@@ -10,7 +10,7 @@ import SailLook
 /// hides, and ⌃⌘S (View ▸ Show Sidebar) slides it over the content.
 @MainActor
 public final class WorkspacesView: NSView {
-    static let narrow = 720.0
+    static let narrow = 720.0, cardWidth = 440.0
 
     var client: SailClient?
     var person = WorkspacesModel.Person(handle: "", admin: false, confirmed: false, controlPlane: "") {
@@ -29,10 +29,15 @@ public final class WorkspacesView: NSView {
 
     package let panel: LeftPanel
     package let project: ProjectView
-    let card = NSStackView()
-    let tryAgain: SailButton
-    private let cardWords = NSTextField(wrappingLabelWithString: "")
+    /// The card shown in place of the panel and the project: an empty state saying why.
+    let card = NSView()
+    /// The card's first action as last drawn: Sign In or Try Again.
+    private(set) var tryAgain: SailButton
+    private var cardSaid: [String] = []
+    /// When the projects were last asked for and not listed.
+    private var triedAt: Date?
     private let titleFont: TitleFont
+    private let mono: LabelFont
     private var model = WorkspacesModel(person: WorkspacesModel.Person(handle: "", admin: false, confirmed: false, controlPlane: ""))
     private var door = Door.asking
     private var overlaid = false
@@ -48,16 +53,13 @@ public final class WorkspacesView: NSView {
     init(look: Look, title: TitleFont, mono: LabelFont) {
         self.look = look
         titleFont = title
+        self.mono = mono
         panel = LeftPanel(look: look, mono: mono)
         project = ProjectView(look: look, mono: mono, titleFont: title)
         tryAgain = SailButton("Try Again", kind: .primary, look: look, target: nil, action: nil)
         super.init(frame: .zero)
-        tryAgain.target = self
-        tryAgain.action = #selector(askAgain(_:))
-        card.setViews([cardWords, tryAgain], in: .top)
-        card.orientation = .vertical
-        card.alignment = .centerX
-        card.spacing = 14
+        let cardWidth = card.widthAnchor.constraint(equalToConstant: Self.cardWidth)
+        cardWidth.priority = .defaultHigh
         for view in [project, card, panel] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
@@ -65,8 +67,8 @@ public final class WorkspacesView: NSView {
         NSLayoutConstraint.activate([
             panel.leadingAnchor.constraint(equalTo: leadingAnchor), panel.topAnchor.constraint(equalTo: topAnchor), panel.bottomAnchor.constraint(equalTo: bottomAnchor),
             project.topAnchor.constraint(equalTo: topAnchor), project.bottomAnchor.constraint(equalTo: bottomAnchor), project.trailingAnchor.constraint(equalTo: trailingAnchor),
-            card.centerXAnchor.constraint(equalTo: centerXAnchor), card.centerYAnchor.constraint(equalTo: centerYAnchor),
-            card.widthAnchor.constraint(lessThanOrEqualToConstant: 420),
+            card.centerXAnchor.constraint(equalTo: centerXAnchor), card.centerYAnchor.constraint(equalTo: centerYAnchor), cardWidth,
+            card.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -32),
         ])
         contentLeading = project.leadingAnchor.constraint(equalTo: panel.trailingAnchor)
         contentFull = project.leadingAnchor.constraint(equalTo: leadingAnchor)
@@ -87,12 +89,12 @@ public final class WorkspacesView: NSView {
     /// Everything the section says now, a line each, as the drive reads it.
     public var text: String {
         switch door {
-        case .asking, .signedOut, .unknown: return (["Workspaces"] + cardWords.stringValue.split(separator: "\n").map(String.init)).joined(separator: "\n")
+        case .asking, .signedOut, .unknown: return (["Workspaces"] + cardSaid).joined(separator: "\n")
         case .signedIn: break
         }
         switch model.screen {
         case .loading: return "Workspaces"
-        case let .unreachable(said): return "Workspaces\nSail can't reach the control plane\n" + said
+        case .unreachable: return (["Workspaces"] + cardSaid).joined(separator: "\n")
         case let .shown(panel, .noProjects(empty)): return (["Workspaces", panel.who, empty.title, empty.body] + (empty.line.map { [$0] } ?? [])).joined(separator: "\n")
         case let .shown(_, .project(page)):
             var lines = ["Workspaces", page.name, page.lede] + (page.banner.map { [$0.title, $0.line] } ?? [])
@@ -110,7 +112,7 @@ public final class WorkspacesView: NSView {
     /// A row as a person reads it: its name, its state, and its owner when not theirs ("quay · running · ana").
     private func said(_ line: WorkspacesModel.Line) -> String {
         var parts = [line.name, WorkspaceLine.pill(line.state).label.lowercased()]
-        if let owner = line.owner, owner != person.handle { parts.append(owner) }
+        if let owner = line.owner { parts.append(owner) }
         return parts.joined(separator: " · ")
     }
 
@@ -159,6 +161,7 @@ public final class WorkspacesView: NSView {
         Task {
             guard let client else { return }
             let answer = await Self.result { () async throws(SailError) in try await client.send(.projects) }
+            if case .failure = answer { triedAt = Date() }
             if let request = model.projectsListed(answer) { list(request) }
             render()
         }
@@ -205,11 +208,13 @@ public final class WorkspacesView: NSView {
         case .newWorkspace:
             model.beginCreate()
             render()
-            window?.makeFirstResponder(project.field.field)
+            project.focusField()
         case let .typed(name):
             let refused = model.screen.createRefused
             model.type(name)
-            if refused { render() }
+            guard refused else { return }
+            render()
+            project.focusField()
         case .create:
             guard let name = model.sendCreate() else { return }
             render()
@@ -255,24 +260,54 @@ public final class WorkspacesView: NSView {
                 project.isHidden = false
                 project.renderEmpty(empty)
             }
+        case (_, .loading?):
+            card.isHidden = true
+            panel.renderLoading()
+            setPanel(shown: true)
+            project.isHidden = false
+            project.renderLoading()
         default:
             project.isHidden = true
             setPanel(shown: false)
             card.isHidden = false
-            let (words, button): ([String], String?) = switch (door, screen) {
-            case (.asking, _): (["Asking the control plane who is signed in…"], nil)
-            case (.signedOut, _): (["You are signed out of the control plane.", "Sign in to see your workspaces on the runner."], "Sign In")
-            case let (.unknown(lines), _): (lines, "Try Again")
-            case let (_, .unreachable(said)?): (
-                    ["Sail can't reach the control plane", said, "Your terminals on this Mac keep working; your workspaces come back when the control plane answers."], "Try Again"
-                )
-            default: ([], nil)
-            }
-            cardWords.stringValue = words.joined(separator: "\n")
-            cardWords.alignment = .center
-            tryAgain.title = button ?? "Try Again"
-            tryAgain.isHidden = button == nil
+            showCard(screen)
         }
+    }
+
+    /// The card as an empty state: who is signed in being asked, signed out, not known, or the
+    /// control plane out of reach with when it was last tried.
+    private func showCard(_ screen: WorkspacesModel.Screen?) {
+        let (icon, title, body, button, line): (LineIcon, String, String, String?, String?) = switch (door, screen) {
+        case (.asking, _): (.box, "Asking the control plane who is signed in…", "", nil, nil)
+        case (.signedOut, _): (.box, "Sign in to see your workspaces", "You are signed out of the control plane.", "Sign In", nil)
+        case let (.unknown(lines), _): (.cloudOff, lines.first ?? "", lines.dropFirst().joined(separator: " "), "Try Again", nil)
+        case let (_, .unreachable(empty)?): (.cloudOff, empty.title, empty.body, "Try Again", triedAt.map { "last tried " + Self.clock.string(from: $0) })
+        default: (.box, "", "", nil, nil)
+        }
+        cardSaid = [title, body].filter { !$0.isEmpty }
+        let first = SailButton(button ?? "Try Again", kind: .primary, look: look, target: self, action: #selector(askAgain(_:)))
+        if button == "Try Again" { first.shortcut("r", modifiers: .command, mono: mono) }
+        tryAgain = first
+        var actions = button == nil ? [] : [first]
+        if case .unreachable? = screen { actions.append(SailButton("Open Account", kind: .quiet, look: look, target: self, action: #selector(openAccount(_:)))) }
+        let empty = EmptyState(icon: icon, title: title, body: body, actions: actions, line: line, look: look, titleFont: titleFont, mono: mono)
+        card.subviews.forEach { $0.removeFromSuperview() }
+        empty.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(empty)
+        NSLayoutConstraint.activate([
+            empty.leadingAnchor.constraint(equalTo: card.leadingAnchor), empty.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            empty.topAnchor.constraint(equalTo: card.topAnchor), empty.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+        ])
+    }
+
+    private static let clock = {
+        let clock = DateFormatter()
+        clock.dateFormat = "HH:mm:ss"
+        return clock
+    }()
+
+    @objc private func openAccount(_: Any?) {
+        onSignIn()
     }
 
     private var panelShown = true

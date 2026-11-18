@@ -36,8 +36,16 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         public let note: String?
         /// Its own height, for a row taller than its style's (the create row with its refusal).
         public let height: Double?
+        /// How it is drawn whatever its state: the create row, drawn chosen while its field holds the
+        /// keys, and in the error's tint once refused.
+        public let paint: RowPaint?
+        /// Its content takes the whole row, past the actions column: a row that holds its own buttons.
+        public let full: Bool
 
-        public init(id: String, name: String, voice: String, content: NSView, actions: [Action] = [], note: String? = nil, height: Double? = nil) {
+        public init(
+            id: String, name: String, voice: String, content: NSView, actions: [Action] = [], note: String? = nil, height: Double? = nil,
+            paint: RowPaint? = nil, full: Bool = false
+        ) {
             self.id = id
             self.name = name
             self.voice = voice
@@ -45,6 +53,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             self.actions = actions
             self.note = note
             self.height = height
+            self.paint = paint
+            self.full = full
         }
     }
 
@@ -252,7 +262,7 @@ final class SailRowView: NSTableRowView {
     }
 
     var paint: RowPaint {
-        RowPaint(RowState(chosen: isSelected, emphasized: isEmphasized, hovered: hovered), look: look)
+        item?.paint ?? RowPaint(RowState(chosen: isSelected, emphasized: isEmphasized, hovered: hovered), look: look)
     }
 
     /// The table sets a row's state on every layout pass; only a change touches the row, or each
@@ -311,7 +321,8 @@ final class SailRowView: NSTableRowView {
         guard paint.bar else { return }
         NSColor(Tint(look.accent)).setFill()
         let rightToLeft = userInterfaceLayoutDirection == .rightToLeft, half = RowStyle.barWidth / 2
-        let bar = NSRect(x: rightToLeft ? Double(bounds.width) - RowStyle.barWidth : 0, y: Double(content.midY) - rowStyle.bar / 2, width: RowStyle.barWidth, height: rowStyle.bar)
+        let top = Double(content.minY) + (min(Double(content.height), rowStyle.height) - rowStyle.bar) / 2
+        let bar = NSRect(x: rightToLeft ? Double(bounds.width) - RowStyle.barWidth : 0, y: top, width: RowStyle.barWidth, height: rowStyle.bar)
         NSBezierPath(roundedRect: bar, xRadius: half, yRadius: half).fill()
         NSBezierPath(rect: NSRect(x: rightToLeft ? Double(bar.maxX) - half : Double(bar.minX), y: Double(bar.minY), width: half, height: Double(bar.height))).fill()
     }
@@ -440,6 +451,7 @@ final class RowCell: NSView {
             addSubview(view)
         }
         let top = rowStyle.hairline ? 1.0 : 0, gap = buttons.isEmpty && note == nil ? 0.0 : 8
+        let actionsColumn = item.full ? 0 : actionsColumn
         let stretched = actionsColumn.map { content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(rowStyle.margin + rowStyle.trailing + $0)) }
             ?? content.trailingAnchor.constraint(equalTo: actions.leadingAnchor, constant: -gap)
         stretched.priority = actionsColumn == nil ? .defaultHigh : .required

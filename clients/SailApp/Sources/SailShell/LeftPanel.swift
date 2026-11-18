@@ -6,8 +6,9 @@ import SailLook
 /// The app's one left panel, as the approved navigation draws it, with the Workspaces section's
 /// projects: a 46 pt header with the section's title over a hairline, the projects as the panel's
 /// project rows (tile, name, readiness pill) under a "Projects" head, and a foot under a hairline
-/// with who is signed in and the control plane in mono 11. It is 236 pt by default; its trailing
-/// edge drags it between 200 and 360 pt, remembered on this Mac.
+/// with who is signed in and the control plane in mono 11. With no project it says so under the head;
+/// before any is listed it shows skeleton rows. It is 236 pt by default; its trailing edge drags it
+/// between 200 and 360 pt, remembered on this Mac.
 @MainActor
 package final class LeftPanel: NSView {
     static let width = (standard: 236.0, least: 200.0, most: 360.0), header = 46.0, edge = 6.0
@@ -22,6 +23,10 @@ package final class LeftPanel: NSView {
     let heading = NSTextField(labelWithString: "Workspaces")
     let who = NSTextField(labelWithString: "")
     let place = NSTextField(labelWithString: "")
+    /// "No project is open to you yet.", with none listed.
+    let emptyLine = NSTextField(labelWithString: "")
+    /// Skeleton rows, each a tile and a name, before any project is listed.
+    private let skeletons: [(tile: Skeleton, name: Skeleton)]
     private let mono: LabelFont
     private(set) var widthConstraint: NSLayoutConstraint!
     private var projects: [WorkspacesModel.Project] = []
@@ -30,7 +35,16 @@ package final class LeftPanel: NSView {
         self.look = look
         self.mono = mono
         list = SailList(rowStyle: .sidebar, look: look, mono: mono)
+        skeletons = [70.0, 52, 88, 60, 74].map { (tile: Skeleton(width: TilePaint.side, height: TilePaint.side, look: look), name: Skeleton(width: $0, look: look)) }
         super.init(frame: .zero)
+        emptyLine.isHidden = true
+        addSubview(emptyLine)
+        for (tile, name) in skeletons {
+            tile.isHidden = true
+            name.isHidden = true
+            addSubview(tile)
+            addSubview(name)
+        }
         heading.font = .systemFont(ofSize: 15, weight: .semibold)
         heading.textColor = NSColor(look.text)
         let foot = NSStackView(views: [who, place])
@@ -67,6 +81,11 @@ package final class LeftPanel: NSView {
 
     /// Shows `panel`'s projects, its chosen one chosen, and who is signed in.
     func render(_ panel: WorkspacesModel.Panel) {
+        loading(false)
+        emptyLine.isHidden = panel.emptyLine == nil
+        emptyLine.attributedStringValue = NSAttributedString(string: panel.emptyLine ?? "", attributes: [
+            .font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .foregroundColor: NSColor(look.textSecondary),
+        ])
         if panel.projects != projects {
             projects = panel.projects
             list.entries = [.head("Projects", count: panel.projects.count)] + panel.projects.map { project in
@@ -76,6 +95,23 @@ package final class LeftPanel: NSView {
         if list.chosen != panel.chosen { list.choose(panel.chosen) }
         who.attributedStringValue = Self.foot(panel.who, look.textSecondary, mono)
         place.attributedStringValue = Self.foot(panel.controlPlane, look.textTertiary, mono)
+        needsLayout = true
+    }
+
+    /// Skeleton rows in place of the projects, and no one named yet.
+    func renderLoading() {
+        loading(true)
+        emptyLine.isHidden = true
+        who.stringValue = ""
+        place.stringValue = ""
+    }
+
+    private func loading(_ loading: Bool) {
+        list.isHidden = loading
+        for (tile, name) in skeletons {
+            tile.isHidden = !loading
+            name.isHidden = !loading
+        }
         needsLayout = true
     }
 
@@ -111,7 +147,17 @@ package final class LeftPanel: NSView {
         let top = Self.header + 4
         let rows = Double(list.rect(ofRow: max(list.numberOfRows - 1, 0)).maxY)
         list.frame = NSRect(x: 0, y: top, width: Double(bounds.width), height: min(rows, max(footTop - top, 0)))
+        let under = top + RowStyle.groupHeight
+        emptyLine.frame = NSRect(x: 14, y: under + 8, width: max(Double(bounds.width) - 28, 0), height: Double(emptyLine.intrinsicContentSize.height))
+        for (index, (tile, name)) in skeletons.enumerated() {
+            let middle = under + (Double(index) + 0.5) * RowStyle.sidebar.height
+            tile.frame = NSRect(x: Self.tileX, y: middle - TilePaint.side / 2, width: TilePaint.side, height: TilePaint.side)
+            name.frame = NSRect(x: Self.tileX + TilePaint.side + 7, y: middle - 5, width: Double(name.intrinsicContentSize.width), height: 10)
+        }
     }
+
+    /// Where a project row's tile starts (the sidebar row's inset and its disclosure's 12 pt slot).
+    static let tileX = RowStyle.sidebar.margin + RowStyle.sidebar.leading + RowStyle.disclosure + RowStyle.gap
 
     override public func draw(_: NSRect) {
         NSColor(Tint(look.surface)).setFill()

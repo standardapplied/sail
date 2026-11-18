@@ -33,6 +33,11 @@ public final class SailTextField: NSView {
         }
     }
 
+    /// The box's widest, when the line under it may run wider than the box.
+    public var boxWidth: Double? {
+        didSet { needsLayout = true }
+    }
+
     public var isEnabled: Bool {
         get { field.isEnabled }
         set {
@@ -95,7 +100,8 @@ public final class SailTextField: NSView {
     /// The eyebrow's line, 10 pt as Mast sets it (line height 1), the gap under it, then the box.
     var box: NSRect {
         let top = Look.haloRoom + (label == nil ? 0 : Look.Step.caption.points + FieldSize.gap)
-        return NSRect(x: Look.haloRoom, y: top, width: max(Double(bounds.width) - 2 * Look.haloRoom, 0), height: size.height)
+        let room = max(Double(bounds.width) - 2 * Look.haloRoom, 0), width = min(boxWidth ?? room, room)
+        return NSRect(x: rightToLeft ? Look.haloRoom + room - width : Look.haloRoom, y: top, width: width, height: size.height)
     }
 
     /// The text cell's own inset before its first glyph, taken off so the text starts at the inset.

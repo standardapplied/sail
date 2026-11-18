@@ -47,6 +47,12 @@ public struct RowPaint: Equatable, Sendable {
         bar = state.chosen
         actions = state.chosen || state.hovered
     }
+
+    public init(fill: Tint?, bar: Bool) {
+        self.fill = fill
+        self.bar = bar
+        actions = false
+    }
 }
 
 /// A project's tile: its lower-case initial in mono at 11 in its hue, on the hue at 14% with a 22% ring

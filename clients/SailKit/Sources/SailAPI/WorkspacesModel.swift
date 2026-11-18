@@ -24,8 +24,9 @@ public struct WorkspacesModel: Sendable {
     public enum Screen: Equatable, Sendable {
         /// Nothing listed yet.
         case loading
-        /// The projects could not be listed and nothing is shown: the transport's sentence.
-        case unreachable(String)
+        /// The projects could not be listed and nothing is shown: what went wrong, and that the
+        /// terminals here are untouched.
+        case unreachable(Empty)
         case shown(Panel, Content)
     }
 
@@ -35,6 +36,8 @@ public struct WorkspacesModel: Sendable {
         /// Who is signed in and their role ("ana · member").
         public let who: String
         public let controlPlane: String
+        /// What the panel says when it lists no project.
+        public let emptyLine: String?
     }
 
     public struct Project: Equatable, Sendable {
@@ -114,6 +117,9 @@ public struct WorkspacesModel: Sendable {
         public let name: String
         public let instance: String
         public let state: Open<WorkspaceState>
+        /// It is the person's own.
+        public let mine: Bool
+        /// Whose it is, shown only when it is someone else's.
         public let owner: String?
         public let chosen: Bool
         public let primary: Primary?
@@ -130,6 +136,9 @@ public struct WorkspacesModel: Sendable {
     public enum Entry: Equatable, Sendable {
         case open, startAndOpen, copyName
     }
+
+    /// The server's rule for a workspace's name, said under the name field.
+    public static let nameRule = "Lowercase letters, digits and dashes."
 
     public struct CreateLine: Equatable, Sendable {
         public var name: String
@@ -151,7 +160,7 @@ public struct WorkspacesModel: Sendable {
     public private(set) var chosen: String?
     public private(set) var chosenRow: String?
     private var projects: [ProjectSummary]?
-    private var projectsFailure: String?
+    private var projectsFailure: SailError?
     private var listing = WorkspaceListing()
     private var listedAt: Date?
     private var listFailure: String?
@@ -180,7 +189,7 @@ public struct WorkspacesModel: Sendable {
             }
             return name == chosen ? listAgain() : choose(name)
         case let .failure(error):
-            projectsFailure = error.description
+            projectsFailure = error
             return nil
         }
     }
@@ -223,9 +232,11 @@ public struct WorkspacesModel: Sendable {
 
     // MARK: Create
 
+    /// Opens the create row, the one row marked while it is open.
     public mutating func beginCreate() {
-        guard create == nil, canCreate else { return }
+        guard canCreate else { return }
         create = CreateLine(name: "", underWay: false, refusal: [], existing: nil)
+        chosenRow = nil
     }
 
     public mutating func type(_ name: String) {
@@ -264,10 +275,11 @@ public struct WorkspacesModel: Sendable {
     // MARK: What is shown
 
     public var screen: Screen {
-        guard let projects else { return projectsFailure.map(Screen.unreachable) ?? .loading }
+        guard let projects else { return projectsFailure.map { .unreachable(Self.unreachable($0)) } ?? .loading }
         let panel = Panel(
             projects: projects.map { Project(name: $0.name, mark: Self.mark($0.template)) }, chosen: chosen,
-            who: "\(person.handle) · \(person.confirmed ? person.admin ? "admin" : "member" : "role not yet confirmed")", controlPlane: person.controlPlane
+            who: "\(person.handle) · \(person.confirmed ? person.admin ? "admin" : "member" : "role not yet confirmed")", controlPlane: person.controlPlane,
+            emptyLine: projects.isEmpty ? "No project is open to you yet." : nil
         )
         guard let project = projects.first(where: { $0.name == chosen }) else {
             return .shown(panel, .noProjects(Empty(
@@ -279,9 +291,21 @@ public struct WorkspacesModel: Sendable {
         return .shown(panel, .project(page(project)))
     }
 
+    private static func unreachable(_ error: SailError) -> Empty {
+        let said = switch error {
+        case let .unreachable(reason): reason
+        default: error.description
+        }
+        return Empty(
+            title: "Sail can’t reach the control plane",
+            body: "\(said) Your terminals on this Mac keep working; your workspaces come back when the control plane answers.", line: nil,
+            action: .checkAgain, missing: false
+        )
+    }
+
     private var canCreate: Bool {
         guard let project = projects?.first(where: { $0.name == chosen }) else { return false }
-        return Self.mark(project.template) != .noTemplate && create?.underWay != true
+        return Self.mark(project.template) != .noTemplate && create == nil
     }
 
     private func page(_ project: ProjectSummary) -> Page {
@@ -310,7 +334,7 @@ public struct WorkspacesModel: Sendable {
                 ))
             } else {
                 let lines = rows.map(line)
-                let yours = lines.filter { $0.owner == person.handle }, others = lines.filter { $0.owner != person.handle }
+                let yours = lines.filter(\.mine), others = lines.filter { !$0.mine }
                 body = .list(Table(yours: yours, others: others, create: create, count: lines.count))
             }
         }
@@ -321,7 +345,7 @@ public struct WorkspacesModel: Sendable {
     }
 
     private func line(_ row: WorkspaceRow) -> Line {
-        let opens = row.owner == person.handle || person.admin
+        let mine = row.owner == person.handle, opens = mine || person.admin
         let primary: Primary? = switch row.state {
         case .known(.running): opens ? .open : nil
         case .known(.stopped), .known(.frozen): opens ? .startAndOpen : nil
@@ -329,7 +353,7 @@ public struct WorkspacesModel: Sendable {
         }
         let entry: [Entry] = primary.map { [$0 == .open ? .open : .startAndOpen] } ?? []
         return Line(
-            name: row.name, instance: row.instance, state: row.state, owner: row.owner, chosen: row.name == chosenRow, primary: primary,
+            name: row.name, instance: row.instance, state: row.state, mine: mine, owner: mine ? nil : row.owner, chosen: row.name == chosenRow, primary: primary,
             why: opens ? nil : "Only \(row.owner ?? "its owner") or an admin opens it", menu: entry + [.copyName]
         )
     }

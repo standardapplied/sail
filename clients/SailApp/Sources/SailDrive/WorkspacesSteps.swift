@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SailAPI
+import SailControls
 import SailKitTestSupport
 import SailShell
 import SailTerminal
@@ -85,6 +86,11 @@ extension Driver {
         pane.project.on(.newWorkspace)
         pane.project.field.field.stringValue = name
         pane.project.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: pane.project.field.field))
+    }
+
+    private static func found<Found: NSView>(_ kind: Found.Type, in view: NSView) -> [Found] {
+        if let view = view as? Found { return [view] }
+        return view.subviews.flatMap { found(kind, in: $0) }
     }
 
     func performWorkspaces(_ step: Step) async -> (Bool, String)? {
@@ -180,7 +186,16 @@ extension Driver {
             }
             guard let done else { return (false, "no act \(what)") }
             pane.project.on(done)
-            return (true, "")
+            let open = { pane.project.field.window != nil }
+            let shown = await waitUntil(step.seconds ?? 5) {
+                switch done {
+                case .newWorkspace: open()
+                case .cancelCreate: !open()
+                case let .show(name): pane.project.list.chosen == name
+                default: true
+                }
+            }
+            return (shown, "the create row \(open() ? "open" : "closed"); chosen \(pane.project.list.chosen ?? "none")")
         }
         if let width = step.cardWidth {
             let extra = Double(shell.window.frame.width) - Double(pane.frame.width)
@@ -188,10 +203,15 @@ extension Driver {
             pane.layoutSubtreeIfNeeded()
             return (Double(pane.frame.width) == width, "the card is \(pane.frame.width) pt; the panel \(pane.panel.isHidden ? "hidden" : "shown")")
         }
-        if step.showSidebar == true {
+        if let shown = step.skeletons {
+            let showing = { Self.found(Skeleton.self, in: pane).filter { !$0.isHiddenOrHasHiddenAncestor && $0.alphaValue == 1 }.count }
+            let found = await waitUntil(step.seconds ?? 5) { (showing() > 0) == shown }
+            return (found, "\(showing()) skeleton bars shown; the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
+        }
+        if let shown = step.showSidebar {
             pane.toggleSidebar(nil)
             pane.layoutSubtreeIfNeeded()
-            return (!pane.panel.isHidden, "the panel \(pane.panel.isHidden ? "hidden" : "shown")")
+            return (pane.panel.isHidden != shown, "the panel \(pane.panel.isHidden ? "hidden" : "shown")")
         }
         if let wanted = step.ticketAsked {
             let found = await waitUntilAsync(step.seconds ?? 15) { await Self.tickets().contains { asked in wanted.allSatisfy { asked[$0.key] == $0.value } } }

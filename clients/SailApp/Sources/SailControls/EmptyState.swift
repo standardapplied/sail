@@ -3,7 +3,8 @@ import SailLook
 
 /// What an empty place says, centred in its frame (`EmptyTilePaint`): a 56 pt tile with an 8 pt grid
 /// and a line icon, a Newsreader title, a body at most 400 pt wide, its actions, and an optional mono
-/// line. Its words are labels, so VoiceOver reads the title, the body, then the action.
+/// line, after the actions (when it was last tried) or before them (who is asking). Its words are
+/// labels, so VoiceOver reads the title, the body, then the action.
 @MainActor
 public final class EmptyState: NSView {
     static let column = 400.0, gap = 10.0, tileGap = 6.0, actionsGap = 8.0, iconSide = 24.0
@@ -15,6 +16,7 @@ public final class EmptyState: NSView {
     public let actions: [SailButton]
     private let icon: LineIcon
     private let missing: Bool
+    private let lineFirst: Bool
     private let titleFont: TitleFont
     private let mono: LabelFont
     let title: NSTextField
@@ -22,11 +24,12 @@ public final class EmptyState: NSView {
     let line: NSTextField?
 
     public init(
-        icon: LineIcon, title: String, body: String, actions: [SailButton], line: String? = nil, missing: Bool = false, look: Look, titleFont: TitleFont,
-        mono: LabelFont
+        icon: LineIcon, title: String, body: String, actions: [SailButton], line: String? = nil, lineFirst: Bool = false, missing: Bool = false, look: Look,
+        titleFont: TitleFont, mono: LabelFont
     ) {
         self.icon = icon
         self.missing = missing
+        self.lineFirst = lineFirst
         self.actions = actions
         self.look = look
         self.titleFont = titleFont
@@ -85,10 +88,18 @@ public final class EmptyState: NSView {
         let sizes = actions.map { $0.intrinsicContentSize }
         let row = sizes.reduce(0) { $0 + Double($1.width) } + Self.actionsGap * Double(max(sizes.count - 1, 0))
         let tallest = sizes.map { Double($0.height) }.max() ?? 0
-        let actionsRect = NSRect(x: (width - row) / 2, y: Double(bodyRect.maxY) + Self.gap + Self.actionsGap, width: row, height: tallest)
-        guard let line else { return (tileRect, titleRect, bodyRect, actionsRect, nil, Double(actionsRect.maxY)) }
-        let lineRect = NSRect(x: left, y: Double(actionsRect.maxY) + Self.gap, width: column, height: measured(line))
-        return (tileRect, titleRect, bodyRect, actionsRect, lineRect, Double(lineRect.maxY))
+        guard let line else {
+            let actionsRect = NSRect(x: (width - row) / 2, y: Double(bodyRect.maxY) + Self.gap + Self.actionsGap, width: row, height: tallest)
+            return (tileRect, titleRect, bodyRect, actionsRect, nil, Double(actionsRect.maxY))
+        }
+        guard lineFirst else {
+            let actionsRect = NSRect(x: (width - row) / 2, y: Double(bodyRect.maxY) + Self.gap + Self.actionsGap, width: row, height: tallest)
+            let lineRect = NSRect(x: left, y: Double(actionsRect.maxY) + Self.gap, width: column, height: measured(line))
+            return (tileRect, titleRect, bodyRect, actionsRect, lineRect, Double(lineRect.maxY))
+        }
+        let lineRect = NSRect(x: left, y: Double(bodyRect.maxY) + Self.gap, width: column, height: measured(line))
+        let actionsRect = NSRect(x: (width - row) / 2, y: Double(lineRect.maxY) + Self.gap + Self.actionsGap, width: row, height: tallest)
+        return (tileRect, titleRect, bodyRect, actionsRect, lineRect, Double(actionsRect.maxY))
     }
 
     override public var intrinsicContentSize: NSSize {

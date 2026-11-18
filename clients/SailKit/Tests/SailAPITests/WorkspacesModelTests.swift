@@ -45,7 +45,12 @@ import Testing
         var model = WorkspacesModel(person: Self.ana)
         #expect(model.screen == .loading)
         model.projectsListed(.failure(.unreachable("The network connection was lost.")))
-        #expect(model.screen == .unreachable("Sail could not reach the control plane: The network connection was lost."))
+        guard case let .unreachable(card) = model.screen else { Issue.record("no card: \(model.screen)"); return }
+        #expect(card.title == "Sail can’t reach the control plane" && card.action == .checkAgain)
+        #expect(card.body == "The network connection was lost. Your terminals on this Mac keep working; your workspaces come back when the control plane answers.")
+        model.projectsListed(.failure(.unexpected(route: "GET /v1/projects", status: 502)))
+        guard case let .unreachable(proxied) = model.screen else { Issue.record("no card: \(model.screen)"); return }
+        #expect(proxied.body.hasPrefix("The control plane answered with an error (502).") && !proxied.body.contains("/v1/"))
     }
 
     /// Frame "No project is open to you": the panel stays, empty, and the identity line says who asks.
@@ -53,7 +58,7 @@ import Testing
         var model = WorkspacesModel(person: Self.ana)
         model.projectsListed(.success(ProjectList(projects: [], total: 0)))
         guard case let .shown(panel, .noProjects(empty)) = model.screen else { Issue.record("no empty card: \(model.screen)"); return }
-        #expect(panel.projects.isEmpty && panel.who == "ana · member" && panel.controlPlane == "main.acme.dev")
+        #expect(panel.projects.isEmpty && panel.who == "ana · member" && panel.controlPlane == "main.acme.dev" && panel.emptyLine == "No project is open to you yet.")
         #expect(empty.title == "No project is open to you yet")
         #expect(empty.body == "An admin adds you to a project on main.acme.dev. Once they do, it appears on the left, and you can create your own workspaces in it.")
         #expect(empty.line == "signed in as ana · member · main.acme.dev" && empty.action == .checkAgain)
@@ -70,6 +75,7 @@ import Testing
         #expect(table.yours[0].primary == .open && table.yours[1].primary == .startAndOpen)
         #expect(table.yours[0].menu == [.open, .copyName] && table.yours[1].menu == [.startAndOpen, .copyName])
         #expect(!table.others.contains { $0.name == "main" }, "the project's own container is no workspace")
+        #expect(table.yours.allSatisfy { $0.mine && $0.owner == nil } && table.others.allSatisfy { !$0.mine && $0.owner != nil }, "an owner is said only on someone else's row")
         let member = try #require(Self.table(Self.listed(Self.ana)))
         let theirs = try #require(member.others.first)
         #expect(theirs.primary == nil && theirs.why == "Only \(theirs.owner ?? "") or an admin opens it" && theirs.menu == [.copyName])
@@ -158,8 +164,11 @@ import Testing
     /// Frames "Creating a workspace", "under way" and the row that appears chosen.
     @Test func aCreateGoesFromTheRowToTheListedRow() throws {
         var model = Self.listed(Self.uday, "workspaces")
+        model.chooseRow("dock")
         model.beginCreate()
         #expect(Self.table(model)?.create == WorkspacesModel.CreateLine(name: "", underWay: false, refusal: [], existing: nil))
+        #expect(Self.table(model)?.yours.contains(where: \.chosen) == false, "a row stays chosen beside the open create row")
+        #expect(Self.page(model)?.canCreate == false, "New Workspace offered while its row is open")
         model.type("new")
         let sent = model.sendCreate()
         let name = try #require(sent)
@@ -189,6 +198,8 @@ import Testing
         let create = try #require(Self.table(model)?.create)
         #expect(create.name == "dock" && !create.underWay && create.existing == "dock")
         #expect(create.refusal == ["Workspace 'dock' of harbor exists already, as the instance 'harbor-dock'."])
+        model.chooseRow("dock")
+        #expect(Self.table(model)?.yours.first(where: \.chosen)?.name == "dock" && Self.table(model)?.create?.existing == "dock", "Show dock lost the create row")
         model.type("dock2")
         #expect(Self.table(model)?.create?.refusal == [], "typing clears the refusal")
         model.cancelCreate()
