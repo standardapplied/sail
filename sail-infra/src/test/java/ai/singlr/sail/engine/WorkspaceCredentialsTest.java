@@ -132,6 +132,23 @@ class WorkspaceCredentialsTest {
     git("config", "--global", "user.email", "builder@sail.invalid");
   }
 
+  /**
+   * A template's build cut short before its dev user was made (step 6) is stripped all the same:
+   * there is no git identity of anyone's to remove, and nothing asks for a user that is not there.
+   */
+  @Test
+  void theStripOfATemplateWhoseDevUserWasNeverMadeEndsCleanly() throws Exception {
+    stub("id", "exit 1\n");
+    stub("runuser", "echo 'runuser: user dev does not exist' >&2\nexit 1\n");
+    Files.writeString(
+        root.resolve("home/dev/.git-credentials"), "https://oauth2:" + TOKEN + "@github.com\n");
+
+    var stripped = script(WorkspaceCredentials.STRIP, "");
+
+    assertEquals(0, stripped.exit(), stripped.said());
+    assertFalse(Files.exists(root.resolve("home/dev/.git-credentials")));
+  }
+
   /** The strip takes all four out, and the check then finds nothing. */
   @Test
   void theStripTakesTheBuildersTokenGhLoginIdentityAndKeysOutAndTheCheckFindsNone()

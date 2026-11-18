@@ -1332,8 +1332,10 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
     stored then: the values a build is given live only in its process and are never written) and
     stopped, and only then is the record ended `interrupted`, "The build stopped when the runner
     restarted.". One whose template cannot be cleaned is stopped all the same, and its record says
-    so; nothing tries again, since the next build strips the template whatever happens. Building
-    again resumes at the step that did not finish.
+    so; nothing tries again, since the next build strips the template whatever happens. While it
+    does, a read says the build was cut short, not that it runs. The strip needs no dev user, so a
+    template cut before step 6 made one is stripped too. Building again resumes at the step that
+    did not finish.
   - `sudo sail project workspace create <p> <name>` builds it first when there is none or it is
     stale. It then clones it with `incus copy <p>--tmpl/v<n> <p>-<name>`, passing the workspace's
     keys at the copy: `-c user.sail.project=<p> -c user.sail.workspace=<name> -c

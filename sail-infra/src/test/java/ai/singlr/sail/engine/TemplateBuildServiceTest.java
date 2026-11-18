@@ -460,6 +460,31 @@ class TemplateBuildServiceTest {
         "a read only lists");
   }
 
+  /**
+   * While sail-api, starting, cleans a cut build's template it holds the template's lock: a read
+   * then answers at once that the build was cut short, never that it is under way.
+   */
+  @Test
+  void aReadWhileSailApiCleansACutBuildSaysItWasCutNeverThatItRuns() throws Exception {
+    var stripping = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var shell =
+        holdingAt("sail-strip", incus(ZFS, template("Running", ""), "[]"), stripping, release);
+    write(running("dana", 9));
+    var builds = builds(shell);
+    var starting = Thread.ofPlatform().start(() -> builds.endCutShort(List.of("acme")));
+    assertTrue(stripping.await(10, TimeUnit.SECONDS), "the cleanup holds the lock");
+
+    var during = builds.status(acme());
+    var joining = builds.joining(acme());
+    release.countDown();
+    starting.join(TimeUnit.SECONDS.toMillis(30));
+
+    assertEquals(TemplateBuildService.State.FAILED, during.state());
+    assertEquals(TemplateBuild.CUT_PENDING, during.build().orElseThrow().reason());
+    assertEquals(Optional.empty(), joining, "a cut build being cleaned is no build to join");
+  }
+
   @Test
   void sailApiStartingEndsEveryCutBuildItCan() throws Exception {
     var shell = incus(ZFS, "[]", "[]");

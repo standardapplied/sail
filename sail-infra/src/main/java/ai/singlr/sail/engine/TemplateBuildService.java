@@ -12,6 +12,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -76,6 +77,7 @@ public final class TemplateBuildService {
   private final Consumer<Exception> log;
   private final ConcurrentHashMap<String, CompletableFuture<Void>> running =
       new ConcurrentHashMap<>();
+  private final Set<String> ending = ConcurrentHashMap.newKeySet();
 
   /**
    * @param builds keeps each build's record
@@ -114,6 +116,7 @@ public final class TemplateBuildService {
       return Optional.of(joined(config, under));
     }
     return builds.record(config.name()).filter(TemplateRecord::running).isPresent()
+            && !ending.contains(config.name())
             && builds.building(config.name())
         ? Optional.of(status(config, true))
         : Optional.empty();
@@ -164,10 +167,13 @@ public final class TemplateBuildService {
       try {
         var record = builds.record(project).filter(TemplateRecord::running);
         if (record.isPresent()) {
+          ending.add(project);
           builds.endCutShort(project, shell, tokensOf.apply(record.get().by()));
         }
       } catch (Exception failed) {
         log.accept(failed);
+      } finally {
+        ending.remove(project);
       }
     }
   }
@@ -224,13 +230,16 @@ public final class TemplateBuildService {
 
   /**
    * {@code project}'s template whose current version is {@code current}, its lock probed and its
-   * record read: a record with no outcome whose lock is free is a build cut short, read as
-   * interrupted until it is ended.
+   * record read: a record with no outcome whose lock is free, or held by this process ending it, is
+   * a build cut short, read as interrupted until it is ended.
    */
   private Status read(String project, Optional<WorkspaceTemplate.Template> current)
       throws Exception {
     var record = builds.record(project);
-    var building = record.filter(TemplateRecord::running).isPresent() && builds.building(project);
+    var building =
+        record.filter(TemplateRecord::running).isPresent()
+            && !ending.contains(project)
+            && builds.building(project);
     var told =
         record.map(
             last ->
