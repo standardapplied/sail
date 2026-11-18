@@ -11,10 +11,20 @@
         "joined": false,
         "kept": 0,
         "outcome": "failed",
-        "reason": "The runner could not finish that.",
+        "reason": "github.com did not give lighthouse's repo lamp to the token stored for it: the token may not read the repo, or the repo may not exist.",
         "remedy": [
           {
-            "text": "An admin looks at the runner."
+            "text": "Store a token for github.com that reads it, then try again: "
+          },
+          {
+            "args": [
+              "github.com"
+            ],
+            "run": "sail",
+            "verb": "git login"
+          },
+          {
+            "text": "."
           }
         ],
         "started_at": "2026-11-11T08:55:50.656Z",

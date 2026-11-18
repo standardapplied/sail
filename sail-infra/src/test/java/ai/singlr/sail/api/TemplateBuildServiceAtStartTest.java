@@ -33,7 +33,7 @@ import org.junit.jupiter.api.io.TempDir;
  * gone is ended at once, and one whose template still holds a token is left, said in the log, for
  * the next read.
  */
-class TemplateBuildsAtStartTest {
+class TemplateBuildServiceAtStartTest {
 
   private static final Instant AT = Instant.parse("2026-11-17T09:00:00Z");
 
@@ -87,9 +87,10 @@ class TemplateBuildsAtStartTest {
       assertEquals(
           TemplateRecord.Outcome.INTERRUPTED,
           TemplateRecord.read(TemplateRecord.fileOf(dir, "lamp")).orElseThrow().outcome());
-      assertTrue(
-          TemplateRecord.read(TemplateRecord.fileOf(dir, "dock")).orElseThrow().running(),
-          "dock's template still holds a token, so its record waits for a read that can end it");
+      assertEquals(
+          TemplateBuild.UNCLEANED,
+          TemplateRecord.read(TemplateRecord.fileOf(dir, "dock")).orElseThrow().reason(),
+          "dock's template still holds a token, and its record says so");
       assertTrue(incus.invocations().contains("incus stop dock--tmpl"), "never left running");
       assertTrue(
           said.toString(StandardCharsets.UTF_8).contains("a template build"),

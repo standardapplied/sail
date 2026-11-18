@@ -10,18 +10,14 @@ import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.pty.PtyAdmission;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
@@ -38,6 +34,22 @@ public final class TemplateBuild {
 
   /** The steps a build reports: the provisioner's own, then the lane's finish. */
   public static final int STEPS = ProjectPhase.values().length + 1;
+
+  /** Why a build cut short ended, once sail-api cleaned its template as it started. */
+  public static final String CUT_SHORT = "The build stopped when the runner restarted.";
+
+  /** Why a build cut short ended, when its template could not be cleaned. */
+  public static final String UNCLEANED =
+      "The build stopped when the runner restarted, and its template could not be cleaned of its"
+          + " builder's credentials; building it again cleans it.";
+
+  /**
+   * What a read says of a build cut short that no one has ended yet: a read never cleans, so it
+   * says when that happens.
+   */
+  public static final String CUT_PENDING =
+      "The build stopped before it finished; its template is cleaned when the runner next starts,"
+          + " or when it is built again.";
 
   /** What a build cut short or failed is told to do: build again, from where it stopped. */
   public static final Remedy RESUMES =
@@ -84,7 +96,7 @@ public final class TemplateBuild {
       String by,
       ProvisionListener console,
       Provision provision,
-      Consumer<TemplateRecord> started,
+      Runnable started,
       boolean dryRun) {
     var inputs = ProjectProvisioner.inputs(config, Optional.empty());
     if (dryRun) {
@@ -114,7 +126,7 @@ public final class TemplateBuild {
           public void started() {
             record.set(TemplateRecord.started(by, clock.get(), STEPS));
             record.get().write(file);
-            started.accept(record.get());
+            started.run();
           }
 
           @Override
@@ -138,15 +150,16 @@ public final class TemplateBuild {
   }
 
   /**
-   * Ends a build cut short ({@code record} has no outcome, and the template's lock is free): under
-   * the lock, the template is stripped of every credential, searched for {@code tokens} (its
-   * builder's), and stopped, as a failed build is, and only then is its record ended {@code
-   * interrupted}, saying {@code why}. Answers the record as it ends; empty when there was nothing
-   * to end, or another holds the lock.
+   * Ends a build cut short ({@code record} has no outcome, and the template's lock is free), as
+   * sail-api starts: under the lock, the template is stripped of every credential, searched for
+   * {@code tokens} (its builder's, as stored now: the values a build is given live only in its
+   * process, and are never written), and stopped, as a failed build is; only then is its record
+   * ended {@code interrupted}. A template that cannot be cleaned is stopped all the same, and its
+   * record says so, so nothing tries again until the next build, which strips it. Empty when there
+   * was nothing to end, or another holds the lock.
    */
   public Optional<TemplateRecord> endCutShort(
-      String project, ShellExec shell, Collection<String> tokens, String why)
-      throws IOException, InterruptedException, TimeoutException {
+      String project, ShellExec shell, Collection<String> tokens) throws Exception {
     var template = WorkspaceTemplate.nameOf(project);
     var lock = FileMutex.acquireUntil(ContainerConfig.lockOf(locks, template), 0, () -> 0);
     if (lock.isEmpty()) {
@@ -158,22 +171,43 @@ public final class TemplateBuild {
       if (record.isEmpty()) {
         return Optional.empty();
       }
-      var found = new BoxInstances(shell).named(template);
-      if (found.isPresent()) {
-        var containers = new ContainerManager(shell);
-        if (!(found.get().state() instanceof ContainerState.Running)) {
-          containers.start(template);
-        }
-        try {
-          WorkspaceCredentials.strip(shell, template);
-          WorkspaceCredentials.requireNone(shell, template, tokens);
-        } finally {
-          containers.stop(template);
-        }
+      Exception failed = null;
+      try {
+        clean(shell, template, tokens);
+      } catch (Exception e) {
+        failed = e;
       }
-      var ended = record.get().ended(TemplateRecord.Outcome.INTERRUPTED, clock.get(), why, RESUMES);
+      var ended =
+          record
+              .get()
+              .ended(
+                  TemplateRecord.Outcome.INTERRUPTED,
+                  clock.get(),
+                  failed == null ? CUT_SHORT : UNCLEANED,
+                  RESUMES);
       ended.write(file);
+      if (failed != null) {
+        throw failed;
+      }
       return Optional.of(ended);
+    }
+  }
+
+  private static void clean(ShellExec shell, String template, Collection<String> tokens)
+      throws Exception {
+    var found = new BoxInstances(shell).named(template);
+    if (found.isEmpty()) {
+      return;
+    }
+    var containers = new ContainerManager(shell);
+    if (!(found.get().state() instanceof ContainerState.Running)) {
+      containers.start(template);
+    }
+    try {
+      WorkspaceCredentials.strip(shell, template);
+      WorkspaceCredentials.requireNone(shell, template, tokens);
+    } finally {
+      containers.stop(template);
     }
   }
 
@@ -190,35 +224,6 @@ public final class TemplateBuild {
   public Optional<TemplateRecord> record(String project) {
     return TemplateRecord.read(TemplateRecord.fileOf(projectsDir, project));
   }
-
-  /**
-   * {@code config}, refused when it sets no resources, before anything is built: a template is
-   * launched with the project's own CPU, memory and disk.
-   */
-  public static ProjectDefinition requireResources(ProjectDefinition config) {
-    if (config.resources() != null) {
-      return config;
-    }
-    throw Remedied.state(
-        config.name()
-            + "'s definition sets no CPU, memory or disk, so its template cannot be built.",
-        Remedy.of(
-            "Set them first: ",
-            Remedy.sail("project config set", config.name(), "resources", RESOURCES),
-            "."));
-  }
-
-  /** This box's {@code host.yaml} at {@code file}, refused when the box was never set up. */
-  public static HostYaml hostOf(Path file) throws IOException {
-    if (!Files.isRegularFile(file)) {
-      throw Remedied.state(
-          "This runner is not set up, so no template can be built on it.",
-          Remedy.of("Set it up first: ", Remedy.sail("host init"), "."));
-    }
-    return HostYaml.fromMap(YamlUtil.parseFile(file));
-  }
-
-  private static final String RESOURCES = "{\"cpu\": 2, \"memory\": \"8GB\", \"disk\": \"50GB\"}";
 
   /** The pool a new template goes on: the base profile's, as {@code host} names it. */
   public static String poolOf(HostYaml host) {

@@ -18,7 +18,7 @@ import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.TemplateBuild;
-import ai.singlr.sail.engine.TemplateBuilds;
+import ai.singlr.sail.engine.TemplateBuildService;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.ProjectScope;
@@ -124,9 +124,9 @@ record FdesResponse(List<FdeSummaryView> fdes) implements Mappable {
 
 /**
  * A project as the list shows it: its own container's status, and its template's state ({@link
- * TemplateBuilds.State}), absent where this box keeps no templates.
+ * TemplateBuildService.State}), absent where this box keeps no templates.
  */
-record ProjectListItemView(String name, String containerStatus, TemplateBuilds.State template)
+record ProjectListItemView(String name, String containerStatus, TemplateBuildService.State template)
     implements Mappable {
   @Override
   public Map<String, Object> toMap() {
@@ -2008,7 +2008,7 @@ record WorkspaceCreateResponse(Workspaces.Created created, String owner, boolean
  * whether the definition changed since it was built, the number of steps a build takes, and its
  * last build, running or ended, whether a request to build found it under way ({@code joined}).
  */
-record TemplateResponse(TemplateBuilds.Status status) implements Mappable {
+record TemplateResponse(TemplateBuildService.Status status) implements Mappable {
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();

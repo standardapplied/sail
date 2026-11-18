@@ -16,6 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.commands.SailCommandLine;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.ByteArrayOutputStream;
@@ -1836,10 +1838,17 @@ class WorkspacesTest {
     var failure =
         assertThrows(IllegalStateException.class, () -> templates(shell).ensure(acme(), source()));
 
+    var refused = assertInstanceOf(Remedied.class, failure);
     assertEquals(
         "Instance 'acme--tmpl' carries no user.sail.template.of of project acme, so it is not"
             + " acme's template and nothing is built into it.",
-        failure.getMessage());
+        refused.reason());
+    assertEquals(
+        Remedy.of(
+            "Move it aside, so the next build makes the template: ",
+            Remedy.program("incus", "rename", "acme--tmpl", "acme--tmpl-aside"),
+            "."),
+        refused.remedy());
     assertEquals(List.of(), builtInto);
     assertFalse(shell.invocations().stream().anyMatch(c -> c.contains("snapshot")));
   }

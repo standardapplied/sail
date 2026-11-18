@@ -200,6 +200,15 @@ final class WorkspaceVerbs {
     CheckedTokens check(ProjectDefinition config) {
       return CheckedTokens.of(config, person, tokens, asks, env);
     }
+
+    /**
+     * Who a build from this box's command line is, as its record says: the person whose tokens it
+     * clones with, else the account that ran it, the one {@code sudo} acts for first.
+     */
+    String who() {
+      return person.orElseGet(
+          () -> Objects.requireNonNullElse(env.get("SUDO_USER"), System.getProperty("user.name")));
+    }
   }
 
   /**
@@ -212,6 +221,7 @@ final class WorkspaceVerbs {
   static WorkspaceTemplate.Source source(
       ProjectDefinition config,
       CheckedTokens tokens,
+      String by,
       boolean dryRun,
       boolean json,
       OperatorCommand operator)
@@ -223,7 +233,7 @@ final class WorkspaceVerbs {
         config,
         tokens,
         name -> catalog.read(name).isPresent(),
-        Objects.requireNonNullElse(HostSync.handle(), "root"),
+        by,
         json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE,
         (into, tracker, listener) -> {
           catalog.requireUnpruned(config.name());
@@ -267,7 +277,7 @@ final class WorkspaceVerbs {
             by,
             listener,
             provision,
-            started -> {},
+            () -> {},
             dryRun);
   }
 

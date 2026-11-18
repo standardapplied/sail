@@ -1,0 +1,31 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/projects/lighthouse/template:build"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Set it up first: host init.",
+        "code": "conflict",
+        "field_errors": [],
+        "message": "This runner is not set up, so no template can be built on it.",
+        "remedy": [
+          {
+            "text": "Set it up first: "
+          },
+          {
+            "args": [],
+            "run": "sail",
+            "verb": "host init"
+          },
+          {
+            "text": "."
+          }
+        ]
+      },
+      "schema_version": 1
+    },
+    "status": 409
+  }
+}

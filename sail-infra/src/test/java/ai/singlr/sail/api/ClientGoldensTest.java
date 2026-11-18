@@ -44,7 +44,6 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
-import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtyWire;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -689,6 +688,8 @@ class ClientGoldensTest {
     private final List<OpenStream> streams = new ArrayList<>();
     private final Map<String, String> ids = new LinkedHashMap<>();
     private final Path projects;
+    private final java.util.concurrent.atomic.AtomicReference<SyncConfig> config =
+        new java.util.concurrent.atomic.AtomicReference<>(OWNER);
 
     Box(Sqlite db, EventBus bus, Path dir) throws IOException {
       this.projects = dir;
@@ -712,11 +713,11 @@ class ClientGoldensTest {
                       db,
                       "node",
                       dir,
-                      () -> OWNER,
+                      config::get,
                       target -> {
                         throw new IOException("main unavailable");
                       }));
-      this.auth = TestAuth.sessions(db, OWNER);
+      this.auth = TestAuth.sessions(db, config::get);
       this.server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
       server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
       PrivateAttributes.context(
@@ -1168,10 +1169,13 @@ class ClientGoldensTest {
 
     /**
      * Records every answer of a project's template the app draws, each named for the design's frame
-     * it serves ({@code design/workspaces-mockup.html}): lighthouse with no template (2d) and the
-     * refusals of a build (2c for a member or a viewer, 2d for an admin), its build under way (2e)
-     * and joined by a second admin (2f), harbor's template built and lighthouse's found current
-     * (2g), and a build that failed or was cut short (2h).
+     * it serves ({@code design/workspaces-mockup.html}): lighthouse with no template, as a member
+     * sees it (2c) and as an admin (2d) with the refusals Build Template can meet (2d), its build
+     * under way as its builder sees it (2e) and as everyone else does, a second admin's request
+     * joining it (2f), harbor's template built and lighthouse's found current (2g), and a build
+     * that failed, was cut short and ended, or was cut short with no one to end it yet (2h). The
+     * refusals the app never meets, since it offers no button, carry no frame: a member's, a
+     * viewer's and on a node anyone's but its own person's.
      */
     void recordTemplates(
         Map<String, String> goldens, String dana, String ike, String ana, String vik)
@@ -1179,6 +1183,24 @@ class ClientGoldensTest {
       Acting.system(() -> new ProjectStore(db).upsert(LIGHTHOUSE));
       var lighthouse = "/v1/projects/lighthouse/template";
       var build = lighthouse + ":build";
+      record(goldens, "template-2c-missing", "GET", lighthouse, ana, null);
+      record(goldens, "template-2d-missing", "GET", lighthouse, dana, null);
+      record(goldens, "refusal-template-admin-only", "POST", build, ana, null);
+      record(goldens, "refusal-template-read-only", "POST", build, vik, null);
+      config.set(new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "uday", "uday-box"));
+      try {
+        record(goldens, "refusal-template-node", "POST", build, dana, null);
+      } finally {
+        config.set(OWNER);
+      }
+      record(
+          goldens,
+          "refusal-template-2d-no-resources",
+          "POST",
+          "/v1/projects/harbor/template:build",
+          dana,
+          null);
+      record(goldens, "refusal-template-2d-runner-not-ready", "POST", build, dana, null);
       var hostYaml = SailPaths.hostConfigPath();
       YamlUtil.dumpToFile(
           new HostYaml(
@@ -1194,16 +1216,6 @@ class ClientGoldensTest {
               .toMap(),
           hostYaml);
       try {
-        record(goldens, "template-2d-missing", "GET", lighthouse, dana, null);
-        record(goldens, "refusal-template-2c-admin-only", "POST", build, ana, null);
-        record(goldens, "refusal-template-2c-read-only", "POST", build, vik, null);
-        record(
-            goldens,
-            "refusal-template-2d-no-resources",
-            "POST",
-            "/v1/projects/harbor/template:build",
-            dana,
-            null);
         operations.useCredentialProbe(url -> true);
         new FdeStore(db).logins().storeGit(idOf("uday"), "github.com", "ghp_the_box_persons_own");
         record(goldens, "refusal-template-2d-login-not-stored", "POST", build, dana, null);
@@ -1215,6 +1227,7 @@ class ClientGoldensTest {
             ContainerConfig.lockOf(SailPaths.locksDir(), "lighthouse--tmpl"),
             () -> {
               record(goldens, "template-2e-building", "GET", lighthouse, dana, null);
+              record(goldens, "template-2f-building", "GET", lighthouse, ana, null);
               record(goldens, "template-2f-joined", "POST", build, ike, null);
               return null;
             });
@@ -1223,16 +1236,29 @@ class ClientGoldensTest {
             .ended(
                 TemplateRecord.Outcome.FAILED,
                 AT.minusSeconds(60),
-                PtyAdmission.Unavailable.UNFINISHED,
-                PtyAdmission.Unavailable.REMEDY)
+                "github.com did not give lighthouse's repo lamp to the token stored for it: the"
+                    + " token may not read the repo, or the repo may not exist.",
+                Remedy.of(
+                    "Store a token for github.com that reads it, then try again: ",
+                    Remedy.sail("git login", "github.com"),
+                    "."))
             .write(recordOf("lighthouse"));
         record(goldens, "template-2h-failed", "GET", lighthouse, dana, null);
-        step.write(recordOf("lighthouse"));
+        step.ended(
+                TemplateRecord.Outcome.INTERRUPTED,
+                AT.minusSeconds(30),
+                TemplateBuild.CUT_SHORT,
+                TemplateBuild.RESUMES)
+            .write(recordOf("lighthouse"));
         record(goldens, "template-2h-interrupted", "GET", lighthouse, dana, null);
-        TemplateRecord.started("dana", started, TemplateBuild.STEPS)
-            .at(TemplateBuild.STEPS, AT.minusSeconds(20))
-            .ended(TemplateRecord.Outcome.BUILT, AT.minusSeconds(10), null, null)
-            .write(recordOf("harbor"));
+        step.write(recordOf("lighthouse"));
+        record(goldens, "template-2h-cut-pending", "GET", lighthouse, dana, null);
+        var built =
+            TemplateRecord.started("dana", started, TemplateBuild.STEPS)
+                .at(TemplateBuild.STEPS, AT.minusSeconds(20))
+                .ended(TemplateRecord.Outcome.BUILT, AT.minusSeconds(10), null, null);
+        built.write(recordOf("harbor"));
+        built.write(recordOf("lighthouse"));
         record(goldens, "template-2g-built", "GET", "/v1/projects/harbor/template", dana, null);
         operations.useCredentialProbe(url -> false);
         incus

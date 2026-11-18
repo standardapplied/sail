@@ -991,7 +991,14 @@ nineteen steps, one per `ProjectPhase`, and a `ProvisionTracker` lets a failed r
 it stopped. The network wait (step 4) is never taken as done while a later step will run: the
 container may have been started again since, and its address is waited for anew. A run that
 resumes then finishes what dpkg was left doing (`dpkg --configure -a`), since a run cut short while
-apt installed leaves every later apt step refused. The tracker resumes only for the definition it was written for: its state carries the
+apt installed leaves every later apt step refused; every apt call, and that finish, waits up to five
+minutes for dpkg's lock a container's own apt timers may hold. A repo is cloned beside its
+directory and renamed into place, so a run cut mid-clone resumes to a whole repo. Every step is
+safe to run twice: none asks on a terminal or collides with what a run before it left. A failed
+clone is said by how far its repo could be read, asked by exit status (`git ls-remote
+--exit-code` through the same credentials, then the host's own 401 to a plain request): not
+written (the disk), no such branch, refused (the token sentence, with the typed remedy that stores
+one), or not reached. The tracker resumes only for the definition it was written for: its state carries the
 SHA-256 of the definition's JSON document (`ProjectDefinitionJson.write`) and the workstation
 key's fingerprint (`ProjectProvisioner.inputs`), and progress recorded for another (or by a release that recorded none)
 restarts the run from the first step, each step re-checking its own effect. A finished run records
@@ -1293,35 +1300,40 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
     definition as it is.
   - `POST /v1/projects/{p}/template:build` (an admin, Access's Build a template) builds it the same
     way, through the same lane (`TemplateBuild`, one implementation behind both doors), cloning with
-    the caller's own stored git tokens; the CLI clones with the box's person's. Every refusal is
-    answered before anything changes: an admin's role, on a node its own person's (others are told
-    templates are built on main), resources in the definition, a set-up runner, and a token for
-    every repo host that asks (`login_not_stored`, its remedy typed). The build then runs on a
-    thread of sail-api's (`TemplateBuilds`), so it outlives the request: `202` once it holds the
-    template's lock, `200` with `outcome: current` when its version was built from the definition
-    as it is. A second request while one runs, the CLI's included, joins it (`202`,
-    `build.joined`) and needs no token of its own. Builds of different projects run side by side.
-  - `GET /v1/projects/{p}/template` reads it without waiting: `state` (`ready` while a version is
-    current, `building`, `failed` when none is current and the last build failed or was cut short,
-    else `missing`), `version`, `stale`, `steps` (20) and `build`, the last build's record, so a
-    rebuild that failed while an older version serves is told beside that version.
-    `GET /v1/projects` gives each project's `template` state, Incus listed once for all.
+    the caller's own stored git tokens; the CLI clones with the box's person's and records them as
+    the builder. Every refusal is answered before anything changes: an admin's role, on a node its
+    own person's (others are told templates are built on main), resources in the definition, a
+    set-up runner, and a token for every repo host that asks (`login_not_stored`, its remedy
+    typed). The build then runs on a thread of sail-api's (`TemplateBuildService`), so it outlives
+    the request: `202` once it holds the template's lock, `200` when its version was built from the
+    definition as it is, answered as a read right after would answer. A second request while one
+    runs joins it (`202`, `build.joined`) and needs no token of its own, the CLI's build included;
+    one that arrives before this process's build holds the lock waits for it. Builds of different
+    projects run side by side.
+  - `GET /v1/projects/{p}/template` changes nothing and waits on nothing: a probe of the lock, the
+    record, one Incus read. It answers `state` (`ready` while a version is current, `building`,
+    `failed` when none is current and the last build failed or was cut short, else `missing`),
+    `version`, `stale`, `steps` (20) and `build`, the last build's record, so a rebuild that failed
+    while an older version serves is told beside that version. `GET /v1/projects` gives each
+    project's `template` state, Incus listed once for all.
   - **The record.** Each build, from either door, keeps `<projects>/<p>/template-build.json`, written
-    whole (a temporary file renamed over it) at every step: `by`, `started_at`, `step` of `steps`,
-    `step_started_at`, `kept` (steps a resumed build found done), and once it ends `outcome`
-    (`built`, `failed` or `interrupted`), `ended_at`, `reason` and `remedy`. Steps 1 to 19 are the
-    provisioner's; step 20 is the lane's finish (strip, check, stop, record, snapshot). A failure's
-    reason is its words when written for a person (`Remedied`); any other, a tool's output, goes to
-    the log, and the record says the runner could not finish. A template is building while its
-    lock is held and its record has no outcome: a create checking the version holds the lock too.
+    whole and durably (a temporary file beside it, flushed, renamed over it, the directory flushed)
+    at every step: `by`, `started_at`, `step` of `steps`, `step_started_at`, `kept` (steps a
+    resumed build found done), and once it ends `outcome` (`built`, `failed` or `interrupted`),
+    `ended_at`, `reason` and `remedy`. Steps 1 to 19 are the provisioner's; step 20 is the lane's
+    finish (strip, check, stop, record, snapshot). A failure's reason is its words when written for
+    a person (`Remedied`); any other, a tool's output, goes to the log, and the record says the
+    runner could not finish. A template is building while its lock is held and its record has no
+    outcome: a create checking the version holds the lock too.
   - **A build cut short** (sail-api restarted, the CLI killed) leaves a record with no outcome and a
-    free lock. sail-api ends every one it finds as it starts, and so does any read that meets one:
-    under the lock, the template is started if stopped, stripped, searched for its builder's tokens
-    and stopped, and only then is the record ended `interrupted`, "The build stopped when the runner
-    restarted.". One whose template still holds a token is stopped and its record left, counted
-    `failed`, for the next read. A read or a request to build that meets one this process is
-    ending waits for the end (up to `CREATE_WAIT`). Building again resumes at the step that did not
-    finish, dpkg's interrupted work finished first.
+    free lock. A read says it as it is, at once: `interrupted`, its template cleaned when the runner
+    next starts or when it is built again. sail-api ends every one as it starts, once: under the
+    lock, the template is started if stopped, stripped, searched for its builder's tokens (as
+    stored then: the values a build is given live only in its process and are never written) and
+    stopped, and only then is the record ended `interrupted`, "The build stopped when the runner
+    restarted.". One whose template cannot be cleaned is stopped all the same, and its record says
+    so; nothing tries again, since the next build strips the template whatever happens. Building
+    again resumes at the step that did not finish.
   - `sudo sail project workspace create <p> <name>` builds it first when there is none or it is
     stale. It then clones it with `incus copy <p>--tmpl/v<n> <p>-<name>`, passing the workspace's
     keys at the copy: `-c user.sail.project=<p> -c user.sail.workspace=<name> -c
@@ -1477,8 +1489,11 @@ Each row with the tests that prove it:
   `WorkspacesTest.twoCreatesOnABoxWithNoTemplateBuildItOnceIntoAFreshInstanceAndBothClone`,
   `WorkspacesTest.aVersionNumberIsNeverGivenTwiceEvenWhenEverySnapshotIsGone`,
   `WorkspacesTest.aCreateMeetingABuildOfItsTemplateIsBusyPastTheWaitNamingItsStepAndTime`,
-  `TemplateBuildsTest`, `ScopeChangeRoundTest.aTemplateBeingBuiltIsLeftToTheRoundAfterItsBuild`,
-  `WorkspaceIT.aNodesRoundLeavesATemplateItsBuildHoldsAndTheRoundAfterDeletesIt`.*
+  `TemplateBuildServiceTest`, `ScopeChangeRoundTest.aTemplateBeingBuiltIsLeftToTheRoundAfterItsBuild`,
+  `WorkspaceIT.aNodesRoundLeavesATemplateItsBuildHoldsAndTheRoundAfterDeletesIt`,
+  `WorkspaceIT.aBuildThroughTheServiceIsJoinedRefusesACreateAndEndsWithItsTokenStripped`,
+  `WorkspaceIT.aKilledBuildIsCleanedOfItsTokenAsSailApiStartsAndBuildAgainBuildsIt`,
+  `WorkspaceIT.aRefusedCloneThenAStoredTokenResumesAtTheCloneAndEndsBuilt`.*
 - **W8. ZFS or nothing.**
   - A new template goes on the base profile's pool when it is ZFS, else on the one ZFS pool beside
     it. Several ZFS pools beside a pool that is not ZFS are refused, naming them.

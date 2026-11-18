@@ -189,7 +189,7 @@ public final class WorkspaceTemplate {
     if (found.isPresent()
         && !(found.get().kind() instanceof BoxInstances.Template(var of)
             && of.equals(config.name()))) {
-      throw new IllegalStateException(
+      throw Remedied.state(
           "Instance '"
               + template
               + "' carries no "
@@ -198,7 +198,11 @@ public final class WorkspaceTemplate {
               + config.name()
               + ", so it is not "
               + config.name()
-              + "'s template and nothing is built into it.");
+              + "'s template and nothing is built into it.",
+          Remedy.of(
+              "Move it aside, so the next build makes the template: ",
+              Remedy.program("incus", "rename", template, template + "-aside"),
+              "."));
     }
     var pool = found.isPresent() ? found.get().pool() : choose(zfs, source.basePool());
     if (!zfs.contains(pool)) {

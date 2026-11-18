@@ -46,6 +46,12 @@ public final class ProjectProvisioner {
   private static final Duration NETWORK_TIMEOUT = Duration.ofSeconds(60);
   private static final Duration INSTALL_TIMEOUT = Duration.ofMinutes(10);
 
+  /** How long an apt or dpkg call waits for dpkg's lock another holds. */
+  static final Duration APT_LOCK_WAIT = Duration.ofMinutes(5);
+
+  /** Beside a repo's directory, where its clone is made before it is renamed into place. */
+  static final String PARTIAL = ".sail-partial";
+
   private static final Pattern VERSION_PATTERN = Pattern.compile("[0-9][0-9.]*");
   private static final String MAVEN_PRIMARY_BASE_URL = "https://dlcdn.apache.org/maven/maven-3/";
   private static final String MAVEN_ARCHIVE_BASE_URL =
@@ -174,9 +180,7 @@ public final class ProjectProvisioner {
       setDiskQuota(config, name, host);
       setResourceLimits(config, name);
       waitForNetwork(name);
-      if (resumed) {
-        finishInterruptedPackages(name);
-      }
+      readyPackages(name, resumed);
       installPackages(config, name);
       configureSsh(config, name, host);
       installSailMachinery(config, name);
@@ -204,39 +208,116 @@ public final class ProjectProvisioner {
   }
 
   /**
-   * A clone of {@code repo} its host refused, in a person's words: whether a token was given for
-   * the host ({@code tokens}, keyed as the repo URLs spell their hosts), and the typed remedy that
-   * stores one. What git said ({@code said}) stays the cause, for the log: a person reads a build's
-   * record and the API, never a tool's output.
+   * Clones {@code repo} to {@code target} whole or not at all: into a directory beside it, a
+   * leftover of a clone cut short removed first, then renamed into place, so a run cut mid-clone
+   * resumes to a whole repo, never to the half a killed clone left at {@code target}.
    */
-  static IllegalStateException cloneRefused(
+  private void cloneWhole(
+      ProjectDefinition config,
+      String name,
+      ProjectDefinition.Repo repo,
+      String target,
+      Map<String, String> tokens)
+      throws Exception {
+    var partial = target + PARTIAL;
+    var cleared = execAsDevUser(name, List.of("rm", "-rf", "--", partial));
+    if (!cleared.ok()) {
+      throw new IOException(
+          "Could not remove a clone cut short at " + partial + ": " + cleared.stderr());
+    }
+    var cmd = new ArrayList<>(List.of("git", "clone"));
+    if (repo.branch() != null) {
+      cmd.addAll(List.of("--branch", repo.branch()));
+    }
+    cmd.addAll(List.of("--", repo.url(), partial));
+    var result = execAsDevUser(name, cmd, INSTALL_TIMEOUT);
+    if (!result.ok()) {
+      throw cloneFailed(config, repo, tokens, readable(name, repo), result.stderr());
+    }
+    var placed = execAsDevUser(name, List.of("mv", "-T", "--", partial, target));
+    if (!placed.ok()) {
+      throw new IOException(
+          "Could not move the clone of " + repo.url() + " into place: " + placed.stderr());
+    }
+  }
+
+  /**
+   * What a failed clone of {@code repo} says of the repo, asked again by exit status alone, never
+   * by git's words: {@code git ls-remote --exit-code} through the same credentials answers 0 when
+   * the repo (and its branch) can be read, 2 when the branch is not there, anything else when it
+   * cannot be read; then the host's own answer to a plain request without credentials (401, see
+   * {@link ShellExec#asksForCredentials}) tells a refusal from a host that cannot be reached.
+   */
+  private CloneReach readable(String name, ProjectDefinition.Repo repo) throws Exception {
+    var ask = new ArrayList<>(List.of("git", "ls-remote", "--exit-code", "--", repo.url()));
+    if (repo.branch() != null) {
+      ask.add("refs/heads/" + repo.branch());
+    }
+    var asked = execAsDevUser(name, ask, NETWORK_TIMEOUT);
+    if (asked.ok()) {
+      return CloneReach.READ;
+    }
+    if (asked.exitCode() == 2) {
+      return CloneReach.NO_BRANCH;
+    }
+    return shell.asksForCredentials(repo.url()) ? CloneReach.REFUSED : CloneReach.UNREACHED;
+  }
+
+  /** How far a failed clone's repo could be read, by {@link #readable}. */
+  enum CloneReach {
+    READ,
+    NO_BRANCH,
+    REFUSED,
+    UNREACHED
+  }
+
+  /**
+   * A failed clone of {@code repo}, in a person's words by how far its repo could be read ({@code
+   * reach}), the token sentence for a refusal alone; whether a token was given for its host is
+   * {@code tokens}, keyed as repo URLs spell hosts. What git said stays the cause, for the log: a
+   * person reads a build's record and the API, never a tool's output.
+   */
+  static IllegalStateException cloneFailed(
       ProjectDefinition config,
       ProjectDefinition.Repo repo,
       Map<String, String> tokens,
+      CloneReach reach,
       String said) {
     var cause = new IOException("Failed to clone " + repo.url() + ": " + said);
-    var hosts = GitCredentials.extractHttpsHosts(List.of(repo));
     var named = config.name() + "'s repo " + repo.path();
-    if (hosts.isEmpty()) {
-      return Remedied.state(
-          named + " could not be cloned.",
-          Remedy.of("Check its address in the project's definition."),
-          cause);
-    }
-    var host = hosts.getFirst();
-    return Remedied.state(
-        host
-            + " did not give "
-            + named
-            + (tokens.containsKey(host)
-                ? " to the token stored for it: the token may not read the repo, or the repo may"
-                    + " not exist."
-                : ": the repo may ask for a token, or may not exist."),
-        Remedy.of(
-            "Store a token for " + host + " that reads it, then try again: ",
-            Remedy.sail("git login", host),
-            "."),
-        cause);
+    var host =
+        GitCredentials.extractHttpsHosts(List.of(repo)).stream().findFirst().orElse(repo.url());
+    return switch (reach) {
+      case READ ->
+          Remedied.state(
+              named + " could be read but not written into the container: its disk may be full.",
+              Remedy.of("An admin looks at the runner's disk."),
+              cause);
+      case NO_BRANCH ->
+          Remedied.state(
+              host + " has no branch " + repo.branch() + " in " + named + ".",
+              Remedy.of("Name a branch the repo has in the project's definition."),
+              cause);
+      case UNREACHED ->
+          Remedied.state(
+              host + " could not be reached to clone " + named + ".",
+              Remedy.of("Try again once the runner reaches " + host + "."),
+              cause);
+      case REFUSED ->
+          Remedied.state(
+              host
+                  + " did not give "
+                  + named
+                  + (tokens.containsKey(host)
+                      ? " to the token stored for it: the token may not read the repo, or the"
+                          + " repo may not exist."
+                      : ": the repo may ask for a token, or may not exist."),
+              Remedy.of(
+                  "Store a token for " + host + " that reads it, then try again: ",
+                  Remedy.sail("git login", host),
+                  "."),
+              cause);
+    };
   }
 
   /**
@@ -427,16 +508,34 @@ public final class ProjectProvisioner {
   }
 
   /**
-   * Finishes configuring what a run cut short left of the container's packages: a run killed while
-   * apt installed (a restart of sail-api in a template's build, then its cleanup's stop) leaves
-   * dpkg interrupted, and every later apt step refuses until it is configured. A run that resumes
-   * asks dpkg once, which does nothing when nothing was left.
+   * Readies apt for the steps after the network wait, whenever one runs: every apt call waits up to
+   * {@link #APT_LOCK_WAIT} for dpkg's lock (a container just started may have its own apt timers
+   * holding it), and a run that resumes ({@code resumed}) first finishes what dpkg was left doing,
+   * since a run cut while apt installed leaves dpkg interrupted and every later apt call refused.
+   * {@code dpkg --configure -a} has no lock wait of its own: exit status 2, the lock held among
+   * them, is asked again each second for as long.
    */
-  private void finishInterruptedPackages(String name) throws Exception {
+  private void readyPackages(String name, boolean resumed) throws Exception {
+    if (tracker.isComplete()) {
+      return;
+    }
+    pushFileToContainer(
+        name,
+        "/etc/apt/apt.conf.d/90sail-lock-wait",
+        "DPkg::Lock::Timeout \"" + APT_LOCK_WAIT.toSeconds() + "\";\n");
+    if (!resumed) {
+      return;
+    }
     var finished =
         execInContainer(
             name,
-            List.of("bash", "-c", "DEBIAN_FRONTEND=noninteractive dpkg --configure -a"),
+            List.of(
+                "bash",
+                "-c",
+                ("for _ in $(seq 1 %d); do DEBIAN_FRONTEND=noninteractive dpkg --configure -a"
+                        + " && exit 0; rc=$?; [ \"$rc\" -eq 2 ] || exit \"$rc\"; sleep 1; done;"
+                        + " exit 2")
+                    .formatted(APT_LOCK_WAIT.toSeconds())),
             INSTALL_TIMEOUT);
     if (!finished.ok()) {
       throw new IOException(
@@ -1019,17 +1118,7 @@ public final class ProjectProvisioner {
         continue;
       }
 
-      var cmd = new ArrayList<>(List.of("git", "clone"));
-      if (repo.branch() != null) {
-        cmd.addAll(List.of("--branch", repo.branch()));
-      }
-      cmd.add("--");
-      cmd.addAll(List.of(repo.url(), targetDir));
-
-      var result = execAsDevUser(name, cmd, INSTALL_TIMEOUT);
-      if (!result.ok()) {
-        throw cloneRefused(config, repo, gitTokens.byHostFor(config.repos()), result.stderr());
-      }
+      cloneWhole(config, name, repo, targetDir, gitTokens.byHostFor(config.repos()));
       cloned++;
     }
 

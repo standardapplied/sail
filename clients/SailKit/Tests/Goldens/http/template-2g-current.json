@@ -7,13 +7,13 @@
     "body": {
       "build": {
         "by": "dana",
-        "ended_at": "2026-11-11T09:00:00.656Z",
+        "ended_at": "2026-11-11T08:59:50.656Z",
         "joined": false,
         "kept": 0,
-        "outcome": "current",
-        "started_at": "2026-11-11T09:00:00.656Z",
-        "step": 0,
-        "step_started_at": "2026-11-11T09:00:00.656Z",
+        "outcome": "built",
+        "started_at": "2026-11-11T08:55:50.656Z",
+        "step": 20,
+        "step_started_at": "2026-11-11T08:59:40.656Z",
         "steps": 20
       },
       "project": "lighthouse",

@@ -9,9 +9,13 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -46,8 +50,6 @@ public record TemplateRecord(
   public enum Outcome {
     /** A new version was built and is current. */
     BUILT,
-    /** The current version was built from the definition as it is, so nothing was built. */
-    CURRENT,
     /** A step failed: {@link #reason} says why. */
     FAILED,
     /** The build's process ended before it did, by a restart or a kill. */
@@ -64,7 +66,7 @@ public record TemplateRecord(
     Objects.requireNonNull(startedAt, "startedAt");
   }
 
-  /** A build {@code by} starts at {@code at}, at step 0, {@code kept} steps already done. */
+  /** A build {@code by} starts at {@code at}, at step 0 of {@code steps}. */
   public static TemplateRecord started(String by, Instant at, int steps) {
     return new TemplateRecord(by, at, 0, steps, at, null, null, null, null, 0);
   }
@@ -108,14 +110,29 @@ public record TemplateRecord(
     }
   }
 
-  /** Writes this record to {@code file} whole: a temporary file beside it, renamed over it. */
+  /**
+   * Writes this record to {@code file} whole and durably: a temporary file beside it, flushed to
+   * the disk, renamed over it, and the rename flushed with its directory, so a power cut leaves the
+   * record before or after, never none: a lost record would leave a cut build's template uncleaned.
+   */
   public void write(Path file) {
+    var temporary = file.resolveSibling("." + FILE + ".tmp");
     try {
       Files.createDirectories(file.getParent());
-      var temporary = file.resolveSibling("." + FILE + ".tmp");
-      Files.writeString(temporary, YamlUtil.dumpJson(toMap()));
+      try (var out =
+          FileChannel.open(
+              temporary,
+              StandardOpenOption.CREATE,
+              StandardOpenOption.TRUNCATE_EXISTING,
+              StandardOpenOption.WRITE)) {
+        out.write(ByteBuffer.wrap(YamlUtil.dumpJson(toMap()).getBytes(StandardCharsets.UTF_8)));
+        out.force(true);
+      }
       Files.move(
           temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+      try (var directory = FileChannel.open(file.getParent(), StandardOpenOption.READ)) {
+        directory.force(true);
+      }
     } catch (IOException e) {
       throw new UncheckedIOException("Could not keep the template build's record: " + file, e);
     }
@@ -131,6 +148,8 @@ public record TemplateRecord(
     m.put("step_started_at", stepStartedAt.toString());
     if (outcome != null) {
       m.put("outcome", outcome.wire());
+    }
+    if (endedAt != null) {
       m.put("ended_at", endedAt.toString());
     }
     if (reason != null) {

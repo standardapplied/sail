@@ -15,7 +15,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.FilePicker;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.TemplateBuilds;
+import ai.singlr.sail.engine.TemplateBuildService;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.SpecStore;
 import com.sun.net.httpserver.HttpExchange;
@@ -711,15 +711,15 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     throw methodNotAllowed();
   }
 
-  /** {@code POST /v1/projects/{p}/workspaces} with {@code {"name": ...}}: the caller's own. */
   /** A build answered: accepted while it runs, plain when its version was current. */
   private static ApiResponse building(Result<TemplateResponse> answered) {
     return answered instanceof Result.Success<TemplateResponse> success
-            && success.value().status().state() == TemplateBuilds.State.BUILDING
+            && success.value().status().state() == TemplateBuildService.State.BUILDING
         ? ApiResponse.fromAccepted(answered)
         : ApiResponse.from(answered);
   }
 
+  /** {@code POST /v1/projects/{p}/workspaces} with {@code {"name": ...}}: the caller's own. */
   private ApiResponse createWorkspace(Call call) throws IOException {
     if (!(call.body().get("name") instanceof String name)) {
       throw new IllegalArgumentException("The body names the workspace as {\"name\": ...}.");

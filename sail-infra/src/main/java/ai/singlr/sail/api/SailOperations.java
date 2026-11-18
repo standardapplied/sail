@@ -18,6 +18,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.EngagementMode;
 import ai.singlr.sail.config.FileLimits;
+import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.Spec;
@@ -46,7 +47,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.TemplateBuild;
-import ai.singlr.sail.engine.TemplateBuilds;
+import ai.singlr.sail.engine.TemplateBuildService;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.WorkspaceTemplate;
@@ -77,6 +78,7 @@ import ai.singlr.sail.store.SyncHealth;
 import ai.singlr.sail.sync.SyncTransportException;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -108,7 +110,7 @@ public final class SailOperations implements HostOperations {
   private HostIdentity identity;
   private HostPty pty;
   private HostSchema schema;
-  private TemplateBuilds templateBuilds;
+  private TemplateBuildService templateBuildService;
   private Predicate<String> asksForCredentials = new ShellExecutor(false)::asksForCredentials;
 
   /** The host facets exist once the control-plane database is known; the web lane needs none. */
@@ -1455,7 +1457,7 @@ public final class SailOperations implements HostOperations {
             WorkspaceDoors.answered(
                 () ->
                     new TemplateResponse(
-                        templateBuilds().status(projects.definition(readable(project))))));
+                        templateBuildService().status(projects.definition(readable(project))))));
   }
 
   @Override
@@ -1469,12 +1471,12 @@ public final class SailOperations implements HostOperations {
                   WorkspaceDoors.requireBuild(
                       projectCatalog(), project, box.isNode() ? box.handle() : null);
                   var definition = projects.definition(project);
-                  var joined = templateBuilds().joining(definition);
+                  var joined = templateBuildService().joining(definition);
                   if (joined.isPresent()) {
                     return new TemplateResponse(joined.get());
                   }
-                  var config = TemplateBuild.requireResources(definition);
-                  var host = TemplateBuild.hostOf(SailPaths.hostConfigPath());
+                  var config = requireResources(definition);
+                  var host = hostOf(SailPaths.hostConfigPath());
                   var caller = Actor.current().handle();
                   var tokens =
                       CheckedTokens.of(
@@ -1486,12 +1488,11 @@ public final class SailOperations implements HostOperations {
                   var provision =
                       TemplateBuild.provision(shell, host, config, tokens, projectSkills);
                   return new TemplateResponse(
-                      templateBuilds()
+                      templateBuildService()
                           .start(
                               config,
-                              caller,
                               started ->
-                                  templateRecords()
+                                  templateBuild()
                                       .source(
                                           config,
                                           TemplateBuild.poolOf(host),
@@ -1521,27 +1522,55 @@ public final class SailOperations implements HostOperations {
    * so.
    */
   public void endCutShortTemplateBuilds() {
-    templateBuilds()
+    templateBuildService()
         .endCutShort(projectCatalog().list().stream().map(ProjectStore.ProjectRow::name).toList());
   }
 
-  private TemplateBuild templateRecords() {
+  private TemplateBuild templateBuild() {
     return new TemplateBuild(SailPaths.locksDir(), projectsDir, DateTimeUtils::now);
   }
 
-  private synchronized TemplateBuilds templateBuilds() {
-    if (templateBuilds == null) {
-      templateBuilds =
-          new TemplateBuilds(
-              templateRecords(),
+  private synchronized TemplateBuildService templateBuildService() {
+    if (templateBuildService == null) {
+      templateBuildService =
+          new TemplateBuildService(
+              templateBuild(),
               new WorkspaceTemplate(shell.observer(), shell, SailPaths.locksDir()),
               shell,
               handle -> gitTokensOf(handle).values(),
-              failed -> ApiLog.unexpected("a template build", failed),
-              DateTimeUtils::now);
+              failed -> ApiLog.unexpected("a template build", failed));
     }
-    return templateBuilds;
+    return templateBuildService;
   }
+
+  /**
+   * {@code config}, refused when it sets no resources, before anything is built: a template is
+   * launched with the project's own CPU, memory and disk.
+   */
+  private static ProjectDefinition requireResources(ProjectDefinition config) {
+    if (config.resources() != null) {
+      return config;
+    }
+    throw Remedied.state(
+        config.name()
+            + "'s definition sets no CPU, memory or disk, so its template cannot be built.",
+        Remedy.of(
+            "Set them first: ",
+            Remedy.sail("project config set", config.name(), "resources", RESOURCES),
+            "."));
+  }
+
+  /** This box's {@code host.yaml} at {@code file}, refused when the box was never set up. */
+  private static HostYaml hostOf(Path file) throws IOException {
+    if (!Files.isRegularFile(file)) {
+      throw Remedied.state(
+          "This runner is not set up, so no template can be built on it.",
+          Remedy.of("Set it up first: ", Remedy.sail("host init"), "."));
+    }
+    return HostYaml.fromMap(YamlUtil.parseFile(file));
+  }
+
+  private static final String RESOURCES = "{\"cpu\": 2, \"memory\": \"8GB\", \"disk\": \"50GB\"}";
 
   /** The git tokens person {@code handle} stored on this box; none for one it does not know. */
   private Map<String, String> gitTokensOf(String handle) {
@@ -1838,12 +1867,12 @@ public final class SailOperations implements HostOperations {
    * The state of each of {@code names}' templates, none on a box that keeps no records of its
    * projects; a box whose Incus cannot say is answered as the failure it is.
    */
-  private Map<String, TemplateBuilds.State> templateStates(List<String> names) {
+  private Map<String, TemplateBuildService.State> templateStates(List<String> names) {
     if (projectsDir == null || names.isEmpty()) {
       return Map.of();
     }
     try {
-      return templateBuilds().states(names);
+      return templateBuildService().states(names);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new ApiException(ErrorCode.INTERNAL, "Interrupted.", e);

@@ -181,4 +181,16 @@ class WorkspaceVerbsTest {
         (into, tracker, listener) -> {},
         false);
   }
+
+  /** A build from the command line is recorded as its person, else as the account sudo acts for. */
+  @Test
+  void aCommandLineBuildIsRecordedAsItsPersonElseTheAccountSudoActsFor() {
+    var person = new WorkspaceVerbs.Keeper(Optional.of("eng"), Map.of(), url -> false, Map.of());
+    var nobody =
+        new WorkspaceVerbs.Keeper(
+            Optional.empty(), Map.of(), url -> false, Map.of("SUDO_USER", "uday"));
+
+    assertEquals("eng", person.who());
+    assertEquals("uday", nobody.who());
+  }
 }
