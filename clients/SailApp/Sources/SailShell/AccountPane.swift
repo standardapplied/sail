@@ -107,7 +107,6 @@ public final class AccountPane: NSView, NSMenuItemValidation {
                 guard self.actions == acted else { return self.forgetIfGone(error) }
                 throw error
             }
-            guard self.shown == seen else { return }
             let quiet = self.actions != acted
             if !quiet { self.say([]) }
             self.show(found, saying: !quiet)
