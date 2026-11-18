@@ -46,8 +46,7 @@ public struct Stalls: Sendable {
 
 /// A look at a thread, taken by a sampler: whether it was runnable, its CPU time so far, its
 /// whole process's CPU time so far, and the machine's CPU ticks so far, idle and busy (each tick
-/// 1/100 s of one CPU; nil where they could not be read), and for the main thread the mode its
-/// run loop was running (nil when it ran none).
+/// 1/100 s of one CPU; nil where they could not be read).
 public struct ThreadLook: Sendable, Equatable {
     public static let tick = 0.01
 
@@ -57,16 +56,14 @@ public struct ThreadLook: Sendable, Equatable {
     public var processCPU: Double
     public var idleTicks: UInt32?
     public var busyTicks: UInt32?
-    public var mode: String?
 
-    public init(time: Double, runnable: Bool, cpu: Double, processCPU: Double, idleTicks: UInt32?, busyTicks: UInt32?, mode: String? = nil) {
+    public init(time: Double, runnable: Bool, cpu: Double, processCPU: Double, idleTicks: UInt32?, busyTicks: UInt32?) {
         self.time = time
         self.runnable = runnable
         self.cpu = cpu
         self.processCPU = processCPU
         self.idleTicks = idleTicks
         self.busyTicks = busyTicks
-        self.mode = mode
     }
 }
 
@@ -120,12 +117,12 @@ public enum MachineShare {
 
     /// The time in `wait` the machine is answerable for (``starvation(in:looks:)``), in seconds,
     /// never more than the wait.
-    /// The run loop modes of the looks taken in `wait`, each with how many looks saw it, the most
-    /// seen first: whether the main run loop was in a mode that runs the main queue's blocks.
-    public static func modes(in wait: Span, looks: [ThreadLook]) -> String {
-        let seen = looks.filter { $0.time >= wait.start && $0.time <= wait.end }
-        guard !seen.isEmpty else { return "no look" }
-        let counted = Dictionary(grouping: seen) { $0.mode ?? "not running" }.map { (mode: $0.key, count: $0.value.count) }
+    /// The main run loop's modes as samples read them (nil: it ran none), each with how many
+    /// samples saw it, the most seen first: whether the loop was in a mode that runs the main
+    /// queue's blocks.
+    public static func modes(_ seen: [String?]) -> String {
+        guard !seen.isEmpty else { return "no sample" }
+        let counted = Dictionary(grouping: seen) { $0 ?? "not running" }.map { (mode: $0.key, count: $0.value.count) }
         return counted.sorted { $0.count != $1.count ? $0.count > $1.count : $0.mode < $1.mode }.map { "\($0.mode) at \($0.count)" }.joined(separator: ", ")
     }
 

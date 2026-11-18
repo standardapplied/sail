@@ -634,59 +634,68 @@ final class ScreenWake: Sendable {
         var oldest: Double
         var newest: Double
         var changes: Int
-        /// Which wake this is, so its post time is written into it and no later one.
+        /// Which wake this is, so its hand-off's stamps are written into it and no later one.
         var wake: UInt64
-        /// When the session's thread had handed the wake to the queue: stamped once `async`
-        /// returned, so a thread kept from the CPU before it handed it shows as a late post, not a
-        /// late take. Nil when the queue took it first.
-        var posted: Double?
+        /// When the session's thread began to hand the wake to the queue.
+        var handing: Double
+        /// When that hand-off had returned; nil when the queue took the wake first. The two
+        /// bracket the hand-off, so a thread kept from the CPU around it is never read as either
+        /// side's time alone.
+        var handed: Double?
     }
 
-    private let queue: DispatchQueue
+    private struct State {
+        var outstanding: Outstanding?
+        var wakes: UInt64 = 0
+    }
+
+    private let handOver: @Sendable (@escaping @Sendable () -> Void) -> Void
     private let marks: ViewMarks
     private let draw: @Sendable () -> Void
-    /// The changes since the queue last took the wake; nil while none is outstanding.
-    private let outstanding = Mutex<Outstanding?>(nil)
-    private let wakes = Mutex<UInt64>(0)
+    /// The changes since the queue last took the wake (nil while none is outstanding), and how
+    /// many wakes there have been.
+    private let state = Mutex(State())
 
     /// A wake that `queue`, the main queue unless a test gives another, takes to call `draw`.
-    init(on queue: DispatchQueue = .main, marks: ViewMarks, draw: @escaping @Sendable () -> Void) {
-        self.queue = queue
+    convenience init(on queue: DispatchQueue = .main, marks: ViewMarks, draw: @escaping @Sendable () -> Void) {
+        self.init(handingOver: { queue.async(execute: $0) }, marks: marks, draw: draw)
+    }
+
+    /// A wake that `handOver` gives the queue: a test hands it over its own way.
+    init(handingOver handOver: @escaping @Sendable (@escaping @Sendable () -> Void) -> Void, marks: ViewMarks, draw: @escaping @Sendable () -> Void) {
+        self.handOver = handOver
         self.marks = marks
         self.draw = draw
     }
 
     func changed(at time: Double) {
-        let wake = wakes.withLock { wakes in
-            wakes &+= 1
-            return wakes
-        }
-        let post = outstanding.withLock { outstanding in
-            guard outstanding == nil else {
-                outstanding?.changes += 1
-                outstanding?.newest = time
-                return false
+        let wake = state.withLock { state -> UInt64? in
+            guard state.outstanding == nil else {
+                state.outstanding?.changes += 1
+                state.outstanding?.newest = time
+                return nil
             }
-            outstanding = Outstanding(oldest: time, newest: time, changes: 1, wake: wake, posted: nil)
-            return true
+            state.wakes &+= 1
+            state.outstanding = Outstanding(oldest: time, newest: time, changes: 1, wake: state.wakes, handing: CACurrentMediaTime(), handed: nil)
+            return state.wakes
         }
-        guard post else { return }
-        queue.async { self.taken() }
+        guard let wake else { return }
+        handOver { self.taken() }
         let handed = CACurrentMediaTime()
-        outstanding.withLock { outstanding in
-            if outstanding?.wake == wake { outstanding?.posted = handed }
+        state.withLock { state in
+            if state.outstanding?.wake == wake { state.outstanding?.handed = handed }
         }
     }
 
     /// The wake is cleared before the screen is read, so a change after the read posts another.
     private func taken() {
-        guard let taken = outstanding.withLock({ outstanding in
-            defer { outstanding = nil }
-            return outstanding
+        guard let taken = state.withLock({ state in
+            defer { state.outstanding = nil }
+            return state.outstanding
         }) else { return }
         marks.output(at: taken.oldest)
         if taken.changes > 1 { marks.output(at: taken.newest) }
-        marks.told(since: taken.oldest, posted: taken.posted, changes: taken.changes)
+        marks.told(since: taken.oldest, handing: taken.handing, handed: taken.handed, changes: taken.changes)
         draw()
     }
 }

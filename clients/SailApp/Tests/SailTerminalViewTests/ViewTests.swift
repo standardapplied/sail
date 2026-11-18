@@ -418,24 +418,37 @@ import Testing
         #expect(figures.keyToEchoEstimated.count == 1, "the key's echo was not put to the wake's newest change")
     }
 
-    /// A wake records when the session's thread posted it, apart from when the screen took the
-    /// output and when the main thread took the wake: a late post and a late take are told apart.
-    @Test func aWakeRecordsWhenItWasPosted() throws {
+    /// A wake records when the session's thread began to hand it to the queue and when the hand-off
+    /// had returned, one stamp each side of the hand-off itself: a late hand-off and a late take
+    /// are told apart.
+    @Test func aWakeStampsItsHandOffOnBothSides() throws {
         let marks = ViewMarks()
         let queue = DispatchQueue(label: "sh.standardapplied.sail.tests.posted")
         let drew = DispatchSemaphore(value: 0)
-        let wake = ScreenWake(on: queue, marks: marks) { drew.signal() }
+        let handedAt = Mutex(0.0)
+        let wake = ScreenWake(handingOver: { block in
+            handedAt.withLock { $0 = CACurrentMediaTime() }
+            queue.async(execute: block)
+        }, marks: marks) { drew.signal() }
         queue.suspend()
-        let before = CACurrentMediaTime()
-        wake.changed(at: before - 0.05)
-        let after = CACurrentMediaTime()
+        wake.changed(at: CACurrentMediaTime() - 0.05)
         queue.resume()
         try #require(drew.wait(timeout: .now() + 2) == .success)
         let figures = marks.figures
-        let posted = try #require(figures.longestToToldPosted)
-        #expect(posted >= before && posted <= after, "posted at \(posted), while the change was told from \(before) to \(after)")
-        let hop = try #require(figures.longestToTold)
-        #expect(hop.start == before - 0.05)
+        let handing = try #require(figures.longestToToldHanding), handed = try #require(figures.longestToToldHanded)
+        let at = handedAt.withLock { $0 }
+        #expect(handing <= at && at <= handed, "the stamps \(handing) and \(handed) do not bracket the hand-off at \(at)")
+    }
+
+    /// A wake the queue takes before its hand-off's return is stamped keeps that stamp unknown: the
+    /// take's time never stands in for it.
+    @Test func aWakeTakenBeforeItsHandOffReturnsLeavesThatStampUnknown() throws {
+        let marks = ViewMarks()
+        let wake = ScreenWake(handingOver: { $0() }, marks: marks) {}
+        wake.changed(at: CACurrentMediaTime() - 0.05)
+        let figures = marks.figures
+        #expect(figures.longestToToldHanding != nil)
+        #expect(figures.longestToToldHanded == nil, "the take's time stood in for the hand-off's return")
     }
 
     /// Changes the main thread has not yet taken make one wake, which carries the oldest of them:

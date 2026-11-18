@@ -73,10 +73,11 @@ final class ViewMarks: Sendable {
     }
 
     /// The main thread took the view's wake for `changes` changes, the oldest at `since`, now; the
-    /// session's thread had handed it to the queue at `posted`, nil when the queue took it first.
-    func told(since: Double, posted: Double?, changes: Int) {
+    /// session's thread began to hand it over at `handing` and had handed it at `handed`, nil when
+    /// the queue took it first.
+    func told(since: Double, handing: Double, handed: Double?, changes: Int) {
         let now = CACurrentMediaTime()
-        marks.withLock { $0.told(at: now, since: since, posted: posted ?? now, changes: changes) }
+        marks.withLock { $0.told(at: now, since: since, handing: handing, handed: handed, changes: changes) }
     }
 
     func committed(frame: UInt64, read: Double, target: Double) {

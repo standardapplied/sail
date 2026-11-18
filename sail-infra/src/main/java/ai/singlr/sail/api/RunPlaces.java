@@ -291,7 +291,7 @@ final class RunPlaces {
               + check.place().workspace()
               + " of "
               + check.place().project()
-              + " could not be made ready: "
+              + " could not be readied: "
               + Remedied.reasonOf(e),
           Remedied.remedyOf(e),
           e);
@@ -314,7 +314,7 @@ final class RunPlaces {
               + Strings.gibibytes(space.total() - space.used())
               + " free of "
               + Strings.gibibytes(space.total())
-              + ", under the 10% this box keeps free, so no new workspace is made on it.",
+              + ", under the 10% this box keeps free, so no new workspace is created on it.",
           Remedy.of("Free space on it, or see sudo zpool status " + pool + "."));
     }
     requireCap(config, () -> liveSpecs.apply(boxHandle));
@@ -360,7 +360,7 @@ final class RunPlaces {
               + config.resources().memory()
               + " each (a cap of "
               + cap
-              + "), so no new workspace is made.",
+              + "), so no new workspace is created.",
           Remedy.of("Wait for one of their runs to end."));
     }
   }

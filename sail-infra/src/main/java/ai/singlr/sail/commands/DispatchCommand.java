@@ -294,7 +294,7 @@ public final class DispatchCommand implements Runnable {
       var workspace = dispatched.workspace();
       System.out.println(
           "  Would "
-              + (workspace.reused() ? "reuse" : "make")
+              + (workspace.reused() ? "reuse" : "create")
               + " workspace "
               + workspace.workspace()
               + " ("
@@ -320,7 +320,7 @@ public final class DispatchCommand implements Runnable {
         ? "Workspace " + workspace.workspace() + " reused"
         : "Workspace "
             + workspace.workspace()
-            + " made in "
+            + " created in "
             + String.format(Locale.ROOT, "%.1f", workspace.timings().totalMs() / 1000.0)
             + " s";
   }

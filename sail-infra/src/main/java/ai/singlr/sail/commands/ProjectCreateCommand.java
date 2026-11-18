@@ -154,7 +154,7 @@ public final class ProjectCreateCommand implements Runnable {
         ansi.string("  @|bold,green \u2713|@ Created " + created.name() + " in the catalog."));
     out.println(
         ansi.string(
-            "    @|faint Next:|@ make its container with @|bold "
+            "    @|faint Next:|@ create its container with @|bold "
                 + operator.sail("project apply " + created.name())
                 + "|@"));
   }

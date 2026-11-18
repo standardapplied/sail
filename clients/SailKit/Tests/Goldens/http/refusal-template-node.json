@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/projects/lighthouse/template:build"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Templates are built on main, where your workspaces are created.",
+        "code": "read_only_credential",
+        "field_errors": [],
+        "message": "This box is uday's node, where only uday builds a template; lighthouse's template for your workspaces is built on main."
+      },
+      "schema_version": 1
+    },
+    "status": 403
+  }
+}
