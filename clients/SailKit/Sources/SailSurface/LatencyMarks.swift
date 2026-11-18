@@ -200,6 +200,12 @@ public struct LatencyMarks: Sendable {
     }
 
     /// The drawable asked for came, or the ask gave up, at `time`.
+    /// The drawable asks that overlap `span`, an ask still out included up to `now`.
+    public func asks(in span: Span, now: Double) -> [Span] {
+        let open = fetchStarted.map { [Span($0, now)] } ?? []
+        return (fetches + open).filter { $0.overlap(span) > 0 }
+    }
+
     public mutating func fetchEnded(at time: Double) {
         guard let started = fetchStarted else { return }
         fetchStarted = nil

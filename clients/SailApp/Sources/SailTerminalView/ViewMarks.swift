@@ -36,6 +36,12 @@ final class ViewMarks: Sendable {
         }
     }
 
+    /// The drawable asks that overlap `span`, one still out included.
+    func asks(in span: Span) -> [Span] {
+        let now = CACurrentMediaTime()
+        return marks.withLock { $0.asks(in: span, now: now) }
+    }
+
     func fetchStarted() {
         let now = CACurrentMediaTime()
         marks.withLock { $0.fetchStarted(at: now) }

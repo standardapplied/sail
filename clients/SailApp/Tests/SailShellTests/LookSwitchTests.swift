@@ -39,7 +39,9 @@ import Testing
             let views = Self.views(under: frame)
             let flaggedBefore = Set(views.filter { $0 is NSStackView && $0.needsUpdateConstraints }.map { ObjectIdentifier($0) })
             let before = views.map(\.frame)
+            let laidOut = bench.tabLayouts
             shell.apply(look)
+            #expect(bench.tabLayouts == laidOut, "a change of look laid the workbench's tabs out \(bench.tabLayouts - laidOut) times")
             let flagged = views.filter { $0 is NSStackView && $0.needsUpdateConstraints && !flaggedBefore.contains(ObjectIdentifier($0)) }
             #expect(flagged.isEmpty, "a change of look has \(flagged.count) stack views declare their constraints again: \(Self.named(flagged))")
             frame.layoutSubtreeIfNeeded()
@@ -75,5 +77,21 @@ import Testing
             #expect(button.image?.isTemplate == false, "\(button.toolTip ?? "a button")'s symbol is a template")
         }
         #expect(marks.allSatisfy { $0.contentTintColor == nil && $0.image?.isTemplate == false })
+    }
+
+    /// I3: once both looks were shown, a change of look resolves no symbol: every image it hands a
+    /// button was made before (``SymbolInk/resolutions``).
+    @Test func aChangeOfLookBetweenLooksShownResolvesNoSymbol() throws {
+        let shell = try WorkbenchLookTests.shell(.dark)
+        let strip = shell.thisMac.strip
+        strip.showsTabs = true
+        strip.show(WorkbenchLookTests.items(), selected: TabID(1))
+        shell.apply(.light)
+        shell.apply(.dark)
+        let resolved = SymbolInk.resolutions
+        for look in [Look.light, .dark, .light, .dark] {
+            shell.apply(look)
+        }
+        #expect(SymbolInk.resolutions == resolved, "four changes of look resolved \(SymbolInk.resolutions - resolved) symbols")
     }
 }

@@ -6,7 +6,7 @@ import SailLook
 /// change of look then hands a button an image already made, instead of Core Animation tinting a
 /// template copy of it again (`CATintedImage`) and converting its pixels at every switch.
 @MainActor
-enum SymbolInk {
+package enum SymbolInk {
     private struct Key: Hashable {
         let name: String
         let points: Double
@@ -15,10 +15,14 @@ enum SymbolInk {
     }
 
     private static var made: [Key: NSImage] = [:]
+    /// How many symbol images were made: each a resolution of the symbol at its size, weight and
+    /// colour, which a change of look between looks already shown never needs.
+    package private(set) static var resolutions = 0
 
     static func image(_ name: String, points: Double, weight: NSFont.Weight, colour: Tint, accessibility: String) -> NSImage {
         let key = Key(name: name, points: points, weight: weight.rawValue, colour: colour)
         if let image = made[key] { return image }
+        resolutions += 1
         let symbol = NSImage(systemSymbolName: name, accessibilityDescription: accessibility) ?? NSImage()
         let configuration = NSImage.SymbolConfiguration(pointSize: points, weight: weight)
             .applying(NSImage.SymbolConfiguration(paletteColors: [NSColor(colour)]))

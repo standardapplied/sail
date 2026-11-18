@@ -181,7 +181,11 @@ public final class WorkbenchView: NSView {
         model.tabs.forEach { tab in tabViews[tab.id].map { layout(tab, in: $0) } }
     }
 
+    /// How many times a tab's panes were laid out: what a change of look leaves alone.
+    package private(set) var tabLayouts = 0
+
     private func layout(_ tab: Tab, in view: TabView) {
+        tabLayouts += 1
         let frames = model.frames(of: tab.id, in: view.bounds.size, scale: scale)
         for id in tab.layout.leaves {
             guard let pane = panes[id] else { continue }
