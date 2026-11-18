@@ -142,9 +142,9 @@ func answer<Response>(
     }
 
     @Test func aWorkspaceDoorReadsWhatItMadeOrChanged() throws {
-        let made = try Endpoint.createWorkspace("new", project: "harbor")
+        let created = try Endpoint.createWorkspace("new", project: "harbor")
             .decode(response(try Exchange("workspace-create")))
-        #expect(made == WorkspaceCreated(
+        #expect(created == WorkspaceCreated(
             project: "harbor", workspace: "new", instance: "harbor-new", owner: "dana", template: "v1", stale: false,
             timings: WorkspaceTimings(
                 cloneMs: 0, startMs: 0, readyMs: 0, totalMs: 0, readySteps: ["files": 0, "machinery": 0, "mark": 0]

@@ -39,7 +39,7 @@ extension Endpoint where Response == WorkspaceList {
     }
 }
 
-/// A workspace the caller made: theirs, a clone of the project's current template.
+/// A workspace the caller created: theirs, a clone of the project's current template.
 public struct WorkspaceCreated: Codable, Equatable, Sendable {
     public let project: String
     public let workspace: String
@@ -95,7 +95,7 @@ public enum WorkspaceChange: String, CaseIterable, Sendable {
     case deleted
 }
 
-/// How long a make or a start took, in milliseconds; `cloneMs` only for a make.
+/// How long a creation or a start took, in milliseconds; `cloneMs` only for a creation.
 public struct WorkspaceTimings: Codable, Equatable, Sendable {
     public let cloneMs: Int64?
     public let startMs: Int64
@@ -122,7 +122,7 @@ public struct WorkspaceTimings: Codable, Equatable, Sendable {
 }
 
 extension Endpoint where Response == WorkspaceCreated {
-    /// Makes workspace `name` of `project`, the caller's own.
+    /// Creates workspace `name` of `project`, the caller's own.
     public static func createWorkspace(_ name: String, project: String) throws(SailError) -> Self {
         Self(.post, Route.workspaces(project: project), body: try SailJSON.encode(["name": name]))
     }

@@ -20,14 +20,48 @@ struct OneSession: TokenVault {
     func forget(_: ControlPlane) throws(VaultFailure) {}
 }
 
-/// A passkey that makes and signs whatever it is asked.
+/// Shut until opened: whatever waits on it meanwhile goes on once it is.
+final class Gate: Sendable {
+    private let state = Mutex<(waiting: CheckedContinuation<Void, Never>?, opened: Bool)>((nil, false))
+
+    var isWaiting: Bool {
+        state.withLock { $0.waiting != nil }
+    }
+
+    func wait() async {
+        await withCheckedContinuation { (wait: CheckedContinuation<Void, Never>) in
+            let go = state.withLock { state -> Bool in
+                if state.opened { return true }
+                state.waiting = wait
+                return false
+            }
+            if go { wait.resume() }
+        }
+    }
+
+    func open() {
+        let waiting = state.withLock { state -> CheckedContinuation<Void, Never>? in
+            state.opened = true
+            defer { state.waiting = nil }
+            return state.waiting
+        }
+        waiting?.resume()
+    }
+}
+
+/// A passkey that makes and signs whatever it is asked, its sheet up until `sheet` opens when one
+/// is given.
 struct Signs: PasskeyAuthenticator {
+    var sheet: Gate?
+
     func register(_: PasskeyRegistrationRequest) async throws(PasskeyFailure) -> PasskeyRegistration {
-        PasskeyRegistration(credentialId: Data([1, 2, 3]), clientDataJSON: Data("{\"type\":\"webauthn.create\"}".utf8), attestationObject: Data([0xA3]))
+        await sheet?.wait()
+        return PasskeyRegistration(credentialId: Data([1, 2, 3]), clientDataJSON: Data("{\"type\":\"webauthn.create\"}".utf8), attestationObject: Data([0xA3]))
     }
 
     func assert(_: PasskeyAssertionRequest) async throws(PasskeyFailure) -> PasskeyAssertion {
-        PasskeyAssertion(
+        await sheet?.wait()
+        return PasskeyAssertion(
             credentialId: Data([1, 2, 3]), clientDataJSON: Data("{\"type\":\"webauthn.get\"}".utf8), authenticatorData: Data([5]),
             signature: Data([7]), userHandle: Data("uday".utf8)
         )
@@ -42,7 +76,8 @@ final class Held: Transport {
     private let holding: String
     private let skipped: Int
     private let answer: Exchange?
-    private let state = Mutex<(routes: [String], held: CheckedContinuation<Void, Never>?, released: Bool, seen: Int)>(([], nil, false, 0))
+    private let gate = Gate()
+    private let state = Mutex<(routes: [String], seen: Int)>(([], 0))
 
     init(_ server: RecordedServer, holding: String, after skipped: Int = 0, then answer: Exchange? = nil) {
         self.server = server
@@ -63,14 +98,7 @@ final class Held: Transport {
             return state.seen == skipped + 1
         }
         guard held else { return try await server.send(request) }
-        await withCheckedContinuation { (wait: CheckedContinuation<Void, Never>) in
-            let go = state.withLock { state -> Bool in
-                if state.released { return true }
-                state.held = wait
-                return false
-            }
-            if go { wait.resume() }
-        }
+        await gate.wait()
         guard let answer else { return try await server.send(request) }
         return HTTPResponse(status: answer.status, headers: answer.headers, body: answer.body)
     }
@@ -80,23 +108,27 @@ final class Held: Transport {
     }
 
     func release() {
-        let waiting = state.withLock { state -> CheckedContinuation<Void, Never>? in
-            state.released = true
-            defer { state.held = nil }
-            return state.held
-        }
-        waiting?.resume()
+        gate.open()
     }
 }
 
+/// How many times the pane asked before signing out, and its last question's reply.
+@MainActor final class Asked {
+    var count = 0
+    var reply: (@MainActor (Bool) -> Void)?
+}
+
 /// The account pane: a check of who is signed in (the app becoming active) holds no button, so a
-/// person's action is never swallowed by it; its late answer is shown unless who is signed in was
-/// set since it began, and what the person's action said is kept.
+/// person's action is never swallowed by it; an answer that comes during a person's action waits
+/// for it to end, and is then shown unless who is signed in was set since the check began, said
+/// after what the action said.
 @MainActor @Suite struct AccountPaneTests {
-    static func pane(remembering fde: String, _ transport: Held) throws -> AccountPane {
+    static let ticket = "enr_0123456789abcdef0123456789abcdef"
+
+    static func pane(remembering fde: String, _ transport: Held, sheet: Gate? = nil) throws -> AccountPane {
         let defaults = try #require(UserDefaults(suiteName: "sail-account-\(UUID().uuidString)"))
         defaults.set("http://127.0.0.1:7979", forKey: AccountPane.addressKey)
-        let account = Account(authenticator: Signs(), vault: OneSession(fde: fde)) { _ in transport }
+        let account = Account(authenticator: Signs(sheet: sheet), vault: OneSession(fde: fde)) { _ in transport }
         return AccountPane(
             account: account, look: .light, title: try TitleFont(directory: LookTests.fonts), mono: try TerminalFonts(directory: LookTests.fonts),
             defaults: defaults
@@ -125,25 +157,91 @@ final class Held: Transport {
         #expect(!pane.busy)
     }
 
-    /// An enrollment while a check that will find a session is under way: its sentence is kept,
-    /// and the check's answer shown.
+    /// The same, the check finding a remembered session the control plane does not confirm: the
+    /// refusal is said, then why it is not confirmed, and the rows say it is not yet confirmed.
+    @Test func aRefusedSignInDuringACheckThatCannotConfirmSaysBoth() async throws {
+        let failing = Exchange(method: "GET", path: "/v1/whoami", status: 502, body: Data("{}".utf8))
+        let transport = Held(RecordedServer([]), holding: "whoami", then: failing)
+        let pane = try Self.pane(remembering: "uday", transport)
+        let checking = Task { await pane.refresh() }
+        #expect(await RunnerTabTests.until { transport.routes.contains { $0.contains("whoami") } })
+
+        pane.signIn.performClick(nil)
+
+        #expect(await RunnerTabTests.until { !pane.isActing && !pane.lines.isEmpty }, "the sign-in's refusal was never said")
+        let refused = pane.lines
+        transport.release()
+        await checking.value
+        #expect(pane.standing?.fde == "uday")
+        #expect(pane.lines.starts(with: refused) && pane.lines.count > refused.count, "why it is not confirmed was not said: \(pane.lines)")
+        #expect(pane.text.contains("Not yet confirmed: remembered on this Mac until "), "\(pane.text)")
+        #expect(!pane.text.contains("Signed in until"), "\(pane.text)")
+    }
+
+    /// An enrollment while a check that will find a session is under way: the check's answer is
+    /// shown, and the enrollment's sentence kept, but never "Sign in with it." beside the
+    /// signed-in rows.
     @Test func anEnrollmentDuringACheckKeepsItsSentenceAndTheCheckSignedIn() async throws {
         let server = RecordedServer([try Exchange("whoami"), try Exchange("passkey-register-start"), try Exchange("passkey-register-finish")])
         let transport = Held(server, holding: "whoami")
         let pane = try Self.pane(remembering: "uday", transport)
         let checking = Task { await pane.refresh() }
         #expect(await RunnerTabTests.until { transport.routes.contains { $0.contains("whoami") } })
-        pane.ticket.stringValue = "enr_0123456789abcdef0123456789abcdef"
+        pane.ticket.stringValue = Self.ticket
 
         pane.enroll.performClick(nil)
 
         #expect(await RunnerTabTests.until { !pane.isActing && !pane.lines.isEmpty }, "the enrollment said nothing: \(transport.routes)")
-        let enrolled = pane.lines
-        #expect(enrolled.first?.hasPrefix("A passkey for @") == true, "\(enrolled)")
+        #expect(pane.lines == ["A passkey for @uday is on this Mac.", "Sign in with it."], "\(pane.lines)")
         transport.release()
         await checking.value
         #expect(pane.standing?.fde == "uday", "the check's answer was dropped though the enrollment set no one")
-        #expect(pane.lines == enrolled, "the enrollment's sentence is no longer said: \(pane.lines)")
+        #expect(pane.lines == ["A passkey for @uday is on this Mac."], "\(pane.lines)")
+    }
+
+    /// A check that answers while the enrollment's passkey sheet is up: the pane does not change
+    /// under the sheet; once the enrollment ends the check's answer is shown, never beside "Sign
+    /// in with it.".
+    @Test func aCheckAnsweringDuringAnEnrollmentWaitsForItToEnd() async throws {
+        let server = RecordedServer([try Exchange("whoami"), try Exchange("passkey-register-start"), try Exchange("passkey-register-finish")])
+        let transport = Held(server, holding: "whoami")
+        let sheet = Gate()
+        let pane = try Self.pane(remembering: "uday", transport, sheet: sheet)
+        let checking = Task { await pane.refresh() }
+        #expect(await RunnerTabTests.until { transport.routes.contains { $0.contains("whoami") } })
+        pane.ticket.stringValue = Self.ticket
+        pane.enroll.performClick(nil)
+        #expect(await RunnerTabTests.until { sheet.isWaiting }, "the passkey sheet never came up: \(transport.routes)")
+
+        transport.release()
+        await checking.value
+
+        #expect(pane.standing == nil && pane.isActing, "the pane changed under the passkey sheet")
+        sheet.open()
+        #expect(await RunnerTabTests.until { !pane.isActing }, "the enrollment never ended")
+        #expect(pane.standing?.fde == "uday", "the check's answer was never shown")
+        #expect(pane.lines == ["A passkey for @uday is on this Mac."], "\(pane.lines)")
+    }
+
+    /// A check of an older session that answers while the sign-in's passkey sheet is up: the pane
+    /// does not flip under the sheet, and the sign-in, once it ends, is not undone by it.
+    @Test func aCheckAnsweringDuringASignInNeitherFlipsThePaneNorUndoesIt() async throws {
+        let server = RecordedServer([try Exchange("whoami"), try Exchange("passkey-login-start"), try Exchange("passkey-login-finish")])
+        let transport = Held(server, holding: "whoami")
+        let sheet = Gate()
+        let pane = try Self.pane(remembering: "someone-before", transport, sheet: sheet)
+        let checking = Task { await pane.refresh() }
+        #expect(await RunnerTabTests.until { transport.routes.contains { $0.contains("whoami") } })
+        pane.signIn.performClick(nil)
+        #expect(await RunnerTabTests.until { sheet.isWaiting }, "the passkey sheet never came up: \(transport.routes)")
+
+        transport.release()
+        await checking.value
+
+        #expect(pane.standing == nil, "the pane flipped to \(pane.standing?.fde ?? "") under the passkey sheet")
+        sheet.open()
+        #expect(await RunnerTabTests.until { !pane.isActing }, "the sign-in never ended")
+        #expect(pane.standing?.fde == "uday", "the check's late answer undid the sign-in: \(pane.standing?.fde ?? "no one")")
     }
 
     /// A sign-in that succeeds while a check of an older session is under way: the check's late
@@ -166,8 +264,8 @@ final class Held: Transport {
     }
 
     /// An enrollment while a check finds the session ended: the enrollment set no one, so the
-    /// check's answer, no one signed in, is shown, and the enrollment's sentence kept.
-    @Test func anEnrollmentDuringACheckThatFindsTheSessionEndedShowsNoOneAndKeepsItsSentence() async throws {
+    /// check's answer, no one signed in, is shown, and said after the enrollment's sentence.
+    @Test func anEnrollmentDuringACheckThatFindsTheSessionEndedShowsNoOneAndSaysBoth() async throws {
         let server = RecordedServer([try Exchange("whoami"), try Exchange("passkey-register-start"), try Exchange("passkey-register-finish")])
         let transport = Held(server, holding: "whoami", after: 1, then: try Exchange("refusal-invalid-bearer-token"))
         let pane = try Self.pane(remembering: "uday", transport)
@@ -175,7 +273,7 @@ final class Held: Transport {
         #expect(pane.standing?.fde == "uday", "the first check found no one: \(pane.lines)")
         let checking = Task { await pane.refresh() }
         #expect(await RunnerTabTests.until { transport.routes.filter { $0.contains("whoami") }.count == 2 })
-        pane.ticket.stringValue = "enr_0123456789abcdef0123456789abcdef"
+        pane.ticket.stringValue = Self.ticket
 
         pane.enroll.performClick(nil)
 
@@ -184,6 +282,28 @@ final class Held: Transport {
         transport.release()
         await checking.value
         #expect(pane.standing == nil, "the session the server ended is still shown")
-        #expect(pane.lines == enrolled, "the enrollment's sentence is no longer said: \(pane.lines)")
+        #expect(pane.lines.starts(with: enrolled) && pane.lines.contains { $0.hasSuffix("has ended.") }, "\(pane.lines)")
+    }
+
+    /// Sign Out asks once: a second click, or the menu item, while the question is up asks
+    /// nothing; signing out then signs out.
+    @Test func signOutAsksOnceWhileItsQuestionIsUp() async throws {
+        let transport = Held(RecordedServer([try Exchange("whoami")]), holding: "nothing is held")
+        let pane = try Self.pane(remembering: "uday", transport)
+        await pane.refresh()
+        #expect(pane.standing?.fde == "uday")
+        let asked = Asked()
+        pane.askBeforeSigningOut = { reply in
+            asked.count += 1
+            asked.reply = reply
+        }
+
+        pane.signOut.performClick(nil)
+        pane.signOutHere(nil)
+
+        #expect(asked.count == 1, "Sign Out asked \(asked.count) times")
+        #expect(!pane.signOut.isEnabled && pane.isActing)
+        asked.reply?(true)
+        #expect(pane.standing == nil && !pane.isActing && pane.signIn.isEnabled)
     }
 }
