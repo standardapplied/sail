@@ -44,6 +44,12 @@ enum Draw {
         path.stroke()
     }
 
+    /// `text` drawn with its baseline at `baseline` (a flipped view's points from the top).
+    static func line(_ text: NSAttributedString, x: Double, baseline: Double) {
+        let font = text.length > 0 ? text.attribute(.font, at: 0, effectiveRange: nil) as? NSFont : nil
+        text.draw(at: NSPoint(x: x, y: baseline - Double(font?.ascender ?? 0)))
+    }
+
     /// `text` set in `font` and `ink`, letter-spaced `tracking` ems, upper-cased when `upper`.
     static func text(_ text: String, _ font: NSFont, _ ink: Tint, tracking: Double = 0, upper: Bool = false) -> NSAttributedString {
         NSAttributedString(

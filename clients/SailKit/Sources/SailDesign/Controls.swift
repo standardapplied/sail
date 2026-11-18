@@ -272,3 +272,29 @@ public enum Shortcut {
         return modifiers + key.uppercased()
     }
 }
+
+/// Where a line of text sits, as the design's browser sets it. Its ascent and descent are rounded to
+/// whole points and the line box's leading split in two, the half above rounded down; so a 10 pt
+/// mono label in a 10 pt line has its baseline 8 pt under the line's top, not 10.2.
+public enum TextLine {
+    /// JetBrains Mono's ascent and descent, in ems (hhea, typo and win agree: 1020 and 300).
+    public static let monoAscent = 1.02, monoDescent = 0.30
+
+    /// The baseline of `points` text with this ascent and descent (in ems) in a line box
+    /// `lineHeight` tall (nil: the font's own height) whose top is at `top`.
+    public static func baseline(top: Double, points: Double, lineHeight: Double? = nil, ascent: Double = monoAscent, descent: Double = monoDescent) -> Double {
+        let above = (ascent * points).rounded(), below = (descent * points).rounded()
+        return top + above + (((lineHeight ?? above + below) - above - below) / 2).rounded(.down)
+    }
+
+    /// A line of `points` text at the font's own height, its ascent and descent rounded.
+    public static func height(points: Double, ascent: Double = monoAscent, descent: Double = monoDescent) -> Double {
+        (ascent * points).rounded() + (descent * points).rounded()
+    }
+
+    /// How far to raise text set in lines `lineHeight` tall so the extra height is split above and
+    /// below it, as the browser splits it, where AppKit would put it all above.
+    public static func centring(lineHeight: Double, ascent: Double, descent: Double) -> Double {
+        (lineHeight - ascent - descent) / 2
+    }
+}

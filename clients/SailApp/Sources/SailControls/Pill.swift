@@ -69,7 +69,7 @@ public final class Pill: NSView {
         Draw.box(bounds, radius: Look.innerRadius, fill: nil, edge: paint.edge, dash: paint.dashed ? PillSize.dash.map { CGFloat($0) } : [])
         let label = self.label
         let x = userInterfaceLayoutDirection == .rightToLeft ? size.trailing : size.leading + size.dot + size.gap
-        label.draw(at: NSPoint(x: x, y: (Double(bounds.height - label.size().height) / 2).rounded()))
+        Draw.line(label, x: x, baseline: TextLine.baseline(top: (Double(bounds.height) - size.text) / 2, points: size.text, lineHeight: size.text))
     }
 
     private func repaint() {
@@ -160,8 +160,8 @@ public final class Keycap: NSView {
         edge.windingRule = .evenOdd
         NSColor(look.separatorStrong).setFill()
         edge.fill()
-        let label = self.label
-        label.draw(at: NSPoint(x: ((bounds.width - label.size().width) / 2).rounded(), y: (inner.midY - label.size().height / 2).rounded()))
+        let label = self.label, points = Look.Step.caption.points
+        Draw.line(label, x: ((bounds.width - label.size().width) / 2).rounded(), baseline: TextLine.baseline(top: Double(inner.minY) + 3, points: points, lineHeight: points))
     }
 }
 

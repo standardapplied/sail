@@ -260,25 +260,45 @@ import Testing
     }
 
     /// A control moved to another window watches that window's key changes and no longer the old
-    /// one's.
+    /// one's: when the window it is in stops being key, it is told (counted) and its halo is gone
+    /// (read from its pixels); a key change of the window it left tells it nothing.
     @Test func aControlWatchesOnlyTheWindowItIsIn() throws {
-        let button = Self.sized(SailButton("Open", kind: .primary, look: .light, target: nil, action: nil))
-        let field = try Self.field(.light)
-        let counts: [(NSView, () -> Int)] = [(button, { button.keyChanges }), (field, { field.keyChanges })]
-        for (view, count) in counts {
-            let (first, _) = Self.window(holding: view, on: .white)
-            let (second, backdrop) = Self.window(holding: NSView(frame: view.frame), on: .white)
+        let look = Look.light, canvas = NSColor(Tint(look.canvas))
+        let button = Self.sized(SailButton("Open", kind: .primary, look: look, target: nil, action: nil))
+        let field = try Self.field(look)
+        let halo = Self.swatch(canvas, [NSColor(look.focusHalo)], scale: 2), bare = Self.swatch(canvas, [], scale: 2)
+        let cases: [(NSView, () -> Int, NSPoint)] = [
+            (button, { button.keyChanges }, NSPoint(x: button.box.minX - 2.5, y: button.box.midY)), (field, { field.keyChanges }, NSPoint(x: field.box.minX - 1.5, y: field.box.midY)),
+        ]
+        for (view, count, at) in cases {
+            let (first, _) = Self.window(holding: view, on: canvas)
+            let (second, backdrop) = Self.window(holding: NSView(frame: view.frame), on: canvas)
             defer {
                 first.orderOut(nil)
                 second.orderOut(nil)
             }
             backdrop.addSubview(view)
+            view.setFrameOrigin(.zero)
+            let focused = view === field ? second.makeFirstResponder(field.field) : button.becomeFirstResponder()
+            #expect(focused)
+            #expect(Self.tells(backdrop.colour(at: at, scale: 2), halo, from: bare), "\(type(of: view)) shows no halo in its key window")
             let before = count()
-            NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: first)
+            NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: first)
             #expect(count() == before, "\(type(of: view)) still watches the window it left")
+            second.key = false
             NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: second)
-            #expect(count() == before + 1, "\(type(of: view)) does not watch the window it is in")
+            #expect(count() == before + 1, "\(type(of: view)) is not told its window stopped being key")
+            #expect(Self.tells(backdrop.colour(at: at, scale: 2), bare, from: halo), "\(type(of: view)) keeps its halo in a window that is not key")
         }
+    }
+
+    /// The eyebrow's capitals stand on the design's baseline: 8 pt under its line's top, which is
+    /// 1 pt higher than Core Text's own ascent would put them.
+    @Test func theEyebrowStandsOnTheDesignsBaseline() throws {
+        let field = try Self.field(.light)
+        let ink = try #require(Backdrop(NSColor(Tint(Look.light.canvas)), holding: field).ink(in: NSRect(x: 0, y: 0, width: 200, height: Look.haloRoom + 10), darkerThan: 400))
+        let baseline = TextLine.baseline(top: Look.haloRoom, points: 10, lineHeight: 10)
+        #expect(abs(Double(ink.maxY) - baseline) <= 0.25, "the eyebrow's capitals end at \(ink.maxY), not on the baseline at \(baseline)")
     }
 
     /// The ⋯'s three dots are evenly spaced wherever the button's middle falls.
@@ -506,15 +526,16 @@ final class Backdrop: NSView {
     }
 
     /// The rectangle, in points from the top left, of the pixels darker than mid grey: the ink.
-    func ink() -> NSRect? {
+    func ink(in region: NSRect? = nil, darkerThan limit: Double = 300) -> NSRect? {
         guard let image = drawn(scale: 2) else { return nil }
         var found: NSRect?
         for y in 0 ..< image.pixelsHigh {
             for x in 0 ..< image.pixelsWide {
-                guard let colour = image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
-                      Double(colour.redComponent + colour.greenComponent + colour.blueComponent) * 255 < 300
-                else { continue }
                 let pixel = NSRect(x: Double(x) / 2, y: Double(y) / 2, width: 0.5, height: 0.5)
+                guard region.map({ $0.contains(NSPoint(x: pixel.midX, y: pixel.midY)) }) ?? true,
+                      let colour = image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
+                      Double(colour.redComponent + colour.greenComponent + colour.blueComponent) * 255 < limit
+                else { continue }
                 found = found.map { $0.union(pixel) } ?? pixel
             }
         }

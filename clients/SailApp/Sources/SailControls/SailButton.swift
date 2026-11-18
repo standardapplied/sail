@@ -196,7 +196,10 @@ public final class SailButton: NSButton {
             symbol.draw(in: Draw.centred(symbol.size, on: NSPoint(x: mark.midX, y: mark.midY)), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         }
         if !iconOnly { label.draw(in: labelRect) }
-        if let hintRect, let hintText { hintText.draw(in: hintRect) }
+        if let hintRect, let hintText {
+            let points = Look.Step.caption.points, top = Double(box.minY) + (Double(box.height) - TextLine.height(points: points)) / 2
+            Draw.line(hintText, x: Double(hintRect.minX), baseline: TextLine.baseline(top: top, points: points))
+        }
         context.endTransparencyLayer()
         context.restoreGState()
     }

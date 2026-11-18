@@ -106,13 +106,13 @@ public final class SailTextField: NSView {
 
     private var lineText: NSAttributedString? {
         guard let said = error ?? help else { return nil }
-        let style = NSMutableParagraphStyle()
+        let style = NSMutableParagraphStyle(), font = NSFont.systemFont(ofSize: Look.Step.footnote.points)
         style.alignment = rightToLeft ? .right : .left
-        style.minimumLineHeight = (Look.Step.footnote.points * 1.4).rounded()
+        style.minimumLineHeight = Look.Step.footnote.points * 1.4
         style.maximumLineHeight = style.minimumLineHeight
         return NSAttributedString(string: said, attributes: [
-            .font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .paragraphStyle: style,
-            .foregroundColor: NSColor(error == nil ? look.textTertiary : Tint(look.error)),
+            .font: font, .paragraphStyle: style, .foregroundColor: NSColor(error == nil ? look.textTertiary : Tint(look.error)),
+            .baselineOffset: TextLine.centring(lineHeight: Double(style.minimumLineHeight), ascent: Double(font.ascender), descent: -Double(font.descender)),
         ])
     }
 
@@ -155,9 +155,8 @@ public final class SailTextField: NSView {
     override public func draw(_: NSRect) {
         let paint = self.paint
         if let eyebrow {
-            let height = Double(eyebrow.size().height)
-            let x = rightToLeft ? Double(box.maxX - eyebrow.size().width) : Double(box.minX)
-            eyebrow.draw(at: NSPoint(x: x, y: Look.haloRoom + (Look.Step.caption.points - height) / 2))
+            let x = rightToLeft ? Double(box.maxX - eyebrow.size().width) : Double(box.minX), points = Look.Step.caption.points
+            Draw.line(eyebrow, x: x, baseline: TextLine.baseline(top: Look.haloRoom, points: points, lineHeight: points))
         }
         if let halo = paint.halo { Draw.halo(halo, around: box, radius: Look.contentRadius) }
         if let context = NSGraphicsContext.current?.cgContext {

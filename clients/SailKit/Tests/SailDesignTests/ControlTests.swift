@@ -148,6 +148,20 @@ import Testing
         }
     }
 
+    /// Each mono label's baseline where the design's DOM puts it: an eyebrow 8 under its line's
+    /// top, a pill's label at 13 in its 20 pt box (11.5 in the sidebar's 18), a keycap's at 12, a
+    /// hint (the font's own line height) at 16.5 in a 26 pt button; and a 16.8 pt help line's
+    /// extra height split above and below.
+    @Test func monoLabelsSitOnTheDesignsBaselines() {
+        #expect(TextLine.baseline(top: 0, points: 10, lineHeight: 10) == 8)
+        #expect(TextLine.baseline(top: (20 - 10) / 2, points: 10, lineHeight: 10) == 13)
+        #expect(TextLine.baseline(top: (18 - 9) / 2, points: 9, lineHeight: 9) == 11.5)
+        #expect(TextLine.baseline(top: 1 + 3, points: 10, lineHeight: 10) == 12)
+        #expect(TextLine.baseline(top: (26 - 13) / 2, points: 10) == 16.5)
+        #expect(TextLine.monoAscent == 1.02 && TextLine.monoDescent == 0.30 && TextLine.height(points: 10) == 13)
+        #expect(abs(TextLine.centring(lineHeight: 16.8, ascent: 11.6, descent: 2.9) - 1.15) < 1e-9)
+    }
+
     /// A button in flight that holds the keys still shows where they are.
     @Test func aBusyFocusedButtonShowsItsHalo() {
         for kind in ButtonKind.allCases {
