@@ -63,10 +63,10 @@ final class MainStacks: @unchecked Sendable {
     static let constraint = Looker.constraint
     /// The most of one CPU the watcher may take: its computation in each period, 5 %.
     static var claim: Double { computation / interval }
-    /// The longest one look may take, wall time: a look is stamped before it reads, so one longer
-    /// than the interval it is taken in tells of the main thread, our CPU and the machine's ticks
-    /// up to a whole look after its stamp. The drive fails past it.
-    static let longestLook = interval
+    /// The longest one look may take, wall time: the next look comes an interval after it ends,
+    /// so a longer one leaves the next more than ``MachineShare/longestGap`` after it, and looks
+    /// that far apart excuse nothing. The drive fails past it.
+    static let longestLook = MachineShare.longestGap - interval
 
     static let depth = 48
     private let thread: thread_act_t
