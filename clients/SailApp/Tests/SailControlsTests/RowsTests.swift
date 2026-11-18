@@ -267,23 +267,8 @@ import Testing
         tooltip.mouseEntered(with: try ControlsTests.entered())
         let again = await ControlsTests.until(3) { tooltip.isShown }
         #expect(again)
-        Self.click(button, in: window)
+        button.performClick(nil)
         #expect(presses.count == 1 && !tooltip.isShown, "a click pressed the button \(presses.count) times and left the chip shown: \(tooltip.isShown)")
-    }
-
-    /// A real click on `view`: the up queued, then the down sent to the window, whose hit test gives
-    /// it to the view; the button's own tracking then takes the up from the queue.
-    static func click(_ view: NSView, in window: NSWindow) {
-        let middle = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
-        func event(_ type: NSEvent.EventType) -> NSEvent? {
-            NSEvent.mouseEvent(
-                with: type, location: middle, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0
-            )
-        }
-        guard let down = event(.leftMouseDown), let up = event(.leftMouseUp) else { return }
-        NSApp.postEvent(up, atStart: false)
-        window.sendEvent(down)
     }
 
     /// The chip's keycap trails its words, and leads them right to left.

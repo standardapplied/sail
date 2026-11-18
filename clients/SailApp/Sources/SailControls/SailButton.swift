@@ -252,8 +252,10 @@ public final class SailButton: NSButton {
     }
 
     /// In flight, a press does nothing: a click, Space, Return or VoiceOver's press.
+    /// Every press (a click, Space, Return) puts the tooltip away as it acts, ⋯ before its menu.
     override public func sendAction(_ action: Selector?, to target: Any?) -> Bool {
-        busyWord == nil && super.sendAction(action, to: target)
+        tooltip?.hide()
+        return busyWord == nil && super.sendAction(action, to: target)
     }
 
     override public func hitTest(_ point: NSPoint) -> NSView? {

@@ -498,7 +498,6 @@ final class MenuOpener: NSObject {
     static let shared = MenuOpener()
 
     @objc func open(_ sender: NSButton) {
-        (sender as? SailButton)?.tooltip?.hide()
         sender.menu?.userInterfaceLayoutDirection = sender.userInterfaceLayoutDirection
         sender.menu?.popUp(positioning: nil, at: Self.corner(under: sender), in: sender)
     }
