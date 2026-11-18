@@ -241,9 +241,11 @@ final class SailRowView: NSTableRowView {
         true
     }
 
+    /// The table sets a new row's state before the row holds its cell, when asking for the cell
+    /// throws; the cell's arrival refreshes the row again.
     private func refresh() {
         let paint = self.paint
-        if let cell = view(atColumn: 0) as? RowCell {
+        if numberOfColumns > 0, let cell = view(atColumn: 0) as? RowCell {
             cell.show(paint.actions, chosen: isSelected, keys: isEmphasized)
         }
         needsDisplay = true
