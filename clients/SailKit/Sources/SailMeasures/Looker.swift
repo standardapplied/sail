@@ -30,7 +30,9 @@ public final class Looker: Sendable {
         #if canImport(Darwin)
         let watched = mach_thread_self()
         let looker = Thread { [self] in
-            let realTime = Mach.becomeRealTime(mach_thread_self(), period: Self.interval, computation: Self.computation, constraint: Self.constraint)
+            let me = mach_thread_self()
+            let realTime = Mach.becomeRealTime(me, period: Self.interval, computation: Self.computation, constraint: Self.constraint)
+            mach_port_deallocate(mach_task_self_, me)
             state.withLock { $0.realTime = realTime }
             while !stopped.load(ordering: .acquiring) {
                 Thread.sleep(forTimeInterval: Self.interval)

@@ -23,9 +23,24 @@ import Synchronization
 /// runnable at four looks or more in a row, no more than 15 ms apart, gaining no CPU while no CPU
 /// of the machine was idle), never less its own CPU time. Each frame over the limit is said, with
 /// its thread's CPU, its wait and what was proven or why nothing was, and each excuse is counted.
-/// A frame whose thread used the time fails as it always did.
+/// A frame whose thread used the time fails as it always did. Four looks 5 ms apart prove at least
+/// 15 ms, so a frame a starved runner made late by less (#439's red run had a 7.5 ms one) is never
+/// excused: that is answered with frames, not machinery. Each series takes ``frames`` frames, so
+/// its nearest-rank p95 leaves ``frames`` − ⌈0.95 × ``frames``⌉ = 20 of them over the limit; #439's
+/// red run had 3 of 54 over (its p95 allowed 2), and every series kept since, 4 of 338 (1.2 %): some
+/// 5 of 400 expected, a quarter of the tail. A series that excuses more frames than that tail is
+/// inconclusive and fails, saying so: a measurement that excused most of itself measured nothing.
+/// At 120 Hz the 400 frames take about 3.6 s a series; a runner that wakes the frame thread 30 ms
+/// late, as CI's macOS runners do, takes about 13 s.
 enum Bench {
     static let frameLimit = 4.0
+    /// The frames each `frame()` series takes.
+    static let frames = 400
+
+    /// How many of `count` frames the nearest-rank p95 leaves above it.
+    static func tail(of count: Int) -> Int {
+        count - Int((0.95 * Double(count)).rounded(.up))
+    }
 
     static func run() throws -> (budgets: [Budget], samples: [BenchSeries], said: [String]) {
         let clock = ContinuousClock()
@@ -70,6 +85,7 @@ enum Bench {
             said += told(taken, realTime: measured.realTime)
             budgets += [
                 Budget(name: "\(name), p95, each net of the time its thread was proven starved", milliseconds: net.p95, limit: frameLimit),
+                excuses(taken),
                 Budget(name: "\(name), p95 raw (reported)", milliseconds: frame.p95, limit: .infinity),
                 Budget(name: "\(name), max raw (reported)", milliseconds: frame.max, limit: .infinity),
                 Budget(name: "frame()'s wait for the lock, \(label) feeds back to back, p95, each net of the probe's own stall", milliseconds: wait.p95, limit: 1),
@@ -117,6 +133,15 @@ enum Bench {
         min(MachineShare.starved(in: frame, looks: looks), max(0, frame.length - cpu))
     }
 
+    /// How many frames of `series` were excused, held to the p95's tail: a series that excused
+    /// more is inconclusive.
+    static func excuses(_ series: BenchSeries) -> Budget {
+        Budget(
+            name: "\(series.name), frames excused as starved, a count (more than the p95's tail of \(tail(of: series.frames.count)) leaves the series inconclusive)",
+            milliseconds: Double(series.frames.filter { $0.excusedMilliseconds > 0 }.count), limit: Double(tail(of: series.frames.count))
+        )
+    }
+
     /// The series in sentences: how many frames were excused and how much, then each frame over
     /// ``frameLimit`` with its thread's CPU, its wait, and what was proven of it or why nothing was.
     static func told(_ series: BenchSeries, realTime: Bool?) -> [String] {
@@ -126,7 +151,11 @@ enum Bench {
             format: "%@: %ld frames, %ld excused, %.1f ms in all; %ld looks at the frame thread, the looker %@",
             series.name, series.frames.count, excused.count, excused.reduce(0) { $0 + $1.excusedMilliseconds }, series.looks.count, looker
         )
-        return [head] + series.frames.enumerated().filter { $0.element.milliseconds > frameLimit }.map { index, frame in
+        let tail = Self.tail(of: series.frames.count)
+        let inconclusive = excused.count > tail
+            ? [String(format: "  INCONCLUSIVE: frames excused: %ld, more than the p95's tail of %ld: a measurement that excused most of itself measured nothing", excused.count, tail)]
+            : []
+        return [head] + inconclusive + series.frames.enumerated().filter { $0.element.milliseconds > frameLimit }.map { index, frame in
             let span = Span(frame.at, frame.at + frame.milliseconds / 1000)
             let proven = MachineShare.starvation(in: span, looks: series.looks)
             let inside = series.looks.filter { $0.time >= span.start && $0.time <= span.end }
@@ -140,32 +169,36 @@ enum Bench {
         }
     }
 
-    /// How many times the stream is fed, so the frames taken meanwhile are enough to rank.
-    static let rounds = 20
-
-    /// How long each `frame()` took, when it waited for the lock (seconds since `origin`), how many
-    /// slices the feeder fed meanwhile and the CPU time its thread used, while `chunks` were fed
-    /// ``rounds`` times back to back on another thread; and a ``Looker``'s looks at its thread.
+    /// How long each of ``frames`` `frame()`s took, when it waited for the lock (seconds since
+    /// `origin`), how many slices the feeder fed meanwhile and the CPU time its thread used, while
+    /// `chunks` were fed over and over, back to back, on another thread until the last frame was
+    /// taken; and a ``Looker``'s looks at its thread.
     private static func framesWhileFeeding(_ chunks: [[UInt8]], origin: ContinuousClock.Instant) throws -> Measured {
         let clock = ContinuousClock()
         let screen = try Screen(size: GridSize(columns: 200, rows: 60), scrollbackBytes: 10 << 20, palette: .dark)
-        let fed = Atomic<Bool>(false)
+        let enough = Atomic<Bool>(false)
+        let stopped = DispatchSemaphore(value: 0)
         let feeder = Thread {
-            for _ in 0 ..< rounds {
+            while !enough.load(ordering: .acquiring) {
                 for chunk in chunks {
+                    guard !enough.load(ordering: .acquiring) else { break }
                     _ = screen.feed(chunk)
                 }
             }
-            fed.store(true, ordering: .releasing)
+            stopped.signal()
         }
         feeder.start()
+        defer {
+            enough.store(true, ordering: .releasing)
+            stopped.wait()
+        }
         let looker = Looker { (ContinuousClock.now - origin) / .seconds(1) }
         defer { looker.stop() }
         var frames: [Duration] = []
         var waits: [Span] = []
         var slices: [Int] = []
         var cpus: [Double] = []
-        while !fed.load(ordering: .acquiring) {
+        while frames.count < Self.frames {
             let cpu = Looker.thisThreadsCPU()
             let started = clock.now
             let timed = try screen.timedFrame()
