@@ -145,7 +145,7 @@ public final class TerminalView: NSView {
         let figures = latency
         return "frames presented \(figures.reportedPresents + figures.unreportedPresents), committed \(committedFrames); the display link "
             + "\(pacer.isIdle ? "paused" : "running") after \(figures.refresh.count) refreshes; \(fetching ? "" : "not ")awaiting a drawable; "
-            + "not yet told presented: \(figures.unpresented.isEmpty ? "none" : figures.unpresented.map(\.description).joined(separator: ", ")); "
+            + UnpresentedFrame.said(figures.unpresented, reported: figures.reportedPresents, unreported: figures.unreportedPresents) + "; "
             + String(format: "commit to completed p50 %.1f max %.1f ms, to told presented p50 %.1f max %.1f ms", figures.commitToCompleted.p50,
                      figures.commitToCompleted.max, figures.commitToPresentTold.p50, figures.commitToPresentTold.max)
     }

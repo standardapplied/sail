@@ -47,17 +47,23 @@ public final class WorkbenchView: NSView {
     /// Workspaces asked to open before the first restore, opened once it has replaced the model.
     private var pendingWorkspaces: [Place] = []
 
-    init(fonts directory: URL, helper: String?, look: Look) throws(ShellError) {
-        self.look = look
-        do {
-            fonts = try TerminalFonts(directory: directory)
-        } catch {
-            throw .resources("the terminal's fonts cannot be read: \(error)")
-        }
+    convenience init(fonts directory: URL, helper: String?, look: Look) throws(ShellError) {
+        let host: LocalHost
         do {
             host = try LocalHost(binary: helper)
         } catch {
             throw .host("this Mac's terminal host has no place to listen: \(error)")
+        }
+        try self.init(fonts: directory, host: host, look: look)
+    }
+
+    init(fonts directory: URL, host: LocalHost, look: Look) throws(ShellError) {
+        self.look = look
+        self.host = host
+        do {
+            fonts = try TerminalFonts(directory: directory)
+        } catch {
+            throw .resources("the terminal's fonts cannot be read: \(error)")
         }
         banner = StatusBanner(look: look)
         strip = TabStrip(look: look)
@@ -462,8 +468,9 @@ public final class WorkbenchView: NSView {
     }
 
     /// Ends `views`' sessions. A pane stays until its host says its session ended (or had
-    /// already); when the host does not confirm, the pane says so and offers to end it again or to
-    /// close it anyway, never vanishing as if it had ended.
+    /// already), the focus moving on at once; when the host does not confirm, the pane is shown,
+    /// saying so and offering to end it again or to close it anyway, never vanishing as if it had
+    /// ended.
     private func end(_ views: [TerminalPane]) {
         for view in views where panes[view.id] === view {
             guard let ending = view.end() else {
@@ -476,7 +483,23 @@ public final class WorkbenchView: NSView {
                 self?.settle(view, outcome)
             }
         }
+        focusPastEnding()
         apply()
+    }
+
+    /// Moves the focus off a pane being ended to where its close will put it: the tab's most
+    /// recently focused other pane, else the tab before's, else the one after's. A second ⌘W while
+    /// the host answers closes the next pane, never the same one again.
+    private func focusPastEnding() {
+        guard let focused = model.focusedPane, panes[focused.id]?.isEnding == true,
+              let at = model.tabs.firstIndex(where: { $0.id == model.selected }) else { return }
+        let tabs = model.tabs
+        var order = [tabs[at]]
+        order += tabs[..<at].reversed()
+        order += tabs[(at + 1)...]
+        let candidates = order.flatMap { $0.history.reversed() }
+        guard let next = candidates.first(where: { panes[$0]?.isEnding == false }) else { return }
+        model.focus(next)
     }
 
     private func settle(_ view: TerminalPane, _ outcome: EndOutcome) {
@@ -485,6 +508,8 @@ public final class WorkbenchView: NSView {
             remove(view)
             return apply()
         }
+        model.focus(view.id)
+        apply()
         view.showUnended(why, endAgain: { [weak self] in self?.end([view]) }, closeAnyway: { [weak self] in
             guard let self, panes[view.id] === view else { return }
             remove(view)

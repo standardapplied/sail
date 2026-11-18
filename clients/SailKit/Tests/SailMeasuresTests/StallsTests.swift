@@ -291,6 +291,21 @@ import Testing
     }
 }
 
+/// A gated figure's verdict names it first, and a series' p95 tail is counted by nearest rank.
+@Suite struct VerdictTests {
+    @Test func aMissedBudgetIsNamedFirstWithItsLimit() {
+        let missed = Verdict.of("full redraw 200x60 cpu p95", milliseconds: 5.245, limit: 4)
+        #expect(!missed.met && missed.said == "missed: full redraw 200x60 cpu p95 5.25 ms, over its 4 ms limit")
+        let met = Verdict.of("full redraw 200x60 cpu p95", milliseconds: 1.51, limit: 4)
+        #expect(met.met && met.said == "within its budget: full redraw 200x60 cpu p95 1.51 ms, limit 4 ms")
+        #expect(Verdict.of("x", milliseconds: 4, limit: 4).met, "the limit itself is within")
+    }
+
+    @Test func theP95LeavesItsTailOfTheSharedCount() {
+        #expect(Sampled.count == 400 && Sampled.tail(of: Sampled.count) == 20 && Sampled.tail(of: 300) == 15 && Sampled.tail(of: 54) == 2)
+    }
+}
+
 #if canImport(Darwin)
 /// The Mach and libproc reads a look is made of, on the machine itself.
 @Suite struct MachTests {

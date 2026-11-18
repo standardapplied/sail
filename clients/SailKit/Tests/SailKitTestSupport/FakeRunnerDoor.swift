@@ -132,8 +132,9 @@ public final class FakeRunnerDoor: Sendable {
         state.withLock { $0.kills }
     }
 
-    /// From now on this Mac's host refuses every Kill, in `words`, its session left running.
-    public func refuseKills(saying words: String) {
+    /// From now on this Mac's host refuses every Kill, in `words`, its session left running; nil
+    /// ends them again.
+    public func refuseKills(saying words: String?) {
         killing.withLock { $0.refusal = words }
     }
 

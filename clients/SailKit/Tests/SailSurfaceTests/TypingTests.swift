@@ -420,4 +420,22 @@ import Testing
         #expect(figures.commitToCompleted.count == 2 && abs(figures.commitToCompleted.max - 6) < 1e-6, "a completion told before its commit mark counts too")
         #expect(figures.commitToPresentTold.count == 1 && abs(figures.commitToPresentTold.max - 999) < 1e-6)
     }
+    /// On a display that tells no presentation time (a CI runner's), a frame not told presented
+    /// says nothing of the display: they are counted and that is said, never listed as if late.
+    @Test func framesNotToldPresentedAreListedOnlyWhereTheDisplayTellsPresentationTimes() {
+        var marks = LatencyMarks()
+        marks.committed(frame: 1, at: 1.001, read: 1.0, target: 1.016)
+        marks.committed(frame: 2, at: 1.020, read: 1.019, target: 1.033)
+        marks.completed(frame: 2, at: 1.026, ok: true)
+        marks.presented(frame: 1, at: 0, told: 1.030)
+        var figures = marks.figures
+        #expect(UnpresentedFrame.said(marks.unpresented(at: 4.020), reported: figures.reportedPresents, unreported: figures.unreportedPresents)
+            == "the display tells no presentation time (1 presents told without one), so the 1 frames not told presented say nothing of it")
+        marks.committed(frame: 3, at: 1.040, read: 1.039, target: 1.050)
+        marks.presented(frame: 3, at: 1.050, told: 1.052)
+        figures = marks.figures
+        #expect(UnpresentedFrame.said(marks.unpresented(at: 4.020), reported: figures.reportedPresents, unreported: figures.unreportedPresents)
+            == "not yet told presented: frame 2 committed 3000 ms ago, its commands completed 6.0 ms after")
+        #expect(UnpresentedFrame.said([], reported: 1, unreported: 0) == "not yet told presented: none")
+    }
 }

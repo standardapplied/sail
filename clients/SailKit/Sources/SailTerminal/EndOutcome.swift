@@ -74,15 +74,25 @@ extension Door {
         if case .runner = self { "The runner" } else { "This Mac's terminal host" }
     }
 
-    /// What a refused end comes to. This Mac's host refuses a Kill of a session it no longer holds
+    /// What a failed end comes to. This Mac's host refuses a Kill of a session it no longer holds
     /// in words, with no code to tell it from any other refusal, so its own list says whether the
-    /// session is gone.
+    /// session is gone; a host that cannot be reached, or hangs up, may have stopped, and every
+    /// session it held ended with it, which is said.
     private func outcome(of error: TerminalError, ending session: String, timeout: Int) async -> EndOutcome {
-        guard case let .local(address) = self, case .refused = error,
-              let listed = try? await SessionListing.sessions(at: address, timeout: timeout),
-              !listed.contains(where: { $0.name == session && $0.live })
-        else { return .of(error) }
-        return .gone
+        guard case let .local(address) = self else { return .of(error) }
+        switch error {
+        case let .unreachable(reason):
+            return .unconfirmed(["This Mac's terminal host could not be reached (\(reason)); if it has stopped, this terminal ended with it."])
+        case .closed:
+            return .unconfirmed(["This Mac's terminal host hung up; if it has stopped, this terminal ended with it."])
+        case .refused:
+            guard let listed = try? await SessionListing.sessions(at: address, timeout: timeout),
+                  !listed.contains(where: { $0.name == session && $0.live })
+            else { return .of(error) }
+            return .gone
+        default:
+            return .of(error)
+        }
     }
 
     /// Ends `session` on a connection of its own, each answer awaited at most `timeout` seconds.

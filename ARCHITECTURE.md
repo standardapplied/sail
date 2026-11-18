@@ -4689,8 +4689,10 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   no code), or unconfirmed in the words of whoever refused it. What may still run is said in one
   sentence (`EndOutcome.mayStillRun`): no timeout ends a detached session, so on a runner it keeps
   its workspace running until someone ends it or stops the workspace, and on this Mac the next
-  launch opens it as a tab of its own. A pane stays until its end is confirmed, saying so when it
-  is not, with End Again and Close Anyway. A refusal is kept whole on every path
+  launch opens it as a tab of its own. A pane stays until its end is confirmed, the focus moving
+  on as the end begins (so a second ⌘W closes the next pane), saying it is ending only past
+  `TerminalPane.endingSaidAfter` (200 ms; a healthy host closes it as at once), and shown, saying
+  so, when it is not confirmed, with End Again and Close Anyway. A refusal is kept whole on every path
   (`SessionEnd.refused(HostRefusal)`, `.ticketRefused(Refusal)`), the host's reason apart from its
   typed remedy, and said by `Said.lines`, the one composition: the sentence and, for a command the
   app knows, who acts; a call that fails is said by its kind, never its route

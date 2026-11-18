@@ -21,6 +21,9 @@ public final class TerminalPane: NSView {
     /// How much of the terminal background lies over a pane that is not focused (Ghostty's
     /// unfocused split opacity of 0.7).
     public static let dimming = 0.3
+    /// How long an end goes unsaid: a host that answers within it closes the pane as at once, as
+    /// Ghostty's close does; one slower says the pane is ending.
+    public static let endingSaidAfter = Duration.milliseconds(200)
 
     public let id: PaneID
     public let name: String
@@ -36,6 +39,8 @@ public final class TerminalPane: NSView {
     public private(set) var attachedOnce = false
     /// The end under way, nil once it answered.
     private var ending: Task<EndOutcome, Never>?
+    /// Waits out ``endingSaidAfter``; a test holds it.
+    var nap: @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) }
     /// Whether the last end of this session was not confirmed: it may still be running.
     public private(set) var unended = false
 
@@ -147,9 +152,20 @@ public final class TerminalPane: NSView {
         return session.atHost != .none
     }
 
-    /// The tab stays while its session is ended, saying so.
-    func showEnding() {
-        banner.show(place.onRunner ? "Ending this terminal on the runner…" : "Ending this terminal…")
+    /// Whether an end is under way.
+    var isEnding: Bool {
+        ending != nil
+    }
+
+    /// The pane stays while its session is ended, saying so once ``endingSaidAfter`` has passed
+    /// with the end still under way.
+    @discardableResult
+    func showEnding() -> Task<Void, Never> {
+        Task { [weak self] in
+            await self?.nap(Self.endingSaidAfter)
+            guard let self, isEnding else { return }
+            banner.show(place.onRunner ? "Ending this terminal on the runner…" : "Ending this terminal…")
+        }
     }
 
     /// The host did not confirm the end, said why: the tab stays, offering to end it again, or to
