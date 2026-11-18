@@ -9,12 +9,12 @@ import SailLook
 /// with who is signed in and the control plane in mono 11. It is 236 pt by default; its trailing
 /// edge drags it between 200 and 360 pt, remembered on this Mac.
 @MainActor
-public final class LeftPanel: NSView {
-    public static let width = (standard: 236.0, least: 200.0, most: 360.0), header = 46.0, edge = 6.0
+package final class LeftPanel: NSView {
+    static let width = (standard: 236.0, least: 200.0, most: 360.0), header = 46.0, edge = 6.0
     static let remembered = "leftPanel.width"
 
-    public var onChoose: @MainActor (String) -> Void = { _ in }
-    public var look: Look {
+    var onChoose: @MainActor (String) -> Void = { _ in }
+    var look: Look {
         didSet { needsDisplay = true }
     }
 
@@ -26,7 +26,7 @@ public final class LeftPanel: NSView {
     private(set) var widthConstraint: NSLayoutConstraint!
     private var projects: [WorkspacesModel.Project] = []
 
-    public init(look: Look, mono: LabelFont) {
+    init(look: Look, mono: LabelFont) {
         self.look = look
         self.mono = mono
         list = SailList(rowStyle: .sidebar, look: look, mono: mono)
@@ -66,7 +66,7 @@ public final class LeftPanel: NSView {
     }
 
     /// Shows `panel`'s projects, its chosen one chosen, and who is signed in.
-    public func render(_ panel: WorkspacesModel.Panel) {
+    func render(_ panel: WorkspacesModel.Panel) {
         if panel.projects != projects {
             projects = panel.projects
             list.entries = [.head("Projects", count: panel.projects.count)] + panel.projects.map { project in

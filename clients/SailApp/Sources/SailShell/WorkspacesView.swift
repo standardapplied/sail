@@ -10,25 +10,25 @@ import SailLook
 /// hides, and ⌃⌘S (View ▸ Show Sidebar) slides it over the content.
 @MainActor
 public final class WorkspacesView: NSView {
-    public static let narrow = 720.0
+    static let narrow = 720.0
 
-    public var client: SailClient?
-    public var person = WorkspacesModel.Person(handle: "", admin: false, confirmed: false, controlPlane: "") {
+    var client: SailClient?
+    var person = WorkspacesModel.Person(handle: "", admin: false, confirmed: false, controlPlane: "") {
         didSet { if person != oldValue { model = WorkspacesModel(person: person) } }
     }
 
-    public var onOpen: @MainActor (_ project: String, _ name: String) -> Void = { _, _ in }
-    public var onSignIn: @MainActor () -> Void = {}
-    public var onAskWhoIsSignedIn: @MainActor () -> Void = {}
-    public var look: Look {
+    var onOpen: @MainActor (_ project: String, _ name: String) -> Void = { _, _ in }
+    var onSignIn: @MainActor () -> Void = {}
+    var onAskWhoIsSignedIn: @MainActor () -> Void = {}
+    var look: Look {
         didSet {
             panel.look = look
             render()
         }
     }
 
-    public let panel: LeftPanel
-    public let project: ProjectView
+    package let panel: LeftPanel
+    package let project: ProjectView
     let card = NSStackView()
     let tryAgain: SailButton
     private let cardWords = NSTextField(wrappingLabelWithString: "")
@@ -37,15 +37,15 @@ public final class WorkspacesView: NSView {
     private var door = Door.asking
     private var overlaid = false
     /// A person's action is under way; the drive waits on it.
-    public private(set) var busy = false
+    package private(set) var busy = false
     /// Actions a person started that have ended, for the drive.
-    public private(set) var ended = 0
+    package private(set) var ended = 0
 
     private enum Door: Equatable {
         case asking, signedOut, unknown([String]), signedIn
     }
 
-    public init(look: Look, title: TitleFont, mono: LabelFont) {
+    init(look: Look, title: TitleFont, mono: LabelFont) {
         self.look = look
         titleFont = title
         panel = LeftPanel(look: look, mono: mono)
@@ -112,10 +112,6 @@ public final class WorkspacesView: NSView {
         var parts = [line.name, WorkspaceLine.pill(line.state).label.lowercased()]
         if let owner = line.owner, owner != person.handle { parts.append(owner) }
         return parts.joined(separator: " · ")
-    }
-
-    public var screen: WorkspacesModel.Screen {
-        model.screen
     }
 
     // MARK: The door
@@ -287,7 +283,7 @@ public final class WorkspacesView: NSView {
     }
 
     /// ⌃⌘S: the hidden panel slides over the content, or away.
-    @objc public func toggleSidebar(_: Any?) {
+    @objc package func toggleSidebar(_: Any?) {
         overlaid.toggle()
         arrange()
     }

@@ -7,10 +7,10 @@ import SailLook
 /// in mono 11, in a column that takes what is left; the state's pill in a 112 pt column; and, when
 /// the workspace is someone else's, their initial and handle in 13 secondary in a 104 pt column.
 @MainActor
-public final class WorkspaceLine: NSStackView {
-    public static let pillColumn = 112.0, ownerColumn = 104.0
+final class WorkspaceLine: NSStackView {
+    static let pillColumn = 112.0, ownerColumn = 104.0
 
-    public init(name: String, instance: String, state: PillState, owner: String?, look: Look, mono: LabelFont) {
+    init(name: String, instance: String, state: PillState, owner: String?, look: Look, mono: LabelFont) {
         super.init(frame: .zero)
         let title = NSTextField(labelWithAttributedString: NSAttributedString(string: name, attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.body.points, weight: .medium), .foregroundColor: NSColor(look.text),
@@ -40,7 +40,7 @@ public final class WorkspaceLine: NSStackView {
     }
 
     /// The pill a workspace's state shows.
-    public static func pill(_ state: Open<WorkspaceState>) -> PillState {
+    static func pill(_ state: Open<WorkspaceState>) -> PillState {
         switch state {
         case .known(.running): return .running
         case .known(.stopped): return .stopped

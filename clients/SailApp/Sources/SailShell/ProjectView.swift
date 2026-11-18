@@ -9,29 +9,29 @@ import SailLook
 /// a foot with the count and the keys. It draws what ``WorkspacesModel`` says and sends the person's
 /// actions back; it keeps nothing of its own.
 @MainActor
-public final class ProjectView: NSView, NSTextFieldDelegate {
-    public enum Act: Equatable {
+package final class ProjectView: NSView, NSTextFieldDelegate {
+    package enum Act: Equatable {
         case open(String), startAndOpen(String), copyName(String)
         case newWorkspace, listAgain, checkAgain, typed(String), create, cancelCreate, chose(String?), show(String)
     }
 
     static let padding = (top: 26.0, sides: 32.0, bottom: 20.0), listGap = 18.0, footGap = 12.0, actionsColumn = 214.0
 
-    public var on: @MainActor (Act) -> Void = { _ in }
-    public var look: Look
-    let list: SailList
+    package var on: @MainActor (Act) -> Void = { _ in }
+    var look: Look
+    package let list: SailList
     let title = NSTextField(labelWithString: "")
     let lede = NSTextField(labelWithString: "")
     let listAgain: SailButton
-    let newWorkspace: SailButton
-    let field: SailTextField
+    package let newWorkspace: SailButton
+    package let field: SailTextField
     private let mono: LabelFont
     private let titleFont: TitleFont
     private let column = NSStackView()
     private let frameView = ListFrame()
     private var page: WorkspacesModel.Page?
 
-    public init(look: Look, mono: LabelFont, titleFont: TitleFont) {
+    init(look: Look, mono: LabelFont, titleFont: TitleFont) {
         self.look = look
         self.mono = mono
         self.titleFont = titleFont
@@ -74,7 +74,7 @@ public final class ProjectView: NSView, NSTextFieldDelegate {
     }
 
     /// Draws `page`.
-    public func render(_ page: WorkspacesModel.Page) {
+    func render(_ page: WorkspacesModel.Page) {
         self.page = page
         title.attributedStringValue = NSAttributedString(string: page.name, attributes: [
             .font: titleFont.font(.title1) as NSFont, .foregroundColor: NSColor(look.text), .kern: -0.012 * Look.Step.title1.points,
@@ -98,12 +98,12 @@ public final class ProjectView: NSView, NSTextFieldDelegate {
         column.setViews(views, in: .top)
     }
 
-    public func controlTextDidChange(_: Notification) {
+    package func controlTextDidChange(_: Notification) {
         on(.typed(field.field.stringValue))
     }
 
     /// Return creates and Esc cancels, from the name field.
-    public func control(_: NSControl, textView _: NSTextView, doCommandBy selector: Selector) -> Bool {
+    package func control(_: NSControl, textView _: NSTextView, doCommandBy selector: Selector) -> Bool {
         switch selector {
         case #selector(NSResponder.insertNewline(_:)): on(.create)
         case #selector(NSResponder.cancelOperation(_:)): on(.cancelCreate)
@@ -113,7 +113,7 @@ public final class ProjectView: NSView, NSTextFieldDelegate {
     }
 
     /// Draws only `empty`, centred: no project to show.
-    public func renderEmpty(_ empty: WorkspacesModel.Empty) {
+    func renderEmpty(_ empty: WorkspacesModel.Empty) {
         page = nil
         column.setViews([spacer(120), emptyState(empty)], in: .top)
     }
