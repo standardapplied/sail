@@ -162,6 +162,25 @@ open_drive() {
   esac
 }
 
+# THROWAWAY: ci/drive's own check that a run passes only when the app quits cleanly. Each case
+# must fail as said, the control must pass, and no drive may be left running.
+printf '{"steps": []}' > "$private_dir/quit.json"
+expect() {
+  local name=$1 want=$2 status=0
+  shift 2
+  "$@" || status=$?
+  echo "ci/drive self-check: $name returned $status, wanted $want"
+  [[ $status == "$want" ]] || { echo "ci/drive self-check: $name FAILED" >&2; exit 1; }
+  if pgrep -f -- "$opened_pattern" > /dev/null; then echo "ci/drive self-check: a drive was left running after $name" >&2; exit 1; fi
+}
+mkdir -p "$out_dir/stale" && printf '{"passed": true}' > "$out_dir/stale/report.json"
+expect "an earlier passing report, and a drive that leaves none" 134 open_drive stale off --drive "$private_dir/none.json" --out "$out_dir/stale"
+expect "a clean run" 0 open_drive clean off --drive "$private_dir/quit.json" --out "$out_dir/clean"
+SAIL_DRIVE_ON_QUIT=crash expect "a crash at quit after a passing report" 134 open_drive crash off --drive "$private_dir/quit.json" --out "$out_dir/crash"
+SAIL_DRIVE_ON_QUIT=hang SAIL_DRIVE_ALARM_SECONDS=90 expect "a hang at quit after a passing report" 124 open_drive hang off --drive "$private_dir/quit.json" --out "$out_dir/hang"
+echo "ci/drive self-check: every case as wanted"
+exit 0
+
 for run in first second third shots workspaces kit kit-rtl; do
   if [[ $run == third ]]; then
     echo "ci/drive: another copy's host, and a client on it"
