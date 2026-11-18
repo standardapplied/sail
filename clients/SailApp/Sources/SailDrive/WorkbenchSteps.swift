@@ -699,7 +699,13 @@ extension Driver {
     /// within 5 s.
     func setLook(_ appearance: NSAppearance.Name?) async -> Bool {
         NSApp.appearance = appearance.flatMap { NSAppearance(named: $0) }
-        return await waitUntil(5) {
+        return await lookDrawn()
+    }
+
+    /// Whether the shell took the app's look and every terminal shown drew a frame in its palette,
+    /// within 5 s.
+    private func lookDrawn() async -> Bool {
+        await waitUntil(5) {
             let look = ShellApp.look(of: NSApp.effectiveAppearance)
             return self.shell.look == look && self.shownTerminals.allSatisfy { pane in
                 pane.terminal.lastFrame.map { $0.colors.background == look.palette.background } ?? true
@@ -713,10 +719,18 @@ extension Driver {
     }
 
     /// The look switched `times` times, each the other of the one before, with the four panes'
-    /// scrollback full: every pane must draw each look, and none may wait to show it, nor the main
-    /// thread be held, over 100 ms (``flood(_:)``, net of the machine's share), counted from each
-    /// screen's change. Told apart: the panes' draws and each main-thread hold over 60 ms with its
-    /// stacks (AppKit drawing the window again shows there).
+    /// scrollback full: every pane must draw each look, and none may wait to show it over 100 ms
+    /// (``flood(_:)``, net of the machine's share), counted from each screen's change; and the
+    /// main thread may be held at most ``lookSwitchHold`` by a switch, counted as ours (the spec
+    /// `sail-app-a-change-of-look-holds-the-main-thread-briefly`). Told apart: how long setting the
+    /// appearance took on the main thread (AppKit carrying it to every view, and the app's own
+    /// `apply`), the panes' draws, and each main-thread hold over 60 ms with its stacks (AppKit
+    /// drawing the window again shows there).
+    /// The most a change of look may hold the main thread with four panes, counted as ours: half the
+    /// 100 ms within which a change reads as instant, so the other half is the panes' frames'; three
+    /// frames at 60 Hz; about twice AppKit's own switch of a plain window.
+    static let lookSwitchHold = 50.0
+
     private func switchLooks(_ grid: [TerminalPane], times: Int) async -> (ok: Bool, said: String) {
         grid.forEach { $0.terminal.resetLatency() }
         mainThread.reset()
@@ -727,25 +741,31 @@ extension Driver {
             let other: NSAppearance.Name = shell.look == .dark ? .aqua : .darkAqua
             let began = ContinuousClock.now
             let at = CACurrentMediaTime()
-            if await setLook(other) { drawn += 1 }
+            NSApp.appearance = NSAppearance(named: other)
+            let setting = (CACurrentMediaTime() - at) * 1000
+            if await lookDrawn() { drawn += 1 }
             let took = (ContinuousClock.now - began) / .milliseconds(1)
             reached.append("\(Self.ms(took)) ms")
-            print(String(format: "look switch at %.3f: the last pane drew it %.1f ms after the switch", at, took))
+            print(String(format: "look switch at %.3f: setting the appearance took %.1f ms on the main thread; the last pane drew it %.1f ms after the switch", at, setting, took))
         }
         for gap in mainThread.stalls.gaps where gap.length > 0.06 {
             print(String(format: "look switch: main thread held %.3f–%.3f (%.1f ms), the drive's own thread %.1f ms of it", gap.start, gap.end, gap.length * 1000,
                          ownThread.stalls.shared(with: gap) * 1000))
             mainStacks.told(gap).forEach { print("look switch: main thread held: \($0)") }
         }
+        let held = mainHeld()
         let judged = grid.map { flood($0.terminal.latency) }
         let worst = judged.max { $0.ours < $1.ours }
         let changes = grid.map { $0.terminal.latency.changes }
         let draws = grid.map { $0.terminal.latency.refresh.max }.reduce(0, +)
         _ = await setLook(nil)
         panes4["look switched, ours, the worst pane ms"] = worst?.ours ?? 0
+        panes4["look switched, the main thread's longest hold, ours ms"] = held.ours
         panes4["look switched, the four panes' longest draws summed ms"] = draws
-        let ok = drawn == times && (worst?.ours ?? 0) <= 100 && changes.allSatisfy { $0 >= times }
+        let withinHold = held.ours <= Self.lookSwitchHold
+        let ok = drawn == times && (worst?.ours ?? 0) <= 100 && withinHold && changes.allSatisfy { $0 >= times }
         return (ok, "all four drew \(drawn) of \(times) switches, each from the switch to the last drawn (polled every 10 ms) \(reached.joined(separator: ", ")); "
+            + "the main thread's longest hold over them (at most \(Self.ms(Self.lookSwitchHold)) ms): \(held.said); "
             + "the four panes' longest draws summed \(Self.ms(draws)) ms; screen changes a pane \(changes.map { "\($0)" }.joined(separator: ", ")); the worst pane: \(worst?.said ?? "none")")
     }
 

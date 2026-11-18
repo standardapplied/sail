@@ -1,0 +1,79 @@
+import AppKit
+import Foundation
+import SailLook
+@testable import SailShell
+import SailWorkbench
+import Testing
+
+/// A change of look recolours and lays nothing out, and colours each symbol once per look (the
+/// spec `sail-app-a-change-of-look-holds-the-main-thread-briefly`, I2 and I3).
+@MainActor @Suite struct LookSwitchTests {
+    /// Every view of the window, its frame view's included: the strip lives in the title bar.
+    static func views(under view: NSView) -> [NSView] {
+        [view] + view.subviews.flatMap { views(under: $0) }
+    }
+
+    static func named(_ views: [NSView]) -> String {
+        views.map { "\(type(of: $0))\($0.identifier.map { " \($0.rawValue)" } ?? "")" }.joined(separator: ", ")
+    }
+
+    /// I2: with four panes in the workbench and the window laid out and drawn, a change of look
+    /// leaves no stack view to declare and diff its constraints again, and laying the window out
+    /// once more moves no view.
+    @Test func aChangeOfLookLaysNothingOut() throws {
+        let shell = try WorkbenchLookTests.shell(.light)
+        shell.select(.thisMac)
+        shell.window.orderFront(nil)
+        defer { shell.window.orderOut(nil) }
+        let bench = shell.thisMac
+        let place = Place.thisMac(folder: "/")
+        for name in ["a", "b", "c", "d"] {
+            let id = bench.model.newTab(session: "mac-look-\(name)", place: place)
+            let pane = try #require(bench.model.panes[id])
+            try #require(bench.makeView(pane, start: .attach, points: 15) != nil)
+        }
+        let frame = try #require(shell.window.contentView?.superview)
+        for look in [Look.dark, Look.light, Look.dark] {
+            frame.layoutSubtreeIfNeeded()
+            shell.window.displayIfNeeded()
+            let views = Self.views(under: frame)
+            let flaggedBefore = Set(views.filter { $0 is NSStackView && $0.needsUpdateConstraints }.map { ObjectIdentifier($0) })
+            let before = views.map(\.frame)
+            shell.apply(look)
+            let flagged = views.filter { $0 is NSStackView && $0.needsUpdateConstraints && !flaggedBefore.contains(ObjectIdentifier($0)) }
+            #expect(flagged.isEmpty, "a change of look has \(flagged.count) stack views declare their constraints again: \(Self.named(flagged))")
+            frame.layoutSubtreeIfNeeded()
+            let moved = zip(views, before).filter { $0.0.frame != $0.1 }.map(\.0)
+            #expect(moved.isEmpty, "a change of look moved \(Self.named(moved))")
+        }
+    }
+
+    /// I3: the rail's and the strip's symbols are non-template images coloured for the look, no
+    /// button carries a tint for Core Animation to apply, and a look returned to hands back the
+    /// very images it had.
+    @Test func symbolsAreColouredOncePerLook() throws {
+        let shell = try WorkbenchLookTests.shell(.dark)
+        let strip = shell.thisMac.strip
+        strip.showsTabs = true
+        strip.show(WorkbenchLookTests.items(), selected: TabID(1))
+        let rail = Rail.Item.allCases.compactMap { shell.rail.button($0) }
+        let strips: [NSButton] = [strip.add as NSButton] + strip.tabs.map { $0.close as NSButton }
+        let marks = strip.tabs.map(\.zoomMark)
+        func images() -> [NSImage?] {
+            rail.map(\.image) + strips.map(\.image) + marks.map(\.image)
+        }
+        shell.apply(.dark)
+        let dark = images()
+        shell.apply(.light)
+        let light = images()
+        shell.apply(.dark)
+        let again = images()
+        #expect(zip(dark, again).allSatisfy { $0 === $1 }, "a look returned to made its symbols again")
+        #expect(zip(dark, light).allSatisfy { $0 !== $1 }, "a symbol kept its image across a change of look")
+        for button in rail + strips {
+            #expect(button.contentTintColor == nil, "\(button.toolTip ?? "a button") is tinted at each change of look")
+            #expect(button.image?.isTemplate == false, "\(button.toolTip ?? "a button")'s symbol is a template")
+        }
+        #expect(marks.allSatisfy { $0.contentTintColor == nil && $0.image?.isTemplate == false })
+    }
+}

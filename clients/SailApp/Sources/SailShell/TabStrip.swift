@@ -44,7 +44,7 @@ public final class TabStrip: NSView {
 
     init(look: Look) {
         self.look = look
-        add = RingedButton(TabButton.symbol("plus", accessibility: "New Tab"), tip: "New Tab")
+        add = RingedButton(symbol: "plus", tip: "New Tab", look: look)
         super.init(frame: NSRect(x: 0, y: 0, width: 600, height: 28))
         wantsLayer = true
         add.target = self
@@ -158,7 +158,7 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         didSet { paint() }
     }
 
-    private let zoomMark = NSImageView(image: TabButton.symbol("arrow.up.left.and.arrow.down.right", accessibility: "Zoomed"))
+    let zoomMark = NSImageView()
     /// The selected tab's mark: a 2 pt bar along its bottom edge in `accentText`, as the rail's
     /// bar marks its chosen item and Mast underlines its active tab.
     let bar = NSView()
@@ -169,7 +169,7 @@ public final class TabButton: NSView, NSTextFieldDelegate {
     init(id: TabID, look: Look) {
         self.id = id
         self.look = look
-        close = RingedButton(Self.symbol("xmark", accessibility: "Close Tab"), tip: "Close Tab")
+        close = RingedButton(symbol: "xmark", tip: "Close Tab", look: look)
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = Look.contentRadius
@@ -220,9 +220,9 @@ public final class TabButton: NSView, NSTextFieldDelegate {
     /// AppKit's subrole for a tab (`NSAccessibilityTabButtonSubrole`, `AXTabButton`).
     public static let tabButton = NSAccessibility.Subrole(rawValue: "AXTabButton")
 
-    static func symbol(_ name: String, accessibility: String) -> NSImage {
-        let image = NSImage(systemSymbolName: name, accessibilityDescription: accessibility) ?? NSImage()
-        return image.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .medium)) ?? image
+    /// A strip symbol at its size and weight, in `colour` (``SymbolInk``).
+    static func symbol(_ name: String, accessibility: String, colour: Tint) -> NSImage {
+        SymbolInk.image(name, points: 11, weight: .medium, colour: colour, accessibility: accessibility)
     }
 
     func show(_ item: TabStrip.Item, selected: Bool, look: Look) {
@@ -380,9 +380,10 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         bar.layer?.backgroundColor = NSColor(look.accentText).cgColor
         bar.isHidden = !isSelected || renaming
         label.textColor = NSColor(isSelected ? look.text : look.textSecondary)
-        label.font = .systemFont(ofSize: Look.Step.callout.points, weight: isSelected ? .medium : .regular)
+        let font = NSFont.systemFont(ofSize: Look.Step.callout.points, weight: isSelected ? .medium : .regular)
+        if label.font != font { label.font = font }
         close.paint(look)
-        zoomMark.contentTintColor = NSColor(look.textSecondary)
+        zoomMark.image = Self.symbol("arrow.up.left.and.arrow.down.right", accessibility: "Zoomed", colour: look.textSecondary)
         close.isHidden = !hovering || renaming
         field?.textColor = NSColor(look.text)
     }
@@ -392,9 +393,13 @@ public final class TabButton: NSView, NSTextFieldDelegate {
 /// accent, never the system's ring.
 @MainActor
 public final class RingedButton: NSButton {
-    init(_ symbol: NSImage, tip: String) {
+    private let symbol: String
+
+    /// A button showing the strip symbol `symbol`, coloured for `look`.
+    init(symbol: String, tip: String, look: Look) {
+        self.symbol = symbol
         super.init(frame: .zero)
-        image = symbol
+        image = TabButton.symbol(symbol, accessibility: tip, colour: look.textSecondary)
         imagePosition = .imageOnly
         isBordered = false
         focusRingType = .none
@@ -409,7 +414,7 @@ public final class RingedButton: NSButton {
     }
 
     func paint(_ look: Look) {
-        contentTintColor = NSColor(look.textSecondary)
+        image = TabButton.symbol(symbol, accessibility: toolTip ?? symbol, colour: look.textSecondary)
         layer?.borderColor = NSColor(look.accent).cgColor
     }
 

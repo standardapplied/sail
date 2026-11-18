@@ -53,7 +53,26 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     private let defaults: UserDefaults
     /// The look it is drawn in; a new one repaints it.
     var look: Look {
-        didSet { paint() }
+        didSet { paintWhenShown() }
+    }
+
+    /// A change of look while hidden is painted when the pane is next shown: no one sees a hidden
+    /// pane, and painting it says its lines again and lays it out, at the switch, for nothing.
+    private var paintOwed = false
+
+    private func paintWhenShown() {
+        if isHidden {
+            paintOwed = true
+        } else {
+            paint()
+        }
+    }
+
+    override public func viewDidUnhide() {
+        super.viewDidUnhide()
+        guard paintOwed else { return }
+        paintOwed = false
+        paint()
     }
 
     private let mono: TerminalFonts
