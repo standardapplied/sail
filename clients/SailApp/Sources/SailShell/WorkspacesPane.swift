@@ -308,7 +308,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     ) -> Task<Void, Never> {
         calls += 1
         if person { making += 1 }
-        enable()
+        [make, open].forEach { $0.isEnabled = false }
         return Task { await self.finish(byAPerson: person, failing: failing, act) }
     }
 
