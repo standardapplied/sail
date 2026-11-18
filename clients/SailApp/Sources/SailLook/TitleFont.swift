@@ -1,5 +1,6 @@
 import CoreText
 import Foundation
+import SailDesign
 
 /// Newsreader 500 for titles, read from the file the app ships beside JetBrains Mono and checked to
 /// be that face; made from the file's own descriptor, so nothing is registered system-wide.

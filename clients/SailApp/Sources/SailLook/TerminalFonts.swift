@@ -41,6 +41,12 @@ public struct TerminalFonts {
         return try TerminalFaces(points: points, scale: scale, fonts: fonts)
     }
 
+    /// The regular face at `points`, for the eyebrows, pills and hints of the app's controls.
+    public func regular(_ points: Double) -> CTFont {
+        descriptors[.regular].map { CTFontCreateWithFontDescriptor($0, points, nil) } ?? CTFontCreateWithName("Menlo" as CFString, points, nil)
+    }
+
+
     private static func style(of font: CTFont) -> FontStyle {
         let traits = CTFontGetSymbolicTraits(font)
         switch (traits.contains(.traitBold), traits.contains(.traitItalic)) {

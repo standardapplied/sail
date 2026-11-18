@@ -4649,7 +4649,10 @@ three instance buffers (`FrameLedger`), box
 drawing, blocks, underline styles and cursors drawn as pixel sprites, the Mac key-code table and
 the typing rules, pointer and wheel gestures, and the latency marks. `SailApp` holds the rest:
 `SailLook` (JetBrains Mono 2.304 and Newsreader 500, vendored with their OFLs and pinned by
-checksum, and the Sail look's tokens, type steps and spacing), `SailRenderer` (Metal and Core Text,
+checksum; it re-exports SailKit's `SailDesign`, the Sail look's tokens, type steps and spacing and
+what each control is in each state, pure Swift tested on Linux), `SailControls` (the controls every
+pane is drawn from, each a thin AppKit view over `SailDesign`'s tables; the drive's `kit` run shoots
+each in every state and look), `SailRenderer` (Metal and Core Text,
 no AppKit), `SailTerminalView` (the `NSView`), `SailAccount` (the platform's passkeys and the
 Keychain), `SailShell` (the app: window, rail, the account and "This Mac"), `SailTestPasskey` (a
 software passkey, never shipped), and two executables: `Sail`, shipped, and `SailDrive`, the drive

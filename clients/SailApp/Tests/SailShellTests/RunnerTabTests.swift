@@ -285,8 +285,7 @@ actor Proxied: Transport {
             row.frame = NSRect(x: 0, y: 0, width: 380, height: Rail.item)
             row.isSelected = true
             row.isEmphasized = emphasized
-            let alpha = emphasized ? look.fillSelected.alpha : look.fillSelected.alpha / 2
-            let fill = Self.colour(of: Swatch(NSColor(look.fillSelected).withAlphaComponent(alpha), over: NSColor(look.canvas)), at: NSPoint(x: 5, y: 5))
+            let fill = Self.colour(of: Swatch(NSColor(emphasized ? look.fillSelected : look.fillSelectedQuiet), over: NSColor(look.canvas)), at: NSPoint(x: 5, y: 5))
             #expect(Self.colour(of: row, at: NSPoint(x: 1, y: 21)).near(Self.channels(look.accent)), "\(name): the bar")
             #expect(Self.colour(of: row, at: NSPoint(x: 200, y: 21)).near(fill), "\(name) \(emphasized): the fill is \(Self.colour(of: row, at: NSPoint(x: 200, y: 21))), not \(fill)")
             #expect(Self.colour(of: row, at: NSPoint(x: 5, y: 21)).near(Self.channels(look.canvas)), "\(name): nothing between the bar and the fill")
