@@ -16,25 +16,16 @@ import org.junit.jupiter.api.Test;
 /** A session's allowance and the bounds it is held to, with no process and no host. */
 class UploadAllowanceTest {
 
-  /** Takes a file of {@code size} bytes and stores it, so it is no longer under way. */
-  private static PutRefusal store(UploadAllowance allowance, long size) {
-    var refused = allowance.take(size);
-    if (refused == null) {
-      allowance.done(size, true);
-    }
-    return refused;
-  }
-
   @Test
   void aSessionKeepsFilesUpToItsBoundAndOneHandedBackMayBeTakenAgain() {
     var allowance = new UploadAllowance();
     for (var i = 0; i < UploadAllowance.FILES - 1; i++) {
-      assertNull(store(allowance, 1));
+      assertNull(allowance.take(1));
     }
     assertNull(allowance.take(1));
 
     assertEquals(PutRefusal.TOO_MANY, allowance.take(1));
-    allowance.done(1, false);
+    allowance.give(1);
     assertNull(allowance.take(1));
   }
 
@@ -45,20 +36,8 @@ class UploadAllowanceTest {
 
     assertEquals(PutRefusal.SESSION_FULL, allowance.take(2));
     assertNull(allowance.take(1));
-    allowance.done(UploadAllowance.SESSION - 1, false);
+    allowance.give(UploadAllowance.SESSION - 1);
     assertNull(allowance.take(UploadAllowance.SESSION - 1));
-  }
-
-  @Test
-  void atMostItsBoundOfUploadsAreUnderWayAndAStoredOneGivesItsPlaceBack() {
-    var allowance = new UploadAllowance();
-    for (var i = 0; i < UploadAllowance.OPEN; i++) {
-      assertNull(allowance.take(1));
-    }
-
-    assertEquals(PutRefusal.BUSY, allowance.take(1));
-    allowance.done(1, true);
-    assertNull(allowance.take(1));
   }
 
   @Test
@@ -70,7 +49,7 @@ class UploadAllowanceTest {
     assertTrue(allowance.empty());
     assertNull(allowance.take(0));
     assertFalse(allowance.empty());
-    allowance.done(0, false);
+    allowance.give(0);
     assertTrue(allowance.empty());
   }
 
@@ -87,12 +66,10 @@ class UploadAllowanceTest {
     assertEquals(UploadAllowance.ITEM, UploadAllowance.limit(PutRefusal.TOO_LARGE));
     assertEquals(UploadAllowance.FILES, UploadAllowance.limit(PutRefusal.TOO_MANY));
     assertEquals(UploadAllowance.SESSION, UploadAllowance.limit(PutRefusal.SESSION_FULL));
-    assertEquals(UploadAllowance.OPEN, UploadAllowance.limit(PutRefusal.BUSY));
     for (var kind : PutRefusal.values()) {
       if (kind != PutRefusal.TOO_LARGE
           && kind != PutRefusal.TOO_MANY
-          && kind != PutRefusal.SESSION_FULL
-          && kind != PutRefusal.BUSY) {
+          && kind != PutRefusal.SESSION_FULL) {
         assertEquals(0, UploadAllowance.limit(kind), kind.wire());
       }
     }

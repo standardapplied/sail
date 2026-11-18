@@ -15,13 +15,11 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -40,8 +38,9 @@ import java.util.function.Supplier;
  * a session's uploads leave its container through {@link UploadCleanup}. The connection's own
  * thread never waits on a container: an upload's chunks are handed to a thread of its own, at most
  * {@link #QUEUE} at a time, and each is written within {@link #WRITE_DEADLINE} or the upload is
- * given up; an upload that waits for the client past {@link #IDLE} is given up too, and a session's
- * end ends every copy of its uploads at once. Nothing of a file's name or content reaches a log.
+ * given up, its end too; an upload that waits for the client past {@link #IDLE} is given up, and a
+ * session's end ends every copy of its uploads at once. Nothing of a file's name or content reaches
+ * a log.
  */
 final class PtyUploads {
 
@@ -94,29 +93,16 @@ final class PtyUploads {
     }
   }
 
-  /** What became of an upload, and whose it was. */
-  private record Answered(String person, PtyMessage answer) {}
-
   /**
-   * One session's uploads: its allowance, whether it ended, its uploads under way, those whose end
-   * came and whose commit has not answered, and the answers of its recent uploads by id, for a
-   * client that lost its connection after it sent an end; all of these under the record's monitor,
-   * held only to read or change them. Its lock, held across a commit and across the removal of the
-   * session's directory, puts the two in order.
+   * One session's uploads: its allowance, whether it ended, and its uploads under way, the last two
+   * under the record's monitor, held only to read or change them. Its lock, held across a commit
+   * and across the removal of the session's directory, puts the two in order.
    */
   private static final class Session {
     final ReentrantLock lock = new ReentrantLock();
     final UploadAllowance allowance = new UploadAllowance();
     boolean ended;
     final Set<Upload> open = new HashSet<>();
-    final Map<Integer, Upload> ending = new LinkedHashMap<>();
-    final Map<Integer, Answered> outcomes =
-        new LinkedHashMap<>() {
-          @Override
-          protected boolean removeEldestEntry(Map.Entry<Integer, Answered> eldest) {
-            return size() > 64;
-          }
-        };
   }
 
   private static final byte[] END = new byte[0];
@@ -164,7 +150,6 @@ final class PtyUploads {
     private final int id;
     private final PtySession session;
     private final long subscriberId;
-    private final String person;
     private final Session record;
     private final String container;
     private final String name;
@@ -172,7 +157,6 @@ final class PtyUploads {
     private final MessageDigest sha = sha256();
     private final ArrayBlockingQueue<byte[]> chunks = new ArrayBlockingQueue<>(QUEUE);
     private final AtomicBoolean settled = new AtomicBoolean();
-    private final CountDownLatch answered = new CountDownLatch(1);
     private long queued;
     private long written;
     private volatile Process process;
@@ -187,13 +171,11 @@ final class PtyUploads {
         PtyMessage.PutBegin begin,
         PtySession session,
         long subscriberId,
-        String person,
         Session record,
         String container) {
       this.id = begin.id();
       this.session = session;
       this.subscriberId = subscriberId;
-      this.person = person;
       this.record = record;
       this.container = container;
       this.name = named(begin.name());
@@ -211,17 +193,16 @@ final class PtyUploads {
   }
 
   /**
-   * Begins upload {@code begin} into {@code session} for the connection {@code subscriberId}, whose
-   * person is {@code person}: the upload, acknowledged on its own thread once the container holds
-   * its temporary, or null with its refusal sent to {@code reply}. Its file and bytes are taken
-   * from the session's allowance at once, so two connections to one session cannot both pass the
-   * last of it; so is its place among the uploads open in the session and on the host.
+   * Begins upload {@code begin} into {@code session} for the connection {@code subscriberId}: the
+   * upload, acknowledged on its own thread once the container holds its temporary, or null with its
+   * refusal sent to {@code reply}. Its file and bytes are taken from the session's allowance at
+   * once, so two connections to one session cannot both pass the last of it; so is its place among
+   * the uploads under way on the host.
    */
   Upload begin(
       PtyMessage.PutBegin begin,
       PtySession session,
       long subscriberId,
-      String person,
       Consumer<PtyMessage> reply) {
     var target = target(session.origin());
     var refusal = refusal(session, subscriberId, target, begin.size());
@@ -230,7 +211,7 @@ final class PtyUploads {
       return null;
     }
     var record = sessions.computeIfAbsent(session.origin().instanceId(), id -> new Session());
-    var upload = new Upload(begin, session, subscriberId, person, record, target.container());
+    var upload = new Upload(begin, session, subscriberId, record, target.container());
     refusal = take(record, upload);
     if (refusal != null) {
       reply.accept(new PtyMessage.PutRefused(begin.id(), refusal, UploadAllowance.limit(refusal)));
@@ -240,7 +221,7 @@ final class PtyUploads {
       synchronized (record) {
         record.open.remove(upload);
       }
-      record.allowance.done(upload.size, false);
+      record.allowance.give(upload.size);
       reply.accept(new PtyMessage.PutRefused(begin.id(), PutRefusal.BUSY, OPEN_ON_HOST));
       return null;
     }
@@ -296,7 +277,9 @@ final class PtyUploads {
     synchronized (upload.record) {
       upload.record.open.remove(upload);
     }
-    upload.record.allowance.done(upload.size, stored);
+    if (!stored) {
+      upload.record.allowance.give(upload.size);
+    }
     openOnHost.release();
   }
 
@@ -377,8 +360,19 @@ final class PtyUploads {
     upload.over = true;
     settle(upload, false);
     if (!upload.cancelled) {
-      reply.accept(new PtyMessage.PutRefused(upload.id, kind, UploadAllowance.limit(kind)));
+      reply.accept(refused(upload, kind));
     }
+  }
+
+  /**
+   * {@code upload} refused as {@code kind}, with the bound it met: for a full disk, what is free.
+   */
+  private static PtyMessage.PutRefused refused(Upload upload, PutRefusal kind) {
+    var limit =
+        kind == PutRefusal.NO_SPACE && upload.copy != null
+            ? upload.copy.free()
+            : UploadAllowance.limit(kind);
+    return new PtyMessage.PutRefused(upload.id, kind, limit);
   }
 
   /** Gives {@code upload} up when the client sends nothing more within {@link #IDLE}. */
@@ -390,10 +384,12 @@ final class PtyUploads {
   /**
    * Writes {@code upload}'s chunks to its copy as the connection hands them over, each within
    * {@link #WRITE_DEADLINE}, acknowledging each once written, then commits it at its end. A copy
-   * that stops, is stopped, or is given up ends the upload: its allowance handed back, its
-   * temporary removed, and, unless it was cancelled, its refusal answered.
+   * that stops, is stopped, is given up, or fails in any way ends the upload: its temporary removed
+   * and, unless it was cancelled, its refusal answered. Whatever happens, its share of the
+   * session's allowance and its place on the host are given back unless it was stored.
    */
   private void write(Upload upload, Consumer<PtyMessage> reply) {
+    var failed = false;
     try {
       while (true) {
         var next = upload.chunks.take();
@@ -413,18 +409,30 @@ final class PtyUploads {
         upload.written += next.length;
         reply.accept(new PtyMessage.PutAck(upload.id, upload.written));
       }
-    } catch (IOException | InterruptedException e) {
-      var refusal =
-          ended(upload.record)
-              ? PutRefusal.SESSION_ENDED
-              : upload.stalled ? PutRefusal.STALLED : upload.copy.refusal();
-      upload.over = true;
+    } catch (IOException | InterruptedException | RuntimeException e) {
+      failed = true;
+      giveUp(upload, reply);
+    } finally {
       settle(upload, false);
-      upload.copy.close();
-      upload.copy.abort();
-      if (!upload.cancelled) {
-        reply.accept(new PtyMessage.PutRefused(upload.id, refusal, UploadAllowance.limit(refusal)));
+      if (failed) {
+        upload.copy.abort();
       }
+    }
+  }
+
+  /**
+   * Ends {@code upload} that failed: its copy ended and its refusal answered; its writer then gives
+   * its share back and removes its temporary.
+   */
+  private void giveUp(Upload upload, Consumer<PtyMessage> reply) {
+    upload.over = true;
+    upload.copy.close();
+    var refusal =
+        ended(upload.record)
+            ? PutRefusal.SESSION_ENDED
+            : upload.stalled ? PutRefusal.STALLED : upload.copy.refusal();
+    if (!upload.cancelled) {
+      reply.accept(refused(upload, refusal));
     }
   }
 
@@ -472,22 +480,24 @@ final class PtyUploads {
     if (!upload.ready
         || chunk.offset() != upload.queued
         || bytes.length > UploadAllowance.CHUNK
-        || upload.queued + bytes.length > upload.size
-        || !upload.chunks.offer(bytes)) {
+        || upload.queued + bytes.length > upload.size) {
+      fail(upload, PutRefusal.FAILED, reply);
+      return false;
+    }
+    waitForClient(upload);
+    if (!upload.chunks.offer(bytes)) {
       fail(upload, PutRefusal.FAILED, reply);
       return false;
     }
     upload.sha.update(bytes);
     upload.queued += bytes.length;
-    waitForClient(upload);
     return true;
   }
 
   /**
    * Ends {@code upload}: from a connection that still writes, when what arrived is all that was
    * declared and its SHA-256 the client's, its writer commits it once every chunk is written, and
-   * answers {@code reply}; else it is refused and its temporary removed. Until it is answered, its
-   * person may cancel it ({@link #cancel}) or ask after it from a new connection ({@link #query}).
+   * answers {@code reply}; else it is refused and its temporary removed.
    */
   void end(Upload upload, PtyMessage.PutEnd end, Consumer<PtyMessage> reply) {
     if (upload == null || upload.id != end.id() || upload.over) {
@@ -499,31 +509,32 @@ final class PtyUploads {
     }
     if (!upload.ready
         || upload.queued != upload.size
-        || !MessageDigest.isEqual(upload.sha.digest(), end.sha256())) {
+        || !MessageDigest.isEqual(upload.sha.digest(), end.sha256())
+        || !upload.chunks.offer(END)) {
       fail(upload, PutRefusal.FAILED, reply);
       return;
     }
-    synchronized (upload.record) {
-      upload.record.ending.put(upload.id, upload);
-    }
     upload.idle.run();
-    if (!upload.chunks.offer(END)) {
-      synchronized (upload.record) {
-        upload.record.ending.remove(upload.id);
-      }
-      fail(upload, PutRefusal.FAILED, reply);
-    }
   }
 
   /**
-   * Commits {@code upload}'s copy under its session's lock, which {@link #ended} has the session's
-   * removal take, so the two are in order: a commit the session's end came before, or came during,
-   * keeps nothing and says so, and a removal after it removes the file. A cancel that came before
-   * the commit began keeps nothing; one that came later is too late, and the answer says the file
-   * is stored.
+   * Commits {@code upload}'s copy: its input closed and the copy's exit awaited within {@link
+   * #WRITE_DEADLINE}, as a write is, then its name given under its session's lock, which {@link
+   * #ended} has the session's removal take, so the two are in order: a commit the session's end
+   * came before, or came during, keeps nothing and says so, and a removal after it removes the
+   * file.
    */
-  private void commit(Upload upload, Consumer<PtyMessage> reply) {
-    var copied = upload.copy.close();
+  private void commit(Upload upload, Consumer<PtyMessage> reply) throws IOException {
+    var deadline = timer.after(WRITE_DEADLINE, () -> stop(upload, true));
+    int copied;
+    try {
+      copied = upload.copy.close();
+    } finally {
+      deadline.run();
+    }
+    if (upload.stalled) {
+      throw new IOException("stalled");
+    }
     PtyMessage answer;
     upload.record.lock.lock();
     try {
@@ -533,15 +544,10 @@ final class PtyUploads {
         upload.copy.abort();
       }
       settle(upload, stored);
-      synchronized (upload.record) {
-        upload.record.ending.remove(upload.id);
-        upload.record.outcomes.put(upload.id, new Answered(upload.person, answer));
-      }
     } finally {
       upload.record.lock.unlock();
     }
     upload.over = true;
-    upload.answered.countDown();
     reply.accept(answer);
   }
 
@@ -550,12 +556,8 @@ final class PtyUploads {
     if (ended(upload.record)) {
       return new PtyMessage.PutRefused(upload.id, PutRefusal.SESSION_ENDED, 0);
     }
-    if (upload.cancelled) {
-      return new PtyMessage.PutRefused(upload.id, PutRefusal.CANCELLED, 0);
-    }
     if (copied != 0) {
-      var refusal = UploadCopy.refusalOf(copied);
-      return new PtyMessage.PutRefused(upload.id, refusal, UploadAllowance.limit(refusal));
+      return refused(upload, UploadCopy.refusalOf(copied));
     }
     var status = upload.copy.commit();
     if (ended(upload.record)) {
@@ -564,75 +566,6 @@ final class PtyUploads {
     return status == 0
         ? new PtyMessage.PutStored(upload.id, upload.copy.path())
         : new PtyMessage.PutRefused(upload.id, PutRefusal.FAILED, 0);
-  }
-
-  /**
-   * Cancels upload {@code id} of {@code session}, asked by the connection {@code subscriberId} of
-   * {@code person}, sent before or after its end: before, {@code upload} is discarded; after, a
-   * commit not yet made keeps nothing and answers {@link PutRefusal#CANCELLED}, and a commit made
-   * stands. Only the upload's own person, holding the write token, cancels it.
-   */
-  void cancel(PtySession session, long subscriberId, String person, int id, Upload upload) {
-    if (upload != null && upload.id == id) {
-      discard(upload);
-      return;
-    }
-    var record = sessions.get(session.origin().instanceId());
-    if (record == null || !session.isWriter(subscriberId)) {
-      return;
-    }
-    synchronized (record) {
-      var ending = record.ending.get(id);
-      if (ending != null && ending.person.equals(person)) {
-        ending.cancelled = true;
-      }
-    }
-  }
-
-  /**
-   * Answers what became of upload {@code id} of {@code session}, for a client whose connection
-   * dropped after it sent the end: its outcome once its commit is done, or {@link
-   * PutRefusal#NOT_KNOWN} when this host has no record of it, or the asking connection {@code
-   * subscriberId} is not the writer's, or {@code person} is not the upload's.
-   */
-  void query(
-      PtySession session, long subscriberId, String person, int id, Consumer<PtyMessage> reply) {
-    var unknown = new PtyMessage.PutRefused(id, PutRefusal.NOT_KNOWN, 0);
-    var record = sessions.get(session.origin().instanceId());
-    if (record == null || !session.isWriter(subscriberId)) {
-      reply.accept(unknown);
-      return;
-    }
-    Answered known;
-    Upload pending;
-    synchronized (record) {
-      known = record.outcomes.get(id);
-      pending = record.ending.get(id);
-    }
-    if (known != null) {
-      reply.accept(known.person().equals(person) ? known.answer() : unknown);
-      return;
-    }
-    if (pending == null || !pending.person.equals(person)) {
-      reply.accept(unknown);
-      return;
-    }
-    Thread.ofVirtual()
-        .name("pty-upload-query")
-        .start(
-            () -> {
-              try {
-                pending.answered.await();
-              } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
-              }
-              Answered done;
-              synchronized (record) {
-                done = record.outcomes.get(id);
-              }
-              reply.accept(done != null ? done.answer() : unknown);
-            });
   }
 
   /**
@@ -664,10 +597,9 @@ final class PtyUploads {
 
   /**
    * The session of {@code origin} ended: no upload begins in it from now on, every copy of its
-   * uploads not yet at their end is ended at once and the upload refused {@link
-   * PutRefusal#SESSION_ENDED}, and its directory is removed after any commit in flight, whether
-   * this host or the one before it stored the files. A container not running then is swept at its
-   * next session ({@link #sweep}).
+   * uploads under way is ended at once and the upload refused {@link PutRefusal#SESSION_ENDED}, and
+   * its directory is removed after any commit in flight, whether this host or the one before it
+   * stored the files. A container not running then is swept at its next session ({@link #sweep}).
    */
   void ended(PtySession.Origin origin) {
     var record = sessions.remove(origin.instanceId());
@@ -677,7 +609,6 @@ final class PtyUploads {
       synchronized (record) {
         record.ended = true;
         underWay = new ArrayList<>(record.open);
-        underWay.removeAll(record.ending.values());
       }
       underWay.forEach(PtyUploads::end);
     }

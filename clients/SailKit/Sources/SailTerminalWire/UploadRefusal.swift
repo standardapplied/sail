@@ -14,20 +14,25 @@ public struct UploadRefusal: Error, Equatable, Sendable {
         case sessionEnded = "session_ended"
         case noSpace = "no_space"
         case failed
-        case cancelled
-        /// The host has no record of the upload asked after: it cannot say whether it stored it.
-        case notKnown = "not_known"
-        /// The workspace did not take a chunk within the host's deadline: its disk stalled.
+        /// The workspace did not take a chunk, or the file's end, within the host's deadline: its
+        /// disk stalled.
         case stalled
-        /// As many uploads as the session or the host keeps under way at once already are.
+        /// As many uploads as the host keeps under way at once already are.
         case busy
+        /// Said by this client alone: the connection dropped after the upload's end was sent, so
+        /// whether the host stored it is not known.
+        case notKnown = "not_known"
         /// Said by this client alone: the connection dropped before the upload's end was sent, so
         /// the host, which stores a file only once its end arrives, kept nothing.
         case connectionLost = "connection_lost"
+
+        /// The kinds this client says on its own, which no host sends.
+        public static let clientsOwn: [Kind] = [.notKnown, .connectionLost]
     }
 
     public var kind: Open<Kind>
-    /// The bound the upload met, in files or bytes as `kind` says; zero when it met none.
+    /// The bound the upload met, in files or bytes as `kind` says, or for ``Kind/noSpace`` the bytes
+    /// free on the workspace's disk; zero when it met none.
     public var limit: Int64
     /// The file's name as the person knows it.
     public var file: String
@@ -58,15 +63,13 @@ public struct UploadRefusal: Error, Equatable, Sendable {
         case .known(.sessionEnded):
             "The session ended before \(file) was uploaded; nothing was saved."
         case .known(.noSpace):
-            "The workspace on \(box) is out of disk space, so \(file) was not saved; free some space in it, then paste the file again."
-        case .known(.cancelled):
-            "\(file) was cancelled; nothing was saved."
+            "The workspace on \(box) has \(Self.megabytes(limit, roundingUp: false)) free, too little for \(file) (\(Self.megabytes(size, roundingUp: true))), so it was not saved; free some space in it, then paste the file again."
         case .known(.notKnown):
             "The connection to \(box) dropped after \(file) was sent, and whether it was saved is not known; paste it again if it is not in your workspace."
         case .known(.stalled):
             "The workspace on \(box) stopped taking \(file), so it was not saved; paste it again."
         case .known(.busy):
-            "\(limit) files are already uploading, the most at once; paste \(file) again when one has finished."
+            "\(limit) files are already uploading to \(box), the most it takes at once; paste \(file) again when one has finished."
         case .known(.connectionLost):
             "The connection to \(box) dropped while \(file) was uploading, before it was sent whole, so nothing was saved; paste it again."
         case .known(.failed), .unknown:

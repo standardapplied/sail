@@ -399,12 +399,12 @@ public final class TerminalSession: Sendable {
     /// waits its turn. Refused with an ``UploadRefusal`` before a byte is sent when this machine's
     /// own host serves the session (it has no workspace), the file is larger than
     /// ``UploadPacing/largest``, or this client is known to be watching, not writing; refused by the
-    /// host for its own reasons. A connection that drops before the end is sent loses the upload
-    /// (``UploadRefusal/Kind/connectionLost``); after it, the next connection asks the host what
-    /// became of it, and its answer is the outcome. Cancelling the task before the end is sent
-    /// cancels the upload, and the host keeps nothing; after it, the host keeps nothing unless it
-    /// already stored the file, and then its path is returned. A read of `source` that fails throws
-    /// its own error. `progress` hears the bytes the host holds as they grow.
+    /// host for its own reasons. A connection that drops loses the upload: before the end is sent,
+    /// nothing was kept (``UploadRefusal/Kind/connectionLost``); after it, whether the host stored
+    /// it is not known (``UploadRefusal/Kind/notKnown``). Cancelling the task before the end is sent
+    /// cancels the upload, and the host keeps nothing; after it, the host's answer stands. A read of
+    /// `source` that fails throws its own error. `progress` hears the bytes the host holds as they
+    /// grow.
     public func upload(
         name: String, source: UploadSource, progress: @escaping @Sendable (Int64) -> Void = { _ in }
     ) async throws -> String {
@@ -426,7 +426,6 @@ public final class TerminalSession: Sendable {
         } catch is TerminalError {
             connection.close()
             flight.dropped(connection)
-            if let now = core.withLock({ $0.connection }), now !== connection { flight.attached(now) }
             outcome = await flight.outcome()
         } catch {
             try? flight.send(.putCancel(id: flight.id))
@@ -436,7 +435,6 @@ public final class TerminalSession: Sendable {
         case let .stored(path):
             progress(source.size)
             return path
-        case .refused(.known(.cancelled), _): throw CancellationError()
         case let .refused(kind, limit): throw UploadRefusal(kind: kind, limit: limit, file: name, size: source.size)
         case .ended: throw refusal(.sessionEnded, 0)
         case .cancelled:
@@ -664,7 +662,6 @@ public final class TerminalSession: Sendable {
             return standDown
         }
         alarm.clear()
-        uploads.attached(connection)
         setPhase(.attached)
         let attached = clock.now
         var outcome = read(connection, since: attached)

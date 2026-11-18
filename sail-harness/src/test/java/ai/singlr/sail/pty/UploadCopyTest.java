@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.pty.PtyMessage.PutRefusal;
+import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -178,6 +179,57 @@ class UploadCopyTest {
     assertEquals(PutRefusal.FAILED, copy.refusal());
   }
 
+  /**
+   * Round 3 Minor 1: an abort ends what holds its own temporary open and nothing else, not a
+   * process holding another upload's temporary whose name begins with this one's.
+   */
+  @Test
+  void anAbortEndsWhatHoldsItsOwnTemporaryAndNoOtherFile() throws Exception {
+    var copy = copies.open("acme", ID, "a", 1, process -> {});
+    var sibling = holding(session().resolve(".1-a.part.part"));
+    try {
+      assertEquals(0, copy.abort());
+
+      assertEquals(List.of(sibling.pid()), ContainerDirectory.holders(session()));
+      assertFalse(Files.exists(session().resolve(".1-a.part")));
+    } finally {
+      sibling.destroyForcibly().waitFor();
+    }
+  }
+
+  /**
+   * Round 3 Minor 1: a process that holds the temporary again as often as it is ended is left after
+   * the abort's tries, and the abort says so by its status.
+   */
+  @Test
+  void anAbortGivesUpOnAHolderItCannotEndAndSaysSo() throws Exception {
+    var copy = copies.open("acme", ID, "a", 1, process -> {});
+    var part = session().resolve(".1-a.part");
+    var respawner =
+        new ProcessBuilder(
+                "sh",
+                "-c",
+                "while :; do sleep 600 >> \"$1\" & wait; done",
+                "respawn",
+                part.toString())
+            .start();
+    try {
+      assertEquals(UploadCopy.HELD, copy.abort());
+    } finally {
+      respawner.destroyForcibly().waitFor();
+      for (var pid : ContainerDirectory.holders(session())) {
+        ProcessHandle.of(pid).ifPresent(ProcessHandle::destroyForcibly);
+      }
+    }
+  }
+
+  /** A process that holds {@code file} open for writing, as a copy holds its temporary. */
+  private static Process holding(Path file) throws IOException {
+    return new ProcessBuilder("sleep", "600")
+        .redirectOutput(ProcessBuilder.Redirect.appendTo(file.toFile()))
+        .start();
+  }
+
   @Test
   void anAbortedCopyLeavesNothing() throws Exception {
     var copy = copies.open("acme", ID, "a", 3, process -> {});
@@ -214,6 +266,8 @@ class UploadCopyTest {
         copies.open("acme", "01a1ea00-0000-7000-8000-000000000003", "c", 1L << 60, process -> {});
     assertFalse(noRoom.opened());
     assertEquals(PutRefusal.NO_SPACE, noRoom.refusal());
+    var free = noRoom.free();
+    assertTrue(free > 0 && free < 1L << 60, "the refusal says what is free: " + free);
     assertFalse(Files.exists(c.root().resolve("01a1ea00-0000-7000-8000-000000000003")));
   }
 

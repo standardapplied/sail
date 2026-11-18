@@ -37,12 +37,8 @@ public enum Frame: Equatable, Sendable {
     case putChunk(id: Int32, offset: Int64, bytes: [UInt8])
     /// Upload `id` is all sent; `sha256` is the digest of its bytes, which the host checks.
     case putEnd(id: Int32, sha256: [UInt8])
-    /// Upload `id` is abandoned: the host keeps nothing of it, unless, its end sent, the host has
-    /// already answered that it is stored.
+    /// Upload `id`, its end not yet sent, is abandoned: the host keeps nothing of it.
     case putCancel(id: Int32)
-    /// What became of upload `id` of the attached session, asked on a new connection when the one
-    /// that sent its end dropped: answered as the upload was, or `not_known`.
-    case putQuery(id: Int32)
     /// The host holds the first `received` bytes of upload `id`: the client's window moves on.
     case putAck(id: Int32, received: Int64)
     /// Upload `id` is stored at `path`, in the session's own workspace.

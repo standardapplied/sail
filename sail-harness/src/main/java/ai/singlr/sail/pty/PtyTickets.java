@@ -83,7 +83,6 @@ final class PtyTickets {
             case PtyMessage.PutChunk m -> true;
             case PtyMessage.PutEnd m -> true;
             case PtyMessage.PutCancel m -> true;
-            case PtyMessage.PutQuery m -> true;
             default -> false;
           };
       return covered

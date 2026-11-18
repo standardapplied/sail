@@ -47,8 +47,14 @@ final class UploadCopy {
   static final int TOO_MANY = 11;
   static final int FULL = 12;
 
-  /** The status a script exits with when the workspace's disk has no room for the file. */
+  /**
+   * The status a script exits with when the workspace's disk has no room for the file, after it
+   * prints {@code free N}, the bytes free on it.
+   */
   static final int NO_SPACE = 28;
+
+  /** The status {@link #ABORT} exits with when a process still holds the temporary after it. */
+  static final int HELD = 3;
 
   /**
    * The one root rule, a shell function the scripts that make, write or remove under the uploads
@@ -81,7 +87,7 @@ final class UploadCopy {
       disk=$(df -Pk "$at") || exit 1
       free=$(printf "%s\\n" "$disk" | awk "NR == 2 { print \\$4 * 1024 }")
       case $free in ""|*[!0-9]*) exit 1 ;; esac
-      [ "$free" -ge "$size" ] || exit 28
+      [ "$free" -ge "$size" ] || { echo "free $free"; exit 28; }
       [ -d "$root" ] || mkdir -m 0755 "$root" || exit 10
       ours "$root" "$rootuid" || exit 10
       chmod 0755 "$root"
@@ -107,7 +113,7 @@ final class UploadCopy {
       echo "$n"
       if ! cat >&3; then
         free=$(df -Pk . | awk "NR == 2 { print \\$4 * 1024 }")
-        [ "$free" -lt 65536 ] && exit 28
+        [ "$free" -lt 65536 ] && { echo "free $free"; exit 28; }
         exit 1
       fi
       ' sail-put "$dir" "$name" "$size" "$files" "$bytes"
@@ -130,17 +136,28 @@ final class UploadCopy {
       """;
 
   /**
-   * Run as the dev user: ends every process that still holds the temporary of number {@code $2} and
-   * name {@code $3} in {@code $1}, then removes it. Ending the host's {@code incus exec} does not
-   * end the copy inside the workspace, and a copy stopped there would hold the file for ever; the
-   * name needs no quoting in a pattern, being the host's.
+   * Run as the dev user: ends every process that holds open the temporary of number {@code $2} and
+   * name {@code $3} in the directory {@code $1}, then removes it. Ending the host's {@code incus
+   * exec} does not end the copy inside the workspace, and a copy stopped there would hold the file
+   * for ever. A process is matched only when one of its descriptors is this temporary itself, by
+   * its whole path, or that path once removed ({@code (deleted)}): never a file whose name merely
+   * begins with it, such as another upload's temporary. Only the dev user's processes can open it,
+   * in the dev user's own {@code 0700} directory, and the file is thrown away, so what holds it is
+   * the copy or a process of the person reading a file that is going. The directory may be gone
+   * already, the session's removal having come first: the path is matched all the same. Five tries,
+   * a fifth of a second apart; a process still holding it then (one in an uninterruptible wait on a
+   * stalled disk) is left, and the script exits {@link #HELD}.
    */
   static final String ABORT =
       """
-      cd "$1" || exit 1
-      part="$(pwd -P)/.$2-$3.part"
-      while held=$(find /proc/[0-9]*/fd -lname "$part*" -printf "%h\n" 2>/dev/null | cut -d/ -f3); [ -n "$held" ]; do
+      dir=$(cd "$1" 2>/dev/null && pwd -P) || dir=$1
+      part="$dir/.$2-$3.part"
+      try=0
+      while held=$(find /proc/[0-9]*/fd \\( -lname "$part" -o -lname "$part (deleted)" \\) -printf "%h\\n" 2>/dev/null | cut -d/ -f3); [ -n "$held" ]; do
+        [ "$try" -lt 5 ] || { rm -f "$part"; exit 3; }
         kill -KILL $held 2>/dev/null
+        try=$((try + 1))
+        sleep 0.2
       done
       rm -f "$part"
       """;
@@ -244,12 +261,11 @@ final class UploadCopy {
         CompletableFuture.runAsync(
             process::destroyForcibly,
             CompletableFuture.delayedExecutor(place.patience().toMillis(), TimeUnit.MILLISECONDS));
-    var line =
-        new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))
-            .readLine();
+    var output =
+        new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+    var line = output.readLine();
     unanswered.cancel(false);
-    var number = line != null && line.matches("[0-9]{1,9}") ? Integer.parseInt(line) : 0;
-    return new Copy(container, place.root() + "/" + instanceId, name, size, process, number);
+    return new Copy(container, place.root() + "/" + instanceId, name, size, process, output, line);
   }
 
   /** One copy into a container: the process whose input takes its bytes, and its number. */
@@ -259,16 +275,26 @@ final class UploadCopy {
     private final String name;
     private final long size;
     private final Process process;
+    private final BufferedReader output;
+    private final String first;
     private final int number;
 
     private Copy(
-        String container, String directory, String name, long size, Process process, int number) {
+        String container,
+        String directory,
+        String name,
+        long size,
+        Process process,
+        BufferedReader output,
+        String first) {
       this.container = container;
       this.directory = directory;
       this.name = name;
       this.size = size;
       this.process = process;
-      this.number = number;
+      this.output = output;
+      this.first = first;
+      this.number = first != null && first.matches("[0-9]{1,9}") ? Integer.parseInt(first) : 0;
     }
 
     /**
@@ -295,6 +321,24 @@ final class UploadCopy {
       return refusalOf(finish(process));
     }
 
+    /**
+     * The bytes free on the workspace's disk as the script said when it refused {@link
+     * PutRefusal#NO_SPACE}, once it has ended; 0 when it said none.
+     */
+    long free() {
+      var said = first;
+      if (opened()) {
+        try {
+          said = output.readLine();
+        } catch (IOException e) {
+          said = null;
+        }
+      }
+      return said != null && said.matches("free [0-9]{1,18}")
+          ? Long.parseLong(said.substring(5))
+          : 0;
+    }
+
     /** Ends the copy: its input closed, its script's status once it exits. */
     int close() {
       try {
@@ -317,16 +361,30 @@ final class UploadCopy {
           Long.toString(size));
     }
 
-    /** Removes the temporary ({@link #ABORT}), when the container made one. */
-    void abort() {
-      if (opened()) {
-        run(container, place.asDev(), ABORT, directory, Integer.toString(number), name);
+    /**
+     * Ends what holds the temporary and removes it ({@link #ABORT}), when the container made one:
+     * the script's status, {@link #HELD} logged.
+     */
+    int abort() {
+      if (!opened()) {
+        return 0;
       }
+      var status = run(container, place.asDev(), ABORT, directory, Integer.toString(number), name);
+      if (status == HELD) {
+        PtySessionHost.log(
+            "upload-abort-held",
+            "-",
+            directory.substring(directory.lastIndexOf('/') + 1),
+            "a process still holds the temporary after 5 tries");
+      }
+      return status;
     }
   }
 
   /**
-   * Runs {@code script} in {@code container} as {@code as} gives, its exit status; 1 if it failed.
+   * Runs {@code script} in {@code container} as {@code as} gives, its exit status; 1 if it failed
+   * or did not end within the place's patience. Its output is not read: these scripts print
+   * nothing, and a script that never ends must not hold its caller past the patience.
    */
   int run(String container, Function<String, List<String>> as, String script, String... args) {
     var command = new ArrayList<>(as.apply(container));
@@ -335,7 +393,6 @@ final class UploadCopy {
     try {
       var process = processes.start(command);
       process.getOutputStream().close();
-      process.getInputStream().transferTo(OutputStream.nullOutputStream());
       return finish(process);
     } catch (IOException e) {
       return 1;

@@ -198,7 +198,6 @@ class PtyTicketsTest {
             new PtyMessage.PutChunk(1, 0, new byte[] {'a'}),
             new PtyMessage.PutEnd(1, new byte[32]),
             new PtyMessage.PutCancel(1),
-            new PtyMessage.PutQuery(1),
             new PtyMessage.Detach())) {
       assertNull(ATTACH_LOUNGE.refusal(driving, null, null));
     }

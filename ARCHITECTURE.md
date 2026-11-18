@@ -3947,9 +3947,9 @@ door, issues a ticket, presents it and hears one echo (`tcp-selftest: ok`), so t
 runs the door and its keepalive options.
 
 **Files pasted into a session (`PtyUploads`).** A client uploads a file on the terminal connection
-it already holds, in frames 12-16 (`PutBegin`, `PutChunk`, `PutEnd`, `PutCancel`, `PutQuery`)
-answered by 35-37 (`PutAck`, `PutStored`, `PutRefused`, a kind and the bound it met, never a
-sentence: SailKit's `UploadRefusal.sentence` words each kind once). Nothing of a file is kept on
+it already holds, in frames 12-15 (`PutBegin`, `PutChunk`, `PutEnd`, `PutCancel`) answered by
+35-37 (`PutAck`, `PutStored`, `PutRefused`, a kind and the bound it met, or for `no_space` the
+bytes free, never a sentence: SailKit's `UploadRefusal.sentence` words each kind once). Nothing of a file is kept on
 the host: its bytes stream from the connection into the workspace. Four classes, one job each:
 `PtyUploads` answers the frames, names targets and files; `UploadAllowance` holds the bounds and a
 session's tally; `UploadCopy` is the shell that puts one file's bytes into a container, whole or not
@@ -3963,7 +3963,7 @@ Incus.
   (`no_container`), and one in a project's container shares it with every member's sessions
   (`shared_container`), so nothing is stored there. The bytes never leave the connection to that host; the control plane never sees one.
 - **U3. Only the writer,** asked of the session (`PtySession.isWriter`) at `PutBegin`, at every chunk
-  and at `PutEnd`; a ticket admits the five client frames as it admits input.
+  and at `PutEnd`; a ticket admits the four client frames as it admits input.
 - **U4. The host names every path:** `/var/lib/sail-paste/<instanceId>/<n>-<name>`, the name reduced
   to `[A-Za-z0-9._-]`, at most 96 bytes, `file` for nothing, `.` or `..` (`PtyUploads.named`, mirrored
   by SailKit's `UploadName`). `/var/lib/sail-paste` is root's (`0755`), made and checked by the host
@@ -3974,9 +3974,10 @@ Incus.
   upload begins and handed back by any upload that is not stored; the container checks the same
   bounds against what the directory holds, and its disk's free space, before it opens the file. A
   refusal is decided by a script's exit status, never by words: 11 `too_many`, 12 `session_full`,
-  28 `no_space` (no room before the file opens, or under 64 KiB free once a write failed); a
-  measurement that fails is `failed`. At most 4 uploads are under way in a session
-  (`UploadAllowance.OPEN`) and 16 on the host (`PtyUploads.OPEN_ON_HOST`), else `busy`.
+  28 `no_space` (no room before the file opens, or under 64 KiB free once a write failed, the
+  script printing what is free); a measurement that fails is `failed`. At most 16 uploads are
+  under way on the host (`PtyUploads.OPEN_ON_HOST`), else `busy`, which takes nothing of the
+  session's allowance.
 - **U6. Whole or nothing.** One `incus exec` per upload (`UploadCopy.OPEN`) runs as root to make the
   directories, then as the dev user (`setpriv`) creates `.<n>-<name>.part` with `O_EXCL` (`set -C`: a
   link at the name to a regular file, or to nothing, is refused; dash writes through one to a device
@@ -3986,21 +3987,27 @@ Incus.
   thread never writes to a workspace: it hands a chunk to the upload's own thread through a queue of
   `PtyUploads.QUEUE` (4), and a client past it (the acknowledgement window is the backpressure) is
   refused `failed`. A chunk not taken within `WRITE_DEADLINE` (30 s) ends the copy and is
-  `stalled`; an upload whose client sends nothing for `IDLE` (2 min) is given up and its copy ended.
-  The deadlines run on an injected timer, so the tests that prove them use none of the clock. At `PutEnd`, from
+  `stalled`, and so is a copy that does not finish within it once its input is closed at the end;
+  an upload whose client sends nothing for `IDLE` (2 min) is given up and its copy ended. The
+  deadlines run on an injected timer, so the tests that prove them use none of the clock. Whatever
+  ends the writer, an unchecked exception included, gives the upload's share back. At `PutEnd`, from
   the writer, with every byte there and the bytes' SHA-256 the client's, `COMMIT` gives the
   temporary its name by a hard link (`ln -T`), which never overwrites nor links into a directory, once it is a regular file of the
   declared size. Anything else (a refusal, a cancel, a detach, a dropped connection, a failed copy)
-  removes the temporary (`ABORT`), first ending every process in the workspace that still holds
-  it: ending the host's `incus exec` does not end the copy inside, and a copy stopped there would
-  hold the file for ever. A cancel after `PutEnd` keeps nothing unless the file took its
-  name first, and the answer says which. A client whose connection dropped after `PutEnd` asks on its
-  next connection (`PutQuery`): the session's last 64 answers are kept by id, else `not_known`.
+  removes the temporary (`ABORT`), first ending every process in the workspace that holds it open:
+  ending the host's `incus exec` does not end the copy inside, and a copy stopped there would hold
+  the file for ever. `ABORT` matches a descriptor on the temporary's whole path, or that path
+  `(deleted)`, never a longer name such as another upload's temporary; it needs no `cd`, so the
+  session's removal coming first changes nothing; it tries five times, a fifth of a second apart,
+  and a holder left then (one stuck on a stalled disk) is logged (`upload-abort-held`). A cancel
+  after `PutEnd` changes nothing: the commit's answer stands. A connection that drops loses its
+  upload: the client says nothing was kept (`connection_lost`) before the end, and that whether it
+  was saved is not known (`not_known`) after it; nothing is asked of the host.
 - **U7. Typing first.** SailKit sends 32 KiB chunks, each frame written on its own, and no more than
   two unacknowledged, so a key waits behind at most 96 KiB
   (`UploadTests.aKeyTypedDuringAnUploadGoesOutAheadOfEveryChunkTheHostHasNotTaken`).
 - **U8. Gone with the session.** When a session ends no upload begins in it, every copy of its
-  uploads under way is ended at once (the commit in flight finishes), and its directory is
+  uploads under way is ended at once, and its directory is
   removed as root on a thread of its own (`UploadCleanup.REMOVE`), never under the host's lock: a commit and the
   removal take the session's lock in turn, so a file is stored before the removal or the upload is
   answered `session_ended`. The next session made in a container removes, under that container's

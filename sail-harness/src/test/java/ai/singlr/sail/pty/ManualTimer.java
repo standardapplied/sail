@@ -10,19 +10,20 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * A clock that never moves on its own: what is due runs when a test says the time has come ({@link
- * #fire}), so a deadline is tested without waiting for it.
+ * A clock that never moves on its own: it moves when a test says so ({@link #fire}), and what is
+ * due by then runs, so a deadline is tested without waiting for it.
  */
 final class ManualTimer implements PtyUploads.Timer {
 
-  private record Due(Duration delay, Runnable task, boolean[] cancelled) {}
+  private record Due(Duration delay, Duration at, Runnable task, boolean[] cancelled) {}
 
   private final List<Due> due = new ArrayList<>();
+  private Duration now = Duration.ZERO;
 
   @Override
   public synchronized Runnable after(Duration delay, Runnable task) {
     var cancelled = new boolean[1];
-    due.add(new Due(delay, task, cancelled));
+    due.add(new Due(delay, now.plus(delay), task, cancelled));
     notifyAll();
     return () -> {
       synchronized (this) {
@@ -31,24 +32,21 @@ final class ManualTimer implements PtyUploads.Timer {
     };
   }
 
-  /** Waits until a task {@code delay} long is due and not cancelled. */
+  /** Waits until a task {@code delay} long is set and not cancelled. */
   synchronized void awaitDue(Duration delay) throws InterruptedException {
-    while (pending(delay).isEmpty()) {
+    while (due.stream().noneMatch(d -> d.delay().equals(delay) && !d.cancelled()[0])) {
       wait();
     }
   }
 
-  /** Runs every task {@code delay} long that is due and not cancelled, as that time passes. */
-  void fire(Duration delay) {
-    List<Due> now;
+  /** Moves the clock on by {@code by}, and runs every task due by then and not cancelled. */
+  void fire(Duration by) {
+    List<Due> ripe;
     synchronized (this) {
-      now = pending(delay);
-      now.forEach(task -> task.cancelled()[0] = true);
+      now = now.plus(by);
+      ripe = due.stream().filter(d -> !d.cancelled()[0] && d.at().compareTo(now) <= 0).toList();
+      ripe.forEach(task -> task.cancelled()[0] = true);
     }
-    now.forEach(task -> task.task().run());
-  }
-
-  private List<Due> pending(Duration delay) {
-    return due.stream().filter(d -> d.delay().equals(delay) && !d.cancelled()[0]).toList();
+    ripe.forEach(task -> task.task().run());
   }
 }

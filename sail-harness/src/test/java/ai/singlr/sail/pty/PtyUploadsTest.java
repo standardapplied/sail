@@ -295,40 +295,38 @@ class PtyUploadsTest {
   }
 
   /**
-   * At most {@link UploadAllowance#OPEN} uploads are under way in a session at once, across its
-   * connections, and at most {@link PtyUploads#OPEN_ON_HOST} on the host, across its sessions; one
-   * past either is refused naming the bound, and a place is given back as an upload ends.
+   * At most {@link PtyUploads#OPEN_ON_HOST} uploads are under way on the host at once, across its
+   * sessions; one past it is refused naming the bound and takes nothing of its session's allowance
+   * (round 3 Minor 2, D02), and a place is given back as an upload ends.
    */
   @Test
-  void uploadsUnderWayAreBoundedInASessionAndOnTheHost() throws Exception {
+  void uploadsUnderWayAreBoundedOnTheHostAndARefusalTakesNothing() throws Exception {
     try (var ignored = startHost()) {
       var holders = new ArrayList<SocketChannel>();
       try {
-        var sessions = PtyUploads.OPEN_ON_HOST / UploadAllowance.OPEN;
-        for (var session = 0; session < sessions; session++) {
-          for (var i = 0; i < UploadAllowance.OPEN; i++) {
-            var holder = i == 0 ? writer("s" + session) : attached(connect(), "s" + session, true);
-            holders.add(holder);
-            PtyWire.write(holder, new PtyMessage.PutBegin(1, "part", 1));
-            assertEquals(new PtyMessage.PutAck(1, 0), answer(holder));
-          }
+        for (var i = 0; i < PtyUploads.OPEN_ON_HOST; i++) {
+          var holder = i == 0 ? writer("s0") : attached(connect(), "s0", true);
+          holders.add(holder);
+          PtyWire.write(holder, new PtyMessage.PutBegin(1, "part", 1));
+          assertEquals(new PtyMessage.PutAck(1, 0), answer(holder));
         }
-        var more = attached(connect(), "s0", true);
-        holders.add(more);
-        PtyWire.write(more, new PtyMessage.PutBegin(2, "one-more", 1));
-        assertEquals(
-            new PtyMessage.PutRefused(2, PutRefusal.BUSY, UploadAllowance.OPEN), answer(more));
         var elsewhere = writer("elsewhere");
         holders.add(elsewhere);
-        PtyWire.write(elsewhere, new PtyMessage.PutBegin(3, "one-more", 1));
-        assertEquals(
-            new PtyMessage.PutRefused(3, PutRefusal.BUSY, PtyUploads.OPEN_ON_HOST),
-            answer(elsewhere));
+        var refusals = (int) (UploadAllowance.SESSION / UploadAllowance.ITEM);
+        for (var id = 0; id < refusals; id++) {
+          PtyWire.write(elsewhere, new PtyMessage.PutBegin(id, "big", UploadAllowance.ITEM));
+          assertEquals(
+              new PtyMessage.PutRefused(id, PutRefusal.BUSY, PtyUploads.OPEN_ON_HOST),
+              answer(elsewhere));
+        }
 
         PtyWire.write(holders.getFirst(), new PtyMessage.PutCancel(1));
         c.awaitFinished(UploadCopy.ABORT);
-        PtyWire.write(elsewhere, new PtyMessage.PutBegin(4, "now", 1));
-        assertEquals(new PtyMessage.PutAck(4, 0), answer(elsewhere));
+        PtyWire.write(elsewhere, new PtyMessage.PutBegin(99, "big", UploadAllowance.ITEM));
+        assertEquals(
+            new PtyMessage.PutAck(99, 0),
+            answer(elsewhere),
+            "the refusals took none of the session's bytes");
       } finally {
         for (var holder : holders) {
           holder.close();
@@ -366,9 +364,9 @@ class PtyUploadsTest {
           ContainerDirectory.holders(onlySession()),
           "nothing in the workspace holds the temporary");
       PtyWire.write(channel, new PtyMessage.PutChunk(1, 0, chunk));
-      PtyWire.write(channel, new PtyMessage.PutQuery(1));
+      PtyWire.write(channel, new PtyMessage.PutBegin(2, "next", 1));
       assertEquals(
-          new PtyMessage.PutRefused(1, PutRefusal.NOT_KNOWN, 0),
+          new PtyMessage.PutAck(2, 0),
           answer(channel),
           "a chunk after the upload was answered is not answered again");
     }
@@ -421,9 +419,9 @@ class PtyUploadsTest {
       assertFalse(c.copies.getFirst().isAlive(), "the copy is ended");
       assertEquals(List.of(), ContainerDirectory.held(onlySession()));
       PtyWire.write(channel, new PtyMessage.PutEnd(1, new byte[32]));
-      PtyWire.write(channel, new PtyMessage.PutQuery(1));
+      PtyWire.write(channel, new PtyMessage.PutBegin(2, "next", 1));
       assertEquals(
-          new PtyMessage.PutRefused(1, PutRefusal.NOT_KNOWN, 0),
+          new PtyMessage.PutAck(2, 0),
           answer(channel),
           "an end after the upload was answered is not answered again");
     }
@@ -431,13 +429,15 @@ class PtyUploadsTest {
 
   /**
    * A session killed while its upload's copy is stalled ends that copy at once, whatever it was
-   * doing, and its connections keep answering.
+   * doing, and its connections keep answering; nothing in the workspace holds the temporary after,
+   * even when the session's removal takes the directory first (round 3 Major 1).
    */
   @Test
   void killingASessionEndsTheCopiesOfItsUploadsAtOnce() throws Exception {
     try (var ignored = startHost();
         var channel = writer("lounge")) {
       c.copyStalls = true;
+      c.abortAfterRemove = true;
       var chunk = new byte[UploadAllowance.CHUNK];
       PtyWire.write(channel, new PtyMessage.PutBegin(1, "big", 3L * chunk.length));
       assertEquals(new PtyMessage.PutAck(1, 0), answer(channel));
@@ -457,37 +457,6 @@ class PtyUploadsTest {
           List.of(),
           ContainerDirectory.holders(c.root()),
           "nothing in the workspace holds the temporary");
-    }
-  }
-
-  /**
-   * Minor 2: only the upload's own person, holding the write token, asks after it or cancels it.
-   */
-  @Test
-  void aWatcherNeitherLearnsAnUploadsOutcomeNorCancelsIt() throws Exception {
-    try (var ignored = startHost();
-        var writer = writer("lounge");
-        var watcher = attached(connect(), "lounge", false)) {
-      var stored = (PtyMessage.PutStored) upload(writer, 7, "secret-plan.pdf", new byte[] {1});
-      PtyWire.write(watcher, new PtyMessage.PutQuery(7));
-      assertEquals(new PtyMessage.PutRefused(7, PutRefusal.NOT_KNOWN, 0), answer(watcher));
-
-      c.commitHeld = new CountDownLatch(1);
-      try {
-        PtyWire.write(writer, new PtyMessage.PutBegin(8, "b", 1));
-        assertEquals(new PtyMessage.PutAck(8, 0), answer(writer));
-        PtyWire.write(writer, new PtyMessage.PutChunk(8, 0, new byte[] {2}));
-        assertEquals(new PtyMessage.PutAck(8, 1), answer(writer));
-        PtyWire.write(writer, new PtyMessage.PutEnd(8, sha256(new byte[] {2})));
-        c.awaitCommand(UploadCopy.COMMIT);
-        PtyWire.write(watcher, new PtyMessage.PutCancel(8));
-        handled(watcher);
-      } finally {
-        c.commitHeld.countDown();
-      }
-      assertInstanceOf(
-          PtyMessage.PutStored.class, answer(writer), "the watcher's cancel is ignored");
-      assertTrue(Files.exists(inRoot(stored.path())));
     }
   }
 
@@ -566,8 +535,9 @@ class PtyUploadsTest {
     }
   }
 
+  /** A cancel that comes after the upload's end changes nothing: the commit's answer stands. */
   @Test
-  void aCancelAfterTheEndKeepsNothingUntilTheFileIsStoredAndNothingOnceItIs() throws Exception {
+  void aCancelAfterTheEndIsTooLateAndTheFileIsStored() throws Exception {
     try (var ignored = startHost();
         var channel = writer("lounge")) {
       c.copyHeld = new CountDownLatch(1);
@@ -578,38 +548,91 @@ class PtyUploadsTest {
       PtyWire.write(channel, new PtyMessage.PutEnd(1, sha256(new byte[] {7})));
       c.copyReached.await();
       PtyWire.write(channel, new PtyMessage.PutCancel(1));
-      PtyWire.write(channel, new PtyMessage.PutQuery(99));
-      assertEquals(new PtyMessage.PutRefused(99, PutRefusal.NOT_KNOWN, 0), answer(channel));
+      handled(channel);
       c.copyHeld.countDown();
-      assertEquals(new PtyMessage.PutRefused(1, PutRefusal.CANCELLED, 0), answer(channel));
-      assertEquals(List.of(), ContainerDirectory.held(onlySession()));
 
-      c.copyHeld = null;
-      var stored = (PtyMessage.PutStored) upload(channel, 2, "b", new byte[] {8});
-      PtyWire.write(channel, new PtyMessage.PutCancel(2));
-      PtyWire.write(channel, new PtyMessage.PutQuery(2));
-      assertEquals(stored, answer(channel), "a stored file stays stored");
+      var stored = assertInstanceOf(PtyMessage.PutStored.class, answer(channel));
       assertTrue(Files.exists(inRoot(stored.path())));
     }
   }
 
+  /**
+   * Round 3 Minor 2 (D03, D04): a write deadline ends with its write, and each chunk sets the idle
+   * clock again, so an upload whose chunks keep coming, each written in time, is stored however
+   * long it runs.
+   */
   @Test
-  void aClientThatLostItsConnectionAfterTheEndHearsWhatBecameOfTheUpload() throws Exception {
+  void anUploadThatKeepsGoingOutlivesEveryDeadline() throws Exception {
     try (var ignored = startHost();
         var channel = writer("lounge")) {
-      c.commitHeld = new CountDownLatch(1);
-      PtyWire.write(channel, new PtyMessage.PutBegin(5, "a", 1));
-      assertEquals(new PtyMessage.PutAck(5, 0), answer(channel));
-      PtyWire.write(channel, new PtyMessage.PutChunk(5, 0, new byte[] {7}));
-      assertEquals(new PtyMessage.PutAck(5, 1), answer(channel));
-      PtyWire.write(channel, new PtyMessage.PutEnd(5, sha256(new byte[] {7})));
-      c.awaitCommand(UploadCopy.COMMIT);
-      channel.close();
-      try (var again = attached(connect(), "lounge", true)) {
-        PtyWire.write(again, new PtyMessage.PutQuery(5));
-        c.commitHeld.countDown();
-        var stored = assertInstanceOf(PtyMessage.PutStored.class, answer(again));
-        assertTrue(Files.exists(inRoot(stored.path())));
+      var bytes = new byte[] {1, 2, 3};
+      PtyWire.write(channel, new PtyMessage.PutBegin(1, "long", bytes.length));
+      assertEquals(new PtyMessage.PutAck(1, 0), answer(channel));
+      for (var i = 0; i < bytes.length; i++) {
+        timer.fire(PtyUploads.IDLE.multipliedBy(3).dividedBy(4));
+        PtyWire.write(channel, new PtyMessage.PutChunk(1, i, new byte[] {bytes[i]}));
+        assertEquals(new PtyMessage.PutAck(1, i + 1), answer(channel));
+      }
+      timer.fire(PtyUploads.WRITE_DEADLINE);
+      PtyWire.write(channel, new PtyMessage.PutEnd(1, sha256(bytes)));
+
+      assertInstanceOf(PtyMessage.PutStored.class, answer(channel));
+    }
+  }
+
+  /**
+   * Round 3 Minor 4: a copy that stops after its last chunk, as its end is awaited, is under the
+   * same deadline as a write, and answered {@link PutRefusal#STALLED}.
+   */
+  @Test
+  void aCopyThatStallsAtItsEndIsGivenUpAtTheWriteDeadline() throws Exception {
+    c.patience = Duration.ofMinutes(10);
+    try (var ignored = startHost();
+        var channel = writer("lounge")) {
+      c.copyStalls = true;
+      PtyWire.write(channel, new PtyMessage.PutBegin(1, "a", 1));
+      assertEquals(new PtyMessage.PutAck(1, 0), answer(channel));
+      PtyWire.write(channel, new PtyMessage.PutChunk(1, 0, new byte[] {7}));
+      assertEquals(new PtyMessage.PutAck(1, 1), answer(channel));
+      PtyWire.write(channel, new PtyMessage.PutEnd(1, sha256(new byte[] {7})));
+      timer.awaitDue(PtyUploads.WRITE_DEADLINE);
+
+      timer.fire(PtyUploads.WRITE_DEADLINE);
+
+      assertEquals(new PtyMessage.PutRefused(1, PutRefusal.STALLED, 0), answer(channel));
+      c.awaitFinished(UploadCopy.ABORT);
+      assertEquals(List.of(), ContainerDirectory.holders(onlySession()));
+    }
+  }
+
+  /**
+   * Round 3 Minor 3: a writer that fails in a way no stream declares answers the upload and gives
+   * its place on the host back, so every place can be taken again.
+   */
+  @Test
+  void aWriterThatThrowsAnswersAndGivesItsPlaceBack() throws Exception {
+    try (var ignored = startHost()) {
+      var holders = new ArrayList<SocketChannel>();
+      try {
+        var first = writer("s0");
+        holders.add(first);
+        c.writeThrows = true;
+        PtyWire.write(first, new PtyMessage.PutBegin(1, "a", 1));
+        assertEquals(new PtyMessage.PutAck(1, 0), answer(first));
+        PtyWire.write(first, new PtyMessage.PutChunk(1, 0, new byte[] {1}));
+        assertEquals(new PtyMessage.PutRefused(1, PutRefusal.FAILED, 0), answer(first));
+        c.writeThrows = false;
+
+        for (var i = 0; i < PtyUploads.OPEN_ON_HOST; i++) {
+          var holder = attached(connect(), "s0", true);
+          holders.add(holder);
+          PtyWire.write(holder, new PtyMessage.PutBegin(2, "part", 1));
+          assertEquals(new PtyMessage.PutAck(2, 0), answer(holder), "place " + i);
+        }
+      } finally {
+        for (var holder : holders) {
+          holder.close();
+        }
       }
     }
   }
@@ -620,8 +643,9 @@ class PtyUploadsTest {
         var channel = writer("lounge")) {
       c.openExits = UploadCopy.NO_SPACE;
       assertEquals(
-          new PtyMessage.PutRefused(1, PutRefusal.NO_SPACE, 0),
-          upload(channel, 1, "a", new byte[] {1}));
+          new PtyMessage.PutRefused(1, PutRefusal.NO_SPACE, ContainerDirectory.FREE),
+          upload(channel, 1, "a", new byte[] {1}),
+          "a full disk's refusal says what is free on it");
       c.openExits = UploadCopy.UNSAFE;
       assertEquals(
           new PtyMessage.PutRefused(2, PutRefusal.FAILED, 0),
@@ -647,7 +671,7 @@ class PtyUploadsTest {
       c.openExits = UploadCopy.NO_SPACE;
       for (var i = 0; i <= UploadAllowance.FILES; i++, id++) {
         assertEquals(
-            new PtyMessage.PutRefused(id, PutRefusal.NO_SPACE, 0),
+            new PtyMessage.PutRefused(id, PutRefusal.NO_SPACE, ContainerDirectory.FREE),
             upload(channel, id, "a", new byte[] {1}));
       }
       c.openExits = null;

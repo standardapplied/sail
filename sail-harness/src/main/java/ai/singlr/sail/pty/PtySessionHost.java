@@ -822,7 +822,7 @@ public final class PtySessionHost implements AutoCloseable {
               } else if (upload != null && !upload.over()) {
                 reply(channel, new PtyMessage.PutRefused(m.id(), PtyMessage.PutRefusal.FAILED, 0));
               } else {
-                upload = uploads.begin(m, attached, subscriberId, who.fde(), replies);
+                upload = uploads.begin(m, attached, subscriberId, replies);
               }
             }
             case PtyMessage.PutChunk m -> {
@@ -837,18 +837,9 @@ public final class PtySessionHost implements AutoCloseable {
               }
             }
             case PtyMessage.PutCancel m -> {
-              if (attached != null) {
-                uploads.cancel(attached, subscriberId, who.fde(), m.id(), upload);
-              }
               if (upload != null && upload.id() == m.id()) {
+                uploads.discard(upload);
                 upload = null;
-              }
-            }
-            case PtyMessage.PutQuery m -> {
-              if (attached == null) {
-                reply(channel, new PtyMessage.Err("Attach before asking after an upload."));
-              } else {
-                uploads.query(attached, subscriberId, who.fde(), m.id(), replies);
               }
             }
             case PtyMessage.Detach m -> {

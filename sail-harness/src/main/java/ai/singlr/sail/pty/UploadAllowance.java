@@ -26,12 +26,8 @@ final class UploadAllowance {
   /** The most bytes one chunk carries. */
   static final int CHUNK = 64 << 10;
 
-  /** The most uploads under way at once in one session. */
-  static final int OPEN = 4;
-
   private int files;
   private long bytes;
-  private int open;
 
   /** Why a file of {@code size} bytes is never taken, whatever a session holds; else null. */
   static PutRefusal sizeRefusal(long size) {
@@ -44,19 +40,12 @@ final class UploadAllowance {
       case TOO_LARGE -> ITEM;
       case TOO_MANY -> FILES;
       case SESSION_FULL -> SESSION;
-      case BUSY -> OPEN;
       default -> 0;
     };
   }
 
-  /**
-   * Takes one file of {@code size} bytes, under way: null, or the refusal when the session has no
-   * room or {@link #OPEN} uploads under way already.
-   */
+  /** Takes one file of {@code size} bytes: null, or the refusal when the session has no room. */
   synchronized PutRefusal take(long size) {
-    if (open >= OPEN) {
-      return PutRefusal.BUSY;
-    }
     if (files >= FILES) {
       return PutRefusal.TOO_MANY;
     }
@@ -65,20 +54,13 @@ final class UploadAllowance {
     }
     files++;
     bytes += size;
-    open++;
     return null;
   }
 
-  /**
-   * One upload of {@code size} bytes is no longer under way: its file and bytes are kept when it
-   * was {@code stored}, else handed back.
-   */
-  synchronized void done(long size, boolean stored) {
-    open--;
-    if (!stored) {
-      files--;
-      bytes -= size;
-    }
+  /** Hands back one file of {@code size} bytes that was not stored. */
+  synchronized void give(long size) {
+    files--;
+    bytes -= size;
   }
 
   /** Whether nothing is taken. */

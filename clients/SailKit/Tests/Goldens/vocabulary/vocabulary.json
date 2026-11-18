@@ -325,8 +325,6 @@
     "session_ended",
     "no_space",
     "failed",
-    "cancelled",
-    "not_known",
     "stalled",
     "busy"
   ],

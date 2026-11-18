@@ -62,6 +62,14 @@ final class ContainerDirectory {
   /** How long the host waits for an open to answer before it gives the open up. */
   Duration patience = Duration.ofSeconds(3);
 
+  /** Whether a copy's input throws as it is written, as a fault no stream declares would. */
+  volatile boolean writeThrows;
+
+  /**
+   * Whether an abort waits for the session's removal to finish first, the order a race can take.
+   */
+  volatile boolean abortAfterRemove;
+
   /** Whether the next open throws as it starts, as a launcher refusing its command would. */
   volatile boolean openThrows;
 
@@ -70,6 +78,9 @@ final class ContainerDirectory {
 
   /** The status the next open exits with instead of running, when set. */
   volatile Integer openExits;
+
+  /** The bytes free an open told to exit by {@link #openExits} says the disk has. */
+  static final long FREE = 18L << 20;
 
   /** Whether each copy into the container keeps only its first byte, as a cut-off stream would. */
   volatile boolean copyTruncates;
@@ -140,6 +151,13 @@ final class ContainerDirectory {
           openHeld = null;
           await(held);
         }
+        if (script.equals(UploadCopy.ABORT) && abortAfterRemove) {
+          try {
+            awaitFinished(UploadCleanup.REMOVE);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+          }
+        }
         if (script.equals(UploadCleanup.SWEEP)) {
           var held = sweepHeld;
           sweepHeld = null;
@@ -163,7 +181,7 @@ final class ContainerDirectory {
           inner = new ArrayList<>(List.of("sh", "-c", "exec tail -f /dev/null"));
         }
         if (script.equals(UploadCopy.OPEN) && openExits != null) {
-          inner = new ArrayList<>(List.of("sh", "-c", "exit " + openExits));
+          inner = new ArrayList<>(List.of("sh", "-c", "echo free " + FREE + "; exit " + openExits));
         }
         if (script.equals(UploadCopy.COMMIT)) {
           await(commitHeld);
@@ -215,7 +233,20 @@ final class ContainerDirectory {
 
     @Override
     public OutputStream getOutputStream() {
-      return process.getOutputStream();
+      if (!writeThrows) {
+        return process.getOutputStream();
+      }
+      return new OutputStream() {
+        @Override
+        public void write(int b) {
+          throw new IllegalStateException("a fault in the copy's input");
+        }
+
+        @Override
+        public void close() throws IOException {
+          process.getOutputStream().close();
+        }
+      };
     }
 
     @Override

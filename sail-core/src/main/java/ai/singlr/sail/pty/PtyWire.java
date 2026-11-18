@@ -134,7 +134,6 @@ public final class PtyWire {
       }
       case PtyMessage.PutEnd m -> out.type(14).i32(m.id()).bytes(m.sha256());
       case PtyMessage.PutCancel m -> out.type(15).i32(m.id());
-      case PtyMessage.PutQuery m -> out.type(16).i32(m.id());
       case PtyMessage.PutAck m -> out.type(35).i32(m.id()).i64(m.received());
       case PtyMessage.PutStored m -> out.type(36).i32(m.id()).string(m.path());
       case PtyMessage.PutRefused m ->
@@ -285,7 +284,6 @@ public final class PtyWire {
       case 13 -> new PtyMessage.PutChunk(in.getInt(), in.getLong(), bytes(in));
       case 14 -> new PtyMessage.PutEnd(in.getInt(), bytes(in));
       case 15 -> new PtyMessage.PutCancel(in.getInt());
-      case 16 -> new PtyMessage.PutQuery(in.getInt());
       case 35 -> new PtyMessage.PutAck(in.getInt(), in.getLong());
       case 36 -> new PtyMessage.PutStored(in.getInt(), string(in));
       case 37 ->
