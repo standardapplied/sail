@@ -17,8 +17,13 @@ import SailVT
 /// The redraw is judged on the thread's CPU time, the floor of the probe's rule: a sample the
 /// machine kept off a core is not counted, and one whose thread used the time is. A runner whose
 /// CPU runs slow uses more of it for the same work (main's red at 29de429d: its builds took 1.5 to
-/// 2.3 times a mid runner's), so each sample is taken beside fixed references timed on the same
-/// thread just before it, and judged by ``gate`` on what the machine could do at that moment.
+/// 2.3 times a mid runner's), so each sample is taken beside a fixed loop timed on the same thread
+/// just before it, and its paired ratio is said. That ratio's limit is not set: over ten mid-tier
+/// runs its p50 ran 3.22 to 4.02 loops, a spread of 25 %, so no limit both passes every healthy run
+/// (1.15 × 4.02 = 4.63) and fails a 30 % heavier redraw on the lowest (1.3 × 3.22 = 4.19). The
+/// redraw slows more than the loop does (a loop 22 % slower came with a redraw 60 % slower; a walk
+/// through 16 MB of memory tracked it no better, 16 % over four runs). So ``gate`` holds the 4 ms
+/// budget, with an 8 ms ceiling, until a reference tracks the redraw within 13 %.
 enum Bench {
     static let grid = GridSize(columns: 200, rows: 60)
     static let warmup = 5
@@ -27,34 +32,6 @@ enum Bench {
     /// The redraw's verdict, its budgets named first, then every figure.
     static func verdict(_ judged: (met: Bool, said: String, figures: [String: Double])) -> (met: Bool, said: String) {
         (judged.met, judged.said + "; " + judged.figures.sorted { $0.key < $1.key }.map { "\($0.key) \(String(format: "%.2f", $0.value))" }.joined(separator: ", "))
-    }
-
-    /// A walk over a fixed random cycle through 16 MB, so each step waits on memory: the part of the
-    /// machine's speed the loop does not see. Made once.
-    static let cycle: [UInt32] = {
-        let count = 1 << 22
-        var next = Array(0 ..< UInt32(count))
-        var state: UInt64 = 0x9E37_79B9_7F4A_7C15
-        for index in stride(from: count - 1, to: 0, by: -1) {
-            state ^= state << 13
-            state ^= state >> 7
-            state ^= state << 17
-            next.swapAt(index, Int(state % UInt64(index)))
-        }
-        return next
-    }()
-
-    /// `steps` along ``cycle`` from a start that depends on `seed`, and the thread CPU time they took.
-    static func walk(_ seed: Int, steps: Int = 4000) -> Duration {
-        let started = Duration.threadCPU
-        var at = UInt32(truncatingIfNeeded: seed &* 2_654_435_761) & UInt32(cycle.count - 1)
-        cycle.withUnsafeBufferPointer { next in
-            for _ in 0 ..< steps {
-                at = next[Int(at)]
-            }
-        }
-        precondition(Int(at) < cycle.count)
-        return Duration.threadCPU - started
     }
 
     /// A fixed piece of CPU work, the same on every machine, and the thread CPU time it took: how
@@ -79,10 +56,7 @@ enum Bench {
         var wall: [Duration] = []
         var reads: [Duration] = []
         var references: [Duration] = []
-        var walks: [Duration] = []
-        _ = walk(0)
         for round in 0 ..< warmup + Sampled.count {
-            let walked = walk(round)
             var text = "\u{1b}[H"
             for row in 0 ..< grid.rows {
                 text += "\u{1b}[\(31 + (row + round) % 7)m" + String(repeating: "lorem ipsum \(round) dolor sit amet ", count: 7).prefix(grid.columns)
@@ -98,12 +72,9 @@ enum Bench {
             wall.append(read.wall + renderer.lastEncodeWallTime)
             reads.append(read.cpu)
             references.append(speed)
-            walks.append(walked)
         }
         let redraw = Percentiles(cpu)
-        let loops = references.map { $0 / .milliseconds(1) }, memory = walks.map { $0 / .milliseconds(1) }, work = cpu.map { $0 / .milliseconds(1) }
-        let judged = gate.judge(work: work, references: loops)
-        let byWalk = gate.judge(work: work, references: memory).figures, byBoth = gate.judge(work: work, references: zip(loops, memory).map(+)).figures
+        let judged = gate.judge(work: cpu.map { $0 / .milliseconds(1) }, references: references.map { $0 / .milliseconds(1) })
         let redrawWall = Percentiles(wall)
 
         let ideographs = (0 ..< grid.columns * grid.rows / 2).map { Character(Unicode.Scalar(0x4E00 + UInt32($0 % 600)) ?? "x") }
@@ -118,11 +89,6 @@ enum Bench {
             "full redraw 200x60 cpu max ms": redraw.max, "full redraw 200x60 samples": Double(redraw.count),
             "full redraw 200x60 wall p50 ms": redrawWall.p50, "full redraw 200x60 wall p95 ms": redrawWall.p95,
             "of which reading the frame cpu p95 ms": Percentiles(reads).p95,
-            "walk cpu p50 ms": byWalk["full redraw 200x60 cpu reference p50 ms"] ?? 0,
-            "full redraw 200x60 cpu paired p50 in walks": byWalk["full redraw 200x60 cpu paired p50 in references"] ?? 0,
-            "full redraw 200x60 cpu paired p95 in walks": byWalk["full redraw 200x60 cpu paired p95 in references"] ?? 0,
-            "full redraw 200x60 cpu paired p50 in loop and walk": byBoth["full redraw 200x60 cpu paired p50 in references"] ?? 0,
-            "full redraw 200x60 cpu paired p95 in loop and walk": byBoth["full redraw 200x60 cpu paired p95 in references"] ?? 0,
             "CJK first frame cpu ms, first CJK in the process": Percentiles(Array(cold.frames.prefix(1))).max,
             "CJK first frame cpu ms, CJK drawn before": Percentiles(Array(warm.frames.prefix(1))).max,
             "CJK later frames cpu p50 ms": later.p50, "CJK later frames cpu max ms": later.max,
