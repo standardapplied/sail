@@ -80,14 +80,19 @@ extension Driver {
 
     /// A real click on a chosen row's ⋯ with its tooltip showing: the down sent through the window to
     /// the button, whose own tracking takes the queued up and sends its action, which opens the menu.
-    /// The window stands at the top of the screen, so the menu has room under the button. The chip
+    /// The window stands at the top of the screen, at its leading side's far edge (its right right to
+    /// left, where ⋯ is at the window's left), so the menu has room under the button and beside it;
+    /// a menu without room would be moved by macOS, so that is checked first. The chip
     /// must be gone as the menu opens, and the menu must hang 2 pt under the button's box (within
     /// 1 pt) from its leading edge: its left at the box's left, its right at the box's right right to
     /// left. The screen is shot while the menu is up.
     private func moreClick(mono: LabelFont, title: TitleFont) async -> (Bool, String) {
         let kit = Kit("row", look: .light, mono: mono, title: title)
         let window = kit.window
-        if let visible = (window.screen ?? NSScreen.main)?.visibleFrame { window.setFrameTopLeftPoint(NSPoint(x: visible.minX + 40, y: visible.maxY - 20)) }
+        let rightToLeft = NSApp.userInterfaceLayoutDirection == .rightToLeft
+        guard let visible = (window.screen ?? NSScreen.main)?.visibleFrame else { return (false, "the gallery's window has no screen") }
+        let left = rightToLeft ? Double(visible.maxX) - 40 - Double(window.frame.width) : Double(visible.minX) + 40
+        window.setFrameTopLeftPoint(NSPoint(x: left, y: Double(visible.maxY) - 20))
         window.makeKeyAndOrderFront(nil)
         defer { window.orderOut(nil) }
         guard await waitUntil(5, { window.isKeyWindow }) else { return (false, "the gallery's window never became key") }
@@ -103,6 +108,11 @@ extension Driver {
         )
         if let hover { tooltip.mouseEntered(with: hover) }
         guard await waitUntil(3, { tooltip.isShown }) else { return (false, "⋯'s tooltip never showed") }
+        let box = window.convertToScreen(more.convert(more.alignmentRect(forFrame: more.bounds), to: nil)), size = menu.size
+        let from = rightToLeft ? Double(box.maxX) - Double(size.width) : Double(box.minX), to = from + Double(size.width)
+        guard from >= Double(visible.minX), to <= Double(visible.maxX), Double(box.minY) - 2 - Double(size.height) >= Double(visible.minY) else {
+            return (false, String(format: "the %.0f × %.0f pt menu has no room on screen under the box at %.0f, %.0f, so macOS would move it", Double(size.width), Double(size.height), Double(box.minX), Double(box.minY)))
+        }
         let watch = MenuWatch(tooltip)
         menu.delegate = watch
         let middle = more.convert(NSPoint(x: more.bounds.midX, y: more.bounds.midY), to: nil)
@@ -126,10 +136,8 @@ extension Driver {
         guard watch.opened else { return (false, "the click on ⋯ opened no menu") }
         guard !watch.chipShown else { return (false, "⋯'s tooltip was still showing as its menu opened") }
         guard let frame = watch.frame else { return (false, "the menu opened, but AppKit listed no menu window to measure") }
-        let box = window.convertToScreen(more.convert(more.alignmentRect(forFrame: more.bounds), to: nil))
-        let rightToLeft = more.userInterfaceLayoutDirection == .rightToLeft
         let gap = Double(box.minY - frame.maxY), edge = rightToLeft ? Double(frame.maxX - box.maxX) : Double(frame.minX - box.minX)
-        let said = String(format: "the menu's top %.1f pt under the box, its %@ edge %.1f pt from the box's", gap, rightToLeft ? "right" : "left", edge)
+        let said = String(format: "the %.0f pt wide menu's top %.1f pt under the box, its %@ edge %.1f pt from the box's", Double(frame.width), gap, rightToLeft ? "right" : "left", edge)
         guard abs(gap - 2) <= 1, abs(edge) <= 1 else { return (false, said + ", not 2 pt under it from its leading edge") }
         return (shot != nil, "the click opened ⋯'s menu with its tooltip gone; " + said + "; shot more-click-light.png")
     }
