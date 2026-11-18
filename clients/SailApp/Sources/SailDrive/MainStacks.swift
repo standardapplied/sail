@@ -131,7 +131,7 @@ final class MainStacks: @unchecked Sendable {
             cpu: Double(info.user_time.seconds + info.system_time.seconds) + Double(info.user_time.microseconds + info.system_time.microseconds) / 1e6,
             processCPU: process, idleTicks: ticks.count == 4 ? ticks[2] : nil,
             busyTicks: ticks.count == 4 ? ticks[0] &+ ticks[1] &+ ticks[3] : nil,
-            mode: Self.mainMode()
+            mode: mainMode()
         )
         let cost = CACurrentMediaTime() - time
         lock.withLock {
@@ -267,8 +267,6 @@ final class MainStacks: @unchecked Sendable {
         )
     }
 
-    /// Each look, the session readers' state, CPU time and priority; the readers themselves are
-    /// found again each second, as sessions come and go.
     /// Each look, on the watcher's thread, the readers the scanner found: their state, CPU time and
     /// priority, kept as they are read, with no array made for them.
     private func lookAtReaders(at time: Double) {
