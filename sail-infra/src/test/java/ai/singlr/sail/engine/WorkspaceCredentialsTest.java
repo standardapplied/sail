@@ -26,9 +26,10 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * The strip and the check themselves, run by a real bash, grep and git over a container's root
  * rebuilt under a temporary directory: the paths a container has are moved under it, {@code
- * runuser} and {@code mountpoint} are stand-ins that run as this account and see no mount, and
- * {@code gh} is one that says it is logged in exactly when its {@code hosts.yml} is there. What
- * each script does with the files is the production text's own.
+ * runuser} and {@code mountpoint} are stand-ins that run as this account and see no mount, {@code
+ * id} says there is a dev user, as a container has one whatever account runs the test, and {@code
+ * gh} is one that says it is logged in exactly when its {@code hosts.yml} is there. What each
+ * script does with the files is the production text's own.
  */
 @EnabledOnOs(OS.LINUX)
 class WorkspaceCredentialsTest {
@@ -42,6 +43,7 @@ class WorkspaceCredentialsTest {
   void aContainerRoot() throws IOException {
     bin = Files.createDirectories(root.resolve("sail-bin"));
     stub("runuser", "shift 3\nexec \"$@\"\n");
+    stub("id", "[ \"$*\" = \"-u dev\" ] && echo 1000 && exit 0\nexec /usr/bin/id \"$@\"\n");
     stub("mountpoint", "exit 1\n");
     stub(
         "gh",
