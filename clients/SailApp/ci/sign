@@ -51,8 +51,31 @@ if [[ $mode == on ]]; then
   entitlements=(--entitlements "$temp/Sail.entitlements")
 fi
 
-codesign --force --options runtime "$timestamp" ${keychain[@]+"${keychain[@]}"} --sign "$identity" "$app/Contents/Helpers/sail"
-codesign --force --options runtime "$timestamp" ${keychain[@]+"${keychain[@]}"} ${entitlements[@]+"${entitlements[@]}"} \
-  --sign "$identity" "$app"
+# Signs FILE with codesign and the arguments after it. Apple's timestamp service not answering is
+# the one failure tried again: codesign then exits non-zero saying "A timestamp was expected but was
+# not found", the Security framework's sentence for errSecCSTimestampMissing (a signature that asked
+# for a secure timestamp got none), which no other codesign failure says. Up to five attempts 15 s
+# apart, each said; any other failure fails at once.
+sign() {
+  local file=$1 attempt output
+  shift
+  for attempt in 1 2 3 4 5; do
+    if output=$(codesign "$@" "$file" 2>&1); then
+      [[ -z $output ]] || printf '%s\n' "$output"
+      return 0
+    fi
+    printf '%s\n' "$output" >&2
+    grep -qF 'A timestamp was expected but was not found' <<< "$output" || return 1
+    if [[ $attempt -lt 5 ]]; then
+      echo "ci/sign: Apple's timestamp service gave $file no timestamp (attempt $attempt of 5); signing it again in 15 s" >&2
+      sleep 15
+    fi
+  done
+  echo "ci/sign: Apple's timestamp service gave $file no timestamp in 5 attempts; $app is not signed" >&2
+  return 1
+}
+
+sign "$app/Contents/Helpers/sail" --force --options runtime "$timestamp" ${keychain[@]+"${keychain[@]}"} --sign "$identity"
+sign "$app" --force --options runtime "$timestamp" ${keychain[@]+"${keychain[@]}"} ${entitlements[@]+"${entitlements[@]}"} --sign "$identity"
 codesign --verify --deep --strict "$app"
 echo "ci/sign: $app signed $([[ $identity == - ]] && echo "ad hoc: an unsigned build" || echo "with Developer ID, its profile and entitlements")"

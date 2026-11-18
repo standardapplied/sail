@@ -17,6 +17,8 @@ set -euo pipefail
 
 [[ $# -eq 2 ]] || { echo "usage: ci/drive DRIVE_APP OUT" >&2; exit 2; }
 readonly app=$1 out=$2
+codesign --verify --deep --strict "$app" \
+  || { echo "ci/drive: $app is not soundly signed (codesign --verify --deep --strict failed above); the drive runs no half-signed app" >&2; exit 1; }
 cd "$(dirname "$0")/.."
 readonly drive=$app/Contents/MacOS/SailDrive sail=$app/Contents/Helpers/sail
 [[ -x $drive ]] || { echo "ci/drive: $app holds no SailDrive" >&2; exit 1; }

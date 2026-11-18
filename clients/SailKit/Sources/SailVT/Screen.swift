@@ -123,6 +123,25 @@ public final class Screen: Sendable {
         }
     }
 
+    /// Takes `palette` while the terminal runs, its content, scrollback, selection and cursor kept:
+    /// the default colours are the palette's, colours a program set itself stay as it set them, and
+    /// the next frame is drawn in them. When the scheme changed and a program subscribed to scheme
+    /// reports (mode 2031), the reply is the report it is owed.
+    public func setPalette(_ palette: Palette) throws(ScreenError) -> Effects {
+        try parts.withLock { (parts: inout Parts) throws(ScreenError) -> Effects in
+            let changed = parts.core.sink.isDark != palette.isDark
+            try parts.core.paint(palette)
+            parts.core.sink.isDark = palette.isDark
+            return Effects(reply: changed && parts.core.reportsScheme ? parts.core.schemeReport() : [], events: [])
+        }
+    }
+
+    /// The scheme report a program that subscribed (mode 2031) is owed now, nothing when none did:
+    /// what a writer tells it once a replay is over, in case the scheme changed while it was away.
+    public func schemeReport() -> [UInt8] {
+        parts.withLock { $0.core.reportsScheme ? $0.core.schemeReport() : [] }
+    }
+
     /// Back to a blank terminal, every mode reset.
     public func reset() {
         parts.withLock { $0.core.restart() }

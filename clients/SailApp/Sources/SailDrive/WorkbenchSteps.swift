@@ -1,6 +1,7 @@
 import AppKit
 import Darwin
 import QuartzCore
+import SailLook
 import SailShell
 import SailMeasures
 import SailSurface
@@ -102,6 +103,15 @@ extension Driver {
         }
         if step.panes4 == true {
             return await fourPanes()
+        }
+        if step.colourScript == true {
+            return (FileManager.default.fileExists(atPath: Self.colourAsker), Self.colourAsker)
+        }
+        if let name = step.look {
+            let appearances: [String: NSAppearance.Name?] = ["light": .aqua, "dark": .darkAqua, "system": nil]
+            guard let appearance = appearances[name] else { return (false, "no look named \(name)") }
+            let drawn = await setLook(appearance)
+            return (drawn, "the shell's look is \(shell.look == .dark ? "dark" : "light"); \(drawn ? "every" : "not every") terminal shown drew it")
         }
         if step.onceResized == true {
             let holds = dragHolds
@@ -400,7 +410,9 @@ extension Driver {
     /// at one per 50 ms. Budgets: the echo pane's key to echo p95 ≤ 50 ms and output to committed
     /// p95 ≤ 2 refreshes; each flood shows its last bytes, and none of its output waited, nor was
     /// the main thread held, over 100 ms (``Driver/flood(_:)``); the four views' refresh work p95,
-    /// summed, ≤ 8 ms; ⌘D to the new pane's first committed frame, ten times, p95 ≤ 100 ms. Each
+    /// summed, ≤ 8 ms; the look switched four times with the four panes' scrollback full, each
+    /// look drawn by every pane with no wait over 100 ms (``switchLooks(_:times:)``); ⌘D to the
+    /// new pane's first committed frame, ten times, p95 ≤ 100 ms. Each
     /// wait is net of the machine's share of it. Reported: the host's and the app's CPU shares over
     /// the measure's first second; each flood's frames and longest commit gap with what reached
     /// the screen and what was asked for in it; memory; and, after, the same three floods unlimited
@@ -518,6 +530,9 @@ extension Driver {
         panes4["echo output to committed p95 ms"] = echoed.outputToCommitted.p95
         panes4["peak resident memory at one pane MB"] = before
         panes4["peak resident memory at four panes MB"] = four
+        let switched = await switchLooks(grid, times: 4)
+        budgets["the look switched 4 times, four panes' scrollback full: each pane drew each look, none waited, nor the main thread held, over 100 ms (\(switched.said))"] =
+            switched.ok
         await unlimitedFloods(floods, start: { generate(Self.paneLoad.lines * 151, every: 0, marker: 3) }, stop: stop)
         press("w", ["command", "option"])
         _ = await sheet("Close", asking: "Its 4 terminals will end.", within: 5)
@@ -655,16 +670,17 @@ extension Driver {
         return (said, fires)
     }
 
-    /// `take` in the light look, then the dark, each once the window has been drawn in it; the
-    /// look the system gives comes back after. Fails when a file is missing or empty.
+    /// `take` in the light look, then the dark, each switched while the app runs and taken once the
+    /// window, every terminal shown among it, has been drawn in it; the look the system gives comes
+    /// back after. Fails when a file is missing or empty, or a terminal shown did not draw a look.
     func inBothLooks(_ name: String, _ take: (URL) async -> Void) async -> (Bool, String) {
-        let given = shell.look
         let folder = out.deletingLastPathComponent().appending(path: "window")
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         var taken: [String] = []
+        var undrawn: [String] = []
         for (look, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
-            NSApp.appearance = NSAppearance(named: appearance)
-            _ = await waitUntil(5) { (self.shell.look == .dark) == (look == "dark") }
+            let drawn = await setLook(appearance)
+            if !drawn { undrawn.append(look) }
             await drawnAndCommitted()
             await onTheCursorsVisiblePhase()
             let file = folder.appending(path: "\(name)-\(look).png")
@@ -672,10 +688,65 @@ extension Driver {
             let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int) ?? 0
             taken.append("\(file.lastPathComponent) \(size) bytes")
         }
-        NSApp.appearance = nil
-        _ = await waitUntil(5) { self.shell.look == given }
+        _ = await setLook(nil)
         await drawnAndCommitted()
-        return (taken.allSatisfy { !$0.hasSuffix(" 0 bytes") }, taken.joined(separator: ", "))
+        let said = taken.joined(separator: ", ") + (undrawn.isEmpty ? "" : "; a terminal shown did not draw the \(undrawn.joined(separator: " or ")) look")
+        return (undrawn.isEmpty && taken.allSatisfy { !$0.hasSuffix(" 0 bytes") }, said)
+    }
+
+    /// Sets the app's appearance (nil: the system's again), as the system's changing sets it; true
+    /// once the shell took its look and every terminal shown drew a frame in that look's palette,
+    /// within 5 s.
+    func setLook(_ appearance: NSAppearance.Name?) async -> Bool {
+        NSApp.appearance = appearance.flatMap { NSAppearance(named: $0) }
+        return await waitUntil(5) {
+            let look = ShellApp.look(of: NSApp.effectiveAppearance)
+            return self.shell.look == look && self.shownTerminals.allSatisfy { pane in
+                pane.terminal.lastFrame.map { $0.colors.background == look.palette.background } ?? true
+            }
+        }
+    }
+
+    /// The terminals a person sees now: in the window and not hidden.
+    private var shownTerminals: [TerminalPane] {
+        workbench.panes.values.filter { $0.window != nil && !$0.isHiddenOrHasHiddenAncestor }
+    }
+
+    /// The look switched `times` times, each the other of the one before, with the four panes'
+    /// scrollback full: every pane must draw each look, and none may wait to show it, nor the main
+    /// thread be held, over 100 ms (``flood(_:)``, net of the machine's share), counted from each
+    /// screen's change. Told apart: the panes' draws and each main-thread hold over 60 ms with its
+    /// stacks (AppKit drawing the window again shows there).
+    private func switchLooks(_ grid: [TerminalPane], times: Int) async -> (ok: Bool, said: String) {
+        grid.forEach { $0.terminal.resetLatency() }
+        mainThread.reset()
+        ownThread.reset()
+        var reached: [String] = []
+        var drawn = 0
+        for _ in 0 ..< times {
+            let other: NSAppearance.Name = shell.look == .dark ? .aqua : .darkAqua
+            let began = ContinuousClock.now
+            let at = CACurrentMediaTime()
+            if await setLook(other) { drawn += 1 }
+            let took = (ContinuousClock.now - began) / .milliseconds(1)
+            reached.append("\(Self.ms(took)) ms")
+            print(String(format: "look switch at %.3f: the last pane drew it %.1f ms after the switch", at, took))
+        }
+        for gap in mainThread.stalls.gaps where gap.length > 0.06 {
+            print(String(format: "look switch: main thread held %.3f–%.3f (%.1f ms), the drive's own thread %.1f ms of it", gap.start, gap.end, gap.length * 1000,
+                         ownThread.stalls.shared(with: gap) * 1000))
+            mainStacks.told(gap).forEach { print("look switch: main thread held: \($0)") }
+        }
+        let judged = grid.map { flood($0.terminal.latency) }
+        let worst = judged.max { $0.ours < $1.ours }
+        let changes = grid.map { $0.terminal.latency.changes }
+        let draws = grid.map { $0.terminal.latency.refresh.max }.reduce(0, +)
+        _ = await setLook(nil)
+        panes4["look switched, ours, the worst pane ms"] = worst?.ours ?? 0
+        panes4["look switched, the four panes' longest draws summed ms"] = draws
+        let ok = drawn == times && (worst?.ours ?? 0) <= 100 && changes.allSatisfy { $0 >= times }
+        return (ok, "all four drew \(drawn) of \(times) switches, each from the switch to the last drawn (polled every 10 ms) \(reached.joined(separator: ", ")); "
+            + "the four panes' longest draws summed \(Self.ms(draws)) ms; screen changes a pane \(changes.map { "\($0)" }.joined(separator: ", ")); the worst pane: \(worst?.said ?? "none")")
     }
 
     /// Returns once the window has drawn what it owes and that drawing is committed to the window
