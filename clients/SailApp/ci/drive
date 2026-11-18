@@ -57,7 +57,7 @@ stop_drive() {
   pids=$(pgrep -f -- "$opened_pattern" || true)
   [[ -z $pids ]] || kill -KILL $pids 2> /dev/null || true
 }
-trap 'stop_drive; kill "${servers[@]}" ${shooter:+"$shooter"} 2>/dev/null || true; rm -rf "$passkeys" "$plain" "$private_dir"; restore_keyboard' EXIT
+trap 'stop_drive; declare -F stop_shots > /dev/null && stop_shots; kill "${servers[@]}" 2>/dev/null || true; rm -rf "$passkeys" "$plain" "$private_dir"; restore_keyboard' EXIT
 for port in 7979 7980; do
   for _ in $(seq 1 60); do
     curl -fsS "http://127.0.0.1:$port/v1/health" > /dev/null 2>&1 && break
@@ -90,31 +90,38 @@ inside_out() {
   folder=$(cd "$(dirname "$file")" 2> /dev/null && pwd -P) || return 1
   [[ $folder == "$out_dir" || $folder == "$out_dir"/* ]]
 }
+# The FIFO is held open for reading and writing, so the taker never blocks reopening it between
+# requests; ended (TERM), it exits quietly, and stop_shots reaps it.
 take_shots() {
   local verb id file extra arguments
-  while true; do
-    while IFS=$'\t' read -r verb id file extra; do
-      case $verb in
-        screen | menu)
-          [[ -z $file ]] || verb=refused
-          file=$id
-          ;;
-        window) [[ $id =~ ^[0-9]+$ && -z $extra ]] || verb=refused ;;
-        *) verb=refused ;;
-      esac
-      if [[ $verb == refused ]] || ! inside_out "$file"; then
-        echo "ci/drive: a screenshot request refused" >&2
-        continue
-      fi
-      case $verb in
-        screen) arguments=(-x) ;;
-        menu) arguments=(-x -T 1) ;;
-        window) arguments=(-x -o -l "$id") ;;
-      esac
-      screencapture "${arguments[@]}" "$file" 2> "$file.said" || true
-      : > "$file.done"
-    done < "$SAIL_DRIVE_SHOTS"
+  trap 'exit 0' TERM
+  exec 3<> "$SAIL_DRIVE_SHOTS"
+  while IFS=$'\t' read -r -u 3 verb id file extra; do
+    case $verb in
+      screen | menu)
+        [[ -z $file ]] || verb=refused
+        file=$id
+        ;;
+      window) [[ $id =~ ^[0-9]+$ && -z $extra ]] || verb=refused ;;
+      *) verb=refused ;;
+    esac
+    if [[ $verb == refused ]] || ! inside_out "$file"; then
+      echo "ci/drive: a screenshot request refused" >&2
+      continue
+    fi
+    case $verb in
+      screen) arguments=(-x) ;;
+      menu) arguments=(-x -T 1) ;;
+      window) arguments=(-x -o -l "$id") ;;
+    esac
+    screencapture "${arguments[@]}" "$file" 2> "$file.said" || true
+    : > "$file.done"
   done
+}
+stop_shots() {
+  [[ -n $shooter ]] || return 0
+  kill "$shooter" 2> /dev/null || true
+  wait "$shooter" 2> /dev/null || true
 }
 export SAIL_DRIVE_SHOTS=$private_dir/shots
 mkfifo -m 600 "$SAIL_DRIVE_SHOTS"
@@ -201,6 +208,8 @@ for run in first second third shots workspaces kit kit-rtl; do
   status=0
   open_drive "$run" "$goldens" --drive "$scripts/$script.json" --out "$out_dir/$run" ${directions[@]+"${directions[@]}"} || status=$?
   (( status == 0 )) || {
+    echo "ci/drive: the sessions this Mac's host holds now:"
+    "$sail" session ls --socket "$HOME/.sail/local/pty.sock" --json 2>&1 || true
     reports=$HOME/Library/Logs/DiagnosticReports
     # The drive left no report (it crashed): ReportCrash writes its report some seconds later. Any
     # other failure is a step's, with no crash report to wait for.
