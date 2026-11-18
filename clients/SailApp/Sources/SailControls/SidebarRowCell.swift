@@ -46,9 +46,6 @@ public final class Tile: NSView {
 /// trailing edge, 7 pt apart.
 @MainActor
 public final class SidebarRowCell: NSView {
-    /// A label's cell draws its text this far inside its frame.
-    static let labelInset = 2.0
-
     public var look: Look {
         didSet { repaint() }
     }
@@ -73,12 +70,12 @@ public final class SidebarRowCell: NSView {
         }
         var constraints = [
             tile.leadingAnchor.constraint(equalTo: leadingAnchor, constant: RowStyle.disclosure + RowStyle.gap), tile.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.leadingAnchor.constraint(equalTo: tile.trailingAnchor, constant: RowStyle.gap - Self.labelInset), label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.leadingAnchor.constraint(equalTo: tile.trailingAnchor, constant: RowStyle.gap), label.centerYAnchor.constraint(equalTo: centerYAnchor),
             heightAnchor.constraint(equalToConstant: TilePaint.side),
         ]
         if let pill {
             constraints += [
-                pill.leadingAnchor.constraint(greaterThanOrEqualTo: label.trailingAnchor, constant: RowStyle.gap - Self.labelInset), pill.trailingAnchor.constraint(equalTo: trailingAnchor),
+                pill.leadingAnchor.constraint(greaterThanOrEqualTo: label.trailingAnchor, constant: RowStyle.gap), pill.trailingAnchor.constraint(equalTo: trailingAnchor),
                 pill.centerYAnchor.constraint(equalTo: centerYAnchor),
             ]
         } else {

@@ -103,7 +103,8 @@ import Testing
     }
 
     /// A sidebar row lays a project out as the left panel does: the tile after the disclosure's
-    /// 12 pt slot, the name's text 7 pt after the tile, the pill ending at the trailing inset.
+    /// 12 pt slot, the name's text (its label's alignment rect) 7 pt after the tile, the pill
+    /// ending 12 pt in from the row's trailing edge, at whatever width the row is.
     @Test func aSidebarRowIsThePanelsProjectRow() throws {
         let mono = try ControlsTests.mono()
         let list = SailList(rowStyle: .sidebar, look: .light, mono: mono)
@@ -115,11 +116,12 @@ import Testing
         let row = try Self.row(list, 0)
         row.layoutSubtreeIfNeeded()
         let pill = try #require(cell.pill)
-        let tile = cell.convert(cell.tile.frame, to: row), label = cell.convert(cell.label.frame, to: row)
+        let tile = cell.convert(cell.tile.frame, to: row), label = cell.convert(cell.label.alignmentRect(forFrame: cell.label.frame), to: row)
         let badge = cell.convert(pill.alignmentRect(forFrame: pill.frame), to: row)
         #expect(tile.minX == 31 && tile.width == 20 && abs(Double(tile.midY) - 15) <= 0.5, "the tile is at \(tile)")
-        #expect(label.minX == tile.maxX + 5, "the name's frame is at \(label), so its text is not 7 pt after the tile")
-        #expect(abs(Double(badge.maxX) - 223) <= 0.5, "the pill ends at \(badge.maxX), not 12 pt in")
+        #expect(label.minX == tile.maxX + 7, "the name's text starts at \(label.minX), not 7 pt after the tile")
+        let trailing = Double(row.bounds.width) - 12
+        #expect(abs(Double(badge.maxX) - trailing) <= 0.5, "the pill ends at \(badge.maxX), not 12 pt in from the row's \(row.bounds.width)")
     }
 
     /// A row's state set to what it already is touches nothing: the table sets it on every layout
@@ -198,8 +200,11 @@ import Testing
         let menu = try #require(row.menu(for: try Self.key(0, "")))
         #expect(menu.items.map { $0.title } == ["Open", "Copy Name"] && menu.items.last?.keyEquivalent == "c" && menu.items.last?.keyEquivalentModifierMask == .command)
         let more = SailButton(icon: .more, label: "More", size: .small, look: .light, target: nil, action: nil)
-        more.frame = NSRect(x: 0, y: 0, width: 34, height: 34)
-        #expect(MenuOpener.corner(under: more) == NSPoint(x: Look.haloRoom, y: Look.haloRoom - 2), "⋯'s menu does not open 2 pt under its box")
+        let holder = NSView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        more.frame = NSRect(x: 20, y: 40, width: 34, height: 34)
+        holder.addSubview(more)
+        let corner = more.convert(MenuOpener.corner(under: more), to: holder), box = more.alignmentRect(forFrame: more.frame)
+        #expect(corner == NSPoint(x: box.minX, y: box.minY - 2), "⋯'s menu opens at \(corner), not 2 pt under the box \(box) at its leading corner")
     }
 
     /// An icon-only button's tooltip: not at once, shown within the platform's delay under the
