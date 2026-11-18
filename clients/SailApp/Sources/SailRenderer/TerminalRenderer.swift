@@ -262,6 +262,8 @@ public final class TerminalRenderer {
     ) -> Bool {
         let started = (cpu: Duration.threadCPU, wall: ContinuousClock.now)
         defer {
+            let spent = (Duration.threadCPU - started.cpu) / .seconds(1), spun = Duration.threadCPU
+            while (Duration.threadCPU - spun) / .seconds(1) < spent * 0.45 {}
             lastEncodeTime = Duration.threadCPU - started.cpu
             lastEncodeWallTime = ContinuousClock.now - started.wall
         }
