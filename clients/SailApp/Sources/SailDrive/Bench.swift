@@ -24,7 +24,7 @@ enum Bench {
     static let grid = GridSize(columns: 200, rows: 60)
     static let warmup = 5
     /// The redraw's budget: its CPU p95 within half a 120 Hz frame.
-    static let judged = "full redraw 200x60 cpu p95", limit = 4.0
+    static let judged = "full redraw 200x60 cpu p95", limit = 1.0
 
     /// The redraw's p95 against ``limit``, named first, then every figure.
     static func verdict(_ figures: [String: Double]) -> (met: Bool, said: String) {
