@@ -234,10 +234,11 @@ import Testing
         more.frame = NSRect(x: 20, y: 40, width: 34, height: 34)
         holder.addSubview(more)
         let corner = more.convert(MenuOpener.corner(under: more), to: holder), box = more.alignmentRect(forFrame: more.frame)
-        #expect(corner == NSPoint(x: box.minX, y: box.minY - 2), "⋯'s menu opens at \(corner), not 2 pt under the box \(box) at its leading corner")
+        let first = Double(box.minY) - 2 - MenuOpener.menuPadding
+        #expect(corner == NSPoint(x: Double(box.minX), y: first), "⋯'s menu's first item goes at \(corner), not its padding and 2 pt under the box \(box) at its leading corner")
         more.userInterfaceLayoutDirection = .rightToLeft
         let mirrored = more.convert(MenuOpener.corner(under: more), to: holder)
-        #expect(mirrored == NSPoint(x: box.maxX, y: box.minY - 2), "right to left, ⋯'s menu opens at \(mirrored), not under the box's right corner")
+        #expect(mirrored == NSPoint(x: Double(box.maxX), y: first), "right to left, ⋯'s menu's first item goes at \(mirrored), not under the box's right corner")
     }
 
     /// An icon-only button's tooltip: not at once, shown within the platform's delay under the

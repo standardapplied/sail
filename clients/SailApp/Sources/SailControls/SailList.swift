@@ -497,15 +497,22 @@ final class Run: NSObject {
 final class MenuOpener: NSObject {
     static let shared = MenuOpener()
 
+    /// AppKit hangs a popped-up menu by its first item, not its edge, so the menu's own top padding
+    /// (5 pt, as the mockup's native menu has it) stands above the location given. AppKit says this
+    /// padding nowhere a program can read it; the drive's real click on ⋯ checks the menu's edge on
+    /// screen, so a macOS that changes it fails there.
+    static let menuPadding = 5.0
+
     @objc func open(_ sender: NSButton) {
         sender.menu?.userInterfaceLayoutDirection = sender.userInterfaceLayoutDirection
         sender.menu?.popUp(positioning: nil, at: Self.corner(under: sender), in: sender)
     }
 
-    /// The menu's top leading corner: the box's leading corner, 2 pt under it.
+    /// Where the menu's first item goes: under the box's leading corner, so that the menu's edge is
+    /// 2 pt under the box.
     static func corner(under button: NSView) -> NSPoint {
-        let box = button.bounds, insets = button.alignmentRectInsets
-        let bottom = button.isFlipped ? Double(box.maxY) - Double(insets.bottom) + 2 : Double(box.minY) + Double(insets.bottom) - 2
+        let box = button.bounds, insets = button.alignmentRectInsets, below = 2 + menuPadding
+        let bottom = button.isFlipped ? Double(box.maxY) - Double(insets.bottom) + below : Double(box.minY) + Double(insets.bottom) - below
         let leading = button.userInterfaceLayoutDirection == .rightToLeft ? Double(box.maxX) - Double(insets.right) : Double(box.minX) + Double(insets.left)
         return NSPoint(x: leading, y: bottom)
     }
