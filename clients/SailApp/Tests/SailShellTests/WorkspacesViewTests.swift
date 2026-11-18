@@ -140,7 +140,7 @@ import Testing
                 let pill = line.convert(line.pill.alignmentRect(forFrame: line.pill.frame), from: line.pill.superview)
                 let row = try #require(line.superview).convert(line.frame, to: nil), cell = try #require(line.superview).convert(try #require(line.superview).bounds, to: nil)
                 for label in [line.title, line.place] {
-                    let words = line.convert(label.frame, from: label.superview)
+                    let words = line.convert(label.alignmentRect(forFrame: label.frame), from: label.superview)
                     #expect(words.maxX <= pill.minX + 0.5 && words.width > 0, "\(width) pt: \(label.stringValue.prefix(12))… ends at \(words.maxX), the pill starts at \(pill.minX)")
                 }
                 #expect(line.convert(pill, to: nil).maxX <= row.maxX + 0.5 && row.maxX <= cell.maxX + 0.5, "\(width) pt: the pill (to \(line.convert(pill, to: nil).maxX)) runs past its line (to \(row.maxX)) or the line past its cell (to \(cell.maxX))")
@@ -247,7 +247,7 @@ import Testing
         #expect(foot.frame.height == 2 && abs(Double(foot.frame.maxY - row.bounds.height)) < 0.5 && foot.frame.width == row.bounds.width, "the line is at \(foot.frame)")
         #expect(!view.project.newWorkspace.isEnabled && view.project.newWorkspace.why == "The runner creates one workspace at a time")
         transport.release()
-        #expect(await RunnerTabTests.until { view.text.contains("new · running") }, "\(view.text)")
+        #expect(await RunnerTabTests.until { !view.text.contains("creating") }, "\(view.text)")
         #expect(view.project.newWorkspace.isEnabled && view.project.newWorkspace.why == nil)
     }
 
@@ -259,6 +259,162 @@ import Testing
         project.render(page)
         #expect(!project.newWorkspace.isEnabled && project.newWorkspace.why == "harbor has no template yet")
         #expect(project.newWorkspace.tooltip?.text == "harbor has no template yet" && project.newWorkspace.tooltip?.isOn == true)
+    }
+
+    /// The card goes down to the narrowest the window allows (416 pt) whatever the section shows: no
+    /// width it would like (its card's 440 pt, a centred empty state's) holds the window wider.
+    @Test func theNarrowestCardIsReachedWhateverIsShown() async throws {
+        let (view, window, _) = try await Self.listed()
+        var none = WorkspacesModel(person: Self.uday)
+        none.projectsListed(.success(ProjectList(projects: [], total: 0)))
+        guard case let .shown(_, .noProjects(empty)) = none.screen else { Issue.record("no empty state: \(none.screen)"); return }
+        let shown: [(String, () -> Void)] = [
+            ("a list", {}), ("no project", { view.project.renderEmpty(empty) }),
+            ("the card", { view.signedOut() }),
+        ]
+        for (what, show) in shown {
+            show()
+            window.setContentSize(NSSize(width: 1000, height: 640))
+            view.layoutSubtreeIfNeeded()
+            window.setContentSize(NSSize(width: Self.narrowestCard, height: 640))
+            view.layoutSubtreeIfNeeded()
+            #expect(view.frame.width == Self.narrowestCard, "with \(what) shown the card stays \(view.frame.width) pt")
+        }
+    }
+
+    /// The light look's colours that the dark look does not share: any of them left on a view after
+    /// the change is a view that kept the light look.
+    static let lightOnly: [NSColor] = {
+        let dark = Dictionary(uniqueKeysWithValues: Mirror(reflecting: Look.dark).children.compactMap { child in child.label.map { ($0, child.value) } })
+        return Mirror(reflecting: Look.light).children.compactMap { child -> NSColor? in
+            guard let label = child.label, let light = Self.tint(child.value), let other = dark[label].flatMap(Self.tint), light != other else { return nil }
+            return NSColor(light)
+        }
+    }()
+
+    static func tint(_ value: Any) -> Tint? {
+        (value as? Tint) ?? (value as? RGB).map { Tint($0) }
+    }
+
+    /// Every view shown under `root` that still carries the light look: a stored look that is not
+    /// the dark one (anywhere in its class chain), words in a light-only colour, or a light ground.
+    static func keptLight(under root: NSView) -> [String] {
+        var kept: [String] = []
+        func walk(_ view: NSView) {
+            guard !view.isHidden else { return }
+            var mirror: Mirror? = Mirror(reflecting: view)
+            while let current = mirror {
+                for child in current.children where (child.value as? Look).map({ $0 != .dark }) == true {
+                    kept.append("\(type(of: view)).\(child.label ?? "look")")
+                }
+                mirror = current.superclassMirror
+            }
+            if let label = view as? NSTextField {
+                let words = label.attributedStringValue
+                var colours = [label.textColor].compactMap { $0 }
+                words.enumerateAttribute(.foregroundColor, in: NSRange(location: 0, length: words.length)) { value, _, _ in
+                    if let colour = value as? NSColor { colours.append(colour) }
+                }
+                if !words.string.isEmpty, colours.contains(where: { colour in Self.lightOnly.contains(colour) }) {
+                    kept.append("the words \"\(words.string.prefix(24))\"")
+                }
+            }
+            if let ground = view.layer?.backgroundColor, Self.lightOnly.contains(where: { $0.cgColor == ground }) {
+                kept.append("\(type(of: view))'s ground")
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(root)
+        return kept
+    }
+
+    /// The pages a project's view can draw, each from the model: listed, a row chosen, the create row
+    /// open, refused, under way, a stale list under its banner, no workspaces, no template, loading,
+    /// no project, and narrow.
+    static func scenes(_ project: ProjectView) -> [(String, () -> Void)] {
+        let rows = [
+            WorkspaceRow(name: "dock", instance: "harbor-dock", state: .known(.running), owner: "uday"),
+            WorkspaceRow(name: "pier", instance: "harbor-pier", state: .known(.stopped), owner: "uday"),
+            WorkspaceRow(name: "quay", instance: "harbor-quay", state: .known(.running), owner: "ana"),
+        ]
+        func model(_ steps: (inout WorkspacesModel) -> Void = { _ in }) -> WorkspacesModel.Page? {
+            var model = WorkspacesModel(person: Self.uday)
+            let harbor = ProjectSummary(name: "harbor", containerStatus: .known(.running), template: .known(.ready))
+            let request = model.projectsListed(.success(ProjectList(projects: [harbor], total: 1))) ?? 0
+            model.listed(.success(WorkspaceList(project: "harbor", workspaces: rows)), request: request, at: Date())
+            steps(&model)
+            guard case let .shown(_, .project(page)) = model.screen else { return nil }
+            return page
+        }
+        let pages: [(String, WorkspacesModel.Page?)] = [
+            ("listed", model { $0.chooseRow("dock") }),
+            ("the create row", model { $0.beginCreate() }),
+            ("refused", model { model in
+                model.beginCreate()
+                model.type("dock")
+                _ = model.sendCreate()
+                _ = model.created(.failure(.unreachable("lost")))
+            }),
+            ("under way", model { model in
+                model.beginCreate()
+                model.type("new")
+                _ = model.sendCreate()
+            }),
+            ("stale", model { model in
+                let again = model.listAgain()
+                model.listed(.failure(.unreachable("lost")), request: again, at: Date())
+            }),
+            ("no workspaces", Self.page([])),
+            ("no template", Self.page([], template: .missing)),
+        ]
+        var none = WorkspacesModel(person: Self.uday)
+        none.projectsListed(.success(ProjectList(projects: [], total: 0)))
+        var scenes: [(String, () -> Void)] = pages.map { name, page in (name, { if let page { project.render(page) } }) }
+        scenes.append(("loading", { project.renderLoading() }))
+        if case let .shown(_, .noProjects(empty)) = none.screen { scenes.append(("no project", { project.renderEmpty(empty) })) }
+        return scenes
+    }
+
+    /// A change of look reaches every view the project's view can show, found by walking the view
+    /// tree in each of its pages, wide and narrow: drawn in the light look, then changed to the dark.
+    @Test func aChangeOfLookReachesEveryViewTheProjectShows() throws {
+        for width in [900.0, Self.narrowestCard] {
+            let (project, window) = try Self.project(width: width)
+            defer { window.orderOut(nil) }
+            for (name, show) in Self.scenes(project) {
+                project.look = .light
+                show()
+                project.layoutSubtreeIfNeeded()
+                project.look = .dark
+                show()
+                project.layoutSubtreeIfNeeded()
+                project.list.layoutSubtreeIfNeeded()
+                for row in 0 ..< project.list.numberOfRows {
+                    project.list.rowView(atRow: row, makeIfNecessary: true)?.layoutSubtreeIfNeeded()
+                }
+                let kept = Self.keptLight(under: project)
+                #expect(kept.isEmpty, "\(width) pt, \(name): kept the light look: \(kept)")
+            }
+        }
+    }
+
+    /// The section's own states keep no light either: the panel and a list, loading, and the card
+    /// signed out and out of reach.
+    @Test func aChangeOfLookReachesTheWholeSection() async throws {
+        let (listed, _, _) = try await Self.listed()
+        let (loading, _) = try Self.view(Held(RecordedServer([try Exchange("projects")]), holding: "projects"))
+        loading.shown()
+        let (unreached, _) = try Self.view(RecordedServer([]))
+        unreached.shown()
+        #expect(await RunnerTabTests.until { unreached.text.contains("reach") }, "\(unreached.text)")
+        let (signedOut, _) = try Self.view(RecordedServer([]))
+        signedOut.signedOut()
+        for (name, view) in [("listed", listed), ("loading", loading), ("out of reach", unreached), ("signed out", signedOut)] {
+            view.look = .dark
+            view.layoutSubtreeIfNeeded()
+            let kept = Self.keptLight(under: view)
+            #expect(kept.isEmpty, "\(name): kept the light look: \(kept)")
+        }
     }
 
     /// The panel's edge drags it between 200 and 360 pt.

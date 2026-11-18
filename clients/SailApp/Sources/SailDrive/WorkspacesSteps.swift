@@ -154,6 +154,7 @@ extension Driver {
             return (true, "")
         }
         if let wanted = step.chooseRow {
+            shell.window.makeFirstResponder(pane.project.list)
             pane.project.list.choose(wanted)
             return (pane.project.list.chosen == wanted, "chosen: \(pane.project.list.chosen ?? "none")")
         }

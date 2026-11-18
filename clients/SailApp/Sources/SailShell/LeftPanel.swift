@@ -15,8 +15,9 @@ package final class LeftPanel: NSView {
     static let remembered = "leftPanel.width"
 
     var onChoose: @MainActor (String) -> Void = { _ in }
+    /// Its look; a change redraws its words and rows in it.
     var look: Look {
-        didSet { needsDisplay = true }
+        didSet { relook() }
     }
 
     let list: SailList
@@ -30,6 +31,8 @@ package final class LeftPanel: NSView {
     private let mono: LabelFont
     private(set) var widthConstraint: NSLayoutConstraint!
     private var projects: [WorkspacesModel.Project] = []
+    /// What it last showed, drawn again in a new look.
+    private var shown: WorkspacesModel.Panel?
 
     init(look: Look, mono: LabelFont) {
         self.look = look
@@ -79,8 +82,21 @@ package final class LeftPanel: NSView {
         min(max(width, Self.width.least), Self.width.most)
     }
 
+    private func relook() {
+        heading.textColor = NSColor(look.text)
+        list.look = look
+        for (tile, name) in skeletons {
+            tile.look = look
+            name.look = look
+        }
+        projects = []
+        if let shown { render(shown) }
+        needsDisplay = true
+    }
+
     /// Shows `panel`'s projects, its chosen one chosen, and who is signed in.
     func render(_ panel: WorkspacesModel.Panel) {
+        shown = panel
         loading(false)
         emptyLine.isHidden = panel.emptyLine == nil
         emptyLine.attributedStringValue = NSAttributedString(string: panel.emptyLine ?? "", attributes: [

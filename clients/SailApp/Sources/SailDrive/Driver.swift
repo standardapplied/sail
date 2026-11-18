@@ -26,6 +26,7 @@ final class Driver {
     var tokens: Set<String> = []
     var askedAtStart = 0
     private let steps: [Step]
+    private let goesOn: Bool
     let out: URL
     var results: [Result] = []
     var measures: [Measure] = []
@@ -99,6 +100,7 @@ final class Driver {
         self.passkey = passkey
         self.signed = signed
         steps = script.steps
+        goesOn = script.goesOn == true
         self.out = out
         askedAtStart = passkey.asked
     }
@@ -159,8 +161,10 @@ final class Driver {
             results.append(Result(index: index, name: name, ok: ok, skipped: skipped, seconds: seconds, detail: detail))
             save(index: index, name: name)
             Self.say("drive \(index) \(name): \(skipped ? "skipped" : ok ? "ok" : "FAILED") in \(String(format: "%.2f", seconds)) s \(detail)")
-            if !ok { break }
+            if !ok, !goesOn { break }
         }
+        let failed = results.filter { !$0.ok }.map { "\($0.index) \($0.name)" }
+        if !failed.isEmpty { Self.say("drive: \(failed.count) step\(failed.count == 1 ? "" : "s") FAILED: " + failed.joined(separator: ", ")) }
         let withinClaim = madeStacks.map { $0.watcherShare <= MainStacks.claim } ?? true
         let lookCheap = madeStacks.map { $0.averageLook <= MainStacks.computation } ?? true
         let stayedRealTime = madeStacks.map { !$0.demoted } ?? true

@@ -25,7 +25,10 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         + actionsColumn + 150
 
     package var on: @MainActor (Act) -> Void = { _ in }
-    var look: Look
+    /// Its look; a change repaints what it holds, and the next render draws its words in it.
+    var look: Look {
+        didSet { relook() }
+    }
     package let list: SailList
     let title = NSTextField(labelWithString: "")
     let lede = NSTextField(labelWithString: "")
@@ -87,11 +90,12 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         column.spacing = 0
         column.translatesAutoresizingMaskIntoConstraints = false
         addSubview(column)
+        let above = column.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -Self.padding.bottom)
+        above.priority = WorkspacesView.yields
         NSLayoutConstraint.activate([
             column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.padding.sides),
             column.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.padding.sides),
-            column.topAnchor.constraint(equalTo: topAnchor, constant: Self.padding.top),
-            column.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -Self.padding.bottom),
+            column.topAnchor.constraint(equalTo: topAnchor, constant: Self.padding.top), above,
         ])
     }
 
@@ -131,16 +135,38 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         var views: [NSView] = [head, spacer(Self.listGap)]
         if let notice = page.banner { views += [banner(notice), spacer(12)] }
         switch page.body {
-        case .loading: views.append(Self.framed(SkeletonRows(look: look), height: SkeletonRows.height, look: look))
+        case .loading: views.append(loadingList)
         case .unlisted: break
         case let .empty(empty): views.append(Self.framed(emptyState(empty), look: look))
         case let .list(table):
             fill(table)
             frameView.alphaValue = page.stale ? 0.55 : 1
-            count.attributedStringValue = micro(page.stale ? Self.listed(page.listedAt) : "\(table.count) workspace\(table.count == 1 ? "" : "s")")
+            let listed = table.count + (table.creating == nil ? 0 : 1)
+            count.attributedStringValue = micro(page.stale ? Self.listed(page.listedAt) : "\(listed) workspace\(listed == 1 ? "" : "s")")
             views += [frameView, spacer(Self.footGap), foot]
         }
         show(views)
+    }
+
+    private func relook() {
+        list.look = look
+        frameView.look = look
+        field.look = look
+        for button in [listAgain, newWorkspace, newWorkspaceIcon] {
+            button.look = look
+        }
+        for skeleton in Self.found(Skeleton.self, in: loadingWords) {
+            skeleton.look = look
+        }
+        loadingRows.look = look
+        loadingList.look = look
+        buildFoot()
+        if let page { render(page) }
+    }
+
+    private static func found<Found: NSView>(_ kind: Found.Type, in view: NSView) -> [Found] {
+        if let view = view as? Found { return [view] }
+        return view.subviews.flatMap { found(kind, in: $0) }
     }
 
     /// `views` down the column, each spanning it but the spacers.
@@ -156,12 +182,22 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     func renderLoading() {
         page = nil
         centred?.removeFromSuperview()
+        show([loadingWords, spacer(Self.listGap + 11), loadingList])
+    }
+
+    /// Bars for the name and the line under it, made once: a skeleton shows 150 ms after it enters
+    /// the window, so one drawn anew at each redraw (a change of look) would never be seen.
+    private lazy var loadingWords: NSStackView = {
         let words = NSStackView(views: [Skeleton(width: 160, height: 22, look: look), Skeleton(width: 340, height: 8, look: look)])
         words.orientation = .vertical
         words.alignment = .leading
         words.spacing = 14
-        show([words, spacer(Self.listGap + 11), Self.framed(SkeletonRows(look: look), height: SkeletonRows.height, look: look)])
-    }
+        return words
+    }()
+
+    /// The list's skeleton, made once for the same reason.
+    private lazy var loadingRows = SkeletonRows(look: look)
+    private lazy var loadingList = Self.framed(loadingRows, height: SkeletonRows.height, look: look)
 
     /// The name field given the keys with the caret after its name: every create row drawn holds the
     /// one field, so a redraw while typing takes it out of the window and the keys with it.
@@ -194,7 +230,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         state.translatesAutoresizingMaskIntoConstraints = false
         addSubview(state)
         let wide = state.widthAnchor.constraint(equalToConstant: WorkspacesView.cardWidth)
-        wide.priority = .defaultHigh
+        wide.priority = WorkspacesView.yields
         NSLayoutConstraint.activate([
             state.centerXAnchor.constraint(equalTo: centerXAnchor), state.centerYAnchor.constraint(equalTo: centerYAnchor), wide,
             state.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -2 * Self.padding.sides),
@@ -230,7 +266,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     /// The list's entries: Yours (the create row first), then Other people's.
     private func fill(_ table: WorkspacesModel.Table) {
         list.actionsColumn = narrow ? nil : Self.actionsColumn
-        var entries: [SailList.Entry] = [.head("Yours", count: table.yours.count)]
+        let creating = table.creating == nil ? 0 : 1
+        var entries: [SailList.Entry] = [.head("Yours", count: table.yours.count + creating)]
         if let creating = table.creating {
             entries.append(.item(creatingItem(creating)))
         } else if let create = table.create {
@@ -308,6 +345,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
 
     /// The count (or when the list was last listed) at the left, the keys at the right.
     private func buildFoot() {
+        foot.subviews.forEach { $0.removeFromSuperview() }
         var shown: [NSView] = []
         for (key, words) in [("⏎", "Open"), ("⌘N", "New"), ("⌘R", "List again")] {
             shown.append(Keycap(key, look: look, mono: mono))
@@ -410,7 +448,15 @@ final class SkeletonRows: NSView {
     static let words: [(name: Double, place: Double)] = [(64, 104), (48, 88), (80, 120)]
     static let height = RowStyle.groupHeight + Double(words.count) * RowStyle.list.height
 
-    private let look: Look
+    var look: Look {
+        didSet {
+            for bar in bars.joined() {
+                bar.look = look
+            }
+            needsDisplay = true
+        }
+    }
+
     private let bars: [[Skeleton]]
 
     init(look: Look) {

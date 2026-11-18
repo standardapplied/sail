@@ -11,6 +11,9 @@ import SailLook
 @MainActor
 public final class WorkspacesView: NSView {
     static let narrow = 720.0, cardWidth = 440.0
+    /// Below the window's own size priority: a width the section would like never holds the window
+    /// wider than the person made it (a 750 here held the card at 472 pt, not the least 416).
+    static let yields = NSLayoutConstraint.Priority.defaultLow
 
     var client: SailClient?
     var person = WorkspacesModel.Person(handle: "", admin: false, confirmed: false, controlPlane: "") {
@@ -23,6 +26,8 @@ public final class WorkspacesView: NSView {
     var look: Look {
         didSet {
             panel.look = look
+            project.look = look
+            paint()
             render()
         }
     }
@@ -59,7 +64,7 @@ public final class WorkspacesView: NSView {
         tryAgain = SailButton("Try Again", kind: .primary, look: look, target: nil, action: nil)
         super.init(frame: .zero)
         let cardWidth = card.widthAnchor.constraint(equalToConstant: Self.cardWidth)
-        cardWidth.priority = .defaultHigh
+        cardWidth.priority = Self.yields
         for view in [project, card, panel] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
@@ -75,7 +80,14 @@ public final class WorkspacesView: NSView {
         contentLeading.isActive = true
         panel.onChoose = { [weak self] name in self?.choose(name) }
         project.on = { [weak self] act in self?.act(act) }
+        paint()
         render()
+    }
+
+    /// The section's ground, the card's canvas, as the approved frames draw it around the list.
+    private func paint() {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor(look.canvas).cgColor
     }
 
     private var contentLeading: NSLayoutConstraint!

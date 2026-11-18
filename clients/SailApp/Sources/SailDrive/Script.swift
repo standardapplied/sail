@@ -4,6 +4,9 @@ import Foundation
 /// object naming one action; `name` labels it in the report and its saved image.
 struct Script: Decodable {
     let steps: [Step]
+    /// A failed step is recorded and the next one runs: a script whose frames each set their own
+    /// state shows every frame whatever fails, and fails at its end naming every failed step.
+    var goesOn: Bool?
 }
 
 struct Step: Decodable {
@@ -166,7 +169,8 @@ struct Step: Decodable {
     var skeletons: Bool?
     /// The Workspaces row of this name selected and Open pressed: a tab on the runner.
     var open: String?
-    /// The Workspaces row of this name selected, what its button then says told.
+    /// The Workspaces row of this name selected with the list holding the keys (its Open says ⏎),
+    /// what its button then says told.
     var chooseRow: String?
     /// The Workspaces row chosen is the one of this name, within `seconds` (10 by default).
     var listChosen: String?

@@ -1,4 +1,4 @@
-{"steps": [
+{"goesOn": true, "steps": [
   {"name": "w-account", "select": "account"},
   {"name": "w-address", "address": "http://127.0.0.1:7979"},
   {"name": "w-a-passkey", "passkey": "credential"},
