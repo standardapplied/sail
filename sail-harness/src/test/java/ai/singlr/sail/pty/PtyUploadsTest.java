@@ -865,12 +865,19 @@ class PtyUploadsTest {
   @Test
   void aSessionThatExitedIsSweptByTheNextSessionWhenItsRemovalFailed() throws Exception {
     try (var ignored = startHost();
-        var channel = writer("lounge")) {
+        var channel = writer("lounge");
+        var log = new LogCapture()) {
       var stored = (PtyMessage.PutStored) upload(channel, 1, "a", new byte[] {1});
       c.removeExits = 1;
       PtyWire.write(channel, new PtyMessage.Input(1, new byte[] {4}));
       c.awaitFinished(UploadCleanup.REMOVE);
       assertTrue(Files.exists(inRoot(stored.path())), "the failed removal kept the file");
+      assertTrue(
+          log.awaitLine("upload-cleanup-failed")
+              .endsWith(
+                  " reason=exit 1: ln: failed to access '…': No such file or directory;"
+                      + " swept at the next session"),
+          "the failed removal is logged with what it said, and no name");
       c.removeExits = null;
       try (var next = writer("study")) {
         c.awaitFinished(UploadCleanup.SWEEP);

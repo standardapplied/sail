@@ -3977,7 +3977,10 @@ Incus.
   28 `no_space` (no room before the file opens, or under 64 KiB free once a write failed, the
   script printing what is free); a measurement that fails is `failed`. At most 16 uploads are
   under way on the host (`PtyUploads.OPEN_ON_HOST`), else `busy`, which takes nothing of the
-  session's allowance.
+  session's allowance; it is the only bound on uploads under way, none per person or session. Every
+  script is given up at its patience (`UploadCopy.SCRIPT`), its output never read before it ends; a
+  failed commit or removal is logged with the end of what it said on stderr (at most 512 bytes,
+  every quoted path or name taken out), for an operator alone.
 - **U6. Whole or nothing.** One `incus exec` per upload (`UploadCopy.OPEN`) runs as root to make the
   directories, then as the dev user (`setpriv`) creates `.<n>-<name>.part` with `O_EXCL` (`set -C`: a
   link at the name to a regular file, or to nothing, is refused; dash writes through one to a device

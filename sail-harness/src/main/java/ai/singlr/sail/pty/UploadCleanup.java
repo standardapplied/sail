@@ -85,11 +85,15 @@ final class UploadCleanup {
               }
               try {
                 var root = copy.place();
-                if (copy.run(
-                        container, root.asRoot(), REMOVE, root.root(), instanceId, root.rootUid())
-                    != 0) {
+                var ran =
+                    copy.run(
+                        container, root.asRoot(), REMOVE, root.root(), instanceId, root.rootUid());
+                if (ran.status() != 0) {
                   PtySessionHost.log(
-                      "upload-cleanup-failed", "-", instanceId, "swept at the next session");
+                      "upload-cleanup-failed",
+                      "-",
+                      instanceId,
+                      ran.reason() + "; swept at the next session");
                 }
               } finally {
                 if (session != null) {
@@ -117,9 +121,13 @@ final class UploadCleanup {
                 var root = copy.place();
                 var args = new ArrayList<>(List.of(root.root(), root.rootUid()));
                 args.addAll(live.get());
-                if (copy.run(container, root.asRoot(), SWEEP, args.toArray(String[]::new)) != 0) {
+                var ran = copy.run(container, root.asRoot(), SWEEP, args.toArray(String[]::new));
+                if (ran.status() != 0) {
                   PtySessionHost.log(
-                      "upload-sweep-failed", "-", container, "kept until the next session");
+                      "upload-sweep-failed",
+                      "-",
+                      container,
+                      ran.reason() + "; kept until the next session");
                 }
               } finally {
                 lock.unlock();
