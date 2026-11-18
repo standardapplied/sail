@@ -248,6 +248,7 @@ final class Kit {
         case "field": fields()
         case "pill": pills()
         case "spinner": spinners()
+        case "hang": while true { _ = CACurrentMediaTime() }
         case "row": listRows()
         case "sidebar": sidebarRows()
         case "tooltip": tooltips()
