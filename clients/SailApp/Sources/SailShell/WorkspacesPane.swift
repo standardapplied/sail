@@ -77,6 +77,8 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     private var lines: [String] = []
     private var listing = WorkspaceListing()
     private var calls = 0
+    /// Workspaces a person asked made, not yet made: only these hold Make and Open, never a listing.
+    private var making = 0
     private var refreshes = 0
 
     init(look: Look, title: TitleFont, mono: TerminalFonts) {
@@ -157,10 +159,10 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
 
     @objc public func makeWorkspace(_: Any?) {
         let wanted = name.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !busy, let project = projects.titleOfSelectedItem, let client, !wanted.isEmpty else { return }
+        guard making == 0, let project = projects.titleOfSelectedItem, let client, !wanted.isEmpty else { return }
         say(["Making \(wanted) (about 3 s)"])
         make.title = "Making…"
-        run(failing: { self.say($0) }) { () async throws(SailError) in
+        run(byAPerson: true, failing: { self.say($0) }) { () async throws(SailError) in
             let made = try await client.send(.createWorkspace(wanted, project: project))
             self.name.stringValue = ""
             try await self.listWorkspaces(selecting: made.workspace)
@@ -171,7 +173,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     /// Opens the chosen workspace in a tab, in the project it was listed for, its button saying so
     /// meanwhile; pressed again, or during a call, it does nothing.
     @objc public func openSelected(_: Any?) {
-        guard !busy, open.isEnabled, let project = listing.listed, let row = chosen,
+        guard making == 0, open.isEnabled, let project = listing.listed, let row = chosen,
               row.opens(for: person.handle, admin: person.admin) else { return }
         open.setTitle(row.startsWhenOpened ? "Starting…" : "Opening…")
         open.isEnabled = false
@@ -282,32 +284,40 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         tryAgain.isHidden = false
     }
 
-    /// Open, its words and why not; Make, while a name is typed; neither during a call.
+    /// Open, its words and why not; Make, while a name is typed; neither while a workspace a person
+    /// asked for is being made. A listing under way holds neither: it says nothing a person could
+    /// read as why.
     private func enable() {
         open.setTitle(chosen?.startsWhenOpened == true ? "Start and Open" : "Open")
-        open.isEnabled = !busy && chosen?.opens(for: person.handle, admin: person.admin) == true
+        open.isEnabled = making == 0 && chosen?.opens(for: person.handle, admin: person.admin) == true
         let why = body == .listed ? chosen?.notOpened(for: person.handle, admin: person.admin) : nil
         whyNot.stringValue = why ?? ""
         whyNot.isHidden = why == nil
-        if !busy { make.title = "Make" }
-        make.isEnabled = !busy && !name.stringValue.trimmingCharacters(in: .whitespaces).isEmpty
+        if making == 0 { make.title = "Make" }
+        make.isEnabled = making == 0 && !name.stringValue.trimmingCharacters(in: .whitespaces).isEmpty
         refreshButton.isEnabled = client != nil
     }
 
-    /// The pane's one call at a time, and its one busy count: busy from this call on (Open and Make
-    /// off), its failure said by `failing`, Open and Make offered again once it ends.
+    /// The pane's calls and its one busy count: busy from this call on, its failure said by
+    /// `failing`. A call `byAPerson` (making a workspace) holds Open and Make until it ends; a
+    /// listing holds nothing.
     @discardableResult
     private func run(
-        failing: @escaping @MainActor ([String]) -> Void, _ act: @escaping @MainActor () async throws(SailError) -> Void
+        byAPerson person: Bool = false, failing: @escaping @MainActor ([String]) -> Void,
+        _ act: @escaping @MainActor () async throws(SailError) -> Void
     ) -> Task<Void, Never> {
         calls += 1
-        [make, open].forEach { $0.isEnabled = false }
-        return Task { await self.finish(failing: failing, act) }
+        if person { making += 1 }
+        enable()
+        return Task { await self.finish(byAPerson: person, failing: failing, act) }
     }
 
-    private func finish(failing: @MainActor ([String]) -> Void, _ act: @MainActor () async throws(SailError) -> Void) async {
+    private func finish(
+        byAPerson person: Bool, failing: @MainActor ([String]) -> Void, _ act: @MainActor () async throws(SailError) -> Void
+    ) async {
         defer {
             calls -= 1
+            if person { making -= 1 }
             ended += 1
             enable()
         }

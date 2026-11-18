@@ -222,6 +222,28 @@ actor Proxied: Transport {
         #expect(viewer.text.hasSuffix("Your credential is read-only and cannot enter workspaces.\nAsk an admin for a member or admin credential."), "\(viewer.text)")
     }
 
+    /// A listing under way (the pane shown again, the app active again) holds neither Open nor
+    /// Make: it says nothing a person could read as why. Only a workspace being made holds them.
+    @Test func aListingUnderWayHoldsNeitherOpenNorMake() async throws {
+        let exchanges = [try Exchange("projects"), try Exchange("workspaces")]
+        let pane = try await Self.listed(exchanges, admin: true)
+        pane.name.stringValue = "new"
+        pane.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
+        #expect(pane.open.isEnabled && pane.make.isEnabled, "listed, Open and Make are offered")
+        let transport = Held(RecordedServer(exchanges), holding: "projects")
+        pane.client = SailClient(transport: transport, token: "tok")
+
+        let listing = Task { await pane.refresh() }
+
+        #expect(await Self.until { transport.routes.contains { $0.contains("projects") } }, "the listing asked nothing")
+        #expect(pane.busy)
+        #expect(pane.open.isEnabled && pane.make.isEnabled, "a listing under way held Open or Make")
+        #expect(pane.make.title == "Make")
+        transport.release()
+        await listing.value
+        #expect(pane.open.isEnabled && pane.make.isEnabled)
+    }
+
     /// A pane signed in as `handle`, its projects and workspaces answered by `exchanges`, listed.
     static func listed(
         _ exchanges: [Exchange], as handle: String = "uday", admin: Bool = false, answering502 route: String? = nil
