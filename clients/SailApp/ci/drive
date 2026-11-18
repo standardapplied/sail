@@ -118,3 +118,7 @@ PY
     exit "$status"
   }
 done
+# The third script measures nothing: its sampler never runs, and its last line says so rather
+# than judging the CPU share of a watcher that had no period to run in.
+grep -qF "the main thread's sampler never ran: no step measured a wait" "$out/third-output.txt" \
+  || { echo "ci/drive: the third script measured nothing, yet its last line did not say its sampler never ran" >&2; exit 1; }

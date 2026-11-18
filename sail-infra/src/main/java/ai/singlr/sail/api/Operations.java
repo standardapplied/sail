@@ -86,6 +86,15 @@ public interface Operations extends LocalLaneOperations {
   /**
    * Makes workspace {@code name} of {@code project}, the caller's own, from its current template.
    */
+  /** Project {@code project}'s template, as {@link TemplateResponse} says it. */
+  Result<TemplateResponse> template(String project);
+
+  /**
+   * Builds project {@code project}'s template as the caller, with their own git tokens, or joins
+   * the build under way: answered once it started, or at once when its version is current.
+   */
+  Result<TemplateResponse> buildTemplate(String project);
+
   Result<WorkspaceCreateResponse> createWorkspace(String project, String name);
 
   /** Starts workspace {@code name} of {@code project}, the caller's or, for an admin, anyone's. */

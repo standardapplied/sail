@@ -384,6 +384,13 @@ name `workspace delete`. Two creates of one name create one workspace and refuse
 different names build a missing or stale template once and both clone it. `delete` asks, once it
 finds the workspace, before it removes it and its uncommitted work.
 
+A `create` that meets another build of the template, from the command line or the app, waits up
+to a minute and is then refused as busy, naming the build's step of 20 and how long it has run.
+An admin can build the template from the app as well (`POST /v1/projects/web/template:build`, with
+the admin's own stored git tokens); either build is seen by the other, and a second request joins
+the one under way. A build cut short by a restart of sail-api is stripped of its builder's
+credentials and stopped, and building again picks up at the step that did not finish.
+
 An edited definition is built as the next version at the next `create`. Workspaces created from an
 older version keep running on it. A stale template is converged on its disk, as `apply` converges
 a container, so what the definition dropped stays in it.

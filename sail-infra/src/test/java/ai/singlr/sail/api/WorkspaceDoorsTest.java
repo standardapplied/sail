@@ -19,12 +19,14 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.TestOwners;
 import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayOutputStream;
@@ -633,6 +635,85 @@ class WorkspaceDoorsTest {
       assertEquals(
           "Workspace 'try' has no owner, so only an admin may enter it.", mainRefuses.getMessage());
       assertEquals(Optional.of("client"), node.nodeFde());
+    }
+  }
+
+  /**
+   * A template is built by an admin; on a node, by its own person alone, and every other person is
+   * told the templates of their workspaces are built on main.
+   */
+  @Test
+  void onANodeOnlyItsOwnPersonBuildsATemplateAndOnMainOnlyAnAdmin() throws Exception {
+    try (var db = Sqlite.open(tempDir.resolve("roster.db"))) {
+      new SchemaManager(db).migrate();
+      var fdes = new FdeStore(db);
+      fdes.add("client", null, "client@x", "admin");
+      fdes.add("eng", null, "eng@x", "admin");
+      fdes.add("ana", null, "ana@x", "member");
+      var catalog = new ProjectStore(db);
+      Acting.system(() -> catalog.upsert(ACME));
+      var node =
+          new RoleRule(() -> new SyncConfig("node", "sail@main", "client", "client-box"), fdes);
+      var main = new RoleRule(() -> new SyncConfig("main", null, "client", "main"), fdes);
+      var engOnNode = node.principal(RoleRule.Credential.token("eng", "admin")).orElseThrow();
+      var clientOnNode = node.principal(RoleRule.Credential.token("client", "admin")).orElseThrow();
+      var anaOnMain = main.principal(RoleRule.Credential.token("ana", "member")).orElseThrow();
+
+      Door onTheNode =
+          () -> {
+            WorkspaceDoors.requireBuild(catalog, "acme", "client");
+            return null;
+          };
+      Door onMain =
+          () -> {
+            WorkspaceDoors.requireBuild(catalog, "acme", null);
+            return null;
+          };
+
+      var capped = refused(engOnNode, onTheNode);
+      Actor.call(clientOnNode, onTheNode::run);
+      var member = refused(anaOnMain, onMain);
+
+      assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, capped.failure().errorCode());
+      assertEquals(
+          "This box is client's node, where only client builds a template; acme's template for"
+              + " your workspaces is built on main.",
+          capped.getMessage());
+      assertEquals(
+          "Templates are built on main, where your workspaces are created.",
+          capped.failure().remedy().plain());
+      assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, member.failure().errorCode());
+      assertEquals("Only an admin builds acme's template.", member.getMessage());
+      assertEquals("Ask an admin to build it.", member.failure().remedy().plain());
+    }
+  }
+
+  /**
+   * Access's table says who builds a template: an admin. A node's own person who is a member is
+   * refused on their own node as on main, in the same sentence, not sent to main.
+   */
+  @Test
+  void aNodesOwnPersonWhoIsAMemberIsRefusedAsAMemberIsOnMain() throws Exception {
+    try (var db = Sqlite.open(tempDir.resolve("keeper.db"))) {
+      new SchemaManager(db).migrate();
+      var fdes = new FdeStore(db);
+      fdes.add("client", null, "client@x", "member");
+      var catalog = new ProjectStore(db);
+      Acting.system(() -> catalog.upsert(ACME));
+      var node =
+          new RoleRule(() -> new SyncConfig("node", "sail@main", "client", "client-box"), fdes);
+      var keeper = node.principal(RoleRule.Credential.token("client", "member")).orElseThrow();
+
+      var refused =
+          refused(
+              keeper,
+              () -> {
+                WorkspaceDoors.requireBuild(catalog, "acme", "client");
+                return null;
+              });
+
+      assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, refused.failure().errorCode());
+      assertEquals("Only an admin builds acme's template.", refused.getMessage());
     }
   }
 

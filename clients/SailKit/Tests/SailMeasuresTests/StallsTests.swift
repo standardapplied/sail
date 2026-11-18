@@ -194,6 +194,16 @@ import Testing
         #expect(abs(MachineShare.starved(in: Self.wait, looks: Self.looks(processPerLook: 0.015)) - 0.1) < 1e-9, "half the busy CPU was ours")
         #expect(MachineShare.starved(in: Self.wait, looks: Self.looks(processPerLook: 0.05)) == 0, "all of it was")
     }
+
+    /// The main run loop's modes as samples read them, counted, the most seen first: whether the
+    /// loop was in a mode that runs the main queue's blocks; a sample that found it running none
+    /// is said so.
+    @Test func theMainRunLoopsModesAreCounted() {
+        let seen: [String?] = ["kCFRunLoopDefaultMode", "NSEventTrackingRunLoopMode", "kCFRunLoopDefaultMode", nil]
+        #expect(MachineShare.modes(seen) == "kCFRunLoopDefaultMode at 2, NSEventTrackingRunLoopMode at 1, not running at 1")
+        #expect(MachineShare.modes([]) == "no sample")
+    }
+
 }
 
 /// A flood is judged on its output's wait and the main thread's hold, never on a gap between

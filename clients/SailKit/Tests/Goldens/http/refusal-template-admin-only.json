@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/projects/lighthouse/template:build"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Ask an admin to build it.",
+        "code": "forbidden_admin_only",
+        "field_errors": [],
+        "message": "Only an admin builds lighthouse's template."
+      },
+      "schema_version": 1
+    },
+    "status": 403
+  }
+}

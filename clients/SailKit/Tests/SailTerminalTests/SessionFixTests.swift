@@ -426,6 +426,28 @@ import Testing
         session.close()
     }
 
+    /// The thread that reads the host's frames and feeds the screen is named, so a sampler can find
+    /// it, and the session says what quality of service it runs at. (Foundation on Linux answers a
+    /// thread's name with the process's, so the name is checked where it is told: on macOS.)
+    @Test func theReaderThreadIsNamedAndItsQualityKnown() async throws {
+        let (_, session, peer, _) = try await attachedLocally()
+        let names = Mutex<[String]>([])
+        let (told, sink) = AsyncStream.makeStream(of: Void.self)
+        session.onScreenChange { _ in
+            names.withLock { $0.append(Thread.current.name ?? "") }
+            sink.yield()
+        }
+        var tells = told.makeAsyncIterator()
+        try peer.send(output("named"))
+        _ = await tells.next()
+        #if canImport(Darwin)
+        #expect(names.withLock { $0 }.allSatisfy { $0 == TerminalSession.readerName }, "the change was told on \(names.withLock { $0 })")
+        #endif
+        #expect(!names.withLock { $0 }.isEmpty)
+        #expect(session.readerQuality != nil, "the session does not know its reader's quality of service")
+        session.close()
+    }
+
     /// MINOR 2: a resize's in-band size report goes out at once.
     @Test func aResizeAnswersAnInBandSizeReportAtOnce() async throws {
         let (host, session, peer, watch) = try await attachedLocally()

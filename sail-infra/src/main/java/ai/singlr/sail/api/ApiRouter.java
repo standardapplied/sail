@@ -15,6 +15,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.FilePicker;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.TemplateBuildService;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.SpecStore;
 import com.sun.net.httpserver.HttpExchange;
@@ -259,6 +260,16 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             reads,
             call -> ApiResponse.from(operations.workspaces(call.project()))),
         route(POST, PROJECT + "/workspaces", enterWorkspace, this::createWorkspace),
+        route(
+            GET,
+            PROJECT + "/template",
+            reads,
+            call -> ApiResponse.from(operations.template(call.project()))),
+        route(
+            POST,
+            PROJECT + "/template:build",
+            Gate.decides(Action.BUILD_TEMPLATE),
+            call -> building(operations.buildTemplate(call.project()))),
         route(
             POST,
             PROJECT + "/workspaces/{workspace}/start",
@@ -698,6 +709,14 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     operations.projectFiles(call.project());
     sharedPath(call, call.project());
     throw methodNotAllowed();
+  }
+
+  /** A build answered: accepted while it runs, plain when its version was current. */
+  private static ApiResponse building(Result<TemplateResponse> answered) {
+    return answered instanceof Result.Success<TemplateResponse> success
+            && success.value().status().state() == TemplateBuildService.State.BUILDING
+        ? ApiResponse.fromAccepted(answered)
+        : ApiResponse.from(answered);
   }
 
   /** {@code POST /v1/projects/{p}/workspaces} with {@code {"name": ...}}: the caller's own. */

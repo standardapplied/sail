@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.concurrent.TimeoutException;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
@@ -38,6 +39,13 @@ public final class WorkspaceTemplate {
   static final String INPUTS_KEY = "user.sail.template.inputs";
   static final String LAST_KEY = "user.sail.template.last";
 
+  /**
+   * Set on a template whose build failed or was cut short and that could not be shown to hold none
+   * of its builder's tokens: no build ever resumes on what it holds. Workspaces clone a version's
+   * snapshot, made only once its build's strip and check passed, never the template as it stands.
+   */
+  static final String UNPROVEN_KEY = "user.sail.template.unproven";
+
   private static final int MAX_INSTANCE_NAME = 63;
   private static final Pattern VERSION = Pattern.compile("v([1-9][0-9]{0,8})");
 
@@ -51,24 +59,54 @@ public final class WorkspaceTemplate {
   }
 
   /**
+   * What is told of a build the lane runs, under the template's lock: that it started, and how it
+   * ended, its last step (strip, check, stop, record and snapshot) included.
+   */
+  public interface Recorder {
+    /** Told nothing. */
+    Recorder NONE = new Recorder() {};
+
+    /** A build begins, the lock held. */
+    default void started() {}
+
+    /** The build ended with {@code template} current. */
+    default void built(Template template) {}
+
+    /** The build failed with {@code failure}, which is thrown after this returns. */
+    default void failed(Exception failure) {}
+  }
+
+  /**
    * What a project's template is built from on this box: the base profile's pool ({@code host.yaml}
    * names it), the digest of the definition and key a build provisions from ({@link
-   * ProjectProvisioner#inputs}), whether the catalog holds a project by a name, the build, and the
-   * tokens the build is given, which its check searches the template for; {@link #toString} never
-   * shows them.
+   * ProjectProvisioner#inputs}), whether the catalog holds a project by a name, the build, the
+   * tokens the build is given, which its check searches the template for ({@link #toString} never
+   * shows them), and what is told of a build ({@link Recorder}).
    */
   public record Source(
       String basePool,
       String inputs,
       Predicate<String> held,
       Build build,
-      Collection<String> tokens) {
+      Collection<String> tokens,
+      Recorder recorder) {
     public Source {
       Objects.requireNonNull(basePool, "basePool");
       Objects.requireNonNull(inputs, "inputs");
       Objects.requireNonNull(held, "held");
       Objects.requireNonNull(build, "build");
       tokens = List.copyOf(tokens);
+      Objects.requireNonNull(recorder, "recorder");
+    }
+
+    /** A source whose builds are told to no one. */
+    public Source(
+        String basePool,
+        String inputs,
+        Predicate<String> held,
+        Build build,
+        Collection<String> tokens) {
+      this(basePool, inputs, held, build, tokens, Recorder.NONE);
     }
 
     @Override
@@ -158,7 +196,7 @@ public final class WorkspaceTemplate {
     if (found.isPresent()
         && !(found.get().kind() instanceof BoxInstances.Template(var of)
             && of.equals(config.name()))) {
-      throw new IllegalStateException(
+      throw Remedied.state(
           "Instance '"
               + template
               + "' carries no "
@@ -167,7 +205,11 @@ public final class WorkspaceTemplate {
               + config.name()
               + ", so it is not "
               + config.name()
-              + "'s template and nothing is built into it.");
+              + "'s template and nothing is built into it.",
+          Remedy.of(
+              "Move it aside, so the next build makes the template: ",
+              Remedy.program("incus", "rename", template, template + "-aside"),
+              "."));
     }
     var pool = found.isPresent() ? found.get().pool() : choose(zfs, source.basePool());
     if (!zfs.contains(pool)) {
@@ -208,26 +250,36 @@ public final class WorkspaceTemplate {
                     .max()
                     .orElse(0)
                 + 1);
-    build(source, project, template, pool, found);
-    var recorded =
-        new ContainerConfig(shell, locks)
-            .set(
-                template,
-                List.of(
-                    CURRENT_KEY + "=" + version,
-                    INPUTS_KEY + "=" + source.inputs(),
-                    LAST_KEY + "=" + version));
-    if (!recorded.ok()) {
-      throw new IOException(
-          "Failed to record "
-              + version
-              + " as "
-              + project
-              + "'s current template, so the version before stays current: "
-              + recorded.reason());
+    source.recorder().started();
+    try {
+      var unproven = found.flatMap(i -> i.key(UNPROVEN_KEY)).isPresent();
+      var from = unproven ? rollBack(template, versions, found.get()) : found;
+      build(source, project, template, pool, from, from.isEmpty() || unproven);
+      var recorded =
+          new ContainerConfig(shell, locks)
+              .set(
+                  template,
+                  List.of(
+                      CURRENT_KEY + "=" + version,
+                      INPUTS_KEY + "=" + source.inputs(),
+                      LAST_KEY + "=" + version));
+      if (!recorded.ok()) {
+        throw new IOException(
+            "Failed to record "
+                + version
+                + " as "
+                + project
+                + "'s current template, so the version before stays current: "
+                + recorded.reason());
+      }
+      new SnapshotManager(shell).create(template, version);
+      var built = new Template(project, template, version, source.inputs(), pool, true);
+      source.recorder().built(built);
+      return built;
+    } catch (Exception failure) {
+      source.recorder().failed(failure);
+      throw failure;
     }
-    new SnapshotManager(shell).create(template, version);
-    return new Template(project, template, version, source.inputs(), pool, true);
   }
 
   /**
@@ -255,11 +307,44 @@ public final class WorkspaceTemplate {
     }
   }
 
+  /**
+   * {@code project}'s current template as Incus has it now, read without its lock, so a read never
+   * waits on a build: empty when it has none, or on a box with no ZFS pool.
+   */
+  public Optional<Template> peek(String project)
+      throws IOException, InterruptedException, TimeoutException {
+    return recorded(project, nameOf(project), zfsPools(observer));
+  }
+
+  /**
+   * Each project's current template on this box, by project, as {@link #peek} reads one: Incus
+   * listed once, and each template's versions.
+   */
+  public Map<String, Template> peekAll()
+      throws IOException, InterruptedException, TimeoutException {
+    var zfs = zfsPools(observer);
+    var all = new TreeMap<String, Template>();
+    for (var instance : new BoxInstances(observer).all()) {
+      if (instance.kind() instanceof BoxInstances.Template(var project)
+          && instance.name().equals(nameOf(project))) {
+        recorded(project, Optional.of(instance), zfs)
+            .ifPresent(current -> all.put(project, current));
+      }
+    }
+    return all;
+  }
+
   private Optional<Template> recorded(String project, String template, List<String> zfs)
       throws IOException, InterruptedException, TimeoutException {
+    return recorded(project, new BoxInstances(observer).named(template), zfs);
+  }
+
+  private Optional<Template> recorded(
+      String project, Optional<BoxInstances.Instance> named, List<String> zfs)
+      throws IOException, InterruptedException, TimeoutException {
+    var template = nameOf(project);
     var found =
-        new BoxInstances(observer)
-            .named(template)
+        named
             .filter(i -> i.kind() instanceof BoxInstances.Template(var of) && of.equals(project))
             .filter(i -> zfs.contains(i.pool()));
     var version = found.flatMap(i -> i.key(CURRENT_KEY));
@@ -289,7 +374,8 @@ public final class WorkspaceTemplate {
       String project,
       String template,
       String pool,
-      Optional<BoxInstances.Instance> found)
+      Optional<BoxInstances.Instance> found,
+      boolean fresh)
       throws Exception {
     var containers = new ContainerManager(shell);
     var startedHere = found.isEmpty() || !(found.get().state() instanceof ContainerState.Running);
@@ -302,14 +388,16 @@ public final class WorkspaceTemplate {
           .into(
               new ProjectProvisioner.Instance(
                   template, Optional.of(pool), Map.of(BoxInstances.TEMPLATE_OF_KEY, project)),
-              found.isEmpty());
+              fresh);
       WorkspaceCredentials.strip(shell, template);
       WorkspaceCredentials.requireNone(shell, template, source.tokens());
     } catch (Exception failure) {
       try {
         WorkspaceCredentials.strip(shell, template);
-      } catch (IOException | TimeoutException stripping) {
-        failure.addSuppressed(stripping);
+        WorkspaceCredentials.requireNone(shell, template, source.tokens());
+      } catch (IOException | TimeoutException unproven) {
+        failure.addSuppressed(unproven);
+        markUnproven(shell, locks, template).ifPresent(failure::addSuppressed);
       }
       if (startedHere) {
         try {
@@ -324,17 +412,56 @@ public final class WorkspaceTemplate {
   }
 
   /**
+   * {@code found}, a template marked {@link #UNPROVEN_KEY}, set back to what was last shown to hold
+   * no one's token: its newest version's snapshot, restored, the mark gone with it; or, with no
+   * version to restore, deleted, so the build launches it anew. Answers the template to build into,
+   * empty when it was deleted.
+   */
+  private Optional<BoxInstances.Instance> rollBack(
+      String template, List<Integer> versions, BoxInstances.Instance found)
+      throws IOException, InterruptedException, TimeoutException {
+    var containers = new ContainerManager(shell);
+    if (found.state() instanceof ContainerState.Running) {
+      containers.stop(template);
+    }
+    var newest = versions.stream().mapToInt(Integer::intValue).max();
+    if (newest.isEmpty()) {
+      var deleted = shell.exec(List.of("incus", "delete", "--force", template));
+      if (!deleted.ok()) {
+        throw new IOException(
+            "Could not delete " + template + ", which may hold a token: " + deleted.reason());
+      }
+      return Optional.empty();
+    }
+    new SnapshotManager(shell).restore(template, "v" + newest.getAsInt());
+    var cleared = new ContainerConfig(shell, locks).set(template, List.of(UNPROVEN_KEY + "="));
+    if (!cleared.ok()) {
+      throw new IOException(
+          "Could not clear " + UNPROVEN_KEY + " on " + template + ": " + cleared.reason());
+    }
+    return new BoxInstances(observer).named(template);
+  }
+
+  /** Marks {@code template} {@link #UNPROVEN_KEY}; the failure to, when it could not. */
+  static Optional<IOException> markUnproven(ShellExec shell, Path locks, String template)
+      throws InterruptedException {
+    try {
+      var marked = new ContainerConfig(shell, locks).set(template, List.of(UNPROVEN_KEY + "=1"));
+      return marked.ok()
+          ? Optional.empty()
+          : Optional.of(new IOException("Could not mark " + template + ": " + marked.reason()));
+    } catch (IOException | TimeoutException e) {
+      return Optional.of(new IOException("Could not mark " + template, e));
+    }
+  }
+
+  /**
    * The ZFS pools Incus has; refused before anything changes on a box with none (W8), naming the
    * command that adds one.
    */
   static List<String> requireZfs(ShellExec observer)
       throws IOException, InterruptedException, TimeoutException {
-    var zfs =
-        new IncusStorage(observer)
-            .pools().stream()
-                .filter(pool -> HostYaml.BACKEND_ZFS.equals(pool.driver()))
-                .map(IncusStorage.Pool::name)
-                .toList();
+    var zfs = zfsPools(observer);
     if (zfs.isEmpty()) {
       throw Remedied.state(
           "This box has no ZFS pool, and a workspace is a ZFS clone of its project's template.",
@@ -344,6 +471,15 @@ public final class WorkspaceTemplate {
               ", or with --pool-file-size <size> in place of --disk to try ZFS in a file."));
     }
     return zfs;
+  }
+
+  private static List<String> zfsPools(ShellExec observer)
+      throws IOException, InterruptedException, TimeoutException {
+    return new IncusStorage(observer)
+        .pools().stream()
+            .filter(pool -> HostYaml.BACKEND_ZFS.equals(pool.driver()))
+            .map(IncusStorage.Pool::name)
+            .toList();
   }
 
   /**
