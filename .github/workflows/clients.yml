@@ -379,10 +379,7 @@ jobs:
         id: render-base
         if: ${{ !cancelled() && !inputs.release }}
         run: |
-          case "$GITHUB_EVENT_NAME" in
-            push | pull_request) echo "sha=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT" ;;
-            *) echo "sha=$(git merge-base origin/main HEAD)" >> "$GITHUB_OUTPUT" ;;
-          esac
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Keep main's renderer bench, by its commit and the bench's sources
         if: ${{ !cancelled() && !inputs.release }}
