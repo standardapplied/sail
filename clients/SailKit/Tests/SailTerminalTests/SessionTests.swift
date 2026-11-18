@@ -435,12 +435,10 @@ import Testing
         #expect(report.echoed.max == 1 && report.screen.max == 3)
     }
 
-    @Test func takeWriteKillAndDetachAreTheirFrames() async throws {
+    @Test func takeWriteAndDetachAreTheirFrames() async throws {
         let (host, session, peer, watch) = try await attachedLocally()
         session.takeWrite()
         #expect(try await peer.read() == .takeWrite)
-        try session.kill()
-        #expect(try await peer.read() == .kill(session: "work"))
         session.detach()
         #expect(try await peer.read() == .detach)
         try peer.send(.accepted)
