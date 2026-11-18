@@ -63,6 +63,7 @@ extension Door {
                 try await self.kill(session, timeout: seconds)
                 return .ended
             } catch {
+                if case .timedOut = error { return .unconfirmed([said]) }
                 return await self.outcome(of: error, ending: session, timeout: seconds)
             }
         }

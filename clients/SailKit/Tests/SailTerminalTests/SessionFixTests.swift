@@ -332,6 +332,18 @@ import Testing
         try killer.send(.accepted)
     }
 
+    /// The end's own reads time out with the limit too, and may do so first, on a busy machine:
+    /// the host not answering is said the same either way. A limit of 1.5 s reads for 1 s, so here
+    /// the read times out first.
+    @Test func aKillWhoseReadTimesOutIsSaidAsTheHostNotAnswering() async throws {
+        let host = try FakeHost()
+        let ended = Task { await Door.local(host.address).end("work", within: .milliseconds(1500)) }
+        let killer = try await host.accept()
+        try await killer.welcome()
+        #expect(try await killer.read() == .kill(session: "work"))
+        #expect(await ended.value == .unconfirmed(["This Mac's terminal host did not answer within 1 s."]))
+    }
+
     static func refuseTheKill(at host: FakeHost, saying words: String, listing: [SessionInfo]) async throws {
         let killer = try await host.accept()
         try await killer.welcome()
