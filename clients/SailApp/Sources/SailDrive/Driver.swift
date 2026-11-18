@@ -461,7 +461,7 @@ final class Driver {
         proven.map(\.told).filter { !excused.contains($0) }.forEach { excused.append($0) }
         let evidence = (proven.isEmpty
             ? "no run of \(MachineShare.fewestLooks) looks proved it starved (\(seen) looks in the wait)"
-            : proven.map(\.told).joined(separator: "; ")) + "; the main run loop in " + MachineShare.modes(in: wait, looks: looks)
+            : proven.map(\.told).joined(separator: "; ")) + "; the main run loop's mode, " + mainStacks.modes(in: wait)
         return (ours, "waited \(Self.ms((wait.length - tick) * 1000)) ms, the drive's own thread held \(Self.ms(ownHeld * 1000)) ms of it, "
             + "the main thread runnable without CPU on a machine with none idle \(Self.ms(starved * 1000)) ms of it (\(evidence)), ours \(Self.ms(ours)) ms")
     }
