@@ -397,6 +397,19 @@ import Testing
         #expect(harness.view.visibleText.contains("hello"), "drawn as it arrived, before the next refresh")
     }
 
+    /// Whether the display tells presentation times outlives a latency reset: a step's state after a
+    /// reset, before the next present, still lists its frames where the display does tell times.
+    @Test func presentsToldWithATimeAreCountedOverTheViewsLife() {
+        let marks = ViewMarks()
+        marks.committed(frame: 1, read: 1.0, target: 1.016)
+        marks.presented(frame: 1, at: 0)
+        #expect(marks.presentsToldWithATime == 0, "a present told with no time")
+        marks.committed(frame: 2, read: 1.02, target: 1.033)
+        marks.presented(frame: 2, at: 1.04)
+        marks.reset()
+        #expect(marks.presentsToldWithATime == 1 && marks.figures.reportedPresents == 0)
+    }
+
     /// A key whose echo came in the second of two changes one wake carries is put to that change:
     /// the wake marks its newest change too, so the echo is shown by the frame that reads them,
     /// never held for a later, unrelated output.

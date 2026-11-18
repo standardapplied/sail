@@ -293,6 +293,11 @@ import Testing
 
 /// A gated figure's verdict names it first, and a series' p95 tail is counted by nearest rank.
 @Suite struct VerdictTests {
+    @Test func aFractionalLimitIsPrintedAsItIs() {
+        #expect(Verdict.of("x", milliseconds: 0.75, limit: 0.5).said == "missed: x 0.75 ms, over its 0.5 ms limit")
+        #expect(Verdict.of("x in references", value: 4.2, limit: 4.62, unit: "").said == "within its budget: x in references 4.20, limit 4.62")
+    }
+
     @Test func aMissedBudgetIsNamedFirstWithItsLimit() {
         let missed = Verdict.of("full redraw 200x60 cpu p95", milliseconds: 5.245, limit: 4)
         #expect(!missed.met && missed.said == "missed: full redraw 200x60 cpu p95 5.25 ms, over its 4 ms limit")
@@ -303,6 +308,63 @@ import Testing
 
     @Test func theP95LeavesItsTailOfTheSharedCount() {
         #expect(Sampled.count == 400 && Sampled.tail(of: Sampled.count) == 20 && Sampled.tail(of: 300) == 15 && Sampled.tail(of: 54) == 2)
+    }
+}
+
+/// A redraw judged against the machine's speed at that moment: each sample over the reference timed
+/// just before it. Made-up samples: a mid runner's redraw of 1.4 ms beside a 0.42 ms loop.
+@Suite struct SpeedGateTests {
+    static let gate = SpeedGate(name: "full redraw 200x60 cpu", ratioLimit: 4.0, gatesMedian: true)
+    static let references = Array(repeating: 0.42, count: 400)
+    static let work = (0 ..< 400).map { 1.4 + (($0 % 10 == 0) ? 1.9 : 0) }
+
+    @Test func aRunnerTwiceAsSlowPassesAndSaysTheAbsoluteFigure() {
+        let judged = Self.gate.judge(work: Self.work.map { $0 * 2 }, references: Self.references.map { $0 * 2 })
+        #expect(judged.met, "\(judged.said)")
+        #expect(judged.said.hasPrefix("within its budget: full redraw 200x60 cpu paired p50 in references 3.33, limit 4"), "\(judged.said)")
+        #expect(judged.said.contains("full redraw 200x60 cpu p95 6.60 ms against the 4 ms budget for a person's Mac (reported)"), "\(judged.said)")
+        #expect(judged.figures["full redraw 200x60 cpu reference p50 ms"] == 0.84)
+    }
+
+    @Test func aRedrawThirtyPercentHeavierFailsOnTheRatioNamingIt() {
+        let judged = Self.gate.judge(work: Self.work.map { $0 * 1.3 }, references: Self.references)
+        #expect(!judged.met)
+        #expect(judged.said.hasPrefix("missed: full redraw 200x60 cpu paired p50 in references 4.33, over its 4 limit"), "\(judged.said)")
+    }
+
+    @Test func aRunnerSlowedOnlyInMemoryFailsAndItsLoopIsSeenNormal() {
+        let judged = Self.gate.judge(work: Self.work.map { $0 * 1.5 }, references: Self.references)
+        #expect(!judged.met && judged.said.contains("reference p50 0.42 ms"), "\(judged.said)")
+    }
+
+    @Test func aTransientSlowdownOfASampleAndItsReferenceCancels() {
+        var work = Self.work, references = Self.references
+        for index in stride(from: 0, to: 400, by: 7) {
+            work[index] *= 3
+            references[index] *= 3
+        }
+        let judged = Self.gate.judge(work: work, references: references)
+        #expect(judged.met && abs((judged.figures["full redraw 200x60 cpu paired p50 in references"] ?? 0) - 1.4 / 0.42) < 1e-9, "\(judged.said)")
+    }
+
+    @Test func theHardCeilingFailsOnAnyRunner() {
+        let judged = Self.gate.judge(work: Self.work.map { $0 * 6 }, references: Self.references.map { $0 * 6 })
+        #expect(!judged.met && judged.said.hasPrefix("missed: full redraw 200x60 cpu p95 19.80 ms, over its 8 ms hard ceiling"), "\(judged.said)")
+    }
+
+    @Test func untilItsRatioIsSetTheAbsoluteBudgetGates() {
+        let unset = SpeedGate(name: "full redraw 200x60 cpu", ratioLimit: nil, gatesMedian: true)
+        let judged = unset.judge(work: Self.work.map { $0 * 1.3 }, references: Self.references)
+        #expect(!judged.met && judged.said.hasPrefix("missed: full redraw 200x60 cpu p95 4.29 ms, over its 4 ms limit"), "\(judged.said)")
+        #expect(judged.said.contains("full redraw 200x60 cpu paired p50 in references 4.33 (reported, its limit not yet set from data)"), "\(judged.said)")
+        #expect(unset.judge(work: Self.work, references: Self.references).met)
+    }
+
+    @Test func aMissingFigureFails() {
+        #expect(!Self.gate.judge(work: [], references: []).met)
+        #expect(!Self.gate.judge(work: [1, 2], references: [0.4]).met)
+        let zero = Self.gate.judge(work: [1, 2], references: [0.4, 0])
+        #expect(!zero.met && zero.said == "missed: full redraw 200x60 cpu: a sample without its reference, or none")
     }
 }
 

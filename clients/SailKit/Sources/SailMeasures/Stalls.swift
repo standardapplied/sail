@@ -229,13 +229,16 @@ public enum Sampled {
 }
 
 /// A figure against its limit, in words that name it first: "missed: …, over its … limit" or
-/// "within its budget: …, limit …", so a failed step says what it missed before anything else.
+/// "within its budget: …, limit …", so a failed step says what it missed before anything else. The
+/// limit is printed as it is (0.5, 4.62), the figure to two places.
 public enum Verdict {
-    public static func of(_ name: String, milliseconds: Double, limit: Double) -> (met: Bool, said: String) {
-        let met = milliseconds <= limit
-        return (
-            met, met ? String(format: "within its budget: %@ %.2f ms, limit %.0f ms", name, milliseconds, limit)
-                : String(format: "missed: %@ %.2f ms, over its %.0f ms limit", name, milliseconds, limit)
-        )
+    public static func of(_ name: String, milliseconds: Double, limit: Double, bound: String = "limit") -> (met: Bool, said: String) {
+        of(name, value: milliseconds, limit: limit, unit: "ms", bound: bound)
+    }
+
+    public static func of(_ name: String, value: Double, limit: Double, unit: String, bound: String = "limit") -> (met: Bool, said: String) {
+        let met = value <= limit, unit = unit.isEmpty ? "" : " " + unit
+        let figure = String(format: "%.2f", value) + unit, bounded = String(format: "%g", limit) + unit
+        return (met, met ? "within its budget: \(name) \(figure), \(bound) \(bounded)" : "missed: \(name) \(figure), over its \(bounded) \(bound)")
     }
 }
