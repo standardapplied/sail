@@ -73,20 +73,22 @@ public enum Mach {
     /// A look at `thread` at `time`; nil when `thread_info` fails: a missing look is missing
     /// evidence, never a runnable one. Our processes' CPU (this one and `others`) and the machine's
     /// ticks are read only when the thread is runnable, the only looks ``MachineShare`` reads them
-    /// on: the ticks' per-CPU read is the dear part of a look.
-    public static func look(at thread: thread_act_t, time: Double, others: [pid_t] = []) -> ThreadLook? {
+    /// on: the ticks' per-CPU read is the dear part of a look. `always` reads them on every look,
+    /// for an experiment that must see the machine while the thread waits too.
+    public static func look(at thread: thread_act_t, time: Double, others: [pid_t] = [], always: Bool = false) -> ThreadLook? {
         var info = thread_basic_info()
         var infoCount = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / MemoryLayout<integer_t>.size)
         let got = withUnsafeMutablePointer(to: &info) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(infoCount)) { thread_info(thread, thread_flavor_t(THREAD_BASIC_INFO), $0, &infoCount) }
         }
         guard got == KERN_SUCCESS else { return nil }
-        guard info.run_state == TH_STATE_RUNNING else {
+        let runnable = info.run_state == TH_STATE_RUNNING
+        guard runnable || always else {
             return ThreadLook(time: time, runnable: false, cpu: seconds(info), ourCPU: nil, idleTicks: nil, busyTicks: nil)
         }
         let ticks = hostTicks()
         return ThreadLook(
-            time: time, runnable: true, cpu: seconds(info), ourCPU: ourCPU(others: others),
+            time: time, runnable: runnable, cpu: seconds(info), ourCPU: ourCPU(others: others),
             idleTicks: ticks.count == 4 ? ticks[2] : nil, busyTicks: ticks.count == 4 ? ticks[0] &+ ticks[1] &+ ticks[3] : nil
         )
     }

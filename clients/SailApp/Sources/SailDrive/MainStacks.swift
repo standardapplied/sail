@@ -4,6 +4,7 @@ import QuartzCore
 import SailMeasures
 import SailSurface
 import SailTerminal
+import Synchronization
 
 /// What the main thread is doing: a thread of its own looks at it every ``interval``, always, and
 /// keeps its run state, its CPU time so far and, while it is runnable, our processes' CPU time (the
@@ -40,7 +41,11 @@ final class MainStacks: @unchecked Sendable {
         let id: UInt64
         let name: String
         let cpu: Double
+        /// `pth_curpri`, the priority it is scheduled at now; `pth_priority`, its base; and
+        /// `pth_maxpriority`, the most it may reach (`<mach/thread_info.h>`).
         let priority: Int32
+        let basePriority: Int32
+        let maxPriority: Int32
         let state: Int32
     }
 
@@ -82,6 +87,9 @@ final class MainStacks: @unchecked Sendable {
     private let readerLock = NSLock()
     /// Signalled by the watcher when it took a stack sample, so the helper reads its slow part.
     private let helperWake = DispatchSemaphore(value: 0)
+    /// Whether every look reads our CPU and the machine's ticks, not only a runnable one's: on for
+    /// an experiment that must see the machine while the main thread waits.
+    private let readsEveryLook = Atomic<Bool>(false)
     /// How many readings the helper has taken for stack samples, each naming its samples.
     private var fills = 0
     private var spent: (looks: Int, total: Double, longest: Double, modeLongest: Double, tooSlow: Int) = (0, 0, 0, 0, 0)
@@ -112,6 +120,7 @@ final class MainStacks: @unchecked Sendable {
             }
         }
         watcher.qualityOfService = .userInteractive
+        watcher.name = "sh.standardapplied.sail.drive.watcher"
         watcher.start()
         let helper = Thread { [self] in
             var scanned = -Double.infinity
@@ -129,6 +138,7 @@ final class MainStacks: @unchecked Sendable {
             }
         }
         helper.qualityOfService = .userInitiated
+        helper.name = "sh.standardapplied.sail.drive.helper"
         helper.start()
     }
 
@@ -138,7 +148,7 @@ final class MainStacks: @unchecked Sendable {
     /// looks may be apart and still prove anything, so it is counted and left out of every proof.
     private func look(at time: Double) -> ThreadLook? {
         let pids = lock.withLock { others }
-        guard let look = Mach.look(at: thread, time: time, others: pids) else { return nil }
+        guard let look = Mach.look(at: thread, time: time, others: pids, always: readsEveryLook.load(ordering: .relaxed)) else { return nil }
         let cost = CACurrentMediaTime() - time
         let counts = cost <= MachineShare.longestGap
         lock.withLock {
@@ -153,6 +163,11 @@ final class MainStacks: @unchecked Sendable {
             spent.longest = max(spent.longest, cost)
         }
         return counts ? look : nil
+    }
+
+    /// Has every look read our CPU and the machine's ticks (true), or only a runnable one's.
+    func readEveryLook(_ every: Bool) {
+        readsEveryLook.store(every, ordering: .relaxed)
     }
 
     /// What a look cost on average, wall time.
@@ -251,7 +266,7 @@ final class MainStacks: @unchecked Sendable {
                                                                                    readings.count, readings.count == 1 ? "" : "s", taken.count, (lags.max() ?? 0) * 1000)
     }
 
-    private static func threads() -> [ThreadSample] {
+    static func threads() -> [ThreadSample] {
         var list: thread_act_array_t?
         var count = mach_msg_type_number_t(0)
         guard task_threads(mach_task_self_, &list, &count) == KERN_SUCCESS, let list else { return [] }
@@ -282,7 +297,7 @@ final class MainStacks: @unchecked Sendable {
         let name = withUnsafeBytes(of: info.pth_name) { bytes in String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self) }
         return ThreadSample(
             id: ident.thread_id, name: name, cpu: Double(info.pth_user_time + info.pth_system_time) / 1e9, priority: info.pth_curpri,
-            state: info.pth_run_state
+            basePriority: info.pth_priority, maxPriority: info.pth_maxpriority, state: info.pth_run_state
         )
     }
 

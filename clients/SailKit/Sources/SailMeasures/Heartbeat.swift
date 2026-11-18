@@ -10,6 +10,9 @@ public final class Heartbeat: Sendable {
     public static let interval = 0.01
     private let now: @Sendable () -> Double
     private let gaps: Mutex<(last: Double, longest: Double, stalls: Stalls)>
+    /// The main run loop's timer that ticks it, kept so its kind and tolerance can be read; nil
+    /// for one ticked by a thread of its own. Set once, on the main thread, before any reader.
+    nonisolated(unsafe) public private(set) var timer: Timer?
 
     init(now: @escaping @Sendable () -> Double) {
         self.now = now
@@ -19,9 +22,14 @@ public final class Heartbeat: Sendable {
     /// Ticked by the main run loop in every mode.
     @MainActor public static func onTheMainThread(now: @escaping @Sendable () -> Double) -> Heartbeat {
         let beat = Heartbeat(now: now)
-        RunLoop.main.add(Timer(timeInterval: interval, repeats: true) { _ in beat.tick() }, forMode: .common)
+        let timer = Timer(timeInterval: interval, repeats: true) { _ in beat.tick() }
+        RunLoop.main.add(timer, forMode: .common)
+        beat.timer = timer
         return beat
     }
+
+    /// The name of the thread a heartbeat of its own ticks on.
+    public static let threadName = "sh.standardapplied.sail.heartbeat"
 
     /// Ticked by a thread of its own, which nothing else runs on.
     public static func onItsOwnThread(now: @escaping @Sendable () -> Double) -> Heartbeat {
@@ -33,6 +41,7 @@ public final class Heartbeat: Sendable {
             }
         }
         thread.qualityOfService = .userInteractive
+        thread.name = threadName
         thread.start()
         return beat
     }

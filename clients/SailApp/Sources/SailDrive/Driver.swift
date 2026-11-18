@@ -94,14 +94,21 @@ final class Driver {
         let panes4: [String: Double]
     }
 
-    init(shell: ShellApp, passkey: SoftwarePasskey, signed: Bool, script: Script, out: URL) {
+    init(shell: ShellApp, passkey: SoftwarePasskey, signed: Bool, script: Script, out: URL, holdsActivity: Bool) {
         self.shell = shell
         self.passkey = passkey
         self.signed = signed
         steps = script.steps
         self.out = out
+        self.holdsActivity = holdsActivity
         askedAtStart = passkey.asked
     }
+
+    /// Whether the run holds a process activity, and the options it holds it with.
+    let holdsActivity: Bool
+    static let activityOptions: ProcessInfo.ActivityOptions = [.userInitiated, .latencyCritical]
+    /// The three main-thread clocks a `clocks` step began, until it reports them.
+    var clocks: MainClocks?
 
     /// The focused pane of "This Mac", which the terminal steps act on.
     var pane: TerminalPane? {
@@ -119,15 +126,15 @@ final class Driver {
         shell.rail.selected == .thisMac && pane?.session != nil
     }
 
-    /// Runs the script once. App Nap is held off for the run: it slows a window that is not in
-    /// front, and the keys must go one each `interval`.
+    /// Runs the script once, App Nap held off for the run by a process activity unless the run
+    /// was asked to go without one (`--activity off`), as a person runs the app.
     func start() {
         guard !started else { return }
         started = true
-        let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "driving the app")
+        let activity = holdsActivity ? ProcessInfo.processInfo.beginActivity(options: Self.activityOptions, reason: "driving the app") : nil
         Task {
             await run()
-            ProcessInfo.processInfo.endActivity(activity)
+            if let activity { ProcessInfo.processInfo.endActivity(activity) }
         }
     }
 
@@ -286,6 +293,12 @@ final class Driver {
         }
         if step.latencyOverlay == true {
             return await latencyOverlay(within: step.seconds ?? 5)
+        }
+        if step.machineState == true {
+            return (true, machineState)
+        }
+        if let clocks = step.clocks {
+            return clocksStep(clocks)
         }
         if step.resetLatency == true {
             resetLatency()

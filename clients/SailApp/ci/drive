@@ -13,6 +13,11 @@
 # and once more right to left (kit-rtl).
 # Each run's texts, images and report land in OUT; what it prints, and the servers' logs, beside
 # them. The ticket is handed to the drive in its environment and printed nowhere.
+# First, report-only, the idle-main experiment: Tests/Drive/idle.json launched three ways, each with
+# no host and none of the app's settings: exec'd from this shell as the scripts are, opened by
+# LaunchServices (`open -W -n -F -a`) as a person's Sail is, and opened so without the drive's
+# process activity. Each says what the system reports of the app (its role, flags, priorities) and
+# what three main-thread clocks saw across two floods.
 set -euo pipefail
 
 [[ $# -eq 2 ]] || { echo "usage: ci/drive DRIVE_APP OUT" >&2; exit 2; }
@@ -24,6 +29,7 @@ readonly drive=$app/Contents/MacOS/SailDrive sail=$app/Contents/Helpers/sail
 [[ -x $drive ]] || { echo "ci/drive: $app holds no SailDrive" >&2; exit 1; }
 
 mkdir -p "$out"
+readonly out_dir=$(cd "$out" && pwd) scripts=$PWD/Tests/Drive
 passkeys=$(mktemp -d) plain=$(mktemp -d)
 SAIL_DATA_DIR=$passkeys "$sail" server start --port 7979 --rp-id sail.standardapplied.com --origin https://sail.standardapplied.com \
   > "$out/server-7979.log" 2>&1 &
@@ -55,6 +61,50 @@ export SAIL_DATA_DIR=$passkeys
 "$sail" fde add uday --name Uday --role admin
 SAIL_DRIVE_TICKET=$("$sail" fde enroll uday --json | plutil -extract ticket raw -)
 export SAIL_DRIVE_TICKET SAIL_DRIVE_PASSKEY=$out/software-passkey.json
+rm -f "$SAIL_DRIVE_PASSKEY"
+
+# No host and none of the app's settings, as a fresh run starts.
+fresh_start() {
+  pkill -f '_pty-host --local' || true
+  perl -e 'alarm shift; exec @ARGV' 30 bash -c 'while pgrep -f "_pty-host --local" > /dev/null; do :; done'
+  defaults delete "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" 2> /dev/null || true
+}
+
+# Opens the drive build as LaunchServices opens a person's app, waits for it to quit and prints what
+# it printed. `open` tells nothing of the app's exit status, so the run's report says whether it
+# passed; the alarm ends `open`, and then the drive is ended too.
+open_drive() {
+  local run=$1
+  shift
+  : > "$out_dir/$run-output.txt"
+  : > "$out_dir/$run-errors.txt"
+  tail -f "$out_dir/$run-output.txt" &
+  local follow=$! status=0
+  perl -e 'alarm shift; exec @ARGV' 600 open -W -n -F -a "$app" --stdout "$out_dir/$run-output.txt" --stderr "$out_dir/$run-errors.txt" \
+    --env "SAIL_DRIVE_GOLDENS=off" --args "$@" || status=$?
+  kill "$follow" 2> /dev/null || true
+  if (( status != 0 )); then
+    echo "ci/drive: open ended with status $status; ending the drive it opened"
+    pkill -f "$drive --drive" || true
+  fi
+  cat "$out_dir/$run-errors.txt"
+}
+
+for launch in exec launchservices launchservices-no-activity; do
+  run=idle-$launch
+  echo "ci/drive: the idle-main experiment, launched by $launch"
+  fresh_start
+  case $launch in
+    exec)
+      SAIL_DRIVE_GOLDENS=off perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "$scripts/idle.json" --out "$out_dir/$run" 2>&1 \
+        | tee "$out_dir/$run-output.txt" || true
+      ;;
+    launchservices) open_drive "$run" --drive "$scripts/idle.json" --out "$out_dir/$run" ;;
+    launchservices-no-activity) open_drive "$run" --drive "$scripts/idle.json" --out "$out_dir/$run" --activity off ;;
+  esac
+  echo "ci/drive: $run passed: $(plutil -extract passed raw "$out_dir/$run/report.json" 2> /dev/null || echo 'no report')"
+done
+fresh_start
 rm -f "$SAIL_DRIVE_PASSKEY"
 
 for run in first second third shots workspaces kit kit-rtl; do
