@@ -1,6 +1,5 @@
 {"steps": [
   {"name": "kit-the-account-shown", "select": "account"},
-  {"name": "kit-forced-hang", "kit": "hang"},
   {"name": "kit-buttons", "kit": "button"},
   {"name": "kit-fields", "kit": "field"},
   {"name": "kit-pills-keys-and-initial", "kit": "pill"},

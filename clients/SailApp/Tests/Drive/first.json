@@ -1,4 +1,5 @@
 {"steps": [
+  {"name": "forced-hang", "kit": "hang"},
   {"name": "this-mac-signed-out", "select": "thisMac"},
   {"name": "this-mac-attached", "attached": true, "seconds": 30},
   {"name": "what-the-system-reports-of-the-app", "machineState": true},

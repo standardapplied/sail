@@ -16,6 +16,7 @@ import Synchronization
 extension Driver {
     func performKit(_ step: Step) async -> (Bool, String)? {
         guard let sheet = step.kit else { return nil }
+        if sheet == "hang" { while true { _ = CACurrentMediaTime() } }
         guard NSApplication.shared.isFullKeyboardAccessEnabled else {
             return (false, "keyboard navigation is off, so no button takes the keys: ci/drive turns it on for the kit run")
         }
@@ -248,7 +249,6 @@ final class Kit {
         case "field": fields()
         case "pill": pills()
         case "spinner": spinners()
-        case "hang": while true { _ = CACurrentMediaTime() }
         case "row": listRows()
         case "sidebar": sidebarRows()
         case "tooltip": tooltips()
