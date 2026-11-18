@@ -289,11 +289,12 @@ final class Driver {
         if step.bench == true {
             guard let fonts = Bundle.main.resourceURL?.appending(path: "Fonts") else { return (false, "the bundle has no fonts") }
             do {
-                bench = try Bench.run(fonts: fonts)
+                let judged = try Bench.run(fonts: fonts)
+                bench = judged.figures
+                return Bench.verdict(judged)
             } catch {
                 return (false, "the bench could not run: \(error)")
             }
-            return Bench.verdict(bench)
         }
         if step.latencyOverlay == true {
             return await latencyOverlay(within: step.seconds ?? 5)

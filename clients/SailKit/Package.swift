@@ -47,7 +47,7 @@ let package = Package(
         ),
         .target(name: "SailSurface", dependencies: ["SailVT", "SailTerminal"], swiftSettings: strict),
         .target(name: "SailWorkbench", dependencies: ["SailTerminalWire"], swiftSettings: strict),
-        .target(name: "SailMeasures", dependencies: ["SailSurface"], swiftSettings: strict),
+        .target(name: "SailMeasures", dependencies: ["SailSurface", "SailTerminal"], swiftSettings: strict),
         .target(name: "SailDesign", dependencies: ["SailVT"], swiftSettings: strict),
         .executableTarget(
             name: "sail-term-probe",

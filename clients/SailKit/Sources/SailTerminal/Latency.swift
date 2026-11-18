@@ -21,7 +21,12 @@ public struct Percentiles: Equatable, Sendable, Codable {
     public var max: Double
 
     public init(_ samples: [Duration]) {
-        let sorted = samples.map(\.milliseconds).sorted()
+        self.init(milliseconds: samples.map(\.milliseconds))
+    }
+
+    /// Of samples already in milliseconds, or in any unit they share, taken as they are.
+    public init(milliseconds samples: [Double]) {
+        let sorted = samples.sorted()
         count = sorted.count
         p50 = Self.rank(0.50, of: sorted)
         p95 = Self.rank(0.95, of: sorted)

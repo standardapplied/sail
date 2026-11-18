@@ -15,6 +15,9 @@ final class ViewMarks: Sendable {
 
     private let marks = Mutex(LatencyMarks())
     private let shown = Mutex(Showing())
+    /// Presents the display told with a time over the view's whole life, a latency reset or not:
+    /// whether this display tells presentation times at all.
+    private let timedPresents = Atomic<Int>(0)
 
     /// Screen-updated intervals waiting for their output to reach the display.
     private struct Showing {
@@ -119,7 +122,13 @@ final class ViewMarks: Sendable {
             Self.endAll(frame, &showing)
         }
         let told = CACurrentMediaTime()
+        if time > 0 { timedPresents.add(1, ordering: .relaxed) }
         marks.withLock { $0.presented(frame: frame, at: time, told: told) }
+    }
+
+    /// How many presents the display told with a time since the view began.
+    var presentsToldWithATime: Int {
+        timedPresents.load(ordering: .relaxed)
     }
 
     private static func take(
