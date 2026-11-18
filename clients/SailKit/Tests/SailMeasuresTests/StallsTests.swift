@@ -258,4 +258,5 @@ import Testing
         #expect(beat.stalls.gaps.isEmpty)
         #expect(beat.longest == 0)
         #expect(beat.lastTick == 200)
-    }}
+    }
+}

@@ -397,10 +397,18 @@ final class Driver {
     }
 
     /// Where the longest wake's wait went: the session's thread handing it to the main queue after
-    /// the screen took the output, and the main thread taking it after it was handed over.
+    /// the screen took the output, and the main thread taking it after it was handed over. The
+    /// hand-off is stamped on both sides, so each is said as a range; a stamp the main thread
+    /// overtook is said unknown, never stood in for.
     static func posting(_ figures: LatencyFigures) -> String {
-        guard let hop = figures.longestToTold, let posted = figures.longestToToldPosted else { return "" }
-        return " (posted \(ms((posted - hop.start) * 1000)) ms after the screen took it, taken \(ms((hop.end - posted) * 1000)) ms after it was posted)"
+        guard let hop = figures.longestToTold, let handing = figures.longestToToldHanding else { return "" }
+        let began = ms((handing - hop.start) * 1000), takenBy = ms((hop.end - handing) * 1000)
+        guard let handed = figures.longestToToldHanded else {
+            return " (posted between \(began) ms and an unknown time after the screen took it, taken between an unknown time and \(takenBy) ms after it was posted: "
+                + "the main thread took it before the hand-off's return was stamped)"
+        }
+        return " (posted between \(began) and \(ms((handed - hop.start) * 1000)) ms after the screen took it, taken between \(ms((hop.end - handed) * 1000)) "
+            + "and \(takenBy) ms after it was posted)"
     }
 
     /// A quality of service as the flood's line names it.
