@@ -361,6 +361,10 @@ class PtyUploadsTest {
       c.awaitFinished(UploadCopy.ABORT);
       assertEquals(List.of(), ContainerDirectory.held(onlySession()));
       assertFalse(c.copies.getFirst().isAlive(), "the copy is ended");
+      assertEquals(
+          List.of(),
+          ContainerDirectory.holders(onlySession()),
+          "nothing in the workspace holds the temporary");
       PtyWire.write(channel, new PtyMessage.PutChunk(1, 0, chunk));
       PtyWire.write(channel, new PtyMessage.PutQuery(1));
       assertEquals(
@@ -448,6 +452,11 @@ class PtyUploadsTest {
         handled(killer);
       }
       assertEquals(new PtyMessage.PutRefused(1, PutRefusal.SESSION_ENDED, 0), refusal(channel));
+      c.awaitFinished(UploadCopy.ABORT);
+      assertEquals(
+          List.of(),
+          ContainerDirectory.holders(c.root()),
+          "nothing in the workspace holds the temporary");
     }
   }
 

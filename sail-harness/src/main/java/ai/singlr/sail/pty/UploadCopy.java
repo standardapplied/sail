@@ -130,10 +130,20 @@ final class UploadCopy {
       """;
 
   /**
-   * Run as the dev user: removes the temporary of number {@code $2} and name {@code $3} in {@code
-   * $1}.
+   * Run as the dev user: ends every process that still holds the temporary of number {@code $2} and
+   * name {@code $3} in {@code $1}, then removes it. Ending the host's {@code incus exec} does not
+   * end the copy inside the workspace, and a copy stopped there would hold the file for ever; the
+   * name needs no quoting in a pattern, being the host's.
    */
-  static final String ABORT = "cd \"$1\" && rm -f \".$2-$3.part\"";
+  static final String ABORT =
+      """
+      cd "$1" || exit 1
+      part="$(pwd -P)/.$2-$3.part"
+      while held=$(find /proc/[0-9]*/fd -lname "$part*" -printf "%h\n" 2>/dev/null | cut -d/ -f3); [ -n "$held" ]; do
+        kill -KILL $held 2>/dev/null
+      done
+      rm -f "$part"
+      """;
 
   /**
    * How the scripts reach a container, and whose ids they use: production's runs them by {@code

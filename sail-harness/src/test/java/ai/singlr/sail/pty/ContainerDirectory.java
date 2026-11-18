@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -45,7 +46,11 @@ final class ContainerDirectory {
   /** Every copy's process, as it started. */
   final List<Process> copies = Collections.synchronizedList(new ArrayList<>());
 
-  /** Whether each copy stops taking its input once open, as a stalled container's would. */
+  /**
+   * Whether each copy stops taking its input once open, as a stalled container's would: a process
+   * that holds the temporary and outlives the host's ending of its exec, as one inside a workspace
+   * outlives its {@code incus exec}.
+   */
   volatile boolean copyStalls;
 
   /** Whether the open's measurement of the directory fails, as a missing tool's would. */
@@ -145,7 +150,7 @@ final class ContainerDirectory {
           throw new IllegalStateException("the launcher refused the command");
         }
         if (script.equals(UploadCopy.OPEN) && copyStalls) {
-          inner.set(2, inner.get(2).replace("cat >&3", "exec sleep 600 >&3"));
+          inner.set(2, inner.get(2).replace("cat >&3", "sleep 600 >&3 </dev/null"));
         }
         if (script.equals(UploadCopy.OPEN) && findFails) {
           inner.set(2, inner.get(2).replace("names=$(find", "names=$(false"));
@@ -278,6 +283,31 @@ final class ContainerDirectory {
   }
 
   /** The files and links {@code directory} holds, by name. */
+  /** The processes that hold a file in {@code directory} open, by their ids. */
+  static List<Long> holders(Path directory) {
+    var prefix = directory.toAbsolutePath().toString() + "/";
+    return ProcessHandle.allProcesses()
+        .map(ProcessHandle::pid)
+        .filter(pid -> holds(pid, prefix))
+        .toList();
+  }
+
+  private static boolean holds(long pid, String prefix) {
+    try (Stream<Path> fds = Files.list(Path.of("/proc", Long.toString(pid), "fd"))) {
+      return fds.anyMatch(fd -> linksUnder(fd, prefix));
+    } catch (IOException | UncheckedIOException e) {
+      return false;
+    }
+  }
+
+  private static boolean linksUnder(Path fd, String prefix) {
+    try {
+      return Files.readSymbolicLink(fd).toString().startsWith(prefix);
+    } catch (IOException e) {
+      return false;
+    }
+  }
+
   static List<String> held(Path directory) throws IOException {
     if (!Files.exists(directory)) {
       return List.of();

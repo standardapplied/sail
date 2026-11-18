@@ -3991,7 +3991,9 @@ Incus.
   the writer, with every byte there and the bytes' SHA-256 the client's, `COMMIT` gives the
   temporary its name by a hard link (`ln -T`), which never overwrites nor links into a directory, once it is a regular file of the
   declared size. Anything else (a refusal, a cancel, a detach, a dropped connection, a failed copy)
-  removes the temporary (`ABORT`). A cancel after `PutEnd` keeps nothing unless the file took its
+  removes the temporary (`ABORT`), first ending every process in the workspace that still holds
+  it: ending the host's `incus exec` does not end the copy inside, and a copy stopped there would
+  hold the file for ever. A cancel after `PutEnd` keeps nothing unless the file took its
   name first, and the answer says which. A client whose connection dropped after `PutEnd` asks on its
   next connection (`PutQuery`): the session's last 64 answers are kept by id, else `not_known`.
 - **U7. Typing first.** SailKit sends 32 KiB chunks, each frame written on its own, and no more than
