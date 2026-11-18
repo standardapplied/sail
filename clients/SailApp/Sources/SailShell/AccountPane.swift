@@ -186,7 +186,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
 
     /// The buttons are held only while an action a person started is under way.
     private func holdTheButtons() {
-        [signIn, enroll, signOut].forEach { $0.isEnabled = acting == 0 }
+        [signIn, enroll, signOut].forEach { $0.isEnabled = running == 0 }
     }
 
     private func show(_ signedIn: SignedIn?) {
