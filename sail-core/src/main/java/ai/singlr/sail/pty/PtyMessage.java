@@ -210,6 +210,64 @@ public sealed interface PtyMessage {
     }
   }
 
+  /**
+   * Starts upload {@code id} (unique per connection, one at a time) of a file the person pasted or
+   * dropped, {@code size} bytes, which the host stores in the attached session's own workspace
+   * under a name it makes from {@code name}.
+   */
+  record PutBegin(int id, String name, long size) implements PtyMessage {}
+
+  /** {@code bytes} of upload {@code id} at {@code offset}, in order, at most 64 KiB. */
+  record PutChunk(int id, long offset, byte[] bytes) implements PtyMessage {}
+
+  /** Upload {@code id} is whole: its SHA-256, which the host checks before it stores it. */
+  record PutEnd(int id, byte[] sha256) implements PtyMessage {}
+
+  /** Upload {@code id}, its end not yet sent, is abandoned: the host keeps nothing of it. */
+  record PutCancel(int id) implements PtyMessage {}
+
+  /** The host holds {@code received} bytes of upload {@code id}: the client may send more. */
+  record PutAck(int id, long received) implements PtyMessage {}
+
+  /** Upload {@code id} is stored at {@code path} in the session's own workspace. */
+  record PutStored(int id, String path) implements PtyMessage {}
+
+  /**
+   * Upload {@code id} is refused, and nothing of it is kept: why, and the bound it met (0 when it
+   * met none). The client words it; the host sends only facts.
+   */
+  record PutRefused(int id, PutRefusal kind, long limit) implements PtyMessage {}
+
+  /** Why an upload was refused. */
+  enum PutRefusal {
+    TOO_LARGE,
+    TOO_MANY,
+    SESSION_FULL,
+    NOT_WRITER,
+    NO_CONTAINER,
+    SHARED_CONTAINER,
+    SESSION_ENDED,
+    NO_SPACE,
+    FAILED,
+    STALLED,
+    BUSY;
+
+    /** The kind as the wire names it. */
+    public String wire() {
+      return name().toLowerCase(Locale.ROOT);
+    }
+
+    /** The kind {@code wire} names, refused when it names none. */
+    public static PutRefusal of(String wire) throws IOException {
+      for (var kind : values()) {
+        if (kind.wire().equals(wire)) {
+          return kind;
+        }
+      }
+      throw new IOException("Corrupt pty frame: an upload refusal of kind '" + wire + "'.");
+    }
+  }
+
   record Output(long lastInputSeq, byte[] bytes) implements PtyMessage {}
 
   record ReplayBegin(boolean safe) implements PtyMessage {}

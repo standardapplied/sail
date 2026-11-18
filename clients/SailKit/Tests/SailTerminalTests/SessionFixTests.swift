@@ -214,7 +214,7 @@ import Testing
     /// answering until the host names a writer again.
     @Test func aConnectionWithoutTheWriteTokenAnswersNoQuery() async throws {
         let (host, session, peer, watch) = try await attachedLocally()
-        try peer.send(.refused(HostRefusal(message: TerminalSession.notWriter, remedy: nil)))
+        try peer.send(.refused(HostRefusal(message: TerminalSession.notWriter, remedy: [.words(TerminalSession.notWriter)])))
         try await watch.until("told the refusal") { watch.seen.contains { if case .refused = $0 { true } else { false } } }
         try peer.send(output("\u{1b}[6nquiet"))
         try await watch.text("quiet")
@@ -233,7 +233,7 @@ import Testing
         let (host, session, peer, watch) = try await attachedLocally()
         try peer.send(output("\u{1b}]52;c;aGVsbG8=\u{07}mine"))
         try await watch.until("told the write") { watch.seen.contains(.screen(.clipboardWrite("hello"))) }
-        try peer.send(.refused(HostRefusal(message: TerminalSession.notWriter, remedy: nil)))
+        try peer.send(.refused(HostRefusal(message: TerminalSession.notWriter, remedy: [.words(TerminalSession.notWriter)])))
         try await watch.until("told the refusal") { watch.seen.contains { if case .refused = $0 { true } else { false } } }
         try peer.send(output("\u{1b}]52;c;dGhlaXJz\u{07}theirs\u{07}"))
         try await watch.until("told the bell after it") { watch.seen.contains(.screen(.bell)) }
@@ -502,7 +502,7 @@ import Testing
         let second = try await host.accept()
         try await second.welcome()
         _ = try await second.read()
-        let refusal = HostRefusal(message: "No session mac-b.", remedy: nil)
+        let refusal = HostRefusal(message: "No session mac-b.", remedy: [.words("No session mac-b.")])
         try second.send(.refused(refusal))
         await #expect(throws: TerminalError.refused(refusal)) { try await refused.value }
     }
@@ -536,7 +536,7 @@ import Testing
         try peer.send([.accepted, .writerChanged(fde: "ana")])
         #expect(try await peer.read() == .kill(session: "app-a"))
         let words = FakeRunnerDoor.notTheWriter
-        try peer.send(.refused(HostRefusal(message: words, remedy: nil)))
+        try peer.send(.refused(HostRefusal(message: words, remedy: [])))
         #expect(await ended.value == .unconfirmed([words]), "said in the door's words, decided by the door")
     }
 
@@ -631,7 +631,7 @@ import Testing
         let peer = try await host.accept()
         try await peer.welcome()
         _ = try await peer.read()
-        let refusal = HostRefusal(message: "Listing is not allowed here.", remedy: nil)
+        let refusal = HostRefusal(message: "Listing is not allowed here.", remedy: [.words("Listing is not allowed here.")])
         try peer.send(.refused(refusal))
         await #expect(throws: TerminalError.refused(refusal)) { try await listed.value }
     }

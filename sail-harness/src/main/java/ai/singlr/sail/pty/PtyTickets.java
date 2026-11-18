@@ -54,8 +54,9 @@ final class PtyTickets {
      * Why {@code message} lies outside this ticket, on a connection that opened {@code opened} and
      * holds the write token of {@code writing} (null for none), or null when it does not: an open
      * ticket creates one session in its project and attaches to that session; an attach ticket
-     * attaches to its session; either then writes, resizes, takes the write token and detaches,
-     * ends its own session while it holds that session's write token, and does nothing else.
+     * attaches to its session; either then writes, resizes, takes the write token, uploads into the
+     * session it attached and detaches, ends its own session while it holds that session's write
+     * token, and does nothing else.
      */
     PtyMessage.Err refusal(PtyMessage message, String opened, String writing) {
       var opens = action == PtyMessage.TicketAction.OPEN;
@@ -78,6 +79,10 @@ final class PtyTickets {
             case PtyMessage.Resize m -> true;
             case PtyMessage.TakeWrite m -> true;
             case PtyMessage.Detach m -> true;
+            case PtyMessage.PutBegin m -> true;
+            case PtyMessage.PutChunk m -> true;
+            case PtyMessage.PutEnd m -> true;
+            case PtyMessage.PutCancel m -> true;
             default -> false;
           };
       return covered

@@ -145,7 +145,7 @@ import Testing
         let peer = try await host.accept()
         try await peer.welcome()
         #expect(try await peer.read() == .attach(session: "theirs", write: true))
-        let refusal = HostRefusal(message: "There is no session 'theirs' on this box that you may attach.", remedy: nil)
+        let refusal = HostRefusal(message: "There is no session 'theirs' on this box that you may attach.", remedy: [])
         try peer.send(.refused(refusal))
         try await watch.phase(.ended(.refused(refusal)))
     }
@@ -483,7 +483,7 @@ import Testing
         session.start()
         let peer = try await host.accept()
         try peer.send(raw: Array("SAILPTY2".utf8))
-        try await watch.phase(.ended(.refused(HostRefusal(message: "the terminal host is older than this app: upgrade sail on it", remedy: nil))))
+        try await watch.phase(.ended(.refused(HostRefusal(message: "the terminal host is older than this app: upgrade sail on it", remedy: []))))
     }
 
     @Test func aHostThatRefusesTheHelloEndsTheSessionInItsWords() async throws {
@@ -493,7 +493,7 @@ import Testing
         session.start()
         let peer = try await host.accept()
         _ = try await peer.hello()
-        try peer.send(.refused(HostRefusal(message: "That token is not this machine's person.", remedy: nil)))
-        try await watch.phase(.ended(.refused(HostRefusal(message: "That token is not this machine's person.", remedy: nil))))
+        try peer.send(.refused(HostRefusal(message: "That token is not this machine's person.", remedy: [])))
+        try await watch.phase(.ended(.refused(HostRefusal(message: "That token is not this machine's person.", remedy: []))))
     }
 }

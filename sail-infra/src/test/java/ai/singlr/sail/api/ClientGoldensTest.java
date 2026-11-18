@@ -87,6 +87,8 @@ import java.nio.channels.Channels;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -449,6 +451,9 @@ class ClientGoldensTest {
             .map(runs -> runs.name().toLowerCase(Locale.ROOT))
             .toList());
     vocabulary.put("roles", Arrays.stream(Role.values()).map(Role::attribute).toList());
+    vocabulary.put(
+        "upload_refusals",
+        Arrays.stream(PtyMessage.PutRefusal.values()).map(PtyMessage.PutRefusal::wire).toList());
     vocabulary.put("run_presences", List.of(RunPresence.WORKING, RunPresence.QUIET));
     vocabulary.put("run_statuses", Arrays.stream(RunStatus.values()).map(RunStatus::wire).toList());
     vocabulary.put(
@@ -603,6 +608,13 @@ class ClientGoldensTest {
         new PtyMessage.Yield("lounge", "a dispatch took the repos"),
         new PtyMessage.IssueTicket(PtyMessage.TicketAction.OPEN, PROJECT, "sail_uday", "dock"),
         new PtyMessage.Ticket("tkt_harbor"),
+        new PtyMessage.PutBegin(7, "", 64L << 20),
+        new PtyMessage.PutChunk(7, Long.MAX_VALUE, chunk()),
+        new PtyMessage.PutEnd(7, sha256(chunk())),
+        new PtyMessage.PutCancel(Integer.MAX_VALUE),
+        new PtyMessage.PutAck(7, 65536),
+        new PtyMessage.PutStored(7, "/var/lib/sail-paste/inst-1/1-shot.png"),
+        new PtyMessage.PutRefused(-1, PtyMessage.PutRefusal.TOO_LARGE, 64L << 20),
         new PtyMessage.TicketRefused(
             PtyMessage.TicketRefusal.NOT_FOUND,
             "Project 'harbor' is not in the catalog.",
@@ -625,6 +637,23 @@ class ClientGoldensTest {
                     new Remedy.Words("Run "),
                     new Remedy.Command(Remedy.Runs.SAIL, "session", List.of("take", "lounge")),
                     new Remedy.Words(" to take it.")))));
+  }
+
+  /** The largest chunk an upload carries, every byte value in turn. */
+  private static byte[] chunk() {
+    var chunk = new byte[64 << 10];
+    for (var i = 0; i < chunk.length; i++) {
+      chunk[i] = (byte) i;
+    }
+    return chunk;
+  }
+
+  private static byte[] sha256(byte[] bytes) {
+    try {
+      return MessageDigest.getInstance("SHA-256").digest(bytes);
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException(e);
+    }
   }
 
   private static byte[] wire(PtyMessage message) throws IOException {

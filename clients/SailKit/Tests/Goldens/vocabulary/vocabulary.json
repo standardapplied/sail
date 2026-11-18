@@ -315,6 +315,19 @@
     "cancelled",
     "archived"
   ],
+  "upload_refusals": [
+    "too_large",
+    "too_many",
+    "session_full",
+    "not_writer",
+    "no_container",
+    "shared_container",
+    "session_ended",
+    "no_space",
+    "failed",
+    "stalled",
+    "busy"
+  ],
   "wake_modes": [
     "on",
     "mention",
