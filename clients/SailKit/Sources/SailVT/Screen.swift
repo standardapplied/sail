@@ -22,6 +22,7 @@ import Synchronization
 /// at most the slice being fed when it asked, however many feeds follow back to back (`Mutex` alone
 /// would let the feeder take the lock straight back).
 public final class Screen: Sendable {
+    static let spins = Atomic<Int>(0)
     /// The longest a program may hold the screen still; then the hold is ended and frames go on.
     public static let holdLimit = Duration.seconds(1)
     /// The most bytes fed under one taking of the lock.
@@ -150,6 +151,10 @@ public final class Screen: Sendable {
     package func timedFrame() throws(ScreenError) -> (frame: ScreenFrame, waited: Duration, slicesWaited: Int) {
         try read { (parts: Parts, wait: Wait) throws(ScreenError) in
             try Self.refresh(parts)
+            if Self.spins.add(1, ordering: .relaxed).newValue % 5 == 0 {
+                let began = ContinuousClock.now
+                while ContinuousClock.now - began < .milliseconds(6) {}
+            }
             return (parts.cache.frame(), wait.time, wait.slices)
         }
     }
