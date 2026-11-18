@@ -20,13 +20,17 @@ final class MainStacks: @unchecked Sendable {
         let runState: Int32
         let cpu: Double
         let frames: [UInt]
-        /// The machine's CPU ticks so far (user, system, idle, nice), the process's threads and the
-        /// main run loop's mode (nil: it ran none): the sample's slow part, which the helper's
-        /// thread reads once the watcher has taken the stack, never the real-time watcher itself.
-        var ticks: [UInt32] = []
+        /// The machine's CPU ticks so far (user, system, idle, nice), read by the watcher with the
+        /// stack: one cheap call, so they are the sample's own.
+        let ticks: [UInt32]
+        /// The process's threads and the main run loop's mode (nil: it ran none): the sample's slow
+        /// part, read by the helper's thread once the watcher has taken the stack, never by the
+        /// real-time watcher. `fill` names that reading, which stands for every sample taken since
+        /// the last, and `filledAt` says when it was read.
         var threads: [ThreadSample] = []
         var mode: String?
-        var filled = false
+        var fill: Int?
+        var filledAt: Double?
     }
 
     /// One of the process's threads: its CPU time so far, current priority and run state.
@@ -80,6 +84,8 @@ final class MainStacks: @unchecked Sendable {
     private let readerLock = NSLock()
     /// Signalled by the watcher when it took a stack sample, so the helper reads its slow part.
     private let helperWake = DispatchSemaphore(value: 0)
+    /// How many readings the helper has taken for stack samples, each naming its samples.
+    private var fills = 0
     private var spent: (looks: Int, total: Double, longest: Double, modeLongest: Double) = (0, 0, 0, 0)
     /// Whether the kernel took the watcher's real-time policy, when it began, its own CPU time, its
     /// port, and when the helper first found it demoted out of real time, at what priority.
@@ -213,7 +219,7 @@ final class MainStacks: @unchecked Sendable {
         let ran = !watcher.realTime ? "was REFUSED its real-time policy and ran at its QoS"
             : watcher.demoted.map { String(format: "ran real-time until it was found demoted at %.3f s (priority %d)", $0.time, $0.priority) }
             ?? "ran real-time, never found demoted"
-        return String(format: "%ld looks every %.0f ms, each %.1f µs on average and %.1f µs at most (the main run loop's mode read at most %.1f µs of it); the watcher %@ (period %.0f ms, computation %.2f ms, constraint %.2f ms) used %.1f ms of CPU, %.2f%% of one CPU against its claim of %.0f%%",
+        return String(format: "%ld looks every %.0f ms, each %.1f µs on average and %.1f µs at most; the main run loop's mode, read on the helper's thread for a stack sample, took at most %.1f µs to read; the watcher %@ (period %.0f ms, computation %.2f ms, constraint %.2f ms) used %.1f ms of CPU, %.2f%% of one CPU against its claim of %.0f%%",
                       spent.looks, Self.interval * 1000, spent.looks > 0 ? spent.total / Double(spent.looks) * 1e6 : 0, spent.longest * 1e6, spent.modeLongest * 1e6,
                       ran, Self.interval * 1000, Self.computation * 1000, Self.constraint * 1000, watcher.cpu * 1000, watcherShare * 100, Self.claim * 100)
     }
@@ -229,7 +235,7 @@ final class MainStacks: @unchecked Sendable {
         let count = walk()
         let frames = Array(UnsafeBufferPointer(start: buffer, count: count))
         lock.withLock {
-            samples.append(Sample(time: time, runState: gotInfo == KERN_SUCCESS ? info.run_state : -1, cpu: cpu, frames: frames))
+            samples.append(Sample(time: time, runState: gotInfo == KERN_SUCCESS ? info.run_state : -1, cpu: cpu, frames: frames, ticks: Self.hostTicks()))
             if samples.count > 20000 { samples.removeFirst(10000) }
         }
         helperWake.signal()
@@ -239,15 +245,16 @@ final class MainStacks: @unchecked Sendable {
     /// time (the machine's ticks, the process's threads, the main run loop's mode), read once for
     /// all of them.
     private func fillSamples() {
-        guard lock.withLock({ samples.last.map { !$0.filled } ?? false }) else { return }
-        let ticks = Self.hostTicks(), threads = Self.threads(), mode = mainMode()
+        guard lock.withLock({ samples.last.map { $0.fill == nil } ?? false }) else { return }
+        let threads = Self.threads(), mode = mainMode(), read = CACurrentMediaTime()
         lock.withLock {
+            fills += 1
             var index = samples.count - 1
-            while index >= 0, !samples[index].filled {
-                samples[index].ticks = ticks
+            while index >= 0, samples[index].fill == nil {
                 samples[index].threads = threads
                 samples[index].mode = mode
-                samples[index].filled = true
+                samples[index].fill = fills
+                samples[index].filledAt = read
                 index -= 1
             }
         }
@@ -255,9 +262,15 @@ final class MainStacks: @unchecked Sendable {
 
     /// The main run loop's modes as the stack samples taken in `span` read them, or that none was
     /// taken there: the watcher samples only while the main thread has stalled over 30 ms.
+    /// Each reading counted once, however many samples it stands for, with how long after the
+    /// earliest of them it was read: a mode read late may be one the loop entered after the stall.
     func modes(in span: Span) -> String {
-        let seen = lock.withLock { samples.filter { $0.filled && $0.time >= span.start && $0.time <= span.end }.map(\.mode) }
-        return seen.isEmpty ? "no stack sample in it (the main thread did not stall over 30 ms)" : "in " + MachineShare.modes(seen)
+        let taken = lock.withLock { samples.filter { $0.fill != nil && $0.time >= span.start && $0.time <= span.end } }
+        let readings = Dictionary(grouping: taken) { $0.fill ?? 0 }.values
+        guard !readings.isEmpty else { return "no stack sample in it (the main thread did not stall over 30 ms)" }
+        let lags = readings.map { reading in reading.map { ($0.filledAt ?? $0.time) - $0.time }.max() ?? 0 }
+        return "in " + MachineShare.modes(readings.map { $0.first?.mode }) + String(format: " (%ld reading%@ of %ld samples, read up to %.1f ms after them)",
+                                                                                   readings.count, readings.count == 1 ? "" : "s", taken.count, (lags.max() ?? 0) * 1000)
     }
 
     /// The machine's CPU ticks so far, summed over its CPUs: user, system, idle, nice. Read per CPU
@@ -388,11 +401,16 @@ final class MainStacks: @unchecked Sendable {
         let delta = zip(last.ticks, first.ticks).map { Double($0 &- $1) }
         let total = delta.reduce(0, +)
         let idle = total > 0 ? delta[2] / total * 100 : -1
-        let before = Dictionary(first.threads.map { ($0.id, $0) }, uniquingKeysWith: { one, _ in one })
-        let used = last.threads.compactMap { thread in before[thread.id].map { (thread, (thread.cpu - $0.cpu) * 1000) } }.sorted { $0.1 > $1.1 }
+        let readings = taken.filter { $0.fill != nil }
+        guard let early = readings.first, let late = readings.last, early.fill != late.fill, let from = early.filledAt, let to = late.filledAt else {
+            return String(format: "over %.0f ms between samples: the machine's CPUs %.0f%% idle (ticks user %.0f, system %.0f, idle %.0f); the process's threads read once in it",
+                          (last.time - first.time) * 1000, idle, delta[0], delta[1], delta[2])
+        }
+        let before = Dictionary(early.threads.map { ($0.id, $0) }, uniquingKeysWith: { one, _ in one })
+        let used = late.threads.compactMap { thread in before[thread.id].map { (thread, (thread.cpu - $0.cpu) * 1000) } }.sorted { $0.1 > $1.1 }
         let busiest = used.prefix(8).map { String(format: "%@ %.1f ms (pri %d, state %d)", $0.0.name.isEmpty ? "#\($0.0.id)" : $0.0.name, $0.1, $0.0.priority, $0.0.state) }
-        return String(format: "over %.0f ms between samples: the machine's CPUs %.0f%% idle (ticks user %.0f, system %.0f, idle %.0f); the process's threads by CPU used: ",
-                      (last.time - first.time) * 1000, idle, delta[0], delta[1], delta[2]) + busiest.joined(separator: ", ")
+        return String(format: "over %.0f ms between samples: the machine's CPUs %.0f%% idle (ticks user %.0f, system %.0f, idle %.0f); the process's threads by CPU used between two readings %.0f ms apart: ",
+                      (last.time - first.time) * 1000, idle, delta[0], delta[1], delta[2], (to - from) * 1000) + busiest.joined(separator: ", ")
     }
 
     /// The main thread's return addresses, innermost first, into `buffer`; nothing allocated
