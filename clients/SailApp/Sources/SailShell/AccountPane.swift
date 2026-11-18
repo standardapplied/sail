@@ -126,8 +126,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     private func whenNoOneActs(_ go: @escaping @MainActor () -> Void) {
-        guard acting > 0 else { return go() }
-        heldAnswer = go
+        go()
     }
 
     @objc public func signInWithPasskey(_: Any?) {
@@ -158,11 +157,9 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     /// Asks before signing out; a second click or the menu item meanwhile asks nothing.
     @objc public func signOutHere(_: Any?) {
         guard standing != nil, acting == 0 else { return }
-        begin(clearing: false)
         askBeforeSigningOut { [weak self] go in
             guard let self else { return }
             if go { signOutNow() }
-            end()
         }
     }
 
@@ -257,7 +254,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         heading.stringValue = whoami?.displayName ?? whoami?.name ?? signedIn.fde
         who.stringValue = Self.describe(signedIn)
         var now = lines.filter { $0 != Self.signInWithIt }
-        if case let .failure(refused) = signedIn.whoami { now += refused.lines }
+        if now.isEmpty, case let .failure(refused) = signedIn.whoami { now += refused.lines }
         say(now)
     }
 
