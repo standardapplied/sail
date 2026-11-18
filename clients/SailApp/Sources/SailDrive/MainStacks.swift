@@ -422,8 +422,8 @@ final class MainStacks: @unchecked Sendable {
     /// The samples taken in `span`, each as its run state, the main thread's CPU time since the
     /// first of them, and its innermost symbols.
     /// The summary of `span` and three of its samples: the first, the middle and the last.
-    func told(_ span: Span) -> [String] {
-        let lines = described(in: span)
+    func told(_ span: Span, frames shown: Int = 14) -> [String] {
+        let lines = described(in: span, frames: shown)
         let picked = lines.count > 3 ? [lines[0], lines[lines.count / 2], lines[lines.count - 1]] : lines
         return [summary(of: span)] + picked
     }

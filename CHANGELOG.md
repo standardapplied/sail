@@ -2,7 +2,7 @@
 
 ## 0.72.0
 
-- **A change of look holds the main thread briefly.** Switching between light and dark held the app's main thread 65–83 ms with four panes, 27–44 ms of it the app's own work. The drive now fails a switch that holds it over 50 ms, counted as ours; each pane's 100 ms to show the new look is unchanged. A change of look now recolours and lays nothing out:
+- **A change of look holds the main thread briefly.** Switching between light and dark held the app's main thread 65–83 ms with four panes, 27–44 ms of it the app's own work. The drive now fails a switch that holds it over 50 ms, counted as ours; the first switch, the first the panes' views see and AppKit's cold one, is measured apart and may hold it 50 ms beyond an empty window's first switch, measured in the same step; each pane's 100 ms to show the new look is unchanged. A change of look now recolours and lays nothing out:
   - The prominent button draws its label in the current look's ink, so its stack view no longer declares and diffs its constraints at every switch. That is one in each pane's banner, plus the empty state's and Sign In's.
   - A tab sets its title's font only when its selection changes.
   - The Account and Workspaces panes, when hidden, are painted when next shown. The Workspaces pane no longer reloads its list for a pane no one sees.
