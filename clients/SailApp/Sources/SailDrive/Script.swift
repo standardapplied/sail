@@ -64,12 +64,10 @@ struct Step: Decodable {
     var latencyOverlay: Bool?
     /// Starts the latency from nothing.
     var resetLatency: Bool?
-    /// Says what the system reports of this process now (``MachineState``): its role, flags, QoS
-    /// tiers, every thread's priorities, the window's state and the heartbeat's timer.
+    /// Says what the system reports of this process now (``MachineState``) and fails unless it was
+    /// launched as a person's Sail is: a foreground application whose parent is launchd and whose
+    /// main thread is user-interactive.
     var machineState: Bool?
-    /// "start" begins the three main-thread clocks (``MainClocks``) and the sampler's reading of
-    /// every look; "report" ends them and says what they saw.
-    var clocks: String?
     /// Kills the host the preview started, as a crash would.
     var killHost: Bool?
     /// Makes the flood's bytes, once, at ``Driver/floodFiles``.

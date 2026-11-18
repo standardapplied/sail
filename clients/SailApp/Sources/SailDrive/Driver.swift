@@ -103,9 +103,6 @@ final class Driver {
         askedAtStart = passkey.asked
     }
 
-    /// The three main-thread clocks a `clocks` step began, until it reports them.
-    var clocks: MainClocks?
-
     /// The focused pane of "This Mac", which the terminal steps act on.
     var pane: TerminalPane? {
         shell.thisMac.focused
@@ -182,8 +179,24 @@ final class Driver {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try? encoder.encode(report).write(to: out.appending(path: "report.json"))
+        Self.faultOnQuit()
         guard passed else { exit(1) }
         NSApp.terminate(nil)
+    }
+
+    /// A fault at quit, for `ci/drive`'s own check that a crash or a hang there fails a run whose
+    /// report says it passed: `SAIL_DRIVE_ON_QUIT=crash` aborts, `hang` never returns.
+    private static func faultOnQuit() {
+        switch ProcessInfo.processInfo.environment["SAIL_DRIVE_ON_QUIT"] {
+        case "crash"?:
+            abort()
+        case "hang"?:
+            while true {
+                sleep(60)
+            }
+        default:
+            break
+        }
     }
 
     private func perform(_ step: Step, name: String) async -> (Bool, String) {
@@ -287,10 +300,7 @@ final class Driver {
             return await latencyOverlay(within: step.seconds ?? 5)
         }
         if step.machineState == true {
-            return (true, machineState)
-        }
-        if let clocks = step.clocks {
-            return clocksStep(clocks)
+            return machineState
         }
         if step.resetLatency == true {
             resetLatency()
@@ -692,7 +702,7 @@ final class Driver {
 
     /// The whole screen as it is, so whatever covered the window is seen.
     private static func captureTheScreen(to file: URL) async {
-        await Shot.begin([], to: file)?.taken()
+        await Shot.begin(.screen, to: file)?.taken()
     }
 
     /// `line` on standard output at once, unbuffered, so what the drive printed is in its output

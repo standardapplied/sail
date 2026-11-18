@@ -82,7 +82,7 @@ extension Driver {
             return (reached, "the field is \(field() == nil ? "closed" : "open"); the keys are with \(holder)")
         }
         if let name = step.shot {
-            return await inBothLooks(name) { file in await self.capture(["-o", "-l", "\(self.shell.window.windowNumber)"], to: file) }
+            return await inBothLooks(name) { file in await self.capture(.window(self.shell.window.windowNumber), to: file) }
         }
         if let name = step.shotMenu {
             return await inBothLooks(name) { file in await self.captureWithTheMenuOpen(to: file) }
@@ -770,9 +770,9 @@ extension Driver {
         _ = await waitUntil(2) { view.cursorOn && Self.committed(view) > hidden }
     }
 
-    /// `screencapture -x` with `arguments`, into `file` (``Shot``); its own error, if any, is printed.
-    func capture(_ arguments: [String], to file: URL) async {
-        await Shot.begin(arguments, to: file)?.taken()
+    /// A shot of `kind` into `file` (``Shot``); screencapture's own error, if any, is printed.
+    func capture(_ kind: Shot.Kind, to file: URL) async {
+        await Shot.begin(kind, to: file)?.taken()
     }
 
     /// The focused pane's context menu, popped up as a right-click shows it, the whole screen taken
@@ -783,7 +783,7 @@ extension Driver {
             with: .rightMouseDown, location: view.convert(NSPoint(x: 80, y: 60), to: nil), modifierFlags: [],
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: shell.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
         ), let menu = view.menu(for: event) else { return print("the pane offered no menu") }
-        guard let shot = Shot.begin(["-T", "1"], to: file) else { return }
+        guard let shot = Shot.begin(.menu, to: file) else { return }
         menu.perform(#selector(NSMenu.cancelTracking), with: nil, afterDelay: 2.5, inModes: [.common])
         menu.popUp(positioning: nil, at: NSPoint(x: 80, y: 60), in: view)
         await shot.taken()
@@ -811,7 +811,7 @@ extension Driver {
         guard await waitUntil(10, { entered.withLock { $0 } && window.frame == screen.frame }) else {
             return (false, "the window did not finish entering full screen within 10 s: its frame \(NSStringFromRect(window.frame)), the screen's \(NSStringFromRect(screen.frame))")
         }
-        let (taken, said) = await inBothLooks(name) { file in await self.capture([], to: file) }
+        let (taken, said) = await inBothLooks(name) { file in await self.capture(.screen, to: file) }
         var passed: [String] = []
         func sample() {
             let frame = NSStringFromRect(window.frame)

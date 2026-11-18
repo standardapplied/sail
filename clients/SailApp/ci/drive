@@ -28,7 +28,7 @@ readonly drive=$app/Contents/MacOS/SailDrive sail=$app/Contents/Helpers/sail
 [[ -x $drive ]] || { echo "ci/drive: $app holds no SailDrive" >&2; exit 1; }
 
 mkdir -p "$out"
-readonly out_dir=$(cd "$out" && pwd) scripts=$PWD/Tests/Drive
+readonly out_dir=$(cd "$out" && pwd -P) scripts=$PWD/Tests/Drive
 passkeys=$(mktemp -d) plain=$(mktemp -d) private_dir=$(mktemp -d /tmp/sail-drive.XXXXXX) shooter=
 SAIL_DATA_DIR=$passkeys "$sail" server start --port 7979 --rp-id sail.standardapplied.com --origin https://sail.standardapplied.com \
   > "$out/server-7979.log" 2>&1 &
@@ -43,7 +43,21 @@ restore_keyboard() {
   if [[ $keyboard_was == unset ]]; then defaults delete -g AppleKeyboardUIMode 2> /dev/null || true
   else defaults write -g AppleKeyboardUIMode -int "$keyboard_was"; fi
 }
-trap 'kill "${servers[@]}" ${shooter:+"$shooter"} 2>/dev/null || true; rm -rf "$passkeys" "$plain" "$private_dir"; restore_keyboard' EXIT
+# A drive LaunchServices opened is launchd's child, not this shell's: ended here, on a timeout and on
+# every exit (a local cancel too), with TERM, then KILL if it has not gone within 10 s. Only drives
+# writing into this OUT are ended, not another ci/drive's.
+readonly opened_pattern="SailDrive --drive .* --out $out_dir/"
+stop_drive() {
+  local pids
+  pids=$(pgrep -f -- "$opened_pattern" || true)
+  [[ -n $pids ]] || return 0
+  echo "ci/drive: ending the drive still running (pid $pids)" >&2
+  kill -TERM $pids 2> /dev/null || true
+  perl -e 'alarm shift; exec @ARGV' 10 bash -c 'while pgrep -f -- "$1" > /dev/null; do sleep 0.1; done' _ "$opened_pattern" || true
+  pids=$(pgrep -f -- "$opened_pattern" || true)
+  [[ -z $pids ]] || kill -KILL $pids 2> /dev/null || true
+}
+trap 'stop_drive; kill "${servers[@]}" ${shooter:+"$shooter"} 2>/dev/null || true; rm -rf "$passkeys" "$plain" "$private_dir"; restore_keyboard' EXIT
 for port in 7979 7980; do
   for _ in $(seq 1 60); do
     curl -fsS "http://127.0.0.1:$port/v1/health" > /dev/null 2>&1 && break
@@ -63,29 +77,42 @@ export SAIL_DRIVE_TICKET_FILE=$private_dir/ticket SAIL_DRIVE_PASSKEY=$out_dir/so
 rm -f "$SAIL_DRIVE_PASSKEY"
 
 # Opened by LaunchServices, the app is its own responsible process for the privacy grants and holds
-# no Screen Recording; this shell does, so it takes the drive's screenshots: one line on the FIFO
-# SAIL_DRIVE_SHOTS names (screencapture's arguments, tab-separated, the file last), answered by
-# FILE.done beside FILE.said, what screencapture said. Only the flags the drive uses, numbers, and a
-# file inside OUT are taken.
-valid_shot() {
-  local count=$# file=${!#} word index=0
-  [[ $file == "$out_dir"/* && $file != *..* ]] || return 1
-  for word in "$@"; do
-    index=$((index + 1))
-    ((index == count)) && break
-    [[ $word == -x || $word == -o || $word == -l || $word == -T || $word =~ ^[0-9]+$ ]] || return 1
-  done
+# no Screen Recording; this shell does, so it takes the drive's screenshots. A request is one line on
+# the FIFO SAIL_DRIVE_SHOTS names: `screen FILE`, `window ID FILE` or `menu FILE`, tab-separated;
+# this shell builds screencapture's arguments itself, ID all digits and FILE in OUT (its folder
+# with links resolved, and itself no link), and answers with FILE.done beside FILE.said, what
+# screencapture said. Nothing else is taken. Any process of this user may ask while a run lasts,
+# so this shell's Screen Recording is lent to them for captures into OUT: fine on a CI runner,
+# worth knowing on a Mac of one's own.
+inside_out() {
+  local file=$1 folder
+  [[ $file == /* && ! -L $file ]] || return 1
+  folder=$(cd "$(dirname "$file")" 2> /dev/null && pwd -P) || return 1
+  [[ $folder == "$out_dir" || $folder == "$out_dir"/* ]]
 }
 take_shots() {
-  local words
+  local verb id file extra arguments
   while true; do
-    while IFS=$'\t' read -r -a words; do
-      if ((${#words[@]} == 0)) || ! valid_shot "${words[@]}"; then
+    while IFS=$'\t' read -r verb id file extra; do
+      case $verb in
+        screen | menu)
+          [[ -z $file ]] || verb=refused
+          file=$id
+          ;;
+        window) [[ $id =~ ^[0-9]+$ && -z $extra ]] || verb=refused ;;
+        *) verb=refused ;;
+      esac
+      if [[ $verb == refused ]] || ! inside_out "$file"; then
         echo "ci/drive: a screenshot request refused" >&2
         continue
       fi
-      screencapture "${words[@]}" 2> "${words[${#words[@]} - 1]}.said" || true
-      : > "${words[${#words[@]} - 1]}.done"
+      case $verb in
+        screen) arguments=(-x) ;;
+        menu) arguments=(-x -T 1) ;;
+        window) arguments=(-x -o -l "$id") ;;
+      esac
+      screencapture "${arguments[@]}" "$file" 2> "$file.said" || true
+      : > "$file.done"
     done < "$SAIL_DRIVE_SHOTS"
   done
 }
@@ -95,22 +122,36 @@ take_shots &
 shooter=$!
 
 # Opens the drive build as LaunchServices opens a person's app, waits for it to quit and prints what
-# it printed. `open` tells nothing of the app's exit status, so the run's report says whether it
-# passed: 0 passed, 1 a step failed, 134 no report (it ended without one, as a crash does). The
-# alarm ends `open`, and then the drive it opened.
+# it printed. `open` tells nothing of the app's exit status, so a run passes only when all of these
+# hold, and returns: 0 passed; 1 a step failed; 124 the alarm ended `open` (a hang, the drive then
+# ended); 134 a crash or a hang at quit (no mark of a clean exit, or a new SailDrive crash report),
+# or no report. Its folder and output are removed first, so an earlier run's report never passes.
+# SAIL_DRIVE_ALARM_SECONDS (600) bounds it; ci/drive's own check of these sets it short.
 open_drive() {
-  local run=$1 goldens=$2 opened=0
+  local run=$1 goldens=$2 opened=0 crashes
   shift 2
+  rm -rf "${out_dir:?}/$run"
   : > "$out_dir/$run-output.txt"
   : > "$out_dir/$run-errors.txt"
-  perl -e 'alarm shift; exec @ARGV' 600 open -W -n -a "$app" --stdout "$out_dir/$run-output.txt" --stderr "$out_dir/$run-errors.txt" \
-    --env "SAIL_DRIVE_GOLDENS=$goldens" --args "$@" || opened=$?
-  if (( opened != 0 )); then
-    echo "ci/drive: open ended with status $opened; ending the drive it opened" >&2
-    pkill -f "$drive --drive" || true
-  fi
+  : > "$private_dir/$run-started"
+  perl -e 'alarm shift; exec @ARGV' "${SAIL_DRIVE_ALARM_SECONDS:-600}" open -W -n -a "$app" --stdout "$out_dir/$run-output.txt" \
+    --stderr "$out_dir/$run-errors.txt" --env "SAIL_DRIVE_GOLDENS=$goldens" --args "$@" || opened=$?
   cat "$out_dir/$run-output.txt"
   cat "$out_dir/$run-errors.txt" >&2
+  if ((opened != 0)); then
+    echo "ci/drive: the $run run did not end within ${SAIL_DRIVE_ALARM_SECONDS:-600} s (open ended with status $opened)" >&2
+    stop_drive
+    return 124
+  fi
+  crashes=$(find "$HOME/Library/Logs/DiagnosticReports" -name 'SailDrive*.ips' -newer "$private_dir/$run-started" 2> /dev/null || true)
+  if [[ -n $crashes ]]; then
+    echo "ci/drive: the $run run left a crash report: $crashes" >&2
+    return 134
+  fi
+  if [[ ! -e $out_dir/$run/exited ]]; then
+    echo "ci/drive: the $run run did not exit cleanly: it crashed or hung as it quit, or never started" >&2
+    return 134
+  fi
   case $(plutil -extract passed raw "$out_dir/$run/report.json" 2> /dev/null || echo none) in
     true) return 0 ;;
     false) return 1 ;;
