@@ -29,7 +29,6 @@ final class Driver {
     let out: URL
     var results: [Result] = []
     var measures: [Measure] = []
-    private var bench: [String: Double] = [:]
     /// A `resetLatency` step opened a measured window that a `shownWithin` step has not yet judged:
     /// what the drive saves after each step inside it neither draws nor writes on the main thread.
     private var measuring = false
@@ -90,7 +89,6 @@ final class Driver {
         let scale: Double
         let steps: [Result]
         let measures: [Measure]
-        let bench: [String: Double]
         let panes4: [String: Double]
     }
 
@@ -174,7 +172,7 @@ final class Driver {
         let passed = results.count == steps.count && results.allSatisfy(\.ok) && withinClaim && lookCheap && stayedRealTime
         let report = Report(
             passed: passed, hertz: shell.window.screen?.maximumFramesPerSecond ?? 0, scale: terminal.metrics.scale, steps: results,
-            measures: measures, bench: bench, panes4: panes4
+            measures: measures, panes4: panes4
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -285,16 +283,6 @@ final class Driver {
         if let count = step.drawables {
             terminal.drawableCount = count
             return (terminal.drawableCount == count, "\(terminal.drawableCount) drawables")
-        }
-        if step.bench == true {
-            guard let fonts = Bundle.main.resourceURL?.appending(path: "Fonts") else { return (false, "the bundle has no fonts") }
-            do {
-                let judged = try Bench.run(fonts: fonts)
-                bench = judged.figures
-                return Bench.verdict(judged)
-            } catch {
-                return (false, "the bench could not run: \(error)")
-            }
         }
         if step.latencyOverlay == true {
             return await latencyOverlay(within: step.seconds ?? 5)

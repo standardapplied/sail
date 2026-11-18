@@ -57,9 +57,6 @@ struct Step: Decodable {
     /// Types `measure` keys, one each `interval` ms (50 by default), and records the latency.
     var measure: Int?
     var interval: Int?
-    /// Measures the renderer's CPU side in this release build: a full 200x60 redraw's p95 must be
-    /// 4 ms or less.
-    var bench: Bool?
     /// ⌥⌘L, then the latency overlay must show its figures.
     var latencyOverlay: Bool?
     /// Starts the latency from nothing.
