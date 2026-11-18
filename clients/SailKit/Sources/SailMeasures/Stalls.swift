@@ -216,3 +216,26 @@ public enum FloodVerdict {
         )
     }
 }
+
+/// How many samples a gated series takes, and how many its nearest-rank p95 leaves above it: the
+/// one count the probe's bench and the drive's renderer bench both take.
+public enum Sampled {
+    public static let count = 400
+
+    /// How many of `count` samples the nearest-rank p95 leaves above it: 20 of 400, 2 of 54.
+    public static func tail(of count: Int) -> Int {
+        count - Int((0.95 * Double(count)).rounded(.up))
+    }
+}
+
+/// A figure against its limit, in words that name it first: "missed: …, over its … limit" or
+/// "within its budget: …, limit …", so a failed step says what it missed before anything else.
+public enum Verdict {
+    public static func of(_ name: String, milliseconds: Double, limit: Double) -> (met: Bool, said: String) {
+        let met = milliseconds <= limit
+        return (
+            met, met ? String(format: "within its budget: %@ %.2f ms, limit %.0f ms", name, milliseconds, limit)
+                : String(format: "missed: %@ %.2f ms, over its %.0f ms limit", name, milliseconds, limit)
+        )
+    }
+}
