@@ -1331,11 +1331,20 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
     lock, the template is started if stopped, stripped, searched for its builder's tokens (as
     stored then: the values a build is given live only in its process and are never written) and
     stopped, and only then is the record ended `interrupted`, "The build stopped when the runner
-    restarted.". One whose template cannot be cleaned is stopped all the same, and its record says
-    so; nothing tries again, since the next build strips the template whatever happens. While it
-    does, a read says the build was cut short, not that it runs. The strip needs no dev user, so a
-    template cut before step 6 made one is stripped too. Building again resumes at the step that
-    did not finish.
+    restarted.". While it does, a read says the build was cut short, not that it runs. The strip
+    needs no dev user, so a template cut before step 6 made one is stripped too.
+  - **No token survives in a template, structurally.** Workspaces clone a version's snapshot
+    (`<p>--tmpl/v<n>`), made only after that build's strip and its search for the tokens it was
+    given passed; never the template as it stands. A build that failed or was cut short, and whose
+    template could not be shown to hold none of its builder's tokens, is marked
+    `user.sail.template.unproven`, and the next build never builds on it: it restores the newest
+    version's snapshot (or, with none, deletes the template and launches it anew), clears the mark
+    and runs every step. Absence is shown by a search for the token values the build was given:
+    in the build's process, its own; after a restart, the builder's as stored then, and only when
+    they hold every value the record's proof was made of (a salt of the build's own and each
+    value's SHA-256 under it, kept in the record's file, never on the wire, never a value). A
+    token replaced in between, a strip or a search that fails, or a record with no proof, marks the
+    template unproven, and its record says so.
   - `sudo sail project workspace create <p> <name>` builds it first when there is none or it is
     stale. It then clones it with `incus copy <p>--tmpl/v<n> <p>-<name>`, passing the workspace's
     keys at the copy: `-c user.sail.project=<p> -c user.sail.workspace=<name> -c

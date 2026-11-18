@@ -191,11 +191,13 @@ class TemplateBuildServiceTest {
 
     assertTrue(built.built());
     assertEquals(20, TemplateBuild.STEPS);
-    assertEquals(List.of(running("dana", 0)), started);
+    var proof = started.getFirst().proof();
+    assertEquals(List.of(running("dana", 0).proving(proof)), started);
+    assertTrue(proof.heldIn(List.of("ghp_dana")), "the record proves the build's token");
     assertEquals(List.of(0, 1, 13), during.stream().map(TemplateRecord::step).toList());
     assertTrue(during.stream().allMatch(TemplateRecord::running));
     assertEquals(
-        running("dana", 20).ended(TemplateRecord.Outcome.BUILT, AT, null, null),
+        running("dana", 20).proving(proof).ended(TemplateRecord.Outcome.BUILT, AT, null, null),
         record(recordFile()));
   }
 
@@ -383,7 +385,7 @@ class TemplateBuildServiceTest {
   @Test
   void aBuildCutShortIsStrippedSearchedAndStoppedBeforeItsRecordSaysInterrupted() throws Exception {
     var shell = incus(ZFS, template("Running", ""), "[]");
-    write(running("dana", 9));
+    write(running("dana", 9).proving(TemplateRecord.TokenProof.of(List.of("ghp_dana"))));
     var builds = builds(shell);
 
     builds.endCutShort(List.of("acme"));
@@ -400,6 +402,47 @@ class TemplateBuildServiceTest {
     assertEquals(TemplateRecord.Outcome.INTERRUPTED, ended.outcome());
     assertEquals("The build stopped when the runner restarted.", ended.reason());
     assertEquals(9, ended.step());
+    assertFalse(calls.stream().anyMatch(c -> c.contains("unproven")), "absence was shown");
+  }
+
+  /**
+   * A cut build's cleanup shows absence only with the very token values the build was given: its
+   * record keeps their salted fingerprints, never a value. A token replaced since cannot be
+   * searched for, so the template is stripped, stopped and marked unproven, its record says so, and
+   * the next build rolls it back to its last version.
+   */
+  @Test
+  void aCutBuildWhoseTokenWasReplacedSinceIsMarkedUnprovenAndSaysSo() throws Exception {
+    var shell = incus(ZFS, template("Running", ""), "[]");
+    write(running("dana", 9).proving(TemplateRecord.TokenProof.of(List.of("ghp_replaced"))));
+    var builds = builds(shell);
+
+    builds.endCutShort(List.of("acme"));
+
+    var ended = record(recordFile());
+    assertEquals(TemplateRecord.Outcome.INTERRUPTED, ended.outcome());
+    assertEquals(TemplateBuild.UNPROVEN, ended.reason());
+    assertTrue(
+        shell.invocations().contains("incus config set acme--tmpl user.sail.template.unproven=1"),
+        shell.invocations().toString());
+    assertTrue(shell.invocations().contains("incus stop acme--tmpl"));
+    assertEquals(List.of(), logged);
+  }
+
+  /** The record's proof is in its file, never on the wire, and never a token's value. */
+  @Test
+  void aRecordKeepsItsTokensProofInItsFileAloneAndNeverAValue() throws Exception {
+    var proof = TemplateRecord.TokenProof.of(List.of("ghp_never_written"));
+    write(running("dana", 3).proving(proof));
+
+    var file = Files.readString(recordFile());
+
+    assertFalse(file.contains("ghp_never_written"));
+    assertTrue(file.contains(proof.salt()) && file.contains(proof.fingerprints().getFirst()));
+    assertEquals(proof, record(recordFile()).proof());
+    assertFalse(record(recordFile()).toMap().containsKey("token_salt"));
+    assertTrue(proof.heldIn(List.of("ghp_other", "ghp_never_written")));
+    assertFalse(proof.heldIn(List.of("ghp_other")));
   }
 
   /**
@@ -427,7 +470,7 @@ class TemplateBuildServiceTest {
     assertTrue(shell.invocations().contains("incus stop acme--tmpl"), "it is never left running");
     assertEquals(1, logged.size());
     assertEquals(TemplateBuildService.State.FAILED, status.state());
-    assertEquals(TemplateBuild.UNCLEANED, status.build().orElseThrow().reason());
+    assertEquals(TemplateBuild.UNPROVEN, status.build().orElseThrow().reason());
     assertEquals(TemplateRecord.Outcome.INTERRUPTED, record(recordFile()).outcome());
   }
 

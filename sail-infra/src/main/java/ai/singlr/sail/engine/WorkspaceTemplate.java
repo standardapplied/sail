@@ -39,6 +39,13 @@ public final class WorkspaceTemplate {
   static final String INPUTS_KEY = "user.sail.template.inputs";
   static final String LAST_KEY = "user.sail.template.last";
 
+  /**
+   * Set on a template whose build failed or was cut short and that could not be shown to hold none
+   * of its builder's tokens: no build ever resumes on what it holds. Workspaces clone a version's
+   * snapshot, made only once its build's strip and check passed, never the template as it stands.
+   */
+  static final String UNPROVEN_KEY = "user.sail.template.unproven";
+
   private static final int MAX_INSTANCE_NAME = 63;
   private static final Pattern VERSION = Pattern.compile("v([1-9][0-9]{0,8})");
 
@@ -245,7 +252,9 @@ public final class WorkspaceTemplate {
                 + 1);
     source.recorder().started();
     try {
-      build(source, project, template, pool, found);
+      var unproven = found.flatMap(i -> i.key(UNPROVEN_KEY)).isPresent();
+      var from = unproven ? rollBack(template, versions, found.get()) : found;
+      build(source, project, template, pool, from, from.isEmpty() || unproven);
       var recorded =
           new ContainerConfig(shell, locks)
               .set(
@@ -365,7 +374,8 @@ public final class WorkspaceTemplate {
       String project,
       String template,
       String pool,
-      Optional<BoxInstances.Instance> found)
+      Optional<BoxInstances.Instance> found,
+      boolean fresh)
       throws Exception {
     var containers = new ContainerManager(shell);
     var startedHere = found.isEmpty() || !(found.get().state() instanceof ContainerState.Running);
@@ -378,14 +388,16 @@ public final class WorkspaceTemplate {
           .into(
               new ProjectProvisioner.Instance(
                   template, Optional.of(pool), Map.of(BoxInstances.TEMPLATE_OF_KEY, project)),
-              found.isEmpty());
+              fresh);
       WorkspaceCredentials.strip(shell, template);
       WorkspaceCredentials.requireNone(shell, template, source.tokens());
     } catch (Exception failure) {
       try {
         WorkspaceCredentials.strip(shell, template);
-      } catch (IOException | TimeoutException stripping) {
-        failure.addSuppressed(stripping);
+        WorkspaceCredentials.requireNone(shell, template, source.tokens());
+      } catch (IOException | TimeoutException unproven) {
+        failure.addSuppressed(unproven);
+        markUnproven(shell, locks, template).ifPresent(failure::addSuppressed);
       }
       if (startedHere) {
         try {
@@ -397,6 +409,50 @@ public final class WorkspaceTemplate {
       throw failure;
     }
     containers.stop(template);
+  }
+
+  /**
+   * {@code found}, a template marked {@link #UNPROVEN_KEY}, set back to what was last shown to hold
+   * no one's token: its newest version's snapshot, restored, the mark gone with it; or, with no
+   * version to restore, deleted, so the build launches it anew. Answers the template to build into,
+   * empty when it was deleted.
+   */
+  private Optional<BoxInstances.Instance> rollBack(
+      String template, List<Integer> versions, BoxInstances.Instance found)
+      throws IOException, InterruptedException, TimeoutException {
+    var containers = new ContainerManager(shell);
+    if (found.state() instanceof ContainerState.Running) {
+      containers.stop(template);
+    }
+    var newest = versions.stream().mapToInt(Integer::intValue).max();
+    if (newest.isEmpty()) {
+      var deleted = shell.exec(List.of("incus", "delete", "--force", template));
+      if (!deleted.ok()) {
+        throw new IOException(
+            "Could not delete " + template + ", which may hold a token: " + deleted.reason());
+      }
+      return Optional.empty();
+    }
+    new SnapshotManager(shell).restore(template, "v" + newest.getAsInt());
+    var cleared = new ContainerConfig(shell, locks).set(template, List.of(UNPROVEN_KEY + "="));
+    if (!cleared.ok()) {
+      throw new IOException(
+          "Could not clear " + UNPROVEN_KEY + " on " + template + ": " + cleared.reason());
+    }
+    return new BoxInstances(observer).named(template);
+  }
+
+  /** Marks {@code template} {@link #UNPROVEN_KEY}; the failure to, when it could not. */
+  static Optional<IOException> markUnproven(ShellExec shell, Path locks, String template)
+      throws InterruptedException {
+    try {
+      var marked = new ContainerConfig(shell, locks).set(template, List.of(UNPROVEN_KEY + "=1"));
+      return marked.ok()
+          ? Optional.empty()
+          : Optional.of(new IOException("Could not mark " + template + ": " + marked.reason()));
+    } catch (IOException | TimeoutException e) {
+      return Optional.of(new IOException("Could not mark " + template, e));
+    }
   }
 
   /**

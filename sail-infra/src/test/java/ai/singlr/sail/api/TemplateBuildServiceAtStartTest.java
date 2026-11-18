@@ -88,7 +88,7 @@ class TemplateBuildServiceAtStartTest {
           TemplateRecord.Outcome.INTERRUPTED,
           TemplateRecord.read(TemplateRecord.fileOf(dir, "lamp")).orElseThrow().outcome());
       assertEquals(
-          TemplateBuild.UNCLEANED,
+          TemplateBuild.UNPROVEN,
           TemplateRecord.read(TemplateRecord.fileOf(dir, "dock")).orElseThrow().reason(),
           "dock's template still holds a token, and its record says so");
       assertTrue(incus.invocations().contains("incus stop dock--tmpl"), "never left running");

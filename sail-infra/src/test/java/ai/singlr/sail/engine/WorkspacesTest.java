@@ -432,6 +432,10 @@ class WorkspacesTest {
         List.of(
             "incus start acme--tmpl",
             String.join(" ", strip("acme--tmpl")),
+            String.join(
+                " ",
+                ContainerExec.asRoot(
+                    "acme--tmpl", List.of("bash", "-c", WorkspaceCredentials.HELD, "sail-held"))),
             "incus stop acme--tmpl"),
         shell.invocations().stream()
             .filter(
@@ -441,6 +445,81 @@ class WorkspacesTest {
                         && !c.startsWith("incus query")
                         && !c.startsWith("incus snapshot list"))
             .toList());
+  }
+
+  /** A template marked unproven, current at v1 and built from an older definition. */
+  private static String unproven(String current) {
+    return instance(
+        "acme--tmpl",
+        "Stopped",
+        "tank",
+        ("\"user.sail.template.of\": \"acme\", \"user.sail.template.inputs\": \"older\","
+                + " \"user.sail.template.unproven\": \"1\"")
+            + (current == null ? "" : ", \"user.sail.template.current\": \"" + current + "\""));
+  }
+
+  /**
+   * A template marked unproven (its build failed or was cut, and absence of its builder's tokens
+   * could not be shown) is never built upon: the next build restores its newest version's snapshot,
+   * made only once a build's strip and check passed, clears the mark, and runs every step again.
+   */
+  @Test
+  void anUnprovenTemplateIsRolledBackToItsNewestVersionBeforeItIsBuiltAgain() throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(unproven("v1")), snapshots("v1"));
+
+    var built = templates(shell).ensure(acme(), source());
+
+    var calls = shell.invocations();
+    var restored = calls.indexOf("incus snapshot restore acme--tmpl v1");
+    var cleared = calls.indexOf("incus config set acme--tmpl user.sail.template.unproven=");
+    var started = calls.indexOf("incus start acme--tmpl");
+    assertTrue(restored >= 0 && restored < cleared && cleared < started, calls.toString());
+    assertEquals(List.of(true), builtFresh, "every step runs again on the restored version");
+    assertEquals("v2", built.version());
+  }
+
+  /** With no version to restore, an unproven template is deleted and launched anew. */
+  @Test
+  void anUnprovenTemplateWithNoVersionIsDeletedAndLaunchedAnew() throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(unproven(null)), "[]");
+
+    templates(shell).ensure(acme(), source());
+
+    assertTrue(shell.invocations().contains("incus delete --force acme--tmpl"));
+    assertEquals(List.of(true), builtFresh);
+    assertEquals(1, builtInto.size());
+  }
+
+  /**
+   * A failed build is searched for its tokens after the strip, as a finished one is; a template
+   * that still holds one is marked unproven, so the next build rolls it back.
+   */
+  @Test
+  void aFailedBuildWhoseTemplateStillHoldsATokenIsMarkedUnproven() {
+    var shell =
+        incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"))
+            .on("sail-held", new ShellExec.Result(1, "a token this build was given", ""));
+
+    assertThrows(IOException.class, () -> templates(shell).ensure(acme(), failing()));
+
+    assertTrue(
+        shell.invocations().contains("incus config set acme--tmpl user.sail.template.unproven=1"),
+        shell.invocations().toString());
+  }
+
+  /**
+   * Workspaces clone a version's snapshot, never the template as it stands: one marked unproven
+   * still serves its current version, made only after that build's strip and check passed.
+   */
+  @Test
+  void aWorkspaceOfAnUnprovenTemplateIsAClonOfItsProvenSnapshot() throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(unproven("v1").replace("older", INPUTS)), snapshots("v1"));
+
+    workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7, 8))
+        .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of);
+
+    assertTrue(indexOf(shell, copyArgv("v1")) >= 0, shell.invocations().toString());
+    assertEquals(List.of(), builtInto, "nothing is built: v1 is current");
   }
 
   @Test

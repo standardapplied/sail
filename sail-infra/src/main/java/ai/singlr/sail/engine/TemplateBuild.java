@@ -38,10 +38,13 @@ public final class TemplateBuild {
   /** Why a build cut short ended, once sail-api cleaned its template as it started. */
   public static final String CUT_SHORT = "The build stopped when the runner restarted.";
 
-  /** Why a build cut short ended, when its template could not be cleaned. */
-  public static final String UNCLEANED =
-      "The build stopped when the runner restarted, and its template could not be cleaned of its"
-          + " builder's credentials; building it again cleans it.";
+  /**
+   * Why a build cut short ended, when its template could not be shown to hold none of the tokens
+   * its build was given: the next build starts from the template's last version, never from it.
+   */
+  public static final String UNPROVEN =
+      "The build stopped when the runner restarted, and Sail could not show its template holds none"
+          + " of its builder's credentials; the next build starts it again from its last version.";
 
   /**
    * What a read says of a build cut short that no one has ended yet: a read never cleans, so it
@@ -124,7 +127,9 @@ public final class TemplateBuild {
         new WorkspaceTemplate.Recorder() {
           @Override
           public void started() {
-            record.set(TemplateRecord.started(by, clock.get(), STEPS));
+            record.set(
+                TemplateRecord.started(by, clock.get(), STEPS)
+                    .proving(TemplateRecord.TokenProof.of(tokens)));
             record.get().write(file);
             started.run();
           }
@@ -152,11 +157,14 @@ public final class TemplateBuild {
   /**
    * Ends a build cut short ({@code record} has no outcome, and the template's lock is free), as
    * sail-api starts: under the lock, the template is stripped of every credential, searched for
-   * {@code tokens} (its builder's, as stored now: the values a build is given live only in its
-   * process, and are never written), and stopped, as a failed build is; only then is its record
-   * ended {@code interrupted}. A template that cannot be cleaned is stopped all the same, and its
-   * record says so, so nothing tries again until the next build, which strips it. Empty when there
-   * was nothing to end, or another holds the lock.
+   * {@code tokens} (its builder's, as stored now) and stopped, as a failed build is; only then is
+   * its record ended {@code interrupted}. The build's own token values lived only in its process,
+   * so absence is shown only when {@code tokens} hold every value the record's proof was made of
+   * ({@link TemplateRecord.TokenProof}: salted fingerprints, never a value) and the search finds
+   * none. Otherwise, a token replaced since, or a strip or search that failed, the template is
+   * stopped and marked {@link WorkspaceTemplate#UNPROVEN_KEY}, so the next build rolls it back to
+   * its last version; workspaces clone that version's snapshot, never the template as it stands.
+   * Empty when there was nothing to end, or another holds the lock.
    */
   public Optional<TemplateRecord> endCutShort(
       String project, ShellExec shell, Collection<String> tokens) throws Exception {
@@ -171,11 +179,19 @@ public final class TemplateBuild {
       if (record.isEmpty()) {
         return Optional.empty();
       }
+      var proof = record.get().proof();
       Exception failed = null;
+      var proven = false;
       try {
-        clean(shell, template, tokens);
+        proven = !clean(shell, template, tokens) || (proof != null && proof.heldIn(tokens));
       } catch (Exception e) {
         failed = e;
+      }
+      if (!proven) {
+        var unmarked = WorkspaceTemplate.markUnproven(shell, locks, template);
+        if (failed == null && unmarked.isPresent()) {
+          failed = unmarked.get();
+        }
       }
       var ended =
           record
@@ -183,7 +199,7 @@ public final class TemplateBuild {
               .ended(
                   TemplateRecord.Outcome.INTERRUPTED,
                   clock.get(),
-                  failed == null ? CUT_SHORT : UNCLEANED,
+                  proven ? CUT_SHORT : UNPROVEN,
                   RESUMES);
       ended.write(file);
       if (failed != null) {
@@ -193,11 +209,15 @@ public final class TemplateBuild {
     }
   }
 
-  private static void clean(ShellExec shell, String template, Collection<String> tokens)
+  /**
+   * Strips, searches and stops {@code template}, when there is one: whether there was, since a
+   * template never launched holds nothing.
+   */
+  private static boolean clean(ShellExec shell, String template, Collection<String> tokens)
       throws Exception {
     var found = new BoxInstances(shell).named(template);
     if (found.isEmpty()) {
-      return;
+      return false;
     }
     var containers = new ContainerManager(shell);
     if (!(found.get().state() instanceof ContainerState.Running)) {
@@ -209,6 +229,7 @@ public final class TemplateBuild {
     } finally {
       containers.stop(template);
     }
+    return true;
   }
 
   /** Whether {@code project}'s template is being built now: its lock is held. */

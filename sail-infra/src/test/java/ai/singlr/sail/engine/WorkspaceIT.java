@@ -297,7 +297,8 @@ class WorkspaceIT extends AbstractIncusIT {
   /**
    * Rule 2 on a real Incus: a template that still holds a credential after the strip fails its
    * build, records no version and takes no snapshot, and v1 stays current: (a) the build's token in
-   * places no list names, (b) a system git identity, (c) a key in another home.
+   * places no list names, (b) a system git identity, (c) a key in another home. It is marked
+   * unproven, so the next build restores v1 rather than build on what it holds.
    */
   @Test
   void aTemplateStillHoldingACredentialFailsItsBuildAndVersionOneStaysCurrent() throws Exception {
@@ -328,9 +329,17 @@ class WorkspaceIT extends AbstractIncusIT {
       var template = new BoxInstances(shell).named(TEMPLATE).orElseThrow();
       assertEquals(Optional.of("v1"), template.key(WorkspaceTemplate.CURRENT_KEY));
       assertEquals(
+          Optional.of("1"),
+          template.key(WorkspaceTemplate.UNPROVEN_KEY),
+          "the next build rolls it back rather than build on what it holds");
+      assertEquals(
           List.of("v1"),
           new SnapshotManager(shell)
               .list(TEMPLATE).stream().map(SnapshotManager.SnapshotInfo::name).toList());
+      assertTrue(
+          shell
+              .exec(List.of("incus", "config", "unset", TEMPLATE, WorkspaceTemplate.UNPROVEN_KEY))
+              .ok());
       plant(
           "rm -f /home/dev/.netrc /home/dev/.sail/gh-token-01 /root/.ssh/authorized_keys;"
               + " git config --system --unset-all user.email || true;"
@@ -729,6 +738,7 @@ class WorkspaceIT extends AbstractIncusIT {
     var now = DateTimeUtils.now();
     TemplateRecord.started("ada", now, TemplateBuild.STEPS)
         .at(9, now)
+        .proving(TemplateRecord.TokenProof.of(List.of(FAKE_TOKEN)))
         .write(TemplateRecord.fileOf(dir, PROJECT));
 
     var read = builds.status(edited());
@@ -754,6 +764,46 @@ class WorkspaceIT extends AbstractIncusIT {
 
     assertEquals(
         TemplateRecord.Outcome.BUILT, builds.status(edited()).build().orElseThrow().outcome());
+  }
+
+  /**
+   * A cut build whose token was replaced since cannot be shown absent: sail-api, starting, strips
+   * and stops the template and marks it unproven; Build Again restores the newest version's
+   * snapshot first, so nothing the cut build left reaches v2, and the mark goes with the restore.
+   */
+  @Test
+  void aCutBuildWhoseTokenWasReplacedIsRolledBackBeforeBuildAgain(@TempDir Path dir)
+      throws Exception {
+    var logged = new ArrayList<Exception>();
+    var builds = service(dir, logged);
+    plant("echo left-by-the-cut-build > /home/dev/cut-marker");
+    var now = DateTimeUtils.now();
+    TemplateRecord.started("ada", now, TemplateBuild.STEPS)
+        .at(9, now)
+        .proving(TemplateRecord.TokenProof.of(List.of("ghp_itReplacedSince0042")))
+        .write(TemplateRecord.fileOf(dir, PROJECT));
+
+    builds.endCutShort(List.of(PROJECT));
+    var cut = builds.status(edited()).build().orElseThrow();
+    var marked = new BoxInstances(shell).named(TEMPLATE).orElseThrow();
+    asAda(
+        () ->
+            builds.start(
+                edited(),
+                started ->
+                    recorded(dir, edited(), List.of(), started, (into, tracker, listener) -> {})));
+    awaitTheBuild();
+    var after = builds.status(edited());
+    var rebuilt = new BoxInstances(shell).named(TEMPLATE).orElseThrow();
+
+    assertEquals(TemplateBuild.UNPROVEN, cut.reason());
+    assertEquals(Optional.of("1"), marked.key(WorkspaceTemplate.UNPROVEN_KEY));
+    assertEquals(new ContainerState.Stopped(), marked.state());
+    assertEquals(TemplateRecord.Outcome.BUILT, after.build().orElseThrow().outcome());
+    assertEquals("v2", after.current().orElseThrow().version());
+    assertEquals(Optional.empty(), rebuilt.key(WorkspaceTemplate.UNPROVEN_KEY));
+    assertEquals(null, inSnapshot("v2", "/home/dev/cut-marker"), "the cut's leftovers are gone");
+    assertEquals(List.of(), logged);
   }
 
   /**
