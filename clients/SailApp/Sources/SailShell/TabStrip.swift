@@ -13,6 +13,8 @@ public final class TabStrip: NSView {
         public let id: TabID
         public let title: String
         public let zoomed: Bool
+        /// A terminal in it may still be running: its end was not confirmed.
+        public var unended = false
     }
 
     var onSelect: @MainActor (TabID) -> Void = { _ in }
@@ -159,6 +161,13 @@ public final class TabButton: NSView, NSTextFieldDelegate {
     }
 
     let zoomMark = NSImageView()
+    /// Marks a tab holding a terminal whose end was not confirmed, where the zoom mark goes.
+    let unendedMark = NSImageView()
+
+    /// Whether the tab shows it holds a terminal that may still be running.
+    package var showsUnended: Bool {
+        !unendedMark.isHidden
+    }
     /// The selected tab's mark: a 2 pt bar along its bottom edge in `accentText`, as the rail's
     /// bar marks its chosen item and Mast underlines its active tab.
     let bar = NSView()
@@ -179,7 +188,7 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         close.target = self
         close.action = #selector(closeTab)
         bar.wantsLayer = true
-        for view in [label, close, zoomMark, bar] as [NSView] {
+        for view in [label, close, zoomMark, unendedMark, bar] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -191,6 +200,8 @@ public final class TabButton: NSView, NSTextFieldDelegate {
             close.widthAnchor.constraint(equalToConstant: 16),
             zoomMark.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4), zoomMark.centerYAnchor.constraint(equalTo: centerYAnchor),
             zoomMark.widthAnchor.constraint(equalToConstant: 16),
+            unendedMark.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4), unendedMark.centerYAnchor.constraint(equalTo: centerYAnchor),
+            unendedMark.widthAnchor.constraint(equalToConstant: 16),
             label.centerXAnchor.constraint(equalTo: centerXAnchor), label.centerYAnchor.constraint(equalTo: centerYAnchor),
             label.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: Self.titleInset),
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Self.titleInset),
@@ -228,7 +239,8 @@ public final class TabButton: NSView, NSTextFieldDelegate {
     func show(_ item: TabStrip.Item, selected: Bool, look: Look) {
         label.stringValue = item.title
         toolTip = item.title
-        zoomMark.isHidden = !item.zoomed
+        unendedMark.isHidden = !item.unended
+        zoomMark.isHidden = !item.zoomed || item.unended
         isSelected = selected
         setAccessibilityLabel(item.title)
         setAccessibilityValue(selected)
@@ -384,6 +396,7 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         if label.font != font { label.font = font }
         close.paint(look)
         zoomMark.image = Self.symbol("arrow.up.left.and.arrow.down.right", accessibility: "Zoomed", colour: look.textSecondary)
+        unendedMark.image = Self.symbol("exclamationmark.triangle", accessibility: "May still be running", colour: Tint(look.warning))
         close.isHidden = !hovering || renaming
         field?.textColor = NSColor(look.text)
     }

@@ -274,19 +274,89 @@ import Testing
         session.close()
     }
 
-    /// MINOR 1: a runner's door cannot kill; nothing is sent.
-    @Test func aKillThroughARunnersDoorIsRefusedBeforeAnythingIsSent() throws {
-        let session = TerminalSession(attach: "s", write: true, door: .runner(TicketDesk(address: .tcp(host: "127.0.0.1", port: 9))), screen: try screen())
-        #expect(throws: TerminalError.self) { try session.kill() }
+    /// An attached session on this Mac is ended as any other: a Kill on a connection of its own,
+    /// the host's answer awaited, never a Kill written to the attached connection and forgotten.
+    @Test func anAttachedSessionsEndIsAKillWhoseAnswerIsAwaited() async throws {
+        let (host, session, attached, _) = try await attachedLocally()
+        let ended = Task { await session.end(within: .seconds(10)) }
+        let killer = try await host.accept()
+        try await killer.welcome()
+        #expect(try await killer.read() == .kill(session: "work"))
+        try killer.send(.accepted)
+        #expect(await ended.value == .ended)
+        #expect(try await attached.control() == .detach, "the attached connection only detaches")
     }
 
-    /// Fix 2: a kill with no connection attached says so rather than doing nothing.
-    @Test func aKillWhileNotAttachedIsRefused() throws {
-        let host = try FakeHost()
-        let session = TerminalSession(attach: "s", write: true, door: .local(host.address), screen: try screen())
-        #expect(throws: TerminalError.unsupported("the session is not attached, so there is no connection to ask the host to end it on")) {
-            try session.kill()
+    /// A Kill that cannot reach the host is no end: unconfirmed, saying why.
+    @Test func anAttachedSessionWhoseKillCannotBeSentIsNotEnded() async throws {
+        let (host, session, attached, _) = try await attachedLocally()
+        defer { withExtendedLifetime(attached) {} }
+        host.stop()
+        let outcome = await session.end(within: .seconds(5))
+        guard case let .unconfirmed(why) = outcome, why.count == 1 else {
+            Issue.record("the end was \(outcome)")
+            return
         }
+        #expect(why[0].hasPrefix("This Mac's terminal host could not be reached ("), "said as what is true: \(why[0])")
+        #expect(why[0].hasSuffix("); if it has stopped, this terminal ended with it."))
+    }
+
+    /// A Kill the host refuses, the session still in its list, is no end: unconfirmed in the
+    /// host's words.
+    @Test func anAttachedSessionWhoseKillIsRefusedIsNotEnded() async throws {
+        let (host, session, attached, _) = try await attachedLocally()
+        defer { withExtendedLifetime(attached) {} }
+        let ended = Task { await session.end(within: .seconds(10)) }
+        let words = "Session 'work' is not yours."
+        try await Self.refuseTheKill(at: host, saying: words, listing: [SessionListingTests.info("work")])
+        #expect(await ended.value == .unconfirmed([words]))
+    }
+
+    /// A Kill refused because the host no longer holds the session is the session gone already, by
+    /// the host's own list, not by its words.
+    @Test func anAttachedSessionTheHostNoLongerListsIsGone() async throws {
+        let (host, session, attached, _) = try await attachedLocally()
+        defer { withExtendedLifetime(attached) {} }
+        let ended = Task { await session.end(within: .seconds(10)) }
+        try await Self.refuseTheKill(at: host, saying: "No session 'work'.", listing: [SessionListingTests.info("other")])
+        #expect(await ended.value == .gone)
+    }
+
+    /// A Kill answered after the end's limit is no end: unconfirmed at the limit, in this Mac's
+    /// words.
+    @Test func anAttachedSessionWhoseKillIsAnsweredLateIsNotEnded() async throws {
+        let (host, session, attached, _) = try await attachedLocally()
+        defer { withExtendedLifetime(attached) {} }
+        let began = ContinuousClock.now
+        let ended = Task { await session.end(within: .seconds(1)) }
+        let killer = try await host.accept()
+        try await killer.welcome()
+        #expect(try await killer.read() == .kill(session: "work"))
+        #expect(await ended.value == .unconfirmed(["This Mac's terminal host did not answer within 1 s."]))
+        #expect(ContinuousClock.now - began < .seconds(5), "within the end's one limit")
+    }
+
+    /// The end's own reads time out with the limit too, and may do so first, on a busy machine:
+    /// the host not answering is said the same either way. A limit of 1.5 s reads for 1 s, so here
+    /// the read times out first.
+    @Test func aKillWhoseReadTimesOutIsSaidAsTheHostNotAnswering() async throws {
+        let host = try FakeHost()
+        let ended = Task { await Door.local(host.address).end("work", within: .milliseconds(1500)) }
+        let killer = try await host.accept()
+        try await killer.welcome()
+        #expect(try await killer.read() == .kill(session: "work"))
+        #expect(await ended.value == .unconfirmed(["This Mac's terminal host did not answer within 1 s."]))
+    }
+
+    static func refuseTheKill(at host: FakeHost, saying words: String, listing: [SessionInfo]) async throws {
+        let killer = try await host.accept()
+        try await killer.welcome()
+        #expect(try await killer.read() == .kill(session: "work"))
+        try killer.send(.refused(HostRefusal(message: words, remedy: [])))
+        let lister = try await host.accept()
+        try await lister.welcome()
+        #expect(try await lister.read() == .listSessions(after: "", limit: SessionListing.pageSize))
+        try lister.send(.sessions(SessionPage(sessions: listing, next: "")))
     }
 
     /// Fix 2 BLOCKER (the reviewer's n1): an applied number no client could have sent ends the

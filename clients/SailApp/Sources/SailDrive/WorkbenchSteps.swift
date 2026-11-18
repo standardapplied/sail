@@ -48,6 +48,9 @@ extension Driver {
             let shown = await waitUntil(step.seconds ?? 5) { said().contains(words) }
             return (shown, "the sheet says '\(said())'")
         }
+        if step.heldAtHost == true {
+            return await heldAtHost(within: step.seconds ?? 10)
+        }
         if step.remember == true {
             remembered = pane?.name
             return (remembered != nil, "kept \(remembered ?? "no session")")
@@ -174,6 +177,27 @@ extension Driver {
         return nil
     }
 
+    /// Whether the host holds, live, only This Mac sessions the workbench's panes hold, waiting up
+    /// to `seconds` for ends still under way; else each it holds that no pane does, named. Such a
+    /// session comes back as a tab at the next launch: `Workbench.restore` gives a tab to every
+    /// live This Mac session the kept arrangement does not hold.
+    func heldAtHost(within seconds: Double) async -> (Bool, String) {
+        let held = Set(workbench.model.panes.values.filter { !$0.place.onRunner }.map(\.session))
+        let deadline = ContinuousClock.now + .seconds(seconds)
+        var unheld = ["none: the host did not answer"]
+        repeat {
+            guard let listed = try? await SessionListing.sessions(at: workbench.host.address, timeout: 2) else {
+                try? await Task.sleep(for: .milliseconds(100))
+                continue
+            }
+            let live = listed.filter { $0.live && $0.name.hasPrefix(Place.thisMacSessions) }
+            unheld = live.filter { !held.contains($0.name) }.map { "\($0.name) (\($0.command.joined(separator: " ")), \($0.attached) attached)" }
+            if unheld.isEmpty { return (true, "the host holds \(live.count) live This Mac sessions, each a pane's") }
+            try? await Task.sleep(for: .milliseconds(100))
+        } while ContinuousClock.now < deadline
+        return (false, "the host holds live This Mac sessions no pane holds: \(unheld.joined(separator: ", ")); the panes hold \(held.sorted())")
+    }
+
     /// The sessions the host lists, each live or not.
     private func listedLive() async -> [String: Bool] {
         let sessions = (try? await SessionListing.sessions(at: workbench.host.address, timeout: 2)) ?? []
@@ -217,6 +241,9 @@ extension Driver {
         if let empty = expected.empty, empty != saysNoTerminal { misses.append(empty ? "'No terminal is open' is not shown" : "'No terminal is open' shows") }
         guard let tab = model.selectedTab else { return misses + (expected.tabs == [] ? [] : ["no tab"]) }
         if let focus = expected.focus, tab.layout.leaves.firstIndex(of: tab.focused) != focus { misses.append("pane \(focus) is not focused") }
+        if let unended = expected.unended, unended != workbench.strip.tabs.map(\.showsUnended) {
+            misses.append("the tabs marked unended are \(workbench.strip.tabs.map(\.showsUnended)), not \(unended)")
+        }
         if let dimmed = expected.dimmed, dimmed != orderedPanes.map(\.isDimmed) { misses.append("the dimmed panes are \(orderedPanes.map(\.isDimmed)), not \(dimmed)") }
         if let focused = workbench.focused, shell.window.isKeyWindow, shell.window.firstResponder !== focused.terminal {
             misses.append("the focused pane is not the first responder")

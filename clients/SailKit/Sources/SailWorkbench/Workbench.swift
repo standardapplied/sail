@@ -137,11 +137,13 @@ public struct Workbench: Hashable, Sendable {
         if wasSelected { selected = tabs.isEmpty ? nil : tabs[max(0, index - 1)].id }
     }
 
-    /// Focuses `pane` and selects its tab, as a click on it does; focusing another pane ends a zoom.
-    public mutating func focus(_ pane: PaneID) {
+    /// Focuses `pane` and selects its tab, as a click on it does; focusing another pane ends a zoom,
+    /// unless `keepingZoom`: a zoomed pane being closed stays as it is until it goes, so the tab is
+    /// laid out once, not twice.
+    public mutating func focus(_ pane: PaneID, keepingZoom: Bool = false) {
         guard let index = index(holding: pane) else { return }
         selected = tabs[index].id
-        if tabs[index].focused != pane { tabs[index].zoomed = nil }
+        if tabs[index].focused != pane, !keepingZoom { tabs[index].zoomed = nil }
         focus(pane, at: index)
     }
 

@@ -3,6 +3,8 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # Dispatched from a tag, it is that tag's release. Dispatched from a branch, it publishes the
+  # binaries but ships no app: the app's check fails, its version being no tag's.
   workflow_dispatch:
 
 permissions:

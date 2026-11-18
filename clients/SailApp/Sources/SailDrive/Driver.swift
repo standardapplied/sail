@@ -293,8 +293,7 @@ final class Driver {
             } catch {
                 return (false, "the bench could not run: \(error)")
             }
-            let p95 = bench["full redraw 200x60 cpu p95 ms"] ?? .infinity
-            return (p95 <= 4, bench.sorted { $0.key < $1.key }.map { "\($0.key) \(String(format: "%.2f", $0.value))" }.joined(separator: ", "))
+            return Bench.verdict(bench)
         }
         if step.latencyOverlay == true {
             return await latencyOverlay(within: step.seconds ?? 5)

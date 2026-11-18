@@ -47,17 +47,23 @@ public final class WorkbenchView: NSView {
     /// Workspaces asked to open before the first restore, opened once it has replaced the model.
     private var pendingWorkspaces: [Place] = []
 
-    init(fonts directory: URL, helper: String?, look: Look) throws(ShellError) {
-        self.look = look
-        do {
-            fonts = try TerminalFonts(directory: directory)
-        } catch {
-            throw .resources("the terminal's fonts cannot be read: \(error)")
-        }
+    convenience init(fonts directory: URL, helper: String?, look: Look) throws(ShellError) {
+        let host: LocalHost
         do {
             host = try LocalHost(binary: helper)
         } catch {
             throw .host("this Mac's terminal host has no place to listen: \(error)")
+        }
+        try self.init(fonts: directory, host: host, look: look)
+    }
+
+    init(fonts directory: URL, host: LocalHost, look: Look) throws(ShellError) {
+        self.look = look
+        self.host = host
+        do {
+            fonts = try TerminalFonts(directory: directory)
+        } catch {
+            throw .resources("the terminal's fonts cannot be read: \(error)")
         }
         banner = StatusBanner(look: look)
         strip = TabStrip(look: look)
@@ -153,7 +159,13 @@ public final class WorkbenchView: NSView {
     }
 
     private func showTitles() {
-        strip.show(model.tabs.map { TabStrip.Item(id: $0.id, title: model.title(of: $0.id), zoomed: $0.zoomed != nil) }, selected: model.selected)
+        let items = model.tabs.map { tab in
+            TabStrip.Item(
+                id: tab.id, title: model.title(of: tab.id), zoomed: tab.zoomed != nil,
+                unended: tab.layout.leaves.contains { panes[$0]?.unended == true }
+            )
+        }
+        strip.show(items, selected: model.selected)
         onTitle(model.selectedTab.map { model.title(of: $0.id) } ?? ShellApp.title)
     }
 
@@ -461,31 +473,58 @@ public final class WorkbenchView: NSView {
         }
     }
 
-    /// Ends `views`' sessions. A runner tab stays until the runner says its session ended (or had
-    /// already); when the runner does not confirm, the tab says so and offers to end it again or to
-    /// close it anyway, never vanishing as if it had ended.
+    /// Ends `views`' sessions. A pane stays until its host says its session ended (or had
+    /// already), the focus moving on at once; when the host does not confirm, the pane says so and
+    /// offers to end it again or to close it anyway, never vanishing as if it had ended.
     private func end(_ views: [TerminalPane]) {
+        var ending: [(TerminalPane, Task<EndOutcome, Never>)] = []
         for view in views where panes[view.id] === view {
-            guard view.place.onRunner, let ending = view.end() else {
-                view.end()
+            guard let task = view.end() else {
                 remove(view)
                 continue
             }
             view.showEnding()
+            ending.append((view, task))
+        }
+        focusPastEnding()
+        let left = model.focusedPane?.id
+        for (view, task) in ending {
             Task { [weak self] in
-                let outcome = await ending.value
-                self?.settle(view, outcome)
+                let outcome = await task.value
+                self?.settle(view, outcome, focusLeftOn: left)
             }
         }
         apply()
     }
 
-    private func settle(_ view: TerminalPane, _ outcome: EndOutcome) {
+    /// Moves the focus off a pane being ended to where its close will put it: the tab's most
+    /// recently focused other pane, else the tab before's, else the one after's. A second ⌘W while
+    /// the host answers closes the next pane, never the same one again. A zoomed pane being ended
+    /// stays zoomed until it goes, so its tab is laid out once.
+    private func focusPastEnding() {
+        guard let focused = model.focusedPane, panes[focused.id]?.isEnding == true,
+              let at = model.tabs.firstIndex(where: { $0.id == model.selected }) else { return }
+        let tabs = model.tabs
+        var order = [tabs[at]]
+        order += tabs[..<at].reversed()
+        order += tabs[(at + 1)...]
+        let candidates = order.flatMap { $0.history.reversed() }
+        guard let next = candidates.first(where: { panes[$0]?.isEnding == false }) else { return }
+        model.focus(next, keepingZoom: true)
+    }
+
+    /// What an end came to. An unconfirmed pane is shown, its tab selected and the pane focused,
+    /// only while the focus is still where the end left it (`focusLeftOn`); once the person has
+    /// moved on, the pane says so where it is and its tab is marked, the keys staying where the
+    /// person is.
+    private func settle(_ view: TerminalPane, _ outcome: EndOutcome, focusLeftOn left: PaneID?) {
         guard panes[view.id] === view else { return }
         guard !outcome.closesTab, case let .unconfirmed(why) = outcome else {
             remove(view)
             return apply()
         }
+        if model.focusedPane?.id == left { model.focus(view.id) }
+        apply()
         view.showUnended(why, endAgain: { [weak self] in self?.end([view]) }, closeAnyway: { [weak self] in
             guard let self, panes[view.id] === view else { return }
             remove(view)

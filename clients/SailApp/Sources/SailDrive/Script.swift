@@ -64,6 +64,8 @@ struct Step: Decodable {
     var latencyOverlay: Bool?
     /// Starts the latency from nothing.
     var resetLatency: Bool?
+    /// The host holds, live, no This Mac session that no pane holds (``Driver/heldAtHost(within:)``).
+    var heldAtHost: Bool?
     /// Says what the system reports of this process now (``MachineState``) and fails unless it was
     /// launched as a person's Sail is: a foreground application whose parent is launchd and whose
     /// main thread is user-interactive.
@@ -256,5 +258,7 @@ struct Step: Decodable {
         var dimmed: [Bool]?
         /// "No terminal is open" shows.
         var empty: Bool?
+        /// Which tabs the strip marks as holding a terminal that may still be running.
+        var unended: [Bool]?
     }
 }
