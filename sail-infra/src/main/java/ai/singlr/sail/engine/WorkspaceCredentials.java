@@ -35,26 +35,32 @@ final class WorkspaceCredentials {
 
   /**
    * Every give runs it whole, so nothing of a previous owner survives a re-own or a restart, and so
-   * does a disown. Each removal is idempotent and checked by what is left, never by what a failed
-   * command said.
+   * does a disown, and a template's build that failed or was cut short, before its dev user was
+   * even made (which then holds no git identity of anyone's to remove). Each removal is idempotent
+   * and checked by what is left, never by what a failed command said.
    */
   static final String STRIP =
       """
       set -eu
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
       rm -f %1$s
-      for key in user.name user.email; do
-        as_dev git config --global --unset-all "$key" || [ "$?" -eq 5 ]
-      done
+      dev=$(id -u dev 2>/dev/null) || dev=""
+      if [ -n "$dev" ]; then
+        for key in user.name user.email; do
+          as_dev git config --global --unset-all "$key" || [ "$?" -eq 5 ]
+        done
+      fi
       if [ -e %2$s ]; then : > %2$s; fi
       for file in %1$s; do
         if [ -e "$file" ]; then echo "$file is still there" >&2; exit 1; fi
       done
-      for key in user.name user.email; do
-        if as_dev git config --global --get "$key" >/dev/null; then
-          echo "the git $key is still set" >&2; exit 1
-        fi
-      done
+      if [ -n "$dev" ]; then
+        for key in user.name user.email; do
+          if as_dev git config --global --get "$key" >/dev/null; then
+            echo "the git $key is still set" >&2; exit 1
+          fi
+        done
+      fi
       if [ -s %2$s ]; then echo "%2$s still has a key" >&2; exit 1; fi
       if [ "$#" -eq 2 ]; then
         install -d -m 0700 -o dev -g dev /home/dev/.ssh
@@ -163,7 +169,7 @@ final class WorkspaceCredentials {
         shell,
         instance,
         List.of(owner.name(), owner.email()),
-        "Could not make " + instance + " " + owner.handle() + "'s");
+        "Could not give " + instance + " to " + owner.handle());
     ContainerFilePush.push(
         shell,
         instance,

@@ -80,14 +80,23 @@ public enum Action {
    */
   NARRATE("Narrate", "a run's reports about itself: events, session, inbox acks", "narrate"),
   /**
-   * Entering a workspace: opening a terminal in it, or making, starting, stopping or deleting it. A
-   * workspace is its owner's, the person it was made for or the one its spec's runs act for.
+   * Entering a workspace: opening a terminal in it, or creating, starting, stopping or deleting it.
+   * A workspace is its owner's, the person it was created for or the one its spec's runs act for.
    */
   ENTER_WORKSPACE(
       "Enter a workspace",
-      "open a terminal in a workspace; make, start, stop or delete one",
+      "open a terminal in a workspace; create, start, stop or delete one",
       "enter",
       "workspaces"),
+  /**
+   * Building or rebuilding a project's template, which its workspaces are created from: it runs the
+   * project's whole setup on the runner with the builder's own git tokens.
+   */
+  BUILD_TEMPLATE(
+      "Build a template",
+      "build or rebuild a project's template, which its workspaces are created from",
+      "build",
+      "templates"),
   /** Adding, changing or removing a project's shared files and skills. */
   SHARE(
       "Share",

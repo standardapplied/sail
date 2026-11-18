@@ -6,7 +6,9 @@
 # Then another copy of Sail's host runs from another bundle's path, with a client attached to one
 # of its sessions, and the app is opened once more for Tests/Drive/third.json; then, with no host
 # and no saved arrangement, once more for Tests/Drive/shots.json: the window as the screen shows it;
-# then once more for Tests/Drive/workspaces.json, every control-plane call answered from the goldens.
+# then once more for Tests/Drive/workspaces.json, every control-plane call answered from the goldens;
+# then, with keyboard navigation on, for Tests/Drive/kit.json, the controls' gallery, left to right
+# and once more right to left (kit-rtl).
 # Each run's texts, images and report land in OUT; what it prints, and the servers' logs, beside
 # them. The ticket is handed to the drive in its environment and printed nowhere.
 set -euo pipefail
@@ -24,7 +26,15 @@ SAIL_DATA_DIR=$passkeys "$sail" server start --port 7979 --rp-id sail.standardap
 servers=($!)
 SAIL_DATA_DIR=$plain "$sail" server start --port 7980 > "$out/server-7980.log" 2>&1 &
 servers+=($!)
-trap 'kill "${servers[@]}" 2>/dev/null || true; rm -rf "$passkeys" "$plain"' EXIT
+# The kit runs turn Keyboard Navigation on (a setting of the whole Mac) and it is put back as it was
+# when this ends; outside CI they change it only when SAIL_DRIVE_KEYBOARD_NAVIGATION=on says so.
+keyboard_was=$(defaults read -g AppleKeyboardUIMode 2> /dev/null || echo unset) keyboard_changed=0
+restore_keyboard() {
+  (( keyboard_changed )) || return 0
+  if [[ $keyboard_was == unset ]]; then defaults delete -g AppleKeyboardUIMode 2> /dev/null || true
+  else defaults write -g AppleKeyboardUIMode -int "$keyboard_was"; fi
+}
+trap 'kill "${servers[@]}" 2>/dev/null || true; rm -rf "$passkeys" "$plain"; restore_keyboard' EXIT
 for port in 7979 7980; do
   for _ in $(seq 1 60); do
     curl -fsS "http://127.0.0.1:$port/v1/health" > /dev/null 2>&1 && break
@@ -43,7 +53,7 @@ SAIL_DRIVE_TICKET=$("$sail" fde enroll uday --json | plutil -extract ticket raw 
 export SAIL_DRIVE_TICKET SAIL_DRIVE_PASSKEY=$out/software-passkey.json
 rm -f "$SAIL_DRIVE_PASSKEY"
 
-for run in first second third shots workspaces; do
+for run in first second third shots workspaces kit kit-rtl; do
   if [[ $run == third ]]; then
     echo "ci/drive: another copy's host, and a client on it"
     pkill -f '_pty-host --local' || true
@@ -66,7 +76,17 @@ for run in first second third shots workspaces; do
   echo "ci/drive: $run"
   goldens=off
   [[ $run == workspaces ]] && goldens=on
-  SAIL_DRIVE_GOLDENS=$goldens perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$run.json" --out "$out/$run" 2>&1 | tee "$out/$run-output.txt" || {
+  script=$run directions=()
+  if [[ $run == kit* ]]; then
+    if [[ ${CI:-} != true && ${SAIL_DRIVE_KEYBOARD_NAVIGATION:-} != on ]]; then
+      echo "ci/drive: $run skipped: it turns on Keyboard Navigation, a setting of this whole Mac; SAIL_DRIVE_KEYBOARD_NAVIGATION=on lets it, and it is put back after"
+      continue
+    fi
+    script=kit keyboard_changed=1
+    defaults write -g AppleKeyboardUIMode -int 2
+  fi
+  [[ $run == kit-rtl ]] && directions=(-AppleTextDirection YES -NSForceRightToLeftWritingDirection YES)
+  SAIL_DRIVE_GOLDENS=$goldens perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$script.json" --out "$out/$run" ${directions[@]+"${directions[@]}"} 2>&1 | tee "$out/$run-output.txt" || {
     status=$?
     reports=$HOME/Library/Logs/DiagnosticReports
     # A signal killed the drive (138 is SIGBUS, 139 SIGSEGV): ReportCrash writes its report some
@@ -98,3 +118,7 @@ PY
     exit "$status"
   }
 done
+# The third script measures nothing: its sampler never runs, and its last line says so rather
+# than judging the CPU share of a watcher that had no period to run in.
+grep -qF "the main thread's sampler never ran: no step measured a wait" "$out/third-output.txt" \
+  || { echo "ci/drive: the third script measured nothing, yet its last line did not say its sampler never ran" >&2; exit 1; }

@@ -10,6 +10,7 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.WorkspaceDoors;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
@@ -20,13 +21,11 @@ import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalog;
-import ai.singlr.sail.engine.ProjectPhase;
-import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProvisionListener;
-import ai.singlr.sail.engine.ProvisionTracker;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.TemplateBuild;
 import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
@@ -73,13 +72,13 @@ final class WorkspaceVerbs {
 
   /**
    * Project {@code name}'s definition, when its template can be built on this box: it sets
-   * resources, {@code host init} has run and sail-api has, since every container mounts its socket.
+   * resources and {@code host init} has run, refused in the words the route's are ({@link
+   * TemplateBuild#requireResources}, {@link TemplateBuild#hostOf}), and sail-api has, since every
+   * container mounts its socket.
    */
-  static ProjectDefinition buildable(String name, OperatorCommand operator) {
-    var config = ProjectMutations.requireResources(readable(name, operator), operator);
-    if (!Files.exists(SailPaths.hostConfigPath())) {
-      throw HostInitCommand.notInitialized(operator);
-    }
+  static ProjectDefinition buildable(String name, OperatorCommand operator) throws IOException {
+    var config = TemplateBuild.requireResources(readable(name, operator));
+    TemplateBuild.hostOf(SailPaths.hostConfigPath());
     ContainerSailSetup.requireApi(SailPaths.apiSocketHostDir());
     return config;
   }
@@ -168,19 +167,6 @@ final class WorkspaceVerbs {
   }
 
   /**
-   * The progress a template build resumes: what {@code progress} records for {@code inputs}, unless
-   * the template is {@code fresh} or the record is of a finished build, when every step runs again.
-   */
-  static ProvisionTracker<ProjectPhase> tracker(
-      Path progress, String inputs, boolean fresh, boolean dryRun) throws IOException {
-    var tracker = new ProvisionTracker<>(ProjectPhase.class, progress, dryRun).load(inputs);
-    if (fresh || tracker.isComplete()) {
-      tracker.reset();
-    }
-    return tracker;
-  }
-
-  /**
    * This box's person, by handle, and the git tokens they stored: whose a host command clones with
    * ({@code HostIdentity.gitTokens}). No person when the box names none on its roster. It asks a
    * repo's host whether it wants credentials through {@code asks}, in {@code env}: a command hands
@@ -214,17 +200,28 @@ final class WorkspaceVerbs {
     CheckedTokens check(ProjectDefinition config) {
       return CheckedTokens.of(config, person, tokens, asks, env);
     }
+
+    /**
+     * Who a build from this box's command line is, as its record says: the person whose tokens it
+     * clones with, else the account that ran it, the one {@code sudo} acts for first.
+     */
+    String who() {
+      return person.orElseGet(
+          () -> Objects.requireNonNullElse(env.get("SUDO_USER"), System.getProperty("user.name")));
+    }
   }
 
   /**
    * What {@code config}'s template is built from on this box: the base profile's pool ({@code
    * host.yaml}'s, the default when it names none), the definition's digest, the catalog's names,
    * and a build that runs the project's own provisioner against the template with its own progress
-   * file, with {@code tokens} for its clone and no git identity and no trusted key of anyone's.
+   * file, with {@code tokens} for its clone and no git identity and no trusted key of anyone's,
+   * keeping the record of the build ({@link TemplateBuild}) as the route's does.
    */
   static WorkspaceTemplate.Source source(
       ProjectDefinition config,
       CheckedTokens tokens,
+      String by,
       boolean dryRun,
       boolean json,
       OperatorCommand operator)
@@ -236,47 +233,52 @@ final class WorkspaceVerbs {
         config,
         tokens,
         name -> catalog.read(name).isPresent(),
-        (into, fresh) -> {
+        by,
+        json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE,
+        (into, tracker, listener) -> {
           catalog.requireUnpruned(config.name());
-          var tracker =
-              tracker(
-                  progressOf(config.name()),
-                  ProjectProvisioner.inputs(config, Optional.empty()),
-                  fresh,
-                  dryRun);
-          var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
           try (var operations = OperationsFactory.open()) {
-            new ProjectProvisioner(
+            TemplateBuild.provision(
                     new ShellExecutor(dryRun),
-                    tracker,
-                    listener,
+                    host,
+                    config,
+                    tokens,
                     new ProjectSkills(operations::projectFiles),
-                    Optional.empty(),
                     operator)
-                .provision(
-                    into, config, host, tokens, null, SailPaths.projectFilesDir(config.name()));
+                .into(into, tracker, listener);
           }
-        });
+        },
+        dryRun);
   }
 
   /**
-   * {@code config}'s template source on a box whose {@code host.yaml} is {@code host}: its digest
-   * is the definition's alone (T4), since a template holds no one's key, and the built template is
-   * searched for the {@code tokens} its build was given alone, the ones already in it: a token for
-   * a host this build never used never enters the template, not even as a search pattern.
+   * {@code config}'s template source on a box whose {@code host.yaml} is {@code host}, built by
+   * {@code by}: its digest is the definition's alone (T4), since a template holds no one's key, and
+   * the built template is searched for the {@code tokens} its build was given alone, the ones
+   * already in it: a token for a host this build never used never enters the template, not even as
+   * a search pattern.
    */
   static WorkspaceTemplate.Source source(
       HostYaml host,
       ProjectDefinition config,
       CheckedTokens tokens,
       Predicate<String> held,
-      WorkspaceTemplate.Build build) {
-    return new WorkspaceTemplate.Source(
-        Objects.requireNonNullElse(host.pool(), HostYaml.DEFAULT_POOL),
-        ProjectProvisioner.inputs(config, Optional.empty()),
-        held,
-        build,
-        tokens.values());
+      String by,
+      ProvisionListener listener,
+      TemplateBuild.Provision provision,
+      boolean dryRun) {
+    return new TemplateBuild(SailPaths.locksDir(), SailPaths.projectsDir(), DateTimeUtils::now)
+        .source(
+            config,
+            TemplateBuild.poolOf(host),
+            held,
+            tokens.values(),
+            progressOf(config.name()),
+            by,
+            listener,
+            provision,
+            () -> {},
+            dryRun);
   }
 
   /** What a template build says it did. */

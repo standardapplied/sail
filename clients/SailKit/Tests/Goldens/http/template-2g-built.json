@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/projects/harbor/template"
+  },
+  "response": {
+    "body": {
+      "build": {
+        "by": "dana",
+        "ended_at": "2026-11-11T08:59:50.656Z",
+        "joined": false,
+        "kept": 0,
+        "outcome": "built",
+        "started_at": "2026-11-11T08:55:50.656Z",
+        "step": 20,
+        "step_started_at": "2026-11-11T08:59:40.656Z",
+        "steps": 20
+      },
+      "project": "harbor",
+      "schema_version": 1,
+      "stale": false,
+      "state": "ready",
+      "steps": 20,
+      "version": "v1"
+    },
+    "status": 200
+  }
+}

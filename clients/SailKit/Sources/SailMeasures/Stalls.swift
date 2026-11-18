@@ -117,6 +117,15 @@ public enum MachineShare {
 
     /// The time in `wait` the machine is answerable for (``starvation(in:looks:)``), in seconds,
     /// never more than the wait.
+    /// The main run loop's modes as samples read them (nil: it ran none), each with how many
+    /// samples saw it, the most seen first: whether the loop was in a mode that runs the main
+    /// queue's blocks.
+    public static func modes(_ seen: [String?]) -> String {
+        guard !seen.isEmpty else { return "no sample" }
+        let counted = Dictionary(grouping: seen) { $0 ?? "not running" }.map { (mode: $0.key, count: $0.value.count) }
+        return counted.sorted { $0.count != $1.count ? $0.count > $1.count : $0.mode < $1.mode }.map { "\($0.mode) at \($0.count)" }.joined(separator: ", ")
+    }
+
     public static func starved(in wait: Span, looks: [ThreadLook]) -> Double {
         min(starvation(in: wait, looks: looks).reduce(0) { $0 + $1.machines }, wait.length)
     }

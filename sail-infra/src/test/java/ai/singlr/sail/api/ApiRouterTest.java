@@ -2593,8 +2593,8 @@ class ApiRouterTest {
       return Result.success(
           new ProjectListResponse(
               List.of(
-                  new ProjectListItemView("acme", "running"),
-                  new ProjectListItemView("beta", "not_created"))));
+                  new ProjectListItemView("acme", "running", null),
+                  new ProjectListItemView("beta", "not_created", null))));
     }
 
     @Override

@@ -16,12 +16,12 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 
 /** Another change holding a lock while a test acts, with no sleep: latches and bounded waits. */
-final class HeldLocks {
+public final class HeldLocks {
 
   private HeldLocks() {}
 
   /** Runs {@code act} while another thread holds {@code lock}, and lets it go after. */
-  static void whileHeld(Path lock, Callable<Void> act) throws Exception {
+  public static void whileHeld(Path lock, Callable<Void> act) throws Exception {
     var held = new CountDownLatch(1);
     var release = new CountDownLatch(1);
     var holder = Executors.newSingleThreadExecutor();

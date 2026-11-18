@@ -45,6 +45,8 @@ public struct LatencyMarks: Sendable {
     private var presentedBeforeCommit = 0
     private var longestToShown: Span?
     private var longestToTold: Span?
+    private var longestToToldHanding: Double?
+    private var longestToToldHanded: Double?
     private var wakes = 0
     private var changes = 0
     private var longestBetweenCommits: Span?
@@ -97,11 +99,17 @@ public struct LatencyMarks: Sendable {
     }
 
     /// The main thread took the view's wake at `time`, for `changes` changes of the screen, the
-    /// oldest at `since`: the hop a frame request waits on, from the session's thread to the main one.
-    public mutating func told(at time: Double, since: Double, changes: Int) {
+    /// oldest at `since`, the session's thread having begun to hand it over at `handing` and handed
+    /// it at `handed` (nil when the queue took it first): the hop a frame request waits on, from the
+    /// session's thread to the main one.
+    public mutating func told(at time: Double, since: Double, handing: Double, handed: Double?, changes: Int) {
         wakes += 1
         self.changes += changes
-        Self.keepLongest(Span(since, max(since, time)), in: &longestToTold)
+        let hop = Span(since, max(since, time))
+        guard hop.length > longestToTold?.length ?? -1 else { return }
+        longestToTold = hop
+        longestToToldHanding = handing
+        longestToToldHanded = handed
     }
 
     /// A refresh that read the screen at `read` drew `frame`, committed at `time`, for the display
@@ -215,7 +223,8 @@ public struct LatencyMarks: Sendable {
             keyToEchoEstimated: Self.percentiles(keyToEchoEstimated), refresh: Self.percentiles(refreshes),
             refreshWork: Self.percentiles(refreshWork), screenUpdates: screenUpdates,
             lateOutputs: late, reportedPresents: reported, unreportedPresents: unreported,
-            presentedBeforeCommit: presentedBeforeCommit, longestToShown: longestToShown, longestToTold: longestToTold, wakes: wakes, changes: changes,
+            presentedBeforeCommit: presentedBeforeCommit, longestToShown: longestToShown, longestToTold: longestToTold, longestToToldHanding: longestToToldHanding,
+            longestToToldHanded: longestToToldHanded, wakes: wakes, changes: changes,
             longestBetweenCommits: longestBetweenCommits, longestGapOutputs: longestGapOutputs,
             longestGapFetching: longestBetweenCommits.map { gap in fetches.reduce(0) { $0 + $1.overlap(gap) } * 1000 } ?? 0,
             commitToCompleted: Self.percentiles(commitToCompleted),
@@ -297,6 +306,12 @@ public struct LatencyFigures: Equatable, Sendable, Codable {
     /// When the output that took longest to reach the main thread was taken by the screen and when
     /// the main thread took the view's wake for it, in seconds: a frame is asked for no sooner.
     public var longestToTold: Span?
+    /// When the session's thread began to hand the wake of ``longestToTold`` to the main queue, and
+    /// when that hand-off had returned, in seconds; the second nil when the main thread took the
+    /// wake first. Together they bracket the hand-off: what came before it was the reader's side,
+    /// what came after it the main queue's.
+    public var longestToToldHanding: Double?
+    public var longestToToldHanded: Double?
     /// How many wakes the main thread took for screen changes: one at most is outstanding per view,
     /// however many changes come meanwhile.
     public var wakes: Int

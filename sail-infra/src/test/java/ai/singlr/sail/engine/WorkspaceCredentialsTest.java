@@ -26,9 +26,10 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * The strip and the check themselves, run by a real bash, grep and git over a container's root
  * rebuilt under a temporary directory: the paths a container has are moved under it, {@code
- * runuser} and {@code mountpoint} are stand-ins that run as this account and see no mount, and
- * {@code gh} is one that says it is logged in exactly when its {@code hosts.yml} is there. What
- * each script does with the files is the production text's own.
+ * runuser} and {@code mountpoint} are stand-ins that run as this account and see no mount, {@code
+ * id} says there is a dev user, as a container has one whatever account runs the test, and {@code
+ * gh} is one that says it is logged in exactly when its {@code hosts.yml} is there. What each
+ * script does with the files is the production text's own.
  */
 @EnabledOnOs(OS.LINUX)
 class WorkspaceCredentialsTest {
@@ -42,6 +43,7 @@ class WorkspaceCredentialsTest {
   void aContainerRoot() throws IOException {
     bin = Files.createDirectories(root.resolve("sail-bin"));
     stub("runuser", "shift 3\nexec \"$@\"\n");
+    stub("id", "[ \"$*\" = \"-u dev\" ] && echo 1000 && exit 0\nexec /usr/bin/id \"$@\"\n");
     stub("mountpoint", "exit 1\n");
     stub(
         "gh",
@@ -130,6 +132,23 @@ class WorkspaceCredentialsTest {
     Files.writeString(root.resolve("home/dev/.ssh/authorized_keys"), "ssh-ed25519 AAAAbuilder b\n");
     git("config", "--global", "user.name", "Builder");
     git("config", "--global", "user.email", "builder@sail.invalid");
+  }
+
+  /**
+   * A template's build cut short before its dev user was made (step 6) is stripped all the same:
+   * there is no git identity of anyone's to remove, and nothing asks for a user that is not there.
+   */
+  @Test
+  void theStripOfATemplateWhoseDevUserWasNeverMadeEndsCleanly() throws Exception {
+    stub("id", "exit 1\n");
+    stub("runuser", "echo 'runuser: user dev does not exist' >&2\nexit 1\n");
+    Files.writeString(
+        root.resolve("home/dev/.git-credentials"), "https://oauth2:" + TOKEN + "@github.com\n");
+
+    var stripped = script(WorkspaceCredentials.STRIP, "");
+
+    assertEquals(0, stripped.exit(), stripped.said());
+    assertFalse(Files.exists(root.resolve("home/dev/.git-credentials")));
   }
 
   /** The strip takes all four out, and the check then finds nothing. */

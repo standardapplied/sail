@@ -127,7 +127,7 @@ final class ReviewNarration {
    */
   static String buildLost(String project, String specId) {
     return "The build ended with no exit anyone saw (its process vanished, its workspace stopped,"
-        + " or its dispatch died while making the workspace), so nothing of it is reviewed. Build"
+        + " or its dispatch died while creating the workspace), so nothing of it is reviewed. Build"
         + " it again: "
         + Remedy.of(RestartResolution.redispatch(project, specId)).plain()
         + ".";

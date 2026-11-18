@@ -111,7 +111,7 @@ public final class ContainerAuthorizedKeys {
           + operator.sail("project workspace start " + named)
           + "'.";
     }
-    return told + ". Make it: '" + operator.sail("project apply " + container) + "'.";
+    return told + ". Create it: '" + operator.sail("project apply " + container) + "'.";
   }
 
   public static String noneTrustYet(String why, OperatorCommand operator) {
