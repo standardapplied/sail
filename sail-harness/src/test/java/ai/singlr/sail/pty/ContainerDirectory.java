@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -37,6 +38,27 @@ final class ContainerDirectory {
 
   /** Each script but an open, put here once it exited, which its caller waits for anyway. */
   final LinkedBlockingQueue<String> finished = new LinkedBlockingQueue<>();
+
+  /** The same scripts, every one, in the order they exited. */
+  final List<String> order = Collections.synchronizedList(new ArrayList<>());
+
+  /** Every copy's process, as it started. */
+  final List<Process> copies = Collections.synchronizedList(new ArrayList<>());
+
+  /** Whether each copy stops taking its input once open, as a stalled container's would. */
+  volatile boolean copyStalls;
+
+  /** Whether the open's measurement of the directory fails, as a missing tool's would. */
+  volatile boolean findFails;
+
+  /** Whose the root must be, when not this account's, standing as root. */
+  String rootOwner;
+
+  /** How long the host waits for an open to answer before it gives the open up. */
+  Duration patience = Duration.ofSeconds(3);
+
+  /** Whether the next open throws as it starts, as a launcher refusing its command would. */
+  volatile boolean openThrows;
 
   /** Whether the next open never answers, as a frozen container's would not. */
   volatile boolean openHangs;
@@ -87,7 +109,14 @@ final class ContainerDirectory {
     Function<String, List<String>> asDev =
         container -> List.of("incus", "exec", container, "--user", uid, "--");
     return new UploadCopy.Place(
-        asRoot, asDev, root().toString(), uid, uid, gid, List.of(), Duration.ofSeconds(3));
+        asRoot,
+        asDev,
+        root().toString(),
+        rootOwner == null ? uid : rootOwner,
+        uid,
+        gid,
+        List.of(),
+        patience);
   }
 
   /** Copies into this directory. */
@@ -111,8 +140,18 @@ final class ContainerDirectory {
           sweepHeld = null;
           await(held);
         }
+        if (script.equals(UploadCopy.OPEN) && openThrows) {
+          openThrows = false;
+          throw new IllegalStateException("the launcher refused the command");
+        }
+        if (script.equals(UploadCopy.OPEN) && copyStalls) {
+          inner.set(2, inner.get(2).replace("cat >&3", "exec sleep 600 >&3"));
+        }
+        if (script.equals(UploadCopy.OPEN) && findFails) {
+          inner.set(2, inner.get(2).replace("names=$(find", "names=$(false"));
+        }
         if (script.equals(UploadCopy.OPEN) && copyTruncates) {
-          inner.set(2, script.replace("cat >&3", "{ head -c 1; cat > /dev/null; } >&3"));
+          inner.set(2, inner.get(2).replace("cat >&3", "{ head -c 1; cat > /dev/null; } >&3"));
         }
         if (script.equals(UploadCopy.OPEN) && openHangs) {
           openHangs = false;
@@ -141,9 +180,12 @@ final class ContainerDirectory {
           } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
           }
+          order.add(script);
           finished.add(script);
+          return process;
         }
-        return script.equals(UploadCopy.OPEN) ? new HeldCopy(process) : process;
+        copies.add(process);
+        return new HeldCopy(process);
       };
 
   /** A copy whose exit the host waits for only once {@link #copyHeld} lets it, when set. */
@@ -189,6 +231,16 @@ final class ContainerDirectory {
     @Override
     public void destroy() {
       process.destroy();
+    }
+
+    @Override
+    public Process destroyForcibly() {
+      return process.destroyForcibly();
+    }
+
+    @Override
+    public boolean isAlive() {
+      return process.isAlive();
     }
   }
 

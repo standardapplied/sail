@@ -68,6 +68,64 @@ import Testing
         _ = host
     }
 
+    /// Scenario 12, typing stays first, with no wall time: a link of 10 Mbit/s modelled on the bytes
+    /// it carries. The host sends no acknowledgement until a key is typed, as a slow link holds what
+    /// was sent; the key is typed once the window of two chunks has arrived, and every byte the host
+    /// reads ahead of the key is one the link carries first, so the key's delay at that rate is those
+    /// bytes over the rate: within 110 ms. The window itself is held by
+    /// ``aKeyTypedDuringAnUploadGoesOutAheadOfEveryChunkTheHostHasNotTaken``.
+    @Test(.timeLimit(.minutes(1)))
+    func aKeyTypedDuringAnUploadWaitsBehindLessThanASlowLinkCarriesIn110Milliseconds() async throws {
+        let (host, session, peer) = try await attachedOnRunner()
+        let total = 12
+        let whole = UploadSource.bytes([UInt8](repeating: 5, count: UploadPacing.chunk * total))
+        let window = 2
+        let stored = Task { try await session.upload(name: "big.bin", source: whole) }
+        let id = try await begun(peer, name: "big.bin", size: UploadPacing.chunk * total)
+        try peer.send(.putAck(id: id, received: 0))
+        let chunkFrame = 21
+        let keyFrame = 18
+        var ahead = keyFrame
+        var received = 0
+        var ended = false
+        while received < window * UploadPacing.chunk {
+            if case let .putChunk(_, _, chunk) = try await peer.read() {
+                ahead += chunkFrame + chunk.count
+                received += chunk.count
+            }
+        }
+        session.paste("k")
+        reading: while true {
+            switch try await peer.read() {
+            case let .putChunk(_, _, chunk):
+                ahead += chunkFrame + chunk.count
+                received += chunk.count
+            case .putEnd:
+                ended = true
+            case .input:
+                break reading
+            default:
+                continue
+            }
+        }
+        let linkBytesPerSecond = 10_000_000 / 8
+        let delay = Duration.seconds(Double(ahead) / Double(linkBytesPerSecond))
+        #expect(delay <= .milliseconds(110), "the key waited \(delay) behind \(ahead) bytes")
+        while !ended {
+            try peer.send(.putAck(id: id, received: Int64(received)))
+            let frame = try await peer.read()
+            if case let .putChunk(_, _, chunk) = frame {
+                received += chunk.count
+            } else if case .putEnd = frame {
+                ended = true
+            }
+        }
+        try peer.send(.putStored(id: id, path: "/p"))
+        _ = try await stored.value
+        session.close()
+        _ = host
+    }
+
     @Test func aWatcherAFileTooLargeAndThisMachinesOwnHostAreRefusedBeforeAByteIsSent() async throws {
         let (host, watcher, peer) = try await attachedOnRunner(write: false)
         await #expect(throws: UploadRefusal(kind: .known(.notWriter), limit: 0, file: "a.png", size: 3)) {

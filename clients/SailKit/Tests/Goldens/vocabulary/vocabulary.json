@@ -326,7 +326,9 @@
     "no_space",
     "failed",
     "cancelled",
-    "not_known"
+    "not_known",
+    "stalled",
+    "busy"
   ],
   "wake_modes": [
     "on",

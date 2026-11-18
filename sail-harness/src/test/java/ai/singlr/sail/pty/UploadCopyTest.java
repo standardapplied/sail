@@ -16,6 +16,7 @@ import ai.singlr.sail.pty.PtyMessage.PutRefusal;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
@@ -59,7 +60,7 @@ class UploadCopyTest {
   }
 
   private UploadCopy.Copy stored(String instanceId, String name, byte[] bytes) throws Exception {
-    var copy = copies.open("acme", instanceId, name, bytes.length);
+    var copy = copies.open("acme", instanceId, name, bytes.length, process -> {});
     assertTrue(copy.opened(), () -> "the container refused " + name + ": " + copy.refusal());
     copy.write(bytes);
     assertEquals(0, copy.close());
@@ -108,7 +109,7 @@ class UploadCopyTest {
   @Test
   void aCopyShorterThanItsSizeIsNeverStored() throws Exception {
     c.copyTruncates = true;
-    var copy = copies.open("acme", ID, "a", 3);
+    var copy = copies.open("acme", ID, "a", 3, process -> {});
     copy.write(new byte[] {1, 2, 3});
     assertEquals(0, copy.close());
 
@@ -116,9 +117,70 @@ class UploadCopyTest {
     assertEquals(List.of(), held(session()));
   }
 
+  /**
+   * Round 2 Minor 1: a file, a link or a directory planted at the final name between the open and
+   * the commit is never overwritten or linked into, and the temporary goes.
+   */
+  @Test
+  void aNamePlantedBeforeTheCommitIsNeitherOverwrittenNorLinkedInto() throws Exception {
+    var target = dir.resolve("elsewhere");
+    Files.createDirectories(target);
+    for (var plant : List.of("file", "link", "directory")) {
+      var copy = copies.open("acme", ID, plant, 1, process -> {});
+      copy.write(new byte[] {1});
+      assertEquals(0, copy.close());
+      var name = Path.of(copy.path());
+      switch (plant) {
+        case "file" -> Files.writeString(name, "theirs");
+        case "link" -> Files.createSymbolicLink(name, target);
+        default -> Files.createDirectory(name);
+      }
+
+      assertNotEquals(0, copy.commit(), plant);
+
+      assertEquals(List.of(), held(target), plant + ": nothing linked through");
+      if (plant.equals("file")) {
+        assertEquals("theirs", Files.readString(name));
+      }
+      if (plant.equals("directory")) {
+        assertEquals(List.of(), held(name), "nothing linked into the directory");
+      }
+      assertFalse(held(session()).stream().anyMatch(n -> n.endsWith(".part")), plant);
+    }
+  }
+
+  /**
+   * A temporary that is no longer a regular file when the commit comes, a pipe of the declared size
+   * planted in its place, never takes the name.
+   */
+  @Test
+  void aTemporaryThatIsNotARegularFileIsNeverStored() throws Exception {
+    var copy = copies.open("acme", ID, "a", 0, process -> {});
+    assertEquals(0, copy.close());
+    var name = Path.of(copy.path());
+    var part = name.resolveSibling("." + name.getFileName() + ".part");
+    Files.delete(part);
+    assertEquals(0, new ProcessBuilder("mkfifo", part.toString()).start().waitFor());
+
+    assertNotEquals(0, copy.commit());
+
+    assertFalse(Files.exists(name, LinkOption.NOFOLLOW_LINKS), "nothing took the name");
+  }
+
+  /** Round 2 Minor 5: a measurement that fails is a failure, never read as a full directory. */
+  @Test
+  void aMeasurementThatFailsIsAFailure() throws Exception {
+    c.findFails = true;
+
+    var copy = copies.open("acme", ID, "a", 1, process -> {});
+
+    assertFalse(copy.opened());
+    assertEquals(PutRefusal.FAILED, copy.refusal());
+  }
+
   @Test
   void anAbortedCopyLeavesNothing() throws Exception {
-    var copy = copies.open("acme", ID, "a", 3);
+    var copy = copies.open("acme", ID, "a", 3, process -> {});
     copy.write(new byte[] {1, 2});
     copy.close();
 
@@ -134,7 +196,7 @@ class UploadCopyTest {
     for (var i = 2; i <= UploadAllowance.FILES; i++) {
       Files.createFile(session().resolve(i + "-left"));
     }
-    var tooMany = copies.open("acme", ID, "b", 1);
+    var tooMany = copies.open("acme", ID, "b", 1, process -> {});
     assertFalse(tooMany.opened());
     assertEquals(PutRefusal.TOO_MANY, tooMany.refusal());
 
@@ -144,11 +206,12 @@ class UploadCopyTest {
         new RandomAccessFile(c.root().resolve(other).resolve("2-sparse").toFile(), "rw")) {
       sparse.setLength(UploadAllowance.SESSION);
     }
-    var sessionFull = copies.open("acme", other, "b", 1);
+    var sessionFull = copies.open("acme", other, "b", 1, process -> {});
     assertFalse(sessionFull.opened());
     assertEquals(PutRefusal.SESSION_FULL, sessionFull.refusal());
 
-    var noRoom = copies.open("acme", "01a1ea00-0000-7000-8000-000000000003", "c", 1L << 60);
+    var noRoom =
+        copies.open("acme", "01a1ea00-0000-7000-8000-000000000003", "c", 1L << 60, process -> {});
     assertFalse(noRoom.opened());
     assertEquals(PutRefusal.NO_SPACE, noRoom.refusal());
     assertFalse(Files.exists(c.root().resolve("01a1ea00-0000-7000-8000-000000000003")));
@@ -161,7 +224,7 @@ class UploadCopyTest {
     Files.writeString(outside.resolve("work"), "the person's own");
     Files.createSymbolicLink(c.root(), outside);
 
-    var throughRoot = copies.open("acme", ID, "a", 1);
+    var throughRoot = copies.open("acme", ID, "a", 1, process -> {});
 
     assertFalse(throughRoot.opened());
     assertEquals(PutRefusal.FAILED, throughRoot.refusal());
@@ -171,7 +234,7 @@ class UploadCopyTest {
     Files.createDirectory(c.root());
     Files.createSymbolicLink(session(), outside);
 
-    var throughDirectory = copies.open("acme", ID, "a", 1);
+    var throughDirectory = copies.open("acme", ID, "a", 1, process -> {});
 
     assertFalse(throughDirectory.opened());
     assertEquals(PutRefusal.FAILED, throughDirectory.refusal());
@@ -179,12 +242,25 @@ class UploadCopyTest {
     assertEquals("the person's own", Files.readString(outside.resolve("work")));
   }
 
+  /** A root that is a directory but not root's own is never written into. */
+  @Test
+  void aRootSomeoneElseOwnsIsNeverWrittenInto() throws Exception {
+    Files.createDirectory(c.root());
+    c.rootOwner = "4294967294";
+
+    var copy = c.copies().open("acme", ID, "a", 1, process -> {});
+
+    assertFalse(copy.opened());
+    assertEquals(PutRefusal.FAILED, copy.refusal());
+    assertEquals(List.of(), held(c.root()));
+  }
+
   /** An open the container never answers is given up within the place's patience. */
   @Test
   void anOpenTheContainerNeverAnswersIsGivenUp() throws Exception {
     c.openHangs = true;
 
-    var copy = copies.open("acme", ID, "a", 1);
+    var copy = copies.open("acme", ID, "a", 1, process -> {});
 
     assertFalse(copy.opened());
     assertEquals(PutRefusal.FAILED, copy.refusal());

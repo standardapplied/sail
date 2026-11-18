@@ -20,7 +20,10 @@ import Testing
         #expect(said(.known(.sharedContainer))
             == "This terminal runs in acme's shared container, which every member's terminal reads, so files are not pasted here; paste them into a terminal in your own workspace of acme.")
         #expect(said(.known(.sessionEnded)) == "The session ended before screenshot.png was uploaded; nothing was saved.")
-        #expect(said(.known(.noSpace)) == "box-3 has no room for screenshot.png; nothing was saved.")
+        #expect(said(.known(.noSpace))
+            == "The workspace on box-3 is out of disk space, so screenshot.png was not saved; free some space in it, then paste the file again.")
+        #expect(said(.known(.stalled)) == "The workspace on box-3 stopped taking screenshot.png, so it was not saved; paste it again.")
+        #expect(said(.known(.busy), limit: 4) == "4 files are already uploading, the most at once; paste screenshot.png again when one has finished.")
         #expect(said(.known(.failed)) == "screenshot.png could not be saved on box-3; nothing was pasted. Paste it again.")
         #expect(said(.known(.cancelled)) == "screenshot.png was cancelled; nothing was saved.")
         #expect(said(.known(.notKnown))
@@ -39,7 +42,7 @@ import Testing
     @Test func theKindsAreTheHostsWords() {
         #expect(UploadRefusal.Kind.allCases.map(\.rawValue) == [
             "too_large", "too_many", "session_full", "not_writer", "no_container", "shared_container",
-            "session_ended", "no_space", "failed", "cancelled", "not_known", "connection_lost",
+            "session_ended", "no_space", "failed", "cancelled", "not_known", "stalled", "busy", "connection_lost",
         ])
     }
 }

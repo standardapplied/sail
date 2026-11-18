@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -127,6 +128,57 @@ class UploadCleanupTest {
     c.awaitFinished(UploadCleanup.SWEEP);
 
     assertFalse(Files.exists(c.root(), LinkOption.NOFOLLOW_LINKS));
+  }
+
+  /**
+   * Round 2 Minor 6 (N05): a removal waits for its session's lock, which a commit holds, and does
+   * not touch the container until it has it.
+   */
+  @Test
+  void aRemovalWaitsForItsSessionsLock() throws Exception {
+    directory(ID);
+    var session = new ReentrantLock();
+    session.lock();
+    try {
+      cleanup.remove("acme", ID, session);
+      while (!session.hasQueuedThreads() && c.commands.isEmpty()) {
+        Thread.onSpinWait();
+      }
+      assertTrue(c.commands.isEmpty(), "the removal ran while the session's lock was held");
+    } finally {
+      session.unlock();
+    }
+    c.awaitFinished(UploadCleanup.REMOVE);
+    assertFalse(Files.exists(c.root().resolve(ID)));
+  }
+
+  /**
+   * Round 2 Minor 6 (N30): a sweep waits for its container's lock, which a session's first upload
+   * holds, and reads which sessions are live only once it has it.
+   */
+  @Test
+  void aSweepWaitsForItsContainersLockAndReadsTheLiveOnlyThen() throws Exception {
+    directory(ID);
+    var lock = cleanup.lockOf("acme");
+    var read = new java.util.concurrent.atomic.AtomicBoolean();
+    lock.lock();
+    try {
+      cleanup.sweep(
+          "acme",
+          () -> {
+            read.set(true);
+            return List.of(ID);
+          });
+      while (!lock.hasQueuedThreads() && c.commands.isEmpty()) {
+        Thread.onSpinWait();
+      }
+      assertTrue(c.commands.isEmpty(), "the sweep ran while the container's lock was held");
+      assertFalse(read.get(), "the live sessions were read before the lock was taken");
+    } finally {
+      lock.unlock();
+    }
+    c.awaitFinished(UploadCleanup.SWEEP);
+    assertTrue(Files.exists(c.root().resolve(ID)));
   }
 
   @Test

@@ -30,9 +30,10 @@ final class UploadCleanup {
    * descriptor without following links. A root that is anything else is refused, not touched.
    */
   static final String REMOVE =
-      """
+      UploadCopy.OURS
+          + """
       [ -e "$1" ] || [ -L "$1" ] || exit 0
-      [ -d "$1" ] && [ ! -L "$1" ] && [ "$(stat -c %u "$1")" = "$3" ] || exit 10
+      ours "$1" "$3" || exit 10
       rm -rf --one-file-system -- "$1/$2"
       """;
 
@@ -41,11 +42,12 @@ final class UploadCleanup {
    * an instance id that is not among the ids after {@code $2}, the root's owner.
    */
   static final String SWEEP =
-      """
+      UploadCopy.OURS
+          + """
       root=$1 rootuid=$2
       shift 2
       [ -e "$root" ] || [ -L "$root" ] || exit 0
-      [ -d "$root" ] && [ ! -L "$root" ] && [ "$(stat -c %u "$root")" = "$rootuid" ] || exit 10
+      ours "$root" "$rootuid" || exit 10
       for d in "$root"/*; do
         [ -d "$d" ] || continue
         id=${d##*/}

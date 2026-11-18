@@ -259,7 +259,9 @@ public sealed interface PtyMessage {
     NO_SPACE,
     FAILED,
     CANCELLED,
-    NOT_KNOWN;
+    NOT_KNOWN,
+    STALLED,
+    BUSY;
 
     /** The kind as the wire names it. */
     public String wire() {

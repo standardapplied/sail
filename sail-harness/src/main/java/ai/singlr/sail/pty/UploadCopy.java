@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
@@ -50,25 +51,39 @@ final class UploadCopy {
   static final int NO_SPACE = 28;
 
   /**
+   * The one root rule, a shell function the scripts that make, write or remove under the uploads
+   * root call before they touch it: {@code ours DIR UID} succeeds only when {@code DIR} is a
+   * directory, not a link, owned by {@code UID}.
+   */
+  static final String OURS =
+      """
+      ours() { [ -d "$1" ] && [ ! -L "$1" ] && [ "$(stat -c %u "$1")" = "$2" ]; }
+      """;
+
+  /**
    * Run as root: checks the disk the uploads are kept on (the root's, or its parent's before it is
    * made) has room for {@code $4} bytes, before anything is made on it, makes {@code $1} root's own
    * and {@code $1/$2} the dev user's alone, refusing a link at either, then, as the dev user
    * ({@code shift 9; "$@"}), counts what the directory holds against {@code $5} files and {@code
-   * $6} bytes, creates the temporary for the first number no file takes with {@code O_EXCL} (a link
-   * at the name is refused, never written through), prints that number, and copies its input into
-   * it through the descriptor it opened. A copy that fails is {@code no_space} when it left the
+   * $6} bytes, creates the temporary for the first number no name, link or temporary takes, with
+   * {@code set -C} ({@code O_EXCL}) behind those checks, prints that number, and copies its input
+   * into it through the descriptor it opened. A measurement that fails is {@code failed}, never
+   * read as a full disk or a full directory; a copy that fails is {@code no_space} when it left the
    * disk under 64 KiB free; the host removes its temporary.
    */
   static final String OPEN =
-      """
+      OURS
+          + """
       root=$1 id=$2 name=$3 size=$4 files=$5 bytes=$6 rootuid=$7 devuid=$8 devgid=$9
       shift 9
       at=$root
       [ -d "$at" ] || at=${root%/*}
-      free=$(df -Pk "$at" | awk "NR == 2 { print \\$4 * 1024 }")
+      disk=$(df -Pk "$at") || exit 1
+      free=$(printf "%s\\n" "$disk" | awk "NR == 2 { print \\$4 * 1024 }")
+      case $free in ""|*[!0-9]*) exit 1 ;; esac
       [ "$free" -ge "$size" ] || exit 28
       [ -d "$root" ] || mkdir -m 0755 "$root" || exit 10
-      [ -d "$root" ] && [ ! -L "$root" ] && [ "$(stat -c %u "$root")" = "$rootuid" ] || exit 10
+      ours "$root" "$rootuid" || exit 10
       chmod 0755 "$root"
       dir=$root/$id
       [ -d "$dir" ] || mkdir -m 0700 "$dir" || exit 10
@@ -76,9 +91,10 @@ final class UploadCopy {
       chown "$devuid:$devgid" "$dir" && chmod 0700 "$dir" || exit 10
       exec "$@" sh -c '
       cd "$1" || exit 1
-      held=$(find . -mindepth 1 -maxdepth 1 ! -name ".*.part" | wc -l)
-      [ "$held" -lt "$4" ] || exit 11
-      used=$(find . -mindepth 1 -maxdepth 1 -type f -printf "%s\\n" | awk "{ s += \\$1 } END { print s + 0 }")
+      names=$(find . -mindepth 1 -maxdepth 1 ! -name ".*.part" -printf x) || exit 1
+      [ "${#names}" -lt "$4" ] || exit 11
+      sizes=$(find . -mindepth 1 -maxdepth 1 -type f -printf "%s\\n") || exit 1
+      used=$(printf "%s\\n" "$sizes" | awk "{ s += \\$1 } END { print s + 0 }")
       [ $((used + $3)) -le "$5" ] || exit 12
       n=1
       while [ -e "$n-$2" ] || [ -L "$n-$2" ] || [ -e ".$n-$2.part" ] || [ -L ".$n-$2.part" ]; do
@@ -100,13 +116,14 @@ final class UploadCopy {
   /**
    * Run as the dev user in the session's directory {@code $1}: gives the temporary of number {@code
    * $2} and name {@code $3} its name when it is a file of {@code $4} bytes, by a hard link that
-   * refuses an existing name, and removes the temporary either way.
+   * refuses an existing name, a link or a directory there included ({@code ln -T}), and removes the
+   * temporary either way.
    */
   static final String COMMIT =
       """
       cd "$1" || exit 1
       part=".$2-$3.part"
-      [ -f "$part" ] && [ ! -L "$part" ] && [ "$(stat -c %s "$part")" = "$4" ] && ln "$part" "$2-$3"
+      [ -f "$part" ] && [ ! -L "$part" ] && [ "$(stat -c %s "$part")" = "$4" ] && ln -T "$part" "$2-$3"
       done=$?
       rm -f "$part"
       exit $done
@@ -189,9 +206,11 @@ final class UploadCopy {
   /**
    * Opens a copy of {@code size} bytes named {@code name} into the directory of {@code instanceId}
    * in {@code container}: numbered once the container holds its temporary, or unnumbered when the
-   * container refused it ({@link Copy#refusal}) or did not answer within the place's patience.
+   * container refused it ({@link Copy#refusal}) or did not answer within the place's patience;
+   * {@code started} hears its process as soon as it runs, so it can be ended while it opens.
    */
-  Copy open(String container, String instanceId, String name, long size) throws IOException {
+  Copy open(String container, String instanceId, String name, long size, Consumer<Process> started)
+      throws IOException {
     var command = new ArrayList<>(place.asRoot().apply(container));
     command.addAll(
         List.of(
@@ -210,6 +229,7 @@ final class UploadCopy {
             place.devGid()));
     command.addAll(place.drop());
     var process = processes.start(command);
+    started.accept(process);
     var unanswered =
         CompletableFuture.runAsync(
             process::destroyForcibly,

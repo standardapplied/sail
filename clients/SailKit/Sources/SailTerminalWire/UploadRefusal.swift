@@ -17,6 +17,10 @@ public struct UploadRefusal: Error, Equatable, Sendable {
         case cancelled
         /// The host has no record of the upload asked after: it cannot say whether it stored it.
         case notKnown = "not_known"
+        /// The workspace did not take a chunk within the host's deadline: its disk stalled.
+        case stalled
+        /// As many uploads as the session or the host keeps under way at once already are.
+        case busy
         /// Said by this client alone: the connection dropped before the upload's end was sent, so
         /// the host, which stores a file only once its end arrives, kept nothing.
         case connectionLost = "connection_lost"
@@ -54,11 +58,15 @@ public struct UploadRefusal: Error, Equatable, Sendable {
         case .known(.sessionEnded):
             "The session ended before \(file) was uploaded; nothing was saved."
         case .known(.noSpace):
-            "\(box) has no room for \(file); nothing was saved."
+            "The workspace on \(box) is out of disk space, so \(file) was not saved; free some space in it, then paste the file again."
         case .known(.cancelled):
             "\(file) was cancelled; nothing was saved."
         case .known(.notKnown):
             "The connection to \(box) dropped after \(file) was sent, and whether it was saved is not known; paste it again if it is not in your workspace."
+        case .known(.stalled):
+            "The workspace on \(box) stopped taking \(file), so it was not saved; paste it again."
+        case .known(.busy):
+            "\(limit) files are already uploading, the most at once; paste \(file) again when one has finished."
         case .known(.connectionLost):
             "The connection to \(box) dropped while \(file) was uploading, before it was sent whole, so nothing was saved; paste it again."
         case .known(.failed), .unknown:
