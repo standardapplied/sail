@@ -47,7 +47,7 @@ public struct Stalls: Sendable {
 /// A look at a thread, taken by a sampler: whether it was runnable, its CPU time so far, its
 /// whole process's CPU time so far, and the machine's CPU ticks so far, idle and busy (each tick
 /// 1/100 s of one CPU; nil where they could not be read).
-public struct ThreadLook: Sendable, Equatable {
+public struct ThreadLook: Sendable, Equatable, Codable {
     public static let tick = 0.01
 
     public var time: Double
