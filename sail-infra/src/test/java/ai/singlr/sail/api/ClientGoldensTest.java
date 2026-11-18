@@ -19,17 +19,23 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.EngagementMode;
+import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.ContainerConfig;
+import ai.singlr.sail.engine.HeldLocks;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ProjectProvisioner;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
+import ai.singlr.sail.engine.TemplateBuild;
+import ai.singlr.sail.engine.TemplateRecord;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.LoginOutcome;
 import ai.singlr.sail.harness.RunReport;
@@ -79,6 +85,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.channels.Channels;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
@@ -173,6 +180,24 @@ class ClientGoldensTest {
           null,
           null);
 
+  /**
+   * A project with resources set and a repo whose host asks for credentials: what an admin builds a
+   * template of in the app, frames 2d to 2h of the design.
+   */
+  private static final ProjectDefinition LIGHTHOUSE =
+      new ProjectDefinition(
+          "lighthouse",
+          "",
+          new ProjectDefinition.Resources(2, "4GB", "20GB"),
+          null,
+          null,
+          null,
+          List.of(new ProjectDefinition.Repo("https://github.com/harbor/lamp.git", "lamp", null)),
+          null,
+          null,
+          null,
+          null);
+
   /** Harbor's template, current at v1, as Incus lists it. */
   private static final String TEMPLATE =
       TestWorkspaces.template(PROJECT, ProjectProvisioner.inputs(HARBOR, Optional.empty()));
@@ -229,7 +254,7 @@ class ClientGoldensTest {
 
   @Test
   void theRoutesAndTheStreamAClientDecodesAnswerAsTheGoldensSay() throws Exception {
-    try (var db = Sqlite.openMemory();
+    try (var db = Sqlite.open(tempDir.resolve("box.db"));
         var bus = new EventBus();
         var box = new Box(db, bus, tempDir)) {
       var uday = box.session("uday", "Uday", "uday@example.com", Role.ADMIN);
@@ -358,6 +383,8 @@ class ClientGoldensTest {
           workspace("dock", "Running", "uday", box.idOf("uday")),
           workspace("new", "Running", "uday", box.idOf("uday")));
       box.record(http, "workspaces-made", "GET", workspaces, dana, null);
+      box.recordTemplates(
+          http, dana, box.session("ike", "Ike", "ike@example.com", Role.ADMIN), ana, vik);
 
       assertAll(
           () -> GoldenFiles.check(GOLDENS.resolve("http"), http),
@@ -660,8 +687,12 @@ class ClientGoldensTest {
     private final Map<String, String> pinned = new LinkedHashMap<>();
     private final List<OpenStream> streams = new ArrayList<>();
     private final Map<String, String> ids = new LinkedHashMap<>();
+    private final Path projects;
+    private final java.util.concurrent.atomic.AtomicReference<SyncConfig> config =
+        new java.util.concurrent.atomic.AtomicReference<>(OWNER);
 
     Box(Sqlite db, EventBus bus, Path dir) throws IOException {
+      this.projects = dir;
       new SchemaManager(db).migrate();
       HeldProjects.hold(db, PROJECT);
       this.db = db;
@@ -682,11 +713,11 @@ class ClientGoldensTest {
                       db,
                       "node",
                       dir,
-                      () -> OWNER,
+                      config::get,
                       target -> {
                         throw new IOException("main unavailable");
                       }));
-      this.auth = TestAuth.sessions(db, OWNER);
+      this.auth = TestAuth.sessions(db, config::get);
       this.server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
       server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
       PrivateAttributes.context(
@@ -1134,6 +1165,120 @@ class ClientGoldensTest {
       var listed = new ArrayList<String>(List.of(TEMPLATE));
       listed.addAll(List.of(workspaces));
       incus.onOk("incus list --format json", "[" + String.join(",", listed) + "]");
+    }
+
+    /**
+     * Records every answer of a project's template the app draws, each named for the design's frame
+     * it serves ({@code design/workspaces-mockup.html}): lighthouse with no template, as a member
+     * sees it (2c) and as an admin (2d) with the refusals Build Template can meet (2d), its build
+     * under way as its builder sees it (2e) and as everyone else does, a second admin's request
+     * joining it (2f), harbor's template built and lighthouse's found current (2g), and a build
+     * that failed, was cut short and ended, or was cut short with no one to end it yet (2h). The
+     * refusals the app never meets, since it offers no button, carry no frame: a member's, a
+     * viewer's and on a node anyone's but its own person's.
+     */
+    void recordTemplates(
+        Map<String, String> goldens, String dana, String ike, String ana, String vik)
+        throws Exception {
+      Acting.system(() -> new ProjectStore(db).upsert(LIGHTHOUSE));
+      var lighthouse = "/v1/projects/lighthouse/template";
+      var build = lighthouse + ":build";
+      record(goldens, "template-2c-missing", "GET", lighthouse, ana, null);
+      record(goldens, "template-2d-missing", "GET", lighthouse, dana, null);
+      record(goldens, "refusal-template-admin-only", "POST", build, ana, null);
+      record(goldens, "refusal-template-read-only", "POST", build, vik, null);
+      config.set(new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "uday", "uday-box"));
+      try {
+        record(goldens, "refusal-template-node", "POST", build, dana, null);
+      } finally {
+        config.set(OWNER);
+      }
+      record(
+          goldens,
+          "refusal-template-2d-no-resources",
+          "POST",
+          "/v1/projects/harbor/template:build",
+          dana,
+          null);
+      record(goldens, "refusal-template-2d-runner-not-ready", "POST", build, dana, null);
+      var hostYaml = SailPaths.hostConfigPath();
+      YamlUtil.dumpToFile(
+          new HostYaml(
+                  "dir",
+                  "default",
+                  null,
+                  "incusbr0",
+                  "singlr-base",
+                  "ubuntu/24.04",
+                  "6.0",
+                  null,
+                  null)
+              .toMap(),
+          hostYaml);
+      try {
+        operations.useCredentialProbe(url -> true);
+        new FdeStore(db).logins().storeGit(idOf("uday"), "github.com", "ghp_the_box_persons_own");
+        record(goldens, "refusal-template-2d-login-not-stored", "POST", build, dana, null);
+        var started = AT.minusSeconds(250);
+        var step =
+            TemplateRecord.started("dana", started, TemplateBuild.STEPS).at(9, AT.minusSeconds(40));
+        step.write(recordOf("lighthouse"));
+        HeldLocks.whileHeld(
+            ContainerConfig.lockOf(SailPaths.locksDir(), "lighthouse--tmpl"),
+            () -> {
+              record(goldens, "template-2e-building", "GET", lighthouse, dana, null);
+              record(goldens, "template-2f-building", "GET", lighthouse, ana, null);
+              record(goldens, "template-2f-joined", "POST", build, ike, null);
+              return null;
+            });
+        TemplateRecord.started("dana", started, TemplateBuild.STEPS)
+            .at(13, AT.minusSeconds(90))
+            .ended(
+                TemplateRecord.Outcome.FAILED,
+                AT.minusSeconds(60),
+                "github.com did not give lighthouse's repo lamp to the token stored for it: the"
+                    + " token may not read the repo, or the repo may not exist.",
+                Remedy.of(
+                    "Store a token for github.com that reads it, then try again: ",
+                    Remedy.sail("git login", "github.com"),
+                    "."))
+            .write(recordOf("lighthouse"));
+        record(goldens, "template-2h-failed", "GET", lighthouse, dana, null);
+        step.ended(
+                TemplateRecord.Outcome.INTERRUPTED,
+                AT.minusSeconds(30),
+                TemplateBuild.CUT_SHORT,
+                TemplateBuild.RESUMES)
+            .write(recordOf("lighthouse"));
+        record(goldens, "template-2h-interrupted", "GET", lighthouse, dana, null);
+        step.write(recordOf("lighthouse"));
+        record(goldens, "template-2h-cut-pending", "GET", lighthouse, dana, null);
+        var built =
+            TemplateRecord.started("dana", started, TemplateBuild.STEPS)
+                .at(TemplateBuild.STEPS, AT.minusSeconds(20))
+                .ended(TemplateRecord.Outcome.BUILT, AT.minusSeconds(10), null, null);
+        built.write(recordOf("harbor"));
+        built.write(recordOf("lighthouse"));
+        record(goldens, "template-2g-built", "GET", "/v1/projects/harbor/template", dana, null);
+        operations.useCredentialProbe(url -> false);
+        incus
+            .onOk(
+                "incus list --format json",
+                "["
+                    + TEMPLATE
+                    + ","
+                    + TestWorkspaces.template(
+                        "lighthouse", ProjectProvisioner.inputs(LIGHTHOUSE, Optional.empty()))
+                    + "]")
+            .onOk("incus snapshot list lighthouse--tmpl --format json", TestWorkspaces.V1);
+        record(goldens, "template-2g-current", "POST", build, dana, null);
+      } finally {
+        Files.deleteIfExists(hostYaml);
+      }
+    }
+
+    private Path recordOf(String project) {
+      return TemplateRecord.fileOf(projects, project);
     }
 
     String idOf(String handle) {

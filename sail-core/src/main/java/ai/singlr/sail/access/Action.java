@@ -88,6 +88,15 @@ public enum Action {
       "open a terminal in a workspace; create, start, stop or delete one",
       "enter",
       "workspaces"),
+  /**
+   * Building or rebuilding a project's template, which its workspaces are created from: it runs the
+   * project's whole setup on the runner with the builder's own git tokens.
+   */
+  BUILD_TEMPLATE(
+      "Build a template",
+      "build or rebuild a project's template, which its workspaces are created from",
+      "build",
+      "templates"),
   /** Adding, changing or removing a project's shared files and skills. */
   SHARE(
       "Share",

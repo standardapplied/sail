@@ -51,6 +51,8 @@ class RefusalsNameNoCommandTest {
           "GET, \"/v1/projects\"",
           "GET, PROJECT + \"/workspaces\"",
           "POST, PROJECT + \"/workspaces\"",
+          "GET, PROJECT + \"/template\"",
+          "POST, PROJECT + \"/template:build\"",
           "POST, \"/v1/terminal/tickets\"",
           "POST, \"/v1/auth/login/start\"",
           "POST, \"/v1/auth/login/finish\"");

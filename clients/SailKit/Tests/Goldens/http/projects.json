@@ -8,7 +8,8 @@
       "projects": [
         {
           "container_status": "not_created",
-          "name": "harbor"
+          "name": "harbor",
+          "template": "ready"
         }
       ],
       "schema_version": 1,

@@ -181,6 +181,7 @@ public final class Policy {
           new Row(Action.OPERATE_RUN, NO, OWNER, YES, NO, NO, NO),
           new Row(Action.NARRATE, NO, OWNER, YES, ITS_OWN, ITS_OWN, NO),
           new Row(Action.ENTER_WORKSPACE, NO, OWNER, YES, NO, NO, NO),
+          new Row(Action.BUILD_TEMPLATE, NO, NO, YES, NO, NO, NO),
           new Row(Action.SHARE, NO, YES, YES, NO, NO, NO),
           new Row(Action.SERVE, NO, YES, YES, OWN_WORK, NO, YES),
           new Row(Action.RESTORE, NO, YES, YES, NO, NO, NO),

@@ -182,7 +182,7 @@ class TestOperations implements Operations {
   @Override
   public Result<ProjectListResponse> projects() {
     return Result.success(
-        new ProjectListResponse(List.of(new ProjectListItemView("acme", "running"))));
+        new ProjectListResponse(List.of(new ProjectListItemView("acme", "running", null))));
   }
 
   @Override
@@ -346,6 +346,16 @@ class TestOperations implements Operations {
   @Override
   public Result<WorkspaceListResponse> workspaces(String project) {
     return Result.success(new WorkspaceListResponse(project, List.of()));
+  }
+
+  @Override
+  public Result<TemplateResponse> template(String project) {
+    return Result.failure(ErrorCode.NOT_FOUND, "no templates here");
+  }
+
+  @Override
+  public Result<TemplateResponse> buildTemplate(String project) {
+    return Result.failure(ErrorCode.NOT_FOUND, "no templates here");
   }
 
   @Override

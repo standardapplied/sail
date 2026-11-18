@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.LocalApiSocket;
 import ai.singlr.sail.api.ProjectReader;
+import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.api.RunLauncher;
 import ai.singlr.sail.api.RunReports;
 import ai.singlr.sail.api.SailOperations;
@@ -32,12 +33,15 @@ import ai.singlr.sail.commands.SnapDeleteCommand;
 import ai.singlr.sail.commands.SnapsPruneCommand;
 import ai.singlr.sail.commands.UpCommand;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
@@ -60,12 +64,14 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -291,7 +297,8 @@ class WorkspaceIT extends AbstractIncusIT {
   /**
    * Rule 2 on a real Incus: a template that still holds a credential after the strip fails its
    * build, records no version and takes no snapshot, and v1 stays current: (a) the build's token in
-   * places no list names, (b) a system git identity, (c) a key in another home.
+   * places no list names, (b) a system git identity, (c) a key in another home. It is marked
+   * unproven, so the next build restores v1 rather than build on what it holds.
    */
   @Test
   void aTemplateStillHoldingACredentialFailsItsBuildAndVersionOneStaysCurrent() throws Exception {
@@ -322,9 +329,17 @@ class WorkspaceIT extends AbstractIncusIT {
       var template = new BoxInstances(shell).named(TEMPLATE).orElseThrow();
       assertEquals(Optional.of("v1"), template.key(WorkspaceTemplate.CURRENT_KEY));
       assertEquals(
+          Optional.of("1"),
+          template.key(WorkspaceTemplate.UNPROVEN_KEY),
+          "the next build rolls it back rather than build on what it holds");
+      assertEquals(
           List.of("v1"),
           new SnapshotManager(shell)
               .list(TEMPLATE).stream().map(SnapshotManager.SnapshotInfo::name).toList());
+      assertTrue(
+          shell
+              .exec(List.of("incus", "config", "unset", TEMPLATE, WorkspaceTemplate.UNPROVEN_KEY))
+              .ok());
       plant(
           "rm -f /home/dev/.netrc /home/dev/.sail/gh-token-01 /root/.ssh/authorized_keys;"
               + " git config --system --unset-all user.email || true;"
@@ -566,6 +581,362 @@ class WorkspaceIT extends AbstractIncusIT {
                 "--format=%s",
                 "origin/main"));
     assertEquals("private", fetched.stdout().strip(), fetched.stderr());
+  }
+
+  /** The definition as edited since the sealed template's v1, so the lane builds v2 from it. */
+  private static ProjectDefinition edited() {
+    return new ProjectDefinition(
+        PROJECT,
+        "Workspaces on a real Incus, edited",
+        new ProjectDefinition.Resources(2, "2GB", "10GB"),
+        null,
+        null,
+        null,
+        List.of(new ProjectDefinition.Repo("https://example.invalid/app.git", "app", null)),
+        null,
+        null,
+        null,
+        null);
+  }
+
+  /** sail-api's template builds on this host's Incus, their records kept in {@code dir}. */
+  private TemplateBuildService service(Path dir, List<Exception> logged) {
+    return new TemplateBuildService(
+        new TemplateBuild(SailPaths.locksDir(), dir, DateTimeUtils::now),
+        new WorkspaceTemplate(shell, shell, SailPaths.locksDir()),
+        shell,
+        handle -> List.of(FAKE_TOKEN),
+        logged::add);
+  }
+
+  private static WorkspaceTemplate.Source recorded(
+      Path dir,
+      ProjectDefinition config,
+      Collection<String> tokens,
+      Runnable started,
+      TemplateBuild.Provision provision) {
+    return new TemplateBuild(SailPaths.locksDir(), dir, DateTimeUtils::now)
+        .source(
+            config,
+            BASE_POOL,
+            name -> name.equals(PROJECT),
+            tokens,
+            dir.resolve("template-provision-state.yaml"),
+            "ada",
+            ProvisionListener.NOOP,
+            provision,
+            started,
+            false);
+  }
+
+  private static TemplateBuildService.Status asAda(Callable<TemplateBuildService.Status> work)
+      throws Exception {
+    return Actor.call(new Actor("ada", Role.ADMIN, Actor.Lane.API), work::call);
+  }
+
+  /** Returns once no build holds the template's lock, no longer than a minute. */
+  private static void awaitTheBuild() throws Exception {
+    try (var ended =
+        FileMutex.acquireUntil(
+                ContainerConfig.lockOf(SailPaths.locksDir(), TEMPLATE),
+                System.nanoTime() + TimeUnit.MINUTES.toNanos(1),
+                System::nanoTime)
+            .orElseThrow(() -> new AssertionError("the build never ended"))) {
+      assertTrue(ended != null);
+    }
+  }
+
+  /**
+   * The route's engine on a real Incus: an admin's build holds the template's lock, a second
+   * request joins it, and a workspace create that meets it is refused as busy; the build ends with
+   * v2 current, its snapshot holding none of the token its build wrote.
+   */
+  @Test
+  void aBuildThroughTheServiceIsJoinedRefusesACreateAndEndsWithItsTokenStripped(@TempDir Path dir)
+      throws Exception {
+    var logged = new ArrayList<Exception>();
+    var builds = service(dir, logged);
+    var inside = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+
+    var first =
+        asAda(
+            () ->
+                builds.start(
+                    edited(),
+                    started ->
+                        recorded(
+                            dir,
+                            edited(),
+                            List.of(FAKE_TOKEN),
+                            started,
+                            (into, tracker, listener) -> {
+                              var wrote =
+                                  exec(
+                                      TEMPLATE,
+                                      List.of(
+                                          "bash",
+                                          "-c",
+                                          "echo https://oauth2:"
+                                              + FAKE_TOKEN
+                                              + "@example.invalid > /home/dev/.git-credentials"));
+                              assertTrue(wrote.ok(), wrote.stderr());
+                              inside.countDown();
+                              assertTrue(release.await(1, TimeUnit.MINUTES));
+                            })));
+    assertTrue(inside.await(1, TimeUnit.MINUTES), "the build ran its provisioner");
+    var joined = builds.joining(edited()).orElseThrow();
+    var busy =
+        assertThrows(
+            Workspaces.Busy.class,
+            () ->
+                new Workspaces(
+                        shell,
+                        shell,
+                        HeldLocks.pastEveryWait(),
+                        SailPaths.locksDir(),
+                        Workspaces.memoryOf(new HostDetector()),
+                        url -> false)
+                    .createFromCurrent(
+                        edited(), FIX, null, "eng", TestOwners::of, name -> name.equals(PROJECT)));
+    release.countDown();
+    awaitTheBuild();
+    var after = builds.status(edited());
+
+    assertEquals(TemplateBuildService.State.BUILDING, first.state());
+    assertTrue(joined.joined());
+    assertEquals("ada", joined.build().orElseThrow().by());
+    assertTrue(busy.getMessage().contains("is being built"), busy.getMessage());
+    assertEquals(TemplateBuildService.State.READY, after.state());
+    assertEquals("v2", after.current().orElseThrow().version());
+    assertEquals(TemplateRecord.Outcome.BUILT, after.build().orElseThrow().outcome());
+    assertEquals(null, inSnapshot("v2", "/home/dev/.git-credentials"));
+    assertEquals(List.of(), logged);
+  }
+
+  /**
+   * What a build whose process was killed leaves, its record without an outcome and its lock free
+   * (planted here; the GCP proof kills a real one): sail-api's cleanup strips the template of what
+   * the build wrote, finds no token, stops it and only then ends the record interrupted; the next
+   * build then ends built. A resume of the real provisioner after a cut is proven by {@link
+   * #aRefusedCloneThenAStoredTokenResumesAtTheCloneAndEndsBuilt}.
+   */
+  @Test
+  void aCutBuildIsCleanedOfItsTokenAndTheNextBuildEndsBuilt(@TempDir Path dir) throws Exception {
+    var logged = new ArrayList<Exception>();
+    var builds = service(dir, logged);
+    containers.start(TEMPLATE);
+    var wrote =
+        exec(
+            TEMPLATE,
+            List.of(
+                "bash",
+                "-c",
+                "echo https://oauth2:"
+                    + FAKE_TOKEN
+                    + "@example.invalid > /home/dev/.git-credentials"));
+    assertTrue(wrote.ok(), wrote.stderr());
+    var now = DateTimeUtils.now();
+    TemplateRecord.started("ada", now, TemplateBuild.STEPS)
+        .at(9, now)
+        .write(TemplateRecord.fileOf(dir, PROJECT));
+
+    var read = builds.status(edited());
+    builds.endCutShort(List.of(PROJECT));
+    var cleaned = builds.status(edited());
+
+    assertEquals(TemplateBuild.CUT_PENDING, read.build().orElseThrow().reason());
+    assertEquals(TemplateRecord.Outcome.INTERRUPTED, cleaned.build().orElseThrow().outcome());
+    assertEquals(TemplateBuild.CUT_SHORT, cleaned.build().orElseThrow().reason());
+    assertEquals(
+        new ContainerState.Stopped(),
+        new BoxInstances(shell).named(TEMPLATE).orElseThrow().state());
+    assertEquals(null, pulled(TEMPLATE, "/home/dev/.git-credentials"));
+    assertEquals(List.of(), logged);
+
+    asAda(
+        () ->
+            builds.start(
+                edited(),
+                started ->
+                    recorded(dir, edited(), List.of(), started, (into, tracker, listener) -> {})));
+    awaitTheBuild();
+
+    assertEquals(
+        TemplateRecord.Outcome.BUILT, builds.status(edited()).build().orElseThrow().outcome());
+  }
+
+  /**
+   * A cut build whose template still holds its builder's token where no strip looks: the search
+   * finds it, so sail-api's cleanup stops the template and marks it unproven; Build Again restores
+   * the newest version's snapshot first, so nothing the cut build left reaches v2, and the mark
+   * goes with the restore.
+   */
+  @Test
+  void aCutBuildWhoseTemplateStillHoldsATokenIsMarkedAndRolledBackBeforeBuildAgain(
+      @TempDir Path dir) throws Exception {
+    var logged = new ArrayList<Exception>();
+    var builds = service(dir, logged);
+    plant("echo 'machine example.invalid password " + FAKE_TOKEN + "' > /home/dev/.netrc");
+    var now = DateTimeUtils.now();
+    TemplateRecord.started("ada", now, TemplateBuild.STEPS)
+        .at(9, now)
+        .write(TemplateRecord.fileOf(dir, PROJECT));
+
+    builds.endCutShort(List.of(PROJECT));
+    var cut = builds.status(edited()).build().orElseThrow();
+    var marked = new BoxInstances(shell).named(TEMPLATE).orElseThrow();
+    asAda(
+        () ->
+            builds.start(
+                edited(),
+                started ->
+                    recorded(dir, edited(), List.of(), started, (into, tracker, listener) -> {})));
+    awaitTheBuild();
+    var after = builds.status(edited());
+    var rebuilt = new BoxInstances(shell).named(TEMPLATE).orElseThrow();
+
+    assertEquals(TemplateBuild.UNPROVEN, cut.reason());
+    assertEquals(Optional.of("1"), marked.key(WorkspaceTemplate.UNPROVEN_KEY));
+    assertEquals(new ContainerState.Stopped(), marked.state());
+    assertEquals(TemplateRecord.Outcome.BUILT, after.build().orElseThrow().outcome());
+    assertEquals("v2", after.current().orElseThrow().version());
+    assertEquals(Optional.empty(), rebuilt.key(WorkspaceTemplate.UNPROVEN_KEY));
+    assertEquals(null, inSnapshot("v2", "/home/dev/.netrc"), "the cut's leftovers are gone");
+    assertEquals(1, logged.size(), "the cleanup that found the token is said in the log");
+  }
+
+  /**
+   * The chain the GCP proof could not reach, on a real Incus with a repo server that refuses
+   * anonymous reads: the real provisioner, resumed at the clone, fails at step 13 with no token;
+   * with a token stored, Build Again resumes there with twelve kept, clones with it, and the
+   * template is built holding none of it.
+   */
+  @Test
+  void aRefusedCloneThenAStoredTokenResumesAtTheCloneAndEndsBuilt(@TempDir Path dir)
+      throws Exception {
+    var served = exec(PROJECT, List.of("bash", "-c", PRIVATE_GIT));
+    assertTrue(served.ok(), served.stderr());
+    var host = served.stdout().strip() + ":8443";
+    var url = "https://" + host + "/app.git";
+    var cert = Files.createTempFile("sail-it", ".pem");
+    try {
+      assertTrue(
+          shell
+              .exec(List.of("incus", "file", "pull", PROJECT + "/srv/tls.pem", cert.toString()))
+              .ok());
+      assertTrue(
+          shell
+              .exec(
+                  List.of(
+                      "incus",
+                      "file",
+                      "push",
+                      "--mode",
+                      "0644",
+                      cert.toString(),
+                      TEMPLATE + "/usr/local/share/ca-certificates/sail-it.crt"))
+              .ok());
+    } finally {
+      Files.deleteIfExists(cert);
+    }
+    plant(
+        "git config --system http."
+            + url.substring(0, url.indexOf("/app.git") + 1)
+            + ".sslCAInfo /usr/local/share/ca-certificates/sail-it.crt");
+    var config =
+        new ProjectDefinition(
+            PROJECT,
+            "A private repo, built",
+            new ProjectDefinition.Resources(2, "2GB", "10GB"),
+            null,
+            null,
+            null,
+            List.of(new ProjectDefinition.Repo(url, "private", null)),
+            null,
+            null,
+            null,
+            null);
+    var progress = dir.resolve("template-provision-state.yaml");
+    var earlier =
+        new ProvisionTracker<>(ProjectPhase.class, progress, false)
+            .load(ProjectProvisioner.inputs(config, Optional.empty()));
+    earlier.advance(ProjectPhase.MAVEN_INSTALLED);
+    var hostYaml =
+        new HostYaml(
+            "dir", BASE_POOL, null, "incusbr0", "default", "ubuntu/24.04", "6.0", null, null);
+    var logged = new ArrayList<Exception>();
+    var builds = service(dir, logged);
+
+    var none = CheckedTokens.of(config, Optional.of("ada"), Map.of(), u -> false, Map.of());
+    asAda(
+        () ->
+            builds.start(
+                config,
+                started ->
+                    recorded(
+                        dir,
+                        config,
+                        none.values(),
+                        started,
+                        TemplateBuild.provision(
+                            shell, hostYaml, config, none, ProjectSkills.none()))));
+    awaitTheBuild();
+    var refused = builds.status(config).build().orElseThrow();
+
+    var stored =
+        CheckedTokens.of(
+            config, Optional.of("ada"), Map.of(host, "tok-private"), u -> false, Map.of());
+    asAda(
+        () ->
+            builds.start(
+                config,
+                started ->
+                    recorded(
+                        dir,
+                        config,
+                        stored.values(),
+                        started,
+                        TemplateBuild.provision(
+                            shell, hostYaml, config, stored, ProjectSkills.none()))));
+    awaitTheBuild();
+    var built = builds.status(config);
+
+    assertEquals(TemplateRecord.Outcome.FAILED, refused.outcome(), String.valueOf(refused));
+    assertEquals(13, refused.step());
+    assertEquals(
+        TemplateRecord.Outcome.BUILT, built.build().orElseThrow().outcome(), String.valueOf(built));
+    assertEquals(12, built.build().orElseThrow().kept());
+    assertTrue(pulled(PROJECT, "/srv/seen").contains("tok-private"), "cloned with the token");
+    var version = built.current().orElseThrow().version();
+    assertEquals(null, inSnapshot(version, "/home/dev/.git-credentials"));
+    assertEquals("private", clonedHead(version).strip(), "the clone is whole, at its head");
+  }
+
+  /** The subject of the head commit of the repo cloned into version {@code version}. */
+  private String clonedHead(String version) throws Exception {
+    var probe = PROJECT + "-probe";
+    deleteContainerQuietly(probe);
+    assertTrue(shell.exec(List.of("incus", "copy", TEMPLATE + "/" + version, probe)).ok());
+    try {
+      containers.start(probe);
+      return exec(
+              probe,
+              List.of(
+                  "runuser",
+                  "-u",
+                  "dev",
+                  "--",
+                  "git",
+                  "-C",
+                  "/home/dev/workspace/private",
+                  "log",
+                  "-1",
+                  "--format=%s"))
+          .stdout();
+    } finally {
+      deleteContainerQuietly(probe);
+    }
   }
 
   /**
@@ -1178,6 +1549,33 @@ class WorkspaceIT extends AbstractIncusIT {
     assertEquals(new BoxInstances.Workspace(PROJECT, FIX, true), found.kind());
     assertEquals(Optional.of("eng"), found.key(BoxInstances.OWNER_KEY));
     assertEquals(Optional.of(TestOwners.of("eng").id()), found.key(BoxInstances.OWNER_ID_KEY));
+  }
+
+  /**
+   * The gap the template build's design found, on a real Incus: a node's round that takes a project
+   * main no longer grants it off the box holds the template's build lock, as its build does, never
+   * the workspace lock of its name. A round while the build holds it leaves the template whole; the
+   * first round after deletes it.
+   */
+  @Test
+  void aNodesRoundLeavesATemplateItsBuildHoldsAndTheRoundAfterDeletesIt(@TempDir Path dir)
+      throws Exception {
+    try (var node = new ScopedNode(dir, "sail-it-elsewhere", shell)) {
+      HeldLocks.whileHeld(
+          ContainerConfig.lockOf(SailPaths.locksDir(), TEMPLATE),
+          () -> {
+            node.round();
+            return null;
+          });
+
+      var kept = new BoxInstances(shell).named(TEMPLATE);
+      assertTrue(kept.isPresent(), "a round never deletes a template its build holds");
+      assertEquals(Optional.of("v1"), kept.get().key(WorkspaceTemplate.CURRENT_KEY));
+
+      node.round();
+    }
+
+    assertEquals(Optional.empty(), new BoxInstances(shell).named(TEMPLATE));
   }
 
   /**

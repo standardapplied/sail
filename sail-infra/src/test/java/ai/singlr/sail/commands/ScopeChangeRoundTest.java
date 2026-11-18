@@ -16,7 +16,10 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
+import ai.singlr.sail.engine.ContainerConfig;
+import ai.singlr.sail.engine.HeldLocks;
 import ai.singlr.sail.engine.PipedSyncChannel;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.Workspaces;
@@ -740,6 +743,31 @@ class ScopeChangeRoundTest {
                 + WHY),
         round());
     assertEquals(List.of(), incus.names());
+  }
+
+  /**
+   * A template being built holds its build lock, never its name's workspace lock: a round that
+   * finds its project leaving leaves it while the build runs, and the first round after deletes it.
+   */
+  @Test
+  void aTemplateBeingBuiltIsLeftToTheRoundAfterItsBuild() throws Exception {
+    round();
+    incus.sail("acme");
+    incus.keyed("beta--tmpl", "\"user.sail.template.of\":\"beta\"");
+    narrowTo("acme");
+    var during = new ArrayList<String>();
+
+    HeldLocks.whileHeld(
+        ContainerConfig.lockOf(SailPaths.locksDir(), "beta--tmpl"),
+        () -> {
+          during.addAll(round());
+          return null;
+        });
+
+    assertEquals(List.of("acme", "beta--tmpl"), incus.names());
+    assertFalse(during.stream().anyMatch(line -> line.contains("deleted")), String.valueOf(during));
+    assertEquals(List.of("  ⚠ project beta: its template deleted" + WHY), round());
+    assertEquals(List.of("acme"), incus.names());
   }
 
   @Test
