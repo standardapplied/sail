@@ -79,6 +79,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -1522,9 +1523,13 @@ public final class SailOperations implements HostOperations {
    * stops.
    */
   public AutoCloseable cleanCutTemplateBuilds() {
+    return cleanCutTemplateBuilds(TemplateBuild.CLEANUP_EVERY);
+  }
+
+  AutoCloseable cleanCutTemplateBuilds(Duration every) {
     var passes = new PeriodicPass("templates", this::endCutShortTemplateBuilds);
     passes.runIfIdle();
-    passes.start(TemplateBuild.CLEANUP_EVERY);
+    passes.start(every);
     return passes;
   }
 

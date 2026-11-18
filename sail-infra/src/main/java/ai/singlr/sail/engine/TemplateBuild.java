@@ -51,6 +51,15 @@ public final class TemplateBuild {
           + " builder's credentials; the next build starts it again from its last version.";
 
   /**
+   * Why a build cut short ended, when the strip of its template and the search for its builder's
+   * tokens passed but the template could not be stopped: marked all the same, so the next build
+   * starts from the template's last version.
+   */
+  public static final String UNSTOPPED =
+      "The build stopped before it finished; its template was cleaned of its builder's credentials"
+          + " but could not be stopped, so the next build starts it again from its last version.";
+
+  /**
    * What a read says of a build cut short that sail-api has not ended yet: it ends each one as it
    * starts and then once a minute ({@link #CLEANUP_EVERY}), so this is true at every moment.
    */
@@ -200,7 +209,7 @@ public final class TemplateBuild {
               .ended(
                   TemplateRecord.Outcome.INTERRUPTED,
                   clock.get(),
-                  proven ? CUT_SHORT : UNPROVEN,
+                  proven ? CUT_SHORT : failed instanceof NotStopped ? UNSTOPPED : UNPROVEN,
                   RESUMES);
       ended.write(file);
       if (failed != null) {
@@ -210,7 +219,10 @@ public final class TemplateBuild {
     }
   }
 
-  /** Strips, searches and stops {@code template}, when there is one. */
+  /**
+   * Strips, searches and stops {@code template}, when there is one: a stop that fails after a strip
+   * and search that passed is thrown as {@link NotStopped}, and after one that failed, beside it.
+   */
   private static void clean(ShellExec shell, String template, Collection<String> tokens)
       throws Exception {
     var found = new BoxInstances(shell).named(template);
@@ -218,14 +230,33 @@ public final class TemplateBuild {
       return;
     }
     var containers = new ContainerManager(shell);
-    if (!(found.get().state() instanceof ContainerState.Running)) {
-      containers.start(template);
-    }
+    Exception unclean = null;
     try {
+      if (!(found.get().state() instanceof ContainerState.Running)) {
+        containers.start(template);
+      }
       WorkspaceCredentials.strip(shell, template);
       WorkspaceCredentials.requireNone(shell, template, tokens);
-    } finally {
+    } catch (Exception e) {
+      unclean = e;
+    }
+    try {
       containers.stop(template);
+    } catch (Exception e) {
+      if (unclean == null) {
+        throw new NotStopped(template, e);
+      }
+      unclean.addSuppressed(e);
+    }
+    if (unclean != null) {
+      throw unclean;
+    }
+  }
+
+  /** A template cleaned of every credential that could not be stopped. */
+  private static final class NotStopped extends Exception {
+    NotStopped(String template, Exception cause) {
+      super(template + " was cleaned but could not be stopped: " + cause.getMessage(), cause);
     }
   }
 

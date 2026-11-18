@@ -433,6 +433,57 @@ class TemplateBuildServiceTest {
   }
 
   /**
+   * A cut build whose template was stripped and searched but could not be stopped is marked all the
+   * same, and its record says what happened: cleaned, not stopped.
+   */
+  @Test
+  void aCutBuildWhoseTemplateCannotBeStoppedSaysSoAndIsMarked() throws Exception {
+    var shell =
+        incus(ZFS, template("Running", ""), "[]")
+            .on("incus stop acme--tmpl", new ShellExec.Result(1, "", "Error: stop timed out"));
+    write(running("dana", 9));
+
+    builds(shell).endCutShort(List.of("acme"));
+
+    var ended = record(recordFile());
+    assertEquals(TemplateBuild.UNSTOPPED, ended.reason());
+    assertEquals(TemplateRecord.Outcome.INTERRUPTED, ended.outcome());
+    assertTrue(
+        shell.invocations().stream().anyMatch(c -> c.contains(WorkspaceTemplate.UNPROVEN_KEY)),
+        shell.invocations().toString());
+    assertTrue(logged.getFirst().getMessage().contains("could not be stopped"));
+  }
+
+  /**
+   * A build that starts and finishes between the pass's read of its record and the pass taking its
+   * lock is never touched: the pass reads the record again under the lock and finds it ended.
+   */
+  @Test
+  void aBuildThatFinishesBeforeThePassHoldsItsLockIsLeftAsItEnded() throws Exception {
+    var shell = incus(ZFS, template("Stopped", ""), "[]");
+    write(running("dana", 9));
+    var finished = running("dana", 20).ended(TemplateRecord.Outcome.BUILT, AT, null, null);
+    var builds =
+        new TemplateBuildService(
+            records(),
+            lane(shell),
+            shell,
+            handle -> {
+              write(finished);
+              return List.of("ghp_dana");
+            },
+            logged::add);
+
+    builds.endCutShort(List.of("acme"));
+
+    assertEquals(finished, record(recordFile()));
+    assertEquals(List.of(), logged);
+    assertFalse(
+        shell.invocations().stream().anyMatch(c -> c.startsWith("incus start")),
+        shell.invocations().toString());
+  }
+
+  /**
    * A read never cleans and never waits: a cut build no one has ended yet reads at once as
    * interrupted, saying when it is cleaned, and Incus is only read, never changed.
    */

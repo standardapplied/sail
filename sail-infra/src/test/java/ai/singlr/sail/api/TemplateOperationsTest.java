@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -34,8 +35,11 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -119,6 +123,69 @@ class TemplateOperationsTest {
     } finally {
       Files.deleteIfExists(hostYaml);
     }
+  }
+
+  /**
+   * sail-api ends the builds cut short as it starts, then once each interval, and no more once its
+   * passes are closed, as it stops: a command-line build killed while it runs is ended by the next
+   * pass, never left until a restart.
+   */
+  @Test
+  void sailApiEndsCutBuildsAsItStartsThenEachIntervalUntilItStops() throws Exception {
+    try (var db = Sqlite.open(dir.resolve("passes.db"));
+        var bus = new EventBus()) {
+      new SchemaManager(db).migrate();
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.named("lamp")));
+      var scripted =
+          new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+              .onOk("incus list --format json", "[]");
+      var looked = new Semaphore(0);
+      var incus =
+          new ShellExec() {
+            @Override
+            public ShellExec.Result exec(List<String> command) throws IOException {
+              var result = scripted.exec(command);
+              if (String.join(" ", command).startsWith("incus list")) {
+                looked.release();
+              }
+              return result;
+            }
+
+            @Override
+            public ShellExec.Result exec(List<String> command, Path workDir, Duration timeout)
+                throws IOException {
+              return exec(command);
+            }
+
+            @Override
+            public boolean isDryRun() {
+              return false;
+            }
+          };
+      var operations = operations(db, bus, incus, "ada");
+      var file = TemplateRecord.fileOf(dir, "lamp");
+      cut(file);
+
+      var passes = operations.cleanCutTemplateBuilds(Duration.ofMillis(50));
+      var atStart = TemplateRecord.read(file).orElseThrow();
+      looked.drainPermits();
+      cut(file);
+      var aTickLooked = looked.tryAcquire(10, TimeUnit.SECONDS);
+      passes.close();
+      var afterATick = TemplateRecord.read(file).orElseThrow();
+      cut(file);
+      var lookedOnceClosed = looked.tryAcquire(300, TimeUnit.MILLISECONDS);
+
+      assertEquals(TemplateRecord.Outcome.INTERRUPTED, atStart.outcome(), "ended as it starts");
+      assertTrue(aTickLooked, "a later pass looks again");
+      assertEquals(TemplateRecord.Outcome.INTERRUPTED, afterATick.outcome(), "and ends it");
+      assertFalse(lookedOnceClosed, "no pass runs once sail-api stops");
+      assertTrue(TemplateRecord.read(file).orElseThrow().running());
+    }
+  }
+
+  private static void cut(Path file) {
+    TemplateRecord.started("ada", AT, TemplateBuild.STEPS).at(9, AT).write(file);
   }
 
   @Test

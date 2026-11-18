@@ -1342,7 +1342,8 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
   - **No token survives in a template, structurally.** Workspaces clone a version's snapshot
     (`<p>--tmpl/v<n>`), made only after that build's strip and its search for the tokens it was
     given passed; never the template as it stands. A build that failed or was cut short, whose
-    strip or search failed or found a token, marks its template `user.sail.template.unproven`, and
+    strip or search failed or found a token, or whose template could not be stopped after them (its
+    record says which), marks its template `user.sail.template.unproven`, and
     the next build never builds on it: it restores the newest version's snapshot (or, with none,
     deletes the template and launches it anew), clears the mark and runs every step. A strip and
     search that passed is proof enough, as it is for a build that finished: the strip removes every
