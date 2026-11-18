@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# The exhaustive and seeded suites compute for tens of seconds, so they run on their own after the
+# rest and no other test waits on them for a thread or a core. `rest` skips exactly what
+# `exhaustive` runs, so every suite, one added later included, runs in one of the two; `exhaustive`
+# fails unless each of them printed every case it was meant to run.
+readonly EXHAUSTIVE='^(SailWorkbenchTests\.(WholenessTests|ReviewPropertyTests)|SailEventsTests\.EventStreamParserTests|SailVTTests\.FixtureTests)/'
+
+usage() {
+  echo "Usage: scripts/suites rest | exhaustive LOG" >&2
+  exit 2
+}
+
+[[ $# -ge 1 ]] || usage
+case $1 in
+  rest)
+    swift test --skip "$EXHAUSTIVE"
+    ;;
+  exhaustive)
+    [[ $# -eq 2 ]] || usage
+    log=$2
+    swift test --skip-build --filter "$EXHAUSTIVE" 2>&1 | tee "$log"
+    grep -q 'WholenessTests ran 10000 sequences' "$log"
+    grep -q 'ReviewPropertyTests ran 20000 sequences' "$log"
+    cuts=$(grep -oE 'EventStreamParserTests cut [^ ]+ at [0-9]+ of [0-9]+ offsets' "$log" | awk '$5 == $7' | wc -l)
+    endings=$(grep -oE 'EventStreamParserTests ended [A-Z]+ at [0-9]+ of [0-9]+ offsets and in [0-9]+ of 500 seeded' "$log" | awk '$5 == $7 && $11 == 500' | wc -l)
+    fixtures=$(grep -oE 'FixtureTests fed [^ ]+ in [0-9]+ of 500 seeded' "$log" | awk '$5 == 500' | wc -l)
+    sizes=$(grep -c . Tests/Fixtures/vt/sizes)
+    echo "cut at every offset: $cuts of 2 goldens; ended otherwise: $endings of 2 endings; fixtures fed in 500 chunkings: $fixtures of $sizes"
+    [[ $cuts -eq 2 && $endings -eq 2 && $fixtures -eq $sizes ]]
+    ;;
+  *)
+    usage
+    ;;
+esac

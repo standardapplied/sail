@@ -23,6 +23,7 @@
 7 PtyHostFdStoreIT
 10 PtyLifecycleIT
 18 PtyRoomSessionIT
+70 PtyUploadIT
 20 RefusedLoginIT
 113 ReviewAgentLoopIT
 0 RoomRelayDeliveryIT

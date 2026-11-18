@@ -7,7 +7,8 @@ import Foundation
 /// {"size": [80, 24], "command": ["cat"], "steps": [
 ///   {"type": "echo hi\r"}, {"wait": "hi", "within": 5}, {"resize": [100, 30]},
 ///   {"snapshot": "before"}, {"drop": true}, {"phase": "attached"}, {"same": "before"},
-///   {"detach": true}, {"attach": true}, {"killHost": true}, {"phase": "ended"}, {"measure": 200}
+///   {"detach": true}, {"attach": true}, {"killHost": true}, {"phase": "ended"}, {"measure": 200},
+///   {"upload": "/path/to/shot.png", "within": 60}
 /// ]}
 /// ```
 struct Script: Decodable, Equatable {
@@ -70,6 +71,9 @@ enum Step: Decodable, Equatable, CustomStringConvertible {
     case phase(String, within: Int)
     /// Types this many keys, each after the last one's echo reached the screen.
     case measure(Int)
+    /// Uploads the file into the session within the seconds given (default 10), typing a key and
+    /// erasing it in turn meanwhile and timing each one's echo, then pastes the stored path.
+    case upload(path: String, within: Int)
 
     init(from decoder: any Decoder) throws {
         let fields = try decoder.container(keyedBy: Keys.self)
@@ -95,6 +99,7 @@ enum Step: Decodable, Equatable, CustomStringConvertible {
         case .close: self = .close
         case .phase: self = .phase(try fields.decode(String.self, forKey: key), within: within)
         case .measure: self = .measure(try fields.decode(Int.self, forKey: key))
+        case .upload: self = .upload(path: try fields.decode(String.self, forKey: key), within: within)
         case .within: throw DecodingError.dataCorruptedError(forKey: key, in: fields, debugDescription: "within goes with a step")
         }
     }
@@ -115,10 +120,11 @@ enum Step: Decodable, Equatable, CustomStringConvertible {
         case .close: "close, ending the session at its host"
         case let .phase(phase, within): "phase \(phase) within \(within) s"
         case let .measure(keys): "measure \(keys) echoed keys"
+        case let .upload(path, within): "upload \(URL(filePath: path).lastPathComponent) within \(within) s"
         }
     }
 
     private enum Keys: String, CodingKey {
-        case type, wait, within, resize, snapshot, same, drop, detach, attach, killHost, reconnectNow, hold, close, phase, measure
+        case type, wait, within, resize, snapshot, same, drop, detach, attach, killHost, reconnectNow, hold, close, phase, measure, upload
     }
 }

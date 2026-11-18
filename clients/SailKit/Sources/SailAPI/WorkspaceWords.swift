@@ -71,8 +71,8 @@ extension WorkspaceRow {
         case .known(.running): "running"
         case .known(.stopped): "stopped"
         case .known(.frozen): "paused"
-        case .known(.incomplete): "not whole, make it again"
-        case .known(.notCreated): "not made"
+        case .known(.incomplete): "not whole, create it again"
+        case .known(.notCreated): "not created"
         case let .unknown(raw): raw
         }
     }
@@ -103,7 +103,7 @@ extension WorkspaceRow {
 /// The pane's list of a project's workspaces, asked again and again: the latest request wins. A
 /// list is taken only for the project and the request still shown, so an answer that arrives after
 /// another project was chosen, or after a later request, is dropped; the rows stay paired with the
-/// project they were listed for, which Open and Make act on.
+/// project they were listed for, which Open and Create act on.
 public struct WorkspaceListing: Sendable {
     /// The project of the request now shown.
     public private(set) var asking: String?

@@ -6,7 +6,8 @@ import SailSurface
 import SailTerminal
 
 /// What the main thread is doing: a thread of its own looks at it every ``interval``, always, and
-/// keeps its run state, its CPU time so far, this process's CPU time and the machine's CPU ticks
+/// keeps its run state, its CPU time so far and, while it is runnable, our processes' CPU time (the
+/// app's, the terminal host's and the host's session shims') and the machine's CPU ticks
 /// (``looks``, the evidence ``MachineShare`` judges a wait on: twenty looks in any 100 ms the
 /// watcher itself is not held from); and once the main heartbeat has not ticked for 30 ms it also
 /// records the main thread's stack (frame pointers walked while it is suspended for a few
@@ -20,13 +21,18 @@ final class MainStacks: @unchecked Sendable {
         let runState: Int32
         let cpu: Double
         let frames: [UInt]
-        /// The machine's CPU ticks so far (user, system, idle, nice), the process's threads and the
-        /// main run loop's mode (nil: it ran none): the sample's slow part, which the helper's
-        /// thread reads once the watcher has taken the stack, never the real-time watcher itself.
-        var ticks: [UInt32] = []
+        /// The machine's CPU ticks so far, idle and busy, as the watcher's look at that moment
+        /// read them: nil when the main thread was not runnable, as no look then reads them.
+        let idleTicks: UInt32?
+        let busyTicks: UInt32?
+        /// The process's threads and the main run loop's mode (nil: it ran none): the sample's slow
+        /// part, read by the helper's thread once the watcher has taken the stack, never by the
+        /// real-time watcher. `fill` names that reading, which stands for every sample taken since
+        /// the last, and `filledAt` says when it was read.
         var threads: [ThreadSample] = []
         var mode: String?
-        var filled = false
+        var fill: Int?
+        var filledAt: Double?
     }
 
     /// One of the process's threads: its CPU time so far, current priority and run state.
@@ -49,19 +55,12 @@ final class MainStacks: @unchecked Sendable {
         let priority: Int32
     }
 
-    private static let host = mach_host_self()
-    /// How often the watcher looks at the main thread.
-    static let interval = 0.005
+    /// How often the watcher looks at the main thread, and its real-time claim: ``Looker``'s.
+    static let interval = Looker.interval
     /// The most looks kept: two minutes of them.
     static let kept = 24000
-    /// The watcher's real-time claim (`THREAD_TIME_CONSTRAINT_POLICY`), in seconds: in every
-    /// ``interval`` it may run up to `computation`, done within `constraint` of waking, preemptible.
-    /// Apple's guide sets a real-time thread's values in these proportions (period HZ/160,
-    /// computation HZ/3300, constraint HZ/2200); XNU takes a computation of at least half the
-    /// constraint, and a thread that keeps running past its quantum is demoted by its fail-safe.
-    /// A look costs about 36 µs, so 250 µs leaves room for the late samples' stack walk.
-    static let computation = 0.000_25
-    static let constraint = 0.000_5
+    static let computation = Looker.computation
+    static let constraint = Looker.constraint
     /// The most of one CPU the watcher may take: its computation in each period, 5 %.
     static var claim: Double { computation / interval }
 
@@ -77,33 +76,39 @@ final class MainStacks: @unchecked Sendable {
     /// The reader threads the helper found, their ports freed only under ``readerLock`` once it has
     /// swapped in the next search's, so the watcher never reads a port that was freed.
     private var readerPorts: [(port: thread_act_t, id: UInt64)] = []
+    /// The terminal host's pid and its session shims', found by the helper once a second, whose
+    /// CPU a runnable look counts as ours.
+    private var others: [pid_t] = []
     private let readerLock = NSLock()
     /// Signalled by the watcher when it took a stack sample, so the helper reads its slow part.
     private let helperWake = DispatchSemaphore(value: 0)
-    private var spent: (looks: Int, total: Double, longest: Double, modeLongest: Double) = (0, 0, 0, 0)
+    /// How many readings the helper has taken for stack samples, each naming its samples.
+    private var fills = 0
+    private var spent: (looks: Int, total: Double, longest: Double, modeLongest: Double, tooSlow: Int) = (0, 0, 0, 0, 0)
     /// Whether the kernel took the watcher's real-time policy, when it began, its own CPU time, its
     /// port, and when the helper first found it demoted out of real time, at what priority.
     private var watcher: (realTime: Bool, since: Double, cpu: Double, port: thread_act_t?, demoted: (time: Double, priority: Int32)?) = (false, 0, 0, nil, nil)
     /// The lowest priority a thread runs at under a real-time policy (XNU's `BASEPRI_RTQUEUES`).
     static let realTimePriority: Int32 = 97
 
-    /// Made on the main thread, which it then watches through `beat`.
-    @MainActor init(watching beat: Heartbeat) {
+    /// Made on the main thread, which it then watches through `beat`; `host` answers the terminal
+    /// host's pid, nil while none serves.
+    @MainActor init(watching beat: Heartbeat, host: @escaping @Sendable () -> pid_t?) {
         thread = mach_thread_self()
         let main = pthread_self()
         high = UInt(bitPattern: pthread_get_stackaddr_np(main))
         low = high - UInt(pthread_get_stacksize_np(main))
         let watcher = Thread { [self] in
             let me = mach_thread_self()
-            let realTime = MainStacks.becomeRealTime(me)
-            lock.withLock { self.watcher = (realTime, CACurrentMediaTime(), MainStacks.cpu(of: me) ?? 0, me, nil) }
+            let realTime = Mach.becomeRealTime(me, period: MainStacks.interval, computation: MainStacks.computation, constraint: MainStacks.constraint)
+            lock.withLock { self.watcher = (realTime, CACurrentMediaTime(), Mach.cpu(of: me) ?? 0, me, nil) }
             while true {
                 Thread.sleep(forTimeInterval: MainStacks.interval)
                 let now = CACurrentMediaTime()
-                look(at: now)
+                let seen = look(at: now)
                 lookAtReaders(at: now)
-                if now - beat.lastTick > 0.03 { sample(at: now) }
-                if let used = MainStacks.cpu(of: me) { lock.withLock { self.watcher.cpu = used } }
+                if now - beat.lastTick > 0.03 { sample(at: now, look: seen) }
+                if let used = Mach.cpu(of: me) { lock.withLock { self.watcher.cpu = used } }
             }
         }
         watcher.qualityOfService = .userInteractive
@@ -115,6 +120,8 @@ final class MainStacks: @unchecked Sendable {
                 fillSamples()
                 let now = CACurrentMediaTime()
                 if now - scanned >= 1 {
+                    let found = host().map { [$0] + Mach.children(of: $0) } ?? []
+                    lock.withLock { others = found }
                     findReaders()
                     checkWatcher()
                     scanned = now
@@ -126,32 +133,37 @@ final class MainStacks: @unchecked Sendable {
     }
 
     /// One look at the main thread, and what it cost the watcher. A look whose `thread_info`
-    /// fails is not kept: a missing look is missing evidence, never a runnable one.
-    private func look(at time: Double) {
-        var info = thread_basic_info()
-        var infoCount = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / MemoryLayout<integer_t>.size)
-        let gotInfo = withUnsafeMutablePointer(to: &info) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: Int(infoCount)) { thread_info(thread, thread_flavor_t(THREAD_BASIC_INFO), $0, &infoCount) }
-        }
-        guard gotInfo == KERN_SUCCESS else { return }
-        var usage = rusage()
-        let process = getrusage(RUSAGE_SELF, &usage) == 0
-            ? Double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1e6 : 0
-        let ticks = Self.hostTicks()
-        let look = ThreadLook(
-            time: time, runnable: info.run_state == TH_STATE_RUNNING,
-            cpu: Double(info.user_time.seconds + info.system_time.seconds) + Double(info.user_time.microseconds + info.system_time.microseconds) / 1e6,
-            processCPU: process, idleTicks: ticks.count == 4 ? ticks[2] : nil,
-            busyTicks: ticks.count == 4 ? ticks[0] &+ ticks[1] &+ ticks[3] : nil
-        )
+    /// fails is not kept: a missing look is missing evidence, never a runnable one. Nor is one
+    /// that took longer than ``MachineShare/longestGap``: what it read spans more time than two
+    /// looks may be apart and still prove anything, so it is counted and left out of every proof.
+    private func look(at time: Double) -> ThreadLook? {
+        let pids = lock.withLock { others }
+        guard let look = Mach.look(at: thread, time: time, others: pids) else { return nil }
         let cost = CACurrentMediaTime() - time
+        let counts = cost <= MachineShare.longestGap
         lock.withLock {
-            dense.append(look)
-            if dense.count > Self.kept { dense.removeFirst(Self.kept / 2) }
+            if counts {
+                dense.append(look)
+                if dense.count > Self.kept { dense.removeFirst(Self.kept / 2) }
+            } else {
+                spent.tooSlow += 1
+            }
             spent.looks += 1
             spent.total += cost
             spent.longest = max(spent.longest, cost)
         }
+        return counts ? look : nil
+    }
+
+    /// What a look cost on average, wall time.
+    var averageLook: Double {
+        let spent = lock.withLock { self.spent }
+        return spent.looks > 0 ? spent.total / Double(spent.looks) : 0
+    }
+
+    /// Whether the helper found the watcher demoted out of real time.
+    var demoted: Bool {
+        lock.withLock { watcher.demoted != nil }
     }
 
     /// The main run loop's current mode, nil while it runs none: read on the helper's thread only,
@@ -168,37 +180,6 @@ final class MainStacks: @unchecked Sendable {
         return mode
     }
 
-    /// The watcher made a real-time thread (``computation``, ``constraint`` in every ``interval``),
-    /// so it keeps its looks while every core is busy; whether the kernel took the policy.
-    private static func becomeRealTime(_ thread: thread_act_t) -> Bool {
-        var timebase = mach_timebase_info_data_t()
-        _ = mach_timebase_info(&timebase)
-        func ticks(_ seconds: Double) -> UInt32 {
-            UInt32(seconds * 1e9 * Double(timebase.denom) / Double(timebase.numer))
-        }
-        var policy = thread_time_constraint_policy(
-            period: ticks(interval), computation: ticks(computation), constraint: ticks(constraint), preemptible: 1
-        )
-        let count = mach_msg_type_number_t(MemoryLayout<thread_time_constraint_policy>.size / MemoryLayout<integer_t>.size)
-        let set = withUnsafeMutablePointer(to: &policy) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                thread_policy_set(thread, thread_policy_flavor_t(THREAD_TIME_CONSTRAINT_POLICY), $0, count)
-            }
-        }
-        return set == KERN_SUCCESS
-    }
-
-    /// `thread`'s CPU time so far, in seconds, or nil when it cannot be read.
-    private static func cpu(of thread: thread_act_t) -> Double? {
-        var info = thread_basic_info()
-        var infoCount = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / MemoryLayout<integer_t>.size)
-        let got = withUnsafeMutablePointer(to: &info) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: Int(infoCount)) { thread_info(thread, thread_flavor_t(THREAD_BASIC_INFO), $0, &infoCount) }
-        }
-        guard got == KERN_SUCCESS else { return nil }
-        return Double(info.user_time.seconds + info.system_time.seconds) + Double(info.user_time.microseconds + info.system_time.microseconds) / 1e6
-    }
-
     /// The share of one CPU the watcher has used since it began, which must stay within ``claim``.
     var watcherShare: Double {
         let watcher = lock.withLock { self.watcher }
@@ -213,12 +194,13 @@ final class MainStacks: @unchecked Sendable {
         let ran = !watcher.realTime ? "was REFUSED its real-time policy and ran at its QoS"
             : watcher.demoted.map { String(format: "ran real-time until it was found demoted at %.3f s (priority %d)", $0.time, $0.priority) }
             ?? "ran real-time, never found demoted"
-        return String(format: "%ld looks every %.0f ms, each %.1f µs on average and %.1f µs at most (the main run loop's mode read at most %.1f µs of it); the watcher %@ (period %.0f ms, computation %.2f ms, constraint %.2f ms) used %.1f ms of CPU, %.2f%% of one CPU against its claim of %.0f%%",
-                      spent.looks, Self.interval * 1000, spent.looks > 0 ? spent.total / Double(spent.looks) * 1e6 : 0, spent.longest * 1e6, spent.modeLongest * 1e6,
+        return String(format: "%ld looks every %.0f ms, each %.1f µs on average and %.1f µs at most, %ld looks too slow to count (over %.0f ms); the main run loop's mode, read on the helper's thread for a stack sample, took at most %.1f µs to read; the watcher %@ (period %.0f ms, computation %.2f ms, constraint %.2f ms) used %.1f ms of CPU, %.2f%% of one CPU against its claim of %.0f%%",
+                      spent.looks, Self.interval * 1000, spent.looks > 0 ? spent.total / Double(spent.looks) * 1e6 : 0, spent.longest * 1e6,
+                      spent.tooSlow, MachineShare.longestGap * 1000, spent.modeLongest * 1e6,
                       ran, Self.interval * 1000, Self.computation * 1000, Self.constraint * 1000, watcher.cpu * 1000, watcherShare * 100, Self.claim * 100)
     }
 
-    private func sample(at time: Double) {
+    private func sample(at time: Double, look: ThreadLook?) {
         var info = thread_basic_info()
         var infoCount = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / MemoryLayout<integer_t>.size)
         let gotInfo = withUnsafeMutablePointer(to: &info) {
@@ -229,25 +211,28 @@ final class MainStacks: @unchecked Sendable {
         let count = walk()
         let frames = Array(UnsafeBufferPointer(start: buffer, count: count))
         lock.withLock {
-            samples.append(Sample(time: time, runState: gotInfo == KERN_SUCCESS ? info.run_state : -1, cpu: cpu, frames: frames))
+            samples.append(Sample(
+                time: time, runState: gotInfo == KERN_SUCCESS ? info.run_state : -1, cpu: cpu, frames: frames,
+                idleTicks: look?.idleTicks, busyTicks: look?.busyTicks
+            ))
             if samples.count > 20000 { samples.removeFirst(10000) }
         }
         helperWake.signal()
     }
 
     /// On the helper's thread: the slow part of the stack samples the watcher took since the last
-    /// time (the machine's ticks, the process's threads, the main run loop's mode), read once for
-    /// all of them.
+    /// time (the process's threads, the main run loop's mode), read once for all of them.
     private func fillSamples() {
-        guard lock.withLock({ samples.last.map { !$0.filled } ?? false }) else { return }
-        let ticks = Self.hostTicks(), threads = Self.threads(), mode = mainMode()
+        guard lock.withLock({ samples.last.map { $0.fill == nil } ?? false }) else { return }
+        let threads = Self.threads(), mode = mainMode(), read = CACurrentMediaTime()
         lock.withLock {
+            fills += 1
             var index = samples.count - 1
-            while index >= 0, !samples[index].filled {
-                samples[index].ticks = ticks
+            while index >= 0, samples[index].fill == nil {
                 samples[index].threads = threads
                 samples[index].mode = mode
-                samples[index].filled = true
+                samples[index].fill = fills
+                samples[index].filledAt = read
                 index -= 1
             }
         }
@@ -255,19 +240,15 @@ final class MainStacks: @unchecked Sendable {
 
     /// The main run loop's modes as the stack samples taken in `span` read them, or that none was
     /// taken there: the watcher samples only while the main thread has stalled over 30 ms.
+    /// Each reading counted once, however many samples it stands for, with how long after the
+    /// earliest of them it was read: a mode read late may be one the loop entered after the stall.
     func modes(in span: Span) -> String {
-        let seen = lock.withLock { samples.filter { $0.filled && $0.time >= span.start && $0.time <= span.end }.map(\.mode) }
-        return seen.isEmpty ? "no stack sample in it (the main thread did not stall over 30 ms)" : "in " + MachineShare.modes(seen)
-    }
-
-    private static func hostTicks() -> [UInt32] {
-        var load = host_cpu_load_info()
-        var count = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info>.size / MemoryLayout<integer_t>.size)
-        let got = withUnsafeMutablePointer(to: &load) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { host_statistics(host, HOST_CPU_LOAD_INFO, $0, &count) }
-        }
-        guard got == KERN_SUCCESS else { return [] }
-        return [load.cpu_ticks.0, load.cpu_ticks.1, load.cpu_ticks.2, load.cpu_ticks.3]
+        let taken = lock.withLock { samples.filter { $0.fill != nil && $0.time >= span.start && $0.time <= span.end } }
+        let readings = Dictionary(grouping: taken) { $0.fill ?? 0 }.values
+        guard !readings.isEmpty else { return "no stack sample in it (the main thread did not stall over 30 ms)" }
+        let lags = readings.map { reading in reading.map { ($0.filledAt ?? $0.time) - $0.time }.max() ?? 0 }
+        return "in " + MachineShare.modes(readings.map { $0.first?.mode }) + String(format: " (%ld reading%@ of %ld samples, read up to %.1f ms after them)",
+                                                                                   readings.count, readings.count == 1 ? "" : "s", taken.count, (lags.max() ?? 0) * 1000)
     }
 
     private static func threads() -> [ThreadSample] {
@@ -373,16 +354,20 @@ final class MainStacks: @unchecked Sendable {
     /// Over `span`: how idle the machine's CPUs were, which of the process's threads used the CPU
     /// (by name, the main thread first), and the main thread's priority.
     func summary(of span: Span) -> String {
-        let taken = lock.withLock { samples.filter { $0.time >= span.start && $0.time <= span.end && !$0.ticks.isEmpty } }
-        guard let first = taken.first, let last = taken.last, taken.count > 1 else { return "fewer than two samples in the span" }
-        let delta = zip(last.ticks, first.ticks).map { Double($0 &- $1) }
-        let total = delta.reduce(0, +)
-        let idle = total > 0 ? delta[2] / total * 100 : -1
-        let before = Dictionary(first.threads.map { ($0.id, $0) }, uniquingKeysWith: { one, _ in one })
-        let used = last.threads.compactMap { thread in before[thread.id].map { (thread, (thread.cpu - $0.cpu) * 1000) } }.sorted { $0.1 > $1.1 }
+        let taken = lock.withLock { samples.filter { $0.time >= span.start && $0.time <= span.end && $0.idleTicks != nil && $0.busyTicks != nil } }
+        guard let first = taken.first, let last = taken.last, taken.count > 1 else { return "fewer than two samples with the machine's ticks in the span" }
+        let idleTicks = Double((last.idleTicks ?? 0) &- (first.idleTicks ?? 0)), busyTicks = Double((last.busyTicks ?? 0) &- (first.busyTicks ?? 0))
+        let idle = idleTicks + busyTicks > 0 ? idleTicks / (idleTicks + busyTicks) * 100 : -1
+        let readings = taken.filter { $0.fill != nil }
+        guard let early = readings.first, let late = readings.last, early.fill != late.fill, let from = early.filledAt, let to = late.filledAt else {
+            return String(format: "over %.0f ms between samples: the machine's CPUs %.0f%% idle (ticks busy %.0f, idle %.0f); the process's threads read once in it",
+                          (last.time - first.time) * 1000, idle, busyTicks, idleTicks)
+        }
+        let before = Dictionary(early.threads.map { ($0.id, $0) }, uniquingKeysWith: { one, _ in one })
+        let used = late.threads.compactMap { thread in before[thread.id].map { (thread, (thread.cpu - $0.cpu) * 1000) } }.sorted { $0.1 > $1.1 }
         let busiest = used.prefix(8).map { String(format: "%@ %.1f ms (pri %d, state %d)", $0.0.name.isEmpty ? "#\($0.0.id)" : $0.0.name, $0.1, $0.0.priority, $0.0.state) }
-        return String(format: "over %.0f ms between samples: the machine's CPUs %.0f%% idle (ticks user %.0f, system %.0f, idle %.0f); the process's threads by CPU used: ",
-                      (last.time - first.time) * 1000, idle, delta[0], delta[1], delta[2]) + busiest.joined(separator: ", ")
+        return String(format: "over %.0f ms between samples: the machine's CPUs %.0f%% idle (ticks busy %.0f, idle %.0f); the process's threads by CPU used between two readings %.0f ms apart: ",
+                      (last.time - first.time) * 1000, idle, busyTicks, idleTicks, (to - from) * 1000) + busiest.joined(separator: ", ")
     }
 
     /// The main thread's return addresses, innermost first, into `buffer`; nothing allocated
@@ -420,10 +405,9 @@ final class MainStacks: @unchecked Sendable {
         #endif
     }
 
-    /// Every look at the main thread, with this process's CPU (every thread of the app, its session
-    /// readers included), for ``MachineShare``. The terminal host and its session shims are other
-    /// processes; counting them as ours would need their CPU time (`proc_pid_rusage` on each pid
-    /// the host started), which the sampler does not read.
+    /// Every look at the main thread, with our processes' CPU on its runnable looks (every thread
+    /// of the app, its session readers included, the terminal host and the host's session shims),
+    /// for ``MachineShare``.
     var looks: [ThreadLook] {
         lock.withLock { dense }
     }

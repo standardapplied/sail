@@ -332,7 +332,21 @@ final class TerminalCore {
         return string(value)
     }
 
-    private func paint(_ palette: Palette) throws(ScreenError) {
+    /// Whether a program subscribed to colour scheme reports (mode 2031).
+    var reportsScheme: Bool {
+        mode(2031)
+    }
+
+    /// The colour scheme report, the bytes the scheme query (996) is answered with.
+    func schemeReport() -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: 16)
+        var written = 0
+        let scheme = sink.isDark ? GHOSTTY_COLOR_SCHEME_DARK : GHOSTTY_COLOR_SCHEME_LIGHT
+        guard ghostty_color_scheme_report_encode(scheme, &bytes, bytes.count, &written) == GHOSTTY_SUCCESS else { return [] }
+        return Array(bytes.prefix(written))
+    }
+
+    func paint(_ palette: Palette) throws(ScreenError) {
         var foreground = palette.foreground.ghostty
         var background = palette.background.ghostty
         var cursor = palette.cursor.ghostty

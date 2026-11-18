@@ -54,7 +54,7 @@ final class EffectSink {
     /// again, nor a bell rung or a clipboard written for it.
     var replaying = false
     var size = GhosttySizeReportSize()
-    let isDark: Bool
+    var isDark: Bool
     /// The render state a hold's start is captured into, set once the screen has one.
     var renderState: GhosttyRenderState?
     /// When the program's current render hold (synchronized output, mode 2026) began, nil with none.

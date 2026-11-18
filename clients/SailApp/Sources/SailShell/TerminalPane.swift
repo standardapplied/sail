@@ -10,7 +10,7 @@ import SailWorkbench
 
 /// One pane: one terminal view drawing one session, made and attached once (W2), on this Mac's host
 /// or in a workspace on the runner; only where the session goes and what the banner says differ.
-/// The terminal keeps the palette it opened in (a screen's palette is set when it is made).
+/// The terminal takes the look's palette as the look changes, while it runs.
 @MainActor
 public final class TerminalPane: NSView {
     public enum Start: Equatable, Sendable {
@@ -39,7 +39,6 @@ public final class TerminalPane: NSView {
     /// Whether the last end of this runner session was not confirmed: it may still be running.
     public private(set) var unended = false
 
-    let palette: Palette
     var look: Look {
         didSet { paint() }
     }
@@ -56,8 +55,7 @@ public final class TerminalPane: NSView {
     private var latencyTimer: Timer?
 
     init(
-        _ pane: Pane, start: Start, host: LocalHost, runner: (any TicketSource)?, fonts: TerminalFonts, points: Double, look: Look,
-        palette: Palette
+        _ pane: Pane, start: Start, host: LocalHost, runner: (any TicketSource)?, fonts: TerminalFonts, points: Double, look: Look
     ) throws(ShellError) {
         id = pane.id
         name = pane.session
@@ -71,7 +69,6 @@ public final class TerminalPane: NSView {
             door = .local(host.address)
         }
         self.look = look
-        self.palette = palette
         do {
             terminal = try TerminalView(fonts: fonts, points: points)
         } catch {
@@ -96,7 +93,7 @@ public final class TerminalPane: NSView {
         ))
         let screen: Screen
         do {
-            screen = try Screen(size: grid, scrollbackBytes: 10 << 20, palette: palette)
+            screen = try Screen(size: grid, scrollbackBytes: 10 << 20, palette: look.palette)
         } catch {
             banner.show(Said.sentence("the terminal screen could not be made: \(error)"))
             return
@@ -298,14 +295,12 @@ public final class TerminalPane: NSView {
 
     private func compose() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor(palette.background).cgColor
         terminal.frame = bounds
         terminal.autoresizingMask = [.width, .height]
         addSubview(terminal)
         scrim.frame = bounds
         scrim.autoresizingMask = [.width, .height]
         scrim.wantsLayer = true
-        scrim.layer?.backgroundColor = NSColor(palette.background).withAlphaComponent(Self.dimming).cgColor
         scrim.isHidden = true
         addSubview(scrim)
         banner.translatesAutoresizingMaskIntoConstraints = false
@@ -329,6 +324,9 @@ public final class TerminalPane: NSView {
     }
 
     private func paint() {
+        layer?.backgroundColor = NSColor(look.palette.background).cgColor
+        scrim.layer?.backgroundColor = NSColor(look.palette.background).withAlphaComponent(Self.dimming).cgColor
+        terminal.recolour(look.palette)
         banner.look = look
         latency.textColor = NSColor(look.textSecondary)
         latency.backgroundColor = NSColor(look.surface)

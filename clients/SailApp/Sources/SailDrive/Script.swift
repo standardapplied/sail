@@ -137,8 +137,8 @@ struct Step: Decodable {
     var golden: [String]?
     /// The Workspaces pane says this, within `seconds` (10 by default), no call under way.
     var workspaces: String?
-    /// This name typed into the Workspaces pane's field and Make pressed; the call waited for.
-    var make: String?
+    /// This name typed into the Workspaces pane's field and Create pressed; the call waited for.
+    var create: String?
     /// The controls' gallery sheet of this name ("button", "field", "pill", "spinner") shot in
     /// every state and look, cut into `<control>-<state>-<look>.png`.
     var kit: String?
@@ -162,8 +162,8 @@ struct Step: Decodable {
     var pressStatus: String?
     /// Sign Out pressed on the account, answered no further: what follows it asks.
     var signOutNow: Bool?
-    /// This name typed into the Workspaces pane's field and Make pressed; the call not waited for.
-    var makeStarts: String?
+    /// This name typed into the Workspaces pane's field and Create pressed; the call not waited for.
+    var createStarts: String?
     /// A ticket was asked with these fields (`{"action": "open", "workspace": "dock"}`), within
     /// `seconds` (15 by default).
     var ticketAsked: [String: String]?
@@ -204,8 +204,14 @@ struct Step: Decodable {
     var kill: String?
     /// The tab strip's hit testing: a tab's middle reaches the tab, the empty end moves the window.
     var stripHits: Bool?
-    /// The four-pane measure (scenario 32).
+    /// The four-pane measure (scenario 32), the look switched with their scrollback full among it.
     var panes4: Bool?
+    /// Makes the colour asker, once, at ``Driver/colourAsker``.
+    var colourScript: Bool?
+    /// The app's look set to "light", "dark" or "system" (the system's again), as the system's
+    /// appearance changing sets it; the shell must take it and every terminal shown draw a frame
+    /// in its palette within 5 s.
+    var look: String?
     /// Waits this many seconds.
     var wait: Double?
     /// Each pane of the selected tab shows a line `winch-<columns>` (a program printing one at each

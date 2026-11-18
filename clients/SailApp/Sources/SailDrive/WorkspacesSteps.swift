@@ -69,7 +69,7 @@ actor GoldenDesk: Transport {
 /// The drive's steps on the Workspaces pane and the runner's tabs, against ``GoldenDesk``.
 extension Driver {
     /// Types `name` into the pane's name field as a person does: the field changes and says so,
-    /// which is what enables Make.
+    /// which is what enables Create.
     private func typeName(_ name: String, into pane: WorkspacesPane) {
         pane.name.stringValue = name
         pane.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: pane.name))
@@ -126,18 +126,18 @@ extension Driver {
             pane.list.selectRowIndexes([index], byExtendingSelection: false)
             return (pane.list.selectedRow == index, "the button says \(pane.open.title), \(pane.open.isEnabled ? "enabled" : "disabled")")
         }
-        if let wanted = step.makeStarts {
+        if let wanted = step.createStarts {
             typeName(wanted, into: pane)
-            pane.make.performClick(nil)
-            return (pane.busy && !pane.make.isEnabled, "while making: Make says \(pane.make.title); \(pane.text.replacingOccurrences(of: "\n", with: " | "))")
+            pane.create.performClick(nil)
+            return (pane.busy && !pane.create.isEnabled, "while creating: Create says \(pane.create.title); \(pane.text.replacingOccurrences(of: "\n", with: " | "))")
         }
-        if let wanted = step.make {
+        if let wanted = step.create {
             let before = pane.ended
             typeName(wanted, into: pane)
-            pane.make.performClick(nil)
+            pane.create.performClick(nil)
             let said = pane.text
             let done = await waitUntil(step.seconds ?? 10) { pane.ended > before }
-            return (done, "while making: \(said.replacingOccurrences(of: "\n", with: " | "))")
+            return (done, "while creating: \(said.replacingOccurrences(of: "\n", with: " | "))")
         }
         if let name = step.open {
             guard let index = pane.rows.firstIndex(where: { $0.name == name }) else { return (false, "no row \(name)") }

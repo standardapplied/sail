@@ -3936,7 +3936,7 @@ tick, never once each. An accept that fails while the listener stays bound (out 
 passed over after 100 ms and never ends the door. A presented ticket's credential is resolved
 again against the roster. The connection then keeps `TCP_NODELAY` and TCP keepalive (a vanished peer
 found dead within about a minute, its slot, attachment and write token released), speaks the unix
-socket's `SAILPTY3` frames for its ticket's one action on its one target alone (an open ticket
+socket's `SAILPTY4` frames for its ticket's one action on its one target alone (an open ticket
 creates one session in its project and attaches to it), and may end that one session only while it
 holds its write token, so an observer never ends one (`PtyTickets.Ticket#refusal`, the host's
 ownership check still deciding the kill), each frame decided again as on the unix
@@ -3945,6 +3945,77 @@ issued for no credential, for the host's own token (the box's person exists only
 socket) or for a machine token. `sail _pty-selftest`, the release smoke test, opens a loopback
 door, issues a ticket, presents it and hears one echo (`tcp-selftest: ok`), so the native binary
 runs the door and its keepalive options.
+
+**Files pasted into a session (`PtyUploads`).** A client uploads a file on the terminal connection
+it already holds, in frames 12-15 (`PutBegin`, `PutChunk`, `PutEnd`, `PutCancel`) answered by
+35-37 (`PutAck`, `PutStored`, `PutRefused`, a kind and the bound it met, or for `no_space` the
+bytes free, never a sentence: SailKit's `UploadRefusal.sentence` words each kind once). Nothing of a file is kept on
+the host: its bytes stream from the connection into the workspace. Four classes, one job each:
+`PtyUploads` answers the frames, names targets and files; `UploadAllowance` holds the bounds and a
+session's tally; `UploadCopy` is the shell that puts one file's bytes into a container, whole or not
+at all; `UploadCleanup` removes uploads from containers. Each has its tests (`PtyUploadsTest`
+through a real host, `UploadCopyTest` and `UploadCleanupTest` against a directory standing as the
+container, `UploadAllowanceTest` with no process at all); `PtyUploadIT` drives them against real
+Incus.
+- **U1. Only into the session's own workspace.** `PtyUploads.targetOf` alone names where a
+  session's files go: a session in a workspace into that workspace's own instance
+  (`<project>-<workspace>`, one person's); a session on the box itself has no container
+  (`no_container`), and one in a project's container shares it with every member's sessions
+  (`shared_container`), so nothing is stored there. The bytes never leave the connection to that host; the control plane never sees one.
+- **U3. Only the writer,** asked of the session (`PtySession.isWriter`) at `PutBegin`, at every chunk
+  and at `PutEnd`; a ticket admits the four client frames as it admits input.
+- **U4. The host names every path:** `/var/lib/sail-paste/<instanceId>/<n>-<name>`, the name reduced
+  to `[A-Za-z0-9._-]`, at most 96 bytes, `file` for nothing, `.` or `..` (`PtyUploads.named`, mirrored
+  by SailKit's `UploadName`). `/var/lib/sail-paste` is root's (`0755`), made and checked by the host
+  before every write and every delete; each session's directory is the dev user's alone (`0700`),
+  its files `0600`. `<n>` is the first number no file, link or temporary of that name takes.
+- **U5. Bounded on the host:** 64 MiB a file, 64 KiB a chunk, 256 files and 1 GiB a session
+  (`UploadAllowance`), taken from the session's allowance across its connections when an
+  upload begins and handed back by any upload that is not stored; the container checks the same
+  bounds against what the directory holds, and its disk's free space, before it opens the file. A
+  refusal is decided by a script's exit status, never by words: 11 `too_many`, 12 `session_full`,
+  28 `no_space` (no room before the file opens, or under 64 KiB free once a write failed, the
+  script printing what is free); a measurement that fails is `failed`. At most 16 uploads are
+  under way on the host (`PtyUploads.OPEN_ON_HOST`), else `busy`, which takes nothing of the
+  session's allowance.
+- **U6. Whole or nothing.** One `incus exec` per upload (`UploadCopy.OPEN`) runs as root to make the
+  directories, then as the dev user (`setpriv`) creates `.<n>-<name>.part` with `O_EXCL` (`set -C`: a
+  link at the name to a regular file, or to nothing, is refused; dash writes through one to a device
+  or a pipe, which only the dev user's own process could plant in that moment, and the commit then
+  refuses a temporary that is not a regular file) and copies its input into it; each chunk, in order and
+  within the declared size, is written to that input and acknowledged once written. The connection's
+  thread never writes to a workspace: it hands a chunk to the upload's own thread through a queue of
+  `PtyUploads.QUEUE` (4), and a client past it (the acknowledgement window is the backpressure) is
+  refused `failed`. A chunk not taken within `WRITE_DEADLINE` (30 s) ends the copy and is
+  `stalled`, and so is a copy that does not finish within it once its input is closed at the end;
+  an upload whose client sends nothing for `IDLE` (2 min) is given up and its copy ended. The
+  deadlines run on an injected timer, so the tests that prove them use none of the clock. Whatever
+  ends the writer, an unchecked exception included, gives the upload's share back. At `PutEnd`, from
+  the writer, with every byte there and the bytes' SHA-256 the client's, `COMMIT` gives the
+  temporary its name by a hard link (`ln -T`), which never overwrites nor links into a directory, once it is a regular file of the
+  declared size. Anything else (a refusal, a cancel, a detach, a dropped connection, a failed copy)
+  removes the temporary (`ABORT`), first ending every process in the workspace that holds it open:
+  ending the host's `incus exec` does not end the copy inside, and a copy stopped there would hold
+  the file for ever. `ABORT` matches a descriptor on the temporary's whole path, or that path
+  `(deleted)`, never a longer name such as another upload's temporary; it needs no `cd`, so the
+  session's removal coming first changes nothing; it tries five times, a fifth of a second apart,
+  and a holder left then (one stuck on a stalled disk) is logged (`upload-abort-held`). A cancel
+  after `PutEnd` changes nothing: the commit's answer stands. A connection that drops loses its
+  upload: the client says nothing was kept (`connection_lost`) before the end, and that whether it
+  was saved is not known (`not_known`) after it; nothing is asked of the host.
+- **U7. Typing first.** SailKit sends 32 KiB chunks, each frame written on its own, and no more than
+  two unacknowledged, so a key waits behind at most 96 KiB
+  (`UploadTests.aKeyTypedDuringAnUploadGoesOutAheadOfEveryChunkTheHostHasNotTaken`).
+- **U8. Gone with the session.** When a session ends no upload begins in it, every copy of its
+  uploads under way is ended at once, and its directory is
+  removed as root on a thread of its own (`UploadCleanup.REMOVE`), never under the host's lock: a commit and the
+  removal take the session's lock in turn, so a file is stored before the removal or the upload is
+  answered `session_ended`. The next session made in a container removes, under that container's
+  lock, every directory there named as an instance id whose session is not live (`UploadCleanup.SWEEP`); a
+  session's first upload takes the same lock, so the sweep never removes what a live session is
+  making. No delete follows a link: each checks the root is a directory, not a link, and root's,
+  and `rm -r` removes a link as itself, walking by descriptor, so nothing in the container can turn a
+  delete outside the uploads; the dev user cannot write the root or swap its own directory.
 
 **Where a session opens (`PtySessionHost.folderOf`).** One rule. A session in a container or a
 workspace starts its `incus exec` in `/` on the box and its shell in the instance's own
@@ -4708,16 +4779,18 @@ paravirtual Metal device renders offscreen and reads back exactly: the renderer'
 frame fails past 0.1% of its pixels; emoji cells are left out of that and must hold colour), the
 view's input tests with synthesized events (every suite `swift test list` names, each in its own
 bounded run by `ci/test-suites`, which fails when a listed suite passes no test of its own or a
-test stands outside any suite), the app driven against the pinned darwin `sail`'s
-local host with its latency budgets and against two control planes that `sail` starts on the runner (the drive waits, at every step, until the view has drawn the
+test stands outside any suite), the app driven against the local host of this commit's darwin
+`sail` (built once per run by the workflow's `host` job, which both macOS lanes wait for) with its latency budgets and against two control planes that `sail` starts on the runner (the drive waits, at every step, until the view has drawn the
 screen's text in full; the renderer bench takes 300 full redraws, drawn offscreen with nothing read
 back, on the drawing thread's CPU clock with the wall clock beside it), and the bundle checked on
 every build. With all seven signing secrets (`ci/signing`
 decides, and fails on some but not all) it is signed with Developer ID, its profile embedded and
 its entitlements claimed, notarized, stapled and assessed by Gatekeeper; without them it is uploaded as an unsigned build and the signed-only check
 is skipped. Goldens are recorded only by the workflow's `record-goldens`
-input, never by a pull request's run. This job and the SailKit jobs run only when `clients/` or
-the workflow changed (a job skipped by `if:` reports success, so no required check waits on it).
+input, never by a pull request's run. This job and the SailKit jobs run only when `clients/`, the
+workflow, or what the darwin `sail` is built from (the build files and the Java modules' main
+sources) changed (`ci/changes`; a job skipped by `if:` reports success, so no required check waits
+on it).
 
 ### The Sail app signs in with a passkey
 
@@ -4760,7 +4833,12 @@ always bold, large text by the HIG's measure), content corners at 6 pt, a 60 pt 
 Mac" and the account. The title bar is transparent over a full-size content view: the rail's tint and
 the pane's surface run to the top edge under the platform's own window buttons. Focus rings,
 selection and the caret are the accent's, through the window's own field editor; the look follows a
-dark/light change while the app runs (the terminal's palette at its next session). The artifact is the
+dark/light change while the app runs, every open terminal's palette with it: the screen is recoloured
+in place (`Screen.setPalette`), its content, scrollback, selection and cursor kept and colours a
+program set itself (OSC 4/10/11) kept; colour queries (OSC 10/11/4, `CSI ? 996 n`) are answered in
+the new look; a program subscribed to scheme reports (mode 2031) is told by the writer only, at the
+change and once more at every attach as the writer or take of the write, so an observer's look never
+reaches it and a change made while the client was away is not left unsaid. The artifact is the
 zip `ditto` made, uploaded unarchived, so one unzip gives `Sail.app`; CI checks the download as
 Finder unpacks it.
 

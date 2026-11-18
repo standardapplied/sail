@@ -17,7 +17,7 @@ public final class WorkbenchView: NSView {
 
     public let host: LocalHost
     public let strip: TabStrip
-    public private(set) var model = Workbench()
+    public internal(set) var model = Workbench()
     public private(set) var panes: [PaneID: TerminalPane] = [:]
     var onTitle: @MainActor (String) -> Void = { _ in }
     /// Asked to show "This Mac", for a command given while it is not shown.
@@ -28,13 +28,13 @@ public final class WorkbenchView: NSView {
     /// Asked to show the account, where a runner tab's lapsed sign-in is signed in again.
     var onSignIn: @MainActor () -> Void = {}
 
-    let palette: Palette
     var look: Look {
         didSet { paint() }
     }
 
     private let fonts: TerminalFonts
     private var tabViews: [TabID: TabView] = [:]
+    private var shownSelected: TabID?
     private let banner: StatusBanner
     private let emptyLabel = NSTextField(labelWithString: "No terminal is open")
     private let newTerminal: AccentButton
@@ -49,7 +49,6 @@ public final class WorkbenchView: NSView {
 
     init(fonts directory: URL, helper: String?, look: Look) throws(ShellError) {
         self.look = look
-        palette = look.palette
         do {
             fonts = try TerminalFonts(directory: directory)
         } catch {
@@ -121,7 +120,7 @@ public final class WorkbenchView: NSView {
 
     /// Draws the model, by frames and `isHidden` only (W2), and keeps it soon after.
     func apply() {
-        strip.tabs.filter { $0.field != nil && $0.id != model.selected }.forEach { $0.endRename() }
+        endRenamesLeftBehind()
         for (id, view) in tabViews where !model.tabs.contains(where: { $0.id == id }) {
             view.removeFromSuperview()
             tabViews[id] = nil
@@ -137,6 +136,20 @@ public final class WorkbenchView: NSView {
         showTitles()
         if let focused, !isHidden, !strip.isRenaming, window?.firstResponder !== focused.terminal { window?.makeFirstResponder(focused.terminal) }
         keepSoon()
+    }
+
+    /// A redraw ends a rename only when another tab was chosen, the tab selected before still
+    /// there (a selection moved by its tab closing is no one's choice, and closing a tab selects
+    /// none), or when the renamed tab itself is gone; the name typed is kept. Any other redraw (a
+    /// focus change, a shell ending in another tab, a change of look) leaves the field as it is, so
+    /// Escape still keeps nothing.
+    private func endRenamesLeftBehind() {
+        let chosen = shownSelected.map { shown in shown != model.selected && model.tabs.contains { $0.id == shown } } ?? false
+        shownSelected = model.selected
+        let left = strip.tabs.filter { tab in
+            tab.field != nil && (chosen && tab.id != model.selected || !model.tabs.contains { $0.id == tab.id })
+        }
+        left.forEach { $0.endRename() }
     }
 
     private func showTitles() {
@@ -206,12 +219,12 @@ public final class WorkbenchView: NSView {
     /// The view for `pane`, added once to its tab's view; nil, said in the banner, when it cannot
     /// be made.
     @discardableResult
-    private func makeView(_ pane: Pane, start: TerminalPane.Start, points: Double) -> TerminalPane? {
+    func makeView(_ pane: Pane, start: TerminalPane.Start, points: Double) -> TerminalPane? {
         guard let tab = model.tab(holding: pane.id) else { return nil }
         let view: TerminalPane
         do {
             let tickets = pane.place.onRunner ? signedIn().map { SignedInTickets(for: $0.handle, current: signedIn) } : nil
-            view = try TerminalPane(pane, start: start, host: host, runner: tickets, fonts: fonts, points: points, look: look, palette: palette)
+            view = try TerminalPane(pane, start: start, host: host, runner: tickets, fonts: fonts, points: points, look: look)
         } catch {
             banner.show(Said.sentence(error.description))
             return nil
@@ -409,6 +422,12 @@ public final class WorkbenchView: NSView {
 
     @objc public func closeTab(_ sender: Any?) {
         guard let tab = self.tab(for: sender) else { return }
+        close(tab)
+    }
+
+    /// Ends `tab`'s terminals, asking first when one may end a running program. Closing a tab
+    /// chooses no tab: it is not selected first, so a rename open in another tab goes on.
+    private func close(_ tab: Tab) {
         let views = tab.layout.leaves.compactMap { panes[$0] }
         guard views.count > 1 else {
             return confirm(ending: views, question: "Close this terminal?", detail: "The program running in it will end.")
@@ -571,8 +590,8 @@ public final class WorkbenchView: NSView {
         strip.onSelect = { [weak self] id in self?.change { $0.select(id) } }
         strip.onMenu = { [weak self] id in self?.tabMenu(for: id) }
         strip.onClose = { [weak self] id in
-            self?.change { $0.select(id) }
-            self?.closeTab(nil)
+            guard let self, let tab = model.tabs.first(where: { $0.id == id }) else { return }
+            close(tab)
         }
         strip.onNew = { [weak self] in self?.newTab(nil) }
         strip.onRename = { [weak self] id, name in
@@ -584,13 +603,13 @@ public final class WorkbenchView: NSView {
     }
 
     private func paint() {
-        layer?.backgroundColor = NSColor(palette.background).cgColor
+        layer?.backgroundColor = NSColor(look.palette.background).cgColor
         emptyLabel.textColor = NSColor(look.textSecondary)
         newTerminal.look = look
         banner.look = look
         strip.look = look
         panes.values.forEach { $0.look = look }
-        model.tabs.forEach { tab in tabViews[tab.id].map { layout(tab, in: $0) } }
+        tabViews.values.forEach { $0.paint(look) }
     }
 }
 
@@ -638,13 +657,22 @@ final class TabView: NSView {
             view.show(divider, color: NSColor(look.separatorStrong))
         }
     }
+
+    /// The dividers take `look`'s colour where they are: a change of look moves nothing, so it lays
+    /// nothing out, and a line's colour changes at once, never fading through both looks.
+    func paint(_ look: Look) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        dividers.forEach { $0.line.backgroundColor = NSColor(look.separatorStrong).cgColor }
+        CATransaction.commit()
+    }
 }
 
 final class DividerView: NSView {
     var onDrag: @MainActor ([Side], Double) -> Void = { _, _ in }
     var onDragEnded: @MainActor () -> Void = {}
     private var divider: Divider?
-    private let line = CALayer()
+    let line = CALayer()
 
     override init(frame: NSRect) {
         super.init(frame: frame)

@@ -187,7 +187,7 @@ public final class FakeRunnerDoor: Sendable {
             answer(.welcome(hostBootID: "door-1"), on: connection)
             attached(connection, number, ticket)
         case let .failure(refused):
-            answer(.refused(HostRefusal(message: refused.description, remedy: nil)), on: connection)
+            answer(.refused(HostRefusal(message: refused.description, remedy: [])), on: connection)
         }
     }
 
@@ -210,7 +210,7 @@ public final class FakeRunnerDoor: Sendable {
         var opened: String?
         while let frame = frame(on: connection) {
             if let outside = Self.refusal(of: frame, under: ticket, opened: opened) {
-                return answer(.refused(HostRefusal(message: outside, remedy: nil)), on: connection)
+                return answer(.refused(HostRefusal(message: outside, remedy: [])), on: connection)
             }
             switch frame {
             case let .create(create):
@@ -224,7 +224,7 @@ public final class FakeRunnerDoor: Sendable {
                     if write, state.writers[session] != 0 { state.writers[session] = number }
                     return true
                 }
-                answer(live ? .accepted : .refused(HostRefusal(message: "No live session '\(session)' to attach.", remedy: nil)), on: connection)
+                answer(live ? .accepted : .refused(HostRefusal(message: "No live session '\(session)' to attach.", remedy: [])), on: connection)
             case let .kill(session):
                 let ended = state.withLock { state in
                     state.kills.append(session)
@@ -234,7 +234,7 @@ public final class FakeRunnerDoor: Sendable {
                     return true
                 }
                 guard ended else {
-                    return answer(.refused(HostRefusal(message: Self.notTheWriter, remedy: nil)), on: connection)
+                    return answer(.refused(HostRefusal(message: Self.notTheWriter, remedy: [])), on: connection)
                 }
                 answer(.sessionEnded(reason: "ended"), on: connection)
                 answer(.accepted, on: connection)

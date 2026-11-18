@@ -33,6 +33,20 @@ import Testing
         #expect(strip.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name): the strip is not chrome")
         #expect(selected.layer?.backgroundColor == NSColor(look.fillSelected).cgColor, "\(name): the selected tab is not fillSelected")
         #expect(selected.label.textColor == NSColor(look.text))
+        #expect(selected.label.font == NSFont.systemFont(ofSize: Look.Step.callout.points, weight: .medium), "\(name): the selected title is not medium")
+        #expect(other.label.font == NSFont.systemFont(ofSize: Look.Step.callout.points, weight: .regular))
+        strip.frame = NSRect(x: 0, y: 0, width: 600, height: ShellApp.bandHeight)
+        strip.layoutSubtreeIfNeeded()
+        selected.layoutSubtreeIfNeeded()
+        #expect(strip.isFlipped && !selected.isFlipped, "\(name): the tab's own y no longer runs up from its bottom edge")
+        let bar = selected.bar.frame, width = Double(selected.bounds.width)
+        #expect(width > 2 * Look.contentRadius, "\(name): the tab was not laid out (\(width) pt wide)")
+        #expect(abs(Double(bar.minY)) <= 0.5 && abs(Double(bar.height) - TabButton.barHeight) <= 0.5,
+                "\(name): the bar is at y \(bar.minY), \(bar.height) pt high, not along the tab's bottom edge")
+        #expect(abs(Double(bar.minX) - Look.contentRadius) <= 0.5 && abs(Double(bar.maxX) - (width - Look.contentRadius)) <= 0.5,
+                "\(name): the bar runs \(bar.minX)–\(bar.maxX) in a tab \(width) pt wide")
+        #expect(selected.bar.layer?.backgroundColor == NSColor(look.accentText).cgColor, "\(name): the bar is not accentText")
+        #expect(!selected.bar.isHidden && other.bar.isHidden, "\(name): the bar marks the wrong tab")
         #expect(other.layer?.backgroundColor == NSColor.clear.cgColor)
         #expect(other.label.textColor == NSColor(look.textSecondary))
         #expect(selected.close.isHidden && other.close.isHidden, "\(name): a close button shows without the pointer on its tab")
@@ -54,7 +68,7 @@ import Testing
             #expect(button.layer?.borderWidth == 0)
         }
         #expect(selected.layer.map { Double($0.cornerRadius) } == Look.contentRadius)
-        #expect(selected.label.font == NSFont.systemFont(ofSize: 13))
+        #expect(selected.label.font == NSFont.systemFont(ofSize: 13, weight: .medium))
         #expect(selected.toolTip == "api")
         #expect(!selected.mouseDownCanMoveWindow && strip.mouseDownCanMoveWindow, "\(name): a tab moves the window, or the strip's empty part does not")
         #expect(strip.accessibilityRole() == .tabGroup)
@@ -109,15 +123,16 @@ import Testing
                 let band = full ? ShellApp.bandHeight : Double(root.bounds.height - window.contentLayoutRect.maxY)
                 let context = try #require(Self.drawn(root))
                 let pixels = try #require(context.data).bindMemory(to: UInt8.self, capacity: context.width * context.height * 4)
-                func isChrome(_ x: Double, _ y: Double) -> Bool {
+                func isChrome(_ x: Double, _ y: Double, _ chrome: RGB) -> Bool {
                     let at = (Int(y * 2) * context.width + Int(x * 2)) * 4
-                    let found = [pixels[at], pixels[at + 1], pixels[at + 2]], wanted = [look.chrome.red, look.chrome.green, look.chrome.blue]
+                    let found = [pixels[at], pixels[at + 1], pixels[at + 2]], wanted = [chrome.red, chrome.green, chrome.blue]
                     return zip(found, wanted).allSatisfy { abs(Int($0) - Int($1)) <= 2 }
                 }
                 for x in [40.0, Double(root.bounds.width) / 2, Double(root.bounds.width) - 6] {
-                    #expect(isChrome(x, band / 2), "\(name) \(pane) full \(full): the band at x \(x) is not the chrome")
+                    #expect(isChrome(x, band / 2, look.chrome), "\(name) \(pane) full \(full): the band at x \(x) is not the chrome")
                 }
-                #expect(isChrome(Rail.width / 2, band + 4), "\(name) \(pane) full \(full): the rail under the band is not the chrome")
+                #expect(isChrome(Rail.width / 2, band + 4, look.chrome), "\(name) \(pane) full \(full): the rail under the band is not the chrome")
+                #expect(isChrome(4, Double(root.bounds.height) - 4, look.chrome), "\(name) \(pane) full \(full): the chrome at the bottom is not the band's one fill")
                 let railTop = Double(root.bounds.height - shell.rail.frame.maxY)
                 #expect(abs(railTop - band) < 0.5, "\(name) \(pane) full \(full): the rail starts at \(railTop), the band ends at \(band)")
                 #expect(band >= 44, "\(name): the band is \(band) pt")
@@ -202,11 +217,12 @@ import Testing
         strip.show(Self.items(), selected: TabID(1))
         strip.layoutSubtreeIfNeeded()
         let tab = try #require(strip.tabs.first)
-        let title = try #require(Self.ink(tab), "the title drew no ink")
+        #expect(!tab.bar.isHidden, "the selected tab shows no bar")
+        let title = try #require(Self.ink(tab, except: Look.light.accentText), "the title drew no ink")
         tab.rename()
         let editor = try #require(tab.field?.currentEditor() as? NSTextView)
         editor.setSelectedRange(NSRange(location: editor.string.utf16.count, length: 0))
-        let text = try #require(Self.ink(tab), "the field drew no ink")
+        let text = try #require(Self.ink(tab, except: Look.light.accentText), "the field drew no ink")
         let middle = Double(tab.bounds.midX)
         #expect(abs(text.minY - title.minY) <= 0.5 && abs(text.maxY - title.maxY) <= 0.5, "the text is at \(text), the title was at \(title)")
         #expect(abs(title.midX - middle) <= 1 && abs(text.midX - middle) <= 1, "the tab's middle is \(middle); the title's \(title.midX), the text's \(text.midX)")
@@ -255,6 +271,72 @@ import Testing
         #expect(!strip.isRenaming && renamed.last == "deploy", "the keys taken by another view, the name typed was not kept: \(renamed)")
     }
 
+    /// A rename under way in a background tab goes on through redraws that choose no tab (a focus
+    /// change, a shell ending in another tab, the selected tab closing, another tab's close button)
+    /// and Escape then keeps nothing; another tab chosen ends it with the name typed.
+    @Test func aBackgroundTabsRenameOutlivesRedrawsThatChooseNoTab() async throws {
+        let shell = try Self.shell(.light)
+        shell.select(.thisMac)
+        shell.window.orderFront(nil)
+        defer { shell.window.orderOut(nil) }
+        let bench = shell.thisMac
+        let place = Place.thisMac(folder: "/")
+        let panes = ["a", "b", "c", "d", "e"].map { bench.model.newTab(session: "mac-\($0)", place: place) }
+        bench.apply()
+        let ids = bench.model.tabs.map(\.id)
+        let strip = bench.strip
+        strip.layoutSubtreeIfNeeded()
+        let tab = try #require(strip.tabs.first)
+        func type(_ text: String) throws {
+            let editor = try #require(tab.field?.currentEditor() as? NSTextView)
+            editor.selectAll(nil)
+            editor.insertText(text, replacementRange: editor.selectedRange())
+        }
+        tab.rename()
+        try type("build")
+        bench.apply()
+        _ = bench.model.close(panes[1])
+        bench.apply()
+        _ = bench.model.close(panes[4])
+        bench.apply()
+        let selected = bench.model.selected
+        strip.onClose(ids[2])
+        await Self.mainQueueTurns()
+        #expect(strip.isRenaming, "a redraw that chose no tab ended the background tab's rename")
+        #expect(bench.model.selected == selected, "another tab's close button selected it")
+        let editor = try #require(tab.field?.currentEditor() as? NSTextView)
+        #expect(editor.string == "build")
+        editor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        await Self.mainQueueTurns()
+        #expect(!strip.isRenaming && bench.model.tabs.first?.name == nil, "Escape kept a name: \(String(describing: bench.model.tabs.first?.name))")
+        tab.rename()
+        try type("deploy")
+        strip.onSelect(ids[2])
+        await Self.mainQueueTurns()
+        #expect(!strip.isRenaming && bench.model.tabs.first?.name == "deploy", "another tab chosen did not keep the name typed")
+    }
+
+    /// A change of look reaches every pane, a background tab's as the shown one's: the spec's
+    /// "every tab, focused or not".
+    @Test func aBackgroundTabsPanesTakeTheNewLook() throws {
+        let shell = try Self.shell(.dark)
+        let bench = shell.thisMac
+        let place = Place.thisMac(folder: "/")
+        let ids = ["behind", "shown"].map { bench.model.newTab(session: "mac-\($0)", place: place) }
+        let views = try ids.map { id in
+            let pane = try #require(bench.model.panes[id])
+            return try #require(bench.makeView(pane, start: .attach, points: 15))
+        }
+        let behind = try #require(views[0].superview)
+        behind.isHidden = true
+        #expect(behind.isHidden && views[1].superview?.isHidden == false, "the background tab's view is not the only one hidden")
+        bench.look = .light
+        for (name, view) in zip(["the background tab's", "the shown tab's"], views) {
+            #expect(view.look == .light, "\(name) pane kept the dark look")
+            #expect(view.layer?.backgroundColor == NSColor(Look.light.palette.background).cgColor, "\(name) pane is not drawn light")
+        }
+    }
+
     /// The window's first frame fits its screen: the designed 1180 × 800 on a 1024 × 743 visible
     /// frame is 1024 × 743, and a frame that fits is kept.
     @Test func theWindowsFirstFrameFitsItsScreen() {
@@ -272,8 +354,9 @@ import Testing
 
     /// The rectangle, in points from the top left, of `view`'s mostly opaque pixels darker than
     /// `limit` (red, green and blue summed, of 765): the text, in the light look. Drawn at 2x as
-    /// AppKit draws views (`cacheDisplay`): a layer's render left out the title's text.
-    static func ink(_ view: NSView, darkerThan limit: Double = 300) -> CGRect? {
+    /// AppKit draws views (`cacheDisplay`): a layer's render left out the title's text. The pixels
+    /// of `except` are left out: a glyph's ink, not a mark of that colour beside it.
+    static func ink(_ view: NSView, darkerThan limit: Double = 300, except: RGB? = nil) -> CGRect? {
         view.layoutSubtreeIfNeeded()
         guard view.bounds.width > 0, view.bounds.height > 0, let image = NSBitmapImageRep(
             bitmapDataPlanes: nil, pixelsWide: Int(view.bounds.width * 2), pixelsHigh: Int(view.bounds.height * 2), bitsPerSample: 8,
@@ -286,7 +369,8 @@ import Testing
         for y in 0 ..< image.pixelsHigh {
             for x in 0 ..< image.pixelsWide {
                 guard let colour = image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), colour.alphaComponent > 0.5,
-                      Double(colour.redComponent + colour.greenComponent + colour.blueComponent) * 255 < limit
+                      Double(colour.redComponent + colour.greenComponent + colour.blueComponent) * 255 < limit,
+                      !Self.matches(colour, except)
                 else { continue }
                 found = found.map { (minX: min($0.minX, x), minY: min($0.minY, y), maxX: max($0.maxX, x), maxY: max($0.maxY, y)) } ?? (minX: x, minY: y, maxX: x, maxY: y)
             }
@@ -296,13 +380,41 @@ import Testing
         }
     }
 
+    /// Whether `colour` is `rgb`, within 12 levels a channel: room for the bitmap's colour space,
+    /// while a title's antialiased ink comes no nearer than 74 levels to the bar's.
+    static func matches(_ colour: NSColor, _ rgb: RGB?) -> Bool {
+        guard let rgb else { return false }
+        let found = [colour.redComponent, colour.greenComponent, colour.blueComponent].map { Int((Double($0) * 255).rounded()) }
+        return zip(found, [Int(rgb.red), Int(rgb.green), Int(rgb.blue)]).allSatisfy { abs($0 - $1) <= 12 }
+    }
+
+    /// A change of look recolours a tab's dividers where they are: nothing is laid out again, and
+    /// the line takes the new look's colour at once.
+    @Test func aChangeOfLookRecoloursTheDividersWhereTheyAre() throws {
+        var bench = Workbench()
+        _ = bench.newTab(session: "mac-left", place: .thisMac(folder: "/"))
+        let size = CGSize(width: 800, height: 600)
+        let right = bench.split(.sideBySide, session: "mac-right", place: .thisMac(folder: "/"), in: size, minimum: CGSize(width: 100, height: 100), scale: 2)
+        try #require(right != nil, "the tab did not split")
+        let dividers = bench.frames(in: size, scale: 2).dividers
+        try #require(dividers.count == 1)
+        let room = TabView(frame: NSRect(origin: .zero, size: size))
+        room.show(dividers, look: .dark)
+        let divider = try #require(room.subviews.compactMap { $0 as? DividerView }.first)
+        let frame = divider.frame, line = divider.line.frame
+        #expect(divider.line.backgroundColor == NSColor(Look.dark.separatorStrong).cgColor)
+        room.paint(.light)
+        #expect(divider.line.backgroundColor == NSColor(Look.light.separatorStrong).cgColor, "the divider kept the dark look's colour")
+        #expect(divider.frame == frame && divider.line.frame == line, "a change of look moved the divider")
+    }
+
     @Test func theScrimIsTheTerminalBackgroundAt30PercentAndTakesNoClick() throws {
         let shell = try Self.shell(.dark)
         var bench = Workbench()
         let id = bench.newTab(session: "mac-scrim", place: .thisMac(folder: "/"))
         let pane = try TerminalPane(
             try #require(bench.panes[id]), start: .attach, host: shell.thisMac.host, runner: nil, fonts: TerminalFonts(directory: LookTests.fonts),
-            points: 15, look: .dark, palette: Look.dark.palette
+            points: 15, look: .dark
         )
         let scrim = try #require(pane.subviews.first { $0 is Scrim })
         #expect(scrim.layer?.backgroundColor == NSColor(Look.dark.palette.background).withAlphaComponent(0.3).cgColor)
@@ -310,6 +422,22 @@ import Testing
         pane.isDimmed = true
         #expect(!scrim.isHidden)
         #expect(scrim.hitTest(NSPoint(x: 10, y: 10)) == nil)
+    }
+
+    /// The look changes while the pane runs: its background and scrim take the other palette's.
+    @Test func aPaneTakesTheOtherLooksBackgroundAndScrimAtOnce() throws {
+        let shell = try Self.shell(.dark)
+        var bench = Workbench()
+        let id = bench.newTab(session: "mac-look", place: .thisMac(folder: "/"))
+        let pane = try TerminalPane(
+            try #require(bench.panes[id]), start: .attach, host: shell.thisMac.host, runner: nil, fonts: TerminalFonts(directory: LookTests.fonts),
+            points: 15, look: .dark
+        )
+        let scrim = try #require(pane.subviews.first { $0 is Scrim })
+        #expect(pane.layer?.backgroundColor == NSColor(Look.dark.palette.background).cgColor)
+        pane.look = .light
+        #expect(pane.layer?.backgroundColor == NSColor(Look.light.palette.background).cgColor)
+        #expect(scrim.layer?.backgroundColor == NSColor(Look.light.palette.background).withAlphaComponent(0.3).cgColor)
     }
 
     /// W8: every command is a menu item with the table's key and modifiers.

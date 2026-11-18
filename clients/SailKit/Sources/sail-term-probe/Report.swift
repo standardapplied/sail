@@ -1,9 +1,11 @@
 import Foundation
+import SailMeasures
 import SailSurface
 import SailTerminal
 
 /// What a probe run leaves as evidence: each step and how it went, the latency numbers and the
-/// budgets they are held to. Never a byte of the terminal, a ticket or a token.
+/// budgets they are held to, each upload, and every ticket the run asked for, one per connection to
+/// the host. Never a byte of the terminal, a ticket or a token.
 struct Report: Encodable {
     var steps: [StepResult]
     var latency: LatencyReport?
@@ -11,13 +13,15 @@ struct Report: Encodable {
     var budgets: [Budget]
     /// What the bench measured, frame by frame, beside its budgets: none for a scripted run.
     var samples: [BenchSeries]? = nil
+    var uploads: [UploadResult] = []
+    var connections: [String] = []
 
     var passed: Bool {
         steps.allSatisfy(\.ok) && budgets.allSatisfy(\.met)
     }
 
     private enum Keys: String, CodingKey {
-        case passed, steps, latency, droppedInputs, budgets, samples
+        case passed, steps, latency, droppedInputs, budgets, samples, uploads, connections
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -28,6 +32,8 @@ struct Report: Encodable {
         try fields.encodeIfPresent(droppedInputs, forKey: .droppedInputs)
         try fields.encode(budgets, forKey: .budgets)
         try fields.encodeIfPresent(samples, forKey: .samples)
+        try fields.encode(uploads, forKey: .uploads)
+        try fields.encode(connections, forKey: .connections)
     }
 
     func write(to path: String?) throws {
@@ -36,6 +42,16 @@ struct Report: Encodable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(self).write(to: URL(filePath: path))
     }
+}
+
+/// One file uploaded: where the host stored it, its size and digest, how long it took, and the echo
+/// of each key typed while it went, in milliseconds.
+struct UploadResult: Encodable {
+    var path: String
+    var bytes: Int
+    var sha256: String
+    var milliseconds: Double
+    var keyEchoes: [Double]
 }
 
 struct StepResult: Encodable {
@@ -51,17 +67,22 @@ struct BenchSeries: Encodable, Equatable {
     var name: String
     var frames: [FrameSample]
     var stalls: [Span]
+    /// The looks at the frames' thread their excuses were proven from.
+    var looks: [ThreadLook] = []
 }
 
 /// One `frame()` taken while another thread fed: when it began (seconds since the bench began),
 /// how long it took, how long of that it waited for the lock, how many slices the feeder fed while
-/// it waited, and how much of its wait the reference thread was held over too.
+/// it waited, how much of its wait the reference thread was held over too, the CPU time its own
+/// thread used in it, and how much of it that thread was proven starved.
 struct FrameSample: Encodable, Equatable {
     var at: Double
     var milliseconds: Double
     var waitMilliseconds: Double
     var slicesWaited: Int
     var heldMilliseconds: Double
+    var cpuMilliseconds: Double = 0
+    var excusedMilliseconds: Double = 0
 }
 
 /// One of T10's budgets and what was measured against it.
