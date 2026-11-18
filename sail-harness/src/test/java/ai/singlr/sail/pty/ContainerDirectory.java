@@ -85,6 +85,15 @@ final class ContainerDirectory {
   /** Whether each copy into the container keeps only its first byte, as a cut-off stream would. */
   volatile boolean copyTruncates;
 
+  /** What a commit or removal told to exit by its knob says on stderr first: a file's name. */
+  static final String SAYS = "ln: failed to access '1-secret-plan.pdf': No such file or directory";
+
+  /** The script that never ends instead of running, when set, as one a frozen container runs. */
+  volatile String hangs;
+
+  /** Whether the open's measurement of the disk prints no figure, as a broken {@code df} would. */
+  volatile boolean dfSaysNothing;
+
   /** The status every commit exits with instead of running, when set. */
   volatile Integer commitExits;
 
@@ -102,6 +111,9 @@ final class ContainerDirectory {
 
   /** Held before a removal runs, when set. */
   volatile CountDownLatch removeHeld;
+
+  /** Counted down once the host has seen a removal end, for {@link #abortAfterRemove}. */
+  final CountDownLatch removed = new CountDownLatch(1);
 
   /** Held as the host waits for a copy to exit, when set; {@link #copyReached} once it waits. */
   volatile CountDownLatch copyHeld;
@@ -152,11 +164,7 @@ final class ContainerDirectory {
           await(held);
         }
         if (script.equals(UploadCopy.ABORT) && abortAfterRemove) {
-          try {
-            awaitFinished(UploadCleanup.REMOVE);
-          } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-          }
+          await(removed);
         }
         if (script.equals(UploadCleanup.SWEEP)) {
           var held = sweepHeld;
@@ -169,6 +177,9 @@ final class ContainerDirectory {
         }
         if (script.equals(UploadCopy.OPEN) && copyStalls) {
           inner.set(2, inner.get(2).replace("cat >&3", "sleep 600 >&3 </dev/null"));
+        }
+        if (script.equals(UploadCopy.OPEN) && dfSaysNothing) {
+          inner.set(2, inner.get(2).replace("df -Pk \"$at\"", "echo Filesystem"));
         }
         if (script.equals(UploadCopy.OPEN) && findFails) {
           inner.set(2, inner.get(2).replace("names=$(find", "names=$(false"));
@@ -186,44 +197,66 @@ final class ContainerDirectory {
         if (script.equals(UploadCopy.COMMIT)) {
           await(commitHeld);
           if (commitExits != null) {
-            inner = new ArrayList<>(List.of("sh", "-c", "exit " + commitExits));
+            inner = saying(commitExits);
           }
         }
         if (script.equals(UploadCleanup.REMOVE)) {
           await(removeHeld);
           if (removeExits != null) {
-            inner = new ArrayList<>(List.of("sh", "-c", "exit " + removeExits));
+            inner = saying(removeExits);
           }
+        }
+        if (script.equals(hangs)) {
+          inner = new ArrayList<>(List.of("sh", "-c", "exec tail -f /dev/null"));
         }
         var process =
             new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD).start();
-        if (!script.equals(UploadCopy.OPEN)) {
-          try {
-            process.waitFor();
-          } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-          }
-          order.add(script);
-          finished.add(script);
-          return process;
+        if (script.equals(UploadCopy.OPEN)) {
+          copies.add(process);
         }
-        copies.add(process);
-        return new HeldCopy(process);
+        return new HeldCopy(process, script);
       };
 
-  /** A copy whose exit the host waits for only once {@link #copyHeld} lets it, when set. */
+  /** A script that says {@link #SAYS} on stderr, then exits {@code status}. */
+  private static ArrayList<String> saying(int status) {
+    return new ArrayList<>(
+        List.of("sh", "-c", "printf '%s\\n' \"$1\" >&2; exit \"$2\"", "sh", SAYS, "" + status));
+  }
+
+  /**
+   * A script's process as the host has it, unwaited as a container's would be: a copy's exit is
+   * waited for only once {@link #copyHeld} lets it, when set, and any other script is counted among
+   * those finished when the host sees it end.
+   */
   private final class HeldCopy extends Process {
     private final Process process;
+    private final String script;
+    private boolean counted;
 
-    HeldCopy(Process process) {
+    HeldCopy(Process process, String script) {
       this.process = process;
+      this.script = script;
     }
 
     @Override
     public boolean waitFor(long timeout, TimeUnit unit) throws InterruptedException {
-      copyReached.countDown();
-      await(copyHeld);
-      return process.waitFor(timeout, unit);
+      if (script.equals(UploadCopy.OPEN)) {
+        copyReached.countDown();
+        await(copyHeld);
+        return process.waitFor(timeout, unit);
+      }
+      var ended = process.waitFor(timeout, unit);
+      synchronized (this) {
+        if (ended && !counted) {
+          counted = true;
+          order.add(script);
+          finished.add(script);
+          if (script.equals(UploadCleanup.REMOVE)) {
+            removed.countDown();
+          }
+        }
+      }
+      return ended;
     }
 
     @Override

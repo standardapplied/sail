@@ -26,6 +26,8 @@ Usage:
   ci/check local-host BINARY    run BINARY's own terminal host as the app's agent does, in this
                                 account's home, which must hold none: it serves, a second exits 1
                                 naming it, and SIGTERM stops it leaving only its lock
+  ci/check min-macos BINARY     fail unless the darwin BINARY's minimum macOS (its Mach-O
+                                LC_BUILD_VERSION) is no newer than the app's LSMinimumSystemVersion
 EOF
   exit 2
 }
@@ -278,6 +280,27 @@ local_host() {
   echo "local-host: ok"
 }
 
+# A binary built on a newer macOS than the app supports declares that macOS its minimum: the app
+# bundling it, and the CLI a person downloads, would claim a Mac the binary does not.
+min_macos() {
+  local binary=${1:-}
+  [[ -f $binary ]] || usage
+  local app minos
+  app=$(plutil -extract LSMinimumSystemVersion raw clients/SailApp/ci/Info.plist)
+  minos=$(vtool -show-build "$binary" | awk '$1 == "minos" { print $2; exit }')
+  [[ -n $minos ]] || { echo "min-macos: $binary names no minimum macOS (no LC_BUILD_VERSION)" >&2; exit 1; }
+  if (( $(version_key "$minos") > $(version_key "$app") )); then
+    echo "min-macos: $binary needs macOS $minos, newer than the app's minimum, macOS $app: build it on macOS $app" >&2
+    exit 1
+  fi
+  echo "min-macos: $binary needs macOS $minos; the app supports macOS $app: ok"
+}
+
+# A dotted version as one number that orders as the version does: 15.0 and 15.0.0 are equal.
+version_key() {
+  awk -F. '{ printf "%d%03d%03d\n", $1, $2, $3 }' <<< "$1"
+}
+
 changed_tests() {
   local base
   base=$(git merge-base origin/main HEAD)
@@ -320,5 +343,6 @@ case ${1:-} in
   methods) shift; methods "$@" ;;
   prepared-image) shift; prepared_image "$@" ;;
   local-host) shift; local_host "$@" ;;
+  min-macos) shift; min_macos "$@" ;;
   *) usage ;;
 esac

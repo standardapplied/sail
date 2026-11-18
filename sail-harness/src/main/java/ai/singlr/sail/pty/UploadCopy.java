@@ -200,6 +200,22 @@ final class UploadCopy {
     Process start(List<String> command) throws IOException;
   }
 
+  /** The status a script's run is given when it does not end within the place's patience. */
+  static final int UNANSWERED = -1;
+
+  /**
+   * Why a script that ended with {@code status} failed, for a log line: the status and the fixed
+   * reason it stands for, never what the script said, so no path or name reaches a log.
+   */
+  static String reason(int status) {
+    return switch (status) {
+      case UNANSWERED -> "no exit: it did not end within its patience";
+      case UNSAFE -> "exit " + UNSAFE + ": the uploads root is not root's own directory";
+      case HELD -> "exit " + HELD + ": a process still holds the temporary";
+      default -> "exit " + status;
+    };
+  }
+
   private final Processes processes;
   private final Place place;
 
@@ -349,16 +365,28 @@ final class UploadCopy {
       return finish(process);
     }
 
-    /** Gives the temporary its name ({@link #COMMIT}): the script's status, 0 when it is stored. */
+    /**
+     * Gives the temporary its name ({@link #COMMIT}): the script's status, 0 when it is stored, a
+     * failure logged with its {@link #reason}.
+     */
     int commit() {
-      return run(
-          container,
-          place.asDev(),
-          COMMIT,
-          directory,
-          Integer.toString(number),
-          name,
-          Long.toString(size));
+      var status =
+          run(
+              container,
+              place.asDev(),
+              COMMIT,
+              directory,
+              Integer.toString(number),
+              name,
+              Long.toString(size));
+      if (status != 0) {
+        PtySessionHost.log("upload-commit-failed", "-", instanceId(), reason(status));
+      }
+      return status;
+    }
+
+    private String instanceId() {
+      return directory.substring(directory.lastIndexOf('/') + 1);
     }
 
     /**
@@ -372,19 +400,16 @@ final class UploadCopy {
       var status = run(container, place.asDev(), ABORT, directory, Integer.toString(number), name);
       if (status == HELD) {
         PtySessionHost.log(
-            "upload-abort-held",
-            "-",
-            directory.substring(directory.lastIndexOf('/') + 1),
-            "a process still holds the temporary after 5 tries");
+            "upload-abort-held", "-", instanceId(), reason(status) + " after 5 tries");
       }
       return status;
     }
   }
 
   /**
-   * Runs {@code script} in {@code container} as {@code as} gives, its exit status; 1 if it failed
-   * or did not end within the place's patience. Its output is not read: these scripts print
-   * nothing, and a script that never ends must not hold its caller past the patience.
+   * Runs {@code script} in {@code container} as {@code as} gives: its exit status, 1 if it could
+   * not start, {@link #UNANSWERED} if it did not end within the place's patience. Nothing of its
+   * output is read, so a script that never ends holds its caller no longer than the patience.
    */
   int run(String container, Function<String, List<String>> as, String script, String... args) {
     var command = new ArrayList<>(as.apply(container));
@@ -399,18 +424,21 @@ final class UploadCopy {
     }
   }
 
-  /** {@code process}'s exit status, waiting at most the place's patience; 1 when it hangs. */
+  /**
+   * {@code process}'s exit status, waiting at most the place's patience; {@link #UNANSWERED} when
+   * it hangs.
+   */
   private int finish(Process process) {
     try {
       if (process.waitFor(place.patience().toMillis(), TimeUnit.MILLISECONDS)) {
         return process.exitValue();
       }
       process.destroyForcibly();
-      return 1;
+      return UNANSWERED;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       process.destroyForcibly();
-      return 1;
+      return UNANSWERED;
     }
   }
 }

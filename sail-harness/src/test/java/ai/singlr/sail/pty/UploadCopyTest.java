@@ -213,14 +213,70 @@ class UploadCopyTest {
                 "respawn",
                 part.toString())
             .start();
-    try {
+    try (var log = new LogCapture()) {
       assertEquals(UploadCopy.HELD, copy.abort());
+
+      assertEquals(
+          "pty-host: upload-abort-held principal=- session="
+              + ID
+              + " reason=exit 3: a process still holds the temporary after 5 tries",
+          log.awaitLine("upload-abort-held"));
     } finally {
       respawner.destroyForcibly().waitFor();
       for (var pid : ContainerDirectory.holders(session())) {
         ProcessHandle.of(pid).ifPresent(ProcessHandle::destroyForcibly);
       }
     }
+  }
+
+  /**
+   * Round 4 Minor 2: a script the container never ends is given up at the place's patience, so its
+   * caller is never held past it; nothing is stored.
+   */
+  @Test
+  void aScriptThatNeverEndsIsGivenUpAtItsPatience() throws Exception {
+    var copy = copies.open("acme", ID, "a", 1, process -> {});
+    copy.write(new byte[] {1});
+    assertEquals(0, copy.close());
+    c.hangs = UploadCopy.COMMIT;
+
+    assertEquals(UploadCopy.UNANSWERED, copy.commit());
+
+    assertFalse(Files.exists(Path.of(copy.path())));
+  }
+
+  /**
+   * Round 4 Minor 3: a commit that fails is logged with its status, never with what the script
+   * said, which here names the file.
+   */
+  @Test
+  void aFailedCommitIsLoggedByItsStatusAndNoName() throws Exception {
+    var copy = copies.open("acme", ID, "a", 1, process -> {});
+    copy.write(new byte[] {1});
+    assertEquals(0, copy.close());
+    c.commitExits = 1;
+
+    try (var log = new LogCapture()) {
+      assertEquals(1, copy.commit());
+
+      var line = log.awaitLine("upload-commit-failed");
+      assertEquals(
+          "pty-host: upload-commit-failed principal=- session=" + ID + " reason=exit 1", line);
+    }
+  }
+
+  /**
+   * Round 4 Minor 3 (D06): a disk measurement that prints no figure is a failure, never read as a
+   * disk with no room.
+   */
+  @Test
+  void aDiskMeasurementWithNoFigureIsAFailure() throws Exception {
+    c.dfSaysNothing = true;
+
+    var copy = copies.open("acme", ID, "a", 1, process -> {});
+
+    assertFalse(copy.opened());
+    assertEquals(PutRefusal.FAILED, copy.refusal());
   }
 
   /** A process that holds {@code file} open for writing, as a copy holds its temporary. */
