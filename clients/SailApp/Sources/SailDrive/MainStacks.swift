@@ -40,7 +40,11 @@ final class MainStacks: @unchecked Sendable {
         let id: UInt64
         let name: String
         let cpu: Double
+        /// `pth_curpri`, the priority it is scheduled at now; `pth_priority`, its base; and
+        /// `pth_maxpriority`, the most it may reach (`<mach/thread_info.h>`).
         let priority: Int32
+        let basePriority: Int32
+        let maxPriority: Int32
         let state: Int32
     }
 
@@ -84,7 +88,7 @@ final class MainStacks: @unchecked Sendable {
     private let helperWake = DispatchSemaphore(value: 0)
     /// How many readings the helper has taken for stack samples, each naming its samples.
     private var fills = 0
-    private var spent: (looks: Int, total: Double, longest: Double, modeLongest: Double, tooSlow: Int) = (0, 0, 0, 0, 0)
+    private var spent: (looks: Int, total: Double, longest: Double, longestAt: Double, modeLongest: Double, tooSlow: Int) = (0, 0, 0, 0, 0, 0)
     /// Whether the kernel took the watcher's real-time policy, when it began, its own CPU time, its
     /// port, and when the helper first found it demoted out of real time, at what priority.
     private var watcher: (realTime: Bool, since: Double, cpu: Double, port: thread_act_t?, demoted: (time: Double, priority: Int32)?) = (false, 0, 0, nil, nil)
@@ -112,6 +116,7 @@ final class MainStacks: @unchecked Sendable {
             }
         }
         watcher.qualityOfService = .userInteractive
+        watcher.name = "sh.standardapplied.sail.drive.watcher"
         watcher.start()
         let helper = Thread { [self] in
             var scanned = -Double.infinity
@@ -129,6 +134,7 @@ final class MainStacks: @unchecked Sendable {
             }
         }
         helper.qualityOfService = .userInitiated
+        helper.name = "sh.standardapplied.sail.drive.helper"
         helper.start()
     }
 
@@ -150,6 +156,7 @@ final class MainStacks: @unchecked Sendable {
             }
             spent.looks += 1
             spent.total += cost
+            if cost > spent.longest { spent.longestAt = time }
             spent.longest = max(spent.longest, cost)
         }
         return counts ? look : nil
@@ -194,8 +201,8 @@ final class MainStacks: @unchecked Sendable {
         let ran = !watcher.realTime ? "was REFUSED its real-time policy and ran at its QoS"
             : watcher.demoted.map { String(format: "ran real-time until it was found demoted at %.3f s (priority %d)", $0.time, $0.priority) }
             ?? "ran real-time, never found demoted"
-        return String(format: "%ld looks every %.0f ms, each %.1f µs on average and %.1f µs at most, %ld looks too slow to count (over %.0f ms); the main run loop's mode, read on the helper's thread for a stack sample, took at most %.1f µs to read; the watcher %@ (period %.0f ms, computation %.2f ms, constraint %.2f ms) used %.1f ms of CPU, %.2f%% of one CPU against its claim of %.0f%%",
-                      spent.looks, Self.interval * 1000, spent.looks > 0 ? spent.total / Double(spent.looks) * 1e6 : 0, spent.longest * 1e6,
+        return String(format: "%ld looks every %.0f ms, each %.1f µs on average and %.1f µs at most (the look at %.3f s), %ld looks too slow to count (over %.0f ms); the main run loop's mode, read on the helper's thread for a stack sample, took at most %.1f µs to read; the watcher %@ (period %.0f ms, computation %.2f ms, constraint %.2f ms) used %.1f ms of CPU, %.2f%% of one CPU against its claim of %.0f%%",
+                      spent.looks, Self.interval * 1000, spent.looks > 0 ? spent.total / Double(spent.looks) * 1e6 : 0, spent.longest * 1e6, spent.longestAt,
                       spent.tooSlow, MachineShare.longestGap * 1000, spent.modeLongest * 1e6,
                       ran, Self.interval * 1000, Self.computation * 1000, Self.constraint * 1000, watcher.cpu * 1000, watcherShare * 100, Self.claim * 100)
     }
@@ -251,7 +258,7 @@ final class MainStacks: @unchecked Sendable {
                                                                                    readings.count, readings.count == 1 ? "" : "s", taken.count, (lags.max() ?? 0) * 1000)
     }
 
-    private static func threads() -> [ThreadSample] {
+    static func threads() -> [ThreadSample] {
         var list: thread_act_array_t?
         var count = mach_msg_type_number_t(0)
         guard task_threads(mach_task_self_, &list, &count) == KERN_SUCCESS, let list else { return [] }
@@ -282,7 +289,7 @@ final class MainStacks: @unchecked Sendable {
         let name = withUnsafeBytes(of: info.pth_name) { bytes in String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self) }
         return ThreadSample(
             id: ident.thread_id, name: name, cpu: Double(info.pth_user_time + info.pth_system_time) / 1e9, priority: info.pth_curpri,
-            state: info.pth_run_state
+            basePriority: info.pth_priority, maxPriority: info.pth_maxpriority, state: info.pth_run_state
         )
     }
 

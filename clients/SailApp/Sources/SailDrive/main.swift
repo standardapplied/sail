@@ -28,6 +28,7 @@ do {
     FileHandle.standardError.write(Data("the drive script \(scriptPath) cannot be read: \(error)\n".utf8))
     exit(2)
 }
+ExitMark.arm(at: out.appending(path: "exited"))
 let passkey = SoftwarePasskey(
     file: environment["SAIL_DRIVE_PASSKEY"].map { URL(filePath: $0) } ?? out.deletingLastPathComponent().appending(path: "software-passkey.json")
 )

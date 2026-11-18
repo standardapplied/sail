@@ -316,6 +316,23 @@ import Testing
         #expect(!strip.isRenaming && bench.model.tabs.first?.name == "deploy", "another tab chosen did not keep the name typed")
     }
 
+    /// Closing a tab that is not the one shown, by its X, names it in the question, as the strip
+    /// names it; the shown tab is "this tab", or "this terminal" when it holds one.
+    @Test func theCloseQuestionNamesATabThatIsNotShown() throws {
+        let shell = try Self.shell(.light)
+        let bench = shell.thisMac
+        let place = Place.thisMac(folder: "/")
+        _ = bench.model.newTab(session: "mac-api", place: place)
+        _ = bench.model.newTab(session: "mac-shown", place: place)
+        let behind = try #require(bench.model.tabs.first)
+        let shown = try #require(bench.model.tabs.last)
+        bench.model.rename(behind.id, to: "api")
+        #expect(bench.closeQuestion(for: behind, terminals: 1) == "Close api?")
+        #expect(bench.closeQuestion(for: behind, terminals: 2) == "Close api?")
+        #expect(bench.closeQuestion(for: shown, terminals: 1) == "Close this terminal?")
+        #expect(bench.closeQuestion(for: shown, terminals: 2) == "Close this tab?")
+    }
+
     /// A change of look reaches every pane, a background tab's as the shown one's: the spec's
     /// "every tab, focused or not".
     @Test func aBackgroundTabsPanesTakeTheNewLook() throws {

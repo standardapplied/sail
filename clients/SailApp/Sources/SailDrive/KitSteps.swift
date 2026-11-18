@@ -115,7 +115,7 @@ extension Driver {
         CATransaction.commit()
         _ = await waitUntil(2) { committed.withLock { $0 } }
         let file = out.appending(path: whole.map { "\($0).png" } ?? "focus.png")
-        await capture(["-o", "-l", "\(window.windowNumber)"], to: file)
+        await capture(.window(window.windowNumber), to: file)
         defer { if whole == nil { try? FileManager.default.removeItem(at: file) } }
         guard let source = CGImageSourceCreateWithURL(file as CFURL, nil) else { return nil }
         return CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)

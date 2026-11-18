@@ -1,6 +1,7 @@
 {"steps": [
   {"name": "this-mac-signed-out", "select": "thisMac"},
   {"name": "this-mac-attached", "attached": true, "seconds": 30},
+  {"name": "what-the-system-reports-of-the-app", "machineState": true},
   {"name": "title-bar-over-this-mac", "titleBar": true},
   {"name": "type-echo-hi", "type": "echo hi\r"},
   {"name": "shows-hi", "line": "hi", "seconds": 30},
@@ -118,6 +119,9 @@
   {"name": "p4-escape-keeps-the-name", "press": "escape"},
   {"name": "p4-back-into-the-split", "clickPane": 1},
   {"name": "p4-unnamed-and-the-split-still-selected", "arrangement": {"tabs": [1, 3], "titles": ["This Mac", "This Mac"], "selected": 1, "focus": 1}},
+  {"name": "p4-close-a-background-tab-from-its-menu", "contextMenu": "tab", "at": 0, "items": ["Rename", "-", "Close Tab", "Close Other Tabs", "-", "New Tab"], "choose": "Close Tab"},
+  {"name": "p4-the-question-names-the-tab-it-closes", "sheet": "Cancel", "asking": "Close This Mac?"},
+  {"name": "p4-nothing-closed-nothing-selected", "arrangement": {"tabs": [1, 3], "selected": 1, "focus": 1}},
   {"name": "a-title-set-50-times-writes-no-arrangement", "titleBurst": 50},
   {"name": "s14-select-split-left", "press": "arrowLeft", "modifiers": ["command", "option"]},
   {"name": "s14-left", "arrangement": {"focus": 0}},

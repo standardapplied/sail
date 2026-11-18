@@ -158,7 +158,7 @@ extension Driver {
             return (true, "")
         }
         if let name = step.shotScreen {
-            return await inBothLooks(name) { file in await self.capture([], to: file) }
+            return await inBothLooks(name) { file in await self.capture(.screen, to: file) }
         }
         return nil
     }

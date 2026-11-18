@@ -119,16 +119,12 @@ final class Driver {
         shell.rail.selected == .thisMac && pane?.session != nil
     }
 
-    /// Runs the script once. App Nap is held off for the run: it slows a window that is not in
-    /// front, and the keys must go one each `interval`.
+    /// Runs the script once, holding no process activity: the app is measured as a person runs it,
+    /// in front, where App Nap does not take an app.
     func start() {
         guard !started else { return }
         started = true
-        let activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "driving the app")
-        Task {
-            await run()
-            ProcessInfo.processInfo.endActivity(activity)
-        }
+        Task { await run() }
     }
 
     private func run() async {
@@ -156,7 +152,7 @@ final class Driver {
             if !ok {
                 detail += "; " + whereTheWindowIs
                 if onTerminal { detail += "; " + terminal.drawingState }
-                Self.captureTheScreen(to: out.appending(path: String(format: "%02d-", index) + name + "-screen.png"))
+                await Self.captureTheScreen(to: out.appending(path: String(format: "%02d-", index) + name + "-screen.png"))
             }
             let seconds = (ContinuousClock.now - began) / .seconds(1)
             let skipped = ok && detail.hasPrefix("skipped: ")
@@ -183,8 +179,24 @@ final class Driver {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try? encoder.encode(report).write(to: out.appending(path: "report.json"))
+        Self.faultOnQuit()
         guard passed else { exit(1) }
         NSApp.terminate(nil)
+    }
+
+    /// A fault at quit, for `ci/drive`'s own check that a crash or a hang there fails a run whose
+    /// report says it passed: `SAIL_DRIVE_ON_QUIT=crash` aborts, `hang` never returns.
+    private static func faultOnQuit() {
+        switch ProcessInfo.processInfo.environment["SAIL_DRIVE_ON_QUIT"] {
+        case "crash"?:
+            abort()
+        case "hang"?:
+            while true {
+                sleep(60)
+            }
+        default:
+            break
+        }
     }
 
     private func perform(_ step: Step, name: String) async -> (Bool, String) {
@@ -286,6 +298,9 @@ final class Driver {
         }
         if step.latencyOverlay == true {
             return await latencyOverlay(within: step.seconds ?? 5)
+        }
+        if step.machineState == true {
+            return machineState
         }
         if step.resetLatency == true {
             resetLatency()
@@ -686,12 +701,8 @@ final class Driver {
     }
 
     /// The whole screen as it is, so whatever covered the window is seen.
-    private static func captureTheScreen(to file: URL) {
-        let capture = Process()
-        capture.executableURL = URL(filePath: "/usr/sbin/screencapture")
-        capture.arguments = ["-x", file.path]
-        try? capture.run()
-        capture.waitUntilExit()
+    private static func captureTheScreen(to file: URL) async {
+        await Shot.begin(.screen, to: file)?.taken()
     }
 
     /// `line` on standard output at once, unbuffered, so what the drive printed is in its output

@@ -23,6 +23,9 @@ public final class Heartbeat: Sendable {
         return beat
     }
 
+    /// The name of the thread a heartbeat of its own ticks on.
+    public static let threadName = "sh.standardapplied.sail.heartbeat"
+
     /// Ticked by a thread of its own, which nothing else runs on.
     public static func onItsOwnThread(now: @escaping @Sendable () -> Double) -> Heartbeat {
         let beat = Heartbeat(now: now)
@@ -33,6 +36,7 @@ public final class Heartbeat: Sendable {
             }
         }
         thread.qualityOfService = .userInteractive
+        thread.name = threadName
         thread.start()
         return beat
     }

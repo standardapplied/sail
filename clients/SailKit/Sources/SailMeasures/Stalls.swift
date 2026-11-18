@@ -141,7 +141,9 @@ public enum MachineShare {
     /// The most of a judged wait the main thread's proven starvation may excuse: half. Past it the
     /// starvation is inconclusive and none of it is excused, so a wait over its budget fails: a
     /// measurement that excused most of itself on inference measured nothing (the bench's rule, by
-    /// time). The drive's own thread's stall is its own measured work, and is never capped.
+    /// time). The drive's own thread's stall is not capped here, though it too is an inference: a
+    /// thread that only sleeps 10 ms woke late, which says the scheduler held it, not that our
+    /// work did; it does not subtract our processes' CPU.
     public static let mostExcused = 0.5
 
     /// Whether the main thread's proven starvation is more than ``mostExcused`` of `wait`.
