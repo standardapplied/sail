@@ -1,0 +1,519 @@
+import AppKit
+import SailLook
+
+/// A list of rows in one of the two row styles (`RowStyle`): group heads and items. It is its own
+/// data source and delegate, and owns the row keys: ↑↓ move the choice (group heads cannot be
+/// chosen), Home and End jump to the first and last item, type-select finds a name, Return presses
+/// the chosen row's first action, and every other action's key works on the chosen row. A row
+/// offers all its actions to VoiceOver as custom actions and in its context menu.
+@MainActor
+public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDelegate {
+    /// One thing a row does; on the row as a small button, or only in its menu (⋯ and right-click).
+    public struct Action {
+        public let title: String
+        public let key: String
+        public let modifiers: NSEvent.ModifierFlags
+        public let onRow: Bool
+        public let run: @MainActor () -> Void
+
+        public init(_ title: String, key: String = "", modifiers: NSEvent.ModifierFlags = [], onRow: Bool = true, run: @escaping @MainActor () -> Void) {
+            self.title = title
+            self.key = key
+            self.modifiers = modifiers
+            self.onRow = onRow
+            self.run = run
+        }
+    }
+
+    /// An item: its id, the name type-select finds, what VoiceOver reads, what it shows, what it does.
+    public struct Item {
+        public let id: String
+        public let name: String
+        public let voice: String
+        public let content: NSView
+        public let actions: [Action]
+
+        public init(id: String, name: String, voice: String, content: NSView, actions: [Action] = []) {
+            self.id = id
+            self.name = name
+            self.voice = voice
+            self.content = content
+            self.actions = actions
+        }
+    }
+
+    public enum Entry {
+        case head(String, count: Int)
+        case item(Item)
+    }
+
+    public var look: Look {
+        didSet { reloadData() }
+    }
+
+    public let rowStyle: RowStyle
+    public var onChoose: @MainActor (String?) -> Void = { _ in }
+    private let mono: LabelFont
+
+    /// The rows. A new set keeps the chosen item chosen by its id wherever it now is, and tells
+    /// `onChoose` only when the choice really changed (its item went).
+    public var entries: [Entry] = [] {
+        willSet { kept = chosen }
+        didSet {
+            reloading = true
+            reloadData()
+            choose(kept)
+            reloading = false
+            if chosen != kept { onChoose(chosen) }
+        }
+    }
+
+    /// The chosen item's id as the old rows had it, taken before they change.
+    private var kept: String?
+    private var reloading = false
+
+    public init(rowStyle: RowStyle, look: Look, mono: LabelFont) {
+        self.rowStyle = rowStyle
+        self.look = look
+        self.mono = mono
+        super.init(frame: .zero)
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("rows"))
+        column.resizingMask = .autoresizingMask
+        addTableColumn(column)
+        columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        headerView = nil
+        style = .plain
+        intercellSpacing = .zero
+        backgroundColor = .clear
+        focusRingType = .none
+        floatsGroupRows = false
+        allowsTypeSelect = true
+        gridStyleMask = []
+        dataSource = self
+        delegate = self
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override public func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        guard let column = tableColumns.first, column.width != newSize.width else { return }
+        column.width = newSize.width
+    }
+
+    func item(at row: Int) -> Item? {
+        guard entries.indices.contains(row), case let .item(item) = entries[row] else { return nil }
+        return item
+    }
+
+    /// The chosen item's id.
+    public var chosen: String? {
+        item(at: selectedRow)?.id
+    }
+
+    /// Chooses the item of `id`, as a pane restoring its last choice does; nil chooses nothing.
+    public func choose(_ id: String?) {
+        guard let row = entries.indices.first(where: { item(at: $0)?.id == id }) else { return deselectAll(nil) }
+        selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        scrollRowToVisible(row)
+    }
+
+    // MARK: Keys
+
+    override public func keyDown(with event: NSEvent) {
+        if !act(on: event) { super.keyDown(with: event) }
+    }
+
+    override public func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard window?.firstResponder === self, act(on: event) else { return super.performKeyEquivalent(with: event) }
+        return true
+    }
+
+    /// Return, Home, End, or an action's key on the chosen row; false when the key is none of them.
+    func act(on event: NSEvent) -> Bool {
+        let items = entries.indices.filter { item(at: $0) != nil }
+        switch event.keyCode {
+        case 115, 119:
+            guard let row = event.keyCode == 115 ? items.first : items.last else { return false }
+            selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            scrollRowToVisible(row)
+            return true
+        case 36, 76:
+            guard let primary = item(at: selectedRow)?.actions.first(where: { $0.onRow }) else { return false }
+            primary.run()
+            return true
+        default:
+            let pressed = event.charactersIgnoringModifiers?.lowercased() ?? ""
+            let held = event.modifierFlags.intersection([.command, .option, .control, .shift])
+            guard !pressed.isEmpty, let action = item(at: selectedRow)?.actions.first(where: { $0.key == pressed && $0.modifiers == held }) else { return false }
+            action.run()
+            return true
+        }
+    }
+
+    // MARK: Data source and delegate
+
+    public func numberOfRows(in _: NSTableView) -> Int {
+        entries.count
+    }
+
+    public func tableView(_: NSTableView, isGroupRow row: Int) -> Bool {
+        item(at: row) == nil
+    }
+
+    public func tableView(_: NSTableView, shouldSelectRow row: Int) -> Bool {
+        item(at: row) != nil
+    }
+
+    public func tableView(_: NSTableView, heightOfRow row: Int) -> CGFloat {
+        let hairline = rowStyle.hairline && row > 0 ? 1.0 : 0
+        guard item(at: row) != nil else { return RowStyle.groupHeight + hairline }
+        return rowStyle.height + (rowStyle.hairline ? 1 : 0)
+    }
+
+    public func tableView(_: NSTableView, typeSelectStringFor _: NSTableColumn?, row: Int) -> String? {
+        item(at: row)?.name
+    }
+
+    public func tableView(_: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        SailRowView(rowStyle: rowStyle, look: look, item: item(at: row), first: row == 0)
+    }
+
+    public func tableView(_: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
+        guard entries.indices.contains(row) else { return nil }
+        switch entries[row] {
+        case let .head(title, count): return HeadCell(title, count: count, look: look, mono: mono, hairline: rowStyle.hairline && row > 0)
+        case let .item(item): return RowCell(item, rowStyle: rowStyle, look: look, mono: mono)
+        }
+    }
+
+    public func tableViewSelectionDidChange(_: Notification) {
+        if !reloading { onChoose(chosen) }
+    }
+}
+
+/// A row as the look draws it (`RowPaint`): the fill, the accent bar
+/// at the list's leading edge and the hairline above a list's row; its actions shown while it is
+/// hovered or chosen. VoiceOver reads its words and offers its actions.
+@MainActor
+final class SailRowView: NSTableRowView {
+    let rowStyle: RowStyle
+    let look: Look
+    let item: SailList.Item?
+    private let first: Bool
+    private var hoverArea: NSTrackingArea?
+
+    var hovered = false {
+        didSet { if hovered != oldValue { refresh() } }
+    }
+
+    init(rowStyle: RowStyle, look: Look, item: SailList.Item?, first: Bool) {
+        self.rowStyle = rowStyle
+        self.look = look
+        self.item = item
+        self.first = first
+        super.init(frame: .zero)
+        guard let item else { return }
+        setAccessibilityLabel(item.voice)
+        setAccessibilityCustomActions(item.actions.map { action in
+            let run = Run(action)
+            return NSAccessibilityCustomAction(name: action.title) {
+                MainActor.assumeIsolated { run.go(nil) }
+                return true
+            }
+        })
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    var paint: RowPaint {
+        RowPaint(RowState(chosen: isSelected, emphasized: isEmphasized, hovered: hovered), look: look)
+    }
+
+    /// The table sets a row's state on every layout pass; only a change touches the row, or each
+    /// pass would ask for another.
+    override var isSelected: Bool {
+        didSet { if isSelected != oldValue { refresh() } }
+    }
+
+    override var isEmphasized: Bool {
+        didSet { if isEmphasized != oldValue { refresh() } }
+    }
+
+    override var interiorBackgroundStyle: NSView.BackgroundStyle {
+        .normal
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    /// The table sets a new row's state before the row holds its cell, when asking for the cell
+    /// throws; the cell's arrival refreshes the row again.
+    private func refresh() {
+        let paint = self.paint
+        if numberOfColumns > 0, let cell = view(atColumn: 0) as? RowCell {
+            cell.show(paint.actions, chosen: isSelected, keys: isEmphasized)
+        }
+        needsDisplay = true
+    }
+
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        refresh()
+    }
+
+    /// The top of the row's own area, under a list's hairline.
+    private var top: Double {
+        rowStyle.hairline && !(item == nil && first) ? 1 : 0
+    }
+
+    override func drawBackground(in _: NSRect) {
+        let content = NSRect(x: 0, y: top, width: Double(bounds.width), height: Double(bounds.height) - top)
+        if top > 0 {
+            NSColor(look.gridLine).setFill()
+            NSBezierPath(rect: NSRect(x: 0, y: 0, width: Double(bounds.width), height: 1)).fill()
+        }
+        guard item != nil else {
+            NSColor(look.fillHover).setFill()
+            return NSBezierPath(rect: content).fill()
+        }
+        let paint = self.paint, area = content.insetBy(dx: rowStyle.margin, dy: 0)
+        if let fill = paint.fill {
+            NSColor(fill).setFill()
+            NSBezierPath(roundedRect: area, xRadius: rowStyle.radius, yRadius: rowStyle.radius).fill()
+        }
+        guard paint.bar else { return }
+        NSColor(Tint(look.accent)).setFill()
+        let rightToLeft = userInterfaceLayoutDirection == .rightToLeft, half = RowStyle.barWidth / 2
+        let bar = NSRect(x: rightToLeft ? Double(bounds.width) - RowStyle.barWidth : 0, y: Double(content.midY) - rowStyle.bar / 2, width: RowStyle.barWidth, height: rowStyle.bar)
+        NSBezierPath(roundedRect: bar, xRadius: half, yRadius: half).fill()
+        NSBezierPath(rect: NSRect(x: rightToLeft ? Double(bar.maxX) - half : Double(bar.minX), y: Double(bar.minY), width: half, height: Double(bar.height))).fill()
+    }
+
+    override func drawSelection(in _: NSRect) {}
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with _: NSEvent) {
+        hovered = true
+    }
+
+    override func mouseExited(with _: NSEvent) {
+        hovered = false
+    }
+
+    override func menu(for _: NSEvent) -> NSMenu? {
+        guard let item, !item.actions.isEmpty else { return nil }
+        return RowCell.menu(item.actions)
+    }
+}
+
+/// A group head's words: mono capitals 20 pt in, the count 8 pt after them, on the line the
+/// browser puts a 10 pt line in the row's middle.
+@MainActor
+final class HeadCell: NSView {
+    static let countGap = 8.0
+
+    private let title: NSAttributedString
+    private let count: NSAttributedString
+    private let hairline: Bool
+
+    init(_ title: String, count: Int, look: Look, mono: LabelFont, hairline: Bool) {
+        let font = mono.font(Look.Step.caption.points) as NSFont
+        self.title = Draw.text(title, font, look.textTertiary, tracking: Look.Tracking.eyebrow, upper: true)
+        self.count = Draw.text("\(count)", font, Tint(look.textTertiary.rgb, alpha: look.textTertiary.alpha * 0.8), tracking: Look.Tracking.eyebrow)
+        self.hairline = hairline
+        super.init(frame: .zero)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+        setAccessibilityLabel("\(title), \(count)")
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override func draw(_: NSRect) {
+        let points = Look.Step.caption.points, top = hairline ? 1.0 : 0
+        let baseline = TextLine.baseline(top: top + (Double(bounds.height) - top - points) / 2, points: points, lineHeight: points)
+        let titleWidth = Double(title.size().width), countWidth = Double(count.size().width), leading = RowStyle.list.leading
+        if userInterfaceLayoutDirection == .rightToLeft {
+            let x = Double(bounds.width) - leading - titleWidth
+            Draw.line(title, x: x, baseline: baseline)
+            Draw.line(count, x: x - Self.countGap - countWidth, baseline: baseline)
+        } else {
+            Draw.line(title, x: leading, baseline: baseline)
+            Draw.line(count, x: leading + titleWidth + Self.countGap, baseline: baseline)
+        }
+    }
+}
+
+/// An item's cell: what the item shows, from the row's leading inset and stretched to its actions
+/// (or to the trailing inset when it has none), and its actions at the trailing edge: the first
+/// on-row action secondary, or primary with ⏎ while the row is chosen; the rest secondary; ⋯ for
+/// the menu when some action lives only there. Hidden actions are hidden, not only clear, so they
+/// take no click and Tab passes them.
+@MainActor
+final class RowCell: NSView {
+    let content: NSView
+    let actions = NSStackView()
+    private let first: SailButton?
+    private let runs: [Run]
+    private var shown = false
+
+    init(_ item: SailList.Item, rowStyle: RowStyle, look: Look, mono: LabelFont) {
+        content = item.content
+        let runs = item.actions.map { Run($0) }
+        self.runs = runs
+        var buttons: [SailButton] = []
+        let onRow = runs.filter { $0.action.onRow }
+        if let primary = onRow.first {
+            let first = SailButton(primary.action.title, kind: .secondary, size: .small, look: look, target: primary, action: #selector(Run.go(_:)))
+            first.shortcut("\r", mono: mono)
+            first.keyEquivalent = ""
+            self.first = first
+            buttons.append(first)
+        } else {
+            first = nil
+        }
+        for other in onRow.dropFirst() {
+            buttons.append(SailButton(other.action.title, kind: .secondary, size: .small, look: look, target: other, action: #selector(Run.go(_:))))
+        }
+        if rowStyle != .sidebar, runs.contains(where: { !$0.action.onRow }) {
+            let more = SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil)
+            buttons.append(more)
+            moreMenu = Self.menu(item.actions)
+            more.target = MenuOpener.shared
+            more.action = #selector(MenuOpener.open(_:))
+            more.menu = moreMenu
+        }
+        super.init(frame: .zero)
+        actions.setViews(buttons, in: .trailing)
+        actions.spacing = 6
+        actions.alphaValue = 0
+        actions.isHidden = true
+        for view in [content, actions] as [NSView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        let top = rowStyle.hairline ? 1.0 : 0, gap = buttons.isEmpty ? 0.0 : 8
+        let stretched = content.trailingAnchor.constraint(equalTo: actions.leadingAnchor, constant: -gap)
+        stretched.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: rowStyle.margin + rowStyle.leading),
+            content.trailingAnchor.constraint(lessThanOrEqualTo: actions.leadingAnchor, constant: -gap), stretched,
+            content.centerYAnchor.constraint(equalTo: centerYAnchor, constant: top / 2),
+            actions.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(rowStyle.margin + rowStyle.trailing)),
+            actions.centerYAnchor.constraint(equalTo: centerYAnchor, constant: top / 2),
+        ])
+        show(false, chosen: false, keys: false)
+    }
+
+    private var moreMenu: NSMenu?
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    /// The actions shown (over 120 ms, at once while motion is reduced) or gone; the primary loud
+    /// while the row is chosen, and Return its key (shown as ⏎) only while the list holds the keys.
+    func show(_ shown: Bool, chosen: Bool, keys: Bool) {
+        if let first {
+            let kind: ButtonKind = chosen ? .primary : .secondary, key = chosen && keys ? "\r" : ""
+            if first.kind != kind { first.kind = kind }
+            if first.keyEquivalent != key { first.keyEquivalent = key }
+        }
+        guard shown != self.shown else { return }
+        self.shown = shown
+        if shown, actions.isHidden { actions.isHidden = false }
+        let alpha: CGFloat = shown ? 1 : 0
+        guard !Motion.shared.reduced, window != nil else {
+            actions.alphaValue = alpha
+            if !shown { actions.isHidden = true }
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Look.Timing.hover
+            self.actions.animator().alphaValue = alpha
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.shown else { return }
+                self.actions.isHidden = true
+            }
+        }
+    }
+
+    /// Every action of a row, as its ⋯ and its right-click show them.
+    static func menu(_ actions: [SailList.Action]) -> NSMenu {
+        let menu = NSMenu()
+        for action in actions {
+            let run = Run(action)
+            let entry = NSMenuItem(title: action.title, action: #selector(Run.go(_:)), keyEquivalent: action.key)
+            entry.keyEquivalentModifierMask = action.modifiers
+            entry.target = run
+            entry.representedObject = run
+            menu.addItem(entry)
+        }
+        return menu
+    }
+}
+
+/// An action as a target: buttons and menu items send `go(_:)`.
+@MainActor
+final class Run: NSObject {
+    let action: SailList.Action
+
+    init(_ action: SailList.Action) {
+        self.action = action
+    }
+
+    @objc func go(_: Any?) {
+        action.run()
+    }
+}
+
+/// Opens the menu a button carries, 2 pt under its box from its leading corner, as a pop-up does;
+/// right to left the menu is laid out so and hangs from the box's right corner.
+@MainActor
+final class MenuOpener: NSObject {
+    static let shared = MenuOpener()
+
+    /// AppKit hangs a popped-up menu by its first item, not its edge, so the menu's own top padding
+    /// (5 pt, as the mockup's native menu has it) stands above the location given. AppKit says this
+    /// padding nowhere a program can read it; the drive's real click on ⋯ checks the menu's edge on
+    /// screen, so a macOS that changes it fails there.
+    static let menuPadding = 5.0
+
+    @objc func open(_ sender: NSButton) {
+        sender.menu?.userInterfaceLayoutDirection = sender.userInterfaceLayoutDirection
+        sender.menu?.popUp(positioning: nil, at: Self.corner(under: sender), in: sender)
+    }
+
+    /// Where the menu's first item goes: under the box's leading corner, so that the menu's edge is
+    /// 2 pt under the box.
+    static func corner(under button: NSView) -> NSPoint {
+        let box = button.bounds, insets = button.alignmentRectInsets, below = 2 + menuPadding
+        let bottom = button.isFlipped ? Double(box.maxY) - Double(insets.bottom) + below : Double(box.minY) + Double(insets.bottom) - below
+        let leading = button.userInterfaceLayoutDirection == .rightToLeft ? Double(box.maxX) - Double(insets.right) : Double(box.minX) + Double(insets.left)
+        return NSPoint(x: leading, y: bottom)
+    }
+}

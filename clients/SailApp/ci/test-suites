@@ -3,7 +3,9 @@
 # 240 s, since a test stuck in a synchronous wait cannot be stopped by its own time limit; on macOS
 # through a pty, so its lines are not buffered away. Fails when the package lists no suite or a
 # test outside any suite (which this would not run), when a suite fails, and when a listed suite
-# passed no test of its own (every test disabled is none).
+# passed no test of its own (every test disabled is none). A suite that ends without a result is
+# said by how its process ended (its exit status, or the signal that ended it), with any crash
+# report macOS wrote during its run: the crashing thread printed, the report kept beside the logs.
 set -uo pipefail
 
 [[ $# -eq 1 ]] || { echo "usage: ci/test-suites LOGDIR" >&2; exit 2; }
@@ -23,19 +25,39 @@ for suite in $listed; do
   echo "::group::$suite"
   log=$logs/$suite.log
   filter="^${suite//./\\.}/"
+  : > "$logs/$suite.started"
+  status=0
   if [[ $(uname) == Darwin ]]; then
-    perl -e 'alarm shift; exec @ARGV' 240 script -q "$log" swift test --skip-build --filter "$filter" || failed=1
+    perl -e 'alarm shift; exec @ARGV' 240 script -q "$log" swift test --skip-build --filter "$filter" || status=$?
   else
-    perl -e 'alarm shift; exec @ARGV' 240 swift test --skip-build --filter "$filter" > "$log" 2>&1 || failed=1
+    perl -e 'alarm shift; exec @ARGV' 240 swift test --skip-build --filter "$filter" > "$log" 2>&1 || status=$?
     cat "$log"
   fi
+  echo "$status" > "$logs/$suite.status"
+  (( status == 0 )) || failed=1
   echo "::endgroup::"
 done
 
-for suite in $listed; do
+suites=($listed)
+for index in "${!suites[@]}"; do
+  suite=${suites[$index]} next=${suites[$((index + 1))]:-}
   log=$logs/$suite.log
   if ! grep -E 'Test [A-Za-z_][^ ]*\(' "$log" 2> /dev/null | grep -q 'passed after' || ! grep -Eq 'Test run with [1-9][0-9]* tests? in .* passed' "$log"; then
-    echo "ci/test-suites: $suite is listed but did not pass a run of at least one test" >&2
+    status=$(cat "$logs/$suite.status")
+    if (( status == 142 )); then ended="was ended by its 240 s alarm (signal 14)"
+    elif (( status > 128 )); then ended="was ended by signal $((status - 128))"
+    else ended="exited with $status"; fi
+    echo "ci/test-suites: $suite did not pass a run of at least one test: its run $ended" >&2
+    if [[ $(uname) == Darwin ]]; then
+      # A report is written seconds after its crash, so the window runs to the next suite's start.
+      reports=$(find "$HOME/Library/Logs/DiagnosticReports" -name '*.ips' -newer "$logs/$suite.started" ${next:+! -newer "$logs/$next.started"} 2> /dev/null || true)
+      if [[ -n $reports ]]; then
+        for report in $reports; do cp "$report" "$logs/"; done
+        "$(dirname "$0")/crash-frames" $reports | sed 's/^/ci\/test-suites: /' >&2
+      else
+        echo "ci/test-suites: macOS wrote no crash report from $suite's start to the next suite's" >&2
+      fi
+    fi
     failed=1
   fi
 done

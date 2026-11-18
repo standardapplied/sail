@@ -211,6 +211,8 @@ struct Step: Decodable {
     /// The tab strip's hit testing: a tab's middle reaches the tab, the empty end moves the window.
     var stripHits: Bool?
     /// The four-pane measure (scenario 32), the look switched with their scrollback full among it.
+    /// Its own waits reach 180 + 60 s, so its script gives `seconds` (300) as the step's whole budget,
+    /// which ci/drive's hang watcher reads.
     var panes4: Bool?
     /// Makes the colour asker, once, at ``Driver/colourAsker``.
     var colourScript: Bool?

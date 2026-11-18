@@ -30,5 +30,5 @@
   {"name": "the-old-item-said", "signed": true, "exactly": ["Sign in to Sail", "Your sign-in to http://127.0.0.1:7979 could not be read from the Keychain.", "Sign in again with your passkey."]},
   {"name": "the-old-item-removed", "signed": true, "keychain": "gone"},
   {"name": "sweep", "sweep": true},
-  {"name": "s32-panes4", "panes4": true}
+  {"name": "s32-panes4", "panes4": true, "seconds": 300}
 ]}

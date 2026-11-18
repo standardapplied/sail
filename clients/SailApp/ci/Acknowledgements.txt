@@ -1,7 +1,7 @@
 Sail carries the software below. Each notice is reproduced as its licence asks.
 
 ================================================================================
-JetBrains Mono 2.304 (Regular, Medium, Bold, Italic, Bold Italic): SIL Open Font License 1.1, its text in Fonts/OFL.txt beside the fonts.
+JetBrains Mono 2.304 (Regular, Medium, SemiBold, Bold, Italic, Bold Italic): SIL Open Font License 1.1, its text in Fonts/OFL.txt beside the fonts.
 ================================================================================
 
 ================================================================================

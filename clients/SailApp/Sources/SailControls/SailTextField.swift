@@ -45,6 +45,7 @@ public final class SailTextField: NSView {
     private let placeholder: String
     private let mono: LabelFont
     private(set) var hovered = false
+    private var hoverArea: NSTrackingArea?
     private var focusWatch: NSKeyValueObservation?
 
     public init(label: String?, placeholder: String, help: String? = nil, size: FieldSize = .regular, secure: Bool = false, look: Look, mono: LabelFont) {
@@ -166,9 +167,9 @@ public final class SailTextField: NSView {
             context.restoreGState()
         }
         guard let lineText, let line = lineRect(width: Double(bounds.width)) else { return }
-        if error != nil, let mark = Draw.symbol("exclamationmark.circle", points: FieldSize.markPoints, ink: Tint(look.error)) {
-            let x = rightToLeft ? Double(box.maxX) - FieldSize.mark / 2 : Double(box.minX) + FieldSize.mark / 2
-            mark.draw(in: Draw.centred(mark.size, on: NSPoint(x: x, y: Double(line.minY) + 1 + FieldSize.mark / 2)), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        if error != nil {
+            let x = rightToLeft ? Double(box.maxX) - FieldSize.mark : Double(box.minX)
+            Draw.icon(.error, in: NSRect(x: x, y: Double(line.minY) + 1, width: FieldSize.mark, height: FieldSize.mark), ink: Tint(look.error))
         }
         lineText.draw(with: line, options: [.usesLineFragmentOrigin])
     }
@@ -218,8 +219,10 @@ public final class SailTextField: NSView {
 
     override public func updateTrackingAreas() {
         super.updateTrackingAreas()
-        trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: box, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self))
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: box, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
     }
 
     override public func mouseEntered(with _: NSEvent) {
