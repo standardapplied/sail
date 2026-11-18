@@ -23,7 +23,7 @@ import Testing
 
     @Test func theTwoRowStylesAreTheSheets() {
         let sidebar = RowStyle.sidebar, list = RowStyle.list
-        #expect([sidebar.height, sidebar.margin, sidebar.leading, sidebar.radius, sidebar.bar, sidebar.spacing] == [30, 6, 6, 5, 14, 0])
+        #expect([sidebar.height, sidebar.margin, sidebar.leading, sidebar.radius, sidebar.bar] == [30, 6, 6, 5, 14])
         #expect(sidebar.trailing == 6 && RowStyle.disclosure == 12 && RowStyle.gap == 7)
         #expect([list.height, list.margin, list.leading, list.trailing, list.radius, list.bar] == [52, 0, 20, 12, 0, 24])
         #expect(list.hairline && !sidebar.hairline && RowStyle.groupHeight == 30 && RowStyle.barWidth == 2)
@@ -76,22 +76,30 @@ import Testing
 
     static let screen = CGRect(x: 0, y: 0, width: 1000, height: 800)
     static let chip = CGSize(width: 120, height: 28)
+    /// A window larger than the screen, so only the screen bounds the chip.
+    static let wide = CGRect(x: -100, y: -100, width: 1200, height: 1000)
 
     @Test func aTooltipGoesUnderItsAnchorCentred() {
-        let place = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 400, y: 500, width: 32, height: 32), screen: Self.screen, beside: false)
+        let place = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 400, y: 500, width: 32, height: 32), window: Self.wide, screen: Self.screen, beside: false)
         #expect(place.side == .below && place.frame == CGRect(x: 356, y: 467, width: 120, height: 28) && place.arrow == 60)
     }
 
     @Test func aTooltipWithNoRoomBelowGoesAbove() {
-        let place = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 400, y: 10, width: 32, height: 32), screen: Self.screen, beside: false)
+        let place = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 400, y: 10, width: 32, height: 32), window: Self.wide, screen: Self.screen, beside: false)
         #expect(place.side == .above && place.frame.minY == 47)
+    }
+
+    /// Exactly enough room below the control is room: the chip goes below.
+    @Test func exactlyEnoughRoomBelowIsRoom() {
+        let place = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 400, y: 33, width: 32, height: 32), window: Self.wide, screen: Self.screen, beside: false)
+        #expect(place.side == .below && place.frame.minY == 0)
     }
 
     /// At the screen's edge the chip is kept inside and its arrow still points at the anchor.
     @Test func aTooltipIsClampedToTheScreenItsArrowOnTheAnchor() {
-        let place = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 975, y: 500, width: 24, height: 24), screen: Self.screen, beside: false)
+        let place = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 975, y: 500, width: 24, height: 24), window: Self.wide, screen: Self.screen, beside: false)
         #expect(place.frame.maxX == 1000 && place.arrow == 107)
-        let left = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 0, y: 500, width: 10, height: 24), screen: Self.screen, beside: false)
+        let left = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 0, y: 500, width: 10, height: 24), window: Self.wide, screen: Self.screen, beside: false)
         #expect(left.frame.minX == 0 && left.arrow == TooltipPlacement.arrowInset)
     }
 
@@ -104,7 +112,33 @@ import Testing
     }
 
     @Test func aFoldedTilesTooltipGoesBesideIt() {
-        let place = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 70, y: 600, width: 32, height: 32), screen: Self.screen, beside: true)
-        #expect(place.side == .trailing && place.frame == CGRect(x: 107, y: 602, width: 120, height: 28) && place.arrow == 14)
+        let place = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 70, y: 600, width: 32, height: 32), window: Self.wide, screen: Self.screen, beside: true)
+        #expect(place.side == .right && place.frame == CGRect(x: 107, y: 602, width: 120, height: 28) && place.arrow == 14)
+    }
+
+    /// Right to left a rail item's chip goes to its left, the arrow on the chip's right edge.
+    @Test func aBesideTooltipGoesLeftRightToLeft() {
+        let place = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 900, y: 600, width: 32, height: 32), window: Self.wide, screen: Self.screen, beside: true, rightToLeft: true)
+        #expect(place.side == .left && place.frame == CGRect(x: 775, y: 602, width: 120, height: 28) && place.arrow == 14)
+    }
+
+    /// Beside its anchor the chip still stays on the screen, across and up, its arrow on the anchor.
+    @Test func aBesideTooltipIsClampedToTheScreen() {
+        let across = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 950, y: 400, width: 32, height: 32), window: Self.wide, screen: Self.screen, beside: true)
+        #expect(across.frame.maxX == 1000 && across.frame.minY == 402)
+        let up = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 70, y: 785, width: 20, height: 20), window: Self.wide, screen: Self.screen, beside: true)
+        #expect(up.frame.maxY == 800 && up.frame.minX == 95 && up.arrow == 23)
+        let down = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 70, y: -10, width: 20, height: 20), window: Self.wide, screen: Self.screen, beside: true)
+        #expect(down.frame.minY == 0 && down.arrow == TooltipPlacement.arrowInset / 2)
+    }
+
+    /// The chip stays 10 pt inside its window, as the design keeps it, before the screen's edge.
+    @Test func aTooltipStaysTenPointsInsideItsWindow() {
+        let window = CGRect(x: 100, y: 100, width: 600, height: 500)
+        let place = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 640, y: 400, width: 24, height: 24), window: window, screen: Self.screen, beside: false)
+        #expect(place.frame.maxX == 690 && place.arrow == 82)
+        let left = TooltipPlacement(chip: Self.chip, anchor: CGRect(x: 104, y: 400, width: 24, height: 24), window: window, screen: Self.screen, beside: false)
+        #expect(left.frame.minX == 110 && left.arrow == TooltipPlacement.arrowInset)
+        #expect(TooltipPlacement.windowInset == 10)
     }
 }

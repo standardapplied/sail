@@ -55,9 +55,20 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     public var onChoose: @MainActor (String?) -> Void = { _ in }
     private let mono: LabelFont
 
+    /// The rows. A new set keeps the chosen item chosen by its id wherever it now is, and tells
+    /// `onChoose` only when the choice really changed (its item went).
     public var entries: [Entry] = [] {
-        didSet { reloadData() }
+        didSet {
+            let was = chosen
+            reloading = true
+            reloadData()
+            choose(was)
+            reloading = false
+            if chosen != was { onChoose(chosen) }
+        }
     }
+
+    private var reloading = false
 
     public init(rowStyle: RowStyle, look: Look, mono: LabelFont) {
         self.rowStyle = rowStyle
@@ -158,7 +169,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     public func tableView(_: NSTableView, heightOfRow row: Int) -> CGFloat {
         let hairline = rowStyle.hairline && row > 0 ? 1.0 : 0
         guard item(at: row) != nil else { return RowStyle.groupHeight + hairline }
-        return rowStyle.height + rowStyle.spacing + (rowStyle.hairline ? 1 : 0)
+        return rowStyle.height + (rowStyle.hairline ? 1 : 0)
     }
 
     public func tableView(_: NSTableView, typeSelectStringFor _: NSTableColumn?, row: Int) -> String? {
@@ -178,7 +189,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     }
 
     public func tableViewSelectionDidChange(_: Notification) {
-        onChoose(chosen)
+        if !reloading { onChoose(chosen) }
     }
 }
 
@@ -271,15 +282,17 @@ final class SailRowView: NSTableRowView {
             NSColor(look.fillHover).setFill()
             return NSBezierPath(rect: content).fill()
         }
-        let paint = self.paint, area = content.insetBy(dx: rowStyle.margin, dy: rowStyle.spacing / 2)
+        let paint = self.paint, area = content.insetBy(dx: rowStyle.margin, dy: 0)
         if let fill = paint.fill {
             NSColor(fill).setFill()
             NSBezierPath(roundedRect: area, xRadius: rowStyle.radius, yRadius: rowStyle.radius).fill()
         }
         guard paint.bar else { return }
         NSColor(Tint(look.accent)).setFill()
-        let x = userInterfaceLayoutDirection == .rightToLeft ? Double(bounds.width) - RowStyle.barWidth : 0
-        NSBezierPath(rect: NSRect(x: x, y: Double(content.midY) - rowStyle.bar / 2, width: RowStyle.barWidth, height: rowStyle.bar)).fill()
+        let rightToLeft = userInterfaceLayoutDirection == .rightToLeft, half = RowStyle.barWidth / 2
+        let bar = NSRect(x: rightToLeft ? Double(bounds.width) - RowStyle.barWidth : 0, y: Double(content.midY) - rowStyle.bar / 2, width: RowStyle.barWidth, height: rowStyle.bar)
+        NSBezierPath(roundedRect: bar, xRadius: half, yRadius: half).fill()
+        NSBezierPath(rect: NSRect(x: rightToLeft ? Double(bar.maxX) - half : Double(bar.minX), y: Double(bar.minY), width: half, height: Double(bar.height))).fill()
     }
 
     override func drawSelection(in _: NSRect) {}
@@ -301,21 +314,25 @@ final class SailRowView: NSTableRowView {
     }
 
     override func menu(for _: NSEvent) -> NSMenu? {
-        item.map { RowCell.menu($0.actions) }
+        guard let item, !item.actions.isEmpty else { return nil }
+        return RowCell.menu(item.actions)
     }
 }
 
-/// A group head's words: mono capitals with the count beside them, 20 pt in.
+/// A group head's words: mono capitals 20 pt in, the count 8 pt after them, on the line the
+/// browser puts a 10 pt line in the row's middle.
 @MainActor
 final class HeadCell: NSView {
-    private let words: NSAttributedString
+    static let countGap = 8.0
+
+    private let title: NSAttributedString
+    private let count: NSAttributedString
     private let hairline: Bool
 
     init(_ title: String, count: Int, look: Look, mono: LabelFont, hairline: Bool) {
         let font = mono.font(Look.Step.caption.points) as NSFont
-        let words = NSMutableAttributedString(attributedString: Draw.text(title, font, look.textTertiary, tracking: Look.Tracking.eyebrow, upper: true))
-        words.append(Draw.text("  \(count)", font, Tint(look.textTertiary.rgb, alpha: look.textTertiary.alpha * 0.8), tracking: Look.Tracking.eyebrow))
-        self.words = words
+        self.title = Draw.text(title, font, look.textTertiary, tracking: Look.Tracking.eyebrow, upper: true)
+        self.count = Draw.text("\(count)", font, Tint(look.textTertiary.rgb, alpha: look.textTertiary.alpha * 0.8), tracking: Look.Tracking.eyebrow)
         self.hairline = hairline
         super.init(frame: .zero)
         setAccessibilityElement(true)
@@ -333,23 +350,32 @@ final class HeadCell: NSView {
     }
 
     override func draw(_: NSRect) {
-        let top = hairline ? 1.0 : 0, height = Double(words.size().height)
-        let x = userInterfaceLayoutDirection == .rightToLeft ? Double(bounds.width) - RowStyle.list.leading - Double(words.size().width) : RowStyle.list.leading
-        words.draw(at: NSPoint(x: x, y: top + (Double(bounds.height) - top - height) / 2))
+        let points = Look.Step.caption.points, top = hairline ? 1.0 : 0
+        let baseline = TextLine.baseline(top: top + (Double(bounds.height) - top - points) / 2, points: points, lineHeight: points)
+        let titleWidth = Double(title.size().width), countWidth = Double(count.size().width), leading = RowStyle.list.leading
+        if userInterfaceLayoutDirection == .rightToLeft {
+            let x = Double(bounds.width) - leading - titleWidth
+            Draw.line(title, x: x, baseline: baseline)
+            Draw.line(count, x: x - Self.countGap - countWidth, baseline: baseline)
+        } else {
+            Draw.line(title, x: leading, baseline: baseline)
+            Draw.line(count, x: leading + titleWidth + Self.countGap, baseline: baseline)
+        }
     }
 }
 
 /// An item's cell: what the item shows, from the row's leading inset and stretched to its actions
 /// (or to the trailing inset when it has none), and its actions at the trailing edge: the first
 /// on-row action secondary, or primary with ⏎ while the row is chosen; the rest secondary; ⋯ for
-/// the menu when some action lives only there.
+/// the menu when some action lives only there. Hidden actions are hidden, not only clear, so they
+/// take no click and Tab passes them.
 @MainActor
 final class RowCell: NSView {
     let content: NSView
     let actions = NSStackView()
-    private let quiet: SailButton?
-    private let loud: SailButton?
+    private let first: SailButton?
     private let runs: [Run]
+    private var shown = false
 
     init(_ item: SailList.Item, rowStyle: RowStyle, look: Look, mono: LabelFont) {
         content = item.content
@@ -358,16 +384,13 @@ final class RowCell: NSView {
         var buttons: [SailButton] = []
         let onRow = runs.filter { $0.action.onRow }
         if let primary = onRow.first {
-            let quiet = SailButton(primary.action.title, kind: .secondary, size: .small, look: look, target: primary, action: #selector(Run.go(_:)))
-            let loud = SailButton(primary.action.title, kind: .primary, size: .small, look: look, target: primary, action: #selector(Run.go(_:)))
-            loud.shortcut("\r", mono: mono)
-            loud.keyEquivalent = ""
-            self.quiet = quiet
-            self.loud = loud
-            buttons += [quiet, loud]
+            let first = SailButton(primary.action.title, kind: .secondary, size: .small, look: look, target: primary, action: #selector(Run.go(_:)))
+            first.shortcut("\r", mono: mono)
+            first.keyEquivalent = ""
+            self.first = first
+            buttons.append(first)
         } else {
-            quiet = nil
-            loud = nil
+            first = nil
         }
         for other in onRow.dropFirst() {
             buttons.append(SailButton(other.action.title, kind: .secondary, size: .small, look: look, target: other, action: #selector(Run.go(_:))))
@@ -384,6 +407,7 @@ final class RowCell: NSView {
         actions.setViews(buttons, in: .trailing)
         actions.spacing = 6
         actions.alphaValue = 0
+        actions.isHidden = true
         for view in [content, actions] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
@@ -411,20 +435,29 @@ final class RowCell: NSView {
     /// The actions shown (over 120 ms, at once while motion is reduced) or gone; the primary loud
     /// while the row is chosen, and Return its key (shown as ⏎) only while the list holds the keys.
     func show(_ shown: Bool, chosen: Bool, keys: Bool) {
-        if let quiet, quiet.isHidden != chosen { quiet.isHidden = chosen }
-        if let loud, loud.isHidden == chosen { loud.isHidden = !chosen }
-        let key = chosen && keys ? "\r" : ""
-        if let loud, loud.keyEquivalent != key { loud.keyEquivalent = key }
+        if let first {
+            let kind: ButtonKind = chosen ? .primary : .secondary, key = chosen && keys ? "\r" : ""
+            if first.kind != kind { first.kind = kind }
+            if first.keyEquivalent != key { first.keyEquivalent = key }
+        }
+        guard shown != self.shown else { return }
+        self.shown = shown
+        if shown, actions.isHidden { actions.isHidden = false }
         let alpha: CGFloat = shown ? 1 : 0
-        guard actions.alphaValue != alpha else { return }
         guard !Motion.shared.reduced, window != nil else {
             actions.alphaValue = alpha
+            if !shown { actions.isHidden = true }
             return
         }
-        NSAnimationContext.beginGrouping()
-        NSAnimationContext.current.duration = Look.Timing.hover
-        actions.animator().alphaValue = alpha
-        NSAnimationContext.endGrouping()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Look.Timing.hover
+            self.actions.animator().alphaValue = alpha
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.shown else { return }
+                self.actions.isHidden = true
+            }
+        }
     }
 
     /// Every action of a row, as its ⋯ and its right-click show them.
@@ -456,19 +489,23 @@ final class Run: NSObject {
     }
 }
 
-/// Opens the menu a button carries, 2 pt under its box, as a pop-up does.
+/// Opens the menu a button carries, 2 pt under its box from its leading corner, as a pop-up does;
+/// right to left the menu is laid out so and hangs from the box's right corner.
 @MainActor
 final class MenuOpener: NSObject {
     static let shared = MenuOpener()
 
     @objc func open(_ sender: NSButton) {
+        (sender as? SailButton)?.tooltip?.hide()
+        sender.menu?.userInterfaceLayoutDirection = sender.userInterfaceLayoutDirection
         sender.menu?.popUp(positioning: nil, at: Self.corner(under: sender), in: sender)
     }
 
-    /// The menu's top left: the box's leading corner, 2 pt under it.
+    /// The menu's top leading corner: the box's leading corner, 2 pt under it.
     static func corner(under button: NSView) -> NSPoint {
         let box = button.bounds, insets = button.alignmentRectInsets
         let bottom = button.isFlipped ? Double(box.maxY) - Double(insets.bottom) + 2 : Double(box.minY) + Double(insets.bottom) - 2
-        return NSPoint(x: Double(box.minX) + Double(insets.left), y: bottom)
+        let leading = button.userInterfaceLayoutDirection == .rightToLeft ? Double(box.maxX) - Double(insets.right) : Double(box.minX) + Double(insets.left)
+        return NSPoint(x: leading, y: bottom)
     }
 }

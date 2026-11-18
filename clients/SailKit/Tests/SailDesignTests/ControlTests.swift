@@ -161,6 +161,7 @@ import Testing
         #expect(TextLine.baseline(top: 0, points: 10, lineHeight: 14) == 10, "a positive half-leading of .5 is rounded down")
         #expect(TextLine.monoAscent == 1.02 && TextLine.monoDescent == 0.30 && TextLine.height(points: 10) == 13)
         #expect(abs(TextLine.centring(lineHeight: 16.8, ascent: 11.6, descent: 2.9) - 1.9) < 1e-9)
+        #expect(abs(TextLine.centring(lineHeight: 20, ascent: 11.6, descent: 2.9) - 3.1) < 1e-9, "the leading's upper half, rounded down, is 2 pt here")
         #expect(TextLine.snapped(11.5, scale: 1) == 11 && TextLine.snapped(11.5, scale: 2) == 11.5 && TextLine.snapped(13, scale: 1) == 13)
     }
 

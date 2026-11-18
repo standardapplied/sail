@@ -35,7 +35,7 @@ public final class Tile: NSView {
     override public func draw(_: NSRect) {
         let paint = TilePaint(name, look: look), points = TilePaint.points
         Draw.box(bounds, radius: TilePaint.radius, fill: paint.fill, edge: paint.ring)
-        let initial = Draw.text(String(name.prefix(1)).lowercased(), mono.font(points, .bold) as NSFont, paint.ink)
+        let initial = Draw.text(String(name.prefix(1)).lowercased(), mono.font(points, .semibold) as NSFont, paint.ink)
         let top = (TilePaint.side - points) / 2
         Draw.line(initial, x: (TilePaint.side - Double(initial.size().width)) / 2, baseline: TextLine.baseline(top: top, points: points, lineHeight: points))
     }

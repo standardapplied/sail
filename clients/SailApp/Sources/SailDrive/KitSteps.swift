@@ -370,14 +370,30 @@ final class Kit {
         row("Tiles", names.map { held("tile-\($0)", Tile($0, look: look, mono: mono)) })
     }
 
-    /// The approved tooltip chips: below their control, and beside a rail item.
+    /// The approved tooltip chips, each 5 pt from its own control: below an icon-only button, and
+    /// beside a rail item (to its left right to left). Each cut is the chip's.
     private func tooltips() {
-        let chips: [(String, String?, TooltipPlacement.Side)] = [
-            ("Hide Inspector", "⌥⌘I", .below), ("New Session in dock", "⌘T", .below), ("List Again", "⌘R", .below), ("More", nil, .below), ("Workspaces", "⌘1", .trailing),
-        ]
-        row("Below an icon-only control · beside a rail item", chips.map { words, hint, side in
-            held("tooltip-\(Self.slug(words))", TooltipChip(words, hint: hint, side: side, look: look, mono: mono))
-        }, spacing: 40)
+        let below: [(String, String?, LineIcon)] = [("New Session in dock", "⌘T", .plus), ("List Again", "⌘R", .refresh), ("More", nil, .more)]
+        var chips: [Specimen] = [], views: [NSView] = []
+        for (words, hint, icon) in below {
+            let chip = held("tooltip-\(Self.slug(words))", TooltipChip(words, hint: hint, side: .below, look: look, mono: mono))
+            views.append(Self.hung(chip.cell, from: held("", SailButton(icon: icon, label: words, size: .small, look: look, target: nil, action: nil)).cell, beside: false))
+            chips.append(chip)
+        }
+        let rightToLeft = NSApp.userInterfaceLayoutDirection == .rightToLeft
+        let beside = held("tooltip-workspaces", TooltipChip("Workspaces", hint: "⌘1", side: rightToLeft ? .left : .right, look: look, mono: mono))
+        views.append(Self.hung(beside.cell, from: held("", SailButton(icon: .box, label: "Workspaces", look: look, target: nil, action: nil)).cell, beside: true))
+        row("Below an icon-only control · beside a rail item", chips + [beside], showing: views, spacing: 40)
+    }
+
+    /// `chip` 5 pt from `control`'s box (each cell keeps 4 pt of room around its view): under it,
+    /// or beside it in reading order.
+    private static func hung(_ chip: NSView, from control: NSView, beside: Bool) -> NSView {
+        let pair = NSStackView(views: [control, chip])
+        pair.orientation = beside ? .horizontal : .vertical
+        pair.alignment = beside ? .centerY : .centerX
+        pair.spacing = TooltipStyle.gap - 2 * Look.haloRoom
+        return pair
     }
 
     private func banners() {
@@ -401,7 +417,7 @@ final class Kit {
         let check = button("Check Again", .secondary)
         check.shortcut("r", modifiers: .command, mono: mono)
         let missing = EmptyState(
-            icon: .layers, title: "demo isn't ready yet", body: "demo has no template yet. An admin builds demo's template on the runner first; then you can create workspaces here.",
+            icon: .layers, title: "demo isn’t ready yet", body: "demo has no template yet. An admin builds demo’s template on the runner first; then you can create workspaces here.",
             actions: [check], line: "signed in as ana · member · main.acme.dev", missing: true, look: look, titleFont: title, mono: mono
         )
         row("Anatomy · something missing", [held("empty-anatomy", EmptyFrame(anatomy, look: look)), held("empty-missing", EmptyFrame(missing, look: look))])
@@ -413,7 +429,7 @@ final class Kit {
         list.entries = entries
         let height = Double(list.rect(ofRow: entries.count - 1).maxY)
         list.frame = NSRect(x: 0, y: 0, width: width, height: height)
-        let holder = NSView()
+        let holder = SurfaceView(look: look)
         holder.addSubview(list)
         holder.widthAnchor.constraint(equalToConstant: width).isActive = true
         holder.heightAnchor.constraint(equalToConstant: height).isActive = true
@@ -620,5 +636,25 @@ final class EmptyFrame: NSView {
         NSBezierPath(roundedRect: bounds, xRadius: Look.contentRadius, yRadius: Look.contentRadius).fill()
         NSColor(look.separator).setStroke()
         NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: Look.contentRadius - 0.5, yRadius: Look.contentRadius - 0.5).stroke()
+    }
+}
+
+/// The surface a list or the left panel stands on, under the rows the gallery shows.
+final class SurfaceView: NSView {
+    let look: Look
+
+    init(look: Look) {
+        self.look = look
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func draw(_: NSRect) {
+        NSColor(Tint(look.surface)).setFill()
+        NSBezierPath(rect: bounds).fill()
     }
 }

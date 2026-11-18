@@ -20,7 +20,10 @@ public final class SailButton: NSButton {
     /// An icon-only button's tooltip, saying its label.
     public private(set) var tooltip: Tooltip?
 
-    public let kind: ButtonKind
+    /// Its kind; a row's first action turns primary while the row is chosen.
+    public var kind: ButtonKind {
+        didSet { if kind != oldValue { repaint() } }
+    }
     public let size: ButtonSize
     public private(set) var busyWord: String?
     private let icon: LineIcon?
@@ -264,6 +267,13 @@ public final class SailButton: NSButton {
         let area = NSTrackingArea(rect: box, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self)
         addTrackingArea(area)
         hoverArea = area
+    }
+
+    /// A click puts the tooltip away: AppKit sends the tooltip, a tracking area's owner, only enter
+    /// and exit, and the click goes to the button.
+    override public func mouseDown(with event: NSEvent) {
+        tooltip?.hide()
+        super.mouseDown(with: event)
     }
 
     override public func mouseEntered(with _: NSEvent) {

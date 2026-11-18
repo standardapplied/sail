@@ -10,6 +10,7 @@ import Testing
 @MainActor @Suite(.serialized) struct RowsTests {
     final class Counts {
         var opened = 0, copied = 0
+        var chosen: [String?] = []
     }
 
     static func list(_ style: RowStyle, look: Look, counts: Counts) throws -> SailList {
@@ -99,27 +100,30 @@ import Testing
         let accent = ControlsTests.swatch(canvas, [NSColor(Tint(look.accent))], scale: 2)
         #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: 0.5, y: dock.minY + 7.5), scale: 2), bare, from: accent), "\(name): the bar is longer than 14 pt")
         #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: 0.5, y: dock.minY + 8.5), scale: 2), accent, from: bare), "\(name): the bar is shorter than 14 pt")
+        let leadingCorner = backdrop.colour(at: NSPoint(x: 0.25, y: dock.minY + 8.25), scale: 2), trailingCorner = backdrop.colour(at: NSPoint(x: 1.75, y: dock.minY + 8.25), scale: 2)
+        #expect(leadingCorner.near(accent) && !trailingCorner.near(accent), "\(name): the bar's corners are \(leadingCorner) and \(trailingCorner), not square at the edge and rounded away from it")
         #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: 100, y: pier.midY), scale: 2), hover, from: bare), "\(name): the hovered row's fill")
     }
 
     /// A sidebar row lays a project out as the left panel does: the tile after the disclosure's
-    /// 12 pt slot, the name's text (its label's alignment rect) 7 pt after the tile, the pill
-    /// ending 12 pt in from the row's trailing edge, at whatever width the row is.
+    /// 12 pt slot, the name's ink starting where the mockup's does (x 58, 7 pt after the tile), the
+    /// pill ending 12 pt in from the row's trailing edge, at whatever width the row is.
     @Test func aSidebarRowIsThePanelsProjectRow() throws {
         let mono = try ControlsTests.mono()
         let list = SailList(rowStyle: .sidebar, look: .light, mono: mono)
         let cell = SidebarRowCell("demo", template: .noTemplate, look: .light, mono: mono)
         list.entries = [.item(SailList.Item(id: "demo", name: "demo", voice: "demo", content: cell))]
         list.frame = NSRect(x: 0, y: 0, width: 235, height: 30)
-        let (window, _) = Self.shown(list)
+        let (window, backdrop) = Self.shown(list)
         defer { window.orderOut(nil) }
         let row = try Self.row(list, 0)
         row.layoutSubtreeIfNeeded()
         let pill = try #require(cell.pill)
-        let tile = cell.convert(cell.tile.frame, to: row), label = cell.convert(cell.label.alignmentRect(forFrame: cell.label.frame), to: row)
+        let tile = cell.convert(cell.tile.frame, to: row)
         let badge = cell.convert(pill.alignmentRect(forFrame: pill.frame), to: row)
         #expect(tile.minX == 31 && tile.width == 20 && abs(Double(tile.midY) - 15) <= 0.5, "the tile is at \(tile)")
-        #expect(label.minX == tile.maxX + 7, "the name's text starts at \(label.minX), not 7 pt after the tile")
+        let name = try #require(backdrop.ink(in: NSRect(x: 52, y: 2, width: 60, height: 26)))
+        #expect(abs(Double(name.minX) - 58) <= 1, "the name's ink starts at \(name.minX), not at the mockup's 58")
         let trailing = Double(row.bounds.width) - 12
         #expect(abs(Double(badge.maxX) - trailing) <= 0.5, "the pill ends at \(badge.maxX), not 12 pt in from the row's \(row.bounds.width)")
     }
@@ -142,6 +146,32 @@ import Testing
         #expect(settled && !row.needsLayout && !cell.needsLayout && !cell.actions.needsLayout, "setting a row's state to what it was asked for layout again")
     }
 
+    /// New rows keep the chosen item by its id, wherever it now stands, and say nothing of it; a
+    /// choice whose item went is said, as nothing chosen.
+    @Test func newRowsKeepTheChosenItem() throws {
+        let counts = Counts()
+        let list = try Self.list(.list, look: .light, counts: counts)
+        list.onChoose = { counts.chosen.append($0) }
+        list.choose("dock")
+        counts.chosen.removeAll()
+        let entries = list.entries
+        list.entries = [entries[0], entries[2], entries[1]]
+        let moved = counts.chosen
+        #expect(list.chosen == "dock" && list.selectedRow == 1 && moved.isEmpty, "dock moved up and the choice is \(list.chosen ?? "nothing") at \(list.selectedRow), said \(moved)")
+        list.entries = [entries[0], entries[1]]
+        let went = counts.chosen
+        #expect(list.chosen == nil && went == [String?.none], "dock went, and the list said \(went)")
+    }
+
+    /// A row with no actions, as every sidebar row is, opens no menu on a right-click.
+    @Test func aRowWithNoActionsHasNoMenu() throws {
+        let list = SailList(rowStyle: .sidebar, look: .light, mono: try ControlsTests.mono())
+        list.entries = [.item(SailList.Item(id: "demo", name: "demo", voice: "demo", content: NSView()))]
+        list.frame = NSRect(x: 0, y: 0, width: 235, height: 30)
+        let row = try Self.row(list, 0)
+        #expect(row.menu(for: try Self.key(0, "")) == nil)
+    }
+
     /// The actions show on hover or choice and are gone at rest; the first is loud only on the
     /// chosen row; ⋯ carries the menu-only ones.
     @Test func actionsShowOnHoverOrChoice() throws {
@@ -153,13 +183,13 @@ import Testing
         defer { window.orderOut(nil) }
         let row = try Self.row(list, 1)
         let cell = try #require(row.view(atColumn: 0) as? RowCell)
-        #expect(cell.actions.alphaValue == 0)
+        #expect(cell.actions.alphaValue == 0 && cell.actions.isHidden, "a row's actions at rest take clicks and the keys")
         row.hovered = true
-        #expect(cell.actions.alphaValue == 1)
+        #expect(cell.actions.alphaValue == 1 && !cell.actions.isHidden)
         let titles = cell.actions.views.compactMap { $0 as? SailButton }.filter { !$0.isHidden }.map { "\($0.kind) \($0.title)" }
         #expect(titles == ["secondary Open", "quiet More"], "the hovered row's actions are \(titles)")
         row.hovered = false
-        #expect(cell.actions.alphaValue == 0)
+        #expect(cell.actions.alphaValue == 0 && cell.actions.isHidden)
         list.choose("pier")
         #expect(cell.actions.alphaValue == 1)
         let chosen = cell.actions.views.compactMap { $0 as? SailButton }.filter { !$0.isHidden }.map { "\($0.kind) \($0.title)" }
@@ -205,6 +235,9 @@ import Testing
         holder.addSubview(more)
         let corner = more.convert(MenuOpener.corner(under: more), to: holder), box = more.alignmentRect(forFrame: more.frame)
         #expect(corner == NSPoint(x: box.minX, y: box.minY - 2), "⋯'s menu opens at \(corner), not 2 pt under the box \(box) at its leading corner")
+        more.userInterfaceLayoutDirection = .rightToLeft
+        let mirrored = more.convert(MenuOpener.corner(under: more), to: holder)
+        #expect(mirrored == NSPoint(x: box.maxX, y: box.minY - 2), "right to left, ⋯'s menu opens at \(mirrored), not under the box's right corner")
     }
 
     /// An icon-only button's tooltip: not at once, shown within the platform's delay under the
@@ -228,6 +261,29 @@ import Testing
         #expect((chip.maxY <= anchor.minY || chip.minY >= anchor.maxY) && abs(Double(chip.midX - anchor.midX)) <= 1, "the chip \(chip) is not under the button \(anchor)")
         tooltip.mouseExited(with: try ControlsTests.entered())
         #expect(!tooltip.isShown)
+        let presses = Presses()
+        button.target = presses
+        button.action = #selector(Presses.press(_:))
+        tooltip.mouseEntered(with: try ControlsTests.entered())
+        let again = await ControlsTests.until(3) { tooltip.isShown }
+        #expect(again)
+        Self.click(button, in: window)
+        #expect(presses.count == 1 && !tooltip.isShown, "a click pressed the button \(presses.count) times and left the chip shown: \(tooltip.isShown)")
+    }
+
+    /// A real click on `view`: the up queued, then the down sent to the window, whose hit test gives
+    /// it to the view; the button's own tracking then takes the up from the queue.
+    static func click(_ view: NSView, in window: NSWindow) {
+        let middle = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
+        func event(_ type: NSEvent.EventType) -> NSEvent? {
+            NSEvent.mouseEvent(
+                with: type, location: middle, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0
+            )
+        }
+        guard let down = event(.leftMouseDown), let up = event(.leftMouseUp) else { return }
+        NSApp.postEvent(up, atStart: false)
+        window.sendEvent(down)
     }
 
     /// The chip's keycap trails its words, and leads them right to left.

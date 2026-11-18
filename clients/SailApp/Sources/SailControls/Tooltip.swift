@@ -88,7 +88,8 @@ public final class TooltipChip: NSView {
         switch side {
         case .below: tip.transform(using: Self.turned(at: NSPoint(x: Double(box.minX) + (arrowAt ?? Double(box.width) / 2), y: Double(box.maxY))))
         case .above: tip.transform(using: Self.turned(at: NSPoint(x: Double(box.minX) + (arrowAt ?? Double(box.width) / 2), y: Double(box.minY))))
-        case .trailing: tip.transform(using: Self.turned(at: NSPoint(x: Double(box.minX), y: Double(box.minY) + (arrowAt ?? Double(box.height) / 2))))
+        case .right: tip.transform(using: Self.turned(at: NSPoint(x: Double(box.minX), y: Double(box.minY) + (arrowAt ?? Double(box.height) / 2))))
+        case .left: tip.transform(using: Self.turned(at: NSPoint(x: Double(box.maxX), y: Double(box.minY) + (arrowAt ?? Double(box.height) / 2))))
         }
         shape.append(tip)
         NSColor(Tint(look.ink)).setFill()
@@ -184,10 +185,6 @@ public final class Tooltip: NSResponder {
         hide()
     }
 
-    override public func mouseDown(with _: NSEvent) {
-        hide()
-    }
-
     public func hide() {
         pending?.cancel()
         pending = nil
@@ -201,7 +198,9 @@ public final class Tooltip: NSResponder {
         guard let anchor, let window = anchor.window, let screen = window.screen else { return }
         let size = chip.chip
         let at = window.convertToScreen(anchor.convert(anchor.alignmentRect(forFrame: anchor.bounds), to: nil))
-        let place = TooltipPlacement(chip: size, anchor: at, screen: screen.visibleFrame, beside: beside, gap: TooltipStyle.gap)
+        let place = TooltipPlacement(
+            chip: size, anchor: at, window: window.frame, screen: screen.visibleFrame, beside: beside, rightToLeft: anchor.userInterfaceLayoutDirection == .rightToLeft
+        )
         chip.side = place.side
         chip.arrowAt = place.arrow
         chip.needsDisplay = true

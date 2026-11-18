@@ -404,7 +404,7 @@ jobs:
           test "$(plutil -extract CFBundleExecutable raw "$app/Contents/Info.plist")" = Sail
           test "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" = sh.standardapplied.sail
           test -x "$app/Contents/MacOS/Sail" && test -x "$app/Contents/Helpers/sail"
-          for font in Regular Medium Bold Italic BoldItalic; do test -f "$app/Contents/Resources/Fonts/JetBrainsMono-$font.ttf"; done
+          for font in Regular Medium SemiBold Bold Italic BoldItalic; do test -f "$app/Contents/Resources/Fonts/JetBrainsMono-$font.ttf"; done
           test -f "$app/Contents/Resources/Fonts/OFL.txt" && test -f "$app/Contents/Resources/Acknowledgements.txt"
           test -f "$app/Contents/Resources/Fonts/Newsreader16pt-Medium.ttf" && test -f "$app/Contents/Resources/Fonts/Newsreader-OFL.txt"
           icon=$(plutil -extract CFBundleIconFile raw "$app/Contents/Info.plist")

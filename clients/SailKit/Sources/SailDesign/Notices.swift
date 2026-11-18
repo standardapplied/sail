@@ -83,35 +83,46 @@ public enum TooltipStyle {
 /// room below; beside it, the arrow at its leading edge, for a folded sidebar's tile. Always inside
 /// the screen's visible frame, the arrow still pointing at the anchor's middle. Screen points, y up.
 public struct TooltipPlacement: Equatable, Sendable {
+    /// Where the chip stands from its control on screen; its arrow is on the facing edge.
     public enum Side: Sendable {
-        case below, above, trailing
+        case below, above, right, left
     }
 
-    /// The arrow is kept this far from the chip's corners.
-    public static let arrowInset = 9.0
+    /// The arrow is kept this far from the chip's corners, and the chip this far inside the window.
+    public static let arrowInset = 9.0, windowInset = 10.0
 
     public let frame: CGRect
     public let side: Side
     /// Along the edge the arrow is on, from the chip's left or bottom.
     public let arrow: Double
 
-    public init(chip: CGSize, anchor: CGRect, screen: CGRect, beside: Bool, gap: Double = TooltipStyle.gap) {
+    /// The chip `chip` big for a control at `anchor`: below it, or above when the screen has no room
+    /// below; beside it (to its right, to its left right to left) for a rail item. It stays 10 pt
+    /// inside the window, as the design keeps it, and then inside the screen.
+    public init(chip: CGSize, anchor: CGRect, window: CGRect, screen: CGRect, beside: Bool, rightToLeft: Bool = false, gap: Double = TooltipStyle.gap) {
         let width = Double(chip.width), height = Double(chip.height)
+        let inside = window.insetBy(dx: Self.windowInset, dy: Self.windowInset)
         func clamp(_ value: Double, _ low: Double, _ high: Double) -> Double {
             max(low, min(value, max(low, high)))
         }
+        func across(_ value: Double) -> Double {
+            clamp(clamp(value, Double(inside.minX), Double(inside.maxX) - width), Double(screen.minX), Double(screen.maxX) - width)
+        }
+        func up(_ value: Double) -> Double {
+            clamp(clamp(value, Double(inside.minY), Double(inside.maxY) - height), Double(screen.minY), Double(screen.maxY) - height)
+        }
         if beside {
-            let x = Double(anchor.maxX) + gap
-            let y = clamp(Double(anchor.midY) - height / 2, Double(screen.minY), Double(screen.maxY) - height)
-            frame = CGRect(x: min(x, Double(screen.maxX) - width), y: y, width: width, height: height)
-            side = .trailing
+            let x = rightToLeft ? Double(anchor.minX) - gap - width : Double(anchor.maxX) + gap
+            let y = up(Double(anchor.midY) - height / 2)
+            frame = CGRect(x: clamp(x, Double(screen.minX), Double(screen.maxX) - width), y: y, width: width, height: height)
+            side = rightToLeft ? .left : .right
             arrow = clamp(Double(anchor.midY) - y, Self.arrowInset / 2, height - Self.arrowInset / 2)
             return
         }
         let below = Double(anchor.minY) - gap - height
         side = below >= Double(screen.minY) ? .below : .above
         let y = side == .below ? below : Double(anchor.maxY) + gap
-        let x = clamp(Double(anchor.midX) - width / 2, Double(screen.minX), Double(screen.maxX) - width)
+        let x = across(Double(anchor.midX) - width / 2)
         frame = CGRect(x: x, y: y, width: width, height: height)
         arrow = clamp(Double(anchor.midX) - x, Self.arrowInset, width - Self.arrowInset)
     }

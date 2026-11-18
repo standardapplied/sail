@@ -11,11 +11,10 @@ public struct RowStyle: Equatable, Sendable {
     public let trailing: Double
     public let radius: Double
     public let bar: Double
-    public let spacing: Double
     public let hairline: Bool
 
-    public static let sidebar = RowStyle(height: 30, margin: 6, leading: 6, trailing: 6, radius: Look.smallRadius, bar: 14, spacing: 0, hairline: false)
-    public static let list = RowStyle(height: 52, margin: 0, leading: 20, trailing: 12, radius: 0, bar: 24, spacing: 0, hairline: true)
+    public static let sidebar = RowStyle(height: 30, margin: 6, leading: 6, trailing: 6, radius: Look.smallRadius, bar: 14, hairline: false)
+    public static let list = RowStyle(height: 52, margin: 0, leading: 20, trailing: 12, radius: 0, bar: 24, hairline: true)
     public static let groupHeight = 30.0
     public static let barWidth = 2.0
     public static let disclosure = 12.0, gap = 7.0
