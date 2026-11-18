@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.OperationsFactory;
@@ -16,10 +17,12 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.CheckedTokens;
-import ai.singlr.sail.engine.ProjectPhase;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectProvisioner;
-import ai.singlr.sail.engine.ProvisionTracker;
+import ai.singlr.sail.engine.ProvisionListener;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.TemplateBuild;
+import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ProjectStore;
@@ -28,6 +31,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import com.sun.net.httpserver.HttpServer;
 import java.net.InetSocketAddress;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -92,27 +96,77 @@ class WorkspaceVerbsTest {
     assertFalse(live.test("docs"));
   }
 
+  /**
+   * The command line's build refuses what the route refuses in the route's words, from the same
+   * checks: a definition without resources, then a runner never set up.
+   */
+  @Test
+  void theCommandLinesBuildRefusesInTheRoutesWords() throws Exception {
+    var host = SailPaths.hostConfigPath();
+    Files.deleteIfExists(host);
+    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+      new SchemaManager(db).migrate();
+      var bare =
+          new ProjectDefinition(
+              "bare-build", "", null, null, null, null, List.of(), null, null, null, null);
+      Acting.system(
+          () -> {
+            new ProjectStore(db).upsert(bare);
+            new ProjectStore(db)
+                .upsert(
+                    new ProjectDefinition(
+                        "set-build",
+                        "",
+                        new ProjectDefinition.Resources(2, "4GB", "20GB"),
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        null,
+                        null,
+                        null,
+                        null));
+          });
+    }
+
+    var noResources =
+        assertThrows(
+            IllegalStateException.class,
+            () -> WorkspaceVerbs.buildable("bare-build", OperatorCommand.PLAIN));
+    var notSetUp =
+        assertThrows(
+            IllegalStateException.class,
+            () -> WorkspaceVerbs.buildable("set-build", OperatorCommand.PLAIN));
+
+    assertEquals(
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                    TemplateBuild.requireResources(
+                        new ProjectDefinition(
+                            "bare-build",
+                            "",
+                            null,
+                            null,
+                            null,
+                            null,
+                            List.of(),
+                            null,
+                            null,
+                            null,
+                            null)))
+            .getMessage(),
+        noResources.getMessage());
+    assertEquals(
+        "This runner is not set up, so no template can be built on it. Set it up first: sail host"
+            + " init.",
+        notSetUp.getMessage());
+  }
+
   @Test
   void aTemplateBuildKeepsItsProgressApartFromTheProjectsOwn() {
     assertEquals(SailPaths.templateProvisionState("acme"), WorkspaceVerbs.progressOf("acme"));
     assertNotEquals(SailPaths.provisionState("acme"), WorkspaceVerbs.progressOf("acme"));
-  }
-
-  @Test
-  void aFreshTemplateOrAFinishedRecordStartsEveryStepAgainAndAnInterruptedOneResumes()
-      throws Exception {
-    var progress = tempDir.resolve("template-provision-state.yaml");
-    var earlier = new ProvisionTracker<>(ProjectPhase.class, progress, false).load("in");
-    earlier.advance(ProjectPhase.CONTAINER_LAUNCHED);
-
-    var resumed = WorkspaceVerbs.tracker(progress, "in", false, false);
-    assertTrue(
-        resumed.isCompleted(ProjectPhase.CONTAINER_LAUNCHED), "an interrupted build resumes");
-
-    var fresh = WorkspaceVerbs.tracker(progress, "in", true, false);
-    assertFalse(
-        fresh.isCompleted(ProjectPhase.CONTAINER_LAUNCHED),
-        "a template that does not exist yet starts from the first step");
   }
 
   @Test
@@ -124,14 +178,11 @@ class WorkspaceVerbsTest {
         new HostYaml(
             "dir", null, null, "incusbr0", "singlr-base", "ubuntu/24.04", "6.0", null, null);
 
-    var source = WorkspaceVerbs.source(named, acme(), none(), name -> false, (into, fresh) -> {});
+    var source = source(named, none());
 
     assertEquals("devpool", source.basePool());
     assertEquals(ProjectProvisioner.inputs(acme(), Optional.empty()), source.inputs());
-    assertEquals(
-        HostYaml.DEFAULT_POOL,
-        WorkspaceVerbs.source(unnamed, acme(), none(), name -> false, (into, fresh) -> {})
-            .basePool());
+    assertEquals(HostYaml.DEFAULT_POOL, source(unnamed, none()).basePool());
   }
 
   /**
@@ -153,7 +204,7 @@ class WorkspaceVerbsTest {
                 Map.of())
             .check(acme());
 
-    var source = WorkspaceVerbs.source(host, acme(), given, name -> false, (into, fresh) -> {});
+    var source = source(host, given);
 
     assertEquals(List.of("ghp_stored_for_github"), List.copyOf(source.tokens()));
   }
@@ -188,5 +239,29 @@ class WorkspaceVerbsTest {
   private static CheckedTokens none() {
     return new WorkspaceVerbs.Keeper(Optional.empty(), Map.of(), url -> false, Map.of())
         .check(acme());
+  }
+
+  private static WorkspaceTemplate.Source source(HostYaml host, CheckedTokens tokens) {
+    return WorkspaceVerbs.source(
+        host,
+        acme(),
+        tokens,
+        name -> false,
+        "eng",
+        ProvisionListener.NOOP,
+        (into, tracker, listener) -> {},
+        false);
+  }
+
+  /** A build from the command line is recorded as its person, else as the account sudo acts for. */
+  @Test
+  void aCommandLineBuildIsRecordedAsItsPersonElseTheAccountSudoActsFor() {
+    var person = new WorkspaceVerbs.Keeper(Optional.of("eng"), Map.of(), url -> false, Map.of());
+    var nobody =
+        new WorkspaceVerbs.Keeper(
+            Optional.empty(), Map.of(), url -> false, Map.of("SUDO_USER", "uday"));
+
+    assertEquals("eng", person.who());
+    assertEquals("uday", nobody.who());
   }
 }

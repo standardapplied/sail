@@ -34,6 +34,7 @@ public final class ScriptedShellExecutor implements ShellExec {
   private final List<String> unbounded = new ArrayList<>();
   private final List<String> inputs = new ArrayList<>();
   private final Result defaultResult;
+  private java.util.function.Predicate<String> asks = url -> false;
 
   public ScriptedShellExecutor() {
     this(new Result(1, "", "command not found"));
@@ -201,5 +202,16 @@ public final class ScriptedShellExecutor implements ShellExec {
   @Override
   public boolean isDryRun() {
     return false;
+  }
+
+  /** Answers a plain request to {@code url} as asking for credentials when {@code asks} says so. */
+  public ScriptedShellExecutor asks(java.util.function.Predicate<String> asks) {
+    this.asks = asks;
+    return this;
+  }
+
+  @Override
+  public boolean asksForCredentials(String url) {
+    return asks.test(url);
   }
 }

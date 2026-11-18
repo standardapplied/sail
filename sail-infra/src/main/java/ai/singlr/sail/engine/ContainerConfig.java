@@ -43,7 +43,7 @@ public final class ContainerConfig {
   }
 
   /** The lock file {@link #hold} takes for {@code container}. */
-  static Path lockOf(Path locks, String container) {
+  public static Path lockOf(Path locks, String container) {
     NameValidator.requireValidProjectName(container);
     return locks.resolve(container + ".machinery.lock");
   }

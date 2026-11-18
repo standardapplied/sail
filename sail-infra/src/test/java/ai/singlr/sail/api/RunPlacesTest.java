@@ -476,7 +476,8 @@ class RunPlacesTest {
 
     assertEquals(ErrorCode.RUNNER_BUSY, refused.get().failure().errorCode());
     assertEquals(
-        "acme's template is being built, and no workspace is cloned from it until it is.",
+        "acme's template is being built, and no workspace is created from it until it is. Try"
+            + " again once it is built: a build takes a few minutes.",
         refused.get().getMessage());
     assertEquals("Then dispatch again.", refused.get().failure().remedy().plain());
   }

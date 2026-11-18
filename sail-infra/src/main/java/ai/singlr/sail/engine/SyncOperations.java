@@ -685,9 +685,10 @@ public final class SyncOperations {
   }
 
   /**
-   * Deletes {@code listed}, Sail's part of leaving {@code project}, under the lock every make,
-   * entry, stop and delete of a workspace of its name holds, when no such change holds it now: it
-   * is read again under the lock and deleted only while it is still {@code project}'s part. Answers
+   * Deletes {@code listed}, Sail's part of leaving {@code project}, under the lock every change of
+   * it holds ({@link Workspaces#holdIfFree(BoxInstances.Instance)}: a template's build holds its
+   * own, a workspace's create, entry, stop and delete theirs), when no change holds it now: it is
+   * read again under the lock and deleted only while it is still {@code project}'s part. Answers
    * the instance deleted, as read then; empty when it was left, for this round's notices or the
    * next round's try.
    */
@@ -700,7 +701,7 @@ public final class SyncOperations {
       Predicate<String> leaving)
       throws InterruptedException {
     try {
-      var lock = workspaces.holdIfFree(listed.name());
+      var lock = workspaces.holdIfFree(listed);
       if (lock.isEmpty()) {
         return Optional.empty();
       }

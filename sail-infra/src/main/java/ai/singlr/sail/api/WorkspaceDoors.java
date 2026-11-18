@@ -20,6 +20,7 @@ import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.pty.PtyAdmission;
+import ai.singlr.sail.store.ProjectStore;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Objects;
@@ -77,8 +78,41 @@ public final class WorkspaceDoors {
         actor, Action.ENTER_WORKSPACE, Resources.workspace(name, project, decided))) {
       case Decision.Allowed allowed -> Optional.empty();
       case Decision.NotFound unread -> throw ProjectReader.absent(project);
-      case Decision.Refused refused -> Optional.of(onTheNode(refused.refusal(), actor, keeper));
+      case Decision.Refused refused ->
+          Optional.of(
+              onTheNode(
+                  refused.refusal(),
+                  actor,
+                  keeper,
+                  " creates or enters a workspace; another person's workspaces live on main.",
+                  "Workspaces are created on main: create yours there."));
     };
+  }
+
+  /**
+   * Refuses the bound actor building {@code project}'s template, as {@code catalog} holds it,
+   * unless an admin, as Access's table has it: a member is told only an admin builds it, a node's
+   * own person among them; on a node ({@code keeper} its own person, null elsewhere) a person the
+   * node caps is told the templates of their workspaces are built on main.
+   */
+  static void requireBuild(ProjectStore catalog, String project, String keeper) {
+    ProjectGate.refusing(catalog, Action.BUILD_TEMPLATE, project)
+        .map(
+            refusal ->
+                refusal.kind() == Refusal.Kind.ADMIN_ONLY
+                    ? new Refusal(
+                        Refusal.Kind.ADMIN_ONLY,
+                        "Only an admin builds " + project + "'s template.",
+                        "Ask an admin to build it.")
+                    : onTheNode(
+                        refusal,
+                        Actor.current(),
+                        keeper,
+                        " builds a template; "
+                            + project
+                            + "'s template for your workspaces is built on main.",
+                        "Templates are built on main, where your workspaces are created."))
+        .ifPresent(WorkspaceDoors::refuse);
   }
 
   /** Throws the refusal of {@link #refusal}, with its code, when there is one. */
@@ -91,7 +125,8 @@ public final class WorkspaceDoors {
    * The refusal a person a node caps to a viewer is given there: where their workspaces live,
    * rather than that their credential reads alone.
    */
-  private static Refusal onTheNode(Refusal refusal, Actor actor, String keeper) {
+  private static Refusal onTheNode(
+      Refusal refusal, Actor actor, String keeper, String onlyTheKeeper, String fix) {
     if (keeper == null
         || refusal.kind() != Refusal.Kind.READ_ONLY
         || keeper.equals(actor.handle())) {
@@ -99,12 +134,8 @@ public final class WorkspaceDoors {
     }
     return new Refusal(
         Refusal.Kind.READ_ONLY,
-        "This box is "
-            + keeper
-            + "'s node, where only "
-            + keeper
-            + " creates or enters a workspace; another person's workspaces live on main.",
-        "Workspaces are created on main: create yours there.");
+        "This box is " + keeper + "'s node, where only " + keeper + onlyTheKeeper,
+        fix);
   }
 
   /**

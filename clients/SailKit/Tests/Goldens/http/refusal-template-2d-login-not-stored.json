@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/projects/lighthouse/template:build"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Store one with git login github.com.",
+        "code": "login_not_stored",
+        "field_errors": [],
+        "message": "github.com asks for credentials to fetch lighthouse's repo lamp, and dana keeps no token for it.",
+        "remedy": [
+          {
+            "text": "Store one with "
+          },
+          {
+            "args": [
+              "github.com"
+            ],
+            "run": "sail",
+            "verb": "git login"
+          },
+          {
+            "text": "."
+          }
+        ]
+      },
+      "schema_version": 1
+    },
+    "status": 409
+  }
+}

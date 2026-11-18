@@ -172,6 +172,7 @@ class ScopedReadsTest {
           "/v1/projects/{project}/ports",
           "/v1/projects/{project}/snapshots",
           "/v1/projects/{project}/workspaces",
+          "/v1/projects/{project}/template",
           "/v1/projects/{project}/files",
           "/v1/projects/{project}/files/{file}");
 
@@ -195,6 +196,7 @@ class ScopedReadsTest {
           "restoreSnapshot",
           "deleteSnapshot",
           "createWorkspace",
+          "buildTemplate",
           "startWorkspace",
           "stopWorkspace",
           "deleteWorkspace",
@@ -261,6 +263,7 @@ class ScopedReadsTest {
           List.of("POST", "/v1/projects/{project}/snapshots/a-label/restore", ""),
           List.of("DELETE", "/v1/projects/{project}/snapshots/a-label", ""),
           List.of("POST", "/v1/projects/{project}/workspaces", "{\"name\": \"w\"}"),
+          List.of("POST", "/v1/projects/{project}/template:build", ""),
           List.of("POST", "/v1/projects/{project}/workspaces/w/start", ""),
           List.of("POST", "/v1/projects/{project}/workspaces/w/stop", ""),
           List.of("DELETE", "/v1/projects/{project}/workspaces/w", ""));

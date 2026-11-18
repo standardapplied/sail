@@ -124,16 +124,17 @@ extension Driver {
             return (lines.first == markedTop, "the top line is '\(lines.first ?? "")', it was '\(markedTop ?? "")'")
         }
         if let times = step.titleBurst {
-            let writes = await arrangementWrites(within: 2) {
+            let last = "t\(times)"
+            let made = await arrangementWrites({ _ in self.workbench.model.focusedPane?.programTitle == last }, seen: "the pane's last title, \(last),") {
                 typeText("for i in $(seq 1 \(times)); do printf '\\e]2;t%s\\a' $i; done\r")
             }
-            return (writes == 0, "the program set its title \(times) times; the arrangement was written \(writes) times")
+            return (made.failure == nil && made.writes == 0, "the program set its title \(times) times; " + (made.failure.map { "FAILED: \($0); " } ?? "") + made.said)
         }
         if let times = step.dividerBurst {
-            let writes = await arrangementWrites(within: 1.5) {
+            let made = await arrangementWrites({ $0 >= 1 }, seen: "the arrangement's save after ⌃⌘→") {
                 for _ in 0 ..< times { press("arrowRight", ["command", "control"]) }
             }
-            return (writes == 1, "⌃⌘→ \(times) times at once; the arrangement was written \(writes) times")
+            return (made.failure == nil && made.writes == 1, "⌃⌘→ \(times) times at once; " + (made.failure.map { "FAILED: \($0); " } ?? "") + made.said)
         }
         if step.hold == true {
             guard let view = pane?.terminal else { return (false, "no pane is focused") }
@@ -826,19 +827,64 @@ extension Driver {
         return (1 ... holds + 1).contains(sizes.count) && sizes.last == "winch-\(columns)"
     }
 
-    /// How many times the app writes its user defaults while `act` runs and for `seconds` after it
-    /// (each write posts `UserDefaults.didChangeNotification` in the process), after a write the
-    /// steps before left pending has landed.
-    private func arrangementWrites(within seconds: Double, _ act: () -> Void) async -> Int {
-        try? await Task.sleep(for: .seconds(1))
+    /// How many times `act` wrote the arrangement itself (``WorkbenchView/arrangementKey``), counted
+    /// from once no save of an earlier step is pending until the action is settled (``settled``:
+    /// `processed`, given the writes so far, holds and no save is pending), and which other
+    /// defaults changed meanwhile, named and never counted. `failure` says what did not hold: a
+    /// save of an earlier step still pending before the action, or `seen` not seen, or a save of
+    /// its own still pending, after 10 s.
+    private func arrangementWrites(
+        _ processed: @escaping @MainActor (Int) -> Bool, seen: String, _ act: () -> Void
+    ) async -> (writes: Int, failure: String?, said: String) {
+        guard await waitUntil(10, { !self.workbench.isKeepingSoon }) else {
+            return (0, "a save of the arrangement from an earlier step was still pending after 10 s, so the step did not begin", "nothing was counted")
+        }
+        let defaults = UserDefaults.standard, key = WorkbenchView.arrangementKey
+        let before = defaults.dictionaryRepresentation()
+        let last = Mutex(defaults.data(forKey: key))
         let writes = Mutex(0)
         let watch = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: nil) { _ in
-            writes.withLock { $0 += 1 }
+            let now = UserDefaults.standard.data(forKey: key)
+            let changed = last.withLock { kept in
+                defer { kept = now }
+                return kept != now
+            }
+            if changed { writes.withLock { $0 += 1 } }
         }
         defer { NotificationCenter.default.removeObserver(watch) }
         act()
-        try? await Task.sleep(for: .seconds(seconds))
-        return writes.withLock { $0 }
+        let failure = await settled(within: 10, seen: seen) { processed(writes.withLock { $0 }) }
+        let after = defaults.dictionaryRepresentation()
+        let others = Set(before.keys).union(after.keys).filter { $0 != key && before[$0] as? NSObject != after[$0] as? NSObject }.sorted()
+        let count = writes.withLock { $0 }
+        return (count, failure, "the arrangement was written \(count) times"
+            + (others.isEmpty ? "" : "; other defaults changed meanwhile, not counted: " + others.joined(separator: ", ")))
+    }
+
+    /// Nil once `processed` holds and no save of the arrangement is pending, on two looks with a
+    /// turn of the main queue between them. One look could fall between the action's work and a
+    /// save it schedules a turn later (an event handled on the next turn, a keep scheduled from
+    /// inside one): by the second look that save is pending, so the wait goes on until it is done.
+    /// Otherwise, after `seconds`, which of the two did not hold.
+    private func settled(within seconds: Double, seen: String, _ processed: @MainActor () -> Bool) async -> String? {
+        let deadline = ContinuousClock.now + .seconds(seconds)
+        while ContinuousClock.now < deadline {
+            if processed(), !workbench.isKeepingSoon {
+                await Self.nextMainTurn()
+                if processed(), !workbench.isKeepingSoon { return nil }
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return processed()
+            ? "a save of the arrangement was still pending after \(Int(seconds)) s"
+            : "\(seen) was not seen within \(Int(seconds)) s"
+    }
+
+    /// Returns after the main queue has run one more turn.
+    private static func nextMainTurn() async {
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.async { done.resume() }
+        }
     }
 
     /// How many frames `view` has committed, as its drawing state says.
