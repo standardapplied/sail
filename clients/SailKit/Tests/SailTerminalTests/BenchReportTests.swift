@@ -76,7 +76,7 @@ import Testing
     }
 
     @Test func theP95LeavesItsTailAndASeriesExcusingMoreIsInconclusive() {
-        #expect(Bench.tail(of: 54) == 2 && Bench.tail(of: Bench.frames) == 20 && Bench.tail(of: 1) == 0)
+        #expect(Sampled.tail(of: 54) == 2 && Sampled.tail(of: Sampled.count) == 20 && Sampled.tail(of: 1) == 0)
         let frames = (0 ..< 40).map { index -> Duration in index < 3 ? .milliseconds(24) : .microseconds(600) }
         let starved = [1.0, 2.0, 3.0].flatMap { Self.looks(across: Span($0 + 0.002, $0 + 0.022)) }
         let measured = Bench.Measured(

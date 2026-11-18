@@ -25,22 +25,15 @@ import Synchronization
 /// its thread's CPU, its wait and what was proven or why nothing was, and each excuse is counted.
 /// A frame whose thread used the time fails as it always did. Four looks 5 ms apart prove at least
 /// 15 ms, so a frame a starved runner made late by less (#439's red run had a 7.5 ms one) is never
-/// excused: that is answered with frames, not machinery. Each series takes ``frames`` frames, so
-/// its nearest-rank p95 leaves ``frames`` − ⌈0.95 × ``frames``⌉ = 20 of them over the limit; #439's
+/// excused: that is answered with frames, not machinery. Each series takes ``Sampled/count`` frames,
+/// so its nearest-rank p95 leaves 400 − ⌈0.95 × 400⌉ = 20 of them over the limit; #439's
 /// red run had 3 of 54 over (its p95 allowed 2), and every series kept since, 4 of 338 (1.2 %): some
 /// 5 of 400 expected, a quarter of the tail. A series that excuses more frames than that tail is
 /// inconclusive and fails, saying so: a measurement that excused most of itself measured nothing.
-/// At 120 Hz the 400 frames take about 3.6 s a series; a runner that wakes the frame thread 30 ms
-/// late, as CI's macOS runners do, takes about 13 s.
+/// At 120 Hz the 400 frames take about 3.6 s a series; on CI's macOS runners, which wake the frame
+/// thread some 30 ms late, they took 15.5 and 14.6 s.
 enum Bench {
     static let frameLimit = 4.0
-    /// The frames each `frame()` series takes.
-    static let frames = 400
-
-    /// How many of `count` frames the nearest-rank p95 leaves above it.
-    static func tail(of count: Int) -> Int {
-        count - Int((0.95 * Double(count)).rounded(.up))
-    }
 
     static func run() throws -> (budgets: [Budget], samples: [BenchSeries], said: [String]) {
         let clock = ContinuousClock()
@@ -137,8 +130,8 @@ enum Bench {
     /// more is inconclusive.
     static func excuses(_ series: BenchSeries) -> Budget {
         Budget(
-            name: "\(series.name), frames excused as starved, a count (more than the p95's tail of \(tail(of: series.frames.count)) leaves the series inconclusive)",
-            milliseconds: Double(series.frames.filter { $0.excusedMilliseconds > 0 }.count), limit: Double(tail(of: series.frames.count))
+            name: "\(series.name), frames excused as starved, a count (more than the p95's tail of \(Sampled.tail(of: series.frames.count)) leaves the series inconclusive)",
+            milliseconds: Double(series.frames.filter { $0.excusedMilliseconds > 0 }.count), limit: Double(Sampled.tail(of: series.frames.count))
         )
     }
 
@@ -151,7 +144,7 @@ enum Bench {
             format: "%@: %ld frames, %ld excused, %.1f ms in all; %ld looks at the frame thread, the looker %@",
             series.name, series.frames.count, excused.count, excused.reduce(0) { $0 + $1.excusedMilliseconds }, series.looks.count, looker
         )
-        let tail = Self.tail(of: series.frames.count)
+        let tail = Sampled.tail(of: series.frames.count)
         let inconclusive = excused.count > tail
             ? [String(format: "  INCONCLUSIVE: frames excused: %ld, more than the p95's tail of %ld: a measurement that excused most of itself measured nothing", excused.count, tail)]
             : []
@@ -198,7 +191,7 @@ enum Bench {
         var waits: [Span] = []
         var slices: [Int] = []
         var cpus: [Double] = []
-        while frames.count < Self.frames {
+        while frames.count < Sampled.count {
             let cpu = Looker.thisThreadsCPU()
             let started = clock.now
             let timed = try screen.timedFrame()

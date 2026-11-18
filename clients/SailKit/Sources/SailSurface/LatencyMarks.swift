@@ -344,6 +344,17 @@ public struct UnpresentedFrame: Equatable, Sendable, Codable, CustomStringConver
             ?? "its commands not completed"
         return String(format: "frame %llu committed %.0f ms ago, ", frame, ageMs) + commands
     }
+
+    /// The frames committed and not yet told presented, in words: listed where the display tells
+    /// presentation times; where it tells none (`reported` 0, as on a CI runner's display), a frame
+    /// not told presented says nothing of the display, so they are counted and that is said.
+    public static func said(_ frames: [UnpresentedFrame], reported: Int, unreported: Int) -> String {
+        guard reported > 0 else {
+            return "the display tells no presentation time (\(unreported) presents told without one), so the \(frames.count) "
+                + "frames not told presented say nothing of it"
+        }
+        return "not yet told presented: " + (frames.isEmpty ? "none" : frames.map(\.description).joined(separator: ", "))
+    }
 }
 
 /// A stretch of time on the host clock, in seconds.
