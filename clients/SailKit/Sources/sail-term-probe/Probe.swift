@@ -39,6 +39,7 @@ struct Probe {
                 let verdict = budget.reported ? "" : " (limit \(budget.limit)) \(budget.met ? "met" : "MISSED")"
                 print("\(budget.name): \(String(format: "%.3f", budget.milliseconds))\(verdict)")
             }
+            bench.said.forEach { print($0) }
             try report.write(to: path)
             return report.passed
         case let .run(run):

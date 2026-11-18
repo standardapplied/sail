@@ -1,4 +1,5 @@
 import Foundation
+import SailMeasures
 import SailSurface
 import SailTerminal
 
@@ -66,17 +67,22 @@ struct BenchSeries: Encodable, Equatable {
     var name: String
     var frames: [FrameSample]
     var stalls: [Span]
+    /// The looks at the frames' thread their excuses were proven from.
+    var looks: [ThreadLook] = []
 }
 
 /// One `frame()` taken while another thread fed: when it began (seconds since the bench began),
 /// how long it took, how long of that it waited for the lock, how many slices the feeder fed while
-/// it waited, and how much of its wait the reference thread was held over too.
+/// it waited, how much of its wait the reference thread was held over too, the CPU time its own
+/// thread used in it, and how much of it that thread was proven starved.
 struct FrameSample: Encodable, Equatable {
     var at: Double
     var milliseconds: Double
     var waitMilliseconds: Double
     var slicesWaited: Int
     var heldMilliseconds: Double
+    var cpuMilliseconds: Double = 0
+    var excusedMilliseconds: Double = 0
 }
 
 /// One of T10's budgets and what was measured against it.

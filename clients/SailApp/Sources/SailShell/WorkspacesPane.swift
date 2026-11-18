@@ -7,10 +7,10 @@ import SailLook
 /// (up to ``shownRows``, then it scrolls), theirs first, each its name, its state as a dot and a word
 /// and, when it is another person's, its owner at the trailing edge; Open directly under it, "Start
 /// and Open" for a stopped workspace, which opening starts, and why when it is not offered; then
-/// NEW WORKSPACE, a name and Make. Where there is no list the body says why in a sentence: the
+/// NEW WORKSPACE, a name and Create. Where there is no list the body says why in a sentence: the
 /// sign-in not yet known, signed out (with Sign In), no project, no workspace, or the list not read
-/// (with Try Again). What the server refuses of a make is said under it in its words. The latest
-/// request wins (``WorkspaceListing``), and Open and Make act on the project the rows were listed
+/// (with Try Again). What the server refuses of a creation is said under it in its words. The latest
+/// request wins (``WorkspaceListing``), and Open and Create act on the project the rows were listed
 /// for, never on what the chooser says since.
 @MainActor
 public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
@@ -36,7 +36,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     /// Why Open is not offered on the chosen row, under it.
     public let whyNot = NSTextField(wrappingLabelWithString: "")
     public let name = NSTextField()
-    public let make = NSButton(title: "Make", target: nil, action: nil)
+    public let create = NSButton(title: "Create", target: nil, action: nil)
     public let said = NSTextField(wrappingLabelWithString: "")
     /// Why there is no list, where the list would be.
     public let empty = NSTextField(wrappingLabelWithString: "")
@@ -77,6 +77,8 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     private var lines: [String] = []
     private var listing = WorkspaceListing()
     private var calls = 0
+    /// Workspaces a person asked for, not yet created: only these hold Create and Open, never a listing.
+    private var creating = 0
     private var refreshes = 0
 
     init(look: Look, title: TitleFont, mono: TerminalFonts) {
@@ -155,23 +157,23 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         shown()
     }
 
-    @objc public func makeWorkspace(_: Any?) {
+    @objc public func createWorkspace(_: Any?) {
         let wanted = name.stringValue.trimmingCharacters(in: .whitespaces)
-        guard !busy, let project = projects.titleOfSelectedItem, let client, !wanted.isEmpty else { return }
-        say(["Making \(wanted) (about 3 s)"])
-        make.title = "Making…"
-        run(failing: { self.say($0) }) { () async throws(SailError) in
-            let made = try await client.send(.createWorkspace(wanted, project: project))
+        guard creating == 0, let project = projects.titleOfSelectedItem, let client, !wanted.isEmpty else { return }
+        say(["Creating \(wanted) (about 3 s)"])
+        create.title = "Creating…"
+        run(byAPerson: true, failing: { self.say($0) }) { () async throws(SailError) in
+            let created = try await client.send(.createWorkspace(wanted, project: project))
             self.name.stringValue = ""
-            try await self.listWorkspaces(selecting: made.workspace)
-            self.say(made.stale ? ["\(made.workspace) was made from an older template."] : [])
+            try await self.listWorkspaces(selecting: created.workspace)
+            self.say(created.stale ? ["\(created.workspace) was created from an older template."] : [])
         }
     }
 
     /// Opens the chosen workspace in a tab, in the project it was listed for, its button saying so
     /// meanwhile; pressed again, or during a call, it does nothing.
     @objc public func openSelected(_: Any?) {
-        guard !busy, open.isEnabled, let project = listing.listed, let row = chosen,
+        guard creating == 0, open.isEnabled, let project = listing.listed, let row = chosen,
               row.opens(for: person.handle, admin: person.admin) else { return }
         open.setTitle(row.startsWhenOpened ? "Starting…" : "Opening…")
         open.isEnabled = false
@@ -269,7 +271,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         case .noProjects:
             paintEmpty(["No project on this control plane is open to you yet.", "An admin adds you to one."])
         case let .noWorkspaces(project):
-            paintEmpty(["No workspaces in \(project) yet.", "Name one below to make it."])
+            paintEmpty(["No workspaces in \(project) yet.", "Name one below to create it."])
         case let .unreadable(lines):
             offer("Try Again")
             paintEmpty(lines)
@@ -282,32 +284,40 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         tryAgain.isHidden = false
     }
 
-    /// Open, its words and why not; Make, while a name is typed; neither during a call.
+    /// Open, its words and why not; Create, while a name is typed; neither while a workspace a person
+    /// asked for is being created. A listing under way holds neither: it says nothing a person could
+    /// read as why.
     private func enable() {
         open.setTitle(chosen?.startsWhenOpened == true ? "Start and Open" : "Open")
-        open.isEnabled = !busy && chosen?.opens(for: person.handle, admin: person.admin) == true
+        open.isEnabled = creating == 0 && chosen?.opens(for: person.handle, admin: person.admin) == true
         let why = body == .listed ? chosen?.notOpened(for: person.handle, admin: person.admin) : nil
         whyNot.stringValue = why ?? ""
         whyNot.isHidden = why == nil
-        if !busy { make.title = "Make" }
-        make.isEnabled = !busy && !name.stringValue.trimmingCharacters(in: .whitespaces).isEmpty
+        if creating == 0 { create.title = "Create" }
+        create.isEnabled = creating == 0 && !name.stringValue.trimmingCharacters(in: .whitespaces).isEmpty
         refreshButton.isEnabled = client != nil
     }
 
-    /// The pane's one call at a time, and its one busy count: busy from this call on (Open and Make
-    /// off), its failure said by `failing`, Open and Make offered again once it ends.
+    /// The pane's calls and its one busy count: busy from this call on, its failure said by
+    /// `failing`. A call `byAPerson` (creating a workspace) holds Open and Create until it ends; a
+    /// listing holds nothing.
     @discardableResult
     private func run(
-        failing: @escaping @MainActor ([String]) -> Void, _ act: @escaping @MainActor () async throws(SailError) -> Void
+        byAPerson person: Bool = false, failing: @escaping @MainActor ([String]) -> Void,
+        _ act: @escaping @MainActor () async throws(SailError) -> Void
     ) -> Task<Void, Never> {
         calls += 1
-        [make, open].forEach { $0.isEnabled = false }
-        return Task { await self.finish(failing: failing, act) }
+        if person { creating += 1 }
+        enable()
+        return Task { await self.finish(byAPerson: person, failing: failing, act) }
     }
 
-    private func finish(failing: @MainActor ([String]) -> Void, _ act: @MainActor () async throws(SailError) -> Void) async {
+    private func finish(
+        byAPerson person: Bool, failing: @MainActor ([String]) -> Void, _ act: @MainActor () async throws(SailError) -> Void
+    ) async {
         defer {
             calls -= 1
+            if person { creating -= 1 }
             ended += 1
             enable()
         }
@@ -362,11 +372,11 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
 
     private func compose(mono: TerminalFonts) {
         wantsLayer = true
-        let making = NSStackView(views: [nameFrame, make])
-        making.spacing = Look.Space.s
-        make.controlSize = .large
+        let createRow = NSStackView(views: [nameFrame, create])
+        createRow.spacing = Look.Space.s
+        create.controlSize = .large
         nameFrame.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        make.setContentHuggingPriority(.required, for: .horizontal)
+        create.setContentHuggingPriority(.required, for: .horizontal)
         let chooser = NSStackView(views: [projects, refreshButton])
         chooser.spacing = Look.Space.s
         refreshButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "List again")
@@ -380,7 +390,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         whyNot.isHidden = true
         name.delegate = self
         let groups: [(NSStackView, [NSView])] = [
-            (projectGroup, [eyebrow("Project", mono: mono), chooser]), (newGroup, [eyebrow("New workspace", mono: mono), making]),
+            (projectGroup, [eyebrow("Project", mono: mono), chooser]), (newGroup, [eyebrow("New workspace", mono: mono), createRow]),
             (emptyGroup, [empty, tryAgain]), (openGroup, [open, whyNot]),
         ]
         for (group, views) in groups {
@@ -410,9 +420,9 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         open.target = self
         name.placeholderString = "name of a new workspace"
         name.target = self
-        name.action = #selector(makeWorkspace(_:))
-        make.target = self
-        make.action = #selector(makeWorkspace(_:))
+        name.action = #selector(createWorkspace(_:))
+        create.target = self
+        create.action = #selector(createWorkspace(_:))
         tryAgain.target = self
         tryAgain.action = #selector(askAgain(_:))
         said.isSelectable = true
@@ -440,7 +450,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Look.Space.x3l),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Look.Space.x3l),
             scroll.widthAnchor.constraint(equalToConstant: Self.width), listHeight,
-            projects.widthAnchor.constraint(equalToConstant: Self.width), making.widthAnchor.constraint(equalToConstant: Self.width),
+            projects.widthAnchor.constraint(equalToConstant: Self.width), createRow.widthAnchor.constraint(equalToConstant: Self.width),
             empty.widthAnchor.constraint(equalToConstant: Self.width), said.widthAnchor.constraint(lessThanOrEqualToConstant: 560),
             whyNot.widthAnchor.constraint(lessThanOrEqualToConstant: Self.width),
         ])

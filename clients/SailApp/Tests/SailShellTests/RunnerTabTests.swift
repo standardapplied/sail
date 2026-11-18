@@ -191,7 +191,7 @@ actor Proxied: Transport {
     }
 
     /// A1, A2, A7: the pane lists the person's workspaces from the server's own answers, theirs
-    /// first; Make says it is under way; a refusal is the server's sentence and the fix in words.
+    /// first; Create says it is under way; a refusal is the server's sentence and the fix in words.
     @Test func thePaneListsMakesAndRefusesInTheServersWords() async throws {
         let pane = WorkspacesPane(look: .light, title: try TitleFont(directory: LookTests.fonts), mono: try TerminalFonts(directory: LookTests.fonts))
         pane.person = ("uday", true)
@@ -204,11 +204,11 @@ actor Proxied: Transport {
         #expect(pane.text.contains("dock · running"), "\(pane.text)")
         pane.name.stringValue = "new"
         let before = pane.ended
-        pane.makeWorkspace(nil)
-        #expect(pane.text.contains("Making new (about 3 s)"))
-        #expect(pane.make.title == "Making…" && !pane.make.isEnabled && !pane.open.isEnabled, "a make under way says so and is not pressed twice")
+        pane.createWorkspace(nil)
+        #expect(pane.text.contains("Creating new (about 3 s)"))
+        #expect(pane.create.title == "Creating…" && !pane.create.isEnabled && !pane.open.isEnabled, "a creation under way says so and is not pressed twice")
         #expect(await Self.until { pane.ended > before })
-        #expect(!pane.text.contains("Making"), "\(pane.text)")
+        #expect(!pane.text.contains("Creating"), "\(pane.text)")
         let viewer = WorkspacesPane(look: .light, title: try TitleFont(directory: LookTests.fonts), mono: try TerminalFonts(directory: LookTests.fonts))
         viewer.client = SailClient(
             transport: RecordedServer([try Exchange("projects"), try Exchange("workspaces"), try Exchange("refusal-read-only-credential-workspace")]),
@@ -217,9 +217,31 @@ actor Proxied: Transport {
         await viewer.refresh()
         viewer.name.stringValue = "new"
         let asked = viewer.ended
-        viewer.makeWorkspace(nil)
+        viewer.createWorkspace(nil)
         #expect(await Self.until { viewer.ended > asked })
         #expect(viewer.text.hasSuffix("Your credential is read-only and cannot enter workspaces.\nAsk an admin for a member or admin credential."), "\(viewer.text)")
+    }
+
+    /// A listing under way (the pane shown again, the app active again) holds neither Open nor
+    /// Create: it says nothing a person could read as why. Only a workspace being created holds them.
+    @Test func aListingUnderWayHoldsNeitherOpenNorCreate() async throws {
+        let exchanges = [try Exchange("projects"), try Exchange("workspaces")]
+        let pane = try await Self.listed(exchanges, admin: true)
+        pane.name.stringValue = "new"
+        pane.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
+        #expect(pane.open.isEnabled && pane.create.isEnabled, "listed, Open and Create are offered")
+        let transport = Held(RecordedServer(exchanges), holding: "projects")
+        pane.client = SailClient(transport: transport, token: "tok")
+
+        let listing = Task { await pane.refresh() }
+
+        #expect(await Self.until { transport.routes.contains { $0.contains("projects") } }, "the listing asked nothing")
+        #expect(pane.busy)
+        #expect(pane.open.isEnabled && pane.create.isEnabled, "a listing under way held Open or Create")
+        #expect(pane.create.title == "Create")
+        transport.release()
+        await listing.value
+        #expect(pane.open.isEnabled && pane.create.isEnabled)
     }
 
     /// A pane signed in as `handle`, its projects and workspaces answered by `exchanges`, listed.
@@ -262,8 +284,8 @@ actor Proxied: Transport {
     @Test func theEmptyStatesSayWhatIsTrue() async throws {
         let none = try await Self.listed([try Exchange("projects"), try Exchange("workspaces-none")])
         #expect(none.body == .noWorkspaces(project: "harbor") && none.list.enclosingScrollView?.isHidden == true && none.open.isHidden)
-        #expect(none.text.hasSuffix("No workspaces in harbor yet.\nName one below to make it."), "\(none.text)")
-        #expect(none.tryAgain.isHidden && !none.name.isHiddenOrHasHiddenAncestor, "the new workspace's name is where it is made")
+        #expect(none.text.hasSuffix("No workspaces in harbor yet.\nName one below to create it."), "\(none.text)")
+        #expect(none.tryAgain.isHidden && !none.name.isHiddenOrHasHiddenAncestor, "the new workspace's name is where it is created")
         let nowhere = try await Self.listed([try Exchange("projects").altered(at: ["projects"], to: [Any]())])
         #expect(nowhere.text == "Workspaces\nNo project on this control plane is open to you yet.\nAn admin adds you to one.", "\(nowhere.text)")
         #expect(nowhere.projects.isHiddenOrHasHiddenAncestor && nowhere.name.isHiddenOrHasHiddenAncestor && nowhere.tryAgain.isHidden)
@@ -301,16 +323,16 @@ actor Proxied: Transport {
         let pane = try await Self.listed([try Exchange("projects"), try Exchange("workspaces")])
         let scroll = try #require(pane.list.enclosingScrollView)
         let project = try #require(Self.label("PROJECT", in: pane)), new = try #require(Self.label("NEW WORKSPACE", in: pane))
-        let making = try #require(pane.name.superview?.superview)
+        let createRow = try #require(pane.name.superview?.superview)
         let rect = { (view: NSView) in pane.convert(view.alignmentRect(forFrame: view.frame), from: view.superview) }
         let gaps = [
             rect(project).minY - rect(pane.projects).maxY, rect(pane.projects).minY - rect(scroll).maxY, rect(scroll).minY - rect(pane.open).maxY,
-            rect(pane.open).minY - rect(new).maxY, rect(new).minY - rect(making).maxY,
+            rect(pane.open).minY - rect(new).maxY, rect(new).minY - rect(createRow).maxY,
         ]
         #expect(gaps.map { $0.rounded() } == [8, 24, 12, 24, 8], "gaps \(gaps)")
         #expect(Double(rect(scroll).height).rounded() == Rail.item, "one row, one row's height")
-        #expect(rect(making).width.rounded() == WorkspacesPane.width && rect(pane.make).maxX.rounded() == rect(scroll).maxX.rounded(),
-                "the name and Make span the list's width: \(rect(making)), \(rect(pane.make)), \(rect(scroll))")
+        #expect(rect(createRow).width.rounded() == WorkspacesPane.width && rect(pane.create).maxX.rounded() == rect(scroll).maxX.rounded(),
+                "the name and Create span the list's width: \(rect(createRow)), \(rect(pane.create)), \(rect(scroll))")
     }
 
     /// Look, the shared field: content corners (the canvas shows at the corner), the surface inside,
