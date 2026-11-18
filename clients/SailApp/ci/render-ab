@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Main's renderer against the branch's, on this runner: builds RenderBench at main's commit
+# (RENDER_AB_BASE) with the branch's bench sources laid over it, so both draw the same workload with
+# the same compiler, unless RENDER_AB_CACHE already holds that build; then the branch's own build
+# (this package's release build) compares the two, alternating warm (RenderBench compare). A pull
+# request's body is read for its Renderer-Bench-Allowance line. RENDER_AB_GATING is yes on a pull
+# request and a dispatch, no on a push to main. What it said, and main's build log, land in OUT.
+set -euo pipefail
+
+[[ $# -eq 1 ]] || { echo "usage: ci/render-ab OUT" >&2; exit 2; }
+: "${RENDER_AB_BASE:?main's commit}" "${RENDER_AB_CACHE:?the folder main's build is kept in}" "${RENDER_AB_GATING:?yes or no}"
+out=$1
+mkdir -p "$out" "$RENDER_AB_CACHE"
+here=$(pwd -P)
+branch=$(swift build -c release --show-bin-path)/RenderBench
+[[ -x $branch ]] || { echo "ci/render-ab: this release build holds no RenderBench" >&2; exit 1; }
+
+body=$out/pr-body.txt
+if [[ ${GITHUB_EVENT_NAME:-} == pull_request && -n ${GITHUB_EVENT_PATH:-} ]]; then
+  jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" > "$body"
+else
+  : > "$body"
+fi
+
+main=$RENDER_AB_CACHE/RenderBench unbuilt=
+started=$(date +%s)
+if [[ -x $main ]]; then
+  echo "ci/render-ab: main's build at ${RENDER_AB_BASE:0:9} came from the cache"
+else
+  tree=$(mktemp -d)/main
+  git worktree add --detach "$tree" "$RENDER_AB_BASE" > /dev/null
+  rm -rf "$tree/clients/SailApp/Sources/RenderBench"
+  cp -R Sources/RenderBench "$tree/clients/SailApp/Sources/RenderBench"
+  if (cd "$tree/clients/SailApp" && swift build -c release --product RenderBench) > "$out/main-build.log" 2>&1; then
+    cp "$(cd "$tree/clients/SailApp" && swift build -c release --show-bin-path)/RenderBench" "$main"
+  else
+    unbuilt="main's renderer did not build at ${RENDER_AB_BASE:0:9}: $(grep -m 1 -E 'error:' "$out/main-build.log" || tail -1 "$out/main-build.log")"
+  fi
+  git worktree remove --force "$tree"
+fi
+echo "ci/render-ab: main's side ready in $(( $(date +%s) - started )) s"
+
+started=$(date +%s)
+arguments=(compare --fonts "$here/Fonts" --branch "$branch" --base "${RENDER_AB_BASE:0:9}" --body "$body" --gating "$RENDER_AB_GATING")
+if [[ -n $unbuilt ]]; then arguments+=(--main-unbuilt "$unbuilt"); else arguments+=(--main "$main"); fi
+status=0
+"$branch" "${arguments[@]}" | tee "$out/render-ab.txt" || status=$?
+echo "ci/render-ab: compared in $(( $(date +%s) - started )) s"
+exit "$status"

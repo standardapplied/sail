@@ -310,59 +310,89 @@ import Testing
     }
 }
 
-/// A redraw on a CI runner: only one 120 Hz frame gates; the 4 ms a person's Mac is held to and
-/// the redraw over the loop timed beside each sample are reported, every run. Made-up samples: a
-/// mid runner's redraw of 1.4 ms beside a 0.42 ms loop, every tenth sample 3.3 ms.
-@Suite struct SpeedGateTests {
-    static let gate = SpeedGate(name: "full redraw 200x60 cpu")
-    static let references = Array(repeating: 0.42, count: 400)
-    static let work = (0 ..< 400).map { 1.4 + (($0 % 10 == 0) ? 1.9 : 0) }
+/// Main's renderer and the branch's drawn in the same job, alternating warm in rounds: each pair's
+/// branch p50 over main's p50, the median of the pairs at most 1 + X. Made-up pairs, three samples
+/// a round, the first pair a warm-up the judge drops.
+@Suite struct SameRunnerTests {
+    static let noise = 0.05
 
-    @Test func aRunnerTwiceAsSlowPassesAndSaysItIsOverTheBudget() {
-        let judged = Self.gate.judge(work: Self.work.map { $0 * 2 }, references: Self.references.map { $0 * 2 })
-        #expect(judged.met, "\(judged.said)")
-        #expect(judged.said.hasPrefix("within its budget: full redraw 200x60 cpu p95 6.60 ms, hard ceiling 8 ms"), "\(judged.said)")
-        #expect(judged.said.contains("full redraw 200x60 cpu p95 6.60 ms, over the 4 ms budget a person's Mac is held to; reported, not gated on this runner"))
-        #expect(judged.figures["full redraw 200x60 cpu reference p50 ms"] == 0.84)
+    /// Pairs at machine speeds `speeds`, the branch `ratios` times main in each.
+    static func pairs(_ speeds: [Double], _ ratios: [Double]) -> [SameRunner.Pair] {
+        [SameRunner.Pair(main: [9, 9, 9], branch: [1, 1, 1])]
+            + zip(speeds, ratios).map { speed, ratio in SameRunner.Pair(main: Array(repeating: speed, count: 3), branch: Array(repeating: speed * ratio, count: 3)) }
     }
 
-    @Test func aRedrawThirtyPercentHeavierIsReportedNamedNotFailed() {
-        let judged = Self.gate.judge(work: Self.work.map { $0 * 1.3 }, references: Self.references)
-        #expect(judged.met, "\(judged.said)")
-        #expect(judged.said.contains("full redraw 200x60 cpu p95 4.29 ms, over the 4 ms budget a person's Mac is held to; reported, not gated on this runner"))
-        #expect(judged.said.contains("full redraw 200x60 cpu paired p50 4.33 and p95 10.21 in references (reported)"), "\(judged.said)")
+    static let healthy = pairs([1.4, 1.4, 1.5, 1.4, 1.5, 1.4], [1, 1.01, 0.99, 1, 1.02, 1])
+
+    @Test func theMedianIsOfEachPairsRatioNotOfThePooledSamples() {
+        let judged = SameRunner.judge(Self.pairs([1, 1, 1, 1, 2], [1, 1, 1.3, 1.3, 1]), noise: Self.noise, allowance: nil, gating: true, base: "abc1234")
+        #expect(judged.met, "pooled, the branch reads 1.3 times main; pair by pair it is 1.00: \(judged.lines)")
+        #expect(judged.lines.first == "within its budget: the branch's redraw at 1.00 times main's (the median of 5 pairs, 1.00 to 1.30), limit 1.05")
     }
 
-    @Test func aRunnerSlowedOnlyInMemoryIsReportedWithItsLoopSeenNormal() {
-        let judged = Self.gate.judge(work: Self.work.map { $0 * 1.5 }, references: Self.references)
-        #expect(judged.met && judged.said.contains("paired p50 5.00") && judged.said.contains("reference p50 0.42 ms"), "\(judged.said)")
+    @Test func aBranchThirtyPercentSlowerFailsNamingTheRatio() {
+        let judged = SameRunner.judge(Self.pairs([1.4, 1.5, 1.4, 1.6, 1.4], [1.3, 1.31, 1.29, 1.3, 1.3]), noise: Self.noise, allowance: nil, gating: true, base: "abc1234")
+        #expect(!judged.met)
+        #expect(judged.lines.first == "missed: the branch's redraw at 1.30 times main's (the median of 5 pairs, 1.29 to 1.31), over its 1.05 limit")
     }
 
-    @Test func aTransientSlowdownOfASampleAndItsReferenceCancels() {
-        var work = Self.work, references = Self.references
-        for index in stride(from: 0, to: 400, by: 7) {
-            work[index] *= 3
-            references[index] *= 3
-        }
-        let judged = Self.gate.judge(work: work, references: references)
-        #expect(judged.met && abs((judged.figures["full redraw 200x60 cpu paired p50 in references"] ?? 0) - 1.4 / 0.42) < 1e-9, "\(judged.said)")
+    @Test func aStatedAllowanceIsHonouredAndSaid() {
+        let allowance = SameRunner.Allowance.slower(percent: 20, reason: "each cell now draws its underline")
+        let judged = SameRunner.judge(Self.pairs([1.4, 1.5, 1.4, 1.6, 1.4], [1.14, 1.14, 1.15, 1.13, 1.14]), noise: Self.noise, allowance: allowance, gating: true, base: "abc1234")
+        #expect(judged.met, "\(judged.lines)")
+        #expect(judged.lines.first == "within its budget: the branch's redraw at 1.14 times main's (the median of 5 pairs, 1.13 to 1.15), limit 1.2")
+        #expect(judged.lines.contains("the PR states an allowance of 20 % slower: each cell now draws its underline"))
     }
 
-    @Test func overTheCeilingFailsOnAnyRunner() {
-        let judged = Self.gate.judge(work: Self.work.map { $0 * 6 }, references: Self.references.map { $0 * 6 })
-        #expect(!judged.met && judged.said.hasPrefix("missed: full redraw 200x60 cpu p95 19.80 ms, over its 8 ms hard ceiling"), "\(judged.said)")
+    @Test func anAllowanceIsReadFromThePRsBodyOnly() {
+        #expect(SameRunner.allowance(in: "Fixes the tab.\n\nRenderer-Bench-Allowance: 20% each cell now draws its underline\n")
+            == .slower(percent: 20, reason: "each cell now draws its underline"))
+        #expect(SameRunner.allowance(in: "Renderer-Bench-Allowance: none compared, RenderBench is new") == .noneCompared(reason: "RenderBench is new"))
+        #expect(SameRunner.allowance(in: "Renderer-Bench-Allowance: a little") == .malformed(line: "Renderer-Bench-Allowance: a little"))
+        #expect(SameRunner.allowance(in: "Renderer-Bench-Allowance: 20%") == .malformed(line: "Renderer-Bench-Allowance: 20%"), "a reason is required")
+        #expect(SameRunner.allowance(in: "No line here.") == nil)
+        let judged = SameRunner.judge(Self.healthy, noise: Self.noise, allowance: .malformed(line: "Renderer-Bench-Allowance: a little"), gating: true, base: "abc1234")
+        #expect(!judged.met && judged.lines.first?.hasPrefix("missed: the PR's line 'Renderer-Bench-Allowance: a little' is neither") == true, "\(judged.lines)")
     }
 
-    @Test func aHealthyRedrawIsWithinTheBudgetItIsReportedAgainst() {
-        let judged = Self.gate.judge(work: Self.work, references: Self.references)
-        #expect(judged.met && judged.said.contains("full redraw 200x60 cpu p95 3.30 ms, within the 4 ms budget a person's Mac is held to (reported)"), "\(judged.said)")
+    @Test func mainsSideUncomparedFailsWithoutTheLineAndSaysWhyWithIt() {
+        let refused = SameRunner.uncompared("main's renderer did not build at abc1234", allowance: nil, gating: true)
+        #expect(!refused.met && refused.lines.first?.hasPrefix("missed: main's renderer could not be compared: main's renderer did not build at abc1234") == true, "\(refused.lines)")
+        let stated = SameRunner.uncompared("main's renderer did not build at abc1234", allowance: .noneCompared(reason: "RenderBench is new"), gating: true)
+        #expect(stated.met && stated.lines.first == "compared nothing: main's renderer did not build at abc1234; the PR states: RenderBench is new")
+        let onMain = SameRunner.uncompared("main's renderer did not build at abc1234", allowance: nil, gating: false)
+        #expect(onMain.met && !onMain.warnings.isEmpty)
     }
 
-    @Test func aMissingFigureFails() {
-        #expect(!Self.gate.judge(work: [], references: []).met)
-        #expect(!Self.gate.judge(work: [1, 2], references: [0.4]).met)
-        let zero = Self.gate.judge(work: [1, 2], references: [0.4, 0])
-        #expect(!zero.met && zero.said == "missed: full redraw 200x60 cpu: a sample without its reference, or none")
+    @Test func aStatedNoneComparedIsComparedAndReportedNotGated() {
+        let judged = SameRunner.judge(Self.pairs([1.4, 1.5, 1.4, 1.6, 1.4], [1.3, 1.31, 1.29, 1.3, 1.3]), noise: Self.noise, allowance: .noneCompared(reason: "the bench's rows changed"), gating: true, base: "abc1234")
+        #expect(judged.met && judged.lines.contains("compared, not gated: the PR states none compared: the bench's rows changed"), "\(judged.lines)")
+    }
+
+    @Test func aPushToMainReportsWithAWarningAndDoesNotGate() {
+        let judged = SameRunner.judge(Self.pairs([1.4, 1.5, 1.4, 1.6, 1.4], [1.3, 1.31, 1.29, 1.3, 1.3]), noise: Self.noise, allowance: nil, gating: false, base: "abc1234")
+        #expect(judged.met)
+        #expect(judged.warnings.first?.hasPrefix("the branch's redraw at 1.30 times main's") == true, "\(judged.warnings)")
+    }
+
+    @Test func theCeilingIsOneFrameToTheHundredth() {
+        let at = SameRunner.judge([SameRunner.Pair(main: [1], branch: [1])] + Array(repeating: SameRunner.Pair(main: [8], branch: [8]), count: 5),
+                                  noise: Self.noise, allowance: nil, gating: true, base: "abc1234")
+        #expect(at.met, "\(at.lines)")
+        let over = SameRunner.judge([SameRunner.Pair(main: [1], branch: [1])] + Array(repeating: SameRunner.Pair(main: [8.01], branch: [8.01]), count: 5),
+                                    noise: Self.noise, allowance: nil, gating: true, base: "abc1234")
+        #expect(!over.met && over.lines.first == "missed: the branch's redraw p95 8.01 ms, over its 8 ms hard ceiling", "\(over.lines)")
+    }
+
+    @Test func overFourMillisecondsWarnsAndIsReportedNotGated() {
+        let judged = SameRunner.judge(Self.pairs([4.4, 4.4, 4.5, 4.4, 4.4], [1, 1, 1, 1, 1]), noise: Self.noise, allowance: nil, gating: true, base: "abc1234")
+        #expect(judged.met)
+        #expect(judged.warnings == ["the branch's redraw p95 4.50 ms is over the 4 ms budget a person's Mac is held to; reported, not gated on this runner"])
+    }
+
+    @Test func tooFewPairsFail() {
+        let judged = SameRunner.judge(Array(Self.healthy.prefix(3)), noise: Self.noise, allowance: nil, gating: true, base: "abc1234")
+        #expect(!judged.met && judged.lines.first == "missed: the comparison took 2 pairs after its warm-up, fewer than 5")
     }
 }
 

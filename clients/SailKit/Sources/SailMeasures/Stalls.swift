@@ -217,8 +217,8 @@ public enum FloodVerdict {
     }
 }
 
-/// How many samples a gated series takes, and how many its nearest-rank p95 leaves above it: the
-/// one count the probe's bench and the drive's renderer bench both take.
+/// How many samples a gated series of the probe's bench takes, and how many its nearest-rank p95
+/// leaves above it.
 public enum Sampled {
     public static let count = 400
 

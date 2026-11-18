@@ -15,6 +15,7 @@ let package = Package(
         .library(name: "SailTerminalView", targets: ["SailTerminalView"]),
         .executable(name: "Sail", targets: ["Sail"]),
         .executable(name: "SailDrive", targets: ["SailDrive"]),
+        .executable(name: "RenderBench", targets: ["RenderBench"]),
     ],
     dependencies: [.package(path: "../SailKit")],
     targets: [
@@ -37,6 +38,11 @@ let package = Package(
         ),
         .executableTarget(name: "Sail", dependencies: ["SailShell"], swiftSettings: strict),
         .target(name: "SailTestPasskey", dependencies: [kit("SailAPI")], swiftSettings: strict),
+        .executableTarget(
+            name: "RenderBench",
+            dependencies: ["SailRenderer", "SailLook", kit("SailMeasures"), kit("SailSurface"), kit("SailTerminal"), kit("SailVT")],
+            swiftSettings: strict
+        ),
         .executableTarget(
             name: "SailDrive",
             dependencies: [

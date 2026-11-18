@@ -4791,8 +4791,9 @@ view's input tests with synthesized events (every suite `swift test list` names,
 bounded run by `ci/test-suites`, which fails when a listed suite passes no test of its own or a
 test stands outside any suite), the app driven against the local host of this commit's darwin
 `sail` (built once per run by the workflow's `host` job, which both macOS lanes wait for) with its latency budgets and against two control planes that `sail` starts on the runner (the drive waits, at every step, until the view has drawn the
-screen's text in full; the renderer bench takes 300 full redraws, drawn offscreen with nothing read
-back, on the drawing thread's CPU clock with the wall clock beside it), and the bundle checked on
+screen's text in full), main's renderer and the branch's drawn in the same job (`ci/render-ab`:
+full redraws offscreen on the drawing thread's CPU clock, alternating warm, a pull request at most
+X slower than main), and the bundle checked on
 every build. With all seven signing secrets (`ci/signing`
 decides, and fails on some but not all) it is signed with Developer ID, its profile embedded and
 its entitlements claimed, notarized, stapled and assessed by Gatekeeper; without them it is uploaded as an unsigned build and the signed-only check

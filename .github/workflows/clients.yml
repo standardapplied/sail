@@ -228,6 +228,9 @@ jobs:
       SHIPPED: Sail-${{ github.sha }}${{ github.run_attempt != '1' && format('-attempt{0}', github.run_attempt) || '' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # The full history: main's commit to draw the renderer against (below).
+          fetch-depth: 0
 
       - name: Xcode
         run: sudo xcode-select --switch /Applications/Xcode_26.3.app
@@ -364,6 +367,37 @@ jobs:
         run: |
           defaults write -g AppleAccentColor -int -1
           ci/drive "$RUNNER_TEMP/drive/Sail.app" "$RUNNER_TEMP/drive-out"
+
+      # Main's renderer against the branch's, on this runner, alternating warm (ci/render-ab; spec
+      # sail-app-renderer-bench-gates-on-the-machines-speed): the runner's speed cancels. A pull
+      # request gates: its redraw at most X slower than main's (X from main against itself), wider
+      # only by a `Renderer-Bench-Allowance: N% <reason>` line in its body, which the step says; a
+      # body edited after the run counts from the next run. A push to main compares against its
+      # parent and reports, a warning when slower, and never gates: its pull request's run was the
+      # gate, and a stated regression must not red main. A dispatch compares against its merge base.
+      - name: Main's commit to draw the renderer against
+        id: render-base
+        if: ${{ !cancelled() && !inputs.release }}
+        run: |
+          case "$GITHUB_EVENT_NAME" in
+            push | pull_request) echo "sha=$(git rev-parse HEAD^1)" >> "$GITHUB_OUTPUT" ;;
+            *) echo "sha=$(git merge-base origin/main HEAD)" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Keep main's renderer bench, by its commit and the bench's sources
+        if: ${{ !cancelled() && !inputs.release }}
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/render-main
+          key: render-bench-${{ steps.render-base.outputs.sha }}-${{ hashFiles('clients/SailApp/Sources/RenderBench/**') }}
+
+      - name: Main's renderer against the branch's, on this runner
+        if: ${{ !cancelled() && !inputs.release }}
+        env:
+          RENDER_AB_BASE: ${{ steps.render-base.outputs.sha }}
+          RENDER_AB_CACHE: ${{ runner.temp }}/render-main
+          RENDER_AB_GATING: ${{ github.event_name == 'push' && 'no' || 'yes' }}
+        run: ci/render-ab "$RUNNER_TEMP/render-ab"
 
       - name: Sign the shipped app with Developer ID
         if: env.SIGNING == 'on'
