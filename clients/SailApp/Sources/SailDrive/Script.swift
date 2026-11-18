@@ -137,8 +137,11 @@ struct Step: Decodable {
     var golden: [String]?
     /// The Workspaces pane says this, within `seconds` (10 by default), no call under way.
     var workspaces: String?
-    /// This name typed into the Workspaces pane's field and Make pressed; the call waited for.
-    var make: String?
+    /// This name typed into the Workspaces pane's field and Create pressed; the call waited for.
+    var create: String?
+    /// The controls' gallery sheet of this name ("button", "field", "pill", "spinner") shot in
+    /// every state and look, cut into `<control>-<state>-<look>.png`.
+    var kit: String?
     /// The Workspaces row of this name selected and Open pressed: a tab on the runner.
     var open: String?
     /// The Workspaces row of this name selected, what its button then says told.
@@ -159,8 +162,8 @@ struct Step: Decodable {
     var pressStatus: String?
     /// Sign Out pressed on the account, answered no further: what follows it asks.
     var signOutNow: Bool?
-    /// This name typed into the Workspaces pane's field and Make pressed; the call not waited for.
-    var makeStarts: String?
+    /// This name typed into the Workspaces pane's field and Create pressed; the call not waited for.
+    var createStarts: String?
     /// A ticket was asked with these fields (`{"action": "open", "workspace": "dock"}`), within
     /// `seconds` (15 by default).
     var ticketAsked: [String: String]?

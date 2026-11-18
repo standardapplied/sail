@@ -47,7 +47,7 @@ public struct Stalls: Sendable {
 /// A look at a thread, taken by a sampler: whether it was runnable, its CPU time so far, its
 /// whole process's CPU time so far, and the machine's CPU ticks so far, idle and busy (each tick
 /// 1/100 s of one CPU; nil where they could not be read).
-public struct ThreadLook: Sendable, Equatable {
+public struct ThreadLook: Sendable, Equatable, Codable {
     public static let tick = 0.01
 
     public var time: Double
@@ -115,8 +115,6 @@ public enum MachineShare {
             && from.idleTicks != nil && from.idleTicks == to.idleTicks
     }
 
-    /// The time in `wait` the machine is answerable for (``starvation(in:looks:)``), in seconds,
-    /// never more than the wait.
     /// The main run loop's modes as samples read them (nil: it ran none), each with how many
     /// samples saw it, the most seen first: whether the loop was in a mode that runs the main
     /// queue's blocks.
@@ -126,6 +124,8 @@ public enum MachineShare {
         return counted.sorted { $0.count != $1.count ? $0.count > $1.count : $0.mode < $1.mode }.map { "\($0.mode) at \($0.count)" }.joined(separator: ", ")
     }
 
+    /// The time in `wait` the machine is answerable for (``starvation(in:looks:)``), in seconds,
+    /// never more than the wait.
     public static func starved(in wait: Span, looks: [ThreadLook]) -> Double {
         min(starvation(in: wait, looks: looks).reduce(0) { $0 + $1.machines }, wait.length)
     }

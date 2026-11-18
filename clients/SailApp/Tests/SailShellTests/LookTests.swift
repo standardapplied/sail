@@ -60,7 +60,7 @@ import Testing
         let sources = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appending(path: "Sources")
         var read = 0
-        for target in ["SailLook", "SailShell", "SailAccount", "Sail", "SailTerminalView", "SailRenderer"] {
+        for target in ["SailLook", "SailShell", "SailAccount", "Sail", "SailTerminalView", "SailRenderer", "SailControls"] {
             let directory = sources.appending(path: target)
             for name in try FileManager.default.contentsOfDirectory(atPath: directory.path) where name.hasSuffix(".swift") {
                 let text = try String(contentsOf: directory.appending(path: name), encoding: .utf8)
@@ -70,7 +70,7 @@ import Testing
                 }
             }
         }
-        #expect(read >= 12)
+        #expect(read >= 19)
     }
 
     @Test func theTitleFontIsThePinnedNewsreaderMedium() throws {
@@ -174,7 +174,7 @@ import Testing
             #expect(pane.enroll.keyEquivalent.isEmpty, "\(name): Enroll answers Return")
             #expect(pane.signIn.keyEquivalent.isEmpty, "\(name): Sign In answers Return")
         }
-        #expect(pane.enroll.controlSize == .large && pane.enroll.intrinsicContentSize.height == shell.workspaces.make.intrinsicContentSize.height,
+        #expect(pane.enroll.controlSize == .large && pane.enroll.intrinsicContentSize.height == shell.workspaces.create.intrinsicContentSize.height,
                 "\(name): Enroll is not the size of the fields' buttons")
     }
 

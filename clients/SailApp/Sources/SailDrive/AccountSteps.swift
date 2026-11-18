@@ -28,18 +28,19 @@ extension Driver {
         if let variable = step.enroll {
             guard let ticket = ProcessInfo.processInfo.environment[variable], !ticket.isEmpty else { return (false, "\(variable) holds no ticket") }
             pane.ticket.stringValue = ticket
-            let idle = await settled(step) { pane.enroll.performClick(nil) }
-            return (idle && pane.ticket.stringValue.isEmpty, "the ticket field is \(pane.ticket.stringValue.isEmpty ? "empty" : "not empty"); \(said)")
+            let acted = await clicked(pane.enroll, named: "Enroll", step)
+            return (acted.ok && pane.ticket.stringValue.isEmpty, (acted.why.map { "\($0); " } ?? "") + "the ticket field is \(pane.ticket.stringValue.isEmpty ? "empty" : "not empty"); \(said)")
         }
         if step.signIn == true {
-            let idle = await settled(step) { pane.signIn.performClick(nil) }
+            let acted = await clicked(pane.signIn, named: "Sign In", step)
             if signed, let plane = try? ControlPlane(address: pane.address.stringValue), let held = try? KeychainVault().session(for: plane) {
                 tokens.insert(held.sessionToken)
             }
-            return (idle, said)
+            return (acted.ok, (acted.why.map { "\($0); " } ?? "") + said)
         }
         if step.signOut == true {
-            return (await settled(step) { pane.signOut.performClick(nil) }, said)
+            let acted = await clicked(pane.signOut, named: "Sign Out", step)
+            return (acted.ok, (acted.why.map { "\($0); " } ?? "") + said)
         }
         if let lines = step.exactly {
             let found = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.split(separator: "\n").map(String.init) == lines }
@@ -81,6 +82,20 @@ extension Driver {
     }
 
     /// Does `act` and waits until the pane has ended what it started.
+    /// Clicks `button` as a person would and waits until the action it started has ended (a check
+    /// of who is signed in may go on): refused, saying so, when the button was disabled, or the
+    /// click started no action within 2 s (a click a check of who is signed in swallowed once
+    /// ended in 0.03 s with nothing said, read as the sign-in's end).
+    private func clicked(_ button: NSButton, named name: String, _ step: Step) async -> (ok: Bool, why: String?) {
+        let pane = shell.account
+        guard button.isEnabled else { return (false, "\(name) was disabled when clicked\(pane.busy ? ", the pane busy" : "")") }
+        let began = pane.actions
+        button.performClick(nil)
+        guard await waitUntil(2, { pane.actions > began }) else { return (false, "the click on \(name) started nothing within 2 s") }
+        guard await waitUntil(step.seconds ?? 20, { !pane.isActing }) else { return (false, "\(name) was still under way after \(Int(step.seconds ?? 20)) s") }
+        return (true, nil)
+    }
+
     private func settled(_ step: Step, _ act: () -> Void) async -> Bool {
         let before = shell.account.ended
         act()

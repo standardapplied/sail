@@ -91,13 +91,13 @@ import Testing
         let rows = list.rows(for: "ana")
         #expect(rows.map(\.name) == ["try", "fix", "half", "dock", "old"])
         #expect(rows.map { $0.reading(for: "ana") } == [
-            "try · running", "fix · stopped", "half · not whole, make it again", "dock · running · uday", "old · paused",
+            "try · running", "fix · stopped", "half · not whole, create it again", "dock · running · uday", "old · paused",
         ])
         #expect(rows.map { $0.notOpened(for: "ana", admin: false) } == [
             nil, nil, nil, "dock is uday's: only uday or an admin can open it.", "No one owns old: only an admin can open it.",
         ])
         #expect(rows.allSatisfy { $0.notOpened(for: "ana", admin: true) == nil })
-        #expect(rows.map(\.said) == ["running", "stopped", "not whole, make it again", "running", "paused"])
+        #expect(rows.map(\.said) == ["running", "stopped", "not whole, create it again", "running", "paused"])
         #expect(rows.map { $0.opens(for: "ana", admin: false) } == [true, true, true, false, false])
         #expect(rows.allSatisfy { $0.opens(for: "uday", admin: true) })
         #expect(rows.map { $0.owner(apartFrom: "ana") } == [nil, nil, nil, "uday", nil])

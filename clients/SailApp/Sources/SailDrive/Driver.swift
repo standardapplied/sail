@@ -194,6 +194,9 @@ final class Driver {
         if let workspaces = await performWorkspaces(step) {
             return workspaces
         }
+        if let kit = await performKit(step) {
+            return kit
+        }
         if let text = step.type {
             for character in text { key(character) }
             return (true, "typed \(text.count) keys")
