@@ -58,16 +58,18 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     /// The rows. A new set keeps the chosen item chosen by its id wherever it now is, and tells
     /// `onChoose` only when the choice really changed (its item went).
     public var entries: [Entry] = [] {
+        willSet { kept = chosen }
         didSet {
-            let was = chosen
             reloading = true
             reloadData()
-            choose(was)
+            choose(kept)
             reloading = false
-            if chosen != was { onChoose(chosen) }
+            if chosen != kept { onChoose(chosen) }
         }
     }
 
+    /// The chosen item's id as the old rows had it, taken before they change.
+    private var kept: String?
     private var reloading = false
 
     public init(rowStyle: RowStyle, look: Look, mono: LabelFont) {
