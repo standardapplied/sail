@@ -80,11 +80,14 @@ extension Driver {
 
     /// A real click on a chosen row's ⋯ with its tooltip showing: the down sent through the window to
     /// the button, whose own tracking takes the queued up and sends its action, which opens the menu.
-    /// The chip must be gone as the menu opens; the screen is shot while the menu is up, and the
-    /// menu window's distance under the button's box is said.
+    /// The window stands at the top of the screen, so the menu has room under the button. The chip
+    /// must be gone as the menu opens, and the menu must hang 2 pt under the button's box (within
+    /// 1 pt) from its leading edge: its left at the box's left, its right at the box's right right to
+    /// left. The screen is shot while the menu is up.
     private func moreClick(mono: LabelFont, title: TitleFont) async -> (Bool, String) {
         let kit = Kit("row", look: .light, mono: mono, title: title)
         let window = kit.window
+        if let visible = (window.screen ?? NSScreen.main)?.visibleFrame { window.setFrameTopLeftPoint(NSPoint(x: visible.minX + 40, y: visible.maxY - 20)) }
         window.makeKeyAndOrderFront(nil)
         defer { window.orderOut(nil) }
         guard await waitUntil(5, { window.isKeyWindow }) else { return (false, "the gallery's window never became key") }
@@ -122,9 +125,13 @@ extension Driver {
         menu.delegate = nil
         guard watch.opened else { return (false, "the click on ⋯ opened no menu") }
         guard !watch.chipShown else { return (false, "⋯'s tooltip was still showing as its menu opened") }
+        guard let frame = watch.frame else { return (false, "the menu opened, but AppKit listed no menu window to measure") }
         let box = window.convertToScreen(more.convert(more.alignmentRect(forFrame: more.bounds), to: nil))
-        let under = watch.frame.map { String(format: "its window's top %.1f pt under the box, its left %.1f pt from the box's", Double(box.minY - $0.maxY), Double($0.minX - box.minX)) }
-        return (shot != nil, "the click opened ⋯'s menu with its tooltip gone; " + (under ?? "AppKit lists no menu window to measure") + "; shot more-click-light.png")
+        let rightToLeft = more.userInterfaceLayoutDirection == .rightToLeft
+        let gap = Double(box.minY - frame.maxY), edge = rightToLeft ? Double(frame.maxX - box.maxX) : Double(frame.minX - box.minX)
+        let said = String(format: "the menu's top %.1f pt under the box, its %@ edge %.1f pt from the box's", gap, rightToLeft ? "right" : "left", edge)
+        guard abs(gap - 2) <= 1, abs(edge) <= 1 else { return (false, said + ", not 2 pt under it from its leading edge") }
+        return (shot != nil, "the click opened ⋯'s menu with its tooltip gone; " + said + "; shot more-click-light.png")
     }
 
     static func views(in view: NSView) -> [NSView] {
