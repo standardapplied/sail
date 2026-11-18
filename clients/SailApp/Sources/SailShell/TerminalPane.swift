@@ -36,7 +36,7 @@ public final class TerminalPane: NSView {
     public private(set) var attachedOnce = false
     /// The end under way, nil once it answered.
     private var ending: Task<EndOutcome, Never>?
-    /// Whether the last end of this runner session was not confirmed: it may still be running.
+    /// Whether the last end of this session was not confirmed: it may still be running.
     public private(set) var unended = false
 
     var look: Look {
@@ -112,23 +112,18 @@ public final class TerminalPane: NSView {
         next.start()
     }
 
-    /// Ends the session at its host, then this client's part: on this pane's connection when it is
-    /// attached to this Mac's host, else on one of its own through the pane's door (a runner's ends
-    /// a session only for a connection that holds the write token, and says when it will not),
-    /// within `limit` in all, a session the host is still making waited for first
-    /// (``TerminalSession/end(within:)``); the task answers what the end came to, nil when nothing
-    /// is left to end. An end under way is the one answered, never a second. A local host that
-    /// cannot be reached keeps the session, which the next launch opens as a last tab.
+    /// Ends the session at its host, then this client's part, on a connection of its own through
+    /// the pane's door, the host's answer awaited (a runner's ends a session only for a connection
+    /// that holds the write token, and says when it will not), within `limit` in all, a session the
+    /// host is still making waited for first (``TerminalSession/end(within:)``); the task answers
+    /// what the end came to, nil when nothing is left to end. An end under way is the one answered,
+    /// never a second. An attached pane's end is no different: a Kill written to its connection and
+    /// not answered could be lost, leaving the session running with no pane.
     @discardableResult
     func end(within limit: Duration = Door.endLimit) -> Task<EndOutcome, Never>? {
         if let ending { return ending }
         guard let session else { return nil }
-        let phase = session.state.phase
-        if !place.onRunner, case .attached = phase, (try? session.kill()) != nil {
-            detach()
-            return nil
-        }
-        if case .ended = phase, !unended {
+        if case .ended = session.state.phase, !unended {
             detach()
             return nil
         }
@@ -152,16 +147,17 @@ public final class TerminalPane: NSView {
         return session.atHost != .none
     }
 
-    /// The tab stays while its runner session is ended, saying so.
+    /// The tab stays while its session is ended, saying so.
     func showEnding() {
-        banner.show("Ending this terminal on the runner…")
+        banner.show(place.onRunner ? "Ending this terminal on the runner…" : "Ending this terminal…")
     }
 
-    /// The runner did not confirm the end, said why: the tab stays, offering to end it again, or
-    /// to close it anyway, which leaves the session to run on.
+    /// The host did not confirm the end, said why: the tab stays, offering to end it again, or to
+    /// close it anyway, which leaves the session to run on.
     func showUnended(_ why: [String], endAgain: @escaping @MainActor () -> Void, closeAnyway: @escaping @MainActor () -> Void) {
         banner.show(
-            EndOutcome.mayStillRun("This terminal", why) + " Close Anyway leaves it there.", button: "End Again", handler: { MainActor.assumeIsolated { endAgain() } }, second: "Close Anyway",
+            EndOutcome.mayStillRun("This terminal", why, onThisMac: !place.onRunner) + " Close Anyway leaves it there.",
+            button: "End Again", handler: { MainActor.assumeIsolated { endAgain() } }, second: "Close Anyway",
             secondHandler: { MainActor.assumeIsolated { closeAnyway() } }
         )
     }
@@ -261,7 +257,7 @@ public final class TerminalPane: NSView {
             }
         case let .phase(.ended(end)) where place.onRunner:
             showEnded(end)
-        case let .phase(.ended(end)):
+        case let .phase(.ended(end)) where end != .closed:
             banner.show(end.said.joined(separator: " "))
         default:
             break

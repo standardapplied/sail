@@ -132,6 +132,35 @@ import Testing
         return session
     }
 
+    /// Played as this Mac's host, it ends what it is asked, refuses or holds Kills when told, and
+    /// lists what lives, driven here by the real client.
+    @Test func asThisMacsHostItEndsRefusesAndHoldsKills() async throws {
+        let door = try FakeRunnerDoor(thisMac: true)
+        defer {
+            door.releaseKills()
+            door.stop()
+        }
+        func attached(_ name: String) async throws -> TerminalSession {
+            let create = SessionCreate(session: name, command: [], workingDirectory: "/tmp", project: "", room: "", size: TerminalSize(columns: 80, rows: 24))
+            let session = TerminalSession(open: create, door: .local(.tcp(host: "127.0.0.1", port: door.port)), screen: try screen())
+            let watch = Watch(session)
+            session.start()
+            try await watch.attached(within: 10)
+            return session
+        }
+        let ended = try await attached("mac-a")
+        #expect(await ended.end() == .ended)
+        door.refuseKills(saying: "Session 'mac-b' is not yours.")
+        let refused = try await attached("mac-b")
+        #expect(await refused.end() == .unconfirmed(["Session 'mac-b' is not yours."]))
+        #expect(door.sessions == ["mac-b"])
+        let late = try await attached("mac-c")
+        door.holdKills()
+        #expect(await late.end(within: .seconds(1)) == .unconfirmed(["This Mac's terminal host did not answer within 1 s."]))
+        #expect(door.sessions == ["mac-b", "mac-c"])
+        #expect(door.kills == ["mac-a", "mac-b"], "the held Kill is not yet counted")
+    }
+
     @Test func itEndsASessionOnlyForItsWriterAndWelcomesATicketOnce() async throws {
         let door = try FakeRunnerDoor()
         defer { door.stop() }

@@ -33,12 +33,14 @@ public enum EndOutcome: Equatable, Sendable {
 
     /// What is true of a session whose end was not confirmed, `tab` naming it by its tab's title,
     /// `why` the end's words: no timeout ends a session left detached, so it runs, and keeps its
-    /// workspace running, until someone ends it or stops the workspace. The one sentence a closed
+    /// workspace running, until someone ends it or stops the workspace; on this Mac it runs until
+    /// someone ends it, and the next launch opens it as a tab of its own. The one sentence a closed
     /// tab, a quit and a sign-out say it in.
-    public static func mayStillRun(_ tab: String, _ why: [String]) -> String {
-        (["\(tab) may still be running on the runner."] + why
-            + ["If it is, it keeps running there, and keeps its workspace running, until someone ends it or stops the workspace."])
-            .joined(separator: " ")
+    public static func mayStillRun(_ tab: String, _ why: [String], onThisMac: Bool = false) -> String {
+        let (place, after) = onThisMac
+            ? ("this Mac", "If it is, it keeps running until someone ends it, and Sail opens it as a tab of its own at its next launch.")
+            : ("the runner", "If it is, it keeps running there, and keeps its workspace running, until someone ends it or stops the workspace.")
+        return (["\(tab) may still be running on \(place)."] + why + [after]).joined(separator: " ")
     }
 }
 
@@ -53,7 +55,7 @@ extension Door {
     /// the writer, then Kill; when someone else holds the token the door refuses, in its words.
     /// `total` is the whole deadline this end is the rest of, which is what a person is told.
     public func end(_ session: String, within limit: Duration = Door.endLimit, of total: Duration? = nil) async -> EndOutcome {
-        let said = "The runner did not answer within \(max(1, Int((total ?? limit).components.seconds))) s."
+        let said = "\(answerer) did not answer within \(max(1, Int((total ?? limit).components.seconds))) s."
         guard limit > .zero else { return .unconfirmed([said]) }
         let seconds = max(1, Int(limit.components.seconds))
         let ended: EndOutcome? = await Self.within(limit) { () async -> EndOutcome in
@@ -61,10 +63,25 @@ extension Door {
                 try await self.kill(session, timeout: seconds)
                 return .ended
             } catch {
-                return .of(error)
+                return await self.outcome(of: error, ending: session, timeout: seconds)
             }
         }
         return ended ?? .unconfirmed([said])
+    }
+
+    private var answerer: String {
+        if case .runner = self { "The runner" } else { "This Mac's terminal host" }
+    }
+
+    /// What a refused end comes to. This Mac's host refuses a Kill of a session it no longer holds
+    /// in words, with no code to tell it from any other refusal, so its own list says whether the
+    /// session is gone.
+    private func outcome(of error: TerminalError, ending session: String, timeout: Int) async -> EndOutcome {
+        guard case let .local(address) = self, case .refused = error,
+              let listed = try? await SessionListing.sessions(at: address, timeout: timeout),
+              !listed.contains(where: { $0.name == session && $0.live })
+        else { return .of(error) }
+        return .gone
     }
 
     /// Ends `session` on a connection of its own, each answer awaited at most `timeout` seconds.

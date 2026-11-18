@@ -461,13 +461,12 @@ public final class WorkbenchView: NSView {
         }
     }
 
-    /// Ends `views`' sessions. A runner tab stays until the runner says its session ended (or had
-    /// already); when the runner does not confirm, the tab says so and offers to end it again or to
+    /// Ends `views`' sessions. A pane stays until its host says its session ended (or had
+    /// already); when the host does not confirm, the pane says so and offers to end it again or to
     /// close it anyway, never vanishing as if it had ended.
     private func end(_ views: [TerminalPane]) {
         for view in views where panes[view.id] === view {
-            guard view.place.onRunner, let ending = view.end() else {
-                view.end()
+            guard let ending = view.end() else {
                 remove(view)
                 continue
             }

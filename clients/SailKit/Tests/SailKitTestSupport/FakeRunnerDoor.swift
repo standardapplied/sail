@@ -17,11 +17,18 @@ import Synchronization
 /// attach is answered and the connection goes on. A test can have someone else hold a session's
 /// write token, and hold a `Create`'s answer while the host makes it. Its live sessions are its
 /// session list.
+///
+/// Made `thisMac`, it plays this Mac's own host instead, as the real one admits its person: a
+/// blank token is welcomed, a connection does anything, a Kill ends the session it names or is
+/// refused as no session, and ListSessions lists the live ones. A test can have it refuse or
+/// hold its Kills.
 public final class FakeRunnerDoor: Sendable {
     public let port: UInt16
     private let listener: Int32
+    private let thisMac: Bool
     private let state = Mutex(State())
     private let creates = Mutex(Creates())
+    private let killing = Mutex(Killing())
 
     private struct State {
         var issued = 0
@@ -42,7 +49,15 @@ public final class FakeRunnerDoor: Sendable {
         var held: [DispatchSemaphore] = []
     }
 
-    public init() throws {
+    /// What this Mac's host does with the Kills it receives.
+    private struct Killing {
+        var refusal: String?
+        var holding = false
+        var held: [DispatchSemaphore] = []
+    }
+
+    public init(thisMac: Bool = false) throws {
+        self.thisMac = thisMac
         let socket = Self.socket()
         guard socket >= 0 else { throw DoorError("no socket for the door") }
         var address = sockaddr_in()
@@ -117,6 +132,26 @@ public final class FakeRunnerDoor: Sendable {
         state.withLock { $0.kills }
     }
 
+    /// From now on this Mac's host refuses every Kill, in `words`, its session left running.
+    public func refuseKills(saying words: String) {
+        killing.withLock { $0.refusal = words }
+    }
+
+    /// From now on a Kill waits, unanswered and its session running, until ``releaseKills()``.
+    public func holdKills() {
+        killing.withLock { $0.holding = true }
+    }
+
+    /// The Kills held go on: each session is ended, then answered.
+    public func releaseKills() {
+        let held = killing.withLock { killing in
+            killing.holding = false
+            defer { killing.held = [] }
+            return killing.held
+        }
+        held.forEach { $0.signal() }
+    }
+
     /// Someone else holds `session`'s write token from now on: an attach asking for it observes.
     public func holdWrite(_ session: String) {
         state.withLock { $0.writers[session] = 0 }
@@ -182,6 +217,10 @@ public final class FakeRunnerDoor: Sendable {
         guard receive(8, on: connection) == Handshake.magic else { return }
         transmit(Handshake.magic, on: connection)
         guard case let .hello(token) = frame(on: connection) else { return }
+        if thisMac, token.isEmpty {
+            answer(.welcome(hostBootID: "mac-1"), on: connection)
+            return served(connection)
+        }
         switch admit(token) {
         case let .success(ticket):
             answer(.welcome(hostBootID: "door-1"), on: connection)
@@ -242,6 +281,46 @@ public final class FakeRunnerDoor: Sendable {
                 continue
             }
         }
+    }
+
+    /// This Mac's host serving its person, who may do anything.
+    private func served(_ connection: Int32) {
+        while let frame = frame(on: connection) {
+            switch frame {
+            case let .create(create):
+                made(create.session)
+                answer(.accepted, on: connection)
+            case let .attach(session, _):
+                let live = state.withLock { $0.live.contains(session) }
+                answer(live ? .accepted : .refused(HostRefusal(message: "No live session '\(session)' to attach.", remedy: [])), on: connection)
+            case let .kill(session):
+                answer(killed(session), on: connection)
+            case .listSessions:
+                let live = state.withLock { $0.live }.map { SessionInfo(name: $0, instanceID: "i-\($0)", live: true, attached: 0, writerFDE: "", room: "", command: []) }
+                answer(.sessions(SessionPage(sessions: live, next: "")), on: connection)
+            default:
+                continue
+            }
+        }
+    }
+
+    /// This Mac's host's answer to a Kill of `session`, once Kills are no longer held.
+    private func killed(_ session: String) -> Frame {
+        let (held, refusal) = killing.withLock { killing -> (DispatchSemaphore?, String?) in
+            guard killing.holding else { return (nil, killing.refusal) }
+            let held = DispatchSemaphore(value: 0)
+            killing.held.append(held)
+            return (held, killing.refusal)
+        }
+        held?.wait()
+        let ended = state.withLock { state in
+            state.kills.append(session)
+            guard refusal == nil, state.live.contains(session) else { return false }
+            state.live.removeAll { $0 == session }
+            return true
+        }
+        if let refusal { return .refused(HostRefusal(message: refusal, remedy: [])) }
+        return ended ? .accepted : .refused(HostRefusal(message: "No session '\(session)'.", remedy: []))
     }
 
     /// Makes `session`, once the `Create`s are no longer held: as the host does, before it answers.

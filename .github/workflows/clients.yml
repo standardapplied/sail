@@ -220,6 +220,12 @@ jobs:
         working-directory: clients/SailApp
     env:
       SAIL_RECORD_GOLDENS: ${{ inputs.record-goldens && '1' || '0' }}
+      # The app's zip, and so its artifact, is named for this attempt of the run: a run's artifacts
+      # outlive their attempt, and download-artifact keeps one artifact per name, the one with the
+      # highest id, which need not be the newest. A re-run attempt's zip named as the first's was
+      # dropped from the list, and its download by its own id failed ("None of the provided
+      # artifact IDs were found", Clients run 44300832101, attempt 3).
+      SHIPPED: Sail-${{ github.sha }}${{ github.run_attempt != '1' && format('-attempt{0}', github.run_attempt) || '' }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -297,6 +303,10 @@ jobs:
           ../../ci/check min-macos "$binary"
           version=$("$binary" -V | tail -1)
           echo "$version"
+          if [[ $GITHUB_REF != refs/tags/* ]]; then
+            echo "a release dispatched from $GITHUB_REF_NAME, not from a tag, ships no app: cut the release from its tag" >&2
+            exit 1
+          fi
           [[ $version == "sail ${GITHUB_REF_NAME#v}" ]] || { echo "the binary is $version, not the release ${GITHUB_REF_NAME}" >&2; exit 1; }
           echo "SAIL_BINARY=$binary" >> "$GITHUB_ENV"
 
@@ -383,7 +393,7 @@ jobs:
           APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
         run: |
           mkdir -p "$RUNNER_TEMP/shipped"
-          ci/notarize "$RUNNER_TEMP/app/Sail.app" "$RUNNER_TEMP/shipped/Sail-$GITHUB_SHA.zip"
+          ci/notarize "$RUNNER_TEMP/app/Sail.app" "$RUNNER_TEMP/shipped/$SHIPPED.zip"
 
       # Checked on every build: the bundle's shape, the hardened runtime, no harness and no software
       # passkey in the shipped binary, no entitlements on the bundled sail, the bundled sail running
@@ -488,7 +498,7 @@ jobs:
         if: env.SIGNING == 'off'
         run: |
           mkdir -p "$RUNNER_TEMP/shipped"
-          ditto -c -k --keepParent "$RUNNER_TEMP/app/Sail.app" "$RUNNER_TEMP/shipped/Sail-unsigned-$GITHUB_SHA.zip"
+          ditto -c -k --keepParent "$RUNNER_TEMP/app/Sail.app" "$RUNNER_TEMP/shipped/${SHIPPED/#Sail-/Sail-unsigned-}.zip"
 
       # The zip ditto made, uploaded as it is (not zipped again), so the download is that zip and
       # one unzip gives Sail.app with its signature, stapled ticket, symlinks and modes; the

@@ -97,6 +97,9 @@ import Testing
         #expect(EndOutcome.mayStillRun("harbor · dock", ["The runner did not answer within 10 s."])
             == "harbor · dock may still be running on the runner. The runner did not answer within 10 s. If it is, it keeps running there, and keeps"
             + " its workspace running, until someone ends it or stops the workspace.")
+        #expect(EndOutcome.mayStillRun("This terminal", ["This Mac's terminal host did not answer within 10 s."], onThisMac: true)
+            == "This terminal may still be running on this Mac. This Mac's terminal host did not answer within 10 s. If it is, it keeps running"
+            + " until someone ends it, and Sail opens it as a tab of its own at its next launch.")
     }
 }
 

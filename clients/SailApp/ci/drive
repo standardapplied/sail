@@ -210,6 +210,9 @@ for run in first second third shots workspaces kit kit-rtl; do
   (( status == 0 )) || {
     echo "ci/drive: the sessions this Mac's host holds now:"
     "$sail" session ls --socket "$HOME/.sail/local/pty.sock" --json 2>&1 || true
+    echo "ci/drive: the arrangement the app saved; a live This Mac session it does not hold is the next launch's extra tab:"
+    defaults export "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" - 2> /dev/null \
+      | python3 -c 'import plistlib, sys; print(plistlib.loads(sys.stdin.buffer.read()).get("workbench.arrangement", b"none saved").decode())' 2>&1 || true
     reports=$HOME/Library/Logs/DiagnosticReports
     # The drive left no report (it crashed): ReportCrash writes its report some seconds later. Any
     # other failure is a step's, with no crash report to wait for.

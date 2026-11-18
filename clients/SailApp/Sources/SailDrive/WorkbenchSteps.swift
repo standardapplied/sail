@@ -177,7 +177,6 @@ extension Driver {
         return nil
     }
 
-    /// The sessions the host lists, each live or not.
     /// Whether the host holds, live, only This Mac sessions the workbench's panes hold, waiting up
     /// to `seconds` for ends still under way; else each it holds that no pane does, named. Such a
     /// session comes back as a tab at the next launch: `Workbench.restore` gives a tab to every
@@ -199,6 +198,7 @@ extension Driver {
         return (false, "the host holds live This Mac sessions no pane holds: \(unheld.joined(separator: ", ")); the panes hold \(held.sorted())")
     }
 
+    /// The sessions the host lists, each live or not.
     private func listedLive() async -> [String: Bool] {
         let sessions = (try? await SessionListing.sessions(at: workbench.host.address, timeout: 2)) ?? []
         return Dictionary(sessions.map { ($0.name, $0.live) }) { first, _ in first }
