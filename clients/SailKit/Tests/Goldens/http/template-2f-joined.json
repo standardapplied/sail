@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/projects/lighthouse/template:build"
+  },
+  "response": {
+    "body": {
+      "build": {
+        "by": "dana",
+        "joined": true,
+        "kept": 0,
+        "started_at": "2026-11-11T08:55:50.656Z",
+        "step": 9,
+        "step_started_at": "2026-11-11T08:59:20.656Z",
+        "steps": 20
+      },
+      "project": "lighthouse",
+      "schema_version": 1,
+      "stale": false,
+      "state": "building",
+      "steps": 20
+    },
+    "status": 202
+  }
+}

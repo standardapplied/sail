@@ -30,6 +30,11 @@ class CiChangesTest {
   private static final List<String> FILES =
       List.of(
           "sail-core/src/main/java/A.java",
+          "sail-core/src/test/java/ATest.java",
+          "sail-core/pom.xml",
+          "pom.xml",
+          ".github/actions/maven-cache/action.yml",
+          ".github/actions/incus/action.yml",
           "clients/SailApp/App.swift",
           "clients/SailKit/Kit.swift",
           "CHANGELOG.md",
@@ -63,13 +68,19 @@ class CiChangesTest {
     "clients/SailKit/Kit.swift, pull_request, false, true, true",
     "clients/SailKit/Kit.swift clients/SailApp/App.swift, pull_request, false, true, true",
     "clients/SailKit/Tests/Goldens/http/a.json, pull_request, true, true, true",
-    "sail-core/src/main/java/A.java, pull_request, true, true, false",
+    "sail-core/src/main/java/A.java, pull_request, true, true, true",
+    "sail-core/pom.xml, pull_request, true, true, true",
+    "pom.xml, pull_request, true, true, true",
+    ".github/actions/maven-cache/action.yml, pull_request, true, true, true",
+    ".github/actions/incus/action.yml, pull_request, true, true, false",
+    "sail-core/src/test/java/ATest.java, pull_request, true, true, false",
     ".github/workflows/ci.yml, pull_request, true, true, false",
     "README.md, pull_request, true, true, false",
     "clients/SailApp/App.swift README.md, pull_request, true, true, true",
     "ci/changes, pull_request, true, true, true",
     "clients/SailApp/App.swift, push, true, true, true",
-    "sail-core/src/main/java/A.java, push, true, true, false",
+    "sail-core/src/main/java/A.java, push, true, true, true",
+    "sail-core/src/test/java/ATest.java, push, true, true, false",
     "sail-core/src/main/java/A.java, workflow_dispatch, true, true, true"
   })
   void aChangeRunsTheLanesThatReadWhatItTouched(
@@ -93,7 +104,7 @@ class CiChangesTest {
 
   @ParameterizedTest(name = "{0} deleted: ci={1}, terminal={2}, clients={3}")
   @CsvSource({
-    "sail-core/src/main/java/A.java, true, true, false",
+    "sail-core/src/main/java/A.java, true, true, true",
     "clients/SailKit/Kit.swift, false, true, true",
     "clients/SailApp/App.swift, false, false, true"
   })

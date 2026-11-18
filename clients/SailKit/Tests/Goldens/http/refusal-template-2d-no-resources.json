@@ -1,0 +1,35 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/projects/harbor/template:build"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Set them first: project config set harbor resources {\"cpu\": 2, \"memory\": \"8GB\", \"disk\": \"50GB\"}.",
+        "code": "conflict",
+        "field_errors": [],
+        "message": "harbor's definition sets no CPU, memory or disk, so its template cannot be built.",
+        "remedy": [
+          {
+            "text": "Set them first: "
+          },
+          {
+            "args": [
+              "harbor",
+              "resources",
+              "{\"cpu\": 2, \"memory\": \"8GB\", \"disk\": \"50GB\"}"
+            ],
+            "run": "sail",
+            "verb": "project config set"
+          },
+          {
+            "text": "."
+          }
+        ]
+      },
+      "schema_version": 1
+    },
+    "status": 409
+  }
+}

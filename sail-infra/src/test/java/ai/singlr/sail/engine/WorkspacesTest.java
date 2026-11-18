@@ -16,6 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.commands.SailCommandLine;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.ByteArrayOutputStream;
@@ -430,6 +432,10 @@ class WorkspacesTest {
         List.of(
             "incus start acme--tmpl",
             String.join(" ", strip("acme--tmpl")),
+            String.join(
+                " ",
+                ContainerExec.asRoot(
+                    "acme--tmpl", List.of("bash", "-c", WorkspaceCredentials.HELD, "sail-held"))),
             "incus stop acme--tmpl"),
         shell.invocations().stream()
             .filter(
@@ -439,6 +445,81 @@ class WorkspacesTest {
                         && !c.startsWith("incus query")
                         && !c.startsWith("incus snapshot list"))
             .toList());
+  }
+
+  /** A template marked unproven, current at v1 and built from an older definition. */
+  private static String unproven(String current) {
+    return instance(
+        "acme--tmpl",
+        "Stopped",
+        "tank",
+        ("\"user.sail.template.of\": \"acme\", \"user.sail.template.inputs\": \"older\","
+                + " \"user.sail.template.unproven\": \"1\"")
+            + (current == null ? "" : ", \"user.sail.template.current\": \"" + current + "\""));
+  }
+
+  /**
+   * A template marked unproven (its build failed or was cut, and absence of its builder's tokens
+   * could not be shown) is never built upon: the next build restores its newest version's snapshot,
+   * made only once a build's strip and check passed, clears the mark, and runs every step again.
+   */
+  @Test
+  void anUnprovenTemplateIsRolledBackToItsNewestVersionBeforeItIsBuiltAgain() throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(unproven("v1")), snapshots("v1"));
+
+    var built = templates(shell).ensure(acme(), source());
+
+    var calls = shell.invocations();
+    var restored = calls.indexOf("incus snapshot restore acme--tmpl v1");
+    var cleared = calls.indexOf("incus config set acme--tmpl user.sail.template.unproven=");
+    var started = calls.indexOf("incus start acme--tmpl");
+    assertTrue(restored >= 0 && restored < cleared && cleared < started, calls.toString());
+    assertEquals(List.of(true), builtFresh, "every step runs again on the restored version");
+    assertEquals("v2", built.version());
+  }
+
+  /** With no version to restore, an unproven template is deleted and launched anew. */
+  @Test
+  void anUnprovenTemplateWithNoVersionIsDeletedAndLaunchedAnew() throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(unproven(null)), "[]");
+
+    templates(shell).ensure(acme(), source());
+
+    assertTrue(shell.invocations().contains("incus delete --force acme--tmpl"));
+    assertEquals(List.of(true), builtFresh);
+    assertEquals(1, builtInto.size());
+  }
+
+  /**
+   * A failed build is searched for its tokens after the strip, as a finished one is; a template
+   * that still holds one is marked unproven, so the next build rolls it back.
+   */
+  @Test
+  void aFailedBuildWhoseTemplateStillHoldsATokenIsMarkedUnproven() {
+    var shell =
+        incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"))
+            .on("sail-held", new ShellExec.Result(1, "a token this build was given", ""));
+
+    assertThrows(IOException.class, () -> templates(shell).ensure(acme(), failing()));
+
+    assertTrue(
+        shell.invocations().contains("incus config set acme--tmpl user.sail.template.unproven=1"),
+        shell.invocations().toString());
+  }
+
+  /**
+   * Workspaces clone a version's snapshot, never the template as it stands: one marked unproven
+   * still serves its current version, made only after that build's strip and check passed.
+   */
+  @Test
+  void aWorkspaceOfAnUnprovenTemplateIsAClonOfItsProvenSnapshot() throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(unproven("v1").replace("older", INPUTS)), snapshots("v1"));
+
+    workspaces(shell, ticks(0, 1, 2, 3, 4, 5, 6, 7, 8))
+        .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of);
+
+    assertTrue(indexOf(shell, copyArgv("v1")) >= 0, shell.invocations().toString());
+    assertEquals(List.of(), builtInto, "nothing is built: v1 is current");
   }
 
   @Test
@@ -1153,7 +1234,7 @@ class WorkspacesTest {
                     .create(acme(), "fix-login", source(), tempDir, "eng", TestOwners::of));
 
     assertEquals(
-        "Workspace 'fix-login' could not be made its own: fatal: could not read from remote",
+        "Workspace 'fix-login' could not be finished: fatal: could not read from remote",
         failure.getMessage());
     assertTrue(
         indexOf(shell, List.of("incus", "delete", "acme-fix-login", "--force"))
@@ -1619,7 +1700,7 @@ class WorkspacesTest {
             .orElseThrow()
             .state());
     var refusal =
-        "Workspace 'fix-login' of acme was never made whole: a create of it did not finish. Create"
+        "Workspace 'fix-login' of acme was never finished: its create did not complete. Create"
             + " it again, which replaces it: sail project workspace create acme fix-login.";
     assertEquals(
         refusal,
@@ -1836,10 +1917,17 @@ class WorkspacesTest {
     var failure =
         assertThrows(IllegalStateException.class, () -> templates(shell).ensure(acme(), source()));
 
+    var refused = assertInstanceOf(Remedied.class, failure);
     assertEquals(
         "Instance 'acme--tmpl' carries no user.sail.template.of of project acme, so it is not"
             + " acme's template and nothing is built into it.",
-        failure.getMessage());
+        refused.reason());
+    assertEquals(
+        Remedy.of(
+            "Move it aside, so the next build makes the template: ",
+            Remedy.program("incus", "rename", "acme--tmpl", "acme--tmpl-aside"),
+            "."),
+        refused.remedy());
     assertEquals(List.of(), builtInto);
     assertFalse(shell.invocations().stream().anyMatch(c -> c.contains("snapshot")));
   }
@@ -1892,10 +1980,15 @@ class WorkspacesTest {
     return outcomes;
   }
 
-  /** Returns once {@code thread} is started and parked, as on a lock another thread holds. */
+  /**
+   * Returns once {@code thread} is started and parked, as on a lock another thread holds: a create
+   * waits for a template's build no longer than {@link Workspaces#CREATE_WAIT}, so it parks timed.
+   */
   private static void awaitParked(AtomicReference<Thread> thread) {
     var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-    while (thread.get() == null || thread.get().getState() != Thread.State.WAITING) {
+    while (thread.get() == null
+        || !Set.of(Thread.State.WAITING, Thread.State.TIMED_WAITING)
+            .contains(thread.get().getState())) {
       assertTrue(System.nanoTime() < deadline, "the second create never waited on a lock");
       Thread.onSpinWait();
     }
@@ -2208,8 +2301,51 @@ class WorkspacesTest {
 
     var busy = assertInstanceOf(Workspaces.Busy.class, refused.get());
     assertEquals(
-        "acme's template is being built, and no workspace is cloned from it until it is.",
+        "acme's template is being built, and no workspace is created from it until it is. Try"
+            + " again once it is built: a build takes a few minutes.",
         busy.getMessage());
+    assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
+  }
+
+  /**
+   * Ruling A: a create from the command line that meets a build of its template waits no longer
+   * than {@link Workspaces#CREATE_WAIT}, as the app's does, and is refused as busy, naming the
+   * build's step of twenty and how long it has run, by the build's record.
+   */
+  @Test
+  void aCreateMeetingABuildOfItsTemplateIsBusyPastTheWaitNamingItsStepAndTime() throws Exception {
+    var shell = incus(DIR_AND_ZFS, list(template("v1", INPUTS)), snapshots("v1"));
+    var workspaces = workspaces(shell, ticks(0, Workspaces.CREATE_WAIT.toNanos()));
+    var record = TemplateRecord.fileOf(SailPaths.projectsDir(), "acme");
+    TemplateRecord.started("dana", NOW.minusSeconds(125), TemplateBuild.STEPS)
+        .at(9, NOW.minusSeconds(20))
+        .write(record);
+
+    var refused = new AtomicReference<Exception>();
+    try (var build = ContainerConfig.hold(locks(), "acme--tmpl")) {
+      var creating =
+          Thread.ofPlatform()
+              .start(
+                  () -> {
+                    try {
+                      workspaces.create(
+                          acme(), "fix-login", source(), tempDir, "eng", TestOwners::of);
+                    } catch (Exception e) {
+                      refused.set(e);
+                    }
+                  });
+      creating.join(TimeUnit.SECONDS.toMillis(30));
+      assertEquals(Thread.State.TERMINATED, creating.getState(), "the create waited unbounded");
+    } finally {
+      Files.deleteIfExists(record);
+    }
+
+    var busy = assertInstanceOf(Workspaces.Busy.class, refused.get());
+    assertEquals(
+        "acme's template is being built (step 9 of 20, 2 min 5 s in), and no workspace is created"
+            + " from it until it is. Try again once it is built: a build takes a few minutes.",
+        busy.getMessage());
+    assertEquals(List.of(), builtInto);
     assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
   }
 
@@ -2563,7 +2699,7 @@ class WorkspacesTest {
         refused
             .getMessage()
             .startsWith(
-                "Workspace acme-fix-login could not be made nobody's, so no run goes in it: "),
+                "Workspace acme-fix-login could not be left nobody's, so no run goes in it: "),
         refused.getMessage());
     assertFalse(
         shell.invocations().stream().anyMatch(c -> c.contains("sail-strip")),
@@ -2884,7 +3020,7 @@ class WorkspacesTest {
     assertTrue(running.invocations().stream().noneMatch(c -> c.startsWith("incus start")));
     assertEquals(
         "Spec fix-login has no workspace of acme on this runner (a done spec's is deleted), and an"
-            + " attach makes none: a run of the spec makes it. Dispatch one, which reopens a done"
+            + " attach creates none: a run of the spec creates it. Dispatch one, which reopens a done"
             + " spec, with: sail spec dispatch -p acme --spec fix-login --restart",
         refused.getMessage());
     var leaf =
@@ -4112,7 +4248,7 @@ class WorkspacesTest {
         refused
             .getMessage()
             .contains(
-                "Project acme is not destroyed: acme-new was made after the destroy read what it"
+                "Project acme is not destroyed: acme-new was created after the destroy read what it"
                     + " would delete."),
         refused.getMessage());
     assertTrue(refused.getMessage().contains("sail project destroy acme"), refused.getMessage());
@@ -4147,7 +4283,7 @@ class WorkspacesTest {
             .get()
             .getMessage()
             .contains(
-                "Project acme is not destroyed: This runner is making another workspace, which"
+                "Project acme is not destroyed: This runner is creating another workspace, which"
                     + " takes about a minute."),
         refused.get().getMessage());
     assertTrue(

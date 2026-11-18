@@ -988,7 +988,18 @@ SHA-256, and strips the Gatekeeper quarantine flag.
 
 **Container provisioning** (`ProjectProvisioner`) is an idempotent, resumable pipeline of
 nineteen steps, one per `ProjectPhase`, and a `ProvisionTracker` lets a failed run pick up where
-it stopped. The tracker resumes only for the definition it was written for: its state carries the
+it stopped. The network wait (step 4) is never taken as done while a later step will run: the
+container may have been started again since, and its address is waited for anew. A run that
+resumes then finishes what dpkg was left doing (`dpkg --configure -a`), since a run cut short while
+apt installed leaves every later apt step refused; every apt call, and that finish, waits up to five
+minutes for dpkg's lock a container's own apt timers may hold (`/etc/apt/apt.conf.d/90sail-lock-wait`,
+which a template's workspaces inherit, harmlessly). A repo is cloned beside its
+directory and renamed into place, so a run cut mid-clone resumes to a whole repo. Every step is
+safe to run twice: none asks on a terminal or collides with what a run before it left. A failed
+clone is said by how far its repo could be read, asked by exit status (`git ls-remote
+--exit-code` through the same credentials, then the host's own 401 to a plain request): read
+but not finished (a cause no status names: a dropped connection, a timeout, the disk), no such
+branch, refused (the token sentence, with the typed remedy that stores one), or not reached. The tracker resumes only for the definition it was written for: its state carries the
 SHA-256 of the definition's JSON document (`ProjectDefinitionJson.write`) and the workstation
 key's fingerprint (`ProjectProvisioner.inputs`), and progress recorded for another (or by a release that recorded none)
 restarts the run from the first step, each step re-checking its own effect. A finished run records
@@ -1288,6 +1299,55 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
 - **Commands.**
   - `sudo sail project template build <p>` builds it unless its current version was built from the
     definition as it is.
+  - `POST /v1/projects/{p}/template:build` (an admin, Access's Build a template) builds it the same
+    way, through the same lane (`TemplateBuild`, one implementation behind both doors), cloning with
+    the caller's own stored git tokens; the CLI clones with the box's person's and records them as
+    the builder. Every refusal is answered before anything changes: an admin's role, on a node its
+    own person's (others are told templates are built on main), resources in the definition, a
+    set-up runner (the command line's build refuses those two in the same words, from
+    `TemplateBuild.requireResources` and `hostOf`), and a token for every repo host that asks
+    (`login_not_stored`, its remedy typed). A member is told "Only an admin builds <p>'s
+    template.", a node's own person who is a member among them. The build then runs on a thread of sail-api's (`TemplateBuildService`), so it outlives
+    the request: `202` once it holds the template's lock, `200` when its version was built from the
+    definition as it is, answered as a read right after would answer with `outcome: current`
+    beside it. A second request while one
+    runs joins it (`202`, `build.joined`) and needs no token of its own, the CLI's build included;
+    one that arrives before this process's build holds the lock waits for it. Builds of different
+    projects run side by side.
+  - `GET /v1/projects/{p}/template` changes nothing and waits on nothing: a probe of the lock, the
+    record, one Incus read. It answers `state` (`ready` while a version is current, `building`,
+    `failed` when none is current and the last build failed or was cut short, else `missing`),
+    `version`, `stale`, `steps` (20) and `build`, the last build's record, so a rebuild that failed
+    while an older version serves is told beside that version. `GET /v1/projects` gives each
+    project's `template` state, Incus listed once for all.
+  - **The record.** Each build, from either door, keeps `<projects>/<p>/template-build.json`, written
+    whole and durably (a temporary file beside it, flushed, renamed over it, the directory flushed)
+    at every step: `by`, `started_at`, `step` of `steps`, `step_started_at`, `kept` (steps a
+    resumed build found done), and once it ends `outcome` (`built`, `failed` or `interrupted`),
+    `ended_at`, `reason` and `remedy`. Steps 1 to 19 are the provisioner's; step 20 is the lane's
+    finish (strip, check, stop, record, snapshot). A failure's reason is its words when written for
+    a person (`Remedied`); any other, a tool's output, goes to the log, and the record says the
+    runner could not finish. A template is building while its lock is held and its record has no
+    outcome: a create checking the version holds the lock too.
+  - **A build cut short** (sail-api restarted, a command-line build killed) leaves a record with no
+    outcome and a free lock. A read says it as it is, at once: `interrupted`, its template being
+    cleaned or cleaned within a minute. sail-api ends every one as it starts and then once a minute
+    (`TemplateBuild.CLEANUP_EVERY`), so a command-line build killed while sail-api runs is ended
+    within a minute, never left running with its builder's token until a restart: under the lock,
+    the template is started if stopped, stripped, searched for its builder's tokens (as stored
+    then; the values a build is given live only in its process and are never written) and
+    stopped, and only then is the record ended `interrupted`. A build whose process still holds
+    the lock is never touched. While it ends one, a read says the build was cut short, not that it
+    runs. The strip needs no dev user, so a template cut before step 6 made one is stripped too.
+  - **No token survives in a template, structurally.** Workspaces clone a version's snapshot
+    (`<p>--tmpl/v<n>`), made only after that build's strip and its search for the tokens it was
+    given passed; never the template as it stands. A build that failed or was cut short, whose
+    strip or search failed or found a token, or whose template could not be stopped after them (its
+    record says which), marks its template `user.sail.template.unproven`, and
+    the next build never builds on it: it restores the newest version's snapshot (or, with none,
+    deletes the template and launches it anew), clears the mark and runs every step. A strip and
+    search that passed is proof enough, as it is for a build that finished: the strip removes every
+    file a build writes a token to.
   - `sudo sail project workspace create <p> <name>` builds it first when there is none or it is
     stale. It then clones it with `incus copy <p>--tmpl/v<n> <p>-<name>`, passing the workspace's
     keys at the copy: `-c user.sail.project=<p> -c user.sail.workspace=<name> -c
@@ -1427,7 +1487,12 @@ Each row with the tests that prove it:
   - A stale template is converged on its disk, as apply converges a container: packages, repos and
     services the definition dropped stay in it. It is not built again from nothing.
   - The template's lock is held while it builds, and the template is read inside it, so a create
-    that waited for another's build clones what it built.
+    that waited for another's build clones what it built. A create, from either door, waits for
+    another's build no longer than `CREATE_WAIT` (60 s), then is refused `runner_busy` naming the
+    build's step of 20 and how long it has run, by its record.
+  - Whatever deletes a template holds that lock: a project's destroy, and a node's round that takes
+    a project main no longer grants it off the box (`Workspaces.holdIfFree(Instance)`), which
+    leaves a template whose build holds it to the round after.
 
   *`WorkspacesTest.aFailedBuildLeavesThePreviousVersionCurrentMakesNoSnapshotAndStopsTheTemplateItStarted`,
   `WorkspacesTest.aFailedBuildLeavesATemplateItFoundRunningRunningAndOneItLaunchedStopped`,
@@ -1436,7 +1501,13 @@ Each row with the tests that prove it:
   `WorkspacesTest.theTemplatesLockIsHeldWhileItBuilds`,
   `WorkspacesTest.twoCreatesOfOneStaleTemplateBuildItOnceAndBothCloneThatVersion`,
   `WorkspacesTest.twoCreatesOnABoxWithNoTemplateBuildItOnceIntoAFreshInstanceAndBothClone`,
-  `WorkspacesTest.aVersionNumberIsNeverGivenTwiceEvenWhenEverySnapshotIsGone`.*
+  `WorkspacesTest.aVersionNumberIsNeverGivenTwiceEvenWhenEverySnapshotIsGone`,
+  `WorkspacesTest.aCreateMeetingABuildOfItsTemplateIsBusyPastTheWaitNamingItsStepAndTime`,
+  `TemplateBuildServiceTest`, `ScopeChangeRoundTest.aTemplateBeingBuiltIsLeftToTheRoundAfterItsBuild`,
+  `WorkspaceIT.aNodesRoundLeavesATemplateItsBuildHoldsAndTheRoundAfterDeletesIt`,
+  `WorkspaceIT.aBuildThroughTheServiceIsJoinedRefusesACreateAndEndsWithItsTokenStripped`,
+  `WorkspaceIT.aKilledBuildIsCleanedOfItsTokenAsSailApiStartsAndBuildAgainBuildsIt`,
+  `WorkspaceIT.aRefusedCloneThenAStoredTokenResumesAtTheCloneAndEndsBuilt`.*
 - **W8. ZFS or nothing.**
   - A new template goes on the base profile's pool when it is ZFS, else on the one ZFS pool beside
     it. Several ZFS pools beside a pool that is not ZFS are refused, naming them.
@@ -1475,7 +1546,7 @@ Each row with the tests that prove it:
   each declaring `Gate.decides(ENTER_WORKSPACE)`. A start, a stop, a delete and a terminal's open
   hold the workspace's lock from their decision to their act, waiting for it no longer than 60 s
   (the sweep stopping or deleting it holds it), then `runner_busy`. A start of a workspace whose
-  labelled person is no longer active here is refused saying so, and that the next pass makes it
+  labelled person is no longer active here is refused saying so, and that the next pass leaves it
   no one's. A delete, at the CLI (`--force`) and the API alike, first reads under that lock what
   the workspace holds, with the idle sweep's reads (`WorkspaceHoldings`: `WorkspaceGit`, a
   stopped one started for it and stopped again when refused), and who is in it (Incus's running
@@ -1997,7 +2068,7 @@ the one whose name and keys match.
   `workspace-create.lock`, one create at a time, and refuses `runner_busy` when another create holds
   it past 60 s. The copy carries `user.sail.spec` and `user.sail.owner`; a reused workspace becomes
   the owner's of the run before anything of the run is staged. A create that fails releases the
-  run. Dispatch says `Workspace <w> made in 3.2 s` or `Workspace <w> reused`, and `--json` carries
+  run. Dispatch says `Workspace <w> created in 3.2 s` or `Workspace <w> reused`, and `--json` carries
   the instance, whether it was reused and its timings.
 - **One branch rule** (`WorkBranch.enter`). With B the run's branch: a fresh build whose B already
   exists, locally or on the remote, is refused naming `--restart`; a repo on B is left as it is,
@@ -3556,7 +3627,8 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 | Dispatch | dispatch or resume a spec; seat or remove a room agent | no | owner | yes | no | no | no |
 | Operate a run | stop it; attach to it; read its log | no | owner | yes | no | no | no |
 | Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | its own | its own | no |
-| Enter a workspace | open a terminal in a workspace; make, start, stop or delete one | no | owner | yes | no | no | no |
+| Enter a workspace | open a terminal in a workspace; create, start, stop or delete one | no | owner | yes | no | no | no |
+| Build a template | build or rebuild a project's template, which its workspaces are created from | no | no | yes | no | no | no |
 | Share | add, change or remove project files and skills | no | yes | yes | no | no | no |
 | Serve | start and stop the project's processes | no | yes | yes | own work | no | yes |
 | Restore | restore or delete a snapshot | no | yes | yes | no | no | no |
@@ -3864,7 +3936,7 @@ tick, never once each. An accept that fails while the listener stays bound (out 
 passed over after 100 ms and never ends the door. A presented ticket's credential is resolved
 again against the roster. The connection then keeps `TCP_NODELAY` and TCP keepalive (a vanished peer
 found dead within about a minute, its slot, attachment and write token released), speaks the unix
-socket's `SAILPTY3` frames for its ticket's one action on its one target alone (an open ticket
+socket's `SAILPTY4` frames for its ticket's one action on its one target alone (an open ticket
 creates one session in its project and attaches to it), and may end that one session only while it
 holds its write token, so an observer never ends one (`PtyTickets.Ticket#refusal`, the host's
 ownership check still deciding the kill), each frame decided again as on the unix
@@ -3873,6 +3945,88 @@ issued for no credential, for the host's own token (the box's person exists only
 socket) or for a machine token. `sail _pty-selftest`, the release smoke test, opens a loopback
 door, issues a ticket, presents it and hears one echo (`tcp-selftest: ok`), so the native binary
 runs the door and its keepalive options.
+
+**Files pasted into a session (`PtyUploads`).** A client uploads a file on the terminal connection
+it already holds, in frames 12-15 (`PutBegin`, `PutChunk`, `PutEnd`, `PutCancel`) answered by
+35-37 (`PutAck`, `PutStored`, `PutRefused`, a kind and the bound it met, or for `no_space` the
+bytes free, never a sentence: SailKit's `UploadRefusal.sentence` words each kind once). Nothing of a file is kept on
+the host: its bytes stream from the connection into the workspace. Four classes, one job each:
+`PtyUploads` answers the frames, names targets and files; `UploadAllowance` holds the bounds and a
+session's tally; `UploadCopy` is the shell that puts one file's bytes into a container, whole or not
+at all; `UploadCleanup` removes uploads from containers. Each has its tests (`PtyUploadsTest`
+through a real host, `UploadCopyTest` and `UploadCleanupTest` against a directory standing as the
+container, `UploadAllowanceTest` with no process at all); `PtyUploadIT` drives them against real
+Incus.
+- **U1. Only into the session's own workspace.** `PtyUploads.targetOf` alone names where a
+  session's files go: a session in a workspace into that workspace's own instance
+  (`<project>-<workspace>`, one person's); a session on the box itself has no container
+  (`no_container`), and one in a project's container shares it with every member's sessions
+  (`shared_container`), so nothing is stored there. The bytes never leave the connection to that host; the control plane never sees one.
+- **U3. Only the writer,** asked of the session (`PtySession.isWriter`) at `PutBegin`, at every chunk
+  and at `PutEnd`; a ticket admits the four client frames as it admits input.
+- **U4. The host names every path:** `/var/lib/sail-paste/<instanceId>/<n>-<name>`, the name reduced
+  to `[A-Za-z0-9._-]`, at most 96 bytes, `file` for nothing, `.` or `..` (`PtyUploads.named`, mirrored
+  by SailKit's `UploadName`). `/var/lib/sail-paste` is root's (`0755`), made and checked by the host
+  before every write and every delete; each session's directory is the dev user's alone (`0700`),
+  its files `0600`. `<n>` is the first number no file, link or temporary of that name takes.
+- **U5. Bounded on the host:** 64 MiB a file, 64 KiB a chunk, 256 files and 1 GiB a session
+  (`UploadAllowance`), taken from the session's allowance across its connections when an
+  upload begins and handed back by any upload that is not stored; the container checks the same
+  bounds against what the directory holds, and its disk's free space, before it opens the file. A
+  refusal is decided by a script's exit status, never by words: 11 `too_many`, 12 `session_full`,
+  28 `no_space` (no room before the file opens, or under 64 KiB free once a write failed, the
+  script printing what is free); a measurement that fails is `failed`. At most 16 uploads are
+  under way on the host (`PtyUploads.OPEN_ON_HOST`), else `busy`, which takes nothing of the
+  session's allowance.
+- **U6. Whole or nothing.** One `incus exec` per upload (`UploadCopy.OPEN`) runs as root to make the
+  directories, then as the dev user (`setpriv`) creates `.<n>-<name>.part` with `O_EXCL` (`set -C`: a
+  link at the name to a regular file, or to nothing, is refused; dash writes through one to a device
+  or a pipe, which only the dev user's own process could plant in that moment, and the commit then
+  refuses a temporary that is not a regular file) and copies its input into it; each chunk, in order and
+  within the declared size, is written to that input and acknowledged once written. The connection's
+  thread never writes to a workspace: it hands a chunk to the upload's own thread through a queue of
+  `PtyUploads.QUEUE` (4), and a client past it (the acknowledgement window is the backpressure) is
+  refused `failed`. A chunk not taken within `WRITE_DEADLINE` (30 s) ends the copy and is
+  `stalled`, and so is a copy that does not finish within it once its input is closed at the end;
+  an upload whose client sends nothing for `IDLE` (2 min) is given up and its copy ended. The
+  deadlines run on an injected timer, so the tests that prove them use none of the clock. Whatever
+  ends the writer, an unchecked exception included, gives the upload's share back. At `PutEnd`, from
+  the writer, with every byte there and the bytes' SHA-256 the client's, `COMMIT` gives the
+  temporary its name by a hard link (`ln -T`), which never overwrites nor links into a directory, once it is a regular file of the
+  declared size. Anything else (a refusal, a cancel, a detach, a dropped connection, a failed copy)
+  removes the temporary (`ABORT`), first ending every process in the workspace that holds it open:
+  ending the host's `incus exec` does not end the copy inside, and a copy stopped there would hold
+  the file for ever. `ABORT` matches a descriptor on the temporary's whole path, or that path
+  `(deleted)`, never a longer name such as another upload's temporary; it needs no `cd`, so the
+  session's removal coming first changes nothing; it tries five times, a fifth of a second apart,
+  and a holder left then (one stuck on a stalled disk) is logged (`upload-abort-held`). A cancel
+  after `PutEnd` changes nothing: the commit's answer stands. A connection that drops loses its
+  upload: the client says nothing was kept (`connection_lost`) before the end, and that whether it
+  was saved is not known (`not_known`) after it; nothing is asked of the host.
+- **U7. Typing first.** SailKit sends 32 KiB chunks, each frame written on its own, and no more than
+  two unacknowledged, so a key waits behind at most 96 KiB
+  (`UploadTests.aKeyTypedDuringAnUploadGoesOutAheadOfEveryChunkTheHostHasNotTaken`).
+- **U8. Gone with the session.** When a session ends no upload begins in it, every copy of its
+  uploads under way is ended at once, and its directory is
+  removed as root on a thread of its own (`UploadCleanup.REMOVE`), never under the host's lock: a commit and the
+  removal take the session's lock in turn, so a file is stored before the removal or the upload is
+  answered `session_ended`. The next session made in a container removes, under that container's
+  lock, every directory there named as an instance id whose session is not live (`UploadCleanup.SWEEP`); a
+  session's first upload takes the same lock, so the sweep never removes what a live session is
+  making. No delete follows a link: each checks the root is a directory, not a link, and root's,
+  and `rm -r` removes a link as itself, walking by descriptor, so nothing in the container can turn a
+  delete outside the uploads; the dev user cannot write the root or swap its own directory.
+
+**Where a session opens (`PtySessionHost.folderOf`).** One rule. A session in a container or a
+workspace starts its `incus exec` in `/` on the box and its shell in the instance's own
+`/home/dev/workspace`, as `sail project workspace shell` does; the folder a `Create` names is not
+used for it, and the app names none (`Place.sessionCreate`, the one place a tab's `Create` is
+built). A session on the box itself opens in the folder named by its absolute path, or in the
+host's own home when none is named; one that is no folder here is refused naming the folder
+(`PtyAdmission.Folder.onThisBox`). A session whose process does not start says so in a sentence
+("Could not start session '<name>' on this box."), and what the process launcher said goes to the
+host's log, never to the person. `RealRunnerTests.theAppsOwnCreateForAWorkspaceTabOpensInTheWorkspaceAndEchoes`
+opens a workspace on a real host with the app's own `Create`.
 
 **The terminal host on a person's own machine.** `sail _pty-host --local` (`LocalPtyHost`) is the
 same host wired for the account it runs as, with no server: the native app's launchd agent runs
@@ -4566,7 +4720,10 @@ three instance buffers (`FrameLedger`), box
 drawing, blocks, underline styles and cursors drawn as pixel sprites, the Mac key-code table and
 the typing rules, pointer and wheel gestures, and the latency marks. `SailApp` holds the rest:
 `SailLook` (JetBrains Mono 2.304 and Newsreader 500, vendored with their OFLs and pinned by
-checksum, and the Sail look's tokens, type steps and spacing), `SailRenderer` (Metal and Core Text,
+checksum; it re-exports SailKit's `SailDesign`, the Sail look's tokens, type steps and spacing and
+what each control is in each state, pure Swift tested on Linux), `SailControls` (the controls every
+pane is drawn from, each a thin AppKit view over `SailDesign`'s tables; the drive's `kit` run shoots
+each in every state and look), `SailRenderer` (Metal and Core Text,
 no AppKit), `SailTerminalView` (the `NSView`), `SailAccount` (the platform's passkeys and the
 Keychain), `SailShell` (the app: window, rail, the account and "This Mac"), `SailTestPasskey` (a
 software passkey, never shipped), and two executables: `Sail`, shipped, and `SailDrive`, the drive
@@ -4622,20 +4779,23 @@ paravirtual Metal device renders offscreen and reads back exactly: the renderer'
 frame fails past 0.1% of its pixels; emoji cells are left out of that and must hold colour), the
 view's input tests with synthesized events (every suite `swift test list` names, each in its own
 bounded run by `ci/test-suites`, which fails when a listed suite passes no test of its own or a
-test stands outside any suite), the app driven against the pinned darwin `sail`'s
-local host with its latency budgets and against two control planes that `sail` starts on the runner (the drive waits, at every step, until the view has drawn the
+test stands outside any suite), the app driven against the local host of this commit's darwin
+`sail` (built once per run by the workflow's `host` job, which both macOS lanes wait for) with its latency budgets and against two control planes that `sail` starts on the runner (the drive waits, at every step, until the view has drawn the
 screen's text in full; the renderer bench takes 300 full redraws, drawn offscreen with nothing read
 back, on the drawing thread's CPU clock with the wall clock beside it), and the bundle checked on
 every build. With all seven signing secrets (`ci/signing`
 decides, and fails on some but not all) it is signed with Developer ID, its profile embedded and
 its entitlements claimed, notarized, stapled and assessed by Gatekeeper; without them it is uploaded as an unsigned build and the signed-only check
 is skipped. Goldens are recorded only by the workflow's `record-goldens`
-input, never by a pull request's run. This job and the SailKit jobs run only when `clients/` or
-the workflow changed (a job skipped by `if:` reports success, so no required check waits on it).
+input, never by a pull request's run. This job and the SailKit jobs run only when `clients/`, the
+workflow, or what the darwin `sail` is built from (the build files and the Java modules' main
+sources) changed (`ci/changes`; a job skipped by `if:` reports success, so no required check waits
+on it).
 A release calls the workflow for this job alone (`release.yml`'s `app`): its app bundles the
 `sail-darwin-arm64` the release built and signed in the same run, used only once its sha256 is the
 published one and its cosign signature is `release.yml`'s at that tag, so the app and the release
-ship one binary, built and attested once; the app's zip is that run's artifact.
+ship one binary, built and attested once; the app's zip is that run's artifact. The job that builds
+this commit's darwin `sail` (`host`) and the SailKit jobs do not run in a release.
 
 ### The Sail app signs in with a passkey
 

@@ -3,6 +3,8 @@ import SailAPI
 import SailTerminal
 import SailTerminalWire
 import SailVT
+import SailWorkbench
+import Synchronization
 
 /// A terminal client with no window: it opens a session on this machine's host or on a runner,
 /// runs a script of steps against it, prints the screen, and leaves a JSON report.
@@ -37,6 +39,7 @@ struct Probe {
                 let verdict = budget.reported ? "" : " (limit \(budget.limit)) \(budget.met ? "met" : "MISSED")"
                 print("\(budget.name): \(String(format: "%.3f", budget.milliseconds))\(verdict)")
             }
+            bench.said.forEach { print($0) }
             try report.write(to: path)
             return report.passed
         case let .run(run):
@@ -54,6 +57,7 @@ struct Probe {
         )
         var host: LocalHostProcess?
         defer { host?.stop() }
+        var tickets: RecordingTickets?
         let door: Door
         let echoBudget: Double
         switch run.host {
@@ -69,10 +73,16 @@ struct Probe {
             guard let token = ProcessInfo.processInfo.environment[variable], !token.isEmpty else {
                 throw ProbeError("the environment variable \(variable) holds no token")
             }
-            create.project = project
-            create.workspace = workspace
-            create.workingDirectory = "/tmp"
-            door = .runner(SailClient(transport: URLSessionTransport(base: api), token: token))
+            if workspace.isEmpty {
+                create.project = project
+                create.workingDirectory = "/tmp"
+            } else {
+                create = Place.workspace(project: project, name: workspace).sessionCreate(session: create.session, size: create.size)
+                create.command = script.command
+            }
+            let recorded = RecordingTickets(SailClient(transport: URLSessionTransport(base: api), token: token))
+            tickets = recorded
+            door = .runner(recorded)
             echoBudget = echoBudgets.runner
         }
         let session = TerminalSession(open: create, door: door, screen: screen)
@@ -83,13 +93,14 @@ struct Probe {
         session.start()
         say("session \(create.session)")
         if script.endWhileOpening { return await endWhileOpening(session) }
-        let report = await Runner(session: session, host: host, echoBudget: echoBudget) { result in
+        var report = await Runner(session: session, host: host, echoBudget: echoBudget) { result in
             say("\(result.ok ? "ok" : "FAILED") \(result.step) (\(String(format: "%.1f", result.milliseconds)) ms)\(result.detail.map { ": \($0)" } ?? "")")
         }.run(script)
         if case let .ended(end) = session.state.phase {
             say("a person reads: " + end.said.joined(separator: " | "))
         }
         session.close()
+        report.connections = tickets?.asked ?? []
         try capture?.close()
         print(try screen.text())
         report.budgets.forEach { say("\($0.name): \(String(format: "%.3f", $0.milliseconds)) ms (limit \($0.limit)) \($0.met ? "met" : "MISSED")") }
@@ -118,6 +129,32 @@ struct Probe {
 
     private static func say(_ line: String) {
         FileHandle.standardError.write(Data((line + "\n").utf8))
+    }
+}
+
+/// Tickets from the API, each request kept: one per connection the session makes to its host, so
+/// the report shows every connection the run opened.
+final class RecordingTickets: TicketSource {
+    private let source: any TicketSource
+    private let requests = Mutex<[String]>([])
+
+    init(_ source: any TicketSource) {
+        self.source = source
+    }
+
+    var asked: [String] {
+        requests.withLock { $0 }
+    }
+
+    func ticket(for request: TicketRequest) async throws(SailError) -> TerminalTicket {
+        let named =
+            switch request {
+            case let .open(project, workspace):
+                workspace.isEmpty ? "a ticket to open a session in \(project)" : "a ticket to open a session in workspace \(workspace) of \(project)"
+            case let .attach(session): "a ticket to attach to \(session)"
+            }
+        requests.withLock { $0.append(named) }
+        return try await source.ticket(for: request)
     }
 }
 

@@ -4397,7 +4397,7 @@ make a workspace of acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 40
 make a workspace of acme as api member bob acme	ok WorkspaceCreateResponse
 make a workspace of acme as api member bob all	ok WorkspaceCreateResponse
 make a workspace of acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
-make a workspace of acme as api member machine all	denied FORBIDDEN 403 This credential names no person, and a workspace is made for the person who asks. | 
+make a workspace of acme as api member machine all	denied FORBIDDEN 403 This credential names no person, and a workspace is created for the person who asks. | 
 make a workspace of acme as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
 make a workspace of acme as api viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
 make a workspace of acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.

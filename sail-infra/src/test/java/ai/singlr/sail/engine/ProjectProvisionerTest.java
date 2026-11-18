@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinitionJson;
@@ -454,8 +456,14 @@ class ProjectProvisionerTest {
     assertTrue(steps.get(3).contains("step:4/"));
   }
 
+  /**
+   * A run that resumes skips the steps done, but waits for the container's network again before the
+   * next: the container may have been started again since (a restart of sail-api cut a template's
+   * build short, and its cleanup stopped it), and a step that downloads would otherwise meet no
+   * network.
+   */
   @Test
-  void resumeFromPackagesSkipsFirstFiveSteps() throws Exception {
+  void resumeFromPackagesSkipsTheStepsDoneButWaitsForTheNetworkAgain() throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     setupTracker.load(ProjectProvisioner.inputs(fullConfig(), Optional.empty()));
@@ -481,10 +489,23 @@ class ProjectProvisionerTest {
 
     provisioner.provision(fullConfig(), hostYaml(), none(fullConfig()), GIT, null);
 
-    assertEquals(30, steps.size());
+    assertEquals(31, steps.size());
     assertTrue(steps.get(0).contains("skipped:1/"));
-    assertTrue(steps.get(4).contains("skipped:5/"));
-    assertTrue(steps.get(5).contains("step:6/"));
+    assertTrue(steps.get(2).contains("skipped:3/"));
+    assertTrue(steps.get(3).contains("step:4/"), steps.get(3));
+    assertTrue(steps.get(4).contains("done:4/"), steps.get(4));
+    assertTrue(steps.get(5).contains("skipped:5/"));
+    assertTrue(steps.get(6).contains("step:6/"));
+    var waited = indexOf(shell, "ip -4 addr show eth0 | grep -q inet");
+    var finished = indexOf(shell, "dpkg --configure -a");
+    var next = indexOf(shell, "id dev");
+    assertTrue(waited >= 0 && waited < finished && finished < next, shell.invocations().toString());
+    var finish = shell.invocations().get(finished);
+    assertTrue(
+        finish.contains("-eq 2") && finish.contains("seq 1 300"),
+        "the finish asks again while dpkg's lock is held: " + finish);
+    var lockWait = indexOf(shell, "/etc/apt/apt.conf.d/90sail-lock-wait");
+    assertTrue(lockWait >= 0 && lockWait < next, "every apt call waits for dpkg's lock");
   }
 
   @Test
@@ -511,10 +532,78 @@ class ProjectProvisionerTest {
 
     provisioner.provision(fullConfig(), hostYaml(), none(fullConfig()), GIT, null);
 
-    assertEquals(29, steps.size());
+    assertEquals(30, steps.size());
     assertTrue(steps.get(0).contains("skipped:1/"));
-    assertTrue(steps.get(5).contains("skipped:6/"));
-    assertTrue(steps.get(6).contains("step:7/"));
+    assertTrue(steps.get(3).contains("step:4/"), steps.get(3));
+    assertTrue(steps.get(6).contains("skipped:6/"));
+    assertTrue(steps.get(7).contains("step:7/"));
+  }
+
+  /**
+   * Every one of the nineteen steps is safe to run twice, as a resumed or repeated run runs it: a
+   * whole run, then every step again from the first, against the same container, both finishing,
+   * with no command that would ask on a terminal it has none of or collide with what the first run
+   * left (a key file gpg would ask to overwrite, a link or directory that exists, a user made
+   * twice, a line appended twice, a clone into a directory that exists).
+   */
+  @Test
+  void everyStepRunsTwiceWithNothingThatAsksOrCollides() throws Exception {
+    var config =
+        new ProjectDefinition(
+            "acme-health",
+            "Acme Health Platform",
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
+            "ubuntu/24.04",
+            List.of("postgresql-client-16"),
+            new ProjectDefinition.Runtimes(25, "22", "3.9.9"),
+            List.of(new ProjectDefinition.Repo("https://github.com/acme/app.git", "app", null)),
+            fullConfig().services(),
+            fullConfig().processes(),
+            fullConfig().agent(),
+            null);
+    var shell =
+        allSuccessShell()
+            .onFail("test -d /home/dev/workspace/app", "")
+            .onFail("/opt/maven/bin/mvn --version", "No such file");
+
+    for (var run = 0; run < 2; run++) {
+      var tracker = tracker();
+      tracker.load(ProjectProvisioner.inputs(config, Optional.empty()));
+      tracker.reset();
+      new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN)
+          .provision(config, hostYaml(), none(config), GIT, null);
+      assertTrue(tracker.isComplete());
+    }
+
+    var unsafe = new ArrayList<String>();
+    var calls = shell.invocations();
+    for (var i = 0; i < calls.size(); i++) {
+      var call = calls.get(i);
+      if ((call.matches(".*\\| gpg .*") && !call.contains("gpg --batch --yes"))
+          || call.matches(".*\\bln -s(?!f).*")
+          || call.matches(".*\\bmkdir (?!-p).*")
+          || call.contains(">>")
+          || (call.contains("apt-get install") && !call.contains("-y"))
+          || (call.contains("git clone") && !call.contains(ProjectProvisioner.PARTIAL))
+          || (call.contains("useradd") && !calls.subList(0, i).contains(INCUS_ID_DEV))) {
+        unsafe.add(call);
+      }
+    }
+    assertEquals(List.of(), unsafe);
+  }
+
+  private static final String INCUS_ID_DEV = "incus exec acme-health -- id dev";
+
+  /** A first run, which nothing cut short before it, has no packages to finish. */
+  @Test
+  void aFirstRunAsksDpkgToFinishNothing() throws Exception {
+    var shell = allSuccessShell();
+    var tracker = tracker();
+
+    new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN)
+        .provision(fullConfig(), hostYaml(), none(fullConfig()), GIT, null);
+
+    assertEquals(-1, indexOf(shell, "dpkg --configure -a"), shell.invocations().toString());
   }
 
   @Test
@@ -605,6 +694,11 @@ class ProjectProvisionerTest {
     var cmds = shell.invocations();
     assertTrue(cmds.contains("incus exec simple -- dpkg -s temurin-25-jdk"));
     assertTrue(cmds.stream().anyMatch(c -> c.endsWith("apt-get install -y -qq temurin-25-jdk")));
+    assertTrue(
+        cmds.stream()
+            .anyMatch(
+                c -> c.contains("gpg --batch --yes --dearmor -o /usr/share/keyrings/adoptium")),
+        "a keyring a run cut short left is replaced, never asked about on a terminal it has none of");
     assertAlreadyProvisioned(steps, cmds);
     assertTrue(steps.contains("done:9/19:JDK 25 (Temurin)"), steps.toString());
   }
@@ -2399,19 +2493,146 @@ class ProjectProvisionerTest {
     var shell =
         shellThroughStep10()
             .onFail("test -d /home/dev/workspace/acme", "")
-            .onFail("git clone", "fatal: repository not found");
+            .onFail("git clone", "fatal: repository not found")
+            .on("git ls-remote", new ShellExec.Result(128, "", "fatal: could not read Username"))
+            .asks(url -> url.equals("https://github.com/acme/app.git"));
     var tracker = tracker();
     var provisioner =
         new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var ex =
         assertThrows(
-            IOException.class,
+            IllegalStateException.class,
             () ->
                 provisioner.provision(
                     configWithRepos(repos), hostYaml(), none(configWithRepos(repos)), GIT, null));
-    assertTrue(ex.getMessage().contains("Failed to clone"));
+    var refused = (Remedied) ex;
+    assertEquals(
+        "github.com did not give acme-health's repo acme: the repo may ask for a token, or may not"
+            + " exist.",
+        refused.reason());
+    assertEquals(
+        Remedy.of(
+            "Store a token for github.com that reads it, then try again: ",
+            Remedy.sail("git login", "github.com"),
+            "."),
+        refused.remedy());
+    assertTrue(ex.getCause().getMessage().contains("fatal: repository not found"));
     assertEquals("REPOS_CLONED", tracker.currentState().error().failedPhase());
+  }
+
+  /**
+   * A failed clone is said by how far its repo could be read, asked again by exit status alone: the
+   * token sentence is for a refusal, never for a host that cannot be reached, a branch that is not
+   * there, or a clone that could not be written.
+   */
+  @Test
+  void aFailedCloneIsSaidByHowFarItsRepoCouldBeReadNeverByGitsWords() {
+    var repo = new ProjectDefinition.Repo("https://github.com/acme/app.git", "app", "develop");
+    var given = Map.of("github.com", "ghp_given");
+    var said = "remote: Repository not found.\nfatal: repository not found";
+
+    var reasons = new ArrayList<String>();
+    for (var reach : ProjectProvisioner.CloneReach.values()) {
+      reasons.add(
+          ((Remedied) ProjectProvisioner.cloneFailed(minimalConfig(), repo, given, reach, said))
+              .reason());
+    }
+
+    assertEquals(
+        List.of(
+            "simple's repo app could be read, but its clone did not finish.",
+            "github.com has no branch develop in simple's repo app.",
+            "github.com did not give simple's repo app to the token stored for it: the token may"
+                + " not read the repo, or the repo may not exist.",
+            "github.com could not be reached to clone simple's repo app."),
+        reasons);
+    assertTrue(reasons.stream().noneMatch(reason -> reason.contains("fatal")));
+  }
+
+  /**
+   * How far a failed clone's repo could be read is asked by exit status: {@code git ls-remote
+   * --exit-code} answering 0 (read), 2 (no such branch), or else, then the host's own 401 to a
+   * plain request telling a refusal from a host not reached.
+   */
+  @Test
+  void aFailedClonesRepoIsAskedAgainByExitStatusAndTheHostsOwnAnswer() throws Exception {
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/acme/app.git", "acme", "develop"));
+    var said = new ArrayList<String>();
+    for (var answer :
+        List.of(
+            new ShellExec.Result(0, "abc refs/heads/develop", ""),
+            new ShellExec.Result(2, "", ""),
+            new ShellExec.Result(128, "", "fatal"))) {
+      var shell =
+          shellThroughStep10()
+              .onFail("test -d /home/dev/workspace/acme", "")
+              .onFail("git clone", "fatal: something")
+              .on("git ls-remote", answer);
+      var refused =
+          assertThrows(
+              IllegalStateException.class,
+              () ->
+                  new ProjectProvisioner(
+                          shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN)
+                      .provision(
+                          configWithRepos(repos),
+                          hostYaml(),
+                          none(configWithRepos(repos)),
+                          GIT,
+                          null));
+      said.add(((Remedied) refused).reason());
+      assertTrue(
+          shell.invocations().stream()
+              .anyMatch(
+                  c ->
+                      c.endsWith(
+                          "git ls-remote --exit-code -- https://github.com/acme/app.git"
+                              + " refs/heads/develop")));
+      Files.deleteIfExists(tempDir.resolve("provision-state.yaml"));
+    }
+
+    assertEquals(
+        List.of(
+            "acme-health's repo acme could be read, but its clone did not finish.",
+            "github.com has no branch develop in acme-health's repo acme.",
+            "github.com could not be reached to clone acme-health's repo acme."),
+        said);
+  }
+
+  /**
+   * M2: a run cut mid-clone resumes to a whole repo. The clone is made beside the repo's directory
+   * and renamed into place, so the cut leaves no half a clone where the repo goes; the run that
+   * resumes removes the leftover and clones again.
+   */
+  @Test
+  void aRunCutMidCloneResumesToAWholeRepoNeverToTheHalfTheCutLeft() throws Exception {
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/acme/app.git", "acme", null));
+    var config = configWithRepos(repos);
+    var cut =
+        shellThroughStep10()
+            .onFail("test -d /home/dev/workspace/acme", "")
+            .onThrow("git clone", new IOException("the exec ended with sail-api"));
+    assertThrows(
+        IOException.class,
+        () ->
+            new ProjectProvisioner(cut, tracker(), null, Optional.empty(), OperatorCommand.PLAIN)
+                .provision(config, hostYaml(), none(config), GIT, null));
+
+    var resumed = shellThroughStep10().onFail("test -d /home/dev/workspace/acme", "");
+    var tracker = tracker();
+    new ProjectProvisioner(resumed, tracker, null, Optional.empty(), OperatorCommand.PLAIN)
+        .provision(config, hostYaml(), none(config), GIT, null);
+
+    var partial = "/home/dev/workspace/acme" + ProjectProvisioner.PARTIAL;
+    var cleared = indexOf(resumed, "rm -rf -- " + partial);
+    var cloned = indexOf(resumed, "git clone -- https://github.com/acme/app.git " + partial);
+    var placed = indexOf(resumed, "mv -T -- " + partial + " /home/dev/workspace/acme");
+    assertTrue(
+        cleared >= 0 && cleared < cloned && cloned < placed, resumed.invocations().toString());
+    assertTrue(tracker.isComplete());
   }
 
   @Test
@@ -3168,5 +3389,15 @@ class ProjectProvisionerTest {
     public void onStepFailed() {
       events.add("failed");
     }
+  }
+
+  private static int indexOf(ScriptedShellExecutor shell, String part) {
+    var calls = shell.invocations();
+    for (var i = 0; i < calls.size(); i++) {
+      if (calls.get(i).contains(part)) {
+        return i;
+      }
+    }
+    return -1;
   }
 }

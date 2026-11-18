@@ -42,6 +42,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 
@@ -197,6 +198,7 @@ public final class PtySessionHost implements AutoCloseable {
   private final PtyIdentity.Resolver identity;
   private final PtyAdmission admission;
   private final PtyEvents events;
+  private final PtyUploads uploads;
   private final String version;
   private final Limits limits;
   private final Handoff handoff;
@@ -325,12 +327,39 @@ public final class PtySessionHost implements AutoCloseable {
       Limits limits,
       Handoff handoff,
       Network network) {
+    this(
+        socketPath,
+        sessionsDir,
+        journalCapacity,
+        identity,
+        admission,
+        events,
+        version,
+        limits,
+        handoff,
+        network,
+        PtyUploads.intoContainers());
+  }
+
+  PtySessionHost(
+      Path socketPath,
+      Path sessionsDir,
+      long journalCapacity,
+      PtyIdentity.Resolver identity,
+      PtyAdmission admission,
+      PtyEvents events,
+      String version,
+      Limits limits,
+      Handoff handoff,
+      Network network,
+      PtyUploads uploads) {
+    this.uploads = uploads;
     this.socketPath = socketPath;
     this.sessionsDir = sessionsDir;
     this.journalCapacity = journalCapacity;
     this.identity = identity;
     this.admission = admission;
-    this.events = events;
+    this.events = new EndingEvents(events, uploads::ended);
     this.version = version;
     this.limits = limits;
     this.handoff = handoff;
@@ -686,6 +715,8 @@ public final class PtySessionHost implements AutoCloseable {
     var bound = admission.bound();
     var principal = who.fde();
     String opened = null;
+    PtyUploads.Upload upload = null;
+    Consumer<PtyMessage> replies = msg -> reply(channel, msg);
     var me = new Admitted(channel, admission.credential(), who);
     admitted.add(me);
     try {
@@ -785,7 +816,35 @@ public final class PtySessionHost implements AutoCloseable {
                 attached.takeWrite(subscriberId, who.fde());
               }
             }
+            case PtyMessage.PutBegin m -> {
+              if (attached == null) {
+                reply(channel, new PtyMessage.Err("Attach before uploading."));
+              } else if (upload != null && !upload.over()) {
+                reply(channel, new PtyMessage.PutRefused(m.id(), PtyMessage.PutRefusal.FAILED, 0));
+              } else {
+                upload = uploads.begin(m, attached, subscriberId, replies);
+              }
+            }
+            case PtyMessage.PutChunk m -> {
+              if (!uploads.chunk(upload, m, replies)) {
+                upload = null;
+              }
+            }
+            case PtyMessage.PutEnd m -> {
+              if (upload != null && upload.id() == m.id()) {
+                uploads.end(upload, m, replies);
+                upload = null;
+              }
+            }
+            case PtyMessage.PutCancel m -> {
+              if (upload != null && upload.id() == m.id()) {
+                uploads.discard(upload);
+                upload = null;
+              }
+            }
             case PtyMessage.Detach m -> {
+              uploads.discard(upload);
+              upload = null;
               if (attached != null) {
                 attached.detach(subscriberId);
                 attached = null;
@@ -811,6 +870,7 @@ public final class PtySessionHost implements AutoCloseable {
     } catch (IOException disconnected) {
       var unused = disconnected;
     } finally {
+      uploads.discard(upload);
       if (attached != null) {
         attached.detach(subscriberId);
       }
@@ -1158,7 +1218,7 @@ public final class PtySessionHost implements AutoCloseable {
     }
     PtyAdmission.Folder folder;
     try {
-      folder = admission.folder(cwd, who);
+      folder = folderOf(m.project(), cwd, who);
     } catch (IOException refused) {
       log("refused", who.fde(), m.session(), "folder");
       return new PtyMessage.Err(
@@ -1180,6 +1240,13 @@ public final class PtySessionHost implements AutoCloseable {
               room,
               folder.command(m.command()),
               m.workspace());
+      uploads.sweep(
+          origin,
+          () ->
+              sessions.values().stream()
+                  .filter(PtySession::live)
+                  .map(live -> live.origin().instanceId())
+                  .toList());
       var env = childEnv(room, version);
       env.putAll(folder.env());
       var argv = new ArrayList<>(handoff.shim().apply(files.exit()));
@@ -1201,10 +1268,36 @@ public final class PtySessionHost implements AutoCloseable {
       return new PtyMessage.Ok();
     } catch (IOException e) {
       deleteFiles(files, who.fde(), m.session());
-      return new PtyMessage.Err(
-          "Could not start session '" + m.session() + "': " + Remedied.reasonOf(e),
-          Remedied.remedyOf(e));
+      return notStarted(m.session(), e, who);
     }
+  }
+
+  /**
+   * Where a session of {@code project} opens, for {@code who}, asked for in {@code cwd}: in a
+   * container or a workspace, always where its instance starts it ({@link
+   * PtyAdmission.Folder#INSTANCE}); on this box itself, where the admission says, which refuses a
+   * folder that is not one here.
+   */
+  PtyAdmission.Folder folderOf(String project, Path cwd, PtyIdentity.Person who)
+      throws IOException {
+    return Strings.isBlank(project) ? admission.folder(cwd, who) : PtyAdmission.Folder.INSTANCE;
+  }
+
+  /**
+   * What a person reads when session {@code session} did not start: the failure's own words when
+   * they were written for a person ({@link Remedied}), else that it could not start here, and what
+   * the process launcher said goes to this host's log, never to the person.
+   */
+  private static PtyMessage.Err notStarted(
+      String session, IOException failure, PtyIdentity.Person who) {
+    if (failure instanceof Remedied) {
+      return new PtyMessage.Err(
+          "Could not start session '" + session + "': " + Remedied.reasonOf(failure),
+          Remedied.remedyOf(failure));
+    }
+    log("start-failed", who.fde(), session, failure.toString());
+    return new PtyMessage.Err(
+        "Could not start session '" + session + "' on this box.", PtyAdmission.Unavailable.REMEDY);
   }
 
   /**

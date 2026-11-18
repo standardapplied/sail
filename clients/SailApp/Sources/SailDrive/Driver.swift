@@ -51,7 +51,14 @@ final class Driver {
     }()
     let mainThread = Heartbeat.onTheMainThread { CACurrentMediaTime() }
     let ownThread = Heartbeat.onItsOwnThread { CACurrentMediaTime() }
-    lazy var mainStacks = MainStacks(watching: mainThread)
+    private var madeStacks: MainStacks?
+    /// The main thread's sampler, begun the first time a measure asks for it, and kept.
+    var mainStacks: MainStacks {
+        if let madeStacks { return madeStacks }
+        let made = MainStacks(watching: mainThread)
+        madeStacks = made
+        return made
+    }
     /// Every stretch of a judged wait excused as the machine's, with its evidence, once each.
     private var excused: [String] = []
 
@@ -156,9 +163,10 @@ final class Driver {
             Self.say("drive \(index) \(name): \(skipped ? "skipped" : ok ? "ok" : "FAILED") in \(String(format: "%.2f", seconds)) s \(detail)")
             if !ok { break }
         }
-        let withinClaim = mainStacks.watcherShare <= MainStacks.claim
+        let withinClaim = madeStacks.map { $0.watcherShare <= MainStacks.claim } ?? true
         Self.say("drive: \(excused.count) stretch\(excused.count == 1 ? "" : "es") of a judged wait excused as the machine's"
-            + (excused.isEmpty ? "" : ": " + excused.joined(separator: "; ")) + "; the main thread's sampler took \(mainStacks.cost)"
+            + (excused.isEmpty ? "" : ": " + excused.joined(separator: "; "))
+            + (madeStacks.map { "; the main thread's sampler took \($0.cost)" } ?? "; the main thread's sampler never ran: no step measured a wait")
             + (withinClaim ? "" : "; FAILED: the watcher took more of a CPU than its claim"))
         let passed = results.count == steps.count && results.allSatisfy(\.ok) && withinClaim
         let report = Report(
@@ -181,6 +189,9 @@ final class Driver {
         }
         if let workspaces = await performWorkspaces(step) {
             return workspaces
+        }
+        if let kit = await performKit(step) {
+            return kit
         }
         if let text = step.type {
             for character in text { key(character) }
@@ -390,8 +401,38 @@ final class Driver {
         return (max(verdict.shown, verdict.held) * 1000, "the longest any output waited to be shown: \(ours(figures.longestToShown).said); "
             + "the main thread's longest hold: \(mainHeld().said); its longest gap between commits \(Self.ms(gap * 1000)) ms, "
             + "\(figures.longestGapOutputs) outputs reached the screen in it, a drawable was being asked for \(Self.ms(figures.longestGapFetching)) ms of it; "
-            + "the main thread took the wake for an output at most \(Self.ms((figures.longestToTold?.length ?? 0) * 1000)) ms after the screen took it, "
+            + "the main thread took the wake for an output at most \(Self.ms((figures.longestToTold?.length ?? 0) * 1000)) ms after the screen took it"
+            + Self.posting(figures) + (figures.longestToTold.map { "; across that wake's wait, " + mainStacks.readers(across: $0) } ?? "")
+            + "; the reader runs at quality of service " + Self.quality(pane?.session?.readerQuality) + ", "
             + "\(figures.wakes) wakes for \(figures.changes) screen changes")
+    }
+
+    /// Where the longest wake's wait went: the session's thread handing it to the main queue after
+    /// the screen took the output, and the main thread taking it after it was handed over. The
+    /// hand-off is stamped on both sides, so each is said as a range; a stamp the main thread
+    /// overtook is said unknown, never stood in for.
+    static func posting(_ figures: LatencyFigures) -> String {
+        guard let hop = figures.longestToTold, let handing = figures.longestToToldHanding else { return "" }
+        let began = ms((handing - hop.start) * 1000), takenBy = ms((hop.end - handing) * 1000)
+        guard let handed = figures.longestToToldHanded else {
+            return " (posted between \(began) ms and an unknown time after the screen took it, taken between an unknown time and \(takenBy) ms after it was posted: "
+                + "the main thread took it before the hand-off's return was stamped)"
+        }
+        return " (posted between \(began) and \(ms((handed - hop.start) * 1000)) ms after the screen took it, taken between \(ms((hop.end - handed) * 1000)) "
+            + "and \(takenBy) ms after it was posted)"
+    }
+
+    /// A quality of service as the flood's line names it.
+    static func quality(_ quality: QualityOfService?) -> String {
+        guard let quality else { return "unknown (no reader yet)" }
+        switch quality {
+        case .userInteractive: return "user-interactive"
+        case .userInitiated: return "user-initiated"
+        case .utility: return "utility"
+        case .background: return "background"
+        case .default: return "default"
+        @unknown default: return "unknown"
+        }
     }
 
     func measurement(_ name: String, keys: Int, figures: LatencyFigures, budgets: [String: Bool]) -> Measure {
@@ -421,9 +462,9 @@ final class Driver {
         let ours = max(0, wait.length - tick - MachineShare.of(wait, own: own, main: looks)) * 1000
         let seen = looks.filter { $0.time >= wait.start && $0.time <= wait.end }.count
         proven.map(\.told).filter { !excused.contains($0) }.forEach { excused.append($0) }
-        let evidence = proven.isEmpty
+        let evidence = (proven.isEmpty
             ? "no run of \(MachineShare.fewestLooks) looks proved it starved (\(seen) looks in the wait)"
-            : proven.map(\.told).joined(separator: "; ")
+            : proven.map(\.told).joined(separator: "; ")) + "; the main run loop's mode, " + mainStacks.modes(in: wait)
         return (ours, "waited \(Self.ms((wait.length - tick) * 1000)) ms, the drive's own thread held \(Self.ms(ownHeld * 1000)) ms of it, "
             + "the main thread runnable without CPU on a machine with none idle \(Self.ms(starved * 1000)) ms of it (\(evidence)), ours \(Self.ms(ours)) ms")
     }

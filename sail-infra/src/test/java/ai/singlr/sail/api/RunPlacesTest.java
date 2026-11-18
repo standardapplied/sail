@@ -198,7 +198,7 @@ class RunPlacesTest {
 
     assertEquals(ErrorCode.COMMAND_FAILED, failed.failure().errorCode());
     assertEquals(
-        "Workspace auth of acme could not be made ready: Failed to clone acme--tmpl/v1 as"
+        "Workspace auth of acme could not be readied: Failed to clone acme--tmpl/v1 as"
             + " 'acme-auth': disk full",
         failed.getMessage());
     assertEquals(ErrorCode.COMMAND_FAILED, interrupted.failure().errorCode());
@@ -223,8 +223,8 @@ class RunPlacesTest {
 
     assertEquals(ErrorCode.COMMAND_FAILED, failed.failure().errorCode());
     assertEquals(
-        "Workspace auth of acme could not be made ready: Workspace 'auth' could not be made its"
-            + " own: acme-auth got no address on eth0 within 30 s, so its repos cannot be fetched",
+        "Workspace auth of acme could not be readied: Workspace 'auth' could not be finished:"
+            + " acme-auth got no address on eth0 within 30 s, so its repos cannot be fetched",
         failed.getMessage());
     assertEquals("Then dispatch again.", failed.failure().remedy().plain());
     assertTrue(
@@ -307,7 +307,7 @@ class RunPlacesTest {
             .map(
                 remedy ->
                     "This box has 1 spec workspace with a live run, as many as its memory holds at"
-                        + " acme's 4GB each (a cap of 1), so no new workspace is made. "
+                        + " acme's 4GB each (a cap of 1), so no new workspace is created. "
                         + remedy)
             .toList(),
         told,
@@ -476,7 +476,8 @@ class RunPlacesTest {
 
     assertEquals(ErrorCode.RUNNER_BUSY, refused.get().failure().errorCode());
     assertEquals(
-        "acme's template is being built, and no workspace is cloned from it until it is.",
+        "acme's template is being built, and no workspace is created from it until it is. Try"
+            + " again once it is built: a build takes a few minutes.",
         refused.get().getMessage());
     assertEquals("Then dispatch again.", refused.get().failure().remedy().plain());
   }

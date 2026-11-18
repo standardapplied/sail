@@ -62,14 +62,17 @@ public final class ProjectTemplateCommand implements Runnable {
       WorkspaceVerbs.requireRoot(dryRun, spec);
       CliCommand.requireJsonOrDryRun(json, dryRun);
       var config = WorkspaceVerbs.buildable(project, operator);
-      var tokens = WorkspaceVerbs.Keeper.here().check(config);
+      var keeper = WorkspaceVerbs.Keeper.here();
+      var tokens = keeper.check(config);
       if (!json) {
         Banner.printBranding(System.out, Ansi.AUTO);
         System.out.println();
       }
       var template =
           WorkspaceVerbs.templates(dryRun)
-              .ensure(config, WorkspaceVerbs.source(config, tokens, dryRun, json, operator));
+              .ensure(
+                  config,
+                  WorkspaceVerbs.source(config, tokens, keeper.who(), dryRun, json, operator));
       if (json) {
         System.out.println(CliJson.stringify(template));
         return;

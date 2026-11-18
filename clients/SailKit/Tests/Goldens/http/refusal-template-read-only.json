@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/projects/lighthouse/template:build"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Ask an admin for a member or admin credential.",
+        "code": "read_only_credential",
+        "field_errors": [],
+        "message": "Your credential is read-only and cannot build templates."
+      },
+      "schema_version": 1
+    },
+    "status": 403
+  }
+}

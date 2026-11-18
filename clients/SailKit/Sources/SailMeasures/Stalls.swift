@@ -47,7 +47,7 @@ public struct Stalls: Sendable {
 /// A look at a thread, taken by a sampler: whether it was runnable, its CPU time so far, its
 /// whole process's CPU time so far, and the machine's CPU ticks so far, idle and busy (each tick
 /// 1/100 s of one CPU; nil where they could not be read).
-public struct ThreadLook: Sendable, Equatable {
+public struct ThreadLook: Sendable, Equatable, Codable {
     public static let tick = 0.01
 
     public var time: Double
@@ -113,6 +113,15 @@ public enum MachineShare {
         let interval = to.time - from.time
         return interval > 0 && interval <= longestGap && from.runnable && to.runnable && to.cpu - from.cpu < interval * cpuAllowed
             && from.idleTicks != nil && from.idleTicks == to.idleTicks
+    }
+
+    /// The main run loop's modes as samples read them (nil: it ran none), each with how many
+    /// samples saw it, the most seen first: whether the loop was in a mode that runs the main
+    /// queue's blocks.
+    public static func modes(_ seen: [String?]) -> String {
+        guard !seen.isEmpty else { return "no sample" }
+        let counted = Dictionary(grouping: seen) { $0 ?? "not running" }.map { (mode: $0.key, count: $0.value.count) }
+        return counted.sorted { $0.count != $1.count ? $0.count > $1.count : $0.mode < $1.mode }.map { "\($0.mode) at \($0.count)" }.joined(separator: ", ")
     }
 
     /// The time in `wait` the machine is answerable for (``starvation(in:looks:)``), in seconds,

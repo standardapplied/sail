@@ -57,10 +57,3 @@ public final class AccentButton: NSButton {
         didSet { setTitle(title) }
     }
 }
-
-extension NSColor {
-    /// A token with its opacity.
-    convenience init(_ tint: Tint) {
-        self.init(srgbRed: Double(tint.rgb.red) / 255, green: Double(tint.rgb.green) / 255, blue: Double(tint.rgb.blue) / 255, alpha: tint.alpha)
-    }
-}

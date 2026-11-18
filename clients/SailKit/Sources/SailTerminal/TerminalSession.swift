@@ -32,6 +32,8 @@ public final class TerminalSession: Sendable {
     public static let stableAttachment = Duration.seconds(5)
     /// How long a size must hold before it is sent to the host.
     public static let resizeHold = Duration.milliseconds(60)
+    /// The name of the thread that reads the host's frames and feeds the screen, so a sampler finds it.
+    public static let readerName = "sh.standardapplied.sail.terminal.reader"
     /// How many events wait for an app that is not reading them; the oldest go first.
     public static let eventBacklog = 256
     /// The largest grid a session takes, from the app or from its host.
@@ -55,6 +57,7 @@ public final class TerminalSession: Sendable {
     private let sequence = Mutex<Int64>(0)
     private let latency = Mutex(LatencyRecorder())
     private let tap = Relay<[UInt8]>()
+    let uploads = Uploads()
     private let alarm: Alarm
     private let sleep: @Sendable (Duration) async throws -> Void
     private let after: HoldTick.After
@@ -63,6 +66,7 @@ public final class TerminalSession: Sendable {
     private let patience: Duration
     private let eventSink: AsyncStream<SessionEvent>.Continuation
     private let screenListener = Relay<ContinuousClock.Instant>()
+    private let reader = Mutex<QualityOfService?>(nil)
     private let clock = ContinuousClock()
 
     private struct Core {
@@ -186,6 +190,11 @@ public final class TerminalSession: Sendable {
     /// time the screen changed, with when it took the output; nil stops new calls, while a call
     /// already begun may still finish. Nothing stands between the change and the call, so it must
     /// return at once: what draws hands the change on.
+    /// The quality of service the reader thread of the latest connection runs at; nil before one.
+    public var readerQuality: QualityOfService? {
+        reader.withLock { $0 }
+    }
+
     public func onScreenChange(_ listener: (@Sendable (ContinuousClock.Instant) -> Void)?) {
         screenListener.set(listener)
     }
@@ -385,6 +394,77 @@ public final class TerminalSession: Sendable {
         self.tap.set(tap)
     }
 
+    /// Uploads `source` as `name` into the session's own workspace, on the attached connection: the
+    /// path the host stored it at, which needs no quoting. One upload goes at a time; a later one
+    /// waits its turn. Refused with an ``UploadRefusal`` before a byte is sent when this machine's
+    /// own host serves the session (it has no workspace), the file is larger than
+    /// ``UploadPacing/largest``, or this client is known to be watching, not writing; refused by the
+    /// host for its own reasons. A connection that drops loses the upload: before the end is sent,
+    /// nothing was kept (``UploadRefusal/Kind/connectionLost``); after it, whether the host stored
+    /// it is not known (``UploadRefusal/Kind/notKnown``). Cancelling the task before the end is sent
+    /// cancels the upload, and the host keeps nothing; after it, the host's answer stands. A read of
+    /// `source` that fails throws its own error. `progress` hears the bytes the host holds as they
+    /// grow.
+    public func upload(
+        name: String, source: UploadSource, progress: @escaping @Sendable (Int64) -> Void = { _ in }
+    ) async throws -> String {
+        let refusal = { (kind: UploadRefusal.Kind, limit: Int64) in
+            UploadRefusal(kind: .known(kind), limit: limit, file: name, size: source.size)
+        }
+        if case .local = door { throw refusal(.noContainer, 0) }
+        guard source.size <= UploadPacing.largest else { throw refusal(.tooLarge, UploadPacing.largest) }
+        try await uploads.enter()
+        defer { uploads.leave() }
+        let (connection, writing) = core.withLock { ($0.connection, $0.writing) }
+        guard let connection else { throw refusal(.connectionLost, 0) }
+        guard writing else { throw refusal(.notWriter, 0) }
+        let flight = uploads.begin(on: connection)
+        defer { uploads.finish(flight) }
+        let outcome: UploadFlight.Outcome
+        do {
+            outcome = try await send(source, as: name, on: flight, progress: progress)
+        } catch is TerminalError {
+            connection.close()
+            flight.dropped(connection)
+            outcome = await flight.outcome()
+        } catch {
+            try? flight.send(.putCancel(id: flight.id))
+            throw error
+        }
+        switch outcome {
+        case let .stored(path):
+            progress(source.size)
+            return path
+        case let .refused(kind, limit): throw UploadRefusal(kind: kind, limit: limit, file: name, size: source.size)
+        case .ended: throw refusal(.sessionEnded, 0)
+        case .cancelled:
+            try? flight.send(.putCancel(id: flight.id))
+            throw CancellationError()
+        }
+    }
+
+    /// Sends `source` on `flight`, paced by ``UploadPacing``: the outcome, or the error sending or
+    /// reading it.
+    private func send(
+        _ source: UploadSource, as name: String, on flight: UploadFlight, progress: @Sendable (Int64) -> Void
+    ) async throws -> UploadFlight.Outcome {
+        try flight.send(.putBegin(id: flight.id, name: name, size: source.size))
+        if let early = await flight.wait(until: 0) { return early }
+        var digest = SHA256()
+        var offset: Int64 = 0
+        while offset < source.size {
+            let bytes = try source.read(Int(min(Int64(UploadPacing.chunk), source.size - offset)))
+            guard !bytes.isEmpty else { throw UploadSourceShrank() }
+            digest.update(bytes)
+            try flight.send(.putChunk(id: flight.id, offset: offset, bytes: bytes))
+            offset += Int64(bytes.count)
+            if let early = await flight.wait(until: offset - Int64(UploadPacing.window * UploadPacing.chunk)) { return early }
+            progress(flight.acked)
+        }
+        try flight.send(.putEnd(id: flight.id, sha256: digest.finalize()))
+        return await flight.outcome()
+    }
+
     /// Asks the host for the write token, which it grants to any attached client; once granted, the
     /// view's size goes to the host, so the pty takes the new writer's size.
     public func takeWrite() {
@@ -460,7 +540,7 @@ public final class TerminalSession: Sendable {
         let intent = core.withLock { $0.intent }
         if case let .open(create) = intent, !Self.fits(GridSize(columns: Int(create.size.columns), rows: Int(create.size.rows))) {
             return .finished(.refused(HostRefusal(
-                message: "a terminal of \(create.size.columns)x\(create.size.rows) cells is larger than \(Self.largestGrid)", remedy: nil
+                message: "a terminal of \(create.size.columns)x\(create.size.rows) cells is larger than \(Self.largestGrid)", remedy: []
             )))
         }
         let entry: (address: HostAddress, token: String)
@@ -474,9 +554,12 @@ public final class TerminalSession: Sendable {
             return .failed(error)
         }
         return await withCheckedContinuation { result in
-            Thread {
+            let reader = Thread {
+                self.reader.withLock { $0 = Thread.current.qualityOfService }
                 result.resume(returning: self.connect(to: entry.address, token: entry.token, generation: generation))
-            }.start()
+            }
+            reader.name = Self.readerName
+            reader.start()
         }
     }
 
@@ -583,6 +666,8 @@ public final class TerminalSession: Sendable {
         let attached = clock.now
         var outcome = read(connection, since: attached)
         connection.close()
+        if case .finished(.ended) = outcome { uploads.over(sessionEnded: true) }
+        uploads.dropped(connection)
         core.withLock { core in
             if core.connection === connection { core.connection = nil }
             if case .dropped = outcome, core.detaching { outcome = .detached }
@@ -635,7 +720,7 @@ public final class TerminalSession: Sendable {
     private static func outcome(of error: TerminalError) -> Outcome {
         switch error {
         case let .refused(refusal): .finished(.refused(refusal))
-        case .skew: .finished(.refused(HostRefusal(message: error.description, remedy: nil)))
+        case .skew: .finished(.refused(HostRefusal(message: error.description, remedy: [])))
         case let .protocolViolation(what): .finished(.protocolViolation(what))
         default: .failed(error)
         }
@@ -736,6 +821,8 @@ public final class TerminalSession: Sendable {
             emit(.refused(refusal))
         case .accepted:
             if core.withLock({ $0.detaching }) { return .detached }
+        case .putAck, .putStored, .putRefused:
+            uploads.take(frame)
         default:
             return .finished(.protocolViolation("it sent \(frame.name) to an attached client"))
         }
@@ -836,7 +923,13 @@ public final class TerminalSession: Sendable {
             core.state.phase = phase
             return true
         }
-        if changed { emit(.phase(phase)) }
+        guard changed else { return }
+        switch phase {
+        case .ended(.ended), .ended(.hostRestarted): uploads.over(sessionEnded: true)
+        case .ended, .parked, .detached: uploads.over(sessionEnded: false)
+        case .connecting, .attached, .reconnecting: break
+        }
+        emit(.phase(phase))
     }
 
     private func finish(_ end: SessionEnd) {

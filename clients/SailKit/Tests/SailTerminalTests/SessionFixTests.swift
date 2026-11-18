@@ -214,7 +214,7 @@ import Testing
     /// answering until the host names a writer again.
     @Test func aConnectionWithoutTheWriteTokenAnswersNoQuery() async throws {
         let (host, session, peer, watch) = try await attachedLocally()
-        try peer.send(.refused(HostRefusal(message: TerminalSession.notWriter, remedy: nil)))
+        try peer.send(.refused(HostRefusal(message: TerminalSession.notWriter, remedy: [.words(TerminalSession.notWriter)])))
         try await watch.until("told the refusal") { watch.seen.contains { if case .refused = $0 { true } else { false } } }
         try peer.send(output("\u{1b}[6nquiet"))
         try await watch.text("quiet")
@@ -233,7 +233,7 @@ import Testing
         let (host, session, peer, watch) = try await attachedLocally()
         try peer.send(output("\u{1b}]52;c;aGVsbG8=\u{07}mine"))
         try await watch.until("told the write") { watch.seen.contains(.screen(.clipboardWrite("hello"))) }
-        try peer.send(.refused(HostRefusal(message: TerminalSession.notWriter, remedy: nil)))
+        try peer.send(.refused(HostRefusal(message: TerminalSession.notWriter, remedy: [.words(TerminalSession.notWriter)])))
         try await watch.until("told the refusal") { watch.seen.contains { if case .refused = $0 { true } else { false } } }
         try peer.send(output("\u{1b}]52;c;dGhlaXJz\u{07}theirs\u{07}"))
         try await watch.until("told the bell after it") { watch.seen.contains(.screen(.bell)) }
@@ -426,6 +426,28 @@ import Testing
         session.close()
     }
 
+    /// The thread that reads the host's frames and feeds the screen is named, so a sampler can find
+    /// it, and the session says what quality of service it runs at. (Foundation on Linux answers a
+    /// thread's name with the process's, so the name is checked where it is told: on macOS.)
+    @Test func theReaderThreadIsNamedAndItsQualityKnown() async throws {
+        let (_, session, peer, _) = try await attachedLocally()
+        let names = Mutex<[String]>([])
+        let (told, sink) = AsyncStream.makeStream(of: Void.self)
+        session.onScreenChange { _ in
+            names.withLock { $0.append(Thread.current.name ?? "") }
+            sink.yield()
+        }
+        var tells = told.makeAsyncIterator()
+        try peer.send(output("named"))
+        _ = await tells.next()
+        #if canImport(Darwin)
+        #expect(names.withLock { $0 }.allSatisfy { $0 == TerminalSession.readerName }, "the change was told on \(names.withLock { $0 })")
+        #endif
+        #expect(!names.withLock { $0 }.isEmpty)
+        #expect(session.readerQuality != nil, "the session does not know its reader's quality of service")
+        session.close()
+    }
+
     /// MINOR 2: a resize's in-band size report goes out at once.
     @Test func aResizeAnswersAnInBandSizeReportAtOnce() async throws {
         let (host, session, peer, watch) = try await attachedLocally()
@@ -480,7 +502,7 @@ import Testing
         let second = try await host.accept()
         try await second.welcome()
         _ = try await second.read()
-        let refusal = HostRefusal(message: "No session mac-b.", remedy: nil)
+        let refusal = HostRefusal(message: "No session mac-b.", remedy: [.words("No session mac-b.")])
         try second.send(.refused(refusal))
         await #expect(throws: TerminalError.refused(refusal)) { try await refused.value }
     }
@@ -514,7 +536,7 @@ import Testing
         try peer.send([.accepted, .writerChanged(fde: "ana")])
         #expect(try await peer.read() == .kill(session: "app-a"))
         let words = FakeRunnerDoor.notTheWriter
-        try peer.send(.refused(HostRefusal(message: words, remedy: nil)))
+        try peer.send(.refused(HostRefusal(message: words, remedy: [])))
         #expect(await ended.value == .unconfirmed([words]), "said in the door's words, decided by the door")
     }
 
@@ -609,7 +631,7 @@ import Testing
         let peer = try await host.accept()
         try await peer.welcome()
         _ = try await peer.read()
-        let refusal = HostRefusal(message: "Listing is not allowed here.", remedy: nil)
+        let refusal = HostRefusal(message: "Listing is not allowed here.", remedy: [.words("Listing is not allowed here.")])
         try peer.send(.refused(refusal))
         await #expect(throws: TerminalError.refused(refusal)) { try await listed.value }
     }

@@ -90,7 +90,8 @@ public final class ProjectWorkspaceCommand implements Runnable {
       if (!dryRun) {
         WorkspaceVerbs.requireMaking(project, name);
       }
-      var tokens = WorkspaceVerbs.Keeper.here().check(config);
+      var keeper = WorkspaceVerbs.Keeper.here();
+      var tokens = keeper.check(config);
       if (!json) {
         Banner.printBranding(System.out, Ansi.AUTO);
         System.out.println();
@@ -100,7 +101,7 @@ public final class ProjectWorkspaceCommand implements Runnable {
               .create(
                   config,
                   name,
-                  WorkspaceVerbs.source(config, tokens, dryRun, json, operator),
+                  WorkspaceVerbs.source(config, tokens, keeper.who(), dryRun, json, operator),
                   SailPaths.projectFilesDir(config.name()),
                   Objects.toString(HostSync.handle(), ""),
                   WorkspaceVerbs::ownerOf);

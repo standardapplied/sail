@@ -46,8 +46,8 @@ import Testing
     @Test func anUntypedFixIsShownAsWrittenAndNoneIsTheMessageAlone() {
         #expect(Self.refusal("Your credential is read-only and cannot enter workspaces.", action: "Ask an admin for a member or admin credential.").lines
             == ["Your credential is read-only and cannot enter workspaces.", "Ask an admin for a member or admin credential."])
-        #expect(Self.refusal("This runner is making another workspace, which takes about a minute.").lines
-            == ["This runner is making another workspace, which takes about a minute."])
+        #expect(Self.refusal("This runner is creating another workspace, which takes about a minute.").lines
+            == ["This runner is creating another workspace, which takes about a minute."])
     }
 
     /// The server's own refusals, as it writes them (`Workspaces.java:1447`, `WorkspaceDoors.java:93-106`,
@@ -56,14 +56,14 @@ import Testing
         let untemplated = Refusal(code: .known(.conflict), message: "acme has no template yet:", action: "project template build acme.",
                                   remedy: [Self.sail("project template build", "acme"), .words(".")])
         #expect(untemplated.lines == ["acme has no template yet:", "An admin builds acme's template on the runner first."])
-        let busy = Refusal(code: .known(.runnerBusy), message: "This runner is making another workspace, which takes about a minute.")
-        #expect(busy.lines == ["This runner is making another workspace, which takes about a minute."])
+        let busy = Refusal(code: .known(.runnerBusy), message: "This runner is creating another workspace, which takes about a minute.")
+        #expect(busy.lines == ["This runner is creating another workspace, which takes about a minute."])
         let node = Refusal(
             code: .known(.readOnlyCredential),
-            message: "This box is client's node, where only client makes or enters a workspace; another person's workspaces live on main.",
-            action: "Workspaces are made on main: make yours there."
+            message: "This box is client's node, where only client creates or enters a workspace; another person's workspaces live on main.",
+            action: "Workspaces are created on main: create yours there."
         )
-        #expect(node.lines.last == "Workspaces are made on main: make yours there.")
+        #expect(node.lines.last == "Workspaces are created on main: create yours there.")
         let offered = Refusal(code: .known(.terminalNotOffered), message: "This runner offers no terminal over the network; ask an admin.")
         #expect(offered.lines == ["This runner offers no terminal over the network; ask an admin."])
     }
@@ -91,13 +91,13 @@ import Testing
         let rows = list.rows(for: "ana")
         #expect(rows.map(\.name) == ["try", "fix", "half", "dock", "old"])
         #expect(rows.map { $0.reading(for: "ana") } == [
-            "try · running", "fix · stopped", "half · not whole, make it again", "dock · running · uday", "old · paused",
+            "try · running", "fix · stopped", "half · not whole, create it again", "dock · running · uday", "old · paused",
         ])
         #expect(rows.map { $0.notOpened(for: "ana", admin: false) } == [
             nil, nil, nil, "dock is uday's: only uday or an admin can open it.", "No one owns old: only an admin can open it.",
         ])
         #expect(rows.allSatisfy { $0.notOpened(for: "ana", admin: true) == nil })
-        #expect(rows.map(\.said) == ["running", "stopped", "not whole, make it again", "running", "paused"])
+        #expect(rows.map(\.said) == ["running", "stopped", "not whole, create it again", "running", "paused"])
         #expect(rows.map { $0.opens(for: "ana", admin: false) } == [true, true, true, false, false])
         #expect(rows.allSatisfy { $0.opens(for: "uday", admin: true) })
         #expect(rows.map { $0.owner(apartFrom: "ana") } == [nil, nil, nil, "uday", nil])

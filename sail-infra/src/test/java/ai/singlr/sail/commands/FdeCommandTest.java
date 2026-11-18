@@ -1033,7 +1033,7 @@ class FdeCommandTest {
         List.of(
             printedCode(),
             "",
-            "  ⚠ web does not trust this key yet: it has no SSH user at uid 1000. Make it: '"
+            "  ⚠ web does not trust this key yet: it has no SSH user at uid 1000. Create it: '"
                 + OperatorCommand.here().sail("project apply web")
                 + "'."),
         printed().subList(printed().size() - 3, printed().size()));
@@ -1139,7 +1139,7 @@ class FdeCommandTest {
             printedCode(),
             "",
             "  ⚠ web does not trust this key yet: it carries no sail-api-sock device, so it is not"
-                + " sail's or its setup did not finish. Make it: '"
+                + " sail's or its setup did not finish. Create it: '"
                 + OperatorCommand.here().sail("project apply web")
                 + "'."),
         printed().subList(printed().size() - 3, printed().size()));
@@ -1301,7 +1301,7 @@ class FdeCommandTest {
                 + " error. Take its line out of every /home account's .ssh/authorized_keys"
                 + " there.",
             "  ⚠ web does not trust this key yet: could not read /home/dev/.ssh/authorized_keys"
-                + " in web: Error: I/O error. Make it: '"
+                + " in web: Error: I/O error. Create it: '"
                 + OperatorCommand.here().sail("project apply web")
                 + "'."),
         printed().subList(printed().size() - 4, printed().size()));
@@ -1327,7 +1327,7 @@ class FdeCommandTest {
             printedCode(),
             "",
             "  ⚠ acme does not trust this key yet: Failed to push file to"
-                + " /home/dev/.ssh/authorized_keys: Error: I/O error. Make it: '"
+                + " /home/dev/.ssh/authorized_keys: Error: I/O error. Create it: '"
                 + OperatorCommand.here().sail("project apply acme")
                 + "'."),
         printed().subList(printed().size() - 5, printed().size()));
@@ -1347,14 +1347,14 @@ class FdeCommandTest {
     assertEquals(
         List.of(
             "  ⚠ acme does not trust this key yet: it has no /home/dev/.ssh/authorized_keys yet."
-                + " Make it: '"
+                + " Create it: '"
                 + OperatorCommand.here().sail("project apply acme")
                 + "'.",
-            "  ⚠ web does not trust this key yet: it has no SSH user at uid 1000. Make it: '"
+            "  ⚠ web does not trust this key yet: it has no SSH user at uid 1000. Create it: '"
                 + OperatorCommand.here().sail("project apply web")
                 + "'.",
             "  ⚠ docs does not trust this key yet: could not read /home/dev/.ssh/authorized_keys"
-                + " in docs: Error: I/O error. Make it: '"
+                + " in docs: Error: I/O error. Create it: '"
                 + OperatorCommand.here().sail("project apply docs")
                 + "'."),
         printed().subList(printed().size() - 3, printed().size()));
@@ -2739,7 +2739,7 @@ class FdeCommandTest {
             "FDE 'ada' already exists. Change it with 'sudo sail fde update ada'.",
             "  ✓ FDE added: ada (member, scoped: grant projects with 'sudo sail fde grant')",
             "Unknown project 'ghost'. List the catalog with 'sudo sail project list'.",
-            "acme does not trust this key yet: Error: I/O error. Make it: 'sudo sail project apply"
+            "acme does not trust this key yet: Error: I/O error. Create it: 'sudo sail project apply"
                 + " acme'.",
             "This box's containers do not trust this key yet: Error: I/O error. Once incus answers,"
                 + " make them: 'sudo sail project apply --all'.",
@@ -2787,7 +2787,7 @@ class FdeCommandTest {
             "acme-try", new BoxInstances.Workspace("acme", "try", true), "x", plain);
 
     assertEquals(
-        "acme does not trust this key yet: x. Make it: 'sail project apply acme'.", container);
+        "acme does not trust this key yet: x. Create it: 'sail project apply acme'.", container);
     assertEquals(
         "acme-try does not trust this key yet: x. It takes it at its next start: 'sail project"
             + " workspace stop acme try', then 'sail project workspace start acme try'.",
