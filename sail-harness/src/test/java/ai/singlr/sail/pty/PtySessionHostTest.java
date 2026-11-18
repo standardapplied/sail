@@ -1998,6 +1998,10 @@ class PtySessionHostTest {
       for (var i = 0; i < 10; i++) {
         try (var tcp = presentTcp(host, "tkt_" + "0".repeat(64))) {
           assertInstanceOf(PtyMessage.Err.class, PtyWire.read(tcp));
+          assertEquals(
+              -1,
+              tcp.read(ByteBuffer.allocate(1)),
+              "the host ends a refused connection, its slot released first, before the next");
         }
       }
       try (var unixFirst = connect("");
