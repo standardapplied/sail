@@ -223,7 +223,11 @@ public final class SailButton: NSButton {
         KeyWatch.move(self, from: window, to: newWindow, calling: #selector(keyChanged))
     }
 
+    /// How many times its window became or ceased to be key while it was there.
+    private(set) var keyChanges = 0
+
     @objc private func keyChanged() {
+        keyChanges += 1
         needsDisplay = true
     }
 

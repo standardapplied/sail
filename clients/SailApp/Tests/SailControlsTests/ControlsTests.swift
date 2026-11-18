@@ -264,7 +264,8 @@ import Testing
     @Test func aControlWatchesOnlyTheWindowItIsIn() throws {
         let button = Self.sized(SailButton("Open", kind: .primary, look: .light, target: nil, action: nil))
         let field = try Self.field(.light)
-        for view in [button, field] as [NSView] {
+        let counts: [(NSView, () -> Int)] = [(button, { button.keyChanges }), (field, { field.keyChanges })]
+        for (view, count) in counts {
             let (first, _) = Self.window(holding: view, on: .white)
             let (second, backdrop) = Self.window(holding: NSView(frame: view.frame), on: .white)
             defer {
@@ -272,11 +273,11 @@ import Testing
                 second.orderOut(nil)
             }
             backdrop.addSubview(view)
-            view.display()
+            let before = count()
             NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: first)
-            #expect(!view.needsDisplay, "\(type(of: view)) still watches the window it left")
-            NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: second)
-            #expect(view.needsDisplay, "\(type(of: view)) does not watch the window it is in")
+            #expect(count() == before, "\(type(of: view)) still watches the window it left")
+            NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: second)
+            #expect(count() == before + 1, "\(type(of: view)) does not watch the window it is in")
         }
     }
 
