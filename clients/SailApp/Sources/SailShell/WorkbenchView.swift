@@ -429,10 +429,18 @@ public final class WorkbenchView: NSView {
     /// chooses no tab: it is not selected first, so a rename open in another tab goes on.
     private func close(_ tab: Tab) {
         let views = tab.layout.leaves.compactMap { panes[$0] }
+        let question = closeQuestion(for: tab, terminals: views.count)
         guard views.count > 1 else {
-            return confirm(ending: views, question: "Close this terminal?", detail: "The program running in it will end.")
+            return confirm(ending: views, question: question, detail: "The program running in it will end.")
         }
-        confirm(ending: views, question: "Close this tab?", detail: "Its \(views.count) terminals will end.")
+        confirm(ending: views, question: question, detail: "Its \(views.count) terminals will end.")
+    }
+
+    /// What closing `tab`, of `count` terminals, asks: a tab that is not the one shown, closed by
+    /// its X from another, is named as the strip names it, so the question says which it means.
+    func closeQuestion(for tab: Tab, terminals count: Int) -> String {
+        guard tab.id == model.selected else { return "Close \(model.title(of: tab.id))?" }
+        return count > 1 ? "Close this tab?" : "Close this terminal?"
     }
 
     /// Closes every tab but this one, asking first as Close Tab does.

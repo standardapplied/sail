@@ -12,7 +12,11 @@
 # then, with keyboard navigation on, for Tests/Drive/kit.json, the controls' gallery, left to right
 # and once more right to left (kit-rtl).
 # Each run's texts, images and report land in OUT; what it prints, and the servers' logs, beside
-# them. The ticket is handed to the drive in its environment and printed nowhere.
+# them. Every run is opened by LaunchServices (`open -W -n -a`), as a person's Sail is: exec'd from
+# this shell, the app had no application role, every thread was held at the utility priority (20)
+# and its timers were coalesced, so the drive measured an app no person runs. The ticket is handed
+# to the drive in a file only it reads, never in the environment a launch passes on, and printed
+# nowhere.
 set -euo pipefail
 
 [[ $# -eq 2 ]] || { echo "usage: ci/drive DRIVE_APP OUT" >&2; exit 2; }
@@ -24,7 +28,8 @@ readonly drive=$app/Contents/MacOS/SailDrive sail=$app/Contents/Helpers/sail
 [[ -x $drive ]] || { echo "ci/drive: $app holds no SailDrive" >&2; exit 1; }
 
 mkdir -p "$out"
-passkeys=$(mktemp -d) plain=$(mktemp -d)
+readonly out_dir=$(cd "$out" && pwd -P) scripts=$PWD/Tests/Drive
+passkeys=$(mktemp -d) plain=$(mktemp -d) private_dir=$(mktemp -d /tmp/sail-drive.XXXXXX) shooter=
 SAIL_DATA_DIR=$passkeys "$sail" server start --port 7979 --rp-id sail.standardapplied.com --origin https://sail.standardapplied.com \
   > "$out/server-7979.log" 2>&1 &
 servers=($!)
@@ -38,7 +43,21 @@ restore_keyboard() {
   if [[ $keyboard_was == unset ]]; then defaults delete -g AppleKeyboardUIMode 2> /dev/null || true
   else defaults write -g AppleKeyboardUIMode -int "$keyboard_was"; fi
 }
-trap 'kill "${servers[@]}" 2>/dev/null || true; rm -rf "$passkeys" "$plain"; restore_keyboard' EXIT
+# A drive LaunchServices opened is launchd's child, not this shell's: ended here, on a timeout and on
+# every exit (a local cancel too), with TERM, then KILL if it has not gone within 10 s. Only drives
+# writing into this OUT are ended, not another ci/drive's.
+readonly opened_pattern="SailDrive --drive .* --out $out_dir/"
+stop_drive() {
+  local pids
+  pids=$(pgrep -f -- "$opened_pattern" || true)
+  [[ -n $pids ]] || return 0
+  echo "ci/drive: ending the drive still running (pid $pids)" >&2
+  kill -TERM $pids 2> /dev/null || true
+  perl -e 'alarm shift; exec @ARGV' 10 bash -c 'while pgrep -f -- "$1" > /dev/null; do sleep 0.1; done' _ "$opened_pattern" || true
+  pids=$(pgrep -f -- "$opened_pattern" || true)
+  [[ -z $pids ]] || kill -KILL $pids 2> /dev/null || true
+}
+trap 'stop_drive; kill "${servers[@]}" ${shooter:+"$shooter"} 2>/dev/null || true; rm -rf "$passkeys" "$plain" "$private_dir"; restore_keyboard' EXIT
 for port in 7979 7980; do
   for _ in $(seq 1 60); do
     curl -fsS "http://127.0.0.1:$port/v1/health" > /dev/null 2>&1 && break
@@ -51,38 +70,132 @@ for port in 7979 7980; do
   }
 done
 
-# A step that prints nothing for SAIL_DRIVE_SILENCE seconds (60; the longest step so far took 24 s)
-# is hung: every thread of the drive is sampled into OUT, the drive is ended, and the step after the
-# last line printed is named. The run's 600 s alarm stays as the backstop.
-silence=${SAIL_DRIVE_SILENCE:-60}
+export SAIL_DATA_DIR=$passkeys
+"$sail" fde add uday --name Uday --role admin
+(umask 077 && "$sail" fde enroll uday --json | plutil -extract ticket raw - > "$private_dir/ticket")
+export SAIL_DRIVE_TICKET_FILE=$private_dir/ticket SAIL_DRIVE_PASSKEY=$out_dir/software-passkey.json
+rm -f "$SAIL_DRIVE_PASSKEY"
+
+# Opened by LaunchServices, the app is its own responsible process for the privacy grants and holds
+# no Screen Recording; this shell does, so it takes the drive's screenshots. A request is one line on
+# the FIFO SAIL_DRIVE_SHOTS names: `screen FILE`, `window ID FILE` or `menu FILE`, tab-separated;
+# this shell builds screencapture's arguments itself, ID all digits and FILE in OUT (its folder
+# with links resolved, and itself no link), and answers with FILE.done beside FILE.said, what
+# screencapture said. Nothing else is taken. Any process of this user may ask while a run lasts,
+# so this shell's Screen Recording is lent to them for captures into OUT: fine on a CI runner,
+# worth knowing on a Mac of one's own.
+inside_out() {
+  local file=$1 folder
+  [[ $file == /* && ! -L $file ]] || return 1
+  folder=$(cd "$(dirname "$file")" 2> /dev/null && pwd -P) || return 1
+  [[ $folder == "$out_dir" || $folder == "$out_dir"/* ]]
+}
+take_shots() {
+  local verb id file extra arguments
+  while true; do
+    while IFS=$'\t' read -r verb id file extra; do
+      case $verb in
+        screen | menu)
+          [[ -z $file ]] || verb=refused
+          file=$id
+          ;;
+        window) [[ $id =~ ^[0-9]+$ && -z $extra ]] || verb=refused ;;
+        *) verb=refused ;;
+      esac
+      if [[ $verb == refused ]] || ! inside_out "$file"; then
+        echo "ci/drive: a screenshot request refused" >&2
+        continue
+      fi
+      case $verb in
+        screen) arguments=(-x) ;;
+        menu) arguments=(-x -T 1) ;;
+        window) arguments=(-x -o -l "$id") ;;
+      esac
+      screencapture "${arguments[@]}" "$file" 2> "$file.said" || true
+      : > "$file.done"
+    done < "$SAIL_DRIVE_SHOTS"
+  done
+}
+export SAIL_DRIVE_SHOTS=$private_dir/shots
+mkfifo -m 600 "$SAIL_DRIVE_SHOTS"
+take_shots &
+shooter=$!
+
+# Watches a run's output while it runs. A step that prints nothing past its budget is hung: the
+# larger of 60 s and the step's own `seconds` plus 30 (a step whose own waits are longer declares
+# them there), so a step is never ended inside its own time. Every thread of the drive is sampled
+# for 5 s into OUT, the step is named in $private_dir/$run-hung, and the drive is ended.
 watch_drive() {
-  local log=$1 script=$2 run=$3 seen=-1 quiet=0 size pid last step
+  local run=$1 script=$2 log=$out_dir/$1-output.txt seen=-1 quiet=0 size pids last done budget step
   while sleep 5; do
-    pid=$(pgrep -f -- "$drive --drive" | head -1) || true
-    [[ -n $pid ]] || continue
+    pids=$(pgrep -f -- "$opened_pattern" || true)
+    [[ -n $pids ]] || continue
     size=$(wc -c < "$log" 2> /dev/null || echo 0)
     if [[ $size != "$seen" ]]; then seen=$size quiet=0; continue; fi
     quiet=$((quiet + 5))
-    (( quiet >= silence )) || continue
     last=$(grep -E '^drive [0-9]+ ' "$log" | tail -1 || true)
-    step=$(python3 -c 'import json, sys; steps = json.load(open(sys.argv[1]))["steps"]; done = int(sys.argv[2].split()[1]); print("step %d, %s" % (done + 1, steps[done]["name"]) if done < len(steps) else "the end, after its last step")' "Tests/Drive/$script.json" "${last:-drive 0 }")
-    echo "ci/drive: $run printed nothing for $quiet s: $step is hung (the last line: ${last:-none})" >&2
-    if command -v sample > /dev/null; then
-      sample "$pid" 5 -file "$out/$run-hung.txt" > /dev/null 2>&1 || true
-      echo "ci/drive: every thread of the drive, sampled for 5 s, is in $out/$run-hung.txt; its main thread:" >&2
-      awk '/^Call graph:/ { on = 1 } on && /^ +[0-9]+ Thread_/ { n++ } n > 1 { exit } on' "$out/$run-hung.txt" | head -80 >&2 || true
-    fi
-    echo "$step" > "$out/$run-hung"
-    kill -KILL "$pid" 2> /dev/null || true
+    done=$(awk '{ print $2 }' <<< "${last:-drive 0}")
+    read -r budget step < <(python3 -c 'import json, sys; steps = json.load(open(sys.argv[1]))["steps"]; n = int(sys.argv[2]); s = steps[n] if n < len(steps) else {"name": "its quit, after the last step"}; print(int(max(60, s.get("seconds", 0) + 30)), "step %d, %s" % (n + 1, s["name"]))' "$script" "$done")
+    (( quiet >= budget )) || continue
+    echo "ci/drive: the $run run printed nothing for $quiet s, past the ${budget} s budget of $step: it is hung" >&2
+    sample $pids 5 -file "$out_dir/$run-hung.txt" > /dev/null 2>&1 || true
+    echo "ci/drive: every thread of the drive, sampled for 5 s, is in $out_dir/$run-hung.txt; its main thread:" >&2
+    awk '/^Call graph:/ { on = 1 } on && /^ +[0-9]+ Thread_/ { n++ } n > 1 { exit } on' "$out_dir/$run-hung.txt" 2> /dev/null | head -80 >&2 || true
+    echo "$step" > "$private_dir/$run-hung"
+    stop_drive
     return 0
   done
 }
 
-export SAIL_DATA_DIR=$passkeys
-"$sail" fde add uday --name Uday --role admin
-SAIL_DRIVE_TICKET=$("$sail" fde enroll uday --json | plutil -extract ticket raw -)
-export SAIL_DRIVE_TICKET SAIL_DRIVE_PASSKEY=$out/software-passkey.json
-rm -f "$SAIL_DRIVE_PASSKEY"
+# Opens the drive build as LaunchServices opens a person's app, waits for it to quit and prints what
+# it printed. `open` tells nothing of the app's exit status, so a run passes only when all of these
+# hold, and returns: 0 passed; 1 a step failed; 125 a step hung past its budget (`watch_drive`
+# named it and sampled the drive); 124 the alarm ended `open` (a hang, the drive then ended); 134 a crash or a hang at quit (no mark of a clean exit, or a new SailDrive crash report),
+# or no report. Its folder and output are removed first, so an earlier run's report never passes.
+# SAIL_DRIVE_ALARM_SECONDS (600) bounds it; ci/drive's own check of these sets it short.
+open_drive() {
+  local run=$1 goldens=$2 opened=0 crashes
+  shift 2
+  rm -rf "${out_dir:?}/$run"
+  : > "$out_dir/$run-output.txt"
+  : > "$out_dir/$run-errors.txt"
+  : > "$private_dir/$run-started"
+  rm -f "$private_dir/$run-hung"
+  watch_drive "$run" "$2" &
+  watcher=$!
+  disown
+  perl -e 'alarm shift; exec @ARGV' "${SAIL_DRIVE_ALARM_SECONDS:-600}" open -W -n -a "$app" --stdout "$out_dir/$run-output.txt" \
+    --stderr "$out_dir/$run-errors.txt" --env "SAIL_DRIVE_GOLDENS=$goldens" --args "$@" || opened=$?
+  kill "$watcher" 2> /dev/null || true
+  cat "$out_dir/$run-output.txt"
+  cat "$out_dir/$run-errors.txt" >&2
+  if [[ -f $private_dir/$run-hung ]]; then
+    echo "ci/drive: the $run run failed: $(cat "$private_dir/$run-hung") hung; its threads are in $out_dir/$run-hung.txt" >&2
+    return 125
+  fi
+  if ((opened != 0)); then
+    echo "ci/drive: the $run run did not end within ${SAIL_DRIVE_ALARM_SECONDS:-600} s (open ended with status $opened)" >&2
+    stop_drive
+    return 124
+  fi
+  crashes=$(find "$HOME/Library/Logs/DiagnosticReports" -name 'SailDrive*.ips' -newer "$private_dir/$run-started" 2> /dev/null || true)
+  if [[ -n $crashes ]]; then
+    echo "ci/drive: the $run run left a crash report: $crashes" >&2
+    return 134
+  fi
+  if [[ ! -e $out_dir/$run/exited ]]; then
+    echo "ci/drive: the $run run did not exit cleanly: it crashed or hung as it quit, or never started" >&2
+    return 134
+  fi
+  case $(plutil -extract passed raw "$out_dir/$run/report.json" 2> /dev/null || echo none) in
+    true) return 0 ;;
+    false) return 1 ;;
+    *)
+      echo "ci/drive: the $run run left no report" >&2
+      return 134
+      ;;
+  esac
+}
 
 for run in first second third shots workspaces kit kit-rtl; do
   if [[ $run == third ]]; then
@@ -120,19 +233,12 @@ for run in first second third shots workspaces kit kit-rtl; do
     defaults write -g AppleKeyboardUIMode -int 2
   fi
   [[ $run == kit-rtl ]] && directions=(-AppleTextDirection YES -NSForceRightToLeftWritingDirection YES)
-  : > "$out/$run-output.txt"
-  watch_drive "$out/$run-output.txt" "$script" "$run" &
-  watcher=$!
-  SAIL_DRIVE_GOLDENS=$goldens perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$script.json" --out "$out/$run" ${directions[@]+"${directions[@]}"} 2>&1 | tee "$out/$run-output.txt" || {
-    status=$?
-    kill "$watcher" 2> /dev/null || true
-    if [[ -f $out/$run-hung ]]; then
-      echo "ci/drive: $run ended: $(cat "$out/$run-hung") is hung" >&2
-      exit "$status"
-    fi
+  status=0
+  open_drive "$run" "$goldens" --drive "$scripts/$script.json" --out "$out_dir/$run" ${directions[@]+"${directions[@]}"} || status=$?
+  (( status == 0 )) || {
     reports=$HOME/Library/Logs/DiagnosticReports
-    # A signal killed the drive (138 is SIGBUS, 139 SIGSEGV): ReportCrash writes its report some
-    # seconds later. Any other failure is a step's, with no report to wait for.
+    # The drive left no report (it crashed): ReportCrash writes its report some seconds later. Any
+    # other failure is a step's, with no crash report to wait for.
     if (( status > 128 )); then
       perl -e 'alarm shift; exec @ARGV' 90 bash -c 'until compgen -G "$1/SailDrive*.ips" > /dev/null; do sleep 1; done' _ "$reports" || true
     fi
@@ -159,7 +265,6 @@ PY
     fi
     exit "$status"
   }
-  kill "$watcher" 2> /dev/null || true
 done
 # The third script measures nothing: its sampler never runs, and its last line says so rather
 # than judging the CPU share of a watcher that had no period to run in.

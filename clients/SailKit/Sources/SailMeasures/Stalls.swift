@@ -141,7 +141,9 @@ public enum MachineShare {
     /// The most of a judged wait the main thread's proven starvation may excuse: half. Past it the
     /// starvation is inconclusive and none of it is excused, so a wait over its budget fails: a
     /// measurement that excused most of itself on inference measured nothing (the bench's rule, by
-    /// time). The drive's own thread's stall is its own measured work, and is never capped.
+    /// time). The drive's own thread's stall is not capped here, though it too is an inference: a
+    /// thread that only sleeps 10 ms woke late, which says the scheduler held it, not that our
+    /// work did; it does not subtract our processes' CPU.
     public static let mostExcused = 0.5
 
     /// Whether the main thread's proven starvation is more than ``mostExcused`` of `wait`.
@@ -211,6 +213,29 @@ public enum FloodVerdict {
         return (
             max(0, shown.length - MachineShare.of(shown, own: own, main: looks)),
             max(0, hold.length - tick - MachineShare.of(hold, own: own, main: looks))
+        )
+    }
+}
+
+/// How many samples a gated series takes, and how many its nearest-rank p95 leaves above it: the
+/// one count the probe's bench and the drive's renderer bench both take.
+public enum Sampled {
+    public static let count = 400
+
+    /// How many of `count` samples the nearest-rank p95 leaves above it: 20 of 400, 2 of 54.
+    public static func tail(of count: Int) -> Int {
+        count - Int((0.95 * Double(count)).rounded(.up))
+    }
+}
+
+/// A figure against its limit, in words that name it first: "missed: …, over its … limit" or
+/// "within its budget: …, limit …", so a failed step says what it missed before anything else.
+public enum Verdict {
+    public static func of(_ name: String, milliseconds: Double, limit: Double) -> (met: Bool, said: String) {
+        let met = milliseconds <= limit
+        return (
+            met, met ? String(format: "within its budget: %@ %.2f ms, limit %.0f ms", name, milliseconds, limit)
+                : String(format: "missed: %@ %.2f ms, over its %.0f ms limit", name, milliseconds, limit)
         )
     }
 }

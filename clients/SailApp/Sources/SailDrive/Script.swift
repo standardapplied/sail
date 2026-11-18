@@ -64,6 +64,10 @@ struct Step: Decodable {
     var latencyOverlay: Bool?
     /// Starts the latency from nothing.
     var resetLatency: Bool?
+    /// Says what the system reports of this process now (``MachineState``) and fails unless it was
+    /// launched as a person's Sail is: a foreground application whose parent is launchd and whose
+    /// main thread is user-interactive.
+    var machineState: Bool?
     /// Kills the host the preview started, as a crash would.
     var killHost: Bool?
     /// Makes the flood's bytes, once, at ``Driver/floodFiles``.
@@ -205,6 +209,8 @@ struct Step: Decodable {
     /// The tab strip's hit testing: a tab's middle reaches the tab, the empty end moves the window.
     var stripHits: Bool?
     /// The four-pane measure (scenario 32), the look switched with their scrollback full among it.
+    /// Its own waits reach 180 + 60 s, so its script gives `seconds` (300) as the step's whole budget,
+    /// which ci/drive's hang watcher reads.
     var panes4: Bool?
     /// Makes the colour asker, once, at ``Driver/colourAsker``.
     var colourScript: Bool?
