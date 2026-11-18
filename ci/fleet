@@ -833,8 +833,8 @@ def read(conn):
     return payload[0], payload[1:]
 def present(ticket):
     conn = socket.create_connection((ip, 7072), timeout=30)
-    conn.sendall(b"SAILPTY3")
-    if exactly(conn, 8) != b"SAILPTY3":
+    conn.sendall(b"SAILPTY4")
+    if exactly(conn, 8) != b"SAILPTY4":
         raise SystemExit("not a sail pty host")
     conn.sendall(frame(9, text(ticket)))
     return conn, read(conn)
