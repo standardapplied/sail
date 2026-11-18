@@ -47,6 +47,33 @@ for port in 7979 7980; do
   }
 done
 
+# A step that prints nothing for SAIL_DRIVE_SILENCE seconds (60; the longest step so far took 24 s)
+# is hung: every thread of the drive is sampled into OUT, the drive is ended, and the step after the
+# last line printed is named. The run's 600 s alarm stays as the backstop.
+silence=${SAIL_DRIVE_SILENCE:-60}
+watch_drive() {
+  local log=$1 script=$2 run=$3 seen=-1 quiet=0 size pid last step
+  while sleep 5; do
+    pid=$(pgrep -f -- "$drive --drive" | head -1) || true
+    [[ -n $pid ]] || continue
+    size=$(wc -c < "$log" 2> /dev/null || echo 0)
+    if [[ $size != "$seen" ]]; then seen=$size quiet=0; continue; fi
+    quiet=$((quiet + 5))
+    (( quiet >= silence )) || continue
+    last=$(grep -E '^drive [0-9]+ ' "$log" | tail -1 || true)
+    step=$(python3 -c 'import json, sys; steps = json.load(open(sys.argv[1]))["steps"]; done = int(sys.argv[2].split()[1]); print("step %d, %s" % (done + 1, steps[done]["name"]) if done < len(steps) else "the end, after its last step")' "Tests/Drive/$script.json" "${last:-drive 0 }")
+    echo "ci/drive: $run printed nothing for $quiet s: $step is hung (the last line: ${last:-none})" >&2
+    if command -v sample > /dev/null; then
+      sample "$pid" 5 -file "$out/$run-hung.txt" > /dev/null 2>&1 || true
+      echo "ci/drive: every thread of the drive, sampled for 5 s, is in $out/$run-hung.txt; its main thread:" >&2
+      awk '/^Call graph:/ { on = 1 } on && /^ +[0-9]+ Thread_/ { n++ } n > 1 { exit } on' "$out/$run-hung.txt" | head -80 >&2 || true
+    fi
+    echo "$step" > "$out/$run-hung"
+    kill -KILL "$pid" 2> /dev/null || true
+    return 0
+  done
+}
+
 export SAIL_DATA_DIR=$passkeys
 "$sail" fde add uday --name Uday --role admin
 SAIL_DRIVE_TICKET=$("$sail" fde enroll uday --json | plutil -extract ticket raw -)
@@ -86,8 +113,16 @@ for run in first second third shots workspaces kit kit-rtl; do
     defaults write -g AppleKeyboardUIMode -int 2
   fi
   [[ $run == kit-rtl ]] && directions=(-AppleTextDirection YES -NSForceRightToLeftWritingDirection YES)
+  : > "$out/$run-output.txt"
+  watch_drive "$out/$run-output.txt" "$script" "$run" &
+  watcher=$!
   SAIL_DRIVE_GOLDENS=$goldens perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$script.json" --out "$out/$run" ${directions[@]+"${directions[@]}"} 2>&1 | tee "$out/$run-output.txt" || {
     status=$?
+    kill "$watcher" 2> /dev/null || true
+    if [[ -f $out/$run-hung ]]; then
+      echo "ci/drive: $run ended: $(cat "$out/$run-hung") is hung" >&2
+      exit "$status"
+    fi
     reports=$HOME/Library/Logs/DiagnosticReports
     # A signal killed the drive (138 is SIGBUS, 139 SIGSEGV): ReportCrash writes its report some
     # seconds later. Any other failure is a step's, with no report to wait for.
@@ -117,6 +152,7 @@ PY
     fi
     exit "$status"
   }
+  kill "$watcher" 2> /dev/null || true
 done
 # The third script measures nothing: its sampler never runs, and its last line says so rather
 # than judging the CPU share of a watcher that had no period to run in.
