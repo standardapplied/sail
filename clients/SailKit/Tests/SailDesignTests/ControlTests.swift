@@ -158,8 +158,10 @@ import Testing
         #expect(TextLine.baseline(top: (18 - 9) / 2, points: 9, lineHeight: 9) == 11.5)
         #expect(TextLine.baseline(top: 1 + 3, points: 10, lineHeight: 10) == 12)
         #expect(TextLine.baseline(top: (26 - 13) / 2, points: 10) == 16.5)
+        #expect(TextLine.baseline(top: 0, points: 10, lineHeight: 14) == 10, "a positive half-leading of .5 is rounded down")
         #expect(TextLine.monoAscent == 1.02 && TextLine.monoDescent == 0.30 && TextLine.height(points: 10) == 13)
-        #expect(abs(TextLine.centring(lineHeight: 16.8, ascent: 11.6, descent: 2.9) - 1.15) < 1e-9)
+        #expect(abs(TextLine.centring(lineHeight: 16.8, ascent: 11.6, descent: 2.9) - 1.9) < 1e-9)
+        #expect(TextLine.snapped(11.5, scale: 1) == 11 && TextLine.snapped(11.5, scale: 2) == 11.5 && TextLine.snapped(13, scale: 1) == 13)
     }
 
     /// A button in flight that holds the keys still shows where they are.

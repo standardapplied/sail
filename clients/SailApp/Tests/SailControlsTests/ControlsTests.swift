@@ -310,6 +310,15 @@ import Testing
         #expect(Double(dots[1].midX) == Double(dots[1].midX).rounded() && Double(dots[1].width) == ButtonSize.dot)
     }
 
+    /// The ⋯ group's middle dot is the box's middle, in both sizes.
+    @Test func theEllipsisIsCentredOnTheBox() {
+        for size in [ButtonSize.small, .regular] {
+            let more = Self.sized(SailButton(icon: "ellipsis", label: "More", size: size, look: .light, target: nil, action: nil))
+            let middle = more.ellipsisDots[1], box = more.box
+            #expect(middle.midX == box.midX && middle.midY == box.midY, "the middle dot is at \(middle.midX), \(middle.midY); the box's middle at \(box.midX), \(box.midY)")
+        }
+    }
+
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
     func aHoveredFieldsEdgeIsInk(_ name: String, _ look: Look) throws {
         let canvas = NSColor(Tint(look.canvas))

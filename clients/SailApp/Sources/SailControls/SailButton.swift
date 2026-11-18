@@ -187,9 +187,9 @@ public final class SailButton: NSButton {
         context.beginTransparencyLayer(auxiliaryInfo: nil)
         if let halo = paint.halo { Draw.halo(halo, around: box, radius: size.radius) }
         Draw.box(box, radius: size.radius, fill: paint.fill, edge: paint.edge)
-        if busyWord == nil, symbolName == Self.ellipsis, let mark {
+        if busyWord == nil, symbolName == Self.ellipsis {
             NSColor(paint.label).setFill()
-            for dot in Self.dots(around: NSPoint(x: mark.midX, y: mark.midY)) {
+            for dot in ellipsisDots {
                 NSBezierPath(ovalIn: dot).fill()
             }
         } else if busyWord == nil, let mark, let symbol {
@@ -211,6 +211,11 @@ public final class SailButton: NSButton {
 
     /// The ⋯ of a row's menu, drawn as the design draws it: three small dots, lighter than the symbol.
     static let ellipsis = "ellipsis"
+
+    /// The ⋯'s dots, centred on the box, as the design centres its glyph.
+    var ellipsisDots: [NSRect] {
+        Self.dots(around: NSPoint(x: box.midX, y: box.midY))
+    }
 
     /// The three dots, the group placed once on a whole point and each dot at the exact pitch from
     /// its middle, so the two gaps are always equal.

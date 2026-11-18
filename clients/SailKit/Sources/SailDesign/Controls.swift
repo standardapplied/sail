@@ -292,9 +292,17 @@ public enum TextLine {
         (ascent * points).rounded() + (descent * points).rounded()
     }
 
-    /// How far to raise text set in lines `lineHeight` tall so the extra height is split above and
-    /// below it, as the browser splits it, where AppKit would put it all above.
+    /// How far to raise text set in lines `lineHeight` tall (AppKit puts its baseline `descent`
+    /// above the line's foot) to stand where the browser puts it, with the font's ascent and
+    /// descent in points.
     public static func centring(lineHeight: Double, ascent: Double, descent: Double) -> Double {
-        (lineHeight - ascent - descent) / 2
+        let above = ascent.rounded(), below = descent.rounded()
+        return lineHeight - descent - (above + ((lineHeight - above - below) / 2).rounded(.down))
+    }
+
+    /// A baseline on the device's pixel grid, as the browser lays text: rounded down to a whole
+    /// pixel at `scale` pixels a point.
+    public static func snapped(_ baseline: Double, scale: Double) -> Double {
+        (baseline * scale).rounded(.down) / scale
     }
 }
