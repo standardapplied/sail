@@ -138,26 +138,23 @@ public enum MachineShare {
         samples.map { $0.length - own.held(over: $0) }
     }
 
-    /// The most of a judged wait the machine may be answerable for: half. Past it the wait is
-    /// inconclusive, nothing of it is excused and it is judged whole, so one over its budget fails:
-    /// a measurement that excused most of itself measured nothing (the bench's rule, by time).
+    /// The most of a judged wait the main thread's proven starvation may excuse: half. Past it the
+    /// starvation is inconclusive and none of it is excused, so a wait over its budget fails: a
+    /// measurement that excused most of itself on inference measured nothing (the bench's rule, by
+    /// time). The drive's own thread's stall is its own measured work, and is never capped.
     public static let mostExcused = 0.5
 
-    /// What the machine claims of `wait`, in seconds: the larger of the stall of the drive's own
-    /// thread over it and the time the main thread was starved in it, never more than the wait.
-    public static func claimed(_ wait: Span, own: Stalls, main looks: [ThreadLook]) -> Double {
-        min(wait.length, max(own.shared(with: wait), starved(in: wait, looks: looks)))
+    /// Whether the main thread's proven starvation is more than ``mostExcused`` of `wait`.
+    public static func inconclusive(_ wait: Span, main looks: [ThreadLook]) -> Bool {
+        starved(in: wait, looks: looks) > wait.length * mostExcused
     }
 
-    /// Whether the machine claims more of `wait` than ``mostExcused``.
-    public static func inconclusive(_ wait: Span, own: Stalls, main looks: [ThreadLook]) -> Bool {
-        claimed(wait, own: own, main: looks) > wait.length * mostExcused
-    }
-
-    /// The machine's share of `wait`, in seconds: what it claims (``claimed(_:own:main:)``), or
-    /// nothing when that is past ``mostExcused``.
+    /// The machine's share of `wait`, in seconds: the larger of the stall of the drive's own
+    /// thread over it and the time the main thread was starved in it (none of the starvation when
+    /// it is inconclusive), never more than the wait.
     public static func of(_ wait: Span, own: Stalls, main looks: [ThreadLook]) -> Double {
-        inconclusive(wait, own: own, main: looks) ? 0 : claimed(wait, own: own, main: looks)
+        let starvation = inconclusive(wait, main: looks) ? 0 : starved(in: wait, looks: looks)
+        return min(wait.length, max(own.shared(with: wait), starvation))
     }
 }
 

@@ -63,10 +63,6 @@ final class MainStacks: @unchecked Sendable {
     static let constraint = Looker.constraint
     /// The most of one CPU the watcher may take: its computation in each period, 5 %.
     static var claim: Double { computation / interval }
-    /// The longest one look may take, wall time: the next look comes an interval after it ends,
-    /// so a longer one leaves the next more than ``MachineShare/longestGap`` after it, and looks
-    /// that far apart excuse nothing. The drive fails past it.
-    static let longestLook = MachineShare.longestGap - interval
 
     static let depth = 48
     private let thread: thread_act_t
@@ -88,7 +84,7 @@ final class MainStacks: @unchecked Sendable {
     private let helperWake = DispatchSemaphore(value: 0)
     /// How many readings the helper has taken for stack samples, each naming its samples.
     private var fills = 0
-    private var spent: (looks: Int, total: Double, longest: Double, modeLongest: Double) = (0, 0, 0, 0)
+    private var spent: (looks: Int, total: Double, longest: Double, modeLongest: Double, tooSlow: Int) = (0, 0, 0, 0, 0)
     /// Whether the kernel took the watcher's real-time policy, when it began, its own CPU time, its
     /// port, and when the helper first found it demoted out of real time, at what priority.
     private var watcher: (realTime: Bool, since: Double, cpu: Double, port: thread_act_t?, demoted: (time: Double, priority: Int32)?) = (false, 0, 0, nil, nil)
@@ -137,24 +133,37 @@ final class MainStacks: @unchecked Sendable {
     }
 
     /// One look at the main thread, and what it cost the watcher. A look whose `thread_info`
-    /// fails is not kept: a missing look is missing evidence, never a runnable one.
+    /// fails is not kept: a missing look is missing evidence, never a runnable one. Nor is one
+    /// that took longer than ``MachineShare/longestGap``: what it read spans more time than two
+    /// looks may be apart and still prove anything, so it is counted and left out of every proof.
     private func look(at time: Double) -> ThreadLook? {
         let pids = lock.withLock { others }
         guard let look = Mach.look(at: thread, time: time, others: pids) else { return nil }
         let cost = CACurrentMediaTime() - time
+        let counts = cost <= MachineShare.longestGap
         lock.withLock {
-            dense.append(look)
-            if dense.count > Self.kept { dense.removeFirst(Self.kept / 2) }
+            if counts {
+                dense.append(look)
+                if dense.count > Self.kept { dense.removeFirst(Self.kept / 2) }
+            } else {
+                spent.tooSlow += 1
+            }
             spent.looks += 1
             spent.total += cost
             spent.longest = max(spent.longest, cost)
         }
-        return look
+        return counts ? look : nil
     }
 
-    /// The longest a look has taken, wall time.
-    var longestLookTaken: Double {
-        lock.withLock { spent.longest }
+    /// What a look cost on average, wall time.
+    var averageLook: Double {
+        let spent = lock.withLock { self.spent }
+        return spent.looks > 0 ? spent.total / Double(spent.looks) : 0
+    }
+
+    /// Whether the helper found the watcher demoted out of real time.
+    var demoted: Bool {
+        lock.withLock { watcher.demoted != nil }
     }
 
     /// The main run loop's current mode, nil while it runs none: read on the helper's thread only,
@@ -185,8 +194,9 @@ final class MainStacks: @unchecked Sendable {
         let ran = !watcher.realTime ? "was REFUSED its real-time policy and ran at its QoS"
             : watcher.demoted.map { String(format: "ran real-time until it was found demoted at %.3f s (priority %d)", $0.time, $0.priority) }
             ?? "ran real-time, never found demoted"
-        return String(format: "%ld looks every %.0f ms, each %.1f µs on average and %.1f µs at most; the main run loop's mode, read on the helper's thread for a stack sample, took at most %.1f µs to read; the watcher %@ (period %.0f ms, computation %.2f ms, constraint %.2f ms) used %.1f ms of CPU, %.2f%% of one CPU against its claim of %.0f%%",
-                      spent.looks, Self.interval * 1000, spent.looks > 0 ? spent.total / Double(spent.looks) * 1e6 : 0, spent.longest * 1e6, spent.modeLongest * 1e6,
+        return String(format: "%ld looks every %.0f ms, each %.1f µs on average and %.1f µs at most, %ld looks too slow to count (over %.0f ms); the main run loop's mode, read on the helper's thread for a stack sample, took at most %.1f µs to read; the watcher %@ (period %.0f ms, computation %.2f ms, constraint %.2f ms) used %.1f ms of CPU, %.2f%% of one CPU against its claim of %.0f%%",
+                      spent.looks, Self.interval * 1000, spent.looks > 0 ? spent.total / Double(spent.looks) * 1e6 : 0, spent.longest * 1e6,
+                      spent.tooSlow, MachineShare.longestGap * 1000, spent.modeLongest * 1e6,
                       ran, Self.interval * 1000, Self.computation * 1000, Self.constraint * 1000, watcher.cpu * 1000, watcherShare * 100, Self.claim * 100)
     }
 

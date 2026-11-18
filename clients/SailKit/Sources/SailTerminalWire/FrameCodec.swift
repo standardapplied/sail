@@ -1,6 +1,6 @@
 import SailAPI
 
-/// The `SAILPTY3` framing, byte for byte as the host's `PtyWire` writes it: a big-endian `Int32`
+/// The `SAILPTY4` framing, byte for byte as the host's `PtyWire` writes it: a big-endian `Int32`
 /// length, then the payload, a type byte and its fields. Integers are big-endian; strings and byte
 /// blobs are an `Int32` length and the bytes; a list is an `Int32` count and its entries.
 public enum FrameCodec {
@@ -82,6 +82,10 @@ private extension Frame {
         case .hello: 9
         case .yield: 10
         case .issueTicket: 11
+        case .putBegin: 12
+        case .putChunk: 13
+        case .putEnd: 14
+        case .putCancel: 15
         case .output: 20
         case .replayBegin: 21
         case .replayEnd: 22
@@ -97,6 +101,9 @@ private extension Frame {
         case .welcome: 32
         case .ticket: 33
         case .ticketRefused: 34
+        case .putAck: 35
+        case .putStored: 36
+        case .putRefused: 37
         }
     }
 
@@ -121,6 +128,13 @@ private extension Frame {
         case let .ticket(ticket): [.string(ticket)]
         case let .ticketRefused(kind, reason, remedy):
             [.string(kind.rawValue), .string(reason), .count(remedy.count)] + remedy.flatMap(\.fields)
+        case let .putBegin(id, name, size): [.int32(id), .string(name), .int64(size)]
+        case let .putChunk(id, offset, bytes): [.int32(id), .int64(offset), .blob(bytes)]
+        case let .putEnd(id, sha256): [.int32(id), .blob(sha256)]
+        case let .putCancel(id): [.int32(id)]
+        case let .putAck(id, received): [.int32(id), .int64(received)]
+        case let .putStored(id, path): [.int32(id), .string(path)]
+        case let .putRefused(id, kind, limit): [.int32(id), .string(kind.rawValue), .int64(limit)]
         case let .output(lastInputSequence, bytes): [.int64(lastInputSequence), .blob(bytes)]
         case let .replayBegin(safe): [.bool(safe)]
         case let .writerChanged(fde): [.string(fde)]
@@ -130,7 +144,7 @@ private extension Frame {
             [.count(page.sessions.count)] + page.sessions.flatMap(\.fields) + [.string(page.next)]
                 + [.count(page.sessions.count)] + page.sessions.flatMap(\.place)
         case let .refused(refusal):
-            [.string(refusal.message)] + (refusal.remedy.map { [.count($0.count)] + $0.flatMap(\.fields) } ?? [])
+            [.string(refusal.message), .count(refusal.remedy.count)] + refusal.remedy.flatMap(\.fields)
         case .takeWrite, .detach, .replayEnd, .paused, .continued, .accepted: []
         }
     }
@@ -213,6 +227,13 @@ private struct Cursor {
                 action: Open(rawValue: try string()), target: try string(), credential: try string(),
                 workspace: try string()
             )
+        case 12: .putBegin(id: try int32(), name: try string(), size: try int64())
+        case 13: .putChunk(id: try int32(), offset: try int64(), bytes: try blob())
+        case 14: .putEnd(id: try int32(), sha256: try blob())
+        case 15: .putCancel(id: try int32())
+        case 35: .putAck(id: try int32(), received: try int64())
+        case 36: .putStored(id: try int32(), path: try string())
+        case 37: .putRefused(id: try int32(), kind: Open(rawValue: try string()), limit: try int64())
         case 33: .ticket(try string())
         case 34:
             .ticketRefused(
@@ -250,10 +271,8 @@ private struct Cursor {
         )
     }
 
-    /// `info` with the place a frame ends with, when its host wrote one (a pinned released host
-    /// writes none).
+    /// `info` with the place its frame ends with.
     private mutating func placed(_ info: SessionInfo) throws(TerminalWireError) -> SessionInfo {
-        guard remaining > 0 else { return info }
         var placed = info
         placed.project = try string()
         placed.workspace = try string()
@@ -261,28 +280,24 @@ private struct Cursor {
         return placed
     }
 
-    /// A page of sessions, each given the place the page ends with, when its host wrote them.
+    /// A page of sessions, each given the place the page ends with.
     private mutating func page() throws(TerminalWireError) -> SessionPage {
         var sessions = try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.session() }
         let next = try string()
-        if remaining > 0 {
-            let placed = try int32()
-            guard placed == sessions.count else {
-                throw .malformed("a page places \(placed) sessions but holds \(sessions.count)")
-            }
-            for index in sessions.indices {
-                sessions[index].project = try string()
-                sessions[index].workspace = try string()
-                sessions[index].opener = try string()
-            }
+        let placed = try int32()
+        guard placed == sessions.count else {
+            throw .malformed("a page places \(placed) sessions but holds \(sessions.count)")
+        }
+        for index in sessions.indices {
+            sessions[index].project = try string()
+            sessions[index].workspace = try string()
+            sessions[index].opener = try string()
         }
         return SessionPage(sessions: sessions, next: next)
     }
 
     private mutating func refusal() throws(TerminalWireError) -> HostRefusal {
-        let message = try string()
-        guard remaining > 0 else { return HostRefusal(message: message, remedy: nil) }
-        return HostRefusal(message: message, remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() })
+        HostRefusal(message: try string(), remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() })
     }
 
     private mutating func part() throws(TerminalWireError) -> RemedyPart {

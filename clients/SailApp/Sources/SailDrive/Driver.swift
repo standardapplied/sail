@@ -166,14 +166,16 @@ final class Driver {
             if !ok { break }
         }
         let withinClaim = madeStacks.map { $0.watcherShare <= MainStacks.claim } ?? true
-        let withinLook = madeStacks.map { $0.longestLookTaken <= MainStacks.longestLook } ?? true
+        let lookCheap = madeStacks.map { $0.averageLook <= MainStacks.computation } ?? true
+        let stayedRealTime = madeStacks.map { !$0.demoted } ?? true
         let stretches = "drive: \(excused.count) stretch\(excused.count == 1 ? "" : "es") of a judged wait excused as the machine's"
             + (excused.isEmpty ? "" : ": " + excused.joined(separator: "; "))
         let sampler = madeStacks.map { "; the main thread's sampler took \($0.cost)" } ?? "; the main thread's sampler never ran: no step measured a wait"
         let overClaim = withinClaim ? "" : "; FAILED: the watcher took more of a CPU than its claim"
-        let overLook = withinLook ? "" : String(format: "; FAILED: a look took longer than %.0f ms", MainStacks.longestLook * 1000)
-        Self.say(stretches + sampler + overClaim + overLook)
-        let passed = results.count == steps.count && results.allSatisfy(\.ok) && withinClaim && withinLook
+        let overLook = lookCheap ? "" : String(format: "; FAILED: a look took more on average than the watcher's computation of %.0f µs", MainStacks.computation * 1e6)
+        let demoted = stayedRealTime ? "" : "; FAILED: the watcher was demoted out of real time"
+        Self.say(stretches + sampler + overClaim + overLook + demoted)
+        let passed = results.count == steps.count && results.allSatisfy(\.ok) && withinClaim && lookCheap && stayedRealTime
         let report = Report(
             passed: passed, hertz: shell.window.screen?.maximumFramesPerSecond ?? 0, scale: terminal.metrics.scale, steps: results,
             measures: measures, bench: bench, panes4: panes4
@@ -491,7 +493,7 @@ final class Driver {
         let own = ownThread.stalls, looks = mainStacks.looks
         let proven = MachineShare.starvation(in: wait, looks: looks)
         let ownHeld = own.shared(with: wait), starved = MachineShare.starved(in: wait, looks: looks)
-        let inconclusive = MachineShare.inconclusive(wait, own: own, main: looks)
+        let inconclusive = MachineShare.inconclusive(wait, main: looks)
         let ours = max(0, wait.length - tick - MachineShare.of(wait, own: own, main: looks)) * 1000
         let inWait = looks.filter { $0.time >= wait.start && $0.time <= wait.end }
         let seen = inWait.count, cpus = ProcessInfo.processInfo.activeProcessorCount
@@ -501,7 +503,7 @@ final class Driver {
             ? "no run of \(MachineShare.fewestLooks) looks proved it starved (\(seen) looks in the wait)"
             : told.joined(separator: "; ")) + "; the main run loop's mode, " + mainStacks.modes(in: wait) + "; " + Self.machineTicks(across: inWait)
         let ceiling = inconclusive
-            ? String(format: "; INCONCLUSIVE: the machine claims more than %.0f%% of the wait, so none of it is excused and it is judged whole", MachineShare.mostExcused * 100)
+            ? String(format: "; INCONCLUSIVE: the main thread's starvation is more than %.0f%% of the wait, so none of it is excused", MachineShare.mostExcused * 100)
             : ""
         return (ours, "waited \(Self.ms((wait.length - tick) * 1000)) ms, the drive's own thread held \(Self.ms(ownHeld * 1000)) ms of it, "
             + "the main thread runnable without CPU on a machine with none idle \(Self.ms(starved * 1000)) ms of it (\(evidence))\(ceiling), ours \(Self.ms(ours)) ms")

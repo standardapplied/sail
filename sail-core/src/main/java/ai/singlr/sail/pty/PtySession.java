@@ -904,6 +904,11 @@ public final class PtySession implements AutoCloseable {
     return WriteOutcome.BACKLOG;
   }
 
+  /** Whether {@code subscriberId} holds the write token: only the writer uploads, as it types. */
+  public boolean isWriter(long subscriberId) {
+    return subscriberId >= 0 && subscriberId == writerId;
+  }
+
   /** Transfers the write token to {@code subscriberId}; everyone hears about it. */
   public synchronized void takeWrite(long subscriberId, String fde) {
     if (!subscribers.containsKey(subscriberId)) {

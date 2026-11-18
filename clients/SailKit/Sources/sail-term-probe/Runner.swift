@@ -1,6 +1,7 @@
 import Foundation
 import SailTerminal
 import SailVT
+import Synchronization
 
 /// Runs a script's steps against one session in order, stopping at the first that fails.
 struct Runner {
@@ -26,6 +27,7 @@ struct Runner {
         }
         var kept = Kept()
         var budgets: [Budget] = []
+        var uploads: [UploadResult] = []
         do {
             try await follower.attached(within: 30)
             results.append(StepResult(step: "attach", ok: true, milliseconds: 0, detail: nil))
@@ -38,6 +40,8 @@ struct Runner {
             do {
                 if case let .measure(keys) = step {
                     budgets = try await measure(keys)
+                } else if case let .upload(path, within) = step {
+                    uploads.append(try await upload(path, within: within))
                 } else {
                     try await take(step, kept: &kept)
                 }
@@ -47,7 +51,10 @@ struct Runner {
                 break
             }
         }
-        return Report(steps: results, latency: session.latencyReport, droppedInputs: session.state.droppedInputs, budgets: budgets)
+        return Report(
+            steps: results, latency: session.latencyReport, droppedInputs: session.state.droppedInputs, budgets: budgets,
+            uploads: uploads
+        )
     }
 
     /// The screens a script kept, and how many replays the session had finished when it last
@@ -101,9 +108,50 @@ struct Runner {
             }
         case let .phase(name, within):
             try await follower.until(within: within, "reached \(name)") { Self.matches(session.state.phase, name) }
-        case .measure:
+        case .measure, .upload:
             break
         }
+    }
+
+    /// Uploads the file at `path` within `within` seconds, typing a key and erasing it in turn
+    /// while it goes, each once the one before echoed, and pastes the stored path, which needs no
+    /// quoting, followed by a space so nothing runs.
+    private func upload(_ path: String, within: Int) async throws -> UploadResult {
+        let bytes = [UInt8](try Data(contentsOf: URL(filePath: path)))
+        let started = clock.now
+        let done = Mutex(false)
+        let stored = Task {
+            defer { done.withLock { $0 = true } }
+            return try await session.upload(name: URL(filePath: path).lastPathComponent, source: .bytes(bytes))
+        }
+        let deadline = Task {
+            try await Task.sleep(for: .seconds(within))
+            stored.cancel()
+        }
+        defer { deadline.cancel() }
+        var echoes: [Double] = []
+        var erase = false
+        while !done.withLock({ $0 }) {
+            let before = session.latencyReport.screen.count
+            let pressed = clock.now
+            session.send(erase ? KeyInput(key: .backspace) : KeyInput(key: .x, text: "x", unshifted: "x"))
+            erase.toggle()
+            try await follower.until("echoed a key typed during the upload") { session.latencyReport.screen.count > before }
+            echoes.append((clock.now - pressed).milliseconds)
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        if erase {
+            session.send(KeyInput(key: .backspace))
+        }
+        let storedPath = try await stored.value
+        let elapsed = (clock.now - started).milliseconds
+        session.paste(storedPath + " ", confirmed: true)
+        var digest = SHA256()
+        digest.update(bytes)
+        return UploadResult(
+            path: storedPath, bytes: bytes.count, sha256: digest.finalize().map { String(format: "%02x", $0) }.joined(),
+            milliseconds: elapsed, keyEchoes: echoes
+        )
     }
 
     /// Types `keys` keys into a program that echoes them, each once the one before reached the

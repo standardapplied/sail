@@ -102,23 +102,24 @@ import Testing
         #expect(abs(MachineShare.of(Self.wait, own: own, main: []) - 0.05) < 1e-9)
         let late = Self.looks(runnable: { $0 >= 10.12 - 1e-9 })
         #expect(abs(MachineShare.of(Self.wait, own: own, main: late) - 0.08) < 1e-9)
-        #expect(abs(MachineShare.claimed(Span(10.0, 10.1), own: own, main: Self.looks()) - 0.1) < 1e-9, "never more than the wait")
+        var whole = Stalls(tick: 0.01)
+        whole.record(Span(9.9, 10.4))
+        #expect(abs(MachineShare.of(Span(10.0, 10.1), own: whole, main: []) - 0.1) < 1e-9, "never more than the wait")
     }
 
-    /// A wait the machine claims more than half of is inconclusive: nothing of it is excused, so
-    /// it is judged whole, and one over its budget fails; up to half, the claim is taken.
-    @Test func aWaitMostlyTheMachinesExcusesNothing() {
+    /// Starvation proven over more than half a wait is inconclusive: none of it is excused; up to
+    /// half, it is. The drive's own thread's stall is its own measured work and is never capped.
+    @Test func starvationOverMostOfAWaitExcusesNothingButTheOwnThreadsStallStands() {
         let own = Stalls(tick: 0.01)
         let under = Self.looks(runnable: { $0 >= 10.12 - 1e-9 })
-        #expect(!MachineShare.inconclusive(Self.wait, own: own, main: under))
-        #expect(abs(MachineShare.of(Self.wait, own: own, main: under) - 0.08) < 1e-9, "under half the wait, the claim is taken")
+        #expect(!MachineShare.inconclusive(Self.wait, main: under))
+        #expect(abs(MachineShare.of(Self.wait, own: own, main: under) - 0.08) < 1e-9, "under half the wait, the starvation is excused")
         let most = Self.looks(runnable: { $0 >= 10.08 - 1e-9 })
-        #expect(MachineShare.inconclusive(Self.wait, own: own, main: most))
-        #expect(abs(MachineShare.claimed(Self.wait, own: own, main: most) - 0.12) < 1e-9)
-        #expect(MachineShare.of(Self.wait, own: own, main: most) == 0, "past the ceiling the wait is judged whole")
+        #expect(MachineShare.inconclusive(Self.wait, main: most))
+        #expect(MachineShare.of(Self.wait, own: own, main: most) == 0, "past the ceiling no starvation is excused")
         var stalled = Stalls(tick: 0.01)
-        stalled.record(Span(9.9, 10.4))
-        #expect(MachineShare.of(Self.wait, own: stalled, main: []) == 0, "the drive's own thread held through all of it")
+        stalled.record(Span(10.0, 10.16))
+        #expect(abs(MachineShare.of(Self.wait, own: stalled, main: most) - 0.15) < 1e-9, "the own thread's stall over most of the wait stands")
     }
 
     /// The two shares are not added: an own-thread stall of 50 ms early in a 200 ms wait and 50 ms
