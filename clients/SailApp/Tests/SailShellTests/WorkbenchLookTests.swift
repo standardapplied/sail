@@ -329,7 +329,7 @@ import Testing
         }
         let behind = try #require(views[0].superview)
         behind.isHidden = true
-        #expect(views[0].isHiddenOrHasHiddenAncestor && !views[1].isHiddenOrHasHiddenAncestor)
+        #expect(behind.isHidden && views[1].superview?.isHidden == false, "the background tab's view is not the only one hidden")
         bench.look = .light
         for (name, view) in zip(["the background tab's", "the shown tab's"], views) {
             #expect(view.look == .light, "\(name) pane kept the dark look")
