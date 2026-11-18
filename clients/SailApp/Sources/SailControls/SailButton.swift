@@ -17,8 +17,24 @@ public final class SailButton: NSButton {
         }
     }
 
-    /// An icon-only button's tooltip, saying its label.
+    /// An icon-only button's tooltip, saying its label; any button's, saying ``why``.
     public private(set) var tooltip: Tooltip?
+
+    /// Why it is off, said by its tooltip on hover and to VoiceOver, so a disabled button is never
+    /// mute; an icon-only button says it in place of its label, without its shortcut. Nil: as before.
+    public var why: String? {
+        didSet {
+            guard why != oldValue else { return }
+            if tooltip == nil, let why {
+                let tooltip = Tooltip(why, look: look, mono: nil)
+                tooltip.attach(to: self, saying: why)
+                self.tooltip = tooltip
+            }
+            tooltip?.text = why ?? (iconOnly ? title : "")
+            tooltip?.chip.showsHint = why == nil
+            tooltip?.isOn = iconOnly || why != nil
+        }
+    }
 
     /// Its kind; a row's first action turns primary while the row is chosen.
     public var kind: ButtonKind {

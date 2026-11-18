@@ -41,10 +41,12 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         public let paint: RowPaint?
         /// Its content takes the whole row, past the actions column: a row that holds its own buttons.
         public let full: Bool
+        /// A view after its note among its actions (a spinner).
+        public let accessory: NSView?
 
         public init(
             id: String, name: String, voice: String, content: NSView, actions: [Action] = [], note: String? = nil, height: Double? = nil,
-            paint: RowPaint? = nil, full: Bool = false
+            paint: RowPaint? = nil, full: Bool = false, accessory: NSView? = nil
         ) {
             self.id = id
             self.name = name
@@ -55,6 +57,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             self.height = height
             self.paint = paint
             self.full = full
+            self.accessory = accessory
         }
     }
 
@@ -234,6 +237,13 @@ final class SailRowView: NSTableRowView {
     let item: SailList.Item?
     private let first: Bool
     private var hoverArea: NSTrackingArea?
+    /// The progress line along its foot, when its paint asks for one.
+    private(set) var line: ProgressLine?
+
+    override func layout() {
+        super.layout()
+        line?.frame = NSRect(x: 0, y: Double(bounds.height) - ProgressLine.height, width: Double(bounds.width), height: ProgressLine.height)
+    }
 
     var hovered = false {
         didSet { if hovered != oldValue { refresh() } }
@@ -246,6 +256,11 @@ final class SailRowView: NSTableRowView {
         self.first = first
         super.init(frame: .zero)
         guard let item else { return }
+        if item.paint?.progress == true {
+            let line = ProgressLine(look: look)
+            addSubview(line)
+            self.line = line
+        }
         setAccessibilityLabel(item.voice)
         setAccessibilityCustomActions(item.actions.map { action in
             let run = Run(action)
@@ -441,7 +456,7 @@ final class RowCell: NSView {
             label.lineBreakMode = .byTruncatingTail
             return label
         }
-        actions.setViews(([note].compactMap { $0 } as [NSView]) + buttons, in: .trailing)
+        actions.setViews(([note, item.accessory].compactMap { $0 } as [NSView]) + buttons, in: .trailing)
         if let note { actions.setCustomSpacing(6 + 4, after: note) }
         actions.spacing = 6
         actions.alphaValue = 0
@@ -556,3 +571,64 @@ final class MenuOpener: NSObject {
         return NSPoint(x: leading, y: bottom)
     }
 }
+
+/// A 2 pt accent line along a row's foot growing to 94 % of it over 3 s, again and again, eased as
+/// the design's `prog` is (cubic-bezier .2 .6 .3 1): a create under way, the server's median long.
+/// Held at 94 % while motion is reduced.
+@MainActor
+final class ProgressLine: NSView {
+    static let height = 2.0, reach = 0.94, seconds = 3.0
+
+    let bar = CALayer()
+    private var laidWidth = 0.0
+
+    init(look: Look) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        bar.backgroundColor = NSColor(Tint(look.accent)).cgColor
+        bar.anchorPoint = CGPoint(x: 0, y: 0.5)
+        layer?.addSublayer(bar)
+        setAccessibilityElement(false)
+        NotificationCenter.default.addObserver(self, selector: #selector(motionChanged), name: Motion.changed, object: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func layout() {
+        super.layout()
+        guard Double(bounds.width) != laidWidth else { return }
+        laidWidth = Double(bounds.width)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        bar.bounds = CGRect(x: 0, y: 0, width: Double(bounds.width) * Self.reach, height: Self.height)
+        bar.position = CGPoint(x: 0, y: Double(bounds.height) / 2)
+        CATransaction.commit()
+        run()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        run()
+    }
+
+    @objc private func motionChanged() {
+        run()
+    }
+
+    /// The growth from nothing, while in a window and motion is not reduced.
+    private func run() {
+        bar.removeAnimation(forKey: "grow")
+        guard window != nil, !Motion.shared.reduced, bounds.width > 0 else { return }
+        let grow = CABasicAnimation(keyPath: "bounds.size.width")
+        grow.fromValue = 0
+        grow.toValue = Double(bounds.width) * Self.reach
+        grow.duration = Self.seconds
+        grow.repeatCount = .infinity
+        grow.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.6, 0.3, 1)
+        bar.add(grow, forKey: "grow")
+    }
+}
+

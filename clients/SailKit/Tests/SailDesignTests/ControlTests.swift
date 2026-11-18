@@ -191,4 +191,10 @@ import Testing
             #expect(Shortcut.said(unnamed, command: true) == nil, "\(unnamed.unicodeScalars.map { String($0.value, radix: 16) }) is said")
         }
     }
+
+    /// An age as the frames write it ("listed 4 min ago"), the same wherever the app says one.
+    @Test func anAgeIsSaidAsTheFramesWriteIt() {
+        let ages: [Double] = [-5, 0.4, 1, 59.9, 60, 240, 3599, 3600, 7300, 86400, 200_000]
+        #expect(ages.map(Ago.said) == ["just now", "just now", "1 s ago", "59 s ago", "1 min ago", "4 min ago", "59 min ago", "1 h ago", "2 h ago", "1 d ago", "2 d ago"])
+    }
 }

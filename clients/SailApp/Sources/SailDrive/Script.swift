@@ -149,7 +149,8 @@ struct Step: Decodable {
     /// every state and look, cut into `<control>-<state>-<look>.png`.
     var kit: String?
     /// A person's action on the Workspaces view: its kind ("startAndOpen",
-    /// "newWorkspace", "cancelCreate", "show", "listAgain", or "type" a name into the create row)
+    /// "newWorkspace", "cancelCreate", "show", "listAgain", "tryAgain" on the card, or "type" a name
+    /// into the create row)
     /// and the workspace or name it is on; it passes when what it does shows (the create row open
     /// or gone, the row shown chosen).
     var act: [String]?
@@ -172,6 +173,9 @@ struct Step: Decodable {
     /// A proxy answers this route ("GET /v1/projects/harbor/workspaces") with a 502 from now on;
     /// empty, no route.
     var proxyFails: String?
+    /// This route ("GET /v1/projects") cannot reach the control plane from now on; `proxyFails`
+    /// empty clears it.
+    var unreachable: String?
     /// The drive's runner door holds this many sessions, within `seconds` (15 by default): the
     /// host's session list.
     var doorLists: Int?

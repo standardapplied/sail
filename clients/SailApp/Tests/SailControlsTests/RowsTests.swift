@@ -292,6 +292,37 @@ import Testing
         #expect(presses.count == 1 && !tooltip.isShown, "a click pressed the button \(presses.count) times and left the chip shown: \(tooltip.isShown)")
     }
 
+    /// A disabled button says why through the same tooltip, shown on hover and read by VoiceOver;
+    /// an icon-only one says it in place of its label and drops its shortcut; with no reason, a
+    /// labelled button says nothing and an icon-only one its label again.
+    @Test func aDisabledButtonSaysWhy() async throws {
+        let mono = try ControlsTests.mono()
+        let labelled = SailButton("New Workspace", kind: .secondary, look: .light, target: nil, action: nil)
+        let icon = SailButton(icon: .plus, label: "New Workspace", kind: .secondary, look: .light, target: nil, action: nil)
+        icon.shortcut("n", modifiers: .command, mono: mono)
+        let holder = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        labelled.frame = NSRect(x: 40, y: 80, width: 160, height: 32)
+        icon.frame = NSRect(x: 260, y: 80, width: 32, height: 32)
+        holder.addSubview(labelled)
+        holder.addSubview(icon)
+        let (window, _) = ControlsTests.window(holding: holder, on: .white)
+        defer { window.orderOut(nil) }
+        #expect(labelled.tooltip == nil)
+        for button in [labelled, icon] {
+            button.isEnabled = false
+            button.why = "demo has no template yet"
+            let tooltip = try #require(button.tooltip)
+            #expect(tooltip.text == "demo has no template yet" && button.accessibilityHelp() == "demo has no template yet")
+            #expect(!tooltip.chip.showsHint, "a disabled button's chip still says its shortcut")
+            tooltip.mouseEntered(with: try ControlsTests.entered())
+            let shown = await ControlsTests.until(3) { tooltip.isShown }
+            #expect(shown, "the reason never showed on hover")
+            tooltip.mouseExited(with: try ControlsTests.entered())
+            button.why = nil
+        }
+        #expect(labelled.tooltip?.isOn == false && icon.tooltip?.isOn == true && icon.tooltip?.text == "New Workspace" && icon.tooltip?.chip.showsHint == true)
+    }
+
     /// The chip's keycap trails its words, and leads them right to left.
     @Test func theChipsKeycapFollowsTheReadingDirection() throws {
         let look = Look.light, canvas = NSColor(Tint(look.canvas))

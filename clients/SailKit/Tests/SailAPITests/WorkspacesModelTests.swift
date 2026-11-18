@@ -47,10 +47,19 @@ import Testing
         model.projectsListed(.failure(.unreachable("The network connection was lost.")))
         guard case let .unreachable(card) = model.screen else { Issue.record("no card: \(model.screen)"); return }
         #expect(card.title == "Sail can’t reach the control plane" && card.action == .checkAgain)
-        #expect(card.body == "The network connection was lost. Your terminals on this Mac keep working; your workspaces come back when the control plane answers.")
+        #expect(card.body == "Sail cannot reach the control plane at main.acme.dev. If it is on your private network, check that the network is connected. "
+            + "Your terminals on this Mac keep working; your workspaces come back when the control plane answers.")
+        #expect(!card.body.contains("network connection was lost"), "the transport's own text reached the person")
         model.projectsListed(.failure(.unexpected(route: "GET /v1/projects", status: 502)))
         guard case let .unreachable(proxied) = model.screen else { Issue.record("no card: \(model.screen)"); return }
-        #expect(proxied.body.hasPrefix("The control plane answered with an error (502).") && !proxied.body.contains("/v1/"))
+        #expect(proxied.title == "Sail can’t list your projects")
+        model.askingProjects()
+        #expect(model.screen == .loading, "Try Again kept the failure up while it asked")
+        model.projectsListed(Self.answer(.projects, "projects"))
+        model.projectsListed(.failure(.unreachable("The network connection was lost.")))
+        model.askingProjects()
+        guard case .shown = model.screen else { Issue.record("a listed panel went for a failed refresh: \(model.screen)"); return }
+        #expect(proxied.body.hasPrefix("The control plane at main.acme.dev answered with an error (502). Your terminals") && !proxied.body.contains("/v1/"))
     }
 
     /// Frame "No project is open to you": the panel stays, empty, and the identity line says who asks.
@@ -101,6 +110,7 @@ import Testing
         model.projectsListed(.success(ProjectList(projects: [ProjectSummary(name: "demo", containerStatus: .known(.notCreated), template: .known(.missing))], total: 1)))
         let page = try #require(Self.page(model))
         #expect(!page.canCreate && page.lede == "demo has no template yet, so no workspace can be created in it.")
+        #expect(page.createWhy == "demo has no template yet", "New Workspace is off without a reason beside it")
         guard case let .empty(empty) = page.body else { Issue.record("no empty state: \(page.body)"); return }
         #expect(empty.title == "demo isn’t ready yet" && empty.missing && empty.action == .checkAgain)
         #expect(empty.body == "demo has no template yet. An admin builds demo’s template on the runner first; then you can create workspaces here.")
@@ -154,7 +164,7 @@ import Testing
         let again = model.listAgain()
         model.listed(.failure(.unreachable("The network connection was lost.")), request: again, at: Self.at.addingTimeInterval(240))
         let page = try #require(Self.page(model))
-        #expect(page.banner == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list harbor’s workspaces", line: "Sail could not reach the control plane: The network connection was lost.", tryAgain: true))
+        #expect(page.banner == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list harbor’s workspaces", line: "Sail cannot reach the control plane at main.acme.dev.", tryAgain: true))
         #expect(page.stale && page.listedAt == Self.at && Self.table(model)?.yours.isEmpty == false, "the old list stays, dimmed")
         let recovered = model.listAgain()
         model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-three"), request: recovered, at: Self.at.addingTimeInterval(300))
@@ -169,10 +179,15 @@ import Testing
         #expect(Self.table(model)?.create == WorkspacesModel.CreateLine(name: "", underWay: false, refusal: [], existing: nil))
         #expect(Self.table(model)?.yours.contains(where: \.chosen) == false, "a row stays chosen beside the open create row")
         #expect(Self.page(model)?.canCreate == false, "New Workspace offered while its row is open")
+        #expect(Self.page(model)?.createWhy == "A new workspace is open below" && Self.table(model)?.creating == nil)
         model.type("new")
         let sent = model.sendCreate()
         let name = try #require(sent)
         #expect(name == "new" && Self.table(model)?.create?.underWay == true && Self.page(model)?.canCreate == false)
+        #expect(Self.page(model)?.createWhy == "The runner creates one workspace at a time")
+        let creating = try #require(Self.table(model)?.creating, "the create under way is not drawn as the row it will be")
+        #expect(creating.name == "new" && creating.instance == "harbor-new" && creating.state == .known(.notCreated) && creating.mine)
+        #expect(creating.owner == nil && !creating.chosen && creating.primary == nil && creating.why == "about 3 s" && creating.menu.isEmpty)
         let second = model.sendCreate()
         #expect(second == nil, "one create at a time")
         model.type("other")
@@ -183,7 +198,8 @@ import Testing
         let request = try #require(answered)
         model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-made"), request: request, at: Self.at)
         let table = try #require(Self.table(model))
-        #expect(table.create == nil && table.yours.first { $0.chosen }?.name == "new")
+        #expect(table.create == nil && table.creating == nil && table.yours.first { $0.chosen }?.name == "new")
+        #expect(Self.page(model)?.createWhy == nil)
     }
 
     /// Frame "Creating, refused": the server's sentence under the name, kept to be fixed, and the

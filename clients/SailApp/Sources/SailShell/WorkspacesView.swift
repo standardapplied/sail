@@ -103,6 +103,7 @@ public final class WorkspacesView: NSView {
             case let .empty(empty): lines += [empty.title, empty.body]
             case let .list(table):
                 lines += table.create?.refusal ?? []
+                lines += table.creating.map { [said($0)] } ?? []
                 lines += (table.yours + table.others).map(said)
             }
             return lines.filter { !$0.isEmpty }.joined(separator: "\n")
@@ -145,7 +146,7 @@ public final class WorkspacesView: NSView {
         await askProjects().value
     }
 
-    @objc func askAgain(_: Any?) {
+    @objc package func askAgain(_: Any?) {
         switch door {
         case .signedOut: onSignIn()
         case .unknown: onAskWhoIsSignedIn()
@@ -158,7 +159,9 @@ public final class WorkspacesView: NSView {
 
     @discardableResult
     private func askProjects() -> Task<Void, Never> {
-        Task {
+        model.askingProjects()
+        render()
+        return Task {
             guard let client else { return }
             let answer = await Self.result { () async throws(SailError) in try await client.send(.projects) }
             if case .failure = answer { triedAt = Date() }

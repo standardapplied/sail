@@ -17,6 +17,8 @@ actor GoldenDesk: Transport {
     private var answers: [String: HTTPResponse] = [:]
     private var held: [String: Duration] = [:]
     private var failing: String?
+    /// The failing route cannot be reached at all, in place of the proxy's 502.
+    private var unreached = false
     private(set) var asked: [HTTPRequest] = []
 
     init() {
@@ -46,14 +48,15 @@ actor GoldenDesk: Transport {
     }
 
     /// From now on a proxy answers `route` with a 502 of its own; nil, nothing.
-    func fail(_ route: String?) {
+    func fail(_ route: String?, unreached: Bool = false) {
         failing = route
+        self.unreached = unreached
     }
 
     func send(_ request: HTTPRequest) async throws(SailError) -> HTTPResponse {
         asked.append(request)
         if let after = held[request.route], after > .zero { try? await Task.sleep(for: after) }
-        guard request.route != failing else { throw .unexpected(route: request.route, status: 502) }
+        guard request.route != failing else { throw unreached ? SailError.unreachable("Could not connect to the server.") : SailError.unexpected(route: request.route, status: 502) }
         guard let answer = answers[request.route] else { throw .unreachable("no golden answers \(request.route)") }
         guard request.route == "POST /v1/terminal/tickets", answer.status == 201, let door = Self.door,
               var body = (try? JSONSerialization.jsonObject(with: answer.body)) as? [String: Any] else { return answer }
@@ -124,6 +127,10 @@ extension Driver {
                 return (false, "the projects golden: \(error)")
             }
         }
+        if let route = step.unreachable {
+            await GoldenDesk.shared.fail(route, unreached: true)
+            return (true, "")
+        }
         if let route = step.proxyFails {
             await GoldenDesk.shared.fail(route.isEmpty ? nil : route)
             return (true, "")
@@ -153,7 +160,8 @@ extension Driver {
         if let wanted = step.createStarts {
             typeName(wanted, into: pane)
             pane.project.on(.create)
-            return (pane.busy && !pane.project.newWorkspace.isEnabled, "while creating: \(pane.text.replacingOccurrences(of: "\n", with: " | "))")
+            let shown = pane.busy && !pane.project.newWorkspace.isEnabled && pane.text.contains("\(wanted) · creating")
+            return (shown, "while creating: \(pane.text.replacingOccurrences(of: "\n", with: " | "))")
         }
         if let wanted = step.create {
             let before = pane.ended
@@ -172,6 +180,10 @@ extension Driver {
         }
         if let act = step.act, let what = act.first {
             let name = act.dropFirst().first ?? ""
+            if what == "tryAgain" {
+                pane.askAgain(nil)
+                return (true, "")
+            }
             if what == "type" {
                 typeName(name, into: pane)
                 return (pane.project.field.field.stringValue == name, "the name field holds \(pane.project.field.field.stringValue)")
@@ -204,9 +216,10 @@ extension Driver {
             return (Double(pane.frame.width) == width, "the card is \(pane.frame.width) pt; the panel \(pane.panel.isHidden ? "hidden" : "shown")")
         }
         if let shown = step.skeletons {
-            let showing = { Self.found(Skeleton.self, in: pane).filter { !$0.isHiddenOrHasHiddenAncestor && $0.alphaValue == 1 }.count }
-            let found = await waitUntil(step.seconds ?? 5) { (showing() > 0) == shown }
-            return (found, "\(showing()) skeleton bars shown; the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
+            let visible = { Self.found(Skeleton.self, in: pane).filter { !$0.isHiddenOrHasHiddenAncestor } }
+            let found = await waitUntil(step.seconds ?? 5) { shown ? !visible().isEmpty && visible().allSatisfy { $0.alphaValue == 1 } : visible().isEmpty }
+            let bars = visible()
+            return (found, "\(bars.filter { $0.alphaValue == 1 }.count) of \(bars.count) skeleton bars shown; the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
         }
         if let shown = step.showSidebar {
             pane.toggleSidebar(nil)

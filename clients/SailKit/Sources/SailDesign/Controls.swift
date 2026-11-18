@@ -273,6 +273,22 @@ public enum Shortcut {
     }
 }
 
+/// How long ago something was, as the app says it everywhere ("listed 4 min ago"): seconds under a
+/// minute, then minutes, hours and days, whole and rounded down; "just now" under a second, and for
+/// a time a clock put ahead.
+public enum Ago {
+    public static func said(_ seconds: Double) -> String {
+        let whole = Int(seconds.rounded(.down))
+        switch whole {
+        case ..<1: return "just now"
+        case ..<60: return "\(whole) s ago"
+        case ..<3600: return "\(whole / 60) min ago"
+        case ..<86400: return "\(whole / 3600) h ago"
+        default: return "\(whole / 86400) d ago"
+        }
+    }
+}
+
 /// Where a line of text sits, as the design's browser sets it. Its ascent and descent are rounded to
 /// whole points and the line box's leading split in two, the half above rounded down; so a 10 pt
 /// mono label in a 10 pt line has its baseline 8 pt under the line's top, not 10.2.

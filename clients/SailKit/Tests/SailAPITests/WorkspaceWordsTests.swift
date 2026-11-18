@@ -127,6 +127,20 @@ import Testing
         #expect(!said.joined().contains("/v1/"))
     }
 
+    /// Where the control plane's address is known, a failure names it in Sail's words in place of the
+    /// transport's text; a refusal stays the server's sentence; with no address, the words above.
+    @Test func aFailureNamesTheControlPlanesAddress() {
+        let failures = [
+            SailError.unreachable("The network connection was lost."), .unexpected(route: "GET /v1/projects", status: 502),
+            .undecodable(Undecodable(route: "GET /v1/projects", field: "projects", reason: "not a list")), .refused(Self.refusal("Workspace 'try' exists already.")),
+        ]
+        #expect(failures.map { $0.said(at: "main.acme.dev") } == [
+            "Sail cannot reach the control plane at main.acme.dev.", "The control plane at main.acme.dev answered with an error (502).",
+            "The control plane at main.acme.dev sent an answer this app cannot read.", "Workspace 'try' exists already.",
+        ])
+        #expect(failures.map { $0.said(at: "") } == failures.map(\.description))
+    }
+
     /// M9: the latest request wins: an answer for a project no longer chosen, or overtaken by a later
     /// request, is dropped; the rows stay paired with the project they were listed for.
     @Test func theLatestListingWinsAndKeepsItsProject() {

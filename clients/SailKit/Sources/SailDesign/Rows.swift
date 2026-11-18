@@ -41,17 +41,21 @@ public struct RowPaint: Equatable, Sendable {
     public let fill: Tint?
     public let bar: Bool
     public let actions: Bool
+    /// A 2 pt accent line runs along its foot: something under way, about as long as it takes.
+    public let progress: Bool
 
     public init(_ state: RowState, look: Look) {
         fill = state.chosen ? (state.emphasized ? look.fillSelected : look.fillSelectedQuiet) : state.hovered ? look.fillHover : nil
         bar = state.chosen
         actions = state.chosen || state.hovered
+        progress = false
     }
 
-    public init(fill: Tint?, bar: Bool) {
+    public init(fill: Tint?, bar: Bool, actions: Bool = false, progress: Bool = false) {
         self.fill = fill
         self.bar = bar
-        actions = false
+        self.actions = actions
+        self.progress = progress
     }
 }
 

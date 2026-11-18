@@ -30,13 +30,12 @@ final class WorkspaceLine: NSStackView {
         super.init(frame: .zero)
         for label in [title, place] {
             label.lineBreakMode = .byTruncatingTail
-            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            label.setContentCompressionResistancePriority(Self.cutShort, for: .horizontal)
         }
         let words = NSStackView(views: [title, place])
         words.orientation = .vertical
         words.alignment = .leading
         words.spacing = 3
-        words.setClippingResistancePriority(.defaultLow, for: .horizontal)
         pill.setContentHuggingPriority(.required, for: .horizontal)
         let shown: [NSView] = narrow ? [words, pill] : [words, Self.column(pill, width: Self.pillColumn), whose].compactMap { $0 }
         distribution = .fill
@@ -45,8 +44,11 @@ final class WorkspaceLine: NSStackView {
         }
         spacing = narrow ? 8 : 0
         alignment = .centerY
-        setClippingResistancePriority(.defaultLow, for: .horizontal)
     }
+
+    /// Below the stacks' own priorities, so a long name is cut short inside its column; stacks that
+    /// clip instead let their words run under the pill.
+    static let cutShort = NSLayoutConstraint.Priority(NSLayoutConstraint.Priority.defaultLow.rawValue - 50)
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {

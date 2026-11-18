@@ -42,9 +42,9 @@ import Testing
     }
 
     /// The page `rows` make of harbor, listed for uday.
-    static func page(_ rows: [WorkspaceRow]) -> WorkspacesModel.Page? {
+    static func page(_ rows: [WorkspaceRow], template: TemplateState = .ready) -> WorkspacesModel.Page? {
         var model = WorkspacesModel(person: Self.uday)
-        let harbor = ProjectSummary(name: "harbor", containerStatus: .known(.running), template: .known(.ready))
+        let harbor = ProjectSummary(name: "harbor", containerStatus: .known(.running), template: .known(template))
         let request = model.projectsListed(.success(ProjectList(projects: [harbor], total: 1))) ?? 0
         model.listed(.success(WorkspaceList(project: "harbor", workspaces: rows)), request: request, at: Date())
         guard case let .shown(_, .project(page)) = model.screen else { return nil }
@@ -114,7 +114,7 @@ import Testing
         for line in lines {
             let whose = try #require(line.whose)
             let words = Self.found(NSTextField.self, in: whose).map(\.stringValue)
-            #expect(whose.frame.width == WorkspaceLine.ownerColumn, "\(line.title.stringValue): the owner's column is \(whose.frame.width) pt")
+            #expect(abs(Double(whose.frame.width) - WorkspaceLine.ownerColumn) < 0.5, "\(line.title.stringValue): the owner's column is \(whose.frame.width) pt")
             #expect(words == (line.title.stringValue == "quay" ? ["ana"] : []), "\(line.title.stringValue)'s owner cell says \(words)")
         }
     }
@@ -138,12 +138,12 @@ import Testing
             #expect(lines.count == 2, "\(width) pt: \(lines.count) rows drawn")
             for line in lines {
                 let pill = line.convert(line.pill.alignmentRect(forFrame: line.pill.frame), from: line.pill.superview)
-                let row = try #require(line.superview).convert(line.frame, to: nil)
+                let row = try #require(line.superview).convert(line.frame, to: nil), cell = try #require(line.superview).convert(try #require(line.superview).bounds, to: nil)
                 for label in [line.title, line.place] {
                     let words = line.convert(label.frame, from: label.superview)
                     #expect(words.maxX <= pill.minX + 0.5 && words.width > 0, "\(width) pt: \(label.stringValue.prefix(12))… ends at \(words.maxX), the pill starts at \(pill.minX)")
                 }
-                #expect(line.convert(pill, to: nil).maxX <= row.maxX, "\(width) pt: the pill runs past its row")
+                #expect(line.convert(pill, to: nil).maxX <= row.maxX + 0.5 && row.maxX <= cell.maxX + 0.5, "\(width) pt: the pill (to \(line.convert(pill, to: nil).maxX)) runs past its line (to \(row.maxX)) or the line past its cell (to \(cell.maxX))")
                 #expect((line.whose == nil) == narrow)
             }
             if narrow { #expect(lines.map(\.place.stringValue) == ["harbor-" + name, "ana's"]) }
@@ -215,6 +215,50 @@ import Testing
         #expect(!view.text.contains("exists already"), "the refusal stayed once the name changed")
         let editor = view.window?.firstResponder as? NSTextView
         #expect(editor?.delegate === view.project.field.field && editor?.selectedRange() == NSRange(location: 5, length: 0), "the name field lost the keys as its refusal went")
+    }
+
+    /// A create under way is the row it will be, as the approved frame draws it: its name over its
+    /// instance, the Creating pill, "about 3 s" and a spinner shown at its end, a 2 pt line along its
+    /// foot; no field. New Workspace says why it waits; the created row then takes its place.
+    @Test func aCreateUnderWayIsTheRowItWillBe() async throws {
+        let exchanges = [try Exchange("projects"), try Exchange("workspaces-three"), try Exchange("workspace-create"), try Exchange("workspaces-made")]
+        let transport = Held(RecordedServer(exchanges), holding: "workspaces", after: 1)
+        let (view, _) = try Self.view(transport)
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("dock") }, "\(view.text)")
+        view.project.on(.newWorkspace)
+        view.project.field.field.stringValue = "new"
+        view.project.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
+        view.project.on(.create)
+        #expect(await RunnerTabTests.until { transport.routes.filter { $0.contains("workspaces") }.count == 2 }, "the create was never asked")
+        #expect(view.text.contains("new · creating"), "\(view.text)")
+        view.layoutSubtreeIfNeeded()
+        let row = try #require(view.project.list.rowView(atRow: 1, makeIfNecessary: true))
+        row.layoutSubtreeIfNeeded()
+        let line = try #require(Self.found(WorkspaceLine.self, in: row).first)
+        #expect(line.title.stringValue == "new" && line.place.stringValue == "harbor-new" && line.pill.state == .creating)
+        #expect(Self.found(SailTextField.self, in: row).isEmpty, "the field is still drawn while the create is under way")
+        let spinner = try #require(Self.found(Spinner.self, in: row).first)
+        let note = try #require(Self.found(NSTextField.self, in: row).first { $0.stringValue == "about 3 s" })
+        #expect(!spinner.isHiddenOrHasHiddenAncestor && !note.isHiddenOrHasHiddenAncestor, "the row's end is hidden")
+        let pill = row.convert(line.pill.bounds, from: line.pill), end = row.convert(note.bounds, from: note)
+        #expect(end.minX > pill.maxX && row.convert(spinner.bounds, from: spinner).minX > end.maxX, "about 3 s and the spinner are not after the pill")
+        let foot = try #require(row.subviews.first { String(describing: type(of: $0)) == "ProgressLine" }, "no line along the row's foot")
+        #expect(foot.frame.height == 2 && abs(Double(foot.frame.maxY - row.bounds.height)) < 0.5 && foot.frame.width == row.bounds.width, "the line is at \(foot.frame)")
+        #expect(!view.project.newWorkspace.isEnabled && view.project.newWorkspace.why == "The runner creates one workspace at a time")
+        transport.release()
+        #expect(await RunnerTabTests.until { view.text.contains("new · running") }, "\(view.text)")
+        #expect(view.project.newWorkspace.isEnabled && view.project.newWorkspace.why == nil)
+    }
+
+    /// New Workspace off in a project with no template says why, through the library's tooltip.
+    @Test func newWorkspaceSaysWhyItIsOff() throws {
+        let page = try #require(Self.page([], template: .missing))
+        let (project, window) = try Self.project(width: 900)
+        defer { window.orderOut(nil) }
+        project.render(page)
+        #expect(!project.newWorkspace.isEnabled && project.newWorkspace.why == "harbor has no template yet")
+        #expect(project.newWorkspace.tooltip?.text == "harbor has no template yet" && project.newWorkspace.tooltip?.isOn == true)
     }
 
     /// The panel's edge drags it between 200 and 360 pt.

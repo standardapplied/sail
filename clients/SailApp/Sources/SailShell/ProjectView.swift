@@ -122,8 +122,10 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         lede.isHidden = narrow
         newWorkspace.isHidden = narrow
         newWorkspaceIcon.isHidden = !narrow
-        newWorkspace.isEnabled = page.canCreate
-        newWorkspaceIcon.isEnabled = page.canCreate
+        for button in [newWorkspace, newWorkspaceIcon] {
+            button.isEnabled = page.canCreate
+            button.why = page.createWhy
+        }
         newWorkspace.kind = Self.isEmptyList(page.body) ? .primary : .secondary
         centred?.removeFromSuperview()
         var views: [NSView] = [head, spacer(Self.listGap)]
@@ -222,14 +224,18 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     }
 
     private static func listed(_ at: Date?) -> String {
-        "listed " + (at.map { RelativeDateTimeFormatter().localizedString(for: $0, relativeTo: Date()) } ?? "earlier")
+        "listed " + (at.map { Ago.said(Date().timeIntervalSince($0)) } ?? "earlier")
     }
 
     /// The list's entries: Yours (the create row first), then Other people's.
     private func fill(_ table: WorkspacesModel.Table) {
         list.actionsColumn = narrow ? nil : Self.actionsColumn
         var entries: [SailList.Entry] = [.head("Yours", count: table.yours.count)]
-        if let create = table.create { entries.append(.item(createItem(create))) }
+        if let creating = table.creating {
+            entries.append(.item(creatingItem(creating)))
+        } else if let create = table.create {
+            entries.append(.item(createItem(create)))
+        }
         entries += table.yours.map { .item(item($0)) }
         if !table.others.isEmpty { entries += [.head("Other people's", count: table.others.count)] + table.others.map { .item(item($0)) } }
         list.entries = entries
@@ -250,6 +256,15 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         }
         let said = [line.name, WorkspaceLine.pill(line.state).label.lowercased()] + (line.owner.map { [$0] } ?? [])
         return SailList.Item(id: line.name, name: line.name, voice: said.joined(separator: ", "), content: content, actions: actions, note: line.why)
+    }
+
+    /// The create under way as the row it will be, in the quiet chosen fill: its name and instance,
+    /// Creating, "about 3 s" with a spinner, and the progress line along its foot.
+    private func creatingItem(_ line: WorkspacesModel.Line) -> SailList.Item {
+        let content = WorkspaceLine(line, narrow: narrow, look: look, mono: mono)
+        let paint = RowPaint(fill: look.fillSelectedQuiet, bar: false, actions: true, progress: true)
+        let voice = [line.name, WorkspaceLine.pill(line.state).label.lowercased(), line.why].compactMap { $0 }.joined(separator: ", ")
+        return SailList.Item(id: line.name, name: line.name, voice: voice, content: content, note: line.why, paint: paint, accessory: Spinner(look: look))
     }
 
     /// The create row, taking the whole row: drawn chosen while open, in the error's tint once refused.

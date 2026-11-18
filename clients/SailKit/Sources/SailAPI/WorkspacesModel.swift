@@ -60,6 +60,8 @@ public struct WorkspacesModel: Sendable {
         /// The line under the project's name.
         public let lede: String
         public let canCreate: Bool
+        /// Why New Workspace is unavailable, said beside it; nil while it is offered.
+        public let createWhy: String?
         public let banner: Notice?
         public let body: Body
         /// The list is the last one taken, its refresh having failed: drawn dimmed.
@@ -110,6 +112,8 @@ public struct WorkspacesModel: Sendable {
         public let yours: [Line]
         public let others: [Line]
         public let create: CreateLine?
+        /// The create under way, drawn as the row it will be: its name, its instance, Creating.
+        public let creating: Line?
         public let count: Int
     }
 
@@ -194,6 +198,12 @@ public struct WorkspacesModel: Sendable {
         }
     }
 
+    /// The projects asked for again: with none ever listed, the loading frame, not the last failure,
+    /// shows until the answer comes.
+    public mutating func askingProjects() {
+        if projects == nil { projectsFailure = nil }
+    }
+
     /// Chooses project `name`, forgetting what was under way on the last one; its list's request.
     public mutating func choose(_ name: String) -> Int {
         chosen = name
@@ -222,7 +232,7 @@ public struct WorkspacesModel: Sendable {
             }
         case let .failure(error):
             guard listing.isLatest(request) else { return }
-            listFailure = error.description
+            listFailure = error.said(at: person.controlPlane)
         }
     }
 
@@ -275,7 +285,7 @@ public struct WorkspacesModel: Sendable {
     // MARK: What is shown
 
     public var screen: Screen {
-        guard let projects else { return projectsFailure.map { .unreachable(Self.unreachable($0)) } ?? .loading }
+        guard let projects else { return projectsFailure.map { .unreachable(unreachable($0)) } ?? .loading }
         let panel = Panel(
             projects: projects.map { Project(name: $0.name, mark: Self.mark($0.template)) }, chosen: chosen,
             who: "\(person.handle) · \(person.confirmed ? person.admin ? "admin" : "member" : "role not yet confirmed")", controlPlane: person.controlPlane,
@@ -291,16 +301,25 @@ public struct WorkspacesModel: Sendable {
         return .shown(panel, .project(page(project)))
     }
 
-    private static func unreachable(_ error: SailError) -> Empty {
-        let said = switch error {
-        case let .unreachable(reason): reason
-        default: error.description
-        }
+    /// The card when no project could be listed: what is true, in Sail's words with the address,
+    /// and that this Mac's terminals are untouched.
+    private func unreachable(_ error: SailError) -> Empty {
+        var unreached = false
+        if case .unreachable = error { unreached = true }
+        let network = unreached ? " If it is on your private network, check that the network is connected." : ""
         return Empty(
-            title: "Sail can’t reach the control plane",
-            body: "\(said) Your terminals on this Mac keep working; your workspaces come back when the control plane answers.", line: nil,
-            action: .checkAgain, missing: false
+            title: unreached ? "Sail can’t reach the control plane" : "Sail can’t list your projects",
+            body: error.said(at: person.controlPlane) + network
+                + " Your terminals on this Mac keep working; your workspaces come back when the control plane answers.",
+            line: nil, action: .checkAgain, missing: false
         )
+    }
+
+    /// Why New Workspace is not offered in `project`; nil when it is.
+    private func createWhy(_ project: ProjectSummary) -> String? {
+        if Self.mark(project.template) == .noTemplate { return "\(project.name) has no template yet" }
+        guard let create else { return nil }
+        return create.underWay ? "The runner creates one workspace at a time" : "A new workspace is open below"
     }
 
     private var canCreate: Bool {
@@ -313,7 +332,8 @@ public struct WorkspacesModel: Sendable {
         let banner = listFailure.map { Notice(tone: .error, title: "Couldn’t list \(name)’s workspaces", line: $0, tryAgain: true) }
         guard Self.mark(project.template) != .noTemplate else {
             return Page(
-                name: name, lede: "\(name) has no template yet, so no workspace can be created in it.", canCreate: false, banner: banner,
+                name: name, lede: "\(name) has no template yet, so no workspace can be created in it.", canCreate: false, createWhy: createWhy(project),
+                banner: banner,
                 body: .empty(Empty(
                     title: "\(name) isn’t ready yet",
                     body: "\(name) has no template yet. An admin builds \(name)’s template on the runner first; then you can create workspaces here.",
@@ -335,12 +355,22 @@ public struct WorkspacesModel: Sendable {
             } else {
                 let lines = rows.map(line)
                 let yours = lines.filter(\.mine), others = lines.filter { !$0.mine }
-                body = .list(Table(yours: yours, others: others, create: create, count: lines.count))
+                body = .list(Table(yours: yours, others: others, create: create, creating: creating(in: name), count: lines.count))
             }
         }
         return Page(
-            name: name, lede: "Your own copies of \(name) on the runner. Each one opens as a terminal tab.", canCreate: canCreate, banner: banner,
+            name: name, lede: "Your own copies of \(name) on the runner. Each one opens as a terminal tab.", canCreate: canCreate,
+            createWhy: createWhy(project), banner: banner,
             body: body, stale: listed && listFailure != nil, listedAt: listedAt
+        )
+    }
+
+    /// The create under way in `project` as its row: Creating, about the server's measured median.
+    private func creating(in project: String) -> Line? {
+        guard let create, create.underWay else { return nil }
+        return Line(
+            name: create.name, instance: "\(project)-\(create.name)", state: .known(.notCreated), mine: true, owner: nil, chosen: false, primary: nil,
+            why: "about 3 s", menu: []
         )
     }
 
@@ -362,7 +392,7 @@ public struct WorkspacesModel: Sendable {
     /// and, while their role is not yet confirmed, that the refusal may follow from it.
     private func lines(_ error: SailError) -> [String] {
         var said: [String]
-        if case let .refused(refusal) = error { said = refusal.lines } else { said = [error.description] }
+        if case let .refused(refusal) = error { said = refusal.lines } else { said = [error.said(at: person.controlPlane)] }
         if !person.confirmed, case .refused = error {
             said.append("Your role is not yet confirmed: Sail has not reached \(person.controlPlane) to check it.")
         }
