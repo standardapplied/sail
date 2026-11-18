@@ -267,6 +267,9 @@ import Testing
         tooltip.mouseEntered(with: try ControlsTests.entered())
         let again = await ControlsTests.until(3) { tooltip.isShown }
         #expect(again)
+        // A press here goes through performClick, not a mouse-down sent through the window:
+        // NSButton's own tracking runs a nested event loop, and with it the test process ended
+        // without a result. The drive's kit-the-more-click step clicks ⋯ for real, its chip showing.
         button.performClick(nil)
         #expect(presses.count == 1 && !tooltip.isShown, "a click pressed the button \(presses.count) times and left the chip shown: \(tooltip.isShown)")
     }

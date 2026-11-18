@@ -51,9 +51,11 @@ stop_drive() {
   local pids
   pids=$(pgrep -f -- "$opened_pattern" || true)
   [[ -n $pids ]] || return 0
-  echo "ci/drive: ending the drive still running (pid $pids)" >&2
+  echo "ci/drive: ending the drive still running (pid $pids):" >&2
+  ps -o pid=,ppid=,command= -p "${pids//$'\n'/,}" >&2 || true
   kill -TERM $pids 2> /dev/null || true
-  perl -e 'alarm shift; exec @ARGV' 10 bash -c 'while pgrep -f -- "$1" > /dev/null; do sleep 0.1; done' _ "$opened_pattern" || true
+  # The pattern goes in the environment, not the wait's arguments, or pgrep finds the wait itself.
+  OPENED_PATTERN=$opened_pattern perl -e 'alarm shift; exec @ARGV' 10 bash -c 'while pgrep -f -- "$OPENED_PATTERN" > /dev/null; do sleep 0.1; done' || true
   pids=$(pgrep -f -- "$opened_pattern" || true)
   [[ -z $pids ]] || kill -KILL $pids 2> /dev/null || true
 }
@@ -244,22 +246,7 @@ for run in first second third shots workspaces kit kit-rtl; do
     fi
     if compgen -G "$reports/SailDrive*.ips" > /dev/null; then
       cp "$reports"/SailDrive*.ips "$out/"
-      for report in "$reports"/SailDrive*.ips; do
-        python3 - "$report" <<'PY'
-import json, sys
-text = open(sys.argv[1]).read()
-body = json.loads(text[text.index("\n") + 1:])
-images = body.get("usedImages", [])
-print("ci/drive: crash report", sys.argv[1], body.get("exception"), body.get("termination", {}).get("indicator"))
-for index, thread in enumerate(body.get("threads", [])):
-    if index != body.get("faultingThread") and not thread.get("triggered"):
-        continue
-    print("faulting thread", index, thread.get("name", ""), thread.get("queue", ""))
-    for frame in thread.get("frames", [])[:60]:
-        image = images[frame["imageIndex"]].get("name", "?") if frame.get("imageIndex", -1) < len(images) else "?"
-        print("  ", image, frame.get("symbol", hex(frame.get("imageOffset", 0))), frame.get("symbolLocation", ""))
-PY
-      done
+      ci/crash-frames "$reports"/SailDrive*.ips | sed 's/^/ci\/drive: /'
     elif (( status > 128 )); then
       echo "ci/drive: the drive left no crash report in $reports within 90 s" >&2
     fi

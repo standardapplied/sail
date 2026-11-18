@@ -25,6 +25,7 @@ extension Driver {
         let motion = Motion.shared, was = motion.reduced
         motion.reduced = true
         defer { motion.reduced = was }
+        if sheet == "more-click" { return await moreClick(mono: mono, title: title) }
         var said: [String] = []
         for (name, look) in [("light", Look.light), ("dark", Look.dark), ("light-contrast", Look.light.contrasted()), ("dark-contrast", Look.dark.contrasted())] {
             let kit = Kit(sheet, look: look, mono: mono, title: title)
@@ -75,6 +76,59 @@ extension Driver {
         }
         let wanted = kit.specimens.count
         return (cut == wanted, "\(cut) of \(wanted) states cut at \(String(format: "%.0f", window.backingScaleFactor))x" + (keys.isEmpty ? "" : "; " + keys.joined(separator: "; ")))
+    }
+
+    /// A real click on a chosen row's ⋯ with its tooltip showing: the down sent through the window to
+    /// the button, whose own tracking takes the queued up and sends its action, which opens the menu.
+    /// The chip must be gone as the menu opens; the screen is shot while the menu is up, and the
+    /// menu window's distance under the button's box is said.
+    private func moreClick(mono: LabelFont, title: TitleFont) async -> (Bool, String) {
+        let kit = Kit("row", look: .light, mono: mono, title: title)
+        let window = kit.window
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        guard await waitUntil(5, { window.isKeyWindow }) else { return (false, "the gallery's window never became key") }
+        guard let list = kit.specimens.first(where: { $0.name == "row-chosen-quiet" })?.list else { return (false, "the row sheet has no quiet chosen row") }
+        list.choose("dock")
+        list.layoutSubtreeIfNeeded()
+        let buttons = Self.views(in: list).compactMap { $0 as? SailButton }
+        guard let more = buttons.first(where: { $0.accessibilityLabel() == "More" && !$0.isHiddenOrHasHiddenAncestor }), let tooltip = more.tooltip, let menu = more.menu
+        else { return (false, "dock's row shows no ⋯ with a tooltip and a menu") }
+        let hover = NSEvent.enterExitEvent(
+            with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, trackingNumber: 0,
+            userData: nil
+        )
+        if let hover { tooltip.mouseEntered(with: hover) }
+        guard await waitUntil(3, { tooltip.isShown }) else { return (false, "⋯'s tooltip never showed") }
+        let watch = MenuWatch(tooltip)
+        menu.delegate = watch
+        let middle = more.convert(NSPoint(x: more.bounds.midX, y: more.bounds.midY), to: nil)
+        func click(_ type: NSEvent.EventType) -> NSEvent? {
+            NSEvent.mouseEvent(
+                with: type, location: middle, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0
+            )
+        }
+        guard let down = click(.leftMouseDown), let up = click(.leftMouseUp) else { return (false, "no click could be made") }
+        let shot = Shot.begin(.menu, to: out.appending(path: "more-click-light.png"))
+        let measure = Timer(timeInterval: 1.5, repeats: false) { _ in
+            MainActor.assumeIsolated { watch.frame = NSApp.windows.first { $0.isVisible && $0.level.rawValue >= NSWindow.Level.popUpMenu.rawValue }?.frame }
+        }
+        RunLoop.main.add(measure, forMode: .common)
+        menu.perform(#selector(NSMenu.cancelTracking), with: nil, afterDelay: 2.5, inModes: [.common])
+        NSApp.postEvent(up, atStart: false)
+        window.sendEvent(down)
+        await shot?.taken()
+        menu.delegate = nil
+        guard watch.opened else { return (false, "the click on ⋯ opened no menu") }
+        guard !watch.chipShown else { return (false, "⋯'s tooltip was still showing as its menu opened") }
+        let box = window.convertToScreen(more.convert(more.alignmentRect(forFrame: more.bounds), to: nil))
+        let under = watch.frame.map { String(format: "its window's top %.1f pt under the box, its left %.1f pt from the box's", Double(box.minY - $0.maxY), Double($0.minX - box.minX)) }
+        return (shot != nil, "the click opened ⋯'s menu with its tooltip gone; " + (under ?? "AppKit lists no menu window to measure") + "; shot more-click-light.png")
+    }
+
+    static func views(in view: NSView) -> [NSView] {
+        view.subviews + view.subviews.flatMap { views(in: $0) }
     }
 
     /// ↓ (or another key) pressed until `id` is chosen, at most once for each row.
@@ -656,5 +710,25 @@ final class SurfaceView: NSView {
     override func draw(_: NSRect) {
         NSColor(Tint(look.surface)).setFill()
         NSBezierPath(rect: bounds).fill()
+    }
+}
+
+/// What a ⋯ menu saw as it opened: whether the tooltip still showed, and where its window stood.
+@MainActor
+final class MenuWatch: NSObject, NSMenuDelegate {
+    let tooltip: Tooltip
+    var opened = false
+    var chipShown = true
+    var frame: NSRect?
+
+    init(_ tooltip: Tooltip) {
+        self.tooltip = tooltip
+    }
+
+    nonisolated func menuWillOpen(_: NSMenu) {
+        MainActor.assumeIsolated {
+            opened = true
+            chipShown = tooltip.isShown
+        }
     }
 }
