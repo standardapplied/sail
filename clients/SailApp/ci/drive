@@ -29,7 +29,7 @@ readonly drive=$app/Contents/MacOS/SailDrive sail=$app/Contents/Helpers/sail
 
 mkdir -p "$out"
 readonly out_dir=$(cd "$out" && pwd) scripts=$PWD/Tests/Drive
-passkeys=$(mktemp -d) plain=$(mktemp -d) ticket_dir=$(mktemp -d /tmp/sail-drive-ticket.XXXXXX)
+passkeys=$(mktemp -d) plain=$(mktemp -d) private_dir=$(mktemp -d /tmp/sail-drive.XXXXXX) shooter=
 SAIL_DATA_DIR=$passkeys "$sail" server start --port 7979 --rp-id sail.standardapplied.com --origin https://sail.standardapplied.com \
   > "$out/server-7979.log" 2>&1 &
 servers=($!)
@@ -43,7 +43,7 @@ restore_keyboard() {
   if [[ $keyboard_was == unset ]]; then defaults delete -g AppleKeyboardUIMode 2> /dev/null || true
   else defaults write -g AppleKeyboardUIMode -int "$keyboard_was"; fi
 }
-trap 'kill "${servers[@]}" 2>/dev/null || true; rm -rf "$passkeys" "$plain" "$ticket_dir"; restore_keyboard' EXIT
+trap 'kill "${servers[@]}" ${shooter:+"$shooter"} 2>/dev/null || true; rm -rf "$passkeys" "$plain" "$private_dir"; restore_keyboard' EXIT
 for port in 7979 7980; do
   for _ in $(seq 1 60); do
     curl -fsS "http://127.0.0.1:$port/v1/health" > /dev/null 2>&1 && break
@@ -58,9 +58,41 @@ done
 
 export SAIL_DATA_DIR=$passkeys
 "$sail" fde add uday --name Uday --role admin
-(umask 077 && "$sail" fde enroll uday --json | plutil -extract ticket raw - > "$ticket_dir/ticket")
-export SAIL_DRIVE_TICKET_FILE=$ticket_dir/ticket SAIL_DRIVE_PASSKEY=$out_dir/software-passkey.json
+(umask 077 && "$sail" fde enroll uday --json | plutil -extract ticket raw - > "$private_dir/ticket")
+export SAIL_DRIVE_TICKET_FILE=$private_dir/ticket SAIL_DRIVE_PASSKEY=$out_dir/software-passkey.json
 rm -f "$SAIL_DRIVE_PASSKEY"
+
+# Opened by LaunchServices, the app is its own responsible process for the privacy grants and holds
+# no Screen Recording; this shell does, so it takes the drive's screenshots: one line on the FIFO
+# SAIL_DRIVE_SHOTS names (screencapture's arguments, tab-separated, the file last), answered by
+# FILE.done beside FILE.said, what screencapture said. Only the flags the drive uses, numbers, and a
+# file inside OUT are taken.
+valid_shot() {
+  local count=$# file=${!#} word index=0
+  [[ $file == "$out_dir"/* && $file != *..* ]] || return 1
+  for word in "$@"; do
+    index=$((index + 1))
+    ((index == count)) && break
+    [[ $word == -x || $word == -o || $word == -l || $word == -T || $word =~ ^[0-9]+$ ]] || return 1
+  done
+}
+take_shots() {
+  local words
+  while true; do
+    while IFS=$'\t' read -r -a words; do
+      if ((${#words[@]} == 0)) || ! valid_shot "${words[@]}"; then
+        echo "ci/drive: a screenshot request refused" >&2
+        continue
+      fi
+      screencapture "${words[@]}" 2> "${words[${#words[@]} - 1]}.said" || true
+      : > "${words[${#words[@]} - 1]}.done"
+    done < "$SAIL_DRIVE_SHOTS"
+  done
+}
+export SAIL_DRIVE_SHOTS=$private_dir/shots
+mkfifo -m 600 "$SAIL_DRIVE_SHOTS"
+take_shots &
+shooter=$!
 
 # Opens the drive build as LaunchServices opens a person's app, waits for it to quit and prints what
 # it printed. `open` tells nothing of the app's exit status, so the run's report says whether it

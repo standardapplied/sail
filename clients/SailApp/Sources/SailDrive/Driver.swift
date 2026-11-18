@@ -155,7 +155,7 @@ final class Driver {
             if !ok {
                 detail += "; " + whereTheWindowIs
                 if onTerminal { detail += "; " + terminal.drawingState }
-                Self.captureTheScreen(to: out.appending(path: String(format: "%02d-", index) + name + "-screen.png"))
+                await Self.captureTheScreen(to: out.appending(path: String(format: "%02d-", index) + name + "-screen.png"))
             }
             let seconds = (ContinuousClock.now - began) / .seconds(1)
             let skipped = ok && detail.hasPrefix("skipped: ")
@@ -691,12 +691,8 @@ final class Driver {
     }
 
     /// The whole screen as it is, so whatever covered the window is seen.
-    private static func captureTheScreen(to file: URL) {
-        let capture = Process()
-        capture.executableURL = URL(filePath: "/usr/sbin/screencapture")
-        capture.arguments = ["-x", file.path]
-        try? capture.run()
-        capture.waitUntilExit()
+    private static func captureTheScreen(to file: URL) async {
+        await Shot.begin([], to: file)?.taken()
     }
 
     /// `line` on standard output at once, unbuffered, so what the drive printed is in its output

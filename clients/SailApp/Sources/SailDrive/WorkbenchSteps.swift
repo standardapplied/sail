@@ -85,7 +85,7 @@ extension Driver {
             return await inBothLooks(name) { file in await self.capture(["-o", "-l", "\(self.shell.window.windowNumber)"], to: file) }
         }
         if let name = step.shotMenu {
-            return await inBothLooks(name) { file in self.captureWithTheMenuOpen(to: file) }
+            return await inBothLooks(name) { file in await self.captureWithTheMenuOpen(to: file) }
         }
         if let name = step.fullScreen {
             return await fullScreen(name)
@@ -770,39 +770,23 @@ extension Driver {
         _ = await waitUntil(2) { view.cursorOn && Self.committed(view) > hidden }
     }
 
-    /// `screencapture -x` with `arguments`, into `file`; its own error, if any, is printed.
+    /// `screencapture -x` with `arguments`, into `file` (``Shot``); its own error, if any, is printed.
     func capture(_ arguments: [String], to file: URL) async {
-        let process = Process()
-        let errors = Pipe()
-        process.executableURL = URL(filePath: "/usr/sbin/screencapture")
-        process.arguments = ["-x"] + arguments + [file.path]
-        process.standardError = errors
-        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-            process.terminationHandler = { _ in done.resume() }
-            guard (try? process.run()) == nil else { return }
-            process.terminationHandler = nil
-            print("screencapture did not run")
-            done.resume()
-        }
-        let said = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        if !said.isEmpty { print("screencapture: \(said)") }
+        await Shot.begin(arguments, to: file)?.taken()
     }
 
     /// The focused pane's context menu, popped up as a right-click shows it, the whole screen taken
     /// a second later (the menu is a window of its own), then the menu closed.
-    private func captureWithTheMenuOpen(to file: URL) {
+    private func captureWithTheMenuOpen(to file: URL) async {
         let view = terminal
         guard let event = NSEvent.mouseEvent(
             with: .rightMouseDown, location: view.convert(NSPoint(x: 80, y: 60), to: nil), modifierFlags: [],
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: shell.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
         ), let menu = view.menu(for: event) else { return print("the pane offered no menu") }
-        let process = Process()
-        process.executableURL = URL(filePath: "/usr/sbin/screencapture")
-        process.arguments = ["-x", "-T", "1", file.path]
-        guard (try? process.run()) != nil else { return print("screencapture did not run") }
+        guard let shot = Shot.begin(["-T", "1"], to: file) else { return }
         menu.perform(#selector(NSMenu.cancelTracking), with: nil, afterDelay: 2.5, inModes: [.common])
         menu.popUp(positioning: nil, at: NSPoint(x: 80, y: 60), in: view)
-        process.waitUntilExit()
+        await shot.taken()
     }
 
     /// The window in full screen once AppKit says the transition ended, filling its screen, the whole
