@@ -122,6 +122,24 @@ import Testing
         #expect(abs(Double(badge.maxX) - 223) <= 0.5, "the pill ends at \(badge.maxX), not 12 pt in")
     }
 
+    /// A row's state set to what it already is touches nothing: the table sets it on every layout
+    /// pass, so a row that relaid its actions each time would never let layout settle.
+    @Test func anUnchangedRowStateLeavesLayoutSettled() throws {
+        let list = try Self.list(.list, look: .light, counts: Counts())
+        let (window, _) = Self.shown(list)
+        defer { window.orderOut(nil) }
+        list.choose("pier")
+        let row = try Self.row(list, 1)
+        window.layoutIfNeeded()
+        let cell = try #require(row.view(atColumn: 0) as? RowCell)
+        let settled = !row.needsLayout && !cell.needsLayout && !cell.actions.needsLayout
+        let selected = row.isSelected, emphasized = row.isEmphasized, hovered = row.hovered
+        row.isSelected = selected
+        row.isEmphasized = emphasized
+        row.hovered = hovered
+        #expect(settled && !row.needsLayout && !cell.needsLayout && !cell.actions.needsLayout, "setting a row's state to what it was asked for layout again")
+    }
+
     /// The actions show on hover or choice and are gone at rest; the first is loud only on the
     /// chosen row; ⋯ carries the menu-only ones.
     @Test func actionsShowOnHoverOrChoice() throws {

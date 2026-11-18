@@ -87,7 +87,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
 
     override public func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        sizeLastColumnToFit()
+        guard let column = tableColumns.first, column.width != newSize.width else { return }
+        column.width = newSize.width
     }
 
     func item(at row: Int) -> Item? {
@@ -193,7 +194,7 @@ final class SailRowView: NSTableRowView {
     private var hoverArea: NSTrackingArea?
 
     var hovered = false {
-        didSet { refresh() }
+        didSet { if hovered != oldValue { refresh() } }
     }
 
     init(rowStyle: RowStyle, look: Look, item: SailList.Item?, first: Bool) {
@@ -222,12 +223,14 @@ final class SailRowView: NSTableRowView {
         RowPaint(RowState(chosen: isSelected, emphasized: isEmphasized, hovered: hovered), look: look)
     }
 
+    /// The table sets a row's state on every layout pass; only a change touches the row, or each
+    /// pass would ask for another.
     override var isSelected: Bool {
-        didSet { refresh() }
+        didSet { if isSelected != oldValue { refresh() } }
     }
 
     override var isEmphasized: Bool {
-        didSet { refresh() }
+        didSet { if isEmphasized != oldValue { refresh() } }
     }
 
     override var interiorBackgroundStyle: NSView.BackgroundStyle {
@@ -406,9 +409,10 @@ final class RowCell: NSView {
     /// The actions shown (over 120 ms, at once while motion is reduced) or gone; the primary loud
     /// while the row is chosen, and Return its key (shown as ⏎) only while the list holds the keys.
     func show(_ shown: Bool, chosen: Bool, keys: Bool) {
-        quiet?.isHidden = chosen
-        loud?.isHidden = !chosen
-        loud?.keyEquivalent = chosen && keys ? "\r" : ""
+        if let quiet, quiet.isHidden != chosen { quiet.isHidden = chosen }
+        if let loud, loud.isHidden == chosen { loud.isHidden = !chosen }
+        let key = chosen && keys ? "\r" : ""
+        if let loud, loud.keyEquivalent != key { loud.keyEquivalent = key }
         let alpha: CGFloat = shown ? 1 : 0
         guard actions.alphaValue != alpha else { return }
         guard !Motion.shared.reduced, window != nil else {

@@ -168,7 +168,7 @@ import Testing
         #expect(button.keyEquivalent.isEmpty)
         button.isDefault = true
         #expect(button.keyEquivalent == "\r")
-        let icon = SailButton(icon: "arrow.clockwise", label: "List Again", look: .light, target: nil, action: nil)
+        let icon = SailButton(icon: .refresh, label: "List Again", look: .light, target: nil, action: nil)
         #expect(icon.accessibilityLabel() == "List Again" && icon.intrinsicContentSize == NSSize(width: 32, height: 32) && icon.tooltip != nil && icon.toolTip == nil)
         button.title = "Start and Open"
         #expect(button.accessibilityLabel() == "Start and Open", "VoiceOver reads the old title")
@@ -308,7 +308,7 @@ import Testing
         let more = Self.sized(SailButton(icon: .more, label: "More", size: size, look: .light, target: nil, action: nil))
         let icon = more.arrangement().mark ?? .zero, box = more.box
         #expect(Double(icon.width) == ButtonSize.icon && icon.midX == box.midX && icon.midY == box.midY, "the icon is \(icon) in \(box)")
-        let canvas = NSColor(Look.light.canvas), ink = NSColor(ButtonPaint(.quiet, ButtonState(), look: .light).label)
+        let canvas = NSColor(Tint(Look.light.canvas)), ink = NSColor(ButtonPaint(.quiet, ButtonState(), look: .light).label)
         let middle = NSPoint(x: box.midX, y: box.midY), between = NSPoint(x: box.midX + 2, y: box.midY)
         let right = Self.swatch(canvas, [ink], scale: 2), wrong = Self.swatch(canvas, [], scale: 2)
         #expect(Self.tells(Self.colour(more, on: canvas, at: middle, scale: 2), right, from: wrong), "the middle dot is not at the box's middle")

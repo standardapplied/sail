@@ -108,6 +108,7 @@ public final class SailButton: NSButton {
 
     override public var keyEquivalent: String {
         didSet {
+            guard keyEquivalent != oldValue else { return }
             invalidateIntrinsicContentSize()
             needsDisplay = true
         }
