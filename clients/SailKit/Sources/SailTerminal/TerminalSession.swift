@@ -485,20 +485,6 @@ public final class TerminalSession: Sendable {
         send(.takeWrite, on: connection)
     }
 
-    /// Asks this machine's own host to end the session, on the attached connection, and is refused
-    /// for a session not attached now. A runner's door is refused before anything is sent: it admits
-    /// Kill only from the write token's holder and hangs up on a Kill it refuses, so a runner's
-    /// session is ended by ``SessionListing/end(_:through:timeout:)``, which waits for the answer.
-    public func kill() throws(TerminalError) {
-        if case .runner = door {
-            throw .unsupported("a runner's session is ended through its door, on a connection that waits for the answer")
-        }
-        guard let connection = core.withLock({ $0.connection }) else {
-            throw .unsupported("the session is not attached, so there is no connection to ask the host to end it on")
-        }
-        send(.kill(session: state.session), on: connection)
-    }
-
     private func supervise(_ generation: Int) async {
         var failures = 0
         var waited = Duration.zero

@@ -4674,18 +4674,25 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   new writer's pty takes it. `reconnectNow()` while attached sends the pty's size, so a connection
   that died during sleep is found at once without resizing anything; the protocol has no no-op
   frame, and an empty `Input` would count as typing. A connect attempt a detach or a close overtook stands down
-  before it sends anything for the session, and `kill()` while not attached, or through a runner's
-  door, throws: a session is ended by `TerminalSession.end(within:)`, within 10 s in all. A `Create`
+  before it sends anything for the session. Every session, attached or not, on this Mac or a
+  runner, is ended by `TerminalSession.end(within:)`, within 10 s in all: a `Kill` written to the
+  attached connection and not answered could be lost, leaving the session running with no pane,
+  so there is none. A `Create`
   sent and not yet answered (a workspace starting) is waited for first, inside the same limit,
   since the host makes the session before it answers and a closed connection does not undo it;
   a session never made is gone already (`atHost`, which also decides what a quit counts; a `Create`
   whose answer was lost may be at the host, so the door decides).
   Then `Door.end(_:within:)` ends it on a connection of its own (through a runner's door an attach
   ticket, attached as the writer, then `Kill`), the ticket included in the limit, its outcome
-  `EndOutcome`: ended, gone already (a ticket to attach refused as not found, by code), or
-  unconfirmed in the words of whoever refused it. What may still run is said in one sentence
-  (`EndOutcome.mayStillRun`): no timeout ends a detached session, so it keeps its workspace
-  running until someone ends it or stops the workspace. A refusal is kept whole on every path
+  `EndOutcome`: ended, gone already (a ticket to attach refused as not found, by code; on this
+  Mac, a refused `Kill` of a session the host's own list no longer holds, since its refusals carry
+  no code), or unconfirmed in the words of whoever refused it. What may still run is said in one
+  sentence (`EndOutcome.mayStillRun`): no timeout ends a detached session, so on a runner it keeps
+  its workspace running until someone ends it or stops the workspace, and on this Mac the next
+  launch opens it as a tab of its own. A pane stays until its end is confirmed, the focus moving
+  on as the end begins (so a second ⌘W closes the next pane), saying it is ending only past
+  `TerminalPane.endingSaidAfter` (200 ms; a healthy host closes it as at once), and shown, saying
+  so, when it is not confirmed, with End Again and Close Anyway. A refusal is kept whole on every path
   (`SessionEnd.refused(HostRefusal)`, `.ticketRefused(Refusal)`), the host's reason apart from its
   typed remedy, and said by `Said.lines`, the one composition: the sentence and, for a command the
   app knows, who acts; a call that fails is said by its kind, never its route
