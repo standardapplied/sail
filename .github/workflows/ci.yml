@@ -58,7 +58,9 @@ jobs:
       fail-fast: false
       matrix:
         module: [sail-core, sail-harness, sail-infra]
-        os: [ubuntu-24.04, macos-latest]
+        # macOS 15, never macos-latest: the oldest macOS the app supports (its
+        # LSMinimumSystemVersion), the image the Clients lanes and the release's darwin build use.
+        os: [ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
