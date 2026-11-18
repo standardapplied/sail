@@ -32,13 +32,19 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         public let voice: String
         public let content: NSView
         public let actions: [Action]
+        /// Words before its actions, shown with them (who may open it).
+        public let note: String?
+        /// Its own height, for a row taller than its style's (the create row with its refusal).
+        public let height: Double?
 
-        public init(id: String, name: String, voice: String, content: NSView, actions: [Action] = []) {
+        public init(id: String, name: String, voice: String, content: NSView, actions: [Action] = [], note: String? = nil, height: Double? = nil) {
             self.id = id
             self.name = name
             self.voice = voice
             self.content = content
             self.actions = actions
+            self.note = note
+            self.height = height
         }
     }
 
@@ -52,6 +58,9 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     }
 
     public let rowStyle: RowStyle
+    /// A width kept for every row's actions, so the rows' content lines up in columns whatever
+    /// actions each shows; nil, the content runs to its row's actions.
+    public var actionsColumn: Double?
     public var onChoose: @MainActor (String?) -> Void = { _ in }
     private let mono: LabelFont
 
@@ -62,7 +71,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         didSet {
             reloading = true
             reloadData()
-            choose(kept)
+            select(kept)
             reloading = false
             if chosen != kept { onChoose(chosen) }
         }
@@ -116,9 +125,19 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
 
     /// Chooses the item of `id`, as a pane restoring its last choice does; nil chooses nothing.
     public func choose(_ id: String?) {
-        guard let row = entries.indices.first(where: { item(at: $0)?.id == id }) else { return deselectAll(nil) }
-        selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        guard let row = select(id) else { return }
         scrollRowToVisible(row)
+    }
+
+    /// Chooses `id` where it stands without scrolling to it: new rows keep the person's scroll.
+    @discardableResult
+    private func select(_ id: String?) -> Int? {
+        guard let row = entries.indices.first(where: { item(at: $0)?.id == id }) else {
+            deselectAll(nil)
+            return nil
+        }
+        selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        return row
     }
 
     // MARK: Keys
@@ -170,8 +189,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
 
     public func tableView(_: NSTableView, heightOfRow row: Int) -> CGFloat {
         let hairline = rowStyle.hairline && row > 0 ? 1.0 : 0
-        guard item(at: row) != nil else { return RowStyle.groupHeight + hairline }
-        return rowStyle.height + (rowStyle.hairline ? 1 : 0)
+        guard let item = item(at: row) else { return RowStyle.groupHeight + hairline }
+        return (item.height ?? rowStyle.height) + (rowStyle.hairline ? 1 : 0)
     }
 
     public func tableView(_: NSTableView, typeSelectStringFor _: NSTableColumn?, row: Int) -> String? {
@@ -186,7 +205,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         guard entries.indices.contains(row) else { return nil }
         switch entries[row] {
         case let .head(title, count): return HeadCell(title, count: count, look: look, mono: mono, hairline: rowStyle.hairline && row > 0)
-        case let .item(item): return RowCell(item, rowStyle: rowStyle, look: look, mono: mono)
+        case let .item(item): return RowCell(item, rowStyle: rowStyle, actionsColumn: actionsColumn, look: look, mono: mono)
         }
     }
 
@@ -379,7 +398,7 @@ final class RowCell: NSView {
     private let runs: [Run]
     private var shown = false
 
-    init(_ item: SailList.Item, rowStyle: RowStyle, look: Look, mono: LabelFont) {
+    init(_ item: SailList.Item, rowStyle: RowStyle, actionsColumn: Double?, look: Look, mono: LabelFont) {
         content = item.content
         let runs = item.actions.map { Run($0) }
         self.runs = runs
@@ -406,7 +425,13 @@ final class RowCell: NSView {
             more.menu = moreMenu
         }
         super.init(frame: .zero)
-        actions.setViews(buttons, in: .trailing)
+        let note = item.note.map { words -> NSTextField in
+            let label = NSTextField(labelWithAttributedString: Draw.text(words, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary))
+            label.lineBreakMode = .byTruncatingTail
+            return label
+        }
+        actions.setViews(([note].compactMap { $0 } as [NSView]) + buttons, in: .trailing)
+        if let note { actions.setCustomSpacing(6 + 4, after: note) }
         actions.spacing = 6
         actions.alphaValue = 0
         actions.isHidden = true
@@ -414,12 +439,14 @@ final class RowCell: NSView {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
-        let top = rowStyle.hairline ? 1.0 : 0, gap = buttons.isEmpty ? 0.0 : 8
-        let stretched = content.trailingAnchor.constraint(equalTo: actions.leadingAnchor, constant: -gap)
-        stretched.priority = .defaultHigh
+        let top = rowStyle.hairline ? 1.0 : 0, gap = buttons.isEmpty && note == nil ? 0.0 : 8
+        let stretched = actionsColumn.map { content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(rowStyle.margin + rowStyle.trailing + $0)) }
+            ?? content.trailingAnchor.constraint(equalTo: actions.leadingAnchor, constant: -gap)
+        stretched.priority = actionsColumn == nil ? .defaultHigh : .required
         NSLayoutConstraint.activate([
             content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: rowStyle.margin + rowStyle.leading),
-            content.trailingAnchor.constraint(lessThanOrEqualTo: actions.leadingAnchor, constant: -gap), stretched,
+            actionsColumn == nil ? content.trailingAnchor.constraint(lessThanOrEqualTo: actions.leadingAnchor, constant: -gap) : actions.widthAnchor.constraint(lessThanOrEqualToConstant: actionsColumn ?? 0),
+            stretched,
             content.centerYAnchor.constraint(equalTo: centerYAnchor, constant: top / 2),
             actions.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(rowStyle.margin + rowStyle.trailing)),
             actions.centerYAnchor.constraint(equalTo: centerYAnchor, constant: top / 2),

@@ -33,6 +33,17 @@ actor GoldenDesk: Transport {
         held[route] = after
     }
 
+    /// From now on the projects are listed as the golden `projects` lists them, but these: each a
+    /// name and its template's state.
+    func answerProjects(_ projects: [[String]]) throws {
+        let exchange = try Exchange("projects")
+        guard var body = try JSONSerialization.jsonObject(with: exchange.body) as? [String: Any] else { return }
+        body["projects"] = projects.map { ["name": $0.first ?? "", "container_status": "running", "template": $0.dropFirst().first ?? "ready"] }
+        body["total"] = projects.count
+        answers["GET /v1/projects"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: try JSONSerialization.data(withJSONObject: body))
+        held["GET /v1/projects"] = .zero
+    }
+
     /// From now on a proxy answers `route` with a 502 of its own; nil, nothing.
     func fail(_ route: String?) {
         failing = route
@@ -68,11 +79,12 @@ actor GoldenDesk: Transport {
 
 /// The drive's steps on the Workspaces pane and the runner's tabs, against ``GoldenDesk``.
 extension Driver {
-    /// Types `name` into the pane's name field as a person does: the field changes and says so,
-    /// which is what enables Create.
-    private func typeName(_ name: String, into pane: WorkspacesPane) {
-        pane.name.stringValue = name
-        pane.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: pane.name))
+    /// Opens the create row and types `name` into its field as a person does: the field changes
+    /// and says so.
+    private func typeName(_ name: String, into pane: WorkspacesView) {
+        pane.project.on(.newWorkspace)
+        pane.project.field.field.stringValue = name
+        pane.project.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: pane.project.field.field))
     }
 
     func performWorkspaces(_ step: Step) async -> (Bool, String)? {
@@ -90,14 +102,21 @@ extension Driver {
         }
         if let text = step.workspaces {
             let found = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.contains(text) }
-            let chosen = pane.rows.indices.contains(pane.list.selectedRow) ? pane.rows[pane.list.selectedRow].name : "none"
-            let focused = pane.window?.firstResponder === pane.list
+            let focused = pane.window?.firstResponder === pane.project.list
             return (found, "the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | ")
-                + "; selected \(chosen)\(focused ? ", the list focused" : ""), Open \(pane.open.isEnabled ? "enabled" : "disabled")")
+                + "; selected \(pane.project.list.chosen ?? "none")\(focused ? ", the list focused" : ""), New Workspace \(pane.project.newWorkspace.isEnabled ? "enabled" : "disabled")")
         }
         if let wanted = step.listChosen {
-            let found = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.rows.indices.contains(pane.list.selectedRow) && pane.rows[pane.list.selectedRow].name == wanted }
+            let found = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.project.list.chosen == wanted }
             return (found, "the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
+        }
+        if let projects = step.projects {
+            do {
+                try await GoldenDesk.shared.answerProjects(projects)
+                return (true, "")
+            } catch {
+                return (false, "the projects golden: \(error)")
+            }
         }
         if let route = step.proxyFails {
             await GoldenDesk.shared.fail(route.isEmpty ? nil : route)
@@ -122,28 +141,57 @@ extension Driver {
             return (true, "")
         }
         if let wanted = step.chooseRow {
-            guard let index = pane.rows.firstIndex(where: { $0.name == wanted }) else { return (false, "no row \(wanted)") }
-            pane.list.selectRowIndexes([index], byExtendingSelection: false)
-            return (pane.list.selectedRow == index, "the button says \(pane.open.title), \(pane.open.isEnabled ? "enabled" : "disabled")")
+            pane.project.list.choose(wanted)
+            return (pane.project.list.chosen == wanted, "chosen: \(pane.project.list.chosen ?? "none")")
         }
         if let wanted = step.createStarts {
             typeName(wanted, into: pane)
-            pane.create.performClick(nil)
-            return (pane.busy && !pane.create.isEnabled, "while creating: Create says \(pane.create.title); \(pane.text.replacingOccurrences(of: "\n", with: " | "))")
+            pane.project.on(.create)
+            return (pane.busy && !pane.project.newWorkspace.isEnabled, "while creating: \(pane.text.replacingOccurrences(of: "\n", with: " | "))")
         }
         if let wanted = step.create {
             let before = pane.ended
             typeName(wanted, into: pane)
-            pane.create.performClick(nil)
+            pane.project.on(.create)
             let said = pane.text
             let done = await waitUntil(step.seconds ?? 10) { pane.ended > before }
             return (done, "while creating: \(said.replacingOccurrences(of: "\n", with: " | "))")
         }
         if let name = step.open {
-            guard let index = pane.rows.firstIndex(where: { $0.name == name }) else { return (false, "no row \(name)") }
-            pane.list.selectRowIndexes([index], byExtendingSelection: false)
-            pane.open.performClick(nil)
+            pane.project.list.choose(name)
+            guard pane.project.list.chosen == name, let enter = Keys.named("enter", modifiers: []) else { return (false, "no row \(name)") }
+            shell.window.makeFirstResponder(pane.project.list)
+            send(enter)
             return (shell.rail.selected == .thisMac, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing"); \(arrangementSaid)")
+        }
+        if let act = step.act, let what = act.first {
+            let name = act.dropFirst().first ?? ""
+            if what == "type" {
+                typeName(name, into: pane)
+                return (pane.project.field.field.stringValue == name, "the name field holds \(pane.project.field.field.stringValue)")
+            }
+            let done: ProjectView.Act? = switch what {
+            case "startAndOpen": .startAndOpen(name)
+            case "newWorkspace": .newWorkspace
+            case "cancelCreate": .cancelCreate
+            case "show": .show(name)
+            case "listAgain": .listAgain
+            default: nil
+            }
+            guard let done else { return (false, "no act \(what)") }
+            pane.project.on(done)
+            return (true, "")
+        }
+        if let width = step.cardWidth {
+            let extra = Double(shell.window.frame.width) - Double(pane.frame.width)
+            shell.window.setContentSize(NSSize(width: width + extra, height: Double(shell.window.contentLayoutRect.height)))
+            pane.layoutSubtreeIfNeeded()
+            return (Double(pane.frame.width) == width, "the card is \(pane.frame.width) pt; the panel \(pane.panel.isHidden ? "hidden" : "shown")")
+        }
+        if step.showSidebar == true {
+            pane.toggleSidebar(nil)
+            pane.layoutSubtreeIfNeeded()
+            return (!pane.panel.isHidden, "the panel \(pane.panel.isHidden ? "hidden" : "shown")")
         }
         if let wanted = step.ticketAsked {
             let found = await waitUntilAsync(step.seconds ?? 15) { await Self.tickets().contains { asked in wanted.allSatisfy { asked[$0.key] == $0.value } } }

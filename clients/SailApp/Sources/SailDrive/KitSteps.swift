@@ -404,7 +404,7 @@ final class Kit {
     /// and without the keys, each list 440 wide.
     private func listRows() {
         let workspace = { (id: String, name: String, state: PillState) in
-            SailList.Item(id: id, name: name, voice: "\(name), \(state.label)", content: WorkspaceLine(name, state: state, look: self.look, mono: self.mono), actions: [
+            SailList.Item(id: id, name: name, voice: "\(name), \(state.label)", content: MinilistLine(name, state: state, look: self.look, mono: self.mono), actions: [
                 SailList.Action(state == .running ? "Open" : "Start and Open") { self.presses.press(nil) },
                 SailList.Action("Copy Name", key: "c", modifiers: .command, onRow: false) {},
             ])
@@ -649,10 +649,11 @@ final class SkeletonFrame: NSView {
     }
 }
 
-/// A workspace row's words as the design's list specimen sets them: the name in 14 medium over its
+/// A workspace row's words as the design's list specimen (its narrower "minilist") sets them, which the
+/// gallery's rows are compared with: the name in 14 medium over its
 /// instance in mono 11, 158 pt, then the state's pill; the labels' frames start 2 pt early, as a
 /// label draws its text 2 pt in.
-final class WorkspaceLine: NSStackView {
+final class MinilistLine: NSStackView {
     init(_ name: String, state: PillState, look: Look, mono: LabelFont) {
         let title = NSTextField(labelWithAttributedString: NSAttributedString(string: name, attributes: [
             .font: NSFont.systemFont(ofSize: 14, weight: .medium), .foregroundColor: NSColor(look.text),

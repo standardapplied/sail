@@ -9,14 +9,17 @@ public struct ProjectList: Codable, Equatable, Sendable {
     }
 }
 
-/// A project, and the state of its container on the box that answered.
+/// A project, the state of its container on the box that answered, and its template's.
 public struct ProjectSummary: Codable, Equatable, Sendable, Identifiable {
     public let name: String
     public let containerStatus: Open<ContainerStatus>
+    /// Where its template is; nil from a server that does not say.
+    public let template: Open<TemplateState>?
 
-    public init(name: String, containerStatus: Open<ContainerStatus>) {
+    public init(name: String, containerStatus: Open<ContainerStatus>, template: Open<TemplateState>? = nil) {
         self.name = name
         self.containerStatus = containerStatus
+        self.template = template
     }
 
     /// A project is known by its name.
@@ -27,7 +30,14 @@ public struct ProjectSummary: Codable, Equatable, Sendable, Identifiable {
     private enum CodingKeys: String, CodingKey {
         case name
         case containerStatus = "container_status"
+        case template
     }
+}
+
+/// Where a project's template is: a version is current; one is being built; none is current and
+/// the last build failed or was cut short; or there has never been one.
+public enum TemplateState: String, CaseIterable, Sendable {
+    case ready, building, failed, missing
 }
 
 /// What a project's container is doing: `error` when the box could not tell.

@@ -163,6 +163,23 @@ import Testing
         #expect(list.chosen == nil && went == [String?.none], "dock went, and the list said \(went)")
     }
 
+    /// New rows keep the person's scroll: the chosen row is not scrolled back into view.
+    @Test func newRowsKeepTheScroll() throws {
+        let mono = try ControlsTests.mono()
+        let list = SailList(rowStyle: .list, look: .light, mono: mono)
+        let entries: [SailList.Entry] = (0 ..< 30).map { .item(SailList.Item(id: "w\($0)", name: "w\($0)", voice: "w\($0)", content: NSView())) }
+        list.entries = entries
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 440, height: 200))
+        scroll.documentView = list
+        list.frame = NSRect(x: 0, y: 0, width: 440, height: Double(list.rect(ofRow: 29).maxY))
+        list.choose("w0")
+        list.scrollRowToVisible(29)
+        let away = scroll.contentView.bounds.origin.y
+        #expect(away > 0)
+        list.entries = entries
+        #expect(list.chosen == "w0" && scroll.contentView.bounds.origin.y == away, "new rows scrolled back to the chosen one")
+    }
+
     /// A row with no actions, as every sidebar row is, opens no menu on a right-click.
     @Test func aRowWithNoActionsHasNoMenu() throws {
         let list = SailList(rowStyle: .sidebar, look: .light, mono: try ControlsTests.mono())

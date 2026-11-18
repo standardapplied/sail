@@ -148,6 +148,16 @@ struct Step: Decodable {
     /// The controls' gallery sheet of this name ("button", "field", "pill", "spinner") shot in
     /// every state and look, cut into `<control>-<state>-<look>.png`.
     var kit: String?
+    /// A person's action on the Workspaces view: its kind ("startAndOpen",
+    /// "newWorkspace", "cancelCreate", "show", "listAgain", or "type" a name into the create row)
+    /// and the workspace or name it is on.
+    var act: [String]?
+    /// The Workspaces card made this many points wide, the window grown or shrunk for it.
+    var cardWidth: Double?
+    /// The projects listed from now on, each its name and its template's state ("missing").
+    var projects: [[String]]?
+    /// View ▸ Show Sidebar (⌃⌘S): the hidden panel slid over the content.
+    var showSidebar: Bool?
     /// The Workspaces row of this name selected and Open pressed: a tab on the runner.
     var open: String?
     /// The Workspaces row of this name selected, what its button then says told.
