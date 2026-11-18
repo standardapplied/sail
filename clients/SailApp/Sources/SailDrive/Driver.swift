@@ -198,7 +198,10 @@ final class Driver {
             return kit
         }
         if let text = step.type {
-            for character in text { key(character) }
+            for character in text {
+                key(character)
+                await Task.yield()
+            }
             return (true, "typed \(text.count) keys")
         }
         if let press = step.press {
@@ -284,14 +287,13 @@ final class Driver {
         if step.resetLatency == true {
             resetLatency()
             drawnBefore = terminal.drawCounts
-            mainStacks.watchWakes(shell.thisMac.panes.values.map { $0.terminal.wakeWaitingSince })
             measuring = true
             return (true, "")
         }
         if let wanted = step.line {
             let line = wanted.replacingOccurrences(of: "{home}", with: NSHomeDirectory())
             let found = await waitUntil(step.seconds ?? 10) {
-                let lines = self.lines
+                let lines = self.drawnLines
                 return lines.indices.contains { index in
                     lines[index] == line && (step.after.map { above in index > 0 && lines[index - 1] == above } ?? true)
                 }
@@ -299,8 +301,8 @@ final class Driver {
             return (found, found ? "" : "no line '\(line)'\(step.after.map { " under '\($0.prefix(40))'" } ?? "") within \(step.seconds ?? 10) s")
         }
         if let top = step.top {
-            let found = await waitUntil(step.seconds ?? 10) { self.lines.first == top }
-            return (found, "the top line is '\(lines.first ?? "")'")
+            let found = await waitUntil(step.seconds ?? 10) { self.drawnLines.first == top }
+            return (found, "the top line is '\(drawnLines.first ?? "")'")
         }
         if step.gridColumns == true {
             let columns = terminal.grid.map { "\($0.columns)" } ?? "none"
@@ -309,7 +311,6 @@ final class Driver {
         }
         if let limit = step.shownWithin {
             measuring = false
-            mainStacks.stopWatchingWakes()
             let figures = terminal.latency
             let judged = flood(figures)
             if let gap = mainThread.stalls.longest() {
@@ -325,10 +326,10 @@ final class Driver {
             return (ok, "\(judged.said); the longest refresh took \(Self.ms(figures.refresh.max)) ms, \(figures.lateOutputs) outputs were late; "
                 + "the main thread was held at most \(Self.ms(measured.mainThreadHeld)) ms; "
                 + "frames committed \(drawn.committed - drawnBefore.committed), of them drawn whole \(drawn.whole - drawnBefore.whole), "
-                + "glyph atlas bytes written \(drawn.atlasBytes - drawnBefore.atlasBytes)" + waitSaid(figures) + earlier)
+                + "glyph atlas bytes written \(drawn.atlasBytes - drawnBefore.atlasBytes)" + earlier)
         }
         if let text = step.text {
-            let found = await waitUntil(step.seconds ?? 10) { self.screenText.contains(text) }
+            let found = await waitUntil(step.seconds ?? 10) { self.terminal.visibleText.contains(text) }
             return (found, found ? "" : "the screen never showed '\(text)'")
         }
         if let banner = step.banner {
@@ -435,13 +436,14 @@ final class Driver {
             + "and \(takenBy) ms after it was posted)"
     }
 
-    /// Where the longest wake sat between its hand-off and its take: what the main run loop did,
-    /// as its observer saw it, and the main thread's stacks the helper took while it waited.
-    func waitSaid(_ figures: LatencyFigures) -> String {
-        guard let hop = figures.longestToTold, let handing = figures.longestToToldHanding else { return "" }
-        let wait = Span(figures.longestToToldHanded ?? handing, hop.end)
-        return "; between the longest wake's hand-off and its take, " + mainStacks.loop(across: wait) + "; the main thread meanwhile: "
-            + mainStacks.waitStacks(across: wait)
+    /// The machine's CPU ticks across a judged wait, from its first look to its last: whether the
+    /// machine ran at all meanwhile. Idle and busy ticks both still across a long wait is what a
+    /// runner paused by its host shows, which nothing inside it can prove otherwise.
+    static func machineTicks(across looks: [ThreadLook]) -> String {
+        guard let first = looks.first, let last = looks.last, let idleFrom = first.idleTicks, let idleTo = last.idleTicks,
+              let busyFrom = first.busyTicks, let busyTo = last.busyTicks
+        else { return "the machine's ticks unread in it" }
+        return String(format: "the machine's idle ticks +%u and busy ticks +%u over its %.1f ms of looks", idleTo &- idleFrom, busyTo &- busyFrom, (last.time - first.time) * 1000)
     }
 
     /// A quality of service as the flood's line names it.
@@ -482,11 +484,12 @@ final class Driver {
         let proven = MachineShare.starvation(in: wait, looks: looks)
         let ownHeld = own.shared(with: wait), starved = MachineShare.starved(in: wait, looks: looks)
         let ours = max(0, wait.length - tick - MachineShare.of(wait, own: own, main: looks)) * 1000
-        let seen = looks.filter { $0.time >= wait.start && $0.time <= wait.end }.count
+        let inWait = looks.filter { $0.time >= wait.start && $0.time <= wait.end }
+        let seen = inWait.count
         proven.map(\.told).filter { !excused.contains($0) }.forEach { excused.append($0) }
         let evidence = (proven.isEmpty
             ? "no run of \(MachineShare.fewestLooks) looks proved it starved (\(seen) looks in the wait)"
-            : proven.map(\.told).joined(separator: "; ")) + "; the main run loop's mode, " + mainStacks.modes(in: wait)
+            : proven.map(\.told).joined(separator: "; ")) + "; the main run loop's mode, " + mainStacks.modes(in: wait) + "; " + Self.machineTicks(across: inWait)
         return (ours, "waited \(Self.ms((wait.length - tick) * 1000)) ms, the drive's own thread held \(Self.ms(ownHeld * 1000)) ms of it, "
             + "the main thread runnable without CPU on a machine with none idle \(Self.ms(starved * 1000)) ms of it (\(evidence)), ours \(Self.ms(ours)) ms")
     }
@@ -693,6 +696,12 @@ final class Driver {
 
     var screenText: String {
         (try? pane?.session?.screen.text()) ?? ""
+    }
+
+    /// The rows the focused view last drew, trimmed: what a `line`, `top` or `text` wait reads, so it
+    /// costs the main thread no refresh of the screen under its lock while a flood feeds it.
+    var drawnLines: [String] {
+        terminal.visibleText.split(separator: "\n", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
     var lines: [String] {

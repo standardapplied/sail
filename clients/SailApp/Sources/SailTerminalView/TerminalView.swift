@@ -50,8 +50,6 @@ public final class TerminalView: NSView {
     var isOnScreen: (NSWindow) -> Bool = { $0.occlusionState.contains(.visible) }
     private var committedFrames = 0
     private var wholeFrames = 0
-    /// The wake drawing the attached link's changes, which a sampler asks how long it has waited.
-    private var wake: ScreenWake?
     /// A drawable is being asked for off the main thread.
     private var fetching = false
     /// The drawable just brought, for the frame drawn on its arrival only.
@@ -161,12 +159,6 @@ public final class TerminalView: NSView {
         (committedFrames, wholeFrames, renderer.atlasUploadBytes)
     }
 
-    /// Since when the view's wake has waited for the main queue, handed over and not yet taken
-    /// (nil while none waits), callable from any thread: a sampler watches a late wake by it.
-    public var wakeWaitingSince: @Sendable () -> Double? {
-        { [wake] in wake?.waitingSince }
-    }
-
     public var metrics: CellMetrics {
         renderer.metrics
     }
@@ -192,7 +184,6 @@ public final class TerminalView: NSView {
         let wake = ScreenWake(marks: marks) { [weak self] in
             MainActor.assumeIsolated { self?.drawNowIfIdle() }
         }
-        self.wake = wake
         link.onScreenChange { updated in wake.changed(at: CACurrentMediaTime() - (ContinuousClock.now - updated) / .seconds(1)) }
         let events = link.events
         tasks.append(Task { [weak self] in
@@ -229,7 +220,6 @@ public final class TerminalView: NSView {
         tasks.forEach { $0.cancel() }
         tasks = []
         link = nil
-        wake = nil
         composition.unmark()
         lastFrame = nil
     }
@@ -704,11 +694,6 @@ final class ScreenWake: Sendable {
         state.withLock { state in
             if state.outstanding?.wake == wake { state.outstanding?.handed = handed }
         }
-    }
-
-    /// When the outstanding wake's hand-off began, nil while no wake waits for the queue.
-    var waitingSince: Double? {
-        state.withLock { $0.outstanding?.handing }
     }
 
     /// The wake is cleared before the screen is read, so a change after the read posts another.

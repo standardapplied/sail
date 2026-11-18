@@ -100,15 +100,25 @@ public enum Mach {
         return got == KERN_SUCCESS ? seconds(info) : nil
     }
 
-    /// The machine's CPU ticks so far: user, system, idle, nice; empty when they cannot be read.
+    /// The machine's CPU ticks so far, summed over its CPUs: user, system, idle, nice; empty when
+    /// they cannot be read. Read per CPU (`host_processor_info`): `host_statistics` answers an
+    /// unprivileged process asking more often than its rate limit allows with its last answer, so
+    /// looks 5 ms apart read the same ticks (idle and busy alike frozen), and a later one a second
+    /// of them at once.
     public static func hostTicks() -> [UInt32] {
-        var load = host_cpu_load_info()
-        var count = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info>.size / MemoryLayout<integer_t>.size)
-        let got = withUnsafeMutablePointer(to: &load) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { host_statistics(host, HOST_CPU_LOAD_INFO, $0, &count) }
+        var cpus = natural_t(0)
+        var info: processor_info_array_t?
+        var count = mach_msg_type_number_t(0)
+        guard host_processor_info(host, PROCESSOR_CPU_LOAD_INFO, &cpus, &info, &count) == KERN_SUCCESS, let info else { return [] }
+        defer { vm_deallocate(mach_task_self_, vm_address_t(UInt(bitPattern: info)), vm_size_t(Int(count) * MemoryLayout<integer_t>.stride)) }
+        let states = Int(CPU_STATE_MAX)
+        var ticks = [UInt32](repeating: 0, count: states)
+        for cpu in 0 ..< Int(cpus) {
+            for state in 0 ..< states {
+                ticks[state] &+= UInt32(bitPattern: info[cpu * states + state])
+            }
         }
-        guard got == KERN_SUCCESS else { return [] }
-        return [load.cpu_ticks.0, load.cpu_ticks.1, load.cpu_ticks.2, load.cpu_ticks.3]
+        return [ticks[Int(CPU_STATE_USER)], ticks[Int(CPU_STATE_SYSTEM)], ticks[Int(CPU_STATE_IDLE)], ticks[Int(CPU_STATE_NICE)]]
     }
 
     /// Makes `thread` real-time (`THREAD_TIME_CONSTRAINT_POLICY`): in every `period` it may run up
