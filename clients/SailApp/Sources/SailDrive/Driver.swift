@@ -167,11 +167,12 @@ final class Driver {
         }
         let withinClaim = madeStacks.map { $0.watcherShare <= MainStacks.claim } ?? true
         let withinLook = madeStacks.map { $0.longestLookTaken <= MainStacks.longestLook } ?? true
-        Self.say("drive: \(excused.count) stretch\(excused.count == 1 ? "" : "es") of a judged wait excused as the machine's"
+        let stretches = "drive: \(excused.count) stretch\(excused.count == 1 ? "" : "es") of a judged wait excused as the machine's"
             + (excused.isEmpty ? "" : ": " + excused.joined(separator: "; "))
-            + (madeStacks.map { "; the main thread's sampler took \($0.cost)" } ?? "; the main thread's sampler never ran: no step measured a wait")
-            + (withinClaim ? "" : "; FAILED: the watcher took more of a CPU than its claim")
-            + (withinLook ? "" : String(format: "; FAILED: a look took longer than %.0f ms", MainStacks.longestLook * 1000)))
+        let sampler = madeStacks.map { "; the main thread's sampler took \($0.cost)" } ?? "; the main thread's sampler never ran: no step measured a wait"
+        let overClaim = withinClaim ? "" : "; FAILED: the watcher took more of a CPU than its claim"
+        let overLook = withinLook ? "" : String(format: "; FAILED: a look took longer than %.0f ms", MainStacks.longestLook * 1000)
+        Self.say(stretches + sampler + overClaim + overLook)
         let passed = results.count == steps.count && results.allSatisfy(\.ok) && withinClaim && withinLook
         let report = Report(
             passed: passed, hertz: shell.window.screen?.maximumFramesPerSecond ?? 0, scale: terminal.metrics.scale, steps: results,

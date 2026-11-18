@@ -323,7 +323,10 @@ import Testing
         let bench = shell.thisMac
         let place = Place.thisMac(folder: "/")
         let ids = ["behind", "shown"].map { bench.model.newTab(session: "mac-\($0)", place: place) }
-        let views = try ids.map { id in try #require(bench.makeView(try #require(bench.model.panes[id]), start: .attach, points: 15)) }
+        let views = try ids.map { id in
+            let pane = try #require(bench.model.panes[id])
+            return try #require(bench.makeView(pane, start: .attach, points: 15))
+        }
         let behind = try #require(views[0].superview)
         behind.isHidden = true
         #expect(views[0].isHiddenOrHasHiddenAncestor && !views[1].isHiddenOrHasHiddenAncestor)

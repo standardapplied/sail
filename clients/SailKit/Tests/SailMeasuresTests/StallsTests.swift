@@ -313,10 +313,16 @@ import Testing
         try child.run()
         defer { child.terminate() }
         let pid = child.processIdentifier
-        #expect(Mach.children(of: getpid()).contains(pid))
-        #expect(Mach.cpu(ofProcess: pid) != nil)
+        let children = Mach.children(of: getpid())
+        #expect(children.contains(pid), "the child \(pid) is not among \(children)")
         #expect(Mach.cpu(ofProcess: -1) == nil, "a pid that cannot be read adds nothing")
-        #expect(Mach.ourCPU(others: [pid]) >= Mach.ourCPU(others: []) - 0.001)
+        let childBefore = try #require(Mach.cpu(ofProcess: pid), "the child's CPU could not be read")
+        let before = Mach.ourCPU(others: [])
+        let with = Mach.ourCPU(others: [pid])
+        let after = Mach.ourCPU(others: [])
+        let childAfter = try #require(Mach.cpu(ofProcess: pid))
+        #expect(before + childBefore <= with + 1e-9 && with <= after + childAfter + 1e-9,
+                "ours with the child \(with) s is not this process's (\(before)–\(after) s) plus the child's (\(childBefore)–\(childAfter) s)")
     }
 }
 #endif
