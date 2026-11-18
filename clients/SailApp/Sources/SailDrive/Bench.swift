@@ -14,20 +14,18 @@ import SailVT
 /// a frame: each frame until every glyph shows, the first in a process that has drawn no CJK yet
 /// and again in one that has, and the bytes it put into the atlases.
 ///
-/// The redraw is judged on the thread's CPU time, the floor of the probe's rule: a sample the
-/// machine kept off a core is not counted, and one whose thread used the time is. A runner whose
-/// CPU runs slow uses more of it for the same work (main's red at 29de429d: its builds took 1.5 to
-/// 2.3 times a mid runner's), so each sample is taken beside a fixed loop timed on the same thread
-/// just before it, and its paired ratio is said. That ratio's limit is not set: over ten mid-tier
-/// runs its p50 ran 3.22 to 4.02 loops, a spread of 25 %, so no limit both passes every healthy run
-/// (1.15 × 4.02 = 4.63) and fails a 30 % heavier redraw on the lowest (1.3 × 3.22 = 4.19). The
-/// redraw slows more than the loop does (a loop 22 % slower came with a redraw 60 % slower; a walk
-/// through 16 MB of memory tracked it no better, 16 % over four runs). So ``gate`` holds the 4 ms
-/// budget, with an 8 ms ceiling, until a reference tracks the redraw within 13 %.
+/// The redraw is measured on the thread's CPU time, the floor of the probe's rule, each sample
+/// beside a fixed loop timed on the same thread just before it. On CI only one 120 Hz frame, 8 ms,
+/// gates (the worst healthy run seen: 5.25 ms): the 4 ms a person's Mac is held to failed two of
+/// nine healthy runs, and no reference tracked the redraw closely enough to judge it on the
+/// machine's speed (over ten runs the redraw ran 3.22 to 4.02 loops, and a loop 22 % slower came
+/// with a redraw 60 % slower). So CI no longer catches a redraw regression under about twice on its
+/// own; the 4 ms figure and the redraw in loops are said every run, and are the trend. The
+/// principled fix, main's renderer and the branch's drawn in the same job, is the spec's next step.
 enum Bench {
     static let grid = GridSize(columns: 200, rows: 60)
     static let warmup = 5
-    static let gate = SpeedGate(name: "full redraw 200x60 cpu", ratioLimit: nil, gatesMedian: true)
+    static let gate = SpeedGate(name: "full redraw 200x60 cpu")
 
     /// The redraw's verdict, its budgets named first, then every figure.
     static func verdict(_ judged: (met: Bool, said: String, figures: [String: Double])) -> (met: Bool, said: String) {

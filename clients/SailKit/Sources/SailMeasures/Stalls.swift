@@ -233,12 +233,8 @@ public enum Sampled {
 /// limit is printed as it is (0.5, 4.62), the figure to two places.
 public enum Verdict {
     public static func of(_ name: String, milliseconds: Double, limit: Double, bound: String = "limit") -> (met: Bool, said: String) {
-        of(name, value: milliseconds, limit: limit, unit: "ms", bound: bound)
-    }
-
-    public static func of(_ name: String, value: Double, limit: Double, unit: String, bound: String = "limit") -> (met: Bool, said: String) {
-        let met = value <= limit, unit = unit.isEmpty ? "" : " " + unit
-        let figure = String(format: "%.2f", value) + unit, bounded = String(format: "%g", limit) + unit
+        let met = milliseconds <= limit
+        let figure = String(format: "%.2f ms", milliseconds), bounded = String(format: "%g ms", limit)
         return (met, met ? "within its budget: \(name) \(figure), \(bound) \(bounded)" : "missed: \(name) \(figure), over its \(bounded) \(bound)")
     }
 }
