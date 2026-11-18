@@ -94,19 +94,15 @@ final class Driver {
         let panes4: [String: Double]
     }
 
-    init(shell: ShellApp, passkey: SoftwarePasskey, signed: Bool, script: Script, out: URL, holdsActivity: Bool) {
+    init(shell: ShellApp, passkey: SoftwarePasskey, signed: Bool, script: Script, out: URL) {
         self.shell = shell
         self.passkey = passkey
         self.signed = signed
         steps = script.steps
         self.out = out
-        self.holdsActivity = holdsActivity
         askedAtStart = passkey.asked
     }
 
-    /// Whether the run holds a process activity, and the options it holds it with.
-    let holdsActivity: Bool
-    static let activityOptions: ProcessInfo.ActivityOptions = [.userInitiated, .latencyCritical]
     /// The three main-thread clocks a `clocks` step began, until it reports them.
     var clocks: MainClocks?
 
@@ -126,16 +122,12 @@ final class Driver {
         shell.rail.selected == .thisMac && pane?.session != nil
     }
 
-    /// Runs the script once, App Nap held off for the run by a process activity unless the run
-    /// was asked to go without one (`--activity off`), as a person runs the app.
+    /// Runs the script once, holding no process activity: the app is measured as a person runs it,
+    /// in front, where App Nap does not take an app.
     func start() {
         guard !started else { return }
         started = true
-        let activity = holdsActivity ? ProcessInfo.processInfo.beginActivity(options: Self.activityOptions, reason: "driving the app") : nil
-        Task {
-            await run()
-            if let activity { ProcessInfo.processInfo.endActivity(activity) }
-        }
+        Task { await run() }
     }
 
     private func run() async {

@@ -12,12 +12,11 @@
 # then, with keyboard navigation on, for Tests/Drive/kit.json, the controls' gallery, left to right
 # and once more right to left (kit-rtl).
 # Each run's texts, images and report land in OUT; what it prints, and the servers' logs, beside
-# them. The ticket is handed to the drive in its environment and printed nowhere.
-# First, report-only, the idle-main experiment: Tests/Drive/idle.json launched three ways, each with
-# no host and none of the app's settings: exec'd from this shell as the scripts are, opened by
-# LaunchServices (`open -W -n -F -a`) as a person's Sail is, and opened so without the drive's
-# process activity. Each says what the system reports of the app (its role, flags, priorities) and
-# what three main-thread clocks saw across two floods.
+# them. Every run is opened by LaunchServices (`open -W -n -a`), as a person's Sail is: exec'd from
+# this shell, the app had no application role, every thread was held at the utility priority (20)
+# and its timers were coalesced, so the drive measured an app no person runs. The ticket is handed
+# to the drive in a file only it reads, never in the environment a launch passes on, and printed
+# nowhere.
 set -euo pipefail
 
 [[ $# -eq 2 ]] || { echo "usage: ci/drive DRIVE_APP OUT" >&2; exit 2; }
@@ -30,7 +29,7 @@ readonly drive=$app/Contents/MacOS/SailDrive sail=$app/Contents/Helpers/sail
 
 mkdir -p "$out"
 readonly out_dir=$(cd "$out" && pwd) scripts=$PWD/Tests/Drive
-passkeys=$(mktemp -d) plain=$(mktemp -d)
+passkeys=$(mktemp -d) plain=$(mktemp -d) ticket_dir=$(mktemp -d /tmp/sail-drive-ticket.XXXXXX)
 SAIL_DATA_DIR=$passkeys "$sail" server start --port 7979 --rp-id sail.standardapplied.com --origin https://sail.standardapplied.com \
   > "$out/server-7979.log" 2>&1 &
 servers=($!)
@@ -44,7 +43,7 @@ restore_keyboard() {
   if [[ $keyboard_was == unset ]]; then defaults delete -g AppleKeyboardUIMode 2> /dev/null || true
   else defaults write -g AppleKeyboardUIMode -int "$keyboard_was"; fi
 }
-trap 'kill "${servers[@]}" 2>/dev/null || true; rm -rf "$passkeys" "$plain"; restore_keyboard' EXIT
+trap 'kill "${servers[@]}" 2>/dev/null || true; rm -rf "$passkeys" "$plain" "$ticket_dir"; restore_keyboard' EXIT
 for port in 7979 7980; do
   for _ in $(seq 1 60); do
     curl -fsS "http://127.0.0.1:$port/v1/health" > /dev/null 2>&1 && break
@@ -59,53 +58,36 @@ done
 
 export SAIL_DATA_DIR=$passkeys
 "$sail" fde add uday --name Uday --role admin
-SAIL_DRIVE_TICKET=$("$sail" fde enroll uday --json | plutil -extract ticket raw -)
-export SAIL_DRIVE_TICKET SAIL_DRIVE_PASSKEY=$out/software-passkey.json
+(umask 077 && "$sail" fde enroll uday --json | plutil -extract ticket raw - > "$ticket_dir/ticket")
+export SAIL_DRIVE_TICKET_FILE=$ticket_dir/ticket SAIL_DRIVE_PASSKEY=$out_dir/software-passkey.json
 rm -f "$SAIL_DRIVE_PASSKEY"
-
-# No host and none of the app's settings, as a fresh run starts.
-fresh_start() {
-  pkill -f '_pty-host --local' || true
-  perl -e 'alarm shift; exec @ARGV' 30 bash -c 'while pgrep -f "_pty-host --local" > /dev/null; do :; done'
-  defaults delete "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" 2> /dev/null || true
-}
 
 # Opens the drive build as LaunchServices opens a person's app, waits for it to quit and prints what
 # it printed. `open` tells nothing of the app's exit status, so the run's report says whether it
-# passed; the alarm ends `open`, and then the drive is ended too.
+# passed: 0 passed, 1 a step failed, 134 no report (it ended without one, as a crash does). The
+# alarm ends `open`, and then the drive it opened.
 open_drive() {
-  local run=$1
-  shift
+  local run=$1 goldens=$2 opened=0
+  shift 2
   : > "$out_dir/$run-output.txt"
   : > "$out_dir/$run-errors.txt"
-  tail -f "$out_dir/$run-output.txt" &
-  local follow=$! status=0
-  perl -e 'alarm shift; exec @ARGV' 600 open -W -n -F -a "$app" --stdout "$out_dir/$run-output.txt" --stderr "$out_dir/$run-errors.txt" \
-    --env "SAIL_DRIVE_GOLDENS=off" --args "$@" || status=$?
-  kill "$follow" 2> /dev/null || true
-  if (( status != 0 )); then
-    echo "ci/drive: open ended with status $status; ending the drive it opened"
+  perl -e 'alarm shift; exec @ARGV' 600 open -W -n -a "$app" --stdout "$out_dir/$run-output.txt" --stderr "$out_dir/$run-errors.txt" \
+    --env "SAIL_DRIVE_GOLDENS=$goldens" --args "$@" || opened=$?
+  if (( opened != 0 )); then
+    echo "ci/drive: open ended with status $opened; ending the drive it opened" >&2
     pkill -f "$drive --drive" || true
   fi
-  cat "$out_dir/$run-errors.txt"
-}
-
-for launch in exec launchservices launchservices-no-activity; do
-  run=idle-$launch
-  echo "ci/drive: the idle-main experiment, launched by $launch"
-  fresh_start
-  case $launch in
-    exec)
-      SAIL_DRIVE_GOLDENS=off perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "$scripts/idle.json" --out "$out_dir/$run" 2>&1 \
-        | tee "$out_dir/$run-output.txt" || true
+  cat "$out_dir/$run-output.txt"
+  cat "$out_dir/$run-errors.txt" >&2
+  case $(plutil -extract passed raw "$out_dir/$run/report.json" 2> /dev/null || echo none) in
+    true) return 0 ;;
+    false) return 1 ;;
+    *)
+      echo "ci/drive: the $run run left no report" >&2
+      return 134
       ;;
-    launchservices) open_drive "$run" --drive "$scripts/idle.json" --out "$out_dir/$run" ;;
-    launchservices-no-activity) open_drive "$run" --drive "$scripts/idle.json" --out "$out_dir/$run" --activity off ;;
   esac
-  echo "ci/drive: $run passed: $(plutil -extract passed raw "$out_dir/$run/report.json" 2> /dev/null || echo 'no report')"
-done
-fresh_start
-rm -f "$SAIL_DRIVE_PASSKEY"
+}
 
 for run in first second third shots workspaces kit kit-rtl; do
   if [[ $run == third ]]; then
@@ -143,11 +125,12 @@ for run in first second third shots workspaces kit kit-rtl; do
     defaults write -g AppleKeyboardUIMode -int 2
   fi
   [[ $run == kit-rtl ]] && directions=(-AppleTextDirection YES -NSForceRightToLeftWritingDirection YES)
-  SAIL_DRIVE_GOLDENS=$goldens perl -e 'alarm shift; exec @ARGV' 600 "$drive" --drive "Tests/Drive/$script.json" --out "$out/$run" ${directions[@]+"${directions[@]}"} 2>&1 | tee "$out/$run-output.txt" || {
-    status=$?
+  status=0
+  open_drive "$run" "$goldens" --drive "$scripts/$script.json" --out "$out_dir/$run" ${directions[@]+"${directions[@]}"} || status=$?
+  (( status == 0 )) || {
     reports=$HOME/Library/Logs/DiagnosticReports
-    # A signal killed the drive (138 is SIGBUS, 139 SIGSEGV): ReportCrash writes its report some
-    # seconds later. Any other failure is a step's, with no report to wait for.
+    # The drive left no report (it crashed): ReportCrash writes its report some seconds later. Any
+    # other failure is a step's, with no crash report to wait for.
     if (( status > 128 )); then
       perl -e 'alarm shift; exec @ARGV' 90 bash -c 'until compgen -G "$1/SailDrive*.ips" > /dev/null; do sleep 1; done' _ "$reports" || true
     fi

@@ -65,8 +65,7 @@ struct Step: Decodable {
     /// Starts the latency from nothing.
     var resetLatency: Bool?
     /// Says what the system reports of this process now (``MachineState``): its role, flags, QoS
-    /// tiers, every thread's priorities, the window's state, the drive's process activity and the
-    /// heartbeat's timer.
+    /// tiers, every thread's priorities, the window's state and the heartbeat's timer.
     var machineState: Bool?
     /// "start" begins the three main-thread clocks (``MainClocks``) and the sampler's reading of
     /// every look; "report" ends them and says what they saw.

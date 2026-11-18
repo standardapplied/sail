@@ -73,23 +73,22 @@ enum MachineState {
 
 extension Driver {
     /// What the system reports of this process now (``MachineState``), the app's place on screen,
-    /// the drive's process activity, the main thread's QoS, the heartbeat's timer and which of the
-    /// drive's environment names reached it (never their values).
+    /// the main thread's QoS, the heartbeat's timer and which of the drive's environment names
+    /// reached it (never their values).
     var machineState: String {
         let qos = DispatchQoS.QoSClass(rawValue: qos_class_self()).map { "\($0)" } ?? "unknown"
         var timer = "no timer"
         if let kept = mainThread.timer {
             timer = String(format: "a Foundation Timer every %.0f ms on the main run loop in its common modes, tolerance %.4f s", kept.timeInterval * 1000, kept.tolerance)
         }
-        let names = ["SAIL_DRIVE_GOLDENS", "SAIL_DRIVE_TICKET", "SAIL_DRIVE_PASSKEY", "SAIL_DATA_DIR", "SAIL_SIGNING"]
+        let names = ["SAIL_DRIVE_GOLDENS", "SAIL_DRIVE_TICKET", "SAIL_DRIVE_TICKET_FILE", "SAIL_DRIVE_PASSKEY", "SAIL_DATA_DIR", "SAIL_SIGNING"]
         let present = names.filter { ProcessInfo.processInfo.environment[$0] != nil }
         let environment = present.isEmpty ? "none of its names" : present.joined(separator: ", ")
-        let activity = holdsActivity ? "holds a process activity (userInitiated, latencyCritical)" : "holds no process activity"
         let policy = NSRunningApplication.current.activationPolicy.rawValue
         let threads = "the main thread's QoS \(qos); threads (scheduled/base/greatest priority): \(MachineState.threads())"
         let parts: [String] = [
             MachineState.process(), MachineState.task(), threads, "\(whereTheWindowIs); activation policy \(policy)",
-            "the drive \(activity)", "the heartbeat is \(timer)", "the drive's environment has \(environment)",
+            "the heartbeat is \(timer)", "the drive's environment has \(environment)",
         ]
         return parts.joined(separator: "; ")
     }

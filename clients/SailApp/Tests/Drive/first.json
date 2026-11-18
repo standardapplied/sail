@@ -1,6 +1,7 @@
 {"steps": [
   {"name": "this-mac-signed-out", "select": "thisMac"},
   {"name": "this-mac-attached", "attached": true, "seconds": 30},
+  {"name": "what-the-system-reports-of-the-app", "machineState": true},
   {"name": "title-bar-over-this-mac", "titleBar": true},
   {"name": "type-echo-hi", "type": "echo hi\r"},
   {"name": "shows-hi", "line": "hi", "seconds": 30},
@@ -40,6 +41,7 @@
   {"name": "paste-asks", "paste": "echo pasted-$((1+1))\necho pasted-$((2+1))\n", "confirm": true},
   {"name": "pasted", "line": "pasted-3", "seconds": 10},
   {"name": "flood-bytes-made-once", "floodFile": true},
+  {"name": "three-main-thread-clocks-begun", "clocks": "start"},
   {"name": "flood-before-the-colour-steps-typed-up-to-its-return", "type": "clear; cat /tmp/sail-drive-flood-lines /tmp/sail-drive-flood-tail; echo before-$((1+1))"},
   {"name": "flood-before-the-colour-steps-latency-from-zero", "resetLatency": true},
   {"name": "flood-before-the-colour-steps-return", "type": "\r"},
@@ -62,6 +64,7 @@
   {"name": "flood-return", "type": "\r"},
   {"name": "flood-done-its-last-20-bytes-then-the-marker", "line": "xxxxxxxxxxxxxxxxxxxxflood-2", "seconds": 180},
   {"name": "every-output-shown-within-100-ms", "shownWithin": 100},
+  {"name": "what-the-three-clocks-saw", "clocks": "report"},
   {"name": "kill-host", "killHost": true},
   {"name": "host-restarted", "banner": "The host restarted", "seconds": 40},
   {"name": "the-ended-pane-closes-without-asking", "press": "w", "modifiers": ["command"]},

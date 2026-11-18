@@ -26,7 +26,7 @@ extension Driver {
             return (true, "")
         }
         if let variable = step.enroll {
-            guard let ticket = ProcessInfo.processInfo.environment[variable], !ticket.isEmpty else { return (false, "\(variable) holds no ticket") }
+            guard let ticket = Self.secret(variable) else { return (false, "neither \(variable) nor the file \(variable)_FILE names holds a ticket") }
             pane.ticket.stringValue = ticket
             let acted = await clicked(pane.enroll, named: "Enroll", step)
             return (acted.ok && pane.ticket.stringValue.isEmpty, (acted.why.map { "\($0); " } ?? "") + "the ticket field is \(pane.ticket.stringValue.isEmpty ? "empty" : "not empty"); \(said)")
@@ -251,15 +251,19 @@ extension Driver {
     /// process's own memory of what it shows, every file named for the bundle id under the Library
     /// folders, crash reports of Sail, `$TMPDIR`, the drive's output and its printed lines, the user
     /// defaults as cfprefsd answers them, the last 15 minutes of the system log at every level,
-    /// every process's arguments and the pasteboard. Paths are reported, never what was found. An
-    /// image is searched as its bytes, which a drawn token would not be; the pasteboard is never
-    /// written by the drive, so it shows only that the app did not write there.
+    /// every process's arguments and the pasteboard. Each place found is reported with which kind
+    /// of secret was in it (a session token, `sess_`, the ticket), never the secret. An image is
+    /// searched as its bytes, which a drawn token would not be; the pasteboard is never written by
+    /// the drive, so it shows only that the app did not write there.
     private func sweep() -> (Bool, String) {
-        let ticket = ProcessInfo.processInfo.environment["SAIL_DRIVE_TICKET"].map { [Data($0.utf8)] } ?? []
-        let needles = tokens.map { Data($0.utf8) } + [Data("sess_".utf8)] + ticket
+        let ticket = Self.secret("SAIL_DRIVE_TICKET").map { [Data($0.utf8)] } ?? []
+        var needles: [(name: String, bytes: Data)] = tokens.map { (name: "a session token", bytes: Data($0.utf8)) }
+        needles.append((name: "sess_", bytes: Data("sess_".utf8)))
+        needles += ticket.map { (name: "the ticket", bytes: $0) }
         var places: [String] = []
         func search(_ data: Data, at place: String) {
-            if needles.contains(where: { data.range(of: $0) != nil }) { places.append(place) }
+            let found = Set(needles.filter { data.range(of: $0.bytes) != nil }.map(\.name)).sorted()
+            if !found.isEmpty { places.append(found.joined(separator: " and ") + " in " + place) }
         }
         search(Data(shell.account.text.utf8), at: "the account pane")
         search(Data(results.map(\.detail).joined(separator: "\n").utf8), at: "the drive's report")
@@ -280,6 +284,16 @@ extension Driver {
         search(Data((NSPasteboard.general.string(forType: .string) ?? "").utf8), at: "the pasteboard")
         let scope = "\(tokens.count) token(s), sess_ and \(ticket.count) ticket in \(files) files, the log, the defaults, the processes and the pasteboard"
         return (places.isEmpty, places.isEmpty ? "found in none of \(scope)" : "found in \(places.joined(separator: ", ")) of \(scope)")
+    }
+
+    /// A secret the drive was handed: in its environment as `name`, or in the file `name_FILE`
+    /// names (a launch by LaunchServices passes its environment on where it may be seen, so CI
+    /// hands the ticket in a file); nil when neither holds one.
+    static func secret(_ name: String) -> String? {
+        let environment = ProcessInfo.processInfo.environment
+        let value = environment[name] ?? environment[name + "_FILE"].flatMap { try? String(contentsOfFile: $0, encoding: .utf8) }
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func files(under folder: URL) -> [URL] {

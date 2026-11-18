@@ -7,8 +7,7 @@ import SailTestPasskey
 /// The app, driven: `--drive <script.json> --out <directory>`, the software passkey in the
 /// platform's place, its credentials kept in `SAIL_DRIVE_PASSKEY` (beside the output when unset)
 /// so a later launch signs in with them; `SAIL_SIGNING=on` says the build is signed;
-/// `SAIL_DRIVE_GOLDENS=on` answers every control-plane call from the server's goldens; `--activity off`
-/// runs it without the process activity the drive otherwise holds, as a person runs the app. Never shipped:
+/// `SAIL_DRIVE_GOLDENS=on` answers every control-plane call from the server's goldens. Never shipped:
 /// it is its own executable, bundled only for CI's drive runs.
 let arguments = CommandLine.arguments
 func value(after flag: String) -> String? {
@@ -36,9 +35,6 @@ let passkey = SoftwarePasskey(
 ShellApp.run(passkeys: { _ in passkey }, connect: { plane in
     ProcessInfo.processInfo.environment["SAIL_DRIVE_GOLDENS"] == "on" ? GoldenDesk.shared as any Transport : URLSessionTransport(base: plane.url)
 }) { shell in
-    let driver = Driver(
-        shell: shell, passkey: passkey, signed: environment["SAIL_SIGNING"] == "on", script: script, out: out,
-        holdsActivity: value(after: "--activity") != "off"
-    )
+    let driver = Driver(shell: shell, passkey: passkey, signed: environment["SAIL_SIGNING"] == "on", script: script, out: out)
     Task { @MainActor in driver.start() }
 }
