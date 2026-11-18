@@ -219,7 +219,7 @@ class UploadCopyTest {
       assertEquals(
           "pty-host: upload-abort-held principal=- session="
               + ID
-              + " reason=a process still holds the temporary after 5 tries",
+              + " reason=exit 3: a process still holds the temporary after 5 tries",
           log.awaitLine("upload-abort-held"));
     } finally {
       respawner.destroyForcibly().waitFor();
@@ -240,17 +240,17 @@ class UploadCopyTest {
     assertEquals(0, copy.close());
     c.hangs = UploadCopy.COMMIT;
 
-    assertEquals(1, copy.commit());
+    assertEquals(UploadCopy.UNANSWERED, copy.commit());
 
     assertFalse(Files.exists(Path.of(copy.path())));
   }
 
   /**
-   * Round 4 Minor 3: a commit that fails is logged with what the script said, every quoted name
-   * taken out, so the log says why without naming the file.
+   * Round 4 Minor 3: a commit that fails is logged with its status, never with what the script
+   * said, which here names the file.
    */
   @Test
-  void aFailedCommitIsLoggedWithWhatItSaidAndNoName() throws Exception {
+  void aFailedCommitIsLoggedByItsStatusAndNoName() throws Exception {
     var copy = copies.open("acme", ID, "a", 1, process -> {});
     copy.write(new byte[] {1});
     assertEquals(0, copy.close());
@@ -261,10 +261,7 @@ class UploadCopyTest {
 
       var line = log.awaitLine("upload-commit-failed");
       assertEquals(
-          "pty-host: upload-commit-failed principal=- session="
-              + ID
-              + " reason=exit 1: ln: failed to access '…': No such file or directory",
-          line);
+          "pty-host: upload-commit-failed principal=- session=" + ID + " reason=exit 1", line);
     }
   }
 

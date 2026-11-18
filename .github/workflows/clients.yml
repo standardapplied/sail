@@ -22,8 +22,10 @@ on:
 permissions:
   contents: read
 
+# A release's call is its own group, by its run: a release started by hand on main shares main's
+# ref, and must neither cancel main's Clients run nor be cancelled by it.
 concurrency:
-  group: clients-${{ github.event.pull_request.number || github.ref }}
+  group: clients-${{ inputs.release && format('release-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -56,6 +58,7 @@ jobs:
           selftest=$(./sail-infra/target/sail _pty-selftest)
           echo "$selftest"
           grep -qx 'local-selftest: ok' <<< "$selftest"
+          ci/check min-macos ./sail-infra/target/sail
 
       - name: Leave the binary for the macOS lanes
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -280,6 +283,7 @@ jobs:
       - name: The release's darwin sail, checked by its checksum and its signature
         if: inputs.release
         run: |
+          set -euo pipefail
           binary="$RUNNER_TEMP/sail/sail-darwin-arm64"
           published=$(< "$binary.sha256")
           actual=$(shasum -a 256 "$binary" | cut -d' ' -f1)
@@ -290,7 +294,10 @@ jobs:
             --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com "$binary"
           chmod +x "$binary"
-          "$binary" -V | tail -1
+          ../../ci/check min-macos "$binary"
+          version=$("$binary" -V | tail -1)
+          echo "$version"
+          [[ $version == "sail ${GITHUB_REF_NAME#v}" ]] || { echo "the binary is $version, not the release ${GITHUB_REF_NAME}" >&2; exit 1; }
           echo "SAIL_BINARY=$binary" >> "$GITHUB_ENV"
 
       - name: For the bundle and this machine's own host
@@ -337,8 +344,11 @@ jobs:
           grep -qx 'local-selftest: ok' <<< "$selftest"
 
       # The system accent graphite first, so a view that took the system's accent would show it.
+      # Not in a release: the same commit's Clients run on main drives it, and the drive's first
+      # script judges timings (a flood, a blink, the main thread's waits) on which the next builds,
+      # so a slow runner must not cost a release its app. The bundled sail's own check above runs.
       - name: Drive the app against this Mac's own host and two control planes
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && !inputs.release }}
         env:
           SAIL_SIGNING: ${{ env.SIGNING }}
         run: |

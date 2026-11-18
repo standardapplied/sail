@@ -3978,9 +3978,9 @@ Incus.
   script printing what is free); a measurement that fails is `failed`. At most 16 uploads are
   under way on the host (`PtyUploads.OPEN_ON_HOST`), else `busy`, which takes nothing of the
   session's allowance; it is the only bound on uploads under way, none per person or session. Every
-  script is given up at its patience (`UploadCopy.SCRIPT`), its output never read before it ends; a
-  failed commit or removal is logged with the end of what it said on stderr (at most 512 bytes,
-  every quoted path or name taken out), for an operator alone.
+  script is given up at its patience (`UploadCopy.SCRIPT`), nothing of its output read; a failed
+  commit, removal or sweep is logged with its exit status and the fixed reason that status stands
+  for (`UploadCopy.reason`), never what the script said, so no path or name reaches a log.
 - **U6. Whole or nothing.** One `incus exec` per upload (`UploadCopy.OPEN`) runs as root to make the
   directories, then as the dev user (`setpriv`) creates `.<n>-<name>.part` with `O_EXCL` (`set -C`: a
   link at the name to a regular file, or to nothing, is refused; dash writes through one to a device
@@ -4797,8 +4797,14 @@ on it).
 A release calls the workflow for this job alone (`release.yml`'s `app`): its app bundles the
 `sail-darwin-arm64` the release built and signed in the same run, used only once its sha256 is the
 published one and its cosign signature is `release.yml`'s at that tag, so the app and the release
-ship one binary, built and attested once; the app's zip is that run's artifact. The job that builds
-this commit's darwin `sail` (`host`) and the SailKit jobs do not run in a release.
+ship one binary, built and attested once; the app's zip is that run's artifact. The check also
+asserts the binary's version is the tag's and its minimum macOS no newer than the app's
+`LSMinimumSystemVersion` (`ci/check min-macos`, which every PR's `host` job runs too). The job that
+builds this commit's darwin `sail` (`host`), the SailKit jobs and the drive do not run in a release:
+the same commit's Clients run on main drives it (a release does not wait for that run), and the drive's timing judgements must not cost a release its
+app; the bundled `sail`'s own check under the hardened runtime still runs. Every macOS job runs on
+`macos-15`, never `macos-latest`: a binary takes its build image's macOS as its minimum, and 15 is
+the oldest the app supports.
 
 ### The Sail app signs in with a passkey
 
@@ -4945,7 +4951,7 @@ to end, which wait only for the one native build:
   killed before it printed a summary; the same lines are the last of the job's log, since a job
   summary has no API. A job that did not pass, cancelled at its time limit included, uploads its
   surefire and failsafe reports as the artifact `<job>[-<label>]-test-reports`, the label naming a
-  matrix leg (`unit-sail-infra-macos-latest-test-reports`, `incus-integration-shard-2-test-reports`):
+  matrix leg (`unit-sail-infra-macos-15-test-reports`, `incus-integration-shard-2-test-reports`):
   `gh run download <runId> -n <name>`.
 - **`gh run view --log` truncates.** It shows about the last 5,000 lines of a job, which for
   these jobs can leave out the failure. The complete log is `gh api
@@ -4972,7 +4978,7 @@ Deliberate limits of the current design, each with its consequence:
    main no longer lists, but the row lingers on nodes as disabled. Delete propagation is a
    roster protocol change.
 4. **One platform per OS.** Linux amd64 hosts; macOS arm64 as a thin client. The terminal host's
-   pty layer runs on macOS through the same spawn chain (the `macos-latest` unit lanes and the
+   pty layer runs on macOS through the same spawn chain (the `macos-15` unit lanes and the
    darwin release's `_pty-selftest` prove it), and `_pty-host --local` serves a Mac's own person
    there. The app's launchd agent that runs it is the app's to package, and with no descriptor
    store its sessions do not survive a restart.

@@ -194,29 +194,27 @@ final class UploadCopy {
             SCRIPT);
   }
 
-  /**
-   * Starts a command, its input to write and its output to read; what it says on stderr is kept to
-   * be read when {@code errors} is set, else dropped.
-   */
+  /** Starts a command, its input to write and its output to read. */
   @FunctionalInterface
   interface Processes {
-    Process start(List<String> command, boolean errors) throws IOException;
+    Process start(List<String> command) throws IOException;
   }
+
+  /** The status a script's run is given when it does not end within the place's patience. */
+  static final int UNANSWERED = -1;
 
   /**
-   * A script's exit status and the end of what it said on stderr ({@link #said}): for a log line
-   * alone, never for a person.
+   * Why a script that ended with {@code status} failed, for a log line: the status and the fixed
+   * reason it stands for, never what the script said, so no path or name reaches a log.
    */
-  record Ran(int status, String said) {
-
-    /** Why the script failed, for a log line: its status and what it said. */
-    String reason() {
-      return said.isEmpty() ? "exit " + status : "exit " + status + ": " + said;
-    }
+  static String reason(int status) {
+    return switch (status) {
+      case UNANSWERED -> "no exit: it did not end within its patience";
+      case UNSAFE -> "exit " + UNSAFE + ": the uploads root is not root's own directory";
+      case HELD -> "exit " + HELD + ": a process still holds the temporary";
+      default -> "exit " + status;
+    };
   }
-
-  /** The most of a script's stderr a log line keeps. */
-  static final int SAID = 512;
 
   private final Processes processes;
   private final Place place;
@@ -226,17 +224,11 @@ final class UploadCopy {
     this.place = place;
   }
 
-  /**
-   * Copies into the containers by {@code incus exec}: what a copy says on stderr is dropped, what
-   * another script says is kept for its log line.
-   */
+  /** Copies into the containers by {@code incus exec}, what the scripts say on stderr dropped. */
   static UploadCopy intoContainers() {
     return new UploadCopy(
-        (command, errors) ->
-            new ProcessBuilder(command)
-                .redirectError(
-                    errors ? ProcessBuilder.Redirect.PIPE : ProcessBuilder.Redirect.DISCARD)
-                .start(),
+        command ->
+            new ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.DISCARD).start(),
         Place.CONTAINERS);
   }
 
@@ -279,7 +271,7 @@ final class UploadCopy {
             place.devUid(),
             place.devGid()));
     command.addAll(place.drop());
-    var process = processes.start(command, false);
+    var process = processes.start(command);
     started.accept(process);
     var unanswered =
         CompletableFuture.runAsync(
@@ -375,10 +367,10 @@ final class UploadCopy {
 
     /**
      * Gives the temporary its name ({@link #COMMIT}): the script's status, 0 when it is stored, a
-     * failure logged with what the script said.
+     * failure logged with its {@link #reason}.
      */
     int commit() {
-      var ran =
+      var status =
           run(
               container,
               place.asDev(),
@@ -387,10 +379,10 @@ final class UploadCopy {
               Integer.toString(number),
               name,
               Long.toString(size));
-      if (ran.status() != 0) {
-        PtySessionHost.log("upload-commit-failed", "-", instanceId(), ran.reason());
+      if (status != 0) {
+        PtySessionHost.log("upload-commit-failed", "-", instanceId(), reason(status));
       }
-      return ran.status();
+      return status;
     }
 
     private String instanceId() {
@@ -405,67 +397,48 @@ final class UploadCopy {
       if (!opened()) {
         return 0;
       }
-      var status =
-          run(container, place.asDev(), ABORT, directory, Integer.toString(number), name).status();
+      var status = run(container, place.asDev(), ABORT, directory, Integer.toString(number), name);
       if (status == HELD) {
         PtySessionHost.log(
-            "upload-abort-held",
-            "-",
-            instanceId(),
-            "a process still holds the temporary after 5 tries");
+            "upload-abort-held", "-", instanceId(), reason(status) + " after 5 tries");
       }
       return status;
     }
   }
 
   /**
-   * Runs {@code script} in {@code container} as {@code as} gives: its exit status, 1 if it failed
-   * or did not end within the place's patience, and what it said on stderr by then. Nothing is read
-   * before it ends, so a script that never ends holds its caller no longer than the patience.
+   * Runs {@code script} in {@code container} as {@code as} gives: its exit status, 1 if it could
+   * not start, {@link #UNANSWERED} if it did not end within the place's patience. Nothing of its
+   * output is read, so a script that never ends holds its caller no longer than the patience.
    */
-  Ran run(String container, Function<String, List<String>> as, String script, String... args) {
+  int run(String container, Function<String, List<String>> as, String script, String... args) {
     var command = new ArrayList<>(as.apply(container));
     command.addAll(List.of("sh", "-c", script, "sail-upload"));
     command.addAll(List.of(args));
     try {
-      var process = processes.start(command, true);
+      var process = processes.start(command);
       process.getOutputStream().close();
-      var status = finish(process);
-      return new Ran(status, said(process));
+      return finish(process);
     } catch (IOException e) {
-      return new Ran(1, e.getClass().getSimpleName());
+      return 1;
     }
   }
 
   /**
-   * What {@code process}, ended, said on stderr: only what is already there, at most {@link #SAID}
-   * bytes, so the read never waits; one line, every quoted part (the tools quote the paths and
-   * names they name) taken out, so no file's name reaches a log.
+   * {@code process}'s exit status, waiting at most the place's patience; {@link #UNANSWERED} when
+   * it hangs.
    */
-  static String said(Process process) {
-    try (var errors = process.getErrorStream()) {
-      var text =
-          new String(errors.readNBytes(Math.min(errors.available(), SAID)), StandardCharsets.UTF_8);
-      return text.replaceAll("'[^']*'|‘[^’]*’|\"[^\"]*\"", "'…'")
-          .replaceAll("\\p{Cntrl}+", " ")
-          .strip();
-    } catch (IOException e) {
-      return "";
-    }
-  }
-
-  /** {@code process}'s exit status, waiting at most the place's patience; 1 when it hangs. */
   private int finish(Process process) {
     try {
       if (process.waitFor(place.patience().toMillis(), TimeUnit.MILLISECONDS)) {
         return process.exitValue();
       }
       process.destroyForcibly();
-      return 1;
+      return UNANSWERED;
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       process.destroyForcibly();
-      return 1;
+      return UNANSWERED;
     }
   }
 }

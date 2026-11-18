@@ -85,7 +85,7 @@ final class ContainerDirectory {
   /** Whether each copy into the container keeps only its first byte, as a cut-off stream would. */
   volatile boolean copyTruncates;
 
-  /** What a commit or a removal told to exit by its knob says on stderr first. */
+  /** What a commit or removal told to exit by its knob says on stderr first: a file's name. */
   static final String SAYS = "ln: failed to access '1-secret-plan.pdf': No such file or directory";
 
   /** The script that never ends instead of running, when set, as one a frozen container runs. */
@@ -154,7 +154,7 @@ final class ContainerDirectory {
 
   /** The container: each command run here after its {@code incus exec ... --}, every one kept. */
   final UploadCopy.Processes processes =
-      (command, errors) -> {
+      command -> {
         commands.add(List.copyOf(command));
         var inner = new ArrayList<>(command.subList(command.indexOf("--") + 1, command.size()));
         var script = inner.size() > 2 ? inner.get(2) : "";
@@ -210,10 +210,7 @@ final class ContainerDirectory {
           inner = new ArrayList<>(List.of("sh", "-c", "exec tail -f /dev/null"));
         }
         var process =
-            new ProcessBuilder(inner)
-                .redirectError(
-                    errors ? ProcessBuilder.Redirect.PIPE : ProcessBuilder.Redirect.DISCARD)
-                .start();
+            new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD).start();
         if (script.equals(UploadCopy.OPEN)) {
           copies.add(process);
         }

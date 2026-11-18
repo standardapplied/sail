@@ -874,10 +874,8 @@ class PtyUploadsTest {
       assertTrue(Files.exists(inRoot(stored.path())), "the failed removal kept the file");
       assertTrue(
           log.awaitLine("upload-cleanup-failed")
-              .endsWith(
-                  " reason=exit 1: ln: failed to access '…': No such file or directory;"
-                      + " swept at the next session"),
-          "the failed removal is logged with what it said, and no name");
+              .endsWith(" reason=exit 1; swept at the next session"),
+          "the failed removal is logged by its status, and with no name");
       c.removeExits = null;
       try (var next = writer("study")) {
         c.awaitFinished(UploadCleanup.SWEEP);
