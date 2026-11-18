@@ -332,7 +332,7 @@
   {"name": "row-7-as-the-platform-says-it", "exactly": ["Sign in to Sail", "Cancelled.", "If this Mac holds no passkey for http://127.0.0.1:7979, enroll one with a ticket from an admin."]},
   {"name": "passkey-answers", "passkey": "credential"},
   {"name": "enroll", "enroll": "SAIL_DRIVE_TICKET"},
-  {"name": "enrolled", "exactly": ["Sign in to Sail", "A passkey for @uday is on this Mac. Sign in with it."]},
+  {"name": "enrolled", "exactly": ["Sign in to Sail", "A passkey for @uday is on this Mac.", "Sign in with it."]},
   {"name": "the-same-ticket-again", "enroll": "SAIL_DRIVE_TICKET"},
   {"name": "row-5", "pane": "This enrollment ticket is used, expired or not from http://127.0.0.1:7979.\nA ticket lasts 15 minutes and enrolls one passkey. Ask an admin: sail fde enroll <handle>.\nEnrollment ticket is invalid or expired."},
   {"name": "sign-in-unsigned", "signed": false, "signIn": true},

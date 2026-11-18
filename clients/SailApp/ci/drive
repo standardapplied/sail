@@ -2,11 +2,13 @@
 # Runs the drive build against this Mac's own host and two control planes the bundled sail starts
 # here, each on a data directory of its own: one taking passkeys for sail.standardapplied.com on
 # 7979, with uday an admin and a ticket to enroll him, and one with no relying party on 7980.
-# Tests/Drive/first.json runs, then the app is quit and opened again for Tests/Drive/second.json.
-# Then another copy of Sail's host runs from another bundle's path, with a client attached to one
-# of its sessions, and the app is opened once more for Tests/Drive/third.json; then, with no host
-# and no saved arrangement, once more for Tests/Drive/shots.json: the window as the screen shows it;
-# then once more for Tests/Drive/workspaces.json, every control-plane call answered from the goldens;
+# Every run but the second starts with none of the app's settings.
+# Tests/Drive/first.json runs, then the app is quit and opened again for Tests/Drive/second.json,
+# which keeps what the first left. Then another copy of Sail's host runs from another bundle's
+# path, with a client attached to one of its sessions, and the app is opened once more for
+# Tests/Drive/third.json; then, with no host, once more for Tests/Drive/shots.json: the window as
+# the screen shows it; then the same way once more for Tests/Drive/workspaces.json, every
+# control-plane call answered from the goldens;
 # then, with keyboard navigation on, for Tests/Drive/kit.json, the controls' gallery, left to right
 # and once more right to left (kit-rtl).
 # Each run's texts, images and report land in OUT; what it prints, and the servers' logs, beside
@@ -68,10 +70,13 @@ for run in first second third shots workspaces kit kit-rtl; do
     perl -e 'alarm shift; exec @ARGV' 30 bash -c 'until "$1" session ls --socket "$2" --json | grep -Eq "\"attached\" *: *1"; do :; done' _ "$other/sail" "$socket"
   fi
   if [[ $run == shots || $run == workspaces ]]; then
-    echo "ci/drive: a fresh start for the $run: no host, no saved arrangement"
+    echo "ci/drive: a fresh start for the $run: no host"
     pkill -f '_pty-host --local' || true
     perl -e 'alarm shift; exec @ARGV' 30 bash -c 'while pgrep -f "_pty-host --local" > /dev/null; do :; done'
-    defaults delete "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" workbench.arrangement 2> /dev/null || true
+  fi
+  if [[ $run != second ]]; then
+    echo "ci/drive: none of the app's settings for the $run"
+    defaults delete "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" 2> /dev/null || true
   fi
   echo "ci/drive: $run"
   goldens=off

@@ -23,8 +23,26 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     public let said = NSTextField(wrappingLabelWithString: "")
     public private(set) var standing: SignedIn?
     /// Whether a ceremony or a call is under way, and how many have ended.
-    public private(set) var busy = false
+    public var busy: Bool {
+        running > 0 || acting > 0
+    }
+
     public private(set) var ended = 0
+    /// How many actions a person has started here (a sign-in, an enrollment, a sign-out): what the
+    /// drive waits on, and what a check's late answer is said after.
+    public private(set) var actions = 0
+    /// Whether an action a person started is under way.
+    public var isActing: Bool {
+        acting > 0
+    }
+
+    private var running = 0
+    private var acting = 0
+    /// How many times who is signed in was set here: a check that began before the latest answers
+    /// too late to be shown.
+    private var shown = 0
+    /// A check's answer that came while a person's action was under way, taken once it ends.
+    private var heldAnswer: (@MainActor () -> Void)?
     /// Who is signed in now, nil for no one: said each time the pane learns it.
     var onStanding: @MainActor (SignedIn?) -> Void = { _ in }
     /// Asked before signing out, answering whether to go on: what the sign-in holds open is ended
@@ -75,15 +93,46 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     /// Asks the server who this Mac is signed in as at the control plane it last used, when it
-    /// holds a session there; what is typed in the field and not yet used is not asked about.
+    /// holds a session there; what is typed in the field and not yet used is not asked about. The
+    /// check holds no button: a person may act while it is under way. An answer that comes during
+    /// a person's action waits for it to end, so the pane never changes under a passkey sheet.
     public func refresh() async {
         guard !busy, let used = defaults.string(forKey: Self.addressKey), let plane = try? ControlPlane(address: used) else { return }
-        await run { () async throws(AccountRefusal) in
-            self.show(try await self.account.current(at: plane))
+        let acted = actions, seen = shown
+        await run(byAPerson: false) { () async throws(AccountRefusal) in
+            let answer: Result<SignedIn?, AccountRefusal>
+            do throws(AccountRefusal) {
+                answer = .success(try await self.account.current(at: plane))
+            } catch {
+                answer = .failure(error)
+            }
+            self.whenNoOneActs { self.take(answer, acted: acted, seen: seen) }
         }
     }
 
+    /// A check's answer, dropped when who is signed in was set since the check began (a sign-in, a
+    /// sign-out), which it would undo. Otherwise shown, and what it says (why the session ended,
+    /// why it is not yet confirmed) said after what a person's action said meanwhile.
+    private func take(_ answer: Result<SignedIn?, AccountRefusal>, acted: Int, seen: Int) {
+        guard shown == seen else { return }
+        if actions == acted { say([]) }
+        switch answer {
+        case let .success(found):
+            show(found)
+        case let .failure(refusal):
+            forgetIfGone(refusal)
+            say(lines + refusal.lines)
+        }
+    }
+
+    private func whenNoOneActs(_ go: @escaping @MainActor () -> Void) {
+        guard acting > 0 else { return go() }
+        heldAnswer = go
+    }
+
     @objc public func signInWithPasskey(_: Any?) {
+        guard acting == 0 else { return }
+        begin()
         Task {
             await run { () async throws(AccountRefusal) in
                 let plane = try self.remembered()
@@ -93,21 +142,27 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     @objc public func enrollWithTicket(_: Any?) {
+        guard acting == 0 else { return }
         let pasted = ticket.stringValue
         ticket.stringValue = ""
+        begin()
         Task {
             await run { () async throws(AccountRefusal) in
                 let plane = try self.remembered()
                 let enrolled = try await self.account.enroll(ticket: pasted, at: plane)
-                self.say(["A passkey for @\(enrolled.fde) is on this Mac. Sign in with it."])
+                self.say(["A passkey for @\(enrolled.fde) is on this Mac.", Self.signInWithIt])
             }
         }
     }
 
+    /// Asks before signing out; a second click or the menu item meanwhile asks nothing.
     @objc public func signOutHere(_: Any?) {
-        guard standing != nil else { return }
+        guard standing != nil, acting == 0 else { return }
+        begin(clearing: false)
         askBeforeSigningOut { [weak self] go in
-            if go { self?.signOutNow() }
+            guard let self else { return }
+            if go { signOutNow() }
+            end()
         }
     }
 
@@ -129,7 +184,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     public func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        item.action != #selector(signOutHere(_:)) || (standing != nil && !busy)
+        item.action != #selector(signOutHere(_:)) || (standing != nil && acting == 0)
     }
 
     private func remembered() throws(AccountRefusal) -> ControlPlane {
@@ -139,24 +194,57 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         return plane
     }
 
-    private func run(_ act: @MainActor () async throws(AccountRefusal) -> Void) async {
-        busy = true
-        say([])
-        [signIn, enroll, signOut].forEach { $0.isEnabled = false }
+    /// A person's action begins, before the click or Return that started it returns: the buttons
+    /// are held, so a second one starts nothing, and (`clearing`) what the pane said is cleared.
+    private func begin(clearing: Bool = true) {
+        acting += 1
+        actions += 1
+        if clearing { say([]) }
+        holdTheButtons()
+    }
+
+    /// A person's action ends: the buttons are offered again once no other is under way, and a
+    /// check's answer that came meanwhile is taken.
+    private func end() {
+        acting -= 1
+        holdTheButtons()
+        guard acting == 0, let held = heldAnswer else { return }
+        heldAnswer = nil
+        held()
+    }
+
+    /// Runs `act`, a person's action (``begin()`` already called) or (not `byAPerson`) a check of
+    /// who is signed in. Only a person's action holds the buttons.
+    private func run(byAPerson person: Bool = true, _ act: @MainActor () async throws(AccountRefusal) -> Void) async {
+        running += 1
+        holdTheButtons()
         defer {
-            busy = false
+            running -= 1
+            if person { end() }
             ended += 1
-            [signIn, enroll, signOut].forEach { $0.isEnabled = true }
         }
         do {
             try await act()
         } catch {
-            if [.ended, .unreadableSignIn].contains(error.reason) { show(nil) }
+            forgetIfGone(error)
             say(error.lines)
         }
     }
 
+    /// No one is signed in when the session ended or could not be read.
+    private func forgetIfGone(_ refusal: AccountRefusal) {
+        if [.ended, .unreadableSignIn].contains(refusal.reason) { show(nil) }
+    }
+
+    /// The buttons are held only while an action a person started is under way.
+    private func holdTheButtons() {
+        [signIn, enroll, signOut].forEach { $0.isEnabled = acting == 0 }
+    }
+
+    /// Shows who is signed in, and why `whoami` could not confirm it, after what the pane says;
+    /// "Sign in with it." is never said beside someone signed in.
     private func show(_ signedIn: SignedIn?) {
+        shown += 1
         standing = signedIn
         signedOutRows.isHidden = signedIn != nil
         signedInRows.isHidden = signedIn == nil
@@ -168,15 +256,21 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         let whoami = try? signedIn.whoami.get()
         heading.stringValue = whoami?.displayName ?? whoami?.name ?? signedIn.fde
         who.stringValue = Self.describe(signedIn)
-        if case let .failure(refused) = signedIn.whoami { say(refused.lines) }
+        var now = lines.filter { $0 != Self.signInWithIt }
+        if case let .failure(refused) = signedIn.whoami { now += refused.lines }
+        say(now)
     }
 
-    /// `@handle`, role, control plane and "Signed in until <date>", a line each.
+    static let signInWithIt = "Sign in with it."
+
+    /// `@handle`, role, control plane and "Signed in until <date>", a line each; a sign-in this Mac
+    /// remembers that the control plane has not confirmed says so instead.
     static func describe(_ signedIn: SignedIn) -> String {
         let whoami = try? signedIn.whoami.get()
+        let until = signedIn.until.formatted(date: .long, time: .shortened)
         return [
             "@\(whoami?.fde ?? signedIn.fde)", whoami?.role.rawValue ?? "", signedIn.controlPlane.description,
-            "Signed in until \(signedIn.until.formatted(date: .long, time: .shortened))",
+            whoami == nil ? "Not yet confirmed: remembered on this Mac until \(until)" : "Signed in until \(until)",
         ].filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
