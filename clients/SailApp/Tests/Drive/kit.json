@@ -3,5 +3,11 @@
   {"name": "kit-buttons", "kit": "button"},
   {"name": "kit-fields", "kit": "field"},
   {"name": "kit-pills-keys-and-initial", "kit": "pill"},
-  {"name": "kit-spinner-and-skeleton", "kit": "spinner"}
+  {"name": "kit-spinner-and-skeleton", "kit": "spinner"},
+  {"name": "kit-list-rows", "kit": "row"},
+  {"name": "kit-the-more-click", "kit": "more-click"},
+  {"name": "kit-sidebar-rows-and-tiles", "kit": "sidebar"},
+  {"name": "kit-tooltip-chips", "kit": "tooltip"},
+  {"name": "kit-banners", "kit": "banner"},
+  {"name": "kit-empty-states", "kit": "empty"}
 ]}

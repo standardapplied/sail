@@ -2,12 +2,12 @@ import CoreText
 import Foundation
 
 /// JetBrains Mono as the controls set it: Medium for their labels (eyebrows, pills, keycaps,
-/// shortcut hints), Regular for a mono line of body text, Bold for a project tile's initial; read
+/// shortcut hints), Regular for a mono line of body text, SemiBold for a project tile's initial; read
 /// from the files the app ships and checked to be those faces. Apart from `TerminalFonts`, so a
 /// terminal never needs the controls' faces to open.
 public struct LabelFont {
     public enum Weight: String, CaseIterable, Sendable {
-        case regular = "JetBrainsMono-Regular", medium = "JetBrainsMono-Medium", bold = "JetBrainsMono-Bold"
+        case regular = "JetBrainsMono-Regular", medium = "JetBrainsMono-Medium", semibold = "JetBrainsMono-SemiBold"
 
         public var file: String {
             rawValue + ".ttf"

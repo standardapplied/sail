@@ -404,7 +404,7 @@ jobs:
           test "$(plutil -extract CFBundleExecutable raw "$app/Contents/Info.plist")" = Sail
           test "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" = sh.standardapplied.sail
           test -x "$app/Contents/MacOS/Sail" && test -x "$app/Contents/Helpers/sail"
-          for font in Regular Medium Bold Italic BoldItalic; do test -f "$app/Contents/Resources/Fonts/JetBrainsMono-$font.ttf"; done
+          for font in Regular Medium SemiBold Bold Italic BoldItalic; do test -f "$app/Contents/Resources/Fonts/JetBrainsMono-$font.ttf"; done
           test -f "$app/Contents/Resources/Fonts/OFL.txt" && test -f "$app/Contents/Resources/Acknowledgements.txt"
           test -f "$app/Contents/Resources/Fonts/Newsreader16pt-Medium.ttf" && test -f "$app/Contents/Resources/Fonts/Newsreader-OFL.txt"
           icon=$(plutil -extract CFBundleIconFile raw "$app/Contents/Info.plist")
@@ -544,7 +544,7 @@ jobs:
           fi
           echo "One unzip of the download gives Sail.app, whole."
 
-      - name: Leave the frames, the drive's images and reports
+      - name: Leave the frames, the drive's images and reports, and the test suites' logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -554,6 +554,7 @@ jobs:
           path: |
             ${{ runner.temp }}/frames
             ${{ runner.temp }}/drive-out
+            ${{ runner.temp }}/test-logs
 
       - name: Leave the window as the screen showed it, in both looks
         if: always()

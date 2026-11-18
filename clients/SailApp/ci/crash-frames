@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""Prints what each macOS crash report (.ips) given says: the exception, how the process ended,
+and the crashing thread's top frames."""
+import json
+import sys
+
+for path in sys.argv[1:]:
+    text = open(path).read()
+    body = json.loads(text[text.index("\n") + 1:])
+    images = body.get("usedImages", [])
+    print("crash report", path, body.get("procName", ""), body.get("exception"), body.get("termination", {}).get("indicator"))
+    for index, thread in enumerate(body.get("threads", [])):
+        if index != body.get("faultingThread") and not thread.get("triggered"):
+            continue
+        print("crashing thread", index, thread.get("name", ""), thread.get("queue", ""))
+        for frame in thread.get("frames", [])[:60]:
+            image = images[frame["imageIndex"]].get("name", "?") if frame.get("imageIndex", -1) < len(images) else "?"
+            print("  ", image, frame.get("symbol", hex(frame.get("imageOffset", 0))), frame.get("symbolLocation", ""))

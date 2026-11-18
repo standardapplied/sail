@@ -25,7 +25,7 @@ enum Keys {
     private static let namedKeys: [String: (key: SailVT.Key, text: String)] = [
         "enter": (.enter, "\r"), "escape": (.escape, "\u{1b}"), "tab": (.tab, "\t"), "backspace": (.backspace, "\u{7f}"),
         "arrowUp": (.arrowUp, "\u{F700}"), "arrowDown": (.arrowDown, "\u{F701}"), "arrowLeft": (.arrowLeft, "\u{F702}"),
-        "arrowRight": (.arrowRight, "\u{F703}"),
+        "arrowRight": (.arrowRight, "\u{F703}"), "home": (.home, "\u{F729}"), "end": (.end, "\u{F72B}"),
     ]
 
     /// The key that types `character`, Shift held for a capital or a shifted symbol; a character

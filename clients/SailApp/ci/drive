@@ -51,9 +51,11 @@ stop_drive() {
   local pids
   pids=$(pgrep -f -- "$opened_pattern" || true)
   [[ -n $pids ]] || return 0
-  echo "ci/drive: ending the drive still running (pid $pids)" >&2
+  echo "ci/drive: ending the drive still running (pid $pids):" >&2
+  ps -o pid=,ppid=,command= -p "${pids//$'\n'/,}" >&2 || true
   kill -TERM $pids 2> /dev/null || true
-  perl -e 'alarm shift; exec @ARGV' 10 bash -c 'while pgrep -f -- "$1" > /dev/null; do sleep 0.1; done' _ "$opened_pattern" || true
+  # The pattern goes in the environment, not the wait's arguments, or pgrep finds the wait itself.
+  OPENED_PATTERN=$opened_pattern perl -e 'alarm shift; exec @ARGV' 10 bash -c 'while pgrep -f -- "$OPENED_PATTERN" > /dev/null; do sleep 0.1; done' || true
   pids=$(pgrep -f -- "$opened_pattern" || true)
   [[ -z $pids ]] || kill -KILL $pids 2> /dev/null || true
 }
@@ -128,10 +130,36 @@ mkfifo -m 600 "$SAIL_DRIVE_SHOTS"
 take_shots &
 shooter=$!
 
+# Watches a run's output while it runs. A step that prints nothing past its budget is hung: the
+# larger of 60 s and the step's own `seconds` plus 30 (a step whose own waits are longer declares
+# them there), so a step is never ended inside its own time. Every thread of the drive is sampled
+# for 5 s into OUT, the step is named in $private_dir/$run-hung, and the drive is ended.
+watch_drive() {
+  local run=$1 script=$2 log=$out_dir/$1-output.txt seen=-1 quiet=0 size pids last done budget step
+  while sleep 5; do
+    pids=$(pgrep -f -- "$opened_pattern" || true)
+    [[ -n $pids ]] || continue
+    size=$(wc -c < "$log" 2> /dev/null || echo 0)
+    if [[ $size != "$seen" ]]; then seen=$size quiet=0; continue; fi
+    quiet=$((quiet + 5))
+    last=$(grep -E '^drive [0-9]+ ' "$log" | tail -1 || true)
+    done=$(awk '{ print $2 }' <<< "${last:-drive 0}")
+    read -r budget step < <(python3 -c 'import json, sys; steps = json.load(open(sys.argv[1]))["steps"]; n = int(sys.argv[2]); s = steps[n] if n < len(steps) else {"name": "its quit, after the last step"}; print(int(max(60, s.get("seconds", 0) + 30)), "step %d, %s" % (n + 1, s["name"]))' "$script" "$done")
+    (( quiet >= budget )) || continue
+    echo "ci/drive: the $run run printed nothing for $quiet s, past the ${budget} s budget of $step: it is hung" >&2
+    sample $pids 5 -file "$out_dir/$run-hung.txt" > /dev/null 2>&1 || true
+    echo "ci/drive: every thread of the drive, sampled for 5 s, is in $out_dir/$run-hung.txt; its main thread:" >&2
+    awk '/^Call graph:/ { on = 1 } on && /^ +[0-9]+ Thread_/ { n++ } n > 1 { exit } on' "$out_dir/$run-hung.txt" 2> /dev/null | head -80 >&2 || true
+    echo "$step" > "$private_dir/$run-hung"
+    stop_drive
+    return 0
+  done
+}
+
 # Opens the drive build as LaunchServices opens a person's app, waits for it to quit and prints what
 # it printed. `open` tells nothing of the app's exit status, so a run passes only when all of these
-# hold, and returns: 0 passed; 1 a step failed; 124 the alarm ended `open` (a hang, the drive then
-# ended); 134 a crash or a hang at quit (no mark of a clean exit, or a new SailDrive crash report),
+# hold, and returns: 0 passed; 1 a step failed; 125 a step hung past its budget (`watch_drive`
+# named it and sampled the drive); 124 the alarm ended `open` (a hang, the drive then ended); 134 a crash or a hang at quit (no mark of a clean exit, or a new SailDrive crash report),
 # or no report. Its folder and output are removed first, so an earlier run's report never passes.
 # SAIL_DRIVE_ALARM_SECONDS (600) bounds it; ci/drive's own check of these sets it short.
 open_drive() {
@@ -141,10 +169,19 @@ open_drive() {
   : > "$out_dir/$run-output.txt"
   : > "$out_dir/$run-errors.txt"
   : > "$private_dir/$run-started"
+  rm -f "$private_dir/$run-hung"
+  watch_drive "$run" "$2" &
+  watcher=$!
+  disown
   perl -e 'alarm shift; exec @ARGV' "${SAIL_DRIVE_ALARM_SECONDS:-600}" open -W -n -a "$app" --stdout "$out_dir/$run-output.txt" \
     --stderr "$out_dir/$run-errors.txt" --env "SAIL_DRIVE_GOLDENS=$goldens" --args "$@" || opened=$?
+  kill "$watcher" 2> /dev/null || true
   cat "$out_dir/$run-output.txt"
   cat "$out_dir/$run-errors.txt" >&2
+  if [[ -f $private_dir/$run-hung ]]; then
+    echo "ci/drive: the $run run failed: $(cat "$private_dir/$run-hung") hung; its threads are in $out_dir/$run-hung.txt" >&2
+    return 125
+  fi
   if ((opened != 0)); then
     echo "ci/drive: the $run run did not end within ${SAIL_DRIVE_ALARM_SECONDS:-600} s (open ended with status $opened)" >&2
     stop_drive
@@ -221,22 +258,7 @@ for run in first second third shots workspaces kit kit-rtl; do
     fi
     if compgen -G "$reports/SailDrive*.ips" > /dev/null; then
       cp "$reports"/SailDrive*.ips "$out/"
-      for report in "$reports"/SailDrive*.ips; do
-        python3 - "$report" <<'PY'
-import json, sys
-text = open(sys.argv[1]).read()
-body = json.loads(text[text.index("\n") + 1:])
-images = body.get("usedImages", [])
-print("ci/drive: crash report", sys.argv[1], body.get("exception"), body.get("termination", {}).get("indicator"))
-for index, thread in enumerate(body.get("threads", [])):
-    if index != body.get("faultingThread") and not thread.get("triggered"):
-        continue
-    print("faulting thread", index, thread.get("name", ""), thread.get("queue", ""))
-    for frame in thread.get("frames", [])[:60]:
-        image = images[frame["imageIndex"]].get("name", "?") if frame.get("imageIndex", -1) < len(images) else "?"
-        print("  ", image, frame.get("symbol", hex(frame.get("imageOffset", 0))), frame.get("symbolLocation", ""))
-PY
-      done
+      ci/crash-frames "$reports"/SailDrive*.ips | sed 's/^/ci\/drive: /'
     elif (( status > 128 )); then
       echo "ci/drive: the drive left no crash report in $reports within 90 s" >&2
     fi
