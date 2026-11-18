@@ -1,4 +1,5 @@
 import AppKit
+import os
 import QuartzCore
 import SailLook
 import SailRenderer
@@ -6,6 +7,8 @@ import SailSurface
 import SailTerminal
 import SailVT
 import Synchronization
+
+private let terminalLog = Logger(subsystem: "sh.standardapplied.sail", category: "terminal")
 
 /// A terminal session in an AppKit view. It draws only what the screen's frame says and sends only
 /// what the screen's encoders make (V2). Output is drawn on the first display refresh after it
@@ -186,6 +189,20 @@ public final class TerminalView: NSView {
         let focused = focused
         input.async { link.setFocused(focused) }
         needFrame()
+    }
+
+    /// Draws the screen in `palette` from the next frame on, its content, scrollback, selection and
+    /// cursor kept; the link tells a program that subscribed of a changed scheme. A palette the
+    /// screen refuses leaves the old colours, said in the system log.
+    public func recolour(_ palette: Palette) {
+        guard let link else { return }
+        input.async {
+            do {
+                try link.setPalette(palette)
+            } catch {
+                terminalLog.fault("a terminal kept its colours: the screen refused the new palette: \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
     /// Whether `link` may be attached: no view has drawn it before.

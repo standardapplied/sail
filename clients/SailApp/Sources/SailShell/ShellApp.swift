@@ -55,7 +55,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
     }
 
-    static func look(of appearance: NSAppearance) -> Look {
+    public static func look(of appearance: NSAppearance) -> Look {
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua ? .light : .dark
     }
 

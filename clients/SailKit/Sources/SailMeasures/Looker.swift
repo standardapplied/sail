@@ -7,8 +7,8 @@ import Foundation
 import Synchronization
 
 /// Looks at the thread that made it every ``interval``, from a real-time thread of its own, and
-/// keeps each look (``ThreadLook``: its run state, its CPU time, this process's CPU time and the
-/// machine's CPU ticks), the evidence ``MachineShare`` excuses a wait on, until stopped. Only on
+/// keeps each look (``ThreadLook``: its run state, its CPU time and, while it is runnable, this
+/// process's CPU time and the machine's CPU ticks), the evidence ``MachineShare`` excuses a wait on, until stopped. Only on
 /// Darwin; elsewhere it looks at nothing, so nothing is excused.
 public final class Looker: Sendable {
     /// How often it looks.
@@ -71,24 +71,56 @@ public final class Looker: Sendable {
 /// The Mach calls a look is made of.
 public enum Mach {
     /// A look at `thread` at `time`; nil when `thread_info` fails: a missing look is missing
-    /// evidence, never a runnable one.
-    public static func look(at thread: thread_act_t, time: Double) -> ThreadLook? {
+    /// evidence, never a runnable one. Our processes' CPU (this one and `others`) and the machine's
+    /// ticks are read only when the thread is runnable, the only looks ``MachineShare`` reads them
+    /// on: the ticks' per-CPU read is the dear part of a look.
+    public static func look(at thread: thread_act_t, time: Double, others: [pid_t] = []) -> ThreadLook? {
         var info = thread_basic_info()
         var infoCount = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / MemoryLayout<integer_t>.size)
         let got = withUnsafeMutablePointer(to: &info) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(infoCount)) { thread_info(thread, thread_flavor_t(THREAD_BASIC_INFO), $0, &infoCount) }
         }
         guard got == KERN_SUCCESS else { return nil }
-        var usage = rusage()
-        let process = getrusage(RUSAGE_SELF, &usage) == 0
-            ? Double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1e6 : 0
+        guard info.run_state == TH_STATE_RUNNING else {
+            return ThreadLook(time: time, runnable: false, cpu: seconds(info), ourCPU: nil, idleTicks: nil, busyTicks: nil)
+        }
         let ticks = hostTicks()
         return ThreadLook(
-            time: time, runnable: info.run_state == TH_STATE_RUNNING, cpu: seconds(info),
-            processCPU: process, idleTicks: ticks.count == 4 ? ticks[2] : nil,
-            busyTicks: ticks.count == 4 ? ticks[0] &+ ticks[1] &+ ticks[3] : nil
+            time: time, runnable: true, cpu: seconds(info), ourCPU: ourCPU(others: others),
+            idleTicks: ticks.count == 4 ? ticks[2] : nil, busyTicks: ticks.count == 4 ? ticks[0] &+ ticks[1] &+ ticks[3] : nil
         )
     }
+
+    /// The CPU time so far, in seconds, of this process and of `others`; a pid that cannot be read
+    /// (it ended) adds nothing.
+    public static func ourCPU(others: [pid_t]) -> Double {
+        var usage = rusage()
+        let own = getrusage(RUSAGE_SELF, &usage) == 0
+            ? Double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1e6 : 0
+        return others.reduce(own) { $0 + (cpu(ofProcess: $1) ?? 0) }
+    }
+
+    /// `pid`'s CPU time so far, in seconds (`proc_pid_rusage`, whose times are Mach time units).
+    public static func cpu(ofProcess pid: pid_t) -> Double? {
+        var info = rusage_info_v0()
+        let got = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V0, $0) }
+        }
+        return got == 0 ? Double(info.ri_user_time &+ info.ri_system_time) * nanosecondsPerUnit / 1e9 : nil
+    }
+
+    /// The processes `pid` started that still run: a terminal host's session shims.
+    public static func children(of pid: pid_t) -> [pid_t] {
+        var pids = [pid_t](repeating: 0, count: 512)
+        let listed = pids.withUnsafeMutableBytes { proc_listchildpids(pid, $0.baseAddress, Int32($0.count)) }
+        return listed > 0 ? pids.filter { $0 > 0 } : []
+    }
+
+    private static let nanosecondsPerUnit: Double = {
+        var timebase = mach_timebase_info_data_t()
+        _ = mach_timebase_info(&timebase)
+        return Double(timebase.numer) / Double(timebase.denom)
+    }()
 
     /// `thread`'s CPU time so far, in seconds, or nil when it cannot be read.
     public static func cpu(of thread: thread_act_t) -> Double? {
@@ -100,15 +132,25 @@ public enum Mach {
         return got == KERN_SUCCESS ? seconds(info) : nil
     }
 
-    /// The machine's CPU ticks so far: user, system, idle, nice; empty when they cannot be read.
+    /// The machine's CPU ticks so far, summed over its CPUs: user, system, idle, nice; empty when
+    /// they cannot be read. Read per CPU (`host_processor_info`): `host_statistics` answers an
+    /// unprivileged process asking more often than its rate limit allows with its last answer, so
+    /// looks 5 ms apart read the same ticks (idle and busy alike frozen), and a later one a second
+    /// of them at once.
     public static func hostTicks() -> [UInt32] {
-        var load = host_cpu_load_info()
-        var count = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info>.size / MemoryLayout<integer_t>.size)
-        let got = withUnsafeMutablePointer(to: &load) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { host_statistics(host, HOST_CPU_LOAD_INFO, $0, &count) }
+        var cpus = natural_t(0)
+        var info: processor_info_array_t?
+        var count = mach_msg_type_number_t(0)
+        guard host_processor_info(host, PROCESSOR_CPU_LOAD_INFO, &cpus, &info, &count) == KERN_SUCCESS, let info else { return [] }
+        defer { vm_deallocate(mach_task_self_, vm_address_t(UInt(bitPattern: info)), vm_size_t(Int(count) * MemoryLayout<integer_t>.stride)) }
+        let states = Int(CPU_STATE_MAX)
+        var ticks = [UInt32](repeating: 0, count: states)
+        for cpu in 0 ..< Int(cpus) {
+            for state in 0 ..< states {
+                ticks[state] &+= UInt32(bitPattern: info[cpu * states + state])
+            }
         }
-        guard got == KERN_SUCCESS else { return [] }
-        return [load.cpu_ticks.0, load.cpu_ticks.1, load.cpu_ticks.2, load.cpu_ticks.3]
+        return [ticks[Int(CPU_STATE_USER)], ticks[Int(CPU_STATE_SYSTEM)], ticks[Int(CPU_STATE_IDLE)], ticks[Int(CPU_STATE_NICE)]]
     }
 
     /// Makes `thread` real-time (`THREAD_TIME_CONSTRAINT_POLICY`): in every `period` it may run up

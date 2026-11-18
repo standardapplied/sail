@@ -15,6 +15,7 @@ public protocol TerminalLink: AnyObject, Sendable {
     func send(_ mouse: MouseInput)
     func scroll(lines: Int, x: Double, y: Double)
     func setFocused(_ focused: Bool)
+    func setPalette(_ palette: Palette) throws(ScreenError)
     func resize(_ size: GridSize) throws(ScreenError)
     func setCellPixels(width: Int, height: Int) throws(ScreenError)
 }

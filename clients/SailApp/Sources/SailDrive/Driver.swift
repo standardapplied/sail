@@ -55,7 +55,8 @@ final class Driver {
     /// The main thread's sampler, begun the first time a measure asks for it, and kept.
     var mainStacks: MainStacks {
         if let madeStacks { return madeStacks }
-        let made = MainStacks(watching: mainThread)
+        let host = shell.thisMac.host
+        let made = MainStacks(watching: mainThread) { host.servingProcess()?.pid }
         madeStacks = made
         return made
     }
@@ -143,8 +144,9 @@ final class Driver {
                 continue
             }
             var (ok, detail) = await perform(step, name: name)
+            await Task.yield()
             let drew = await waitUntil(Self.drawDeadline) {
-                !self.onTerminal || self.terminal.visibleText == self.screenText && self.terminal.isDrawnInFull
+                !self.onTerminal || self.measuring || self.terminal.visibleText == self.screenText && self.terminal.isDrawnInFull
             }
             if ok, !drew {
                 ok = false
@@ -164,11 +166,16 @@ final class Driver {
             if !ok { break }
         }
         let withinClaim = madeStacks.map { $0.watcherShare <= MainStacks.claim } ?? true
-        Self.say("drive: \(excused.count) stretch\(excused.count == 1 ? "" : "es") of a judged wait excused as the machine's"
+        let lookCheap = madeStacks.map { $0.averageLook <= MainStacks.computation } ?? true
+        let stayedRealTime = madeStacks.map { !$0.demoted } ?? true
+        let stretches = "drive: \(excused.count) stretch\(excused.count == 1 ? "" : "es") of a judged wait excused as the machine's"
             + (excused.isEmpty ? "" : ": " + excused.joined(separator: "; "))
-            + (madeStacks.map { "; the main thread's sampler took \($0.cost)" } ?? "; the main thread's sampler never ran: no step measured a wait")
-            + (withinClaim ? "" : "; FAILED: the watcher took more of a CPU than its claim"))
-        let passed = results.count == steps.count && results.allSatisfy(\.ok) && withinClaim
+        let sampler = madeStacks.map { "; the main thread's sampler took \($0.cost)" } ?? "; the main thread's sampler never ran: no step measured a wait"
+        let overClaim = withinClaim ? "" : "; FAILED: the watcher took more of a CPU than its claim"
+        let overLook = lookCheap ? "" : String(format: "; FAILED: a look took more on average than the watcher's computation of %.0f µs", MainStacks.computation * 1e6)
+        let demoted = stayedRealTime ? "" : "; FAILED: the watcher was demoted out of real time"
+        Self.say(stretches + sampler + overClaim + overLook + demoted)
+        let passed = results.count == steps.count && results.allSatisfy(\.ok) && withinClaim && lookCheap && stayedRealTime
         let report = Report(
             passed: passed, hertz: shell.window.screen?.maximumFramesPerSecond ?? 0, scale: terminal.metrics.scale, steps: results,
             measures: measures, bench: bench, panes4: panes4
@@ -194,7 +201,10 @@ final class Driver {
             return kit
         }
         if let text = step.type {
-            for character in text { key(character) }
+            for character in text {
+                key(character)
+                await Task.yield()
+            }
             return (true, "typed \(text.count) keys")
         }
         if let press = step.press {
@@ -285,7 +295,7 @@ final class Driver {
         if let wanted = step.line {
             let line = wanted.replacingOccurrences(of: "{home}", with: NSHomeDirectory())
             let found = await waitUntil(step.seconds ?? 10) {
-                let lines = self.lines
+                let lines = self.drawnLines
                 return lines.indices.contains { index in
                     lines[index] == line && (step.after.map { above in index > 0 && lines[index - 1] == above } ?? true)
                 }
@@ -293,8 +303,8 @@ final class Driver {
             return (found, found ? "" : "no line '\(line)'\(step.after.map { " under '\($0.prefix(40))'" } ?? "") within \(step.seconds ?? 10) s")
         }
         if let top = step.top {
-            let found = await waitUntil(step.seconds ?? 10) { self.lines.first == top }
-            return (found, "the top line is '\(lines.first ?? "")'")
+            let found = await waitUntil(step.seconds ?? 10) { self.drawnLines.first == top }
+            return (found, "the top line is '\(drawnLines.first ?? "")'")
         }
         if step.gridColumns == true {
             let columns = terminal.grid.map { "\($0.columns)" } ?? "none"
@@ -308,14 +318,16 @@ final class Driver {
             if let gap = mainThread.stalls.longest() {
                 mainStacks.told(gap).forEach { print("main thread in its longest hold of the flood: \($0)") }
             }
-            let ok = judged.ours <= limit
+            let covered = Self.measuredFromItsStart(figures)
+            let ok = covered && judged.ours <= limit
             let measured = measurement(name, keys: 0, figures: figures, budgets: ["every output shown within \(Self.ms(limit)) ms": ok])
             measures.append(measured)
-            return (ok, "\(judged.said); the longest refresh took \(Self.ms(figures.refresh.max)) ms, \(figures.lateOutputs) outputs were late; "
+            return (ok, (covered ? "" : "FAILED: the measure missed the flood's start: no key typed after its reset was seen echoed; ")
+                + "\(judged.said); the longest refresh took \(Self.ms(figures.refresh.max)) ms, \(figures.lateOutputs) outputs were late; "
                 + "the main thread was held at most \(Self.ms(measured.mainThreadHeld)) ms")
         }
         if let text = step.text {
-            let found = await waitUntil(step.seconds ?? 10) { self.screenText.contains(text) }
+            let found = await waitUntil(step.seconds ?? 10) { self.terminal.visibleText.contains(text) }
             return (found, found ? "" : "the screen never showed '\(text)'")
         }
         if let banner = step.banner {
@@ -422,6 +434,28 @@ final class Driver {
             + "and \(takenBy) ms after it was posted)"
     }
 
+    /// Whether a flood's measure covers it from its first output: the flood's command is typed
+    /// up to its Return, the measure reset, then the Return typed, so the Return's echo, the
+    /// flood's first output, is a key seen echoed inside the measure. A measure reset after the
+    /// flood began has no key in it.
+    static func measuredFromItsStart(_ figures: LatencyFigures) -> Bool {
+        figures.keyToEcho.count + figures.keyToEchoEstimated.count > 0
+    }
+
+    /// The machine's CPU ticks across a judged wait, between its first and last looks that read
+    /// them (a runnable main thread's), beside what its CPUs make over that time: whether the
+    /// machine ran at all meanwhile. Idle and busy ticks both still across a long wait is what a
+    /// runner paused by its host shows, which nothing inside it can prove otherwise.
+    static func machineTicks(across looks: [ThreadLook]) -> String {
+        let read = looks.filter { $0.idleTicks != nil && $0.busyTicks != nil }
+        guard let first = read.first, let last = read.last, let idleFrom = first.idleTicks, let idleTo = last.idleTicks,
+              let busyFrom = first.busyTicks, let busyTo = last.busyTicks
+        else { return "the machine's ticks unread in it (the main thread never runnable at a look)" }
+        let cpus = ProcessInfo.processInfo.activeProcessorCount, span = last.time - first.time
+        return String(format: "the machine's idle ticks +%u and busy ticks +%u over %.1f ms between looks that read them (%ld CPUs make %.1f)",
+                      idleTo &- idleFrom, busyTo &- busyFrom, span * 1000, cpus, Double(cpus) * span / ThreadLook.tick)
+    }
+
     /// A quality of service as the flood's line names it.
     static func quality(_ quality: QualityOfService?) -> String {
         guard let quality else { return "unknown (no reader yet)" }
@@ -459,14 +493,20 @@ final class Driver {
         let own = ownThread.stalls, looks = mainStacks.looks
         let proven = MachineShare.starvation(in: wait, looks: looks)
         let ownHeld = own.shared(with: wait), starved = MachineShare.starved(in: wait, looks: looks)
+        let inconclusive = MachineShare.inconclusive(wait, main: looks)
         let ours = max(0, wait.length - tick - MachineShare.of(wait, own: own, main: looks)) * 1000
-        let seen = looks.filter { $0.time >= wait.start && $0.time <= wait.end }.count
-        proven.map(\.told).filter { !excused.contains($0) }.forEach { excused.append($0) }
+        let inWait = looks.filter { $0.time >= wait.start && $0.time <= wait.end }
+        let seen = inWait.count, cpus = ProcessInfo.processInfo.activeProcessorCount
+        let told = proven.map { $0.told(cpus: cpus) }
+        if !inconclusive { told.filter { !excused.contains($0) }.forEach { excused.append($0) } }
         let evidence = (proven.isEmpty
             ? "no run of \(MachineShare.fewestLooks) looks proved it starved (\(seen) looks in the wait)"
-            : proven.map(\.told).joined(separator: "; ")) + "; the main run loop's mode, " + mainStacks.modes(in: wait)
+            : told.joined(separator: "; ")) + "; the main run loop's mode, " + mainStacks.modes(in: wait) + "; " + Self.machineTicks(across: inWait)
+        let ceiling = inconclusive
+            ? String(format: "; INCONCLUSIVE: the main thread's starvation is more than %.0f%% of the wait, so none of it is excused", MachineShare.mostExcused * 100)
+            : ""
         return (ours, "waited \(Self.ms((wait.length - tick) * 1000)) ms, the drive's own thread held \(Self.ms(ownHeld * 1000)) ms of it, "
-            + "the main thread runnable without CPU on a machine with none idle \(Self.ms(starved * 1000)) ms of it (\(evidence)), ours \(Self.ms(ours)) ms")
+            + "the main thread runnable without CPU on a machine with none idle \(Self.ms(starved * 1000)) ms of it (\(evidence))\(ceiling), ours \(Self.ms(ours)) ms")
     }
 
     /// The main thread's longest hold, its heartbeat's longest gap (in `span` when given) less one
@@ -488,6 +528,54 @@ final class Driver {
         FileManager.default.createFile(atPath: "/tmp/sail-drive-flood-lines", contents: Data(bytes))
         FileManager.default.createFile(atPath: "/tmp/sail-drive-flood-tail", contents: Data(repeating: UInt8(ascii: "x"), count: 20_971_520 - lines * 150))
         return ("/tmp/sail-drive-flood-lines", "/tmp/sail-drive-flood-tail")
+    }()
+
+    /// A program asking the terminal for its colours, run by the system's perl in a pane. `ask`
+    /// asks the background (OSC 11), palette colour 5 (OSC 4) and the colour scheme (996) and
+    /// prints `asked bg <rgb> c5 <rgb> <light|dark|none>`, short enough for a narrow pane; `set` first sets
+    /// colour 5 to `rgb:12/34/56` as a program's own. `watch` subscribes to colour scheme reports
+    /// (mode 2031), prints `subscribed`, and once a report comes prints `scheme report <scheme>`.
+    static let colourAsker: String = {
+        let path = "/tmp/sail-drive-colours.pl"
+        let script = #"""
+            use strict;
+            use IO::Select;
+            my ($mode) = @ARGV;
+            $| = 1;
+            system('stty -icanon -echo min 1');
+            my $in = IO::Select->new(\*STDIN);
+            sub replies {
+                my $got = '';
+                while ($got !~ /997;\dn/ && $in->can_read(5)) {
+                    sysread(STDIN, my $chunk, 256) or last;
+                    $got .= $chunk;
+                }
+                return $got;
+            }
+            sub scheme {
+                my ($digit) = @_;
+                return 'none' unless defined $digit;
+                return $digit eq '1' ? 'dark' : $digit eq '2' ? 'light' : 'none';
+            }
+            if ($mode eq 'watch') {
+                print "\e[?2031hsubscribed\n";
+                my ($digit) = replies() =~ /997;(\d)n/;
+                print "\e[?2031l";
+                system('stty sane');
+                print "scheme report ", scheme($digit), "\n";
+                exit;
+            }
+            print "\e]4;5;rgb:12/34/56\e\\" if $mode eq 'set';
+            print "\e]11;?\e\\\e]4;5;?\e\\\e[?996n";
+            my $got = replies();
+            system('stty sane');
+            my ($background) = $got =~ /\]11;(rgb:[0-9a-f\/]+)/;
+            my ($own) = $got =~ /\]4;5;(rgb:[0-9a-f\/]+)/;
+            my ($digit) = $got =~ /997;(\d)n/;
+            print "asked bg ", $background // 'none', " c5 ", $own // 'none', " ", scheme($digit), "\n";
+            """#
+        FileManager.default.createFile(atPath: path, contents: Data(script.utf8))
+        return path
     }()
 
     /// A pane's generator, run by the system's perl: it writes the prepared lines (its first
@@ -623,6 +711,12 @@ final class Driver {
 
     var screenText: String {
         (try? pane?.session?.screen.text()) ?? ""
+    }
+
+    /// The rows the focused view last drew, trimmed: what a `line`, `top` or `text` wait reads, so it
+    /// costs the main thread no refresh of the screen under its lock while a flood feeds it.
+    var drawnLines: [String] {
+        terminal.visibleText.split(separator: "\n", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
     var lines: [String] {

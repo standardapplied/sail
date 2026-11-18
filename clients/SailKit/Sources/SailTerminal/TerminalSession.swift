@@ -337,6 +337,15 @@ public final class TerminalSession: Sendable {
         sendInput(screen.scroll(lines: lines, x: x, y: y), handedIn: handedIn)
     }
 
+    /// Takes `palette` while the session runs (``Screen/setPalette(_:)``) and draws it; a program
+    /// that subscribed to scheme reports hears of a changed scheme from the writer only, so an
+    /// observer's look never reaches it.
+    public func setPalette(_ palette: Palette) throws(ScreenError) {
+        let effects = try screen.setPalette(palette)
+        screenChanged(at: clock.now)
+        sendInput(effects.reply, handedIn: nil)
+    }
+
     /// Whether the app shows the session focused; the program hears it when it asked to.
     public func setFocused(_ focused: Bool) {
         let changed = core.withLock { core in
@@ -777,6 +786,7 @@ public final class TerminalSession: Sendable {
             if !focused {
                 sendInput(screen.focus(false), handedIn: nil)
             }
+            sendInput(screen.schemeReport(), handedIn: nil)
             if let refit {
                 send(.resize(refit), on: connection)
             }
@@ -791,21 +801,24 @@ public final class TerminalSession: Sendable {
             emit(.resized(size))
             screenChanged(at: clock.now)
         case let .writerChanged(fde):
-            let fit = core.withLock { core -> TerminalSize? in
+            let (granted, fit) = core.withLock { core -> (Bool, TerminalSize?) in
                 core.state.writer = fde
                 guard core.takingWrite else {
                     if case let .attach(_, write) = core.intent { core.writing = write }
-                    return nil
+                    return (false, nil)
                 }
                 core.takingWrite = false
                 core.writing = true
                 if case let .attach(session, _) = core.intent { core.intent = .attach(session: session, write: true) }
-                guard let view = core.viewSize, view != core.ptySize else { return nil }
+                guard let view = core.viewSize, view != core.ptySize else { return (true, nil) }
                 core.ptySize = view
-                return view
+                return (true, view)
             }
             if let fit {
                 send(.resize(fit), on: connection)
+            }
+            if granted {
+                sendInput(screen.schemeReport(), handedIn: nil)
             }
             emit(.writerChanged(fde))
         case .paused:

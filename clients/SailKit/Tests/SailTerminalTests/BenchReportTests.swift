@@ -14,7 +14,7 @@ import Testing
     static func looks(across span: Span, runnable: Bool = true, cpuPerLook: Double = 0) -> [ThreadLook] {
         stride(from: span.start, through: span.end, by: 0.005).enumerated().map { index, time in
             ThreadLook(
-                time: time, runnable: runnable, cpu: 0.5 + Double(index) * cpuPerLook, processCPU: 1,
+                time: time, runnable: runnable, cpu: 0.5 + Double(index) * cpuPerLook, ourCPU: 1,
                 idleTicks: 100, busyTicks: 1000 + UInt32(index)
             )
         }

@@ -78,6 +78,12 @@ final class FakeLink: TerminalLink {
         if changed { record(screen.focus(focused)) }
     }
 
+    /// Recolours the screen and tells the change, as a writer's session does.
+    func setPalette(_ palette: Palette) throws(ScreenError) {
+        record(try screen.setPalette(palette).reply)
+        listener(.now)
+    }
+
     func setCellPixels(width: Int, height: Int) throws(ScreenError) {
         record(try screen.setCellPixels(width: width, height: height).reply)
     }
