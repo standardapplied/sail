@@ -299,9 +299,7 @@ class PtyUploadIT extends AbstractIncusIT {
         var small = upload(channel, "first.txt", "first".getBytes());
         var directory = directoryOf(small.path());
 
-        assertEquals(
-            new PtyMessage.PutRefused(2, PtyMessage.PutRefusal.NO_SPACE, 0),
-            tryUpload(channel, 2, "big.bin", new byte[2 << 20], () -> {}));
+        assertNoSpace(2, tryUpload(channel, 2, "big.bin", new byte[2 << 20], () -> {}), 1 << 20);
         awaitInInstance("ls -A " + directory + " | tr '\\n' ' '", "1-first.txt");
 
         var filling = new byte[600 << 10];
@@ -313,7 +311,7 @@ class PtyUploadIT extends AbstractIncusIT {
                 "filling.bin",
                 filling,
                 () -> inInstance("head -c 700000 /dev/zero > /var/lib/sail-paste/filler || true"));
-        assertEquals(new PtyMessage.PutRefused(3, PtyMessage.PutRefusal.NO_SPACE, 0), filled);
+        assertNoSpace(3, filled, 64 << 10);
         awaitInInstance("ls -A " + directory + " | tr '\\n' ' '", "1-first.txt");
         inInstance("rm /var/lib/sail-paste/filler");
 
@@ -337,14 +335,24 @@ class PtyUploadIT extends AbstractIncusIT {
 
         inInstance("head -c 2000000 /dev/zero > /var/lib/sail-paste/filler || true");
         try (var another = session("p16")) {
-          assertEquals(
-              new PtyMessage.PutRefused(1, PtyMessage.PutRefusal.NO_SPACE, 0),
-              tryUpload(another, 1, "a.txt", new byte[] {1}, () -> {}));
+          assertNoSpace(1, tryUpload(another, 1, "a.txt", new byte[] {1}, () -> {}), 1);
         }
       }
     } finally {
       deleteContainerQuietly(INSTANCE);
     }
+  }
+
+  /**
+   * {@code answer} refuses upload {@code id} as {@code no_space}, saying what is free on the disk:
+   * less than {@code below} bytes, the room the case left.
+   */
+  private static void assertNoSpace(int id, PtyMessage answer, long below) {
+    var refused = assertInstanceOf(PtyMessage.PutRefused.class, answer);
+    assertEquals(id, refused.id());
+    assertEquals(PtyMessage.PutRefusal.NO_SPACE, refused.kind());
+    assertTrue(
+        refused.limit() >= 0 && refused.limit() < below, "the bytes said free: " + refused.limit());
   }
 
   /**
