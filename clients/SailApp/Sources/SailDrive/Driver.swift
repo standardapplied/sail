@@ -61,6 +61,8 @@ final class Driver {
     }
     /// Each flood judged so far this run, said in brief, so a later one is read beside them.
     private var floodsSaid: [String] = []
+    /// The focused view's draw counts when the flood being measured began.
+    private var drawnBefore: (committed: Int, whole: Int, atlasBytes: Int) = (0, 0, 0)
     /// Every stretch of a judged wait excused as the machine's, with its evidence, once each.
     private var excused: [String] = []
 
@@ -278,6 +280,8 @@ final class Driver {
         }
         if step.resetLatency == true {
             resetLatency()
+            drawnBefore = terminal.drawCounts
+            mainStacks.watchWakes(shell.thisMac.panes.values.map { $0.terminal.wakeWaitingSince })
             measuring = true
             return (true, "")
         }
@@ -302,6 +306,7 @@ final class Driver {
         }
         if let limit = step.shownWithin {
             measuring = false
+            mainStacks.stopWatchingWakes()
             let figures = terminal.latency
             let judged = flood(figures)
             if let gap = mainThread.stalls.longest() {
@@ -313,8 +318,11 @@ final class Driver {
             let earlier = floodsSaid.isEmpty ? "" : "; the floods before it this run: " + floodsSaid.joined(separator: "; ")
             floodsSaid.append("\(name): ours \(Self.ms(judged.ours)) ms, its longest wake taken \(Self.ms((figures.longestToTold?.length ?? 0) * 1000)) ms after the screen took it"
                 + Self.posting(figures))
+            let drawn = terminal.drawCounts
             return (ok, "\(judged.said); the longest refresh took \(Self.ms(figures.refresh.max)) ms, \(figures.lateOutputs) outputs were late; "
-                + "the main thread was held at most \(Self.ms(measured.mainThreadHeld)) ms" + earlier)
+                + "the main thread was held at most \(Self.ms(measured.mainThreadHeld)) ms; "
+                + "frames committed \(drawn.committed - drawnBefore.committed), of them drawn whole \(drawn.whole - drawnBefore.whole), "
+                + "glyph atlas bytes written \(drawn.atlasBytes - drawnBefore.atlasBytes)" + waitSaid(figures) + earlier)
         }
         if let text = step.text {
             let found = await waitUntil(step.seconds ?? 10) { self.screenText.contains(text) }
@@ -422,6 +430,15 @@ final class Driver {
         }
         return " (posted between \(began) and \(ms((handed - hop.start) * 1000)) ms after the screen took it, taken between \(ms((hop.end - handed) * 1000)) "
             + "and \(takenBy) ms after it was posted)"
+    }
+
+    /// Where the longest wake sat between its hand-off and its take: what the main run loop did,
+    /// as its observer saw it, and the main thread's stacks the helper took while it waited.
+    func waitSaid(_ figures: LatencyFigures) -> String {
+        guard let hop = figures.longestToTold, let handing = figures.longestToToldHanding else { return "" }
+        let wait = Span(figures.longestToToldHanded ?? handing, hop.end)
+        return "; between the longest wake's hand-off and its take, " + mainStacks.loop(across: wait) + "; the main thread meanwhile: "
+            + mainStacks.waitStacks(across: wait)
     }
 
     /// A quality of service as the flood's line names it.

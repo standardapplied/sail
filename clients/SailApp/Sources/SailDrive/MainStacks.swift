@@ -84,6 +84,24 @@ final class MainStacks: @unchecked Sendable {
     private let readerLock = NSLock()
     /// Signalled by the watcher when it took a stack sample, so the helper reads its slow part.
     private let helperWake = DispatchSemaphore(value: 0)
+    /// A look at the main thread's stack the helper takes every 1 ms while a flood's wake has waited
+    /// for the main queue over ``lateWake``.
+    struct WaitStack: Sendable {
+        let time: Double
+        let frames: [UInt]
+    }
+
+    /// How long a wake waits before the helper samples the main thread's stack densely.
+    static let lateWake = 0.015
+    private var lateStacks: [WaitStack] = []
+    /// The views' wakes the helper watches while a flood runs, each telling since when it waits.
+    private var wakeProbes: [@Sendable () -> Double?] = []
+    private var watchingWakes = false
+    /// The helper's own buffer for a stack walk, apart from the watcher's.
+    private let helperBuffer = UnsafeMutablePointer<UInt>.allocate(capacity: MainStacks.depth)
+    /// Each activity the main run loop's observer saw, stamped on the main thread itself.
+    private var loopMarks: [(time: Double, activity: CFOptionFlags)] = []
+    private let loopLock = NSLock()
     /// How many readings the helper has taken for stack samples, each naming its samples.
     private var fills = 0
     private var spent: (looks: Int, total: Double, longest: Double, modeLongest: Double) = (0, 0, 0, 0)
@@ -117,8 +135,10 @@ final class MainStacks: @unchecked Sendable {
         let helper = Thread { [self] in
             var scanned = -Double.infinity
             while true {
-                _ = helperWake.wait(timeout: .now() + 1)
+                let watching = lock.withLock { watchingWakes }
+                _ = helperWake.wait(timeout: .now() + (watching ? 0.001 : 1))
                 fillSamples()
+                if watching { sampleLateWake() }
                 let now = CACurrentMediaTime()
                 if now - scanned >= 1 {
                     findReaders()
@@ -129,6 +149,86 @@ final class MainStacks: @unchecked Sendable {
         }
         helper.qualityOfService = .userInitiated
         helper.start()
+        let observer = CFRunLoopObserverCreateWithHandler(kCFAllocatorDefault, CFRunLoopActivity.allActivities.rawValue, true, 0) { [weak self] _, activity in
+            self?.loopDid(activity)
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+    }
+
+    /// On the main thread, at each step of its run loop in the common modes: the step and when.
+    private func loopDid(_ activity: CFRunLoopActivity) {
+        let now = CACurrentMediaTime()
+        loopLock.withLock {
+            loopMarks.append((time: now, activity: activity.rawValue))
+            if loopMarks.count > 200_000 { loopMarks.removeFirst(100_000) }
+        }
+    }
+
+    /// From now until ``stopWatchingWakes()``, the helper looks every 1 ms at `wakes` and samples the
+    /// main thread's stack while any has waited over ``lateWake``: what the main thread was doing
+    /// while a wake sat queued.
+    func watchWakes(_ wakes: [@Sendable () -> Double?]) {
+        lock.withLock {
+            wakeProbes = wakes
+            watchingWakes = true
+        }
+        helperWake.signal()
+    }
+
+    func stopWatchingWakes() {
+        lock.withLock {
+            watchingWakes = false
+            wakeProbes = []
+        }
+    }
+
+    /// On the helper's thread, every 1 ms while watching: a walk of the main thread's stack, with the
+    /// helper's own buffer, when a wake has waited over ``lateWake``. It never takes the main run
+    /// loop's lock.
+    private func sampleLateWake() {
+        let now = CACurrentMediaTime()
+        let probes = lock.withLock { wakeProbes }
+        guard probes.contains(where: { probe in probe().map { now - $0 > Self.lateWake } ?? false }) else { return }
+        let count = walk(into: helperBuffer)
+        let frames = Array(UnsafeBufferPointer(start: helperBuffer, count: count))
+        lock.withLock {
+            lateStacks.append(WaitStack(time: now, frames: frames))
+            if lateStacks.count > 20000 { lateStacks.removeFirst(10000) }
+        }
+    }
+
+    /// What the main run loop did across `span`, as its observer saw it on the main thread: how
+    /// many passes ran its timers and its sources, and how often and how long it slept waiting for
+    /// work. A loop asleep while a wake sat in the main queue was not woken for it.
+    func loop(across span: Span) -> String {
+        let marks = loopLock.withLock { loopMarks.filter { $0.time >= span.start && $0.time <= span.end } }
+        let before = loopLock.withLock { loopMarks.last(where: { $0.time < span.start }) }
+        guard !marks.isEmpty || before != nil else { return "its observer saw nothing of the run loop in it" }
+        let timers = CFRunLoopActivity.beforeTimers.rawValue, sources = CFRunLoopActivity.beforeSources.rawValue
+        let sleeping = CFRunLoopActivity.beforeWaiting.rawValue, woke = CFRunLoopActivity.afterWaiting.rawValue
+        var asleep: Double? = before?.activity == sleeping ? span.start : nil
+        var sleeps: [Double] = []
+        for mark in marks {
+            if mark.activity == sleeping { asleep = mark.time }
+            if mark.activity == woke, let since = asleep {
+                sleeps.append(mark.time - since)
+                asleep = nil
+            }
+        }
+        if let since = asleep { sleeps.append(span.end - since) }
+        return String(format: "the run loop ran its timers %ld times and its sources %ld times; it slept %ld times, %.1f ms in all, at most %.1f ms%@",
+                      marks.filter { $0.activity == timers }.count, marks.filter { $0.activity == sources }.count, sleeps.count,
+                      sleeps.reduce(0, +) * 1000, (sleeps.max() ?? 0) * 1000, asleep != nil ? ", and was still asleep when the wake was taken" : "")
+    }
+
+    /// The main thread's stacks the helper took across `span`, the most seen first by their
+    /// innermost frames: what it was doing while a wake waited.
+    func waitStacks(across span: Span, frames shown: Int = 8) -> String {
+        let taken = lock.withLock { lateStacks.filter { $0.time >= span.start && $0.time <= span.end } }
+        guard !taken.isEmpty else { return "no dense sample in it (no wake waited over 15 ms while the helper looked)" }
+        let named = Dictionary(grouping: taken) { $0.frames.prefix(shown).map(Self.symbol).joined(separator: " < ") }
+        let ranked = named.map { (stack: $0.key, count: $0.value.count) }.sorted { $0.count > $1.count }.prefix(4)
+        return "\(taken.count) samples 1 ms apart: " + ranked.map { "\($0.count)× \($0.stack)" }.joined(separator: " | ")
     }
 
     /// One look at the main thread, and what it cost the watcher. A look whose `thread_info`
@@ -232,7 +332,7 @@ final class MainStacks: @unchecked Sendable {
         }
         let cpu = gotInfo == KERN_SUCCESS
             ? Double(info.user_time.seconds + info.system_time.seconds) + Double(info.user_time.microseconds + info.system_time.microseconds) / 1e6 : -1
-        let count = walk()
+        let count = walk(into: buffer)
         let frames = Array(UnsafeBufferPointer(start: buffer, count: count))
         lock.withLock {
             samples.append(Sample(time: time, runState: gotInfo == KERN_SUCCESS ? info.run_state : -1, cpu: cpu, frames: frames, ticks: Self.hostTicks()))
@@ -415,7 +515,7 @@ final class MainStacks: @unchecked Sendable {
 
     /// The main thread's return addresses, innermost first, into `buffer`; nothing allocated
     /// while it is suspended.
-    private func walk() -> Int {
+    private func walk(into buffer: UnsafeMutablePointer<UInt>) -> Int {
         #if arch(arm64)
         guard thread_suspend(thread) == KERN_SUCCESS else { return 0 }
         defer { thread_resume(thread) }
