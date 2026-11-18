@@ -147,6 +147,7 @@ final class Driver {
                 continue
             }
             var (ok, detail) = await perform(step, name: name)
+            await Task.yield()
             let drew = await waitUntil(Self.drawDeadline) {
                 !self.onTerminal || self.terminal.visibleText == self.screenText && self.terminal.isDrawnInFull
             }

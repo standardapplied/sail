@@ -166,7 +166,7 @@ final class MainStacks: @unchecked Sendable {
         let ran = !watcher.realTime ? "was REFUSED its real-time policy and ran at its QoS"
             : watcher.demoted.map { String(format: "ran real-time until it was found demoted at %.3f s (priority %d)", $0.time, $0.priority) }
             ?? "ran real-time, never found demoted"
-        return String(format: "%ld looks every %.0f ms, each %.1f µs on average and %.1f µs at most ; the main run loop's mode, read on the helper's thread for a stack sample, took at most %.1f µs to read; the watcher %@ (period %.0f ms, computation %.2f ms, constraint %.2f ms) used %.1f ms of CPU, %.2f%% of one CPU against its claim of %.0f%%",
+        return String(format: "%ld looks every %.0f ms, each %.1f µs on average and %.1f µs at most; the main run loop's mode, read on the helper's thread for a stack sample, took at most %.1f µs to read; the watcher %@ (period %.0f ms, computation %.2f ms, constraint %.2f ms) used %.1f ms of CPU, %.2f%% of one CPU against its claim of %.0f%%",
                       spent.looks, Self.interval * 1000, spent.looks > 0 ? spent.total / Double(spent.looks) * 1e6 : 0, spent.longest * 1e6, spent.modeLongest * 1e6,
                       ran, Self.interval * 1000, Self.computation * 1000, Self.constraint * 1000, watcher.cpu * 1000, watcherShare * 100, Self.claim * 100)
     }

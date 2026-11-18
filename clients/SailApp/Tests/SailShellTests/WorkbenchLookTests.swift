@@ -271,6 +271,48 @@ import Testing
         #expect(!strip.isRenaming && renamed.last == "deploy", "the keys taken by another view, the name typed was not kept: \(renamed)")
     }
 
+    /// A rename under way in a background tab goes on through redraws that choose no tab (a focus
+    /// change, a shell ending in another tab, the selected tab closing) and Escape then keeps
+    /// nothing; another tab chosen ends it with the name typed.
+    @Test func aBackgroundTabsRenameOutlivesRedrawsThatChooseNoTab() async throws {
+        let shell = try Self.shell(.light)
+        shell.select(.thisMac)
+        shell.window.orderFront(nil)
+        defer { shell.window.orderOut(nil) }
+        let bench = shell.thisMac
+        let place = Place.thisMac(folder: "/")
+        let panes = ["a", "b", "c", "d", "e"].map { bench.model.newTab(session: "mac-\($0)", place: place) }
+        bench.apply()
+        let ids = bench.model.tabs.map(\.id)
+        let strip = bench.strip
+        strip.layoutSubtreeIfNeeded()
+        let tab = try #require(strip.tabs.first)
+        func type(_ text: String) throws {
+            let editor = try #require(tab.field?.currentEditor() as? NSTextView)
+            editor.selectAll(nil)
+            editor.insertText(text, replacementRange: editor.selectedRange())
+        }
+        tab.rename()
+        try type("build")
+        bench.apply()
+        _ = bench.model.close(panes[1])
+        bench.apply()
+        _ = bench.model.close(panes[4])
+        bench.apply()
+        await Self.mainQueueTurns()
+        #expect(strip.isRenaming, "a redraw that chose no tab ended the background tab's rename")
+        let editor = try #require(tab.field?.currentEditor() as? NSTextView)
+        #expect(editor.string == "build")
+        editor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+        await Self.mainQueueTurns()
+        #expect(!strip.isRenaming && bench.model.tabs.first?.name == nil, "Escape kept a name: \(String(describing: bench.model.tabs.first?.name))")
+        tab.rename()
+        try type("deploy")
+        strip.onSelect(ids[2])
+        await Self.mainQueueTurns()
+        #expect(!strip.isRenaming && bench.model.tabs.first?.name == "deploy", "another tab chosen did not keep the name typed")
+    }
+
     /// The window's first frame fits its screen: the designed 1180 × 800 on a 1024 × 743 visible
     /// frame is 1024 × 743, and a frame that fits is kept.
     @Test func theWindowsFirstFrameFitsItsScreen() {

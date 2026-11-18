@@ -17,7 +17,7 @@ public final class WorkbenchView: NSView {
 
     public let host: LocalHost
     public let strip: TabStrip
-    public private(set) var model = Workbench()
+    public internal(set) var model = Workbench()
     public private(set) var panes: [PaneID: TerminalPane] = [:]
     var onTitle: @MainActor (String) -> Void = { _ in }
     /// Asked to show "This Mac", for a command given while it is not shown.
@@ -34,6 +34,7 @@ public final class WorkbenchView: NSView {
 
     private let fonts: TerminalFonts
     private var tabViews: [TabID: TabView] = [:]
+    private var shownSelected: TabID?
     private let banner: StatusBanner
     private let emptyLabel = NSTextField(labelWithString: "No terminal is open")
     private let newTerminal: AccentButton
@@ -119,7 +120,7 @@ public final class WorkbenchView: NSView {
 
     /// Draws the model, by frames and `isHidden` only (W2), and keeps it soon after.
     func apply() {
-        strip.tabs.filter { $0.field != nil && $0.id != model.selected }.forEach { $0.endRename() }
+        endRenamesLeftBehind()
         for (id, view) in tabViews where !model.tabs.contains(where: { $0.id == id }) {
             view.removeFromSuperview()
             tabViews[id] = nil
@@ -135,6 +136,19 @@ public final class WorkbenchView: NSView {
         showTitles()
         if let focused, !isHidden, !strip.isRenaming, window?.firstResponder !== focused.terminal { window?.makeFirstResponder(focused.terminal) }
         keepSoon()
+    }
+
+    /// A redraw ends a rename only when another tab was chosen, the tab selected before still
+    /// there (a selection moved by its tab closing is no one's choice), or when the renamed tab
+    /// itself is gone; the name typed is kept. Any other redraw (a focus change, a shell ending in
+    /// another tab, a change of look) leaves the field as it is, so Escape still keeps nothing.
+    private func endRenamesLeftBehind() {
+        let chosen = shownSelected.map { shown in shown != model.selected && model.tabs.contains { $0.id == shown } } ?? false
+        shownSelected = model.selected
+        let left = strip.tabs.filter { tab in
+            tab.field != nil && (chosen && tab.id != model.selected || !model.tabs.contains { $0.id == tab.id })
+        }
+        left.forEach { $0.endRename() }
     }
 
     private func showTitles() {
