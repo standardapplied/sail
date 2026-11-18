@@ -139,9 +139,10 @@ public final class WorkbenchView: NSView {
     }
 
     /// A redraw ends a rename only when another tab was chosen, the tab selected before still
-    /// there (a selection moved by its tab closing is no one's choice), or when the renamed tab
-    /// itself is gone; the name typed is kept. Any other redraw (a focus change, a shell ending in
-    /// another tab, a change of look) leaves the field as it is, so Escape still keeps nothing.
+    /// there (a selection moved by its tab closing is no one's choice, and closing a tab selects
+    /// none), or when the renamed tab itself is gone; the name typed is kept. Any other redraw (a
+    /// focus change, a shell ending in another tab, a change of look) leaves the field as it is, so
+    /// Escape still keeps nothing.
     private func endRenamesLeftBehind() {
         let chosen = shownSelected.map { shown in shown != model.selected && model.tabs.contains { $0.id == shown } } ?? false
         shownSelected = model.selected
@@ -218,7 +219,7 @@ public final class WorkbenchView: NSView {
     /// The view for `pane`, added once to its tab's view; nil, said in the banner, when it cannot
     /// be made.
     @discardableResult
-    private func makeView(_ pane: Pane, start: TerminalPane.Start, points: Double) -> TerminalPane? {
+    func makeView(_ pane: Pane, start: TerminalPane.Start, points: Double) -> TerminalPane? {
         guard let tab = model.tab(holding: pane.id) else { return nil }
         let view: TerminalPane
         do {
@@ -421,6 +422,12 @@ public final class WorkbenchView: NSView {
 
     @objc public func closeTab(_ sender: Any?) {
         guard let tab = self.tab(for: sender) else { return }
+        close(tab)
+    }
+
+    /// Ends `tab`'s terminals, asking first when one may end a running program. Closing a tab
+    /// chooses no tab: it is not selected first, so a rename open in another tab goes on.
+    private func close(_ tab: Tab) {
         let views = tab.layout.leaves.compactMap { panes[$0] }
         guard views.count > 1 else {
             return confirm(ending: views, question: "Close this terminal?", detail: "The program running in it will end.")
@@ -583,8 +590,8 @@ public final class WorkbenchView: NSView {
         strip.onSelect = { [weak self] id in self?.change { $0.select(id) } }
         strip.onMenu = { [weak self] id in self?.tabMenu(for: id) }
         strip.onClose = { [weak self] id in
-            self?.change { $0.select(id) }
-            self?.closeTab(nil)
+            guard let self, let tab = model.tabs.first(where: { $0.id == id }) else { return }
+            close(tab)
         }
         strip.onNew = { [weak self] in self?.newTab(nil) }
         strip.onRename = { [weak self] id, name in

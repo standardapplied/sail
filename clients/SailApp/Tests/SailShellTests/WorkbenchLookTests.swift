@@ -272,8 +272,8 @@ import Testing
     }
 
     /// A rename under way in a background tab goes on through redraws that choose no tab (a focus
-    /// change, a shell ending in another tab, the selected tab closing) and Escape then keeps
-    /// nothing; another tab chosen ends it with the name typed.
+    /// change, a shell ending in another tab, the selected tab closing, another tab's close button)
+    /// and Escape then keeps nothing; another tab chosen ends it with the name typed.
     @Test func aBackgroundTabsRenameOutlivesRedrawsThatChooseNoTab() async throws {
         let shell = try Self.shell(.light)
         shell.select(.thisMac)
@@ -299,8 +299,11 @@ import Testing
         bench.apply()
         _ = bench.model.close(panes[4])
         bench.apply()
+        let selected = bench.model.selected
+        strip.onClose(ids[2])
         await Self.mainQueueTurns()
         #expect(strip.isRenaming, "a redraw that chose no tab ended the background tab's rename")
+        #expect(bench.model.selected == selected, "another tab's close button selected it")
         let editor = try #require(tab.field?.currentEditor() as? NSTextView)
         #expect(editor.string == "build")
         editor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
@@ -311,6 +314,24 @@ import Testing
         strip.onSelect(ids[2])
         await Self.mainQueueTurns()
         #expect(!strip.isRenaming && bench.model.tabs.first?.name == "deploy", "another tab chosen did not keep the name typed")
+    }
+
+    /// A change of look reaches every pane, a background tab's as the shown one's: the spec's
+    /// "every tab, focused or not".
+    @Test func aBackgroundTabsPanesTakeTheNewLook() throws {
+        let shell = try Self.shell(.dark)
+        let bench = shell.thisMac
+        let place = Place.thisMac(folder: "/")
+        let ids = ["behind", "shown"].map { bench.model.newTab(session: "mac-\($0)", place: place) }
+        let views = try ids.map { id in try #require(bench.makeView(try #require(bench.model.panes[id]), start: .attach, points: 15)) }
+        let behind = try #require(views[0].superview)
+        behind.isHidden = true
+        #expect(views[0].isHiddenOrHasHiddenAncestor && !views[1].isHiddenOrHasHiddenAncestor)
+        bench.look = .light
+        for (name, view) in zip(["the background tab's", "the shown tab's"], views) {
+            #expect(view.look == .light, "\(name) pane kept the dark look")
+            #expect(view.layer?.backgroundColor == NSColor(Look.light.palette.background).cgColor, "\(name) pane is not drawn light")
+        }
     }
 
     /// The window's first frame fits its screen: the designed 1180 × 800 on a 1024 × 743 visible

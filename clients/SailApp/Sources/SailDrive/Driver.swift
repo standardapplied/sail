@@ -55,14 +55,11 @@ final class Driver {
     /// The main thread's sampler, begun the first time a measure asks for it, and kept.
     var mainStacks: MainStacks {
         if let madeStacks { return madeStacks }
-        let made = MainStacks(watching: mainThread)
+        let host = shell.thisMac.host
+        let made = MainStacks(watching: mainThread) { host.servingProcess()?.pid }
         madeStacks = made
         return made
     }
-    /// Each flood judged so far this run, said in brief, so a later one is read beside them.
-    private var floodsSaid: [String] = []
-    /// The focused view's draw counts when the flood being measured began.
-    private var drawnBefore: (committed: Int, whole: Int, atlasBytes: Int) = (0, 0, 0)
     /// Every stretch of a judged wait excused as the machine's, with its evidence, once each.
     private var excused: [String] = []
 
@@ -149,7 +146,7 @@ final class Driver {
             var (ok, detail) = await perform(step, name: name)
             await Task.yield()
             let drew = await waitUntil(Self.drawDeadline) {
-                !self.onTerminal || self.terminal.visibleText == self.screenText && self.terminal.isDrawnInFull
+                !self.onTerminal || self.measuring || self.terminal.visibleText == self.screenText && self.terminal.isDrawnInFull
             }
             if ok, !drew {
                 ok = false
@@ -169,11 +166,13 @@ final class Driver {
             if !ok { break }
         }
         let withinClaim = madeStacks.map { $0.watcherShare <= MainStacks.claim } ?? true
+        let withinLook = madeStacks.map { $0.longestLookTaken <= MainStacks.longestLook } ?? true
         Self.say("drive: \(excused.count) stretch\(excused.count == 1 ? "" : "es") of a judged wait excused as the machine's"
             + (excused.isEmpty ? "" : ": " + excused.joined(separator: "; "))
             + (madeStacks.map { "; the main thread's sampler took \($0.cost)" } ?? "; the main thread's sampler never ran: no step measured a wait")
-            + (withinClaim ? "" : "; FAILED: the watcher took more of a CPU than its claim"))
-        let passed = results.count == steps.count && results.allSatisfy(\.ok) && withinClaim
+            + (withinClaim ? "" : "; FAILED: the watcher took more of a CPU than its claim")
+            + (withinLook ? "" : String(format: "; FAILED: a look took longer than %.0f ms", MainStacks.longestLook * 1000)))
+        let passed = results.count == steps.count && results.allSatisfy(\.ok) && withinClaim && withinLook
         let report = Report(
             passed: passed, hertz: shell.window.screen?.maximumFramesPerSecond ?? 0, scale: terminal.metrics.scale, steps: results,
             measures: measures, bench: bench, panes4: panes4
@@ -287,7 +286,6 @@ final class Driver {
         }
         if step.resetLatency == true {
             resetLatency()
-            drawnBefore = terminal.drawCounts
             measuring = true
             return (true, "")
         }
@@ -317,17 +315,13 @@ final class Driver {
             if let gap = mainThread.stalls.longest() {
                 mainStacks.told(gap).forEach { print("main thread in its longest hold of the flood: \($0)") }
             }
-            let ok = judged.ours <= limit
+            let covered = Self.measuredFromItsStart(figures)
+            let ok = covered && judged.ours <= limit
             let measured = measurement(name, keys: 0, figures: figures, budgets: ["every output shown within \(Self.ms(limit)) ms": ok])
             measures.append(measured)
-            let earlier = floodsSaid.isEmpty ? "" : "; the floods before it this run: " + floodsSaid.joined(separator: "; ")
-            floodsSaid.append("\(name): ours \(Self.ms(judged.ours)) ms, its longest wake taken \(Self.ms((figures.longestToTold?.length ?? 0) * 1000)) ms after the screen took it"
-                + Self.posting(figures))
-            let drawn = terminal.drawCounts
-            return (ok, "\(judged.said); the longest refresh took \(Self.ms(figures.refresh.max)) ms, \(figures.lateOutputs) outputs were late; "
-                + "the main thread was held at most \(Self.ms(measured.mainThreadHeld)) ms; "
-                + "frames committed \(drawn.committed - drawnBefore.committed), of them drawn whole \(drawn.whole - drawnBefore.whole), "
-                + "glyph atlas bytes written \(drawn.atlasBytes - drawnBefore.atlasBytes)" + earlier)
+            return (ok, (covered ? "" : "FAILED: the measure missed the flood's start: no key typed after its reset was seen echoed; ")
+                + "\(judged.said); the longest refresh took \(Self.ms(figures.refresh.max)) ms, \(figures.lateOutputs) outputs were late; "
+                + "the main thread was held at most \(Self.ms(measured.mainThreadHeld)) ms")
         }
         if let text = step.text {
             let found = await waitUntil(step.seconds ?? 10) { self.terminal.visibleText.contains(text) }
@@ -437,14 +431,26 @@ final class Driver {
             + "and \(takenBy) ms after it was posted)"
     }
 
-    /// The machine's CPU ticks across a judged wait, from its first look to its last: whether the
+    /// Whether a flood's measure covers it from its first output: the flood's command is typed
+    /// up to its Return, the measure reset, then the Return typed, so the Return's echo, the
+    /// flood's first output, is a key seen echoed inside the measure. A measure reset after the
+    /// flood began has no key in it.
+    static func measuredFromItsStart(_ figures: LatencyFigures) -> Bool {
+        figures.keyToEcho.count + figures.keyToEchoEstimated.count > 0
+    }
+
+    /// The machine's CPU ticks across a judged wait, between its first and last looks that read
+    /// them (a runnable main thread's), beside what its CPUs make over that time: whether the
     /// machine ran at all meanwhile. Idle and busy ticks both still across a long wait is what a
     /// runner paused by its host shows, which nothing inside it can prove otherwise.
     static func machineTicks(across looks: [ThreadLook]) -> String {
-        guard let first = looks.first, let last = looks.last, let idleFrom = first.idleTicks, let idleTo = last.idleTicks,
+        let read = looks.filter { $0.idleTicks != nil && $0.busyTicks != nil }
+        guard let first = read.first, let last = read.last, let idleFrom = first.idleTicks, let idleTo = last.idleTicks,
               let busyFrom = first.busyTicks, let busyTo = last.busyTicks
-        else { return "the machine's ticks unread in it" }
-        return String(format: "the machine's idle ticks +%u and busy ticks +%u over its %.1f ms of looks", idleTo &- idleFrom, busyTo &- busyFrom, (last.time - first.time) * 1000)
+        else { return "the machine's ticks unread in it (the main thread never runnable at a look)" }
+        let cpus = ProcessInfo.processInfo.activeProcessorCount, span = last.time - first.time
+        return String(format: "the machine's idle ticks +%u and busy ticks +%u over %.1f ms between looks that read them (%ld CPUs make %.1f)",
+                      idleTo &- idleFrom, busyTo &- busyFrom, span * 1000, cpus, Double(cpus) * span / ThreadLook.tick)
     }
 
     /// A quality of service as the flood's line names it.
@@ -484,15 +490,20 @@ final class Driver {
         let own = ownThread.stalls, looks = mainStacks.looks
         let proven = MachineShare.starvation(in: wait, looks: looks)
         let ownHeld = own.shared(with: wait), starved = MachineShare.starved(in: wait, looks: looks)
+        let inconclusive = MachineShare.inconclusive(wait, own: own, main: looks)
         let ours = max(0, wait.length - tick - MachineShare.of(wait, own: own, main: looks)) * 1000
         let inWait = looks.filter { $0.time >= wait.start && $0.time <= wait.end }
-        let seen = inWait.count
-        proven.map(\.told).filter { !excused.contains($0) }.forEach { excused.append($0) }
+        let seen = inWait.count, cpus = ProcessInfo.processInfo.activeProcessorCount
+        let told = proven.map { $0.told(cpus: cpus) }
+        if !inconclusive { told.filter { !excused.contains($0) }.forEach { excused.append($0) } }
         let evidence = (proven.isEmpty
             ? "no run of \(MachineShare.fewestLooks) looks proved it starved (\(seen) looks in the wait)"
-            : proven.map(\.told).joined(separator: "; ")) + "; the main run loop's mode, " + mainStacks.modes(in: wait) + "; " + Self.machineTicks(across: inWait)
+            : told.joined(separator: "; ")) + "; the main run loop's mode, " + mainStacks.modes(in: wait) + "; " + Self.machineTicks(across: inWait)
+        let ceiling = inconclusive
+            ? String(format: "; INCONCLUSIVE: the machine claims more than %.0f%% of the wait, so none of it is excused and it is judged whole", MachineShare.mostExcused * 100)
+            : ""
         return (ours, "waited \(Self.ms((wait.length - tick) * 1000)) ms, the drive's own thread held \(Self.ms(ownHeld * 1000)) ms of it, "
-            + "the main thread runnable without CPU on a machine with none idle \(Self.ms(starved * 1000)) ms of it (\(evidence)), ours \(Self.ms(ours)) ms")
+            + "the main thread runnable without CPU on a machine with none idle \(Self.ms(starved * 1000)) ms of it (\(evidence))\(ceiling), ours \(Self.ms(ours)) ms")
     }
 
     /// The main thread's longest hold, its heartbeat's longest gap (in `span` when given) less one

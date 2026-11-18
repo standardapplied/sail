@@ -161,7 +161,7 @@ enum Bench {
             let inside = series.looks.filter { $0.time >= span.start && $0.time <= span.end }
             let why = proven.isEmpty
                 ? String(format: "nothing excused: %ld looks in it, runnable at %ld", inside.count, inside.filter(\.runnable).count)
-                : String(format: "%.1f ms excused: ", frame.excusedMilliseconds) + proven.map(\.told).joined(separator: "; ")
+                : String(format: "%.1f ms excused: ", frame.excusedMilliseconds) + proven.map { $0.told(cpus: ProcessInfo.processInfo.activeProcessorCount) }.joined(separator: "; ")
             return String(
                 format: "  frame %ld at %.3f s: %.2f ms, its thread's CPU %.2f ms, its wait for the lock %.2f ms; %@",
                 index, frame.at, frame.milliseconds, frame.cpuMilliseconds, frame.waitMilliseconds, why

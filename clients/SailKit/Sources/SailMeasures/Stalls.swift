@@ -44,24 +44,26 @@ public struct Stalls: Sendable {
     }
 }
 
-/// A look at a thread, taken by a sampler: whether it was runnable, its CPU time so far, its
-/// whole process's CPU time so far, and the machine's CPU ticks so far, idle and busy (each tick
-/// 1/100 s of one CPU; nil where they could not be read).
+/// A look at a thread, taken by a sampler: whether it was runnable, its CPU time so far, our
+/// processes' CPU time so far (its own, and the terminal host's and its session shims' where the
+/// sampler was given them), and the machine's CPU ticks so far, idle and busy (each tick 1/100 s
+/// of one CPU). The last three are nil where they were not read: a sampler reads them only on a
+/// runnable look.
 public struct ThreadLook: Sendable, Equatable, Codable {
     public static let tick = 0.01
 
     public var time: Double
     public var runnable: Bool
     public var cpu: Double
-    public var processCPU: Double
+    public var ourCPU: Double?
     public var idleTicks: UInt32?
     public var busyTicks: UInt32?
 
-    public init(time: Double, runnable: Bool, cpu: Double, processCPU: Double, idleTicks: UInt32?, busyTicks: UInt32?) {
+    public init(time: Double, runnable: Bool, cpu: Double, ourCPU: Double?, idleTicks: UInt32?, busyTicks: UInt32?) {
         self.time = time
         self.runnable = runnable
         self.cpu = cpu
-        self.processCPU = processCPU
+        self.ourCPU = ourCPU
         self.idleTicks = idleTicks
         self.busyTicks = busyTicks
     }
@@ -88,7 +90,7 @@ public enum MachineShare {
     /// two of which it used under ``cpuAllowed`` of the time (so it was not on a core) while the
     /// machine's idle ticks did not move (so no CPU was idle for it), and over which the machine's
     /// busy ticks did move (the counters live). Of the busy CPU that kept it waiting, the share
-    /// our own process used stays ours.
+    /// our own processes used (the app, its terminal host and the host's session shims) stays ours.
     public static func starvation(in wait: Span, looks: [ThreadLook]) -> [Starved] {
         let inside = looks.filter { $0.time >= wait.start && $0.time <= wait.end }.sorted { $0.time < $1.time }
         var proven: [Starved] = [], run: [ThreadLook] = []
@@ -136,26 +138,45 @@ public enum MachineShare {
         samples.map { $0.length - own.held(over: $0) }
     }
 
-    /// The machine's share of `wait`, in seconds: the larger of the stall of the drive's own
+    /// The most of a judged wait the machine may be answerable for: half. Past it the wait is
+    /// inconclusive, nothing of it is excused and it is judged whole, so one over its budget fails:
+    /// a measurement that excused most of itself measured nothing (the bench's rule, by time).
+    public static let mostExcused = 0.5
+
+    /// What the machine claims of `wait`, in seconds: the larger of the stall of the drive's own
     /// thread over it and the time the main thread was starved in it, never more than the wait.
-    public static func of(_ wait: Span, own: Stalls, main looks: [ThreadLook]) -> Double {
+    public static func claimed(_ wait: Span, own: Stalls, main looks: [ThreadLook]) -> Double {
         min(wait.length, max(own.shared(with: wait), starved(in: wait, looks: looks)))
+    }
+
+    /// Whether the machine claims more of `wait` than ``mostExcused``.
+    public static func inconclusive(_ wait: Span, own: Stalls, main looks: [ThreadLook]) -> Bool {
+        claimed(wait, own: own, main: looks) > wait.length * mostExcused
+    }
+
+    /// The machine's share of `wait`, in seconds: what it claims (``claimed(_:own:main:)``), or
+    /// nothing when that is past ``mostExcused``.
+    public static func of(_ wait: Span, own: Stalls, main looks: [ThreadLook]) -> Double {
+        inconclusive(wait, own: own, main: looks) ? 0 : claimed(wait, own: own, main: looks)
     }
 }
 
 /// A stretch in which a thread was runnable and got no CPU while the machine had none idle, the
-/// looks that prove it, and the share of the machine's busy CPU our own process used over it.
+/// looks that prove it, and the share of the machine's busy CPU our own processes used over it.
 public struct Starved: Sendable, Equatable {
     public let looks: [ThreadLook]
     public let ours: Double
 
-    /// The stretch proven by `looks`, nil when the machine's busy ticks did not move over it.
+    /// The stretch proven by `looks`, nil when the machine's busy ticks did not move over it or
+    /// our processes' CPU was not read at its ends.
     init?(_ looks: [ThreadLook]) {
-        guard let first = looks.first, let last = looks.last, let from = first.busyTicks, let to = last.busyTicks, to &- from > 0 else {
+        guard let first = looks.first, let last = looks.last, let from = first.busyTicks, let to = last.busyTicks, to &- from > 0,
+              let ourFrom = first.ourCPU, let ourTo = last.ourCPU
+        else {
             return nil
         }
         self.looks = looks
-        ours = min(1, max(0, last.processCPU - first.processCPU) / (Double(to &- from) * ThreadLook.tick))
+        ours = min(1, max(0, ourTo - ourFrom) / (Double(to &- from) * ThreadLook.tick))
     }
 
     public var span: Span {
@@ -167,14 +188,16 @@ public struct Starved: Sendable, Equatable {
         span.length * (1 - ours)
     }
 
-    /// The stretch and its evidence, so a reader can check it.
-    public var told: String {
+    /// The stretch and its evidence, so a reader can check it: the busy ticks beside the most
+    /// `cpus` CPUs could have made over it, ticks moving in whole steps, so over a stretch this
+    /// short the run state at each look is the stronger evidence.
+    public func told(cpus: Int) -> String {
         let first = looks[0], last = looks[looks.count - 1]
         let gap = zip(looks, looks.dropFirst()).map { $1.time - $0.time }.max() ?? 0
         return String(
-            format: "%.1f ms excused at %.3f–%.3f s: %ld looks at most %.1f ms apart, run state running at each, the thread's CPU +%.2f ms, the machine's idle ticks +0 and busy ticks +%ld, our process %.0f%% of that busy CPU",
+            format: "%.1f ms excused at %.3f–%.3f s: %ld looks at most %.1f ms apart, run state running at each, the thread's CPU +%.2f ms, the machine's idle ticks +0 and busy ticks +%ld (%ld CPUs make %.1f over the stretch), our processes %.0f%% of that busy CPU",
             machines * 1000, first.time, last.time, looks.count, gap * 1000, (last.cpu - first.cpu) * 1000,
-            Int((last.busyTicks ?? 0) &- (first.busyTicks ?? 0)), ours * 100
+            Int((last.busyTicks ?? 0) &- (first.busyTicks ?? 0)), cpus, Double(cpus) * span.length / ThreadLook.tick, ours * 100
         )
     }
 }

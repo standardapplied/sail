@@ -1,3 +1,7 @@
+#if canImport(Darwin)
+import Darwin
+#endif
+import Foundation
 @testable import SailMeasures
 import SailSurface
 import Synchronization
@@ -60,7 +64,7 @@ import Testing
         (0 ..< count).map { index in
             let time = ((start * 100).rounded() + Double(index)) / 100
             return ThreadLook(
-                time: time, runnable: runnable(time), cpu: Double(index) * cpuPerLook, processCPU: Double(index) * processPerLook,
+                time: time, runnable: runnable(time), cpu: Double(index) * cpuPerLook, ourCPU: Double(index) * processPerLook,
                 idleTicks: 100 + UInt32(index) * idlePerLook, busyTicks: 500 + UInt32(index) * busyPerLook
             )
         }
@@ -96,8 +100,25 @@ import Testing
         var own = Stalls(tick: 0.01)
         own.record(Span(10.0, 10.06))
         #expect(abs(MachineShare.of(Self.wait, own: own, main: []) - 0.05) < 1e-9)
-        #expect(abs(MachineShare.of(Self.wait, own: own, main: Self.looks()) - 0.2) < 1e-9)
-        #expect(abs(MachineShare.of(Span(10.0, 10.1), own: own, main: Self.looks()) - 0.1) < 1e-9, "never more than the wait")
+        let late = Self.looks(runnable: { $0 >= 10.12 - 1e-9 })
+        #expect(abs(MachineShare.of(Self.wait, own: own, main: late) - 0.08) < 1e-9)
+        #expect(abs(MachineShare.claimed(Span(10.0, 10.1), own: own, main: Self.looks()) - 0.1) < 1e-9, "never more than the wait")
+    }
+
+    /// A wait the machine claims more than half of is inconclusive: nothing of it is excused, so
+    /// it is judged whole, and one over its budget fails; up to half, the claim is taken.
+    @Test func aWaitMostlyTheMachinesExcusesNothing() {
+        let own = Stalls(tick: 0.01)
+        let under = Self.looks(runnable: { $0 >= 10.12 - 1e-9 })
+        #expect(!MachineShare.inconclusive(Self.wait, own: own, main: under))
+        #expect(abs(MachineShare.of(Self.wait, own: own, main: under) - 0.08) < 1e-9, "under half the wait, the claim is taken")
+        let most = Self.looks(runnable: { $0 >= 10.08 - 1e-9 })
+        #expect(MachineShare.inconclusive(Self.wait, own: own, main: most))
+        #expect(abs(MachineShare.claimed(Self.wait, own: own, main: most) - 0.12) < 1e-9)
+        #expect(MachineShare.of(Self.wait, own: own, main: most) == 0, "past the ceiling the wait is judged whole")
+        var stalled = Stalls(tick: 0.01)
+        stalled.record(Span(9.9, 10.4))
+        #expect(MachineShare.of(Self.wait, own: stalled, main: []) == 0, "the drive's own thread held through all of it")
     }
 
     /// The two shares are not added: an own-thread stall of 50 ms early in a 200 ms wait and 50 ms
@@ -130,7 +151,7 @@ import Testing
     /// it left fewer than two. One look proves nothing: that run is not excused.
     @Test func theRunThatAskedForThisRuleLeftTooFewLooksToBeExcused() {
         let hold = Span(20.0, 20.0393)
-        let theOne = ThreadLook(time: 20.046, runnable: true, cpu: 1.25, processCPU: 9.0, idleTicks: 400, busyTicks: 900)
+        let theOne = ThreadLook(time: 20.046, runnable: true, cpu: 1.25, ourCPU: 9.0, idleTicks: 400, busyTicks: 900)
         #expect(MachineShare.starvation(in: Span(19.9, 20.06), looks: [theOne]).isEmpty)
         #expect(MachineShare.starved(in: hold, looks: [theOne]) == 0)
     }
@@ -143,8 +164,8 @@ import Testing
     /// with flat CPU at two looks 150 ms apart may have run and waited many times between them.
     @Test func missingLooksExcuseNothing() {
         let apart = [
-            ThreadLook(time: 10.0, runnable: true, cpu: 1, processCPU: 1, idleTicks: 100, busyTicks: 500),
-            ThreadLook(time: 10.15, runnable: true, cpu: 1, processCPU: 1, idleTicks: 100, busyTicks: 545),
+            ThreadLook(time: 10.0, runnable: true, cpu: 1, ourCPU: 1, idleTicks: 100, busyTicks: 500),
+            ThreadLook(time: 10.15, runnable: true, cpu: 1, ourCPU: 1, idleTicks: 100, busyTicks: 545),
         ]
         #expect(MachineShare.starvation(in: Self.wait, looks: apart).isEmpty)
         let sparse = Self.looks(count: 11).enumerated().filter { $0.offset % 2 == 0 }.map(\.element)
@@ -170,7 +191,7 @@ import Testing
     @Test func anExcusedStretchSaysItsEvidence() {
         let proven = MachineShare.starvation(in: Self.wait, looks: Self.looks(processPerLook: 0.015))
         #expect(proven.count == 1)
-        #expect(proven[0].told == "100.0 ms excused at 10.000–10.200 s: 21 looks at most 10.0 ms apart, run state running at each, the thread's CPU +0.00 ms, the machine's idle ticks +0 and busy ticks +60, our process 50% of that busy CPU")
+        #expect(proven[0].told(cpus: 3) == "100.0 ms excused at 10.000–10.200 s: 21 looks at most 10.0 ms apart, run state running at each, the thread's CPU +0.00 ms, the machine's idle ticks +0 and busy ticks +60 (3 CPUs make 60.0 over the stretch), our processes 50% of that busy CPU")
     }
 
     /// A tail budget's samples, each net of the own thread's stall over it alone.
@@ -189,10 +210,21 @@ import Testing
         #expect(abs(nets[5] - 0.0105) < 1e-9, "of two held parts over a sample, the longer is taken")
     }
 
-    /// Of the busy CPU that kept the main thread waiting, the share our own process used is ours.
-    @Test func theCPUOurProcessUsedIsOurs() {
+    /// Of the busy CPU that kept the main thread waiting, the share our own processes used (the
+    /// app's, its terminal host's and the host's session shims', summed in each look) is ours: a
+    /// host spinning beside the app is never the machine's.
+    @Test func theCPUOurProcessesUsedIsOurs() {
         #expect(abs(MachineShare.starved(in: Self.wait, looks: Self.looks(processPerLook: 0.015)) - 0.1) < 1e-9, "half the busy CPU was ours")
         #expect(MachineShare.starved(in: Self.wait, looks: Self.looks(processPerLook: 0.05)) == 0, "all of it was")
+    }
+
+    /// A stretch whose ends did not read our processes' CPU proves nothing: what they used is
+    /// unknown, so none of it can be said to be the machine's.
+    @Test func ourCPUUnreadAtAnEndExcusesNothing() {
+        var looks = Self.looks()
+        looks[looks.count - 1].ourCPU = nil
+        let proven = MachineShare.starvation(in: Self.wait, looks: looks)
+        #expect(proven.isEmpty)
     }
 
     /// The main run loop's modes as samples read them, counted, the most seen first: whether the
@@ -257,3 +289,34 @@ import Testing
         #expect(beat.lastTick == 200)
     }
 }
+
+#if canImport(Darwin)
+/// The Mach and libproc reads a look is made of, on the machine itself.
+@Suite struct MachTests {
+    /// A process's CPU read by its pid is in seconds, as this process's own `getrusage` says:
+    /// `proc_pid_rusage` answers in Mach time units, which are not nanoseconds on Apple silicon.
+    @Test func aProcessesCPUByPidIsInSeconds() throws {
+        let until = ProcessInfo.processInfo.systemUptime + 0.2
+        var spin = 0
+        while ProcessInfo.processInfo.systemUptime < until { spin &+= 1 }
+        let byPid = try #require(Mach.cpu(ofProcess: getpid()))
+        let own = Mach.ourCPU(others: [])
+        #expect(spin != 0)
+        #expect(own >= 0.15 && abs(byPid - own) < own * 0.2, "by pid \(byPid) s, by getrusage \(own) s")
+    }
+
+    /// A host's children are listed, and their CPU is added to ours.
+    @Test func aChildIsListedAndItsCPUIsOurs() throws {
+        let child = Process()
+        child.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        child.arguments = ["5"]
+        try child.run()
+        defer { child.terminate() }
+        let pid = child.processIdentifier
+        #expect(Mach.children(of: getpid()).contains(pid))
+        #expect(Mach.cpu(ofProcess: pid) != nil)
+        #expect(Mach.cpu(ofProcess: -1) == nil, "a pid that cannot be read adds nothing")
+        #expect(Mach.ourCPU(others: [pid]) >= Mach.ourCPU(others: []) - 0.001)
+    }
+}
+#endif

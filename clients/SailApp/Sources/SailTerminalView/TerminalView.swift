@@ -1,4 +1,5 @@
 import AppKit
+import os
 import QuartzCore
 import SailLook
 import SailRenderer
@@ -6,6 +7,8 @@ import SailSurface
 import SailTerminal
 import SailVT
 import Synchronization
+
+private let terminalLog = Logger(subsystem: "sh.standardapplied.sail", category: "terminal")
 
 /// A terminal session in an AppKit view. It draws only what the screen's frame says and sends only
 /// what the screen's encoders make (V2). Output is drawn on the first display refresh after it
@@ -49,7 +52,6 @@ public final class TerminalView: NSView {
     /// Whether a window is on screen; a test, whose windows the window server never shows, says.
     var isOnScreen: (NSWindow) -> Bool = { $0.occlusionState.contains(.visible) }
     private var committedFrames = 0
-    private var wholeFrames = 0
     /// A drawable is being asked for off the main thread.
     private var fetching = false
     /// The drawable just brought, for the frame drawn on its arrival only.
@@ -152,13 +154,6 @@ public final class TerminalView: NSView {
         marks.reset()
     }
 
-    /// Frames committed so far, how many of them were drawn whole (every row, as after a change of
-    /// colours), and the bytes written into the glyph atlases: a change that left every frame drawn
-    /// whole, or the atlas filled again, shows in these.
-    public var drawCounts: (committed: Int, whole: Int, atlasBytes: Int) {
-        (committedFrames, wholeFrames, renderer.atlasUploadBytes)
-    }
-
     public var metrics: CellMetrics {
         renderer.metrics
     }
@@ -197,10 +192,17 @@ public final class TerminalView: NSView {
     }
 
     /// Draws the screen in `palette` from the next frame on, its content, scrollback, selection and
-    /// cursor kept; the link tells a program that subscribed of a changed scheme.
+    /// cursor kept; the link tells a program that subscribed of a changed scheme. A palette the
+    /// screen refuses leaves the old colours, said in the system log.
     public func recolour(_ palette: Palette) {
         guard let link else { return }
-        input.async { try? link.setPalette(palette) }
+        input.async {
+            do {
+                try link.setPalette(palette)
+            } catch {
+                terminalLog.fault("a terminal kept its colours: the screen refused the new palette: \(String(describing: error), privacy: .public)")
+            }
+        }
     }
 
     /// Whether `link` may be attached: no view has drawn it before.
@@ -462,7 +464,6 @@ public final class TerminalView: NSView {
         switch renderer.draw(frame, overlay: overlay, from: { defer { self.fetched = nil }; return self.fetched }, presented: { [marks] in marks.presented(frame: $0, at: $1) }, completed: { [marks] in marks.completed(frame: $0, ok: $1) }) {
         case let .drawn(number):
             committedFrames += 1
-            if frame.changed == .all { wholeFrames += 1 }
             marks.committed(frame: number, read: read, target: target)
             lastFrame = frame
             needsDraw = renderer.lastFrameWantsAnother

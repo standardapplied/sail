@@ -714,17 +714,14 @@ extension Driver {
 
     /// The look switched `times` times, each the other of the one before, with the four panes'
     /// scrollback full: every pane must draw each look, and none may wait to show it, nor the main
-    /// thread be held, over 100 ms (``flood(_:)``, net of the machine's share). Told apart: the app's
-    /// own `apply` of each look, the panes' draws, each main-thread hold over 60 ms with its stacks
-    /// (AppKit drawing the window again shows there), and the reference of a plain window's own
-    /// appearance switch on this machine.
+    /// thread be held, over 100 ms (``flood(_:)``, net of the machine's share), counted from each
+    /// screen's change. Told apart: the panes' draws and each main-thread hold over 60 ms with its
+    /// stacks (AppKit drawing the window again shows there).
     private func switchLooks(_ grid: [TerminalPane], times: Int) async -> (ok: Bool, said: String) {
-        let plain = Self.plainWindowSwitches(times, size: shell.window.frame.size)
         grid.forEach { $0.terminal.resetLatency() }
         mainThread.reset()
         ownThread.reset()
         var reached: [String] = []
-        var applied: [Double] = []
         var drawn = 0
         for _ in 0 ..< times {
             let other: NSAppearance.Name = shell.look == .dark ? .aqua : .darkAqua
@@ -733,8 +730,7 @@ extension Driver {
             if await setLook(other) { drawn += 1 }
             let took = (ContinuousClock.now - began) / .milliseconds(1)
             reached.append("\(Self.ms(took)) ms")
-            applied.append(shell.lookTook * 1000)
-            print(String(format: "look switch at %.3f: apply took %.1f ms; the last pane drew it %.1f ms after the switch", at, shell.lookTook * 1000, took))
+            print(String(format: "look switch at %.3f: the last pane drew it %.1f ms after the switch", at, took))
         }
         for gap in mainThread.stalls.gaps where gap.length > 0.06 {
             print(String(format: "look switch: main thread held %.3f–%.3f (%.1f ms), the drive's own thread %.1f ms of it", gap.start, gap.end, gap.length * 1000,
@@ -747,35 +743,10 @@ extension Driver {
         let draws = grid.map { $0.terminal.latency.refresh.max }.reduce(0, +)
         _ = await setLook(nil)
         panes4["look switched, ours, the worst pane ms"] = worst?.ours ?? 0
-        panes4["look switched, apply's longest ms"] = applied.max() ?? 0
         panes4["look switched, the four panes' longest draws summed ms"] = draws
-        panes4["look switched, a plain window's own switch, longest ms"] = plain.max() ?? 0
         let ok = drawn == times && (worst?.ours ?? 0) <= 100 && changes.allSatisfy { $0 >= times }
         return (ok, "all four drew \(drawn) of \(times) switches, each from the switch to the last drawn (polled every 10 ms) \(reached.joined(separator: ", ")); "
-            + "apply took " + applied.map { "\(Self.ms($0)) ms" }.joined(separator: ", ") + "; the four panes' longest draws summed \(Self.ms(draws)) ms; "
-            + "a plain window's own appearance switch on this machine took " + plain.map { "\(Self.ms($0)) ms" }.joined(separator: ", ") + "; "
-            + "screen changes a pane \(changes.map { "\($0)" }.joined(separator: ", ")); the worst pane: \(worst?.said ?? "none")")
-    }
-
-    /// macOS's own appearance switch for a plain window of `size` on this machine: a label, a field
-    /// and a button, its appearance switched `times` times, each timed until the window is drawn
-    /// in it and committed: the system's part of a switch, in ms, the reference for ours.
-    private static func plainWindowSwitches(_ times: Int, size: NSSize) -> [Double] {
-        let plain = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled], backing: .buffered, defer: false)
-        plain.isReleasedWhenClosed = false
-        plain.contentView = NSStackView(views: [
-            NSTextField(labelWithString: "A plain window"), NSTextField(string: "A field"), NSButton(title: "A Button", target: nil, action: nil),
-        ])
-        plain.orderFront(nil)
-        defer { plain.orderOut(nil) }
-        plain.displayIfNeeded()
-        return (0 ..< times).map { turn in
-            let began = CACurrentMediaTime()
-            plain.appearance = NSAppearance(named: turn.isMultiple(of: 2) ? .darkAqua : .aqua)
-            plain.displayIfNeeded()
-            CATransaction.flush()
-            return (CACurrentMediaTime() - began) * 1000
-        }
+            + "the four panes' longest draws summed \(Self.ms(draws)) ms; screen changes a pane \(changes.map { "\($0)" }.joined(separator: ", ")); the worst pane: \(worst?.said ?? "none")")
     }
 
     /// Returns once the window has drawn what it owes and that drawing is committed to the window
