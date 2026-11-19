@@ -68,6 +68,7 @@ public final class SidebarRowCell: NSView {
         pill = template.map { Pill($0, size: .small, look: look, mono: mono) }
         super.init(frame: .zero)
         label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = 1
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let views: [NSView] = [tile, label] + [pill].compactMap { $0 }
         for view in views {
@@ -97,7 +98,7 @@ public final class SidebarRowCell: NSView {
     }
 
     private func repaint() {
-        label.attributedStringValue = Draw.text(name, .systemFont(ofSize: Look.Step.callout.points, weight: .medium), stale ? look.textSecondary : look.text)
+        label.attributedStringValue = Draw.text(name, .systemFont(ofSize: Look.Step.callout.points, weight: .medium), stale ? look.textSecondary : look.text).cut(.byTruncatingTail)
         tile.look = look
         pill?.look = look
     }

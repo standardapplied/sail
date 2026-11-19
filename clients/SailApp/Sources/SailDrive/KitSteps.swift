@@ -404,21 +404,20 @@ final class Kit {
         row("Skeleton row", [held("skeleton-row", frame)])
     }
 
-    /// The quiet scroller at rest, hovered and dragged, each over a list scrolled a third of the way,
-    /// held shown (as with Always show scroll bars) so the sheet can be cut whatever AppKit's fade.
+    /// The quiet scroller at rest, hovered and dragged, a third of the way down: each a scroller of
+    /// its own, which draws whatever AppKit's overlay fade would do in a scroll view.
     private func scrollers() {
         row("Quiet scroller · rest, hover, dragged", ["rest", "hover", "dragged"].map { state in
-            let scroll = QuietScrollView(look: look)
-            scroll.scrollerStyle = .legacy
-            scroll.scroller.hovered = state == "hover"
-            scroll.scroller.dragging = state == "dragged"
-            let rows = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 360))
-            scroll.documentView = rows
-            scroll.widthAnchor.constraint(equalToConstant: 160).isActive = true
-            scroll.heightAnchor.constraint(equalToConstant: 120).isActive = true
-            scroll.contentView.scroll(to: NSPoint(x: 0, y: 80))
-            scroll.reflectScrolledClipView(scroll.contentView)
-            return held("scroller-\(state)", scroll)
+            let scroller = QuietScroller(frame: NSRect(x: 0, y: 0, width: ScrollerStyle.track, height: 120))
+            scroller.look = look
+            scroller.isEnabled = true
+            scroller.knobProportion = 0.33
+            scroller.doubleValue = 0.3
+            scroller.hovered = state == "hover"
+            scroller.dragging = state == "dragged"
+            scroller.widthAnchor.constraint(equalToConstant: ScrollerStyle.track).isActive = true
+            scroller.heightAnchor.constraint(equalToConstant: 120).isActive = true
+            return held("scroller-\(state)", scroller)
         })
     }
 

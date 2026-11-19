@@ -264,7 +264,7 @@ import Testing
             for line in lines {
                 let cell = try #require(line.superview)
                 let pill = cell.convert(line.pill.alignmentRect(forFrame: line.pill.frame), from: line.pill.superview)
-                let reach = Double(cell.bounds.width) - RowStyle.list.trailing - (narrow ? ProjectView.narrowActionsColumn : ProjectView.actionsColumn)
+                let reach = Double(cell.bounds.width) - RowStyle.list.trailing - (narrow ? project.narrowActionsColumn : ProjectView.actionsColumn)
                 #expect(near(line.frame.maxX, reach), "\(width) pt: \(line.title.stringValue.prefix(12))'s line ends at \(line.frame.maxX), not at its actions column \(reach)")
                 for label in [line.title, line.place] {
                     let words = cell.convert(label.alignmentRect(forFrame: label.frame), from: label.superview)

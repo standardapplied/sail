@@ -108,9 +108,13 @@ import Testing
                 guard let scroll = view.project.listScroll else { return ["the list does not scroll"] }
                 view.layoutSubtreeIfNeeded()
                 let room = Double(scroll.documentView?.frame.height ?? 0) - Double(scroll.contentSize.height)
-                scroll.contentView.scroll(to: NSPoint(x: 0, y: max(room / 2, 0)))
-                scroll.reflectScrolledClipView(scroll.contentView)
-                return WorkspacesReachTests.outOfReach(in: view)
+                var faults: [String] = []
+                for (at, offset) in [("half way", room / 2), ("at the end", room)] {
+                    scroll.contentView.scroll(to: NSPoint(x: 0, y: max(offset, 0)))
+                    scroll.reflectScrolledClipView(scroll.contentView)
+                    faults += WorkspacesReachTests.outOfReach(in: view).map { "\(at): \($0)" }
+                }
+                return faults
             case .twentyProjects:
                 let names = (["harbor"] + (2 ... 20).map { "project-\($0)" }).map { #"{"name": "\#($0)", "container_status": "running", "template": "ready"}"# }
                 let projects = Exchange(method: "GET", path: "/v1/projects", status: 200, body: Data(#"{"projects": [\#(names.joined(separator: ", "))], "total": 20, "schema_version": 1}"#.utf8))
@@ -238,8 +242,20 @@ import Testing
                 {
                     faults.append("\(named(label)) clipped: its words need more than its \(label.frame.height) pt")
                 }
-                if !place.isEmpty, child is NSButton || child is Pill || (child is NSTextField && !words.isEmpty) {
+                let drawnThings: Set = ["Initial", "Spinner", "Tile", "ProgressLine"]
+                if !place.isEmpty, child is NSButton || child is Pill || drawnThings.contains(String(describing: type(of: child))) || (child is NSTextField && !words.isEmpty) {
                     leaves.append((child, place))
+                }
+                if let scroller = child as? QuietScroller, scroller.knobProportion < 1, scroller.thumb.height > 0 {
+                    leaves.append((scroller, root.convert(scroller.thumb, from: scroller)))
+                }
+                if let label = child as? NSTextField, !label.isEditable, label.maximumNumberOfLines == 1, !words.isEmpty,
+                   Double(label.intrinsicContentSize.width) > Double(label.frame.width) + 0.5
+                {
+                    let style = label.attributedStringValue.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+                    if ![NSLineBreakMode.byTruncatingTail, .byTruncatingMiddle, .byTruncatingHead].contains(style?.lineBreakMode) {
+                        faults.append("\(named(label)) is cut with no ellipsis")
+                    }
                 }
                 if let button = child as? NSButton, !place.isEmpty {
                     let face = button.alignmentRect(forFrame: button.bounds).insetBy(dx: 2, dy: 2)

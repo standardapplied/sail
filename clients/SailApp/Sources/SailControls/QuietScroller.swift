@@ -48,9 +48,17 @@ public final class QuietScroller: NSScroller {
         NSBezierPath(roundedRect: thumb, xRadius: ScrollerStyle.radius, yRadius: ScrollerStyle.radius).fill()
     }
 
-    override public func trackKnob(with event: NSEvent) {
+    /// Drags begun on the thumb, for the tests: AppKit's overlay scrollers track a drag in
+    /// `mouseDown`, not always through `trackKnob`.
+    package private(set) var drags = 0
+
+    override public func mouseDown(with event: NSEvent) {
+        guard thumb.insetBy(dx: -(ScrollerStyle.track - ScrollerStyle.thumb) / 2, dy: 0).contains(convert(event.locationInWindow, from: nil)) else {
+            return super.mouseDown(with: event)
+        }
+        drags += 1
         dragging = true
-        super.trackKnob(with: event)
+        super.mouseDown(with: event)
         dragging = false
     }
 
@@ -74,7 +82,10 @@ public final class QuietScroller: NSScroller {
 }
 
 /// A scroll view for the app's lists: vertical only, the quiet scroller, no background of its own,
-/// the scroller's track inset 4 pt top and bottom.
+/// the scroller's track inset 4 pt top and bottom. Always the overlay style, whatever "Show scroll
+/// bars" says (AppKit sets `scrollerStyle` again from the system's preference, and this refuses
+/// any other): its rows never give the track 12 pt, so bands and fills run under it and nothing
+/// shifts when a list becomes scrollable. A short list does not bounce.
 @MainActor
 public final class QuietScrollView: NSScrollView {
     public let scroller = QuietScroller()
@@ -94,11 +105,30 @@ public final class QuietScrollView: NSScrollView {
         drawsBackground = false
         horizontalScrollElasticity = .none
         scrollerInsets = NSEdgeInsets(top: ScrollerStyle.inset, left: 0, bottom: ScrollerStyle.inset, right: 0)
+        scrollerStyle = .overlay
+    }
+
+    override public var scrollerStyle: NSScroller.Style {
+        get { super.scrollerStyle }
+        set { super.scrollerStyle = .overlay }
+    }
+
+    /// Bounces only while its rows run past it: a list that fits never shows bare surface.
+    override public func tile() {
+        super.tile()
+        let scrollable = Double(documentView?.frame.height ?? 0) > Double(contentSize.height) + 0.5
+        verticalScrollElasticity = scrollable ? .automatic : .none
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
+    }
+
+    /// Its rows shown from their top.
+    public func scrollToTop() {
+        contentView.scroll(to: .zero)
+        reflectScrolledClipView(contentView)
     }
 
     /// Redraws what it scrolls (a change of look, new rows of the same list) where the person left

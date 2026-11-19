@@ -259,6 +259,67 @@ import Testing
         }
     }
 
+    /// A list of `count` rows under a head in a quiet scroll view `height` tall, in a window.
+    static func scrolling(_ count: Int, height: Double) throws -> (SailList, QuietScrollView, NSWindow) {
+        let list = SailList(rowStyle: .list, look: .light, mono: try ControlsTests.mono())
+        list.entries = [.head("Yours", count: count)] + (1 ... count).map { index in
+            .item(SailList.Item(id: "ws-\(index)", name: "ws-\(index)", voice: "ws-\(index)", content: NSTextField(labelWithString: "ws-\(index)")))
+        }
+        let scroll = QuietScrollView(look: .light)
+        scroll.documentView = list
+        scroll.frame = NSRect(x: 0, y: 0, width: 400, height: height)
+        let rows = Double(list.rect(ofRow: list.numberOfRows - 1).maxY)
+        list.frame = NSRect(x: 0, y: 0, width: 400, height: rows)
+        let window = TestWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: height), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = scroll
+        window.orderFront(nil)
+        scroll.tile()
+        return (list, scroll, window)
+    }
+
+    /// Home chooses the first item and shows the head above it, as AppKit's lists scroll to their
+    /// very top; End chooses the last.
+    @Test func homeShowsTheHeadAboveTheFirstItem() throws {
+        let (list, scroll, window) = try Self.scrolling(30, height: 200)
+        defer { window.orderOut(nil) }
+        list.scrollRowToVisible(list.numberOfRows - 1)
+        #expect(list.act(on: try Self.key(115, "\u{F729}")))
+        #expect(list.chosen == "ws-1" && abs(Double(scroll.contentView.bounds.minY)) < 0.5, "Home left the list \(scroll.contentView.bounds.minY) pt down")
+        #expect(list.act(on: try Self.key(119, "\u{F72B}")))
+        #expect(list.chosen == "ws-30")
+    }
+
+    /// A drag that starts on the thumb draws it in its dragged ink, as AppKit tracks it; a click on
+    /// the track away from the thumb is no drag.
+    @Test func aDragOnTheThumbIsDrawnDragged() throws {
+        let (_, scroll, window) = try Self.scrolling(30, height: 200)
+        defer { window.orderOut(nil) }
+        scroll.flashScrollers()
+        let scroller = scroll.scroller, thumb = scroller.thumb
+        try #require(thumb.height > 1, "nothing to drag: the thumb is \(thumb)")
+        func click(_ point: NSPoint) throws {
+            let at = scroller.convert(point, to: nil)
+            func event(_ type: NSEvent.EventType) throws -> NSEvent {
+                try #require(NSEvent.mouseEvent(with: type, location: at, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0))
+            }
+            NSApp.postEvent(try event(.leftMouseUp), atStart: false)
+            scroller.mouseDown(with: try event(.leftMouseDown))
+        }
+        try click(NSPoint(x: thumb.midX, y: thumb.midY))
+        #expect(scroller.drags == 1 && !scroller.dragging, "a drag on the thumb was not drawn dragged, or stayed so: \(scroller.drags)")
+        let below = thumb.maxY + 20 < scroller.bounds.maxY ? thumb.maxY + 20 : thumb.minY - 20
+        try click(NSPoint(x: thumb.midX, y: below))
+        #expect(scroller.drags == 1, "a click on the track counted as a drag")
+    }
+
+    /// A link given new words paints them as a link's, in the accent's text ink.
+    @Test func aLinkPaintsNewWords() {
+        let link = LinkButton("Show dock", look: .light, target: nil, action: nil)
+        link.title = "Show pier"
+        let words = link.attributedTitle
+        #expect(words.string == "Show pier" && (words.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor) == NSColor(Tint(Look.light.accentText)), "\(words)")
+    }
+
     static func key(_ code: UInt16, _ characters: String, _ flags: NSEvent.ModifierFlags = []) throws -> NSEvent {
         try #require(NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, characters: characters,

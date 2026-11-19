@@ -78,6 +78,7 @@ package final class LeftPanel: NSView {
         }
         scroll.documentView = list
         scroll.scrollerInsets.right = Self.edge
+        list.actionsColumn = Self.trackRoom
         addSubview(scroll)
         let width = UserDefaults.standard.object(forKey: Self.remembered) as? Double ?? Self.width.standard
         widthConstraint = widthAnchor.constraint(equalToConstant: Self.clamped(width))
@@ -98,6 +99,10 @@ package final class LeftPanel: NSView {
     override public var isFlipped: Bool {
         true
     }
+
+    /// What a project row keeps clear at its end, past its 6 pt inset, so its pill never sits under
+    /// the scroller's track, which runs to the drag edge.
+    static let trackRoom = ScrollerStyle.track + edge - RowStyle.sidebar.margin - RowStyle.sidebar.trailing
 
     static func clamped(_ width: Double) -> Double {
         min(max(width, Self.width.least), Self.width.most)

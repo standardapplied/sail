@@ -80,6 +80,104 @@ import Testing
         #expect(view.project.list.chosen == "pier" && window.firstResponder === view.project.list, "a change of look lost the chosen row or the keys")
     }
 
+    static func rows(_ count: Int, of project: String) throws -> Exchange {
+        let rows = (1 ... count).map { ["name": String(format: "ws-%02d", $0), "instance": String(format: "\(project)-ws-%02d", $0), "state": "running", "owner": "uday"] }
+        let body = try JSONSerialization.data(withJSONObject: ["project": project, "schema_version": 1, "workspaces": rows] as [String: Any])
+        return Exchange(method: "GET", path: "/v1/projects/\(project)/workspaces", status: 200, body: body)
+    }
+
+    /// M1: another project's list starts at its top, not where the last project's was left; and so
+    /// does the list of someone signed in after, though their project has the same name.
+    @Test func anotherProjectOrPersonStartsAtTheTop() async throws {
+        let projects = Exchange(method: "GET", path: "/v1/projects", status: 200, body: Data(#"{"projects": [{"name": "harbor", "container_status": "running", "template": "ready"}, {"name": "demo", "container_status": "running", "template": "ready"}], "total": 2, "schema_version": 1}"#.utf8))
+        let (view, window) = try WorkspacesViewTests.view(RecordedServer([projects, try Self.rows(30, of: "harbor"), try Self.rows(30, of: "demo")]), width: 1024 - Rail.width - 4)
+        defer { window.orderOut(nil) }
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("harbor-ws-30") }, "\(view.text)")
+        view.layoutSubtreeIfNeeded()
+        let scroll = try #require(view.project.listScroll)
+        func scrolledHalfWay() {
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: ((Double(scroll.documentView?.frame.height ?? 0) - Double(scroll.contentSize.height)) / 2).rounded()))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+        scrolledHalfWay()
+        view.panel.list.choose("demo")
+        #expect(await RunnerTabTests.until { view.text.contains("demo-ws-30") }, "\(view.text)")
+        view.layoutSubtreeIfNeeded()
+        #expect(abs(Double(scroll.contentView.bounds.minY)) < 0.5, "demo's list opened \(scroll.contentView.bounds.minY) pt down, where harbor's was left")
+        view.panel.list.choose("harbor")
+        #expect(await RunnerTabTests.until { view.text.contains("harbor-ws-30") }, "\(view.text)")
+        view.layoutSubtreeIfNeeded()
+        scrolledHalfWay()
+        view.person = WorkspacesViewTests.ana
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("harbor-ws-30") }, "\(view.text)")
+        view.layoutSubtreeIfNeeded()
+        #expect(abs(Double(scroll.contentView.bounds.minY)) < 0.5, "ana's harbor opened \(scroll.contentView.bounds.minY) pt down, where uday left a list")
+    }
+
+    /// Minor 1: the open create row is brought into view as it opens, not on every redraw: scrolled
+    /// away from it, a refresh leaves the scroll where the person put it.
+    @Test func anOpenCreateRowDoesNotPullTheListBack() async throws {
+        let (view, window) = try WorkspacesViewTests.view(RecordedServer([try Exchange("projects"), try Self.rows(30)]), width: 1024 - Rail.width - 4)
+        defer { window.orderOut(nil) }
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("ws-30") }, "\(view.text)")
+        view.project.on(.newWorkspace)
+        view.layoutSubtreeIfNeeded()
+        let scroll = try #require(view.project.listScroll)
+        #expect(abs(Double(scroll.contentView.bounds.minY)) < 0.5, "the create row opened out of view")
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 300))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        await view.refresh()
+        view.layoutSubtreeIfNeeded()
+        #expect(abs(Double(scroll.contentView.bounds.minY) - 300) < 0.5, "a refresh pulled the list to \(scroll.contentView.bounds.minY) pt, back to the create row")
+    }
+
+    /// Minor 7: a list that fits does not bounce; one that runs past its frame does.
+    @Test func onlyAScrollingListBounces() async throws {
+        let (few, fewWindow, _) = try await WorkspacesViewTests.listed()
+        defer { fewWindow.orderOut(nil) }
+        few.layoutSubtreeIfNeeded()
+        #expect(few.project.listScroll?.verticalScrollElasticity == NSScrollView.Elasticity.none, "three rows that fit bounce in their frame")
+        let (many, manyWindow) = try WorkspacesViewTests.view(RecordedServer([try Exchange("projects"), try Self.rows(30)]), width: 1024 - Rail.width - 4)
+        defer { manyWindow.orderOut(nil) }
+        many.shown()
+        #expect(await RunnerTabTests.until { many.text.contains("ws-30") }, "\(many.text)")
+        many.layoutSubtreeIfNeeded()
+        #expect(many.project.listScroll?.verticalScrollElasticity == NSScrollView.Elasticity.automatic, "thirty rows do not bounce")
+    }
+
+    /// Minor 4: a redraw of three hundred rows (each list answer, each change of look) within a
+    /// frame's 16 ms; the time is said whatever it is.
+    @Test func threeHundredRowsRedrawWithinAFrame() throws {
+        let rows = (1 ... 300).map { WorkspaceRow(name: String(format: "ws-%03d", $0), instance: String(format: "harbor-ws-%03d", $0), state: .known(.running), owner: $0.isMultiple(of: 2) ? "ana" : "uday") }
+        let page = try #require(WorkspacesViewTests.page(rows))
+        let (project, window) = try WorkspacesViewTests.project(width: 1024 - Rail.width - 4 - LeftPanel.width.standard)
+        defer { window.orderOut(nil) }
+        project.render(page)
+        project.layoutSubtreeIfNeeded()
+        var times: [Duration] = []
+        for _ in 0 ..< 3 {
+            let start = ContinuousClock.now
+            project.render(page)
+            project.layoutSubtreeIfNeeded()
+            times.append(ContinuousClock.now - start)
+        }
+        let best = times.min() ?? .zero
+        print("workspaces: three hundred rows redrawn in \(best) (best of \(times))")
+        #expect(best < .milliseconds(16), "three hundred rows take \(best) to redraw, past a frame")
+    }
+
+    /// The narrow rows' actions column is the widest actions a row shows, measured: under the old
+    /// fixed 144 pt, so a name keeps what the actions cannot use.
+    @Test func theNarrowActionsColumnIsTheWidestActions() throws {
+        let (project, window) = try WorkspacesViewTests.project(width: WorkspacesViewTests.narrowestCard)
+        defer { window.orderOut(nil) }
+        print("workspaces: the narrow actions column is \(project.narrowActionsColumn) pt")
+        #expect(project.narrowActionsColumn > 90 && project.narrowActionsColumn < 144, "the narrow actions column is \(project.narrowActionsColumn) pt")
+    }
+
     /// Twenty projects scroll between the panel's header and its foot, which stays put.
     @Test func twentyProjectsScrollAboveThePanelsFoot() throws {
         let panel = LeftPanel(look: .light, mono: try LabelFont(directory: LookTests.fonts))

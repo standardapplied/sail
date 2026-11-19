@@ -76,12 +76,20 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         }
     }
 
-    /// Reloads the rows with the one under the pointer still drawn hovered, its actions shown: a
-    /// new row does not know the pointer is over it until the pointer moves.
+    /// Reloads the rows with the one under the pointer drawn hovered, its actions shown: a new row
+    /// does not know the pointer is over it until the pointer moves. While the app is active the
+    /// row is found where the pointer is; otherwise the row hovered before is hovered again.
     private func reloadKeepingHover() {
         let hovered = (0 ..< numberOfRows).first { (rowView(atRow: $0, makeIfNecessary: false) as? SailRowView)?.hovered == true }.flatMap { item(at: $0)?.id }
         reloadData()
-        guard let hovered, let row = entries.indices.first(where: { item(at: $0)?.id == hovered }) else { return }
+        let row: Int?
+        if let window, NSApplication.shared.isActive, window.isKeyWindow {
+            let under = self.row(at: convert(window.mouseLocationOutsideOfEventStream, from: nil))
+            row = under >= 0 ? under : nil
+        } else {
+            row = hovered.flatMap { id in entries.indices.first { item(at: $0)?.id == id } }
+        }
+        guard let row, item(at: row) != nil else { return }
         (rowView(atRow: row, makeIfNecessary: true) as? SailRowView)?.hovered = true
     }
 
@@ -186,7 +194,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         case 115, 119:
             guard let row = event.keyCode == 115 ? items.first : items.last else { return false }
             selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-            scrollRowToVisible(row)
+            scrollRowToVisible(row == items.first ? 0 : row)
             return true
         case 36, 76:
             guard let primary = item(at: selectedRow)?.actions.first(where: { $0.onRow }) else { return false }
@@ -474,7 +482,7 @@ final class RowCell: NSView {
             more.menu = moreMenu
         }
         let note = item.note.map { words -> NSTextField in
-            let label = NSTextField(labelWithAttributedString: Draw.text(words, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary))
+            let label = NSTextField(labelWithAttributedString: Draw.text(words, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary).cut(.byTruncatingTail))
             label.lineBreakMode = .byTruncatingTail
             label.maximumNumberOfLines = 1
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)

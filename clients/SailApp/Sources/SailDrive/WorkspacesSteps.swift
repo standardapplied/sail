@@ -61,8 +61,14 @@ actor GoldenDesk: Transport {
         held["GET /v1/projects/harbor/workspaces"] = .zero
     }
 
-    /// From now on harbor's workspaces are the three of the golden and one more of `name`, the person's.
+    /// From now on harbor's workspaces are the three of the golden and one more of `name`, the
+    /// person's; and a create is refused as the server refuses a name taken, naming `name`: the
+    /// recorded refusal for dock, its name replaced.
     func answerTaken(_ name: String) throws {
+        let refusal = try Exchange("refusal-conflict-workspace-exists")
+        let said = String(decoding: refusal.body, as: UTF8.self).replacingOccurrences(of: "dock", with: name)
+        answers["POST /v1/projects/harbor/workspaces"] = HTTPResponse(status: refusal.status, headers: refusal.headers, body: Data(said.utf8))
+        held["POST /v1/projects/harbor/workspaces"] = .zero
         let exchange = try Exchange("workspaces-three")
         guard var body = try JSONSerialization.jsonObject(with: exchange.body) as? [String: Any], let rows = body["workspaces"] as? [[String: Any]] else { return }
         body["workspaces"] = rows + [["name": name, "instance": "harbor-\(name)", "state": "running", "owner": "uday"]]
@@ -301,25 +307,37 @@ extension Driver {
     }
 
     /// Waits, at most `seconds`, until `condition` holds, asking it again every 50 ms.
-    /// Scrolls `view` to `fraction` of the way down with real scroll-wheel events, in pixel steps as
-    /// a trackpad's are, handed to the scroll view (one made from a `CGEvent` carries no window to
-    /// hit-test in); it passes once the clip view is there.
+    /// Scrolls `view` to `fraction` of the way down with real scroll-wheel events in pixel steps, as
+    /// a trackpad's are, sent through the window at the view's middle as a person's are, so the
+    /// window's hit-testing routes them. Where AppKit gives the event no window (one made from a
+    /// `CGEvent` may carry none), it is handed to the scroll view, and the result says so.
     private func turnWheel(over view: NSScrollView, to fraction: Double) async -> (Bool, String) {
-        guard view.window != nil, let document = view.documentView else { return (false, "the scroll view is not in a window") }
+        guard let window = view.window, let document = view.documentView else { return (false, "the scroll view is not in a window") }
         let room = Double(document.frame.height) - Double(view.contentSize.height)
         guard room > 0 else { return (false, "nothing to scroll: the rows are \(document.frame.height) pt in \(view.contentSize.height) pt") }
         let wanted = room * min(max(fraction, 0), 1)
+        let middle = window.convertPoint(toScreen: view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil))
+        let top = Double(NSScreen.screens.first?.frame.maxY ?? 0)
+        var routed = true
         while Double(view.contentView.bounds.minY) < wanted - 0.5 {
             let step = Int32(-min(40, wanted - Double(view.contentView.bounds.minY)).rounded(.up))
             guard let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: step, wheel2: 0, wheel3: 0) else { return (false, "no scroll-wheel event") }
+            wheel.location = CGPoint(x: Double(middle.x), y: top - Double(middle.y))
+            wheel.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window.windowNumber))
+            wheel.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window.windowNumber))
             guard let event = NSEvent(cgEvent: wheel) else { return (false, "AppKit took no scroll-wheel event") }
             let before = view.contentView.bounds.minY
-            view.scrollWheel(with: event)
+            if event.window === window {
+                window.sendEvent(event)
+            } else {
+                routed = false
+                view.scrollWheel(with: event)
+            }
             await Task.yield()
-            guard view.contentView.bounds.minY != before else { return (false, "the wheel moved nothing at \(before) of \(room) pt") }
+            guard view.contentView.bounds.minY != before else { return (false, "the wheel moved nothing at \(before) of \(room) pt\(routed ? " through the window" : "")") }
         }
         view.flashScrollers()
-        return (true, "scrolled \(view.contentView.bounds.minY) of \(room) pt")
+        return (true, "scrolled \(view.contentView.bounds.minY) of \(room) pt, \(routed ? "through the window" : "handed to the scroll view: AppKit gave the wheel no window")")
     }
 
     /// Clicks the shown button titled `title` in `pane` as a person does.

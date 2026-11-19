@@ -27,6 +27,7 @@ public final class WorkspacesView: NSView {
             } else {
                 model = WorkspacesModel(person: person)
                 era += 1
+                project.forgetList()
             }
         }
     }
@@ -327,7 +328,9 @@ public final class WorkspacesView: NSView {
         draw()
         let naming = model.screen.createOpen, shown = window?.isKeyWindow == true && !project.isHiddenOrHasHiddenAncestor
         switch claim {
-        case .field? where shown && naming: project.focusField()
+        case .field? where shown && naming:
+            project.showCreateRow()
+            project.focusField()
         case .list? where shown: window?.makeFirstResponder(project.list)
         default: if typing, naming { project.focusField() }
         }

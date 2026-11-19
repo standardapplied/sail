@@ -13,6 +13,13 @@ public final class LinkButton: NSButton {
 
     private let points: Double
 
+    /// New words are painted as the link's own.
+    override public var title: String {
+        didSet { if !painting { paint() } }
+    }
+
+    private var painting = false
+
     public init(_ title: String, points: Double = Look.Step.footnote.points, look: Look, target: AnyObject?, action: Selector?) {
         self.look = look
         self.points = points
@@ -36,6 +43,8 @@ public final class LinkButton: NSButton {
     public static let cutFirst = NSLayoutConstraint.Priority(NSLayoutConstraint.Priority.defaultLow.rawValue - 1)
 
     private func paint() {
+        painting = true
+        defer { painting = false }
         let font = NSFont.systemFont(ofSize: points, weight: .medium)
         let cut = NSMutableParagraphStyle()
         cut.lineBreakMode = .byTruncatingTail

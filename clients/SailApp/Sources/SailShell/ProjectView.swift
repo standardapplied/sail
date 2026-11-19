@@ -21,9 +21,6 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     /// The create row's and the creating row's ids: never a workspace's name, so neither shares an
     /// id with a listed row of the same name.
     static let createID = "\u{0}create", creatingID = "\u{0}creating"
-    /// The narrow rows' actions column: room for Start and Open and ⋯, so a row's words and pill
-    /// run to it as the narrow frame draws them.
-    static let narrowActionsColumn = 144.0
     /// The room between the name's column and the buttons (the design's `.ph` gap), and between two
     /// buttons (`.ph-acts`, `.acts`): the stacks place the buttons' boxes, not their halos.
     static let headGap = 20.0, buttonGap = 6.0
@@ -56,8 +53,31 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     private let head = NSView()
     let foot = NSView()
     private let frameView: ListFrame
-    /// The project whose rows the list last held: its rows drawn again keep the person's scroll.
+
+    /// The narrow rows' actions column: the widest actions any row shows (Start and Open with its
+    /// ⏎, ⋯ beside it), measured, so every list's pills stand at one x and a row's name keeps the
+    /// rest; a note ("Only uday or an admin opens it") is cut within it.
+    lazy var narrowActionsColumn: Double = {
+        let start = SailButton("Start and Open", kind: .primary, size: .small, look: look, target: nil, action: nil)
+        start.shortcut("\r", mono: mono)
+        let more = SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil)
+        let boxes = [start, more].map { Double($0.alignmentRect(forFrame: NSRect(origin: .zero, size: $0.fittingSize)).width) }
+        return (boxes.reduce(0, +) + Self.buttonGap).rounded(.up)
+    }()
+    /// The project whose rows the list last held: its rows drawn again keep the person's scroll;
+    /// another project's, or anyone's after a change of person, start at the top.
     private var filled: String?
+
+    /// Someone else signed in: whatever list comes next starts at its top.
+    func forgetList() {
+        filled = nil
+    }
+
+    /// The create row brought into view with the Yours head over it, as it opens or comes back
+    /// refused; not on every redraw while it is open.
+    func showCreateRow() {
+        list.scrollRowToVisible(0)
+    }
     /// The list's scroll view, for the drive.
     package var listScroll: NSScrollView? {
         frameView.scroll
@@ -159,9 +179,9 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
                 scroll.keepingScroll { fill(table) }
             } else {
                 fill(table)
+                frameView.scroll?.scrollToTop()
             }
             filled = page.name
-            if table.create != nil { list.scrollRowToVisible(1) }
             frameView.alphaValue = page.stale ? 0.55 : 1
             let listed = table.count + (table.creating == nil ? 0 : 1)
             count.attributedStringValue = micro(page.stale ? Self.listed(page.listedAt) : "\(listed) workspace\(listed == 1 ? "" : "s")")
@@ -328,7 +348,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
 
     /// The list's entries: Yours (the create row first), then Other people's.
     private func fill(_ table: WorkspacesModel.Table) {
-        list.actionsColumn = narrow ? Self.narrowActionsColumn : Self.actionsColumn
+        list.actionsColumn = narrow ? narrowActionsColumn : Self.actionsColumn
         let creating = table.creating == nil ? 0 : 1
         var entries: [SailList.Entry] = [.head("Yours", count: table.yours.count + creating)]
         if let creating = table.creating {
@@ -376,8 +396,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         field.help = WorkspacesModel.nameRule
         if field.field.stringValue != create.name { field.field.stringValue = create.name }
         let row = CreateRow(field: field, existing: create.existing, look: look, mono: mono) { [weak self] act in self?.on(act) }
-        let scroller = frameView.scroll?.scrollerStyle == .legacy ? ScrollerStyle.track : 0
-        let room = Double(bounds.width) - 2 * Self.padding.sides - 2 - scroller - RowStyle.list.leading - RowStyle.list.trailing
+        let room = Double(bounds.width) - 2 * Self.padding.sides - 2 - RowStyle.list.leading - RowStyle.list.trailing
         let height = row.height(room: bounds.width > 0 ? room : CreateRow.column + CreateRow.gap + Double(row.buttons.fittingSize.width))
         let paint: RowPaint = refused ? .refused(look) : .naming(look)
         return SailList.Item(id: Self.createID, name: "", voice: "A new workspace's name", content: row, height: height, paint: paint, full: true)
