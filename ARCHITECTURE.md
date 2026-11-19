@@ -4104,11 +4104,30 @@ of it (`Harness.storedLogins`: `~/.claude/.credentials.json`, `~/.claude.json`,
 (which strips before it gives), a disown and a template build take it. The listing, the sidecar and
 every event carry the harness's own command (`["claude", "--dangerously-skip-permissions"]`) and
 `agent`, never the line that started it; no argv on the runner or in the workspace holds a login.
-Every process in a workspace is the dev user, so any session there, and an admin's shell in it, can
-read a running harness's environment, as they can the owner's git token. Sail adds no permission
-rule to an interactive session: what the agent may do is the project's to set in its own
-`.claude/settings.json` or `config.toml` (deny rules, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`, Codex's
-`shell_environment_policy`), with the mode the person chooses.
+A pty host that dies between the hand-over and the read leaves the file until the next agent start
+there (the hand-over's one-minute sweep) or the next give (every start and re-own); removing it at
+host start would take an exec into every workspace. An admin who enters a workspace watches an
+agent session there until they take its keyboard, and then drives an agent signed in as its owner,
+who is told (`WriterChanged`), as an admin's shell there already reaches the owner's login.
+
+What a command the agent runs can read, measured on Claude Code 2.1.329 and Codex 0.170: Claude
+Code keeps a token (`CLAUDE_CODE_OAUTH_TOKEN`) out of the commands its shell runs, but an API key,
+under `SAIL_ANTHROPIC_API_KEY` as under `ANTHROPIC_API_KEY`, is in every command's environment;
+Codex's shell commands get `CODEX_API_KEY` empty, and its policy governs only that shell. Every
+process in a workspace is the dev user, so any command, any session there and an admin's shell in
+it can read a running harness's own `/proc/<pid>/environ`, the login included, as they can the
+owner's git token. Claude Code's `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` is no remedy in a workspace:
+it runs every command in its bubblewrap sandbox and forces the default permission mode, and in an
+Incus container on an Ubuntu 24.04 host bubblewrap is refused a namespace (`bwrap: Creating new
+namespace failed: Permission denied`), so every command fails; without bubblewrap and `socat`
+Claude Code does not start. On a host where the sandbox runs, the scrub does remove
+`SAIL_ANTHROPIC_API_KEY` from a command and hides Claude Code's `environ`; the session's
+`apiKeyHelper` still reads the key. A file the helper reads instead of the variable would keep the
+key out of what a command inherits but not out of what it reads (the same user `cat`s it), and
+would have to live for the session, since the helper runs again every five minutes and on a 401,
+so the variable stays. Sail adds no permission rule to an interactive session: what the agent may
+do is the project's to set in its own `.claude/settings.json` or `config.toml` (deny rules,
+Codex's `shell_environment_policy`), with the mode the person chooses.
 
 **The terminal host on a person's own machine.** `sail _pty-host --local` (`LocalPtyHost`) is the
 same host wired for the account it runs as, with no server: the native app's launchd agent runs

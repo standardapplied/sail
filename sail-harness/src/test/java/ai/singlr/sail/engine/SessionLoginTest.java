@@ -175,6 +175,38 @@ class SessionLoginTest {
   }
 
   /**
+   * Claude Code's environment, which its own processes are started from, holds the login under one
+   * name for its kind and under no other: never the variable Claude Code asks about and stores a
+   * fragment of. What a command it runs then sees is Claude Code's to filter.
+   */
+  @Test
+  void claudeCodesEnvironmentHoldsItsLoginUnderOneNameForItsKindAndNoOther() throws Exception {
+    stub("claude", "env > \"$HOME/claude.env\"\n");
+
+    assertEquals(
+        List.of("CLAUDE_CODE_OAUTH_TOKEN"),
+        namesItsEnvironmentHolds(login("claude-code", "token", TOKEN), "i-t"));
+    assertEquals(
+        List.of("SAIL_ANTHROPIC_API_KEY"),
+        namesItsEnvironmentHolds(login("claude-code", "api-key", KEY), "i-a"));
+  }
+
+  private List<String> namesItsEnvironmentHolds(LoginStore.Login stored, String id)
+      throws Exception {
+    var file = file(id);
+    assertEquals(0, hand(file, LaunchEnv.loginLines(stored)).status());
+    var ran =
+        run(
+            SessionLogin.command(Harnesses.of("claude-code"), "full", Optional.of(stored), file),
+            "");
+    assertEquals(0, ran.status(), ran.output());
+    return Files.readAllLines(dir.resolve("home").resolve("claude.env")).stream()
+        .filter(line -> line.endsWith("=" + stored.value()))
+        .map(line -> line.substring(0, line.indexOf('=')))
+        .toList();
+  }
+
+  /**
    * Codex takes its key from its environment through a provider of its own config, never through
    * its store: its login is never run, so nothing of the key is kept in its home.
    */
