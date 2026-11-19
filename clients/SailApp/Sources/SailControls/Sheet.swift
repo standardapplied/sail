@@ -5,7 +5,9 @@ import SailLook
 /// Newsreader 18 title and a 13 pt secondary body, padded 22 / 24 / 18 with 14 between, and a
 /// footer under a hairline holding the buttons trailing, 8 pt apart. Esc is Cancel. Return is the
 /// primary, except on a destructive sheet (a destructive or destructive-quiet confirm): its
-/// destructive button comes last, takes no Return, and the keys start on Cancel.
+/// destructive button comes last and never takes Return, and Cancel is the default, so Return
+/// cancels, as the kit draws Cancel focused. Esc and ⌘. cancel either way. VoiceOver names the
+/// sheet by its title.
 @MainActor
 public final class Sheet: NSObject {
     public static let width = 440.0
@@ -48,17 +50,21 @@ public final class Sheet: NSObject {
         self.body = NSTextField(wrappingLabelWithString: body)
         cancel = SailButton("Cancel", kind: .secondary, look: look, target: nil, action: nil)
         self.confirm = SailButton(confirm, kind: kind, look: look, target: nil, action: nil)
-        window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 160), styleMask: [.titled], backing: .buffered, defer: true)
+        let panel = SheetPanel(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 160), styleMask: [.titled], backing: .buffered, defer: true)
+        panel.title = title
+        window = panel
         self.titleFont = titleFont
         self.look = look
         super.init()
         paint(title: title, body: body)
         cancel.target = self
         cancel.action = #selector(cancelled(_:))
-        cancel.keyEquivalent = "\u{1b}"
+        cancel.isDefault = destructive
+        if !destructive { cancel.keyEquivalent = "\u{1b}" }
         self.confirm.target = self
         self.confirm.action = #selector(confirmed(_:))
         self.confirm.isDefault = !destructive
+        panel.cancels = { [weak self] in self?.end(false) }
         window.contentView = SheetContent(title: self.title, body: self.body, cancel: cancel, confirm: self.confirm, look: look)
         window.initialFirstResponder = destructive ? cancel : self.confirm
     }
@@ -91,6 +97,16 @@ public final class Sheet: NSObject {
         self.answer = nil
         window.sheetParent?.endSheet(window)
         answer?(confirmed)
+    }
+}
+
+/// The sheet's window: Esc and ⌘. cancel it whichever button holds Return.
+@MainActor
+final class SheetPanel: NSPanel {
+    var cancels: () -> Void = {}
+
+    override func cancelOperation(_: Any?) {
+        cancels()
     }
 }
 

@@ -173,6 +173,18 @@ struct Step: Decodable {
     /// marked prompt, as a command it runs moves it), within `seconds` (10 by default): a close sent
     /// before the shell has answered a command's Return finds the cursor still at the prompt.
     var mayEndAProgram: Bool?
+    /// `[name, "stopped" | "gone"]`: harbor's list from now on as it is answered now, that row stopped
+    /// or left out, as the runner lists it after a stop or a delete.
+    var relistAs: [String]?
+    /// `[name, seconds]`: a plain delete of that harbor workspace refused as holding work, in the
+    /// server's sentence naming it, the answer held that long.
+    var refuseDelete: [String]?
+    /// How many Delete Anyway questions wait behind the sheet open, within `seconds` (10 by default).
+    var questionsWaiting: Int?
+    /// The control plane was asked this route (`"DELETE /v1/…/dock"`), within `seconds` (5 by default).
+    var wasAsked: String?
+    /// The control plane was never asked this route.
+    var neverAsked: String?
     /// The button of this title on the sheet now asking, clicked with real mouse events through the
     /// sheet's own window.
     var sheetClick: String?

@@ -245,6 +245,7 @@ public final class WorkspacesView: NSView {
         let request = model.choose(name)
         render()
         list(request)
+        showQuestion()
     }
 
     /// Runs a person's action: busy while it runs.
@@ -312,43 +313,75 @@ public final class WorkspacesView: NSView {
     /// The sheet asking now, held while it shows.
     private var question: Sheet?
 
-    /// Asks before `action` on `name`: the person's terminals in it counted first, from the runner's
-    /// sessions, so the sheet says what ends; a stop that ends none is sent at once.
+    /// Asks before `action` on `name`. A stop counts the person's own terminals in it first, from
+    /// the runner's sessions, so its sheet says what ends; one of their own that ends none is sent
+    /// at once. Nothing is asked while a question is open.
     private func ask(_ action: WorkspacesModel.Action, _ name: String) {
-        guard let client, let project = model.chosen else { return }
-        let era = self.era, handle = model.person.handle
+        guard let client, let project = model.chosen, model.asking == nil else { return }
+        let era = self.era
         byAPerson { [weak self] in
             guard let self else { return }
-            let listing = try? await client.send(.sessions(workspace: name, project: project))
+            let terminals = action == .stop ? await terminals(in: name, project: project, client) : nil
             guard era == self.era, model.chosen == project else { return }
-            let terminals = listing.map { $0.sessions.count { $0.live && $0.opener == handle } }
-            if let now = model.ask(action, name, terminals: terminals) {
-                send(now, name, project: project)
-            } else {
-                showQuestion()
+            switch model.ask(action, name, terminals: terminals) {
+            case let .send(project, name, action)?: send(action, name, project: project)
+            case .question?: showQuestion()
+            case nil: break
             }
         }
     }
 
-    /// The model's question in the library's sheet on the window: confirmed, its action is sent.
+    /// How many of the person's own terminals are live in `name`, as the runner says now; nil when
+    /// it does not answer.
+    private func terminals(in name: String, project: String, _ client: SailClient) async -> Int? {
+        let handle = model.person.handle
+        return (try? await client.send(.sessions(workspace: name, project: project))).map { $0.sessions.count { $0.live && $0.opener == handle } }
+    }
+
+    /// The question open, in the library's sheet on the window: the sheet holds that one question,
+    /// and confirming it sends exactly that, to its own project. A question waiting its turn is
+    /// shown once this one ends.
     private func showQuestion() {
         guard let asked = model.asking, let window, question == nil else { return }
+        if let detail = asked.detail { NSLog("Sail: %@", detail) }
         let sheet = Sheet(title: asked.title, body: asked.body, confirm: asked.confirm, kind: asked.action == .stop ? .destructiveQuiet : .destructive, look: look, titleFont: titleFont)
         question = sheet
         sheet.ask(on: window) { [weak self] confirmed in
             guard let self else { return }
             question = nil
-            if confirmed, let project = model.chosen, let sent = model.confirm() {
-                send(sent.action, sent.name, project: project)
-            } else {
-                model.cancelQuestion()
+            guard confirmed else {
+                model.cancel(asked)
                 render()
+                showQuestion()
+                return
             }
+            confirm(asked)
         }
     }
 
+    /// A confirmed question sent. A stop of the person's own workspace counts their terminals again
+    /// first: one opened while the sheet asked is asked about before it ends.
+    private func confirm(_ asked: WorkspacesModel.Question) {
+        guard let client, asked.action == .stop, let counted = asked.terminals else { return sendConfirmed(asked) }
+        let era = self.era
+        byAPerson { [weak self] in
+            guard let self else { return }
+            let now = await terminals(in: asked.name, project: asked.project, client)
+            guard era == self.era else { return }
+            guard let now, now > counted, model.chosen == asked.project else { return sendConfirmed(asked) }
+            model.cancel(asked)
+            if case .question? = model.ask(.stop, asked.name, terminals: now) { showQuestion() }
+        }
+    }
+
+    private func sendConfirmed(_ asked: WorkspacesModel.Question) {
+        guard let sent = model.confirm(asked) else { return render() }
+        send(sent.action, sent.name, project: sent.project)
+        showQuestion()
+    }
+
     /// Sends `action` on `name` in `project`, its row waiting; its answer lists the project again, asks
-    /// Delete Anyway in the server's words, or says the refusal over its page.
+    /// Delete Anyway in the server's words (after any question open), or says the refusal over its page.
     private func send(_ action: WorkspacesModel.Action, _ name: String, project: String) {
         guard let client else { return }
         render()
@@ -363,9 +396,14 @@ public final class WorkspacesView: NSView {
             }
             guard era == self.era else { return }
             let request = model.changed(action, name, project: project, answer)
-            if model.asking != nil { showQuestion() }
             if let request { list(request) }
+            showQuestion()
         }
+    }
+
+    /// Delete Anyway questions waiting behind the one open, for the drive.
+    package var questionsWaiting: Int {
+        model.questionsWaiting
     }
 
     /// Where a person's action sends the keys: into the name field (New Workspace, a refusal), or

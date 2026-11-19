@@ -425,7 +425,7 @@ final class SailRowView: NSTableRowView {
 
     override func menu(for _: NSEvent) -> NSMenu? {
         guard let item, !item.actions.isEmpty else { return nil }
-        return RowCell.menu(item.actions)
+        return RowMenu(item.actions, look: look)
     }
 }
 
@@ -516,7 +516,7 @@ final class RowCell: NSView {
         if rowStyle != .sidebar, runs.contains(where: { !$0.action.onRow }) {
             let more = SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil)
             buttons.append(more)
-            moreMenu = Self.menu(item.actions)
+            moreMenu = RowMenu(item.actions, look: look)
             more.target = MenuOpener.shared
             more.action = #selector(MenuOpener.open(_:))
             more.menu = moreMenu
@@ -598,21 +598,44 @@ final class RowCell: NSView {
     }
 
     /// Every action of a row, as its ⋯ and its right-click show them.
-    static func menu(_ actions: [SailList.Action]) -> NSMenu {
-        let menu = NSMenu()
+}
+
+/// A row's menu, its actions in order with a separator before each group: a destructive one
+/// (Delete) in the look's error ink, and plain while it is highlighted, where red on the selection
+/// reads badly.
+@MainActor
+final class RowMenu: NSMenu, NSMenuDelegate {
+    private let ink: NSColor
+
+    init(_ actions: [SailList.Action], look: Look) {
+        ink = NSColor(Tint(look.error))
+        super.init(title: "")
+        delegate = self
         for action in actions {
-            if action.startsGroup, !menu.items.isEmpty { menu.addItem(.separator()) }
+            if action.startsGroup, !items.isEmpty { addItem(.separator()) }
             let run = Run(action)
             let entry = NSMenuItem(title: action.title, action: #selector(Run.go(_:)), keyEquivalent: action.key)
             entry.keyEquivalentModifierMask = action.modifiers
             entry.target = run
             entry.representedObject = run
-            if action.destructive {
-                entry.attributedTitle = NSAttributedString(string: action.title, attributes: [.font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.systemRed])
-            }
-            menu.addItem(entry)
+            addItem(entry)
         }
-        return menu
+        paint(highlighted: nil)
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) {
+        fatalError("a row's menu is made from its actions")
+    }
+
+    private func paint(highlighted: NSMenuItem?) {
+        for item in items where (item.representedObject as? Run)?.action.destructive == true {
+            item.attributedTitle = item === highlighted ? nil : NSAttributedString(string: item.title, attributes: [.font: NSFont.menuFont(ofSize: 0), .foregroundColor: ink])
+        }
+    }
+
+    func menu(_: NSMenu, willHighlight item: NSMenuItem?) {
+        paint(highlighted: item)
     }
 }
 

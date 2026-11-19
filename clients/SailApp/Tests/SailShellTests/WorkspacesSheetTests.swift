@@ -34,7 +34,8 @@ import Testing
             let cancel = content.convert(sheet.cancel.alignmentRect(forFrame: sheet.cancel.frame), from: sheet.cancel.superview)
             let confirm = content.convert(sheet.confirm.alignmentRect(forFrame: sheet.confirm.frame), from: sheet.confirm.superview)
             #expect(near(confirm.minX - cancel.maxX, 8) && near(confirm.maxX, content.bounds.maxX - 16), "Cancel at \(cancel), \(asked.confirm) at \(confirm)")
-            #expect(sheet.confirm.keyEquivalent == "" && sheet.window.initialFirstResponder === sheet.cancel, "\(asked.confirm) takes Return, or the keys do not start on Cancel")
+            #expect(sheet.confirm.keyEquivalent == "" && sheet.cancel.keyEquivalent == "\r", "\(asked.confirm) takes Return, or Return does not cancel")
+            #expect(sheet.window.initialFirstResponder === sheet.cancel && sheet.window.title == asked.title, "the keys do not start on Cancel, or VoiceOver cannot name the sheet")
         }
     }
 
@@ -48,8 +49,8 @@ import Testing
         #expect(sheet.cancel.look == .dark && sheet.confirm.look == .dark, "the sheet's buttons kept the light look")
     }
 
-    /// Delete asks with the person's one live terminal in dock counted; confirmed and refused for the
-    /// work dock holds, it asks Delete Anyway in the server's own words.
+    /// Delete asks what it does; confirmed and refused for the work dock holds, it asks Delete Anyway
+    /// in the server's own words; Esc cancels it.
     @Test func deleteAsksThenAsksAnywayInTheServersWords() async throws {
         let server = RecordedServer([
             try Exchange("projects"), try Exchange("workspaces-three"), try Exchange("workspace-sessions"), try Exchange("refusal-workspace-holds-work"),
@@ -61,13 +62,13 @@ import Testing
         view.project.on(.delete("dock"))
         #expect(await RunnerTabTests.until { window.attachedSheet != nil }, "Delete asked nothing")
         let asked = Driverless.words(window.attachedSheet?.contentView)
-        #expect(asked.contains("Delete dock?") && asked.contains("your terminal in it ends"), "\(asked)")
+        #expect(asked.contains("Delete dock?") && asked.contains("Sail asks again before deleting it"), "\(asked)")
         Driverless.button("Delete Workspace", in: window.attachedSheet?.contentView)?.performClick(nil)
         #expect(await RunnerTabTests.until { Driverless.words(window.attachedSheet?.contentView).contains("Delete dock anyway?") }, "a delete refused for its work did not ask again")
         let anyway = Driverless.words(window.attachedSheet?.contentView)
         #expect(anyway.contains("holds work: app holds uncommitted changes.") && !anyway.contains("--force"), "\(anyway)")
-        Driverless.button("Cancel", in: window.attachedSheet?.contentView)?.performClick(nil)
-        #expect(await RunnerTabTests.until { window.attachedSheet == nil && !view.busy }, "Cancel left the sheet")
+        window.attachedSheet?.cancelOperation(nil)
+        #expect(await RunnerTabTests.until { window.attachedSheet == nil && !view.busy }, "Esc left the sheet up")
     }
 }
 

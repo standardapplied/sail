@@ -76,6 +76,33 @@ actor GoldenDesk: Transport {
         held["GET /v1/projects/harbor/workspaces"] = .zero
     }
 
+    /// From now on harbor's list is the one answered now with `name` stopped, or left out ("gone").
+    func relist(_ name: String, as change: String) throws {
+        let route = "GET /v1/projects/harbor/workspaces"
+        guard let answer = answers[route], var body = try JSONSerialization.jsonObject(with: answer.body) as? [String: Any], var rows = body["workspaces"] as? [[String: Any]] else { return }
+        if change == "gone" {
+            rows.removeAll { $0["name"] as? String == name }
+        } else {
+            rows = rows.map { row in
+                guard row["name"] as? String == name else { return row }
+                var changed = row
+                changed["state"] = change
+                return changed
+            }
+        }
+        body["workspaces"] = rows
+        answers[route] = HTTPResponse(status: answer.status, headers: answer.headers, body: try JSONSerialization.data(withJSONObject: body))
+    }
+
+    /// From now on a plain delete of `name` is refused as holding work, in the recorded sentence for
+    /// dock with its name replaced, the answer held `after`.
+    func refuseDelete(_ name: String, after: Duration) throws {
+        let refusal = try Exchange("refusal-workspace-holds-work")
+        let said = String(decoding: refusal.body, as: UTF8.self).replacingOccurrences(of: "dock", with: name)
+        answers["DELETE /v1/projects/harbor/workspaces/\(name)"] = HTTPResponse(status: refusal.status, headers: refusal.headers, body: Data(said.utf8))
+        held["DELETE /v1/projects/harbor/workspaces/\(name)"] = after
+    }
+
     /// From now on `project`'s workspaces are listed as none.
     func answerNoRows(_ project: String) throws {
         let exchange = try Exchange("workspaces-three")
@@ -181,6 +208,35 @@ extension Driver {
             } catch {
                 return (false, "the rows: \(error)")
             }
+        }
+        if let change = step.relistAs, change.count == 2 {
+            do {
+                try await GoldenDesk.shared.relist(change[0], as: change[1])
+                return (true, "")
+            } catch {
+                return (false, "the list could not be changed: \(error)")
+            }
+        }
+        if let refusal = step.refuseDelete, refusal.count == 2, let seconds = Int(refusal[1]) {
+            do {
+                try await GoldenDesk.shared.refuseDelete(refusal[0], after: .seconds(seconds))
+                return (true, "")
+            } catch {
+                return (false, "the refusal: \(error)")
+            }
+        }
+        if let count = step.questionsWaiting {
+            let waiting = await waitUntil(step.seconds ?? 10) { pane.questionsWaiting == count }
+            return (waiting, "\(pane.questionsWaiting) questions wait behind the sheet")
+        }
+        if let route = step.wasAsked {
+            let found = await waitUntilAsync(step.seconds ?? 5) { await GoldenDesk.shared.asked.contains { $0.route == route } }
+            let routes = await GoldenDesk.shared.asked.map(\.route)
+            return (found, "asked: \(routes.filter { $0.hasPrefix("DELETE") || $0.hasSuffix("/stop") })")
+        }
+        if let route = step.neverAsked {
+            let routes = await GoldenDesk.shared.asked.map(\.route)
+            return (!routes.contains(route), "asked: \(routes.filter { $0.hasPrefix("DELETE") || $0.hasSuffix("/stop") })")
         }
         if let wanted = step.mayEndAProgram {
             let said = await waitUntil(step.seconds ?? 10) { self.workbench.focused?.mayEndAProgram == wanted }
