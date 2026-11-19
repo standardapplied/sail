@@ -459,7 +459,6 @@ final class RowCell: NSView {
         actions.setViews(([note, item.accessory].compactMap { $0 } as [NSView]) + buttons, in: .trailing)
         if let note { actions.setCustomSpacing(6 + 4, after: note) }
         actions.spacing = 6
-        actions.setHuggingPriority(.required, for: .horizontal)
         actions.alphaValue = 0
         actions.isHidden = true
         for view in [content, actions] as [NSView] {

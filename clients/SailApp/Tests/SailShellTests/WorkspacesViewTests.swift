@@ -119,34 +119,46 @@ import Testing
         }
     }
 
-    /// The name's column takes what the pill and the actions leave; a name as long as the server
-    /// allows (63) is cut short before the pill, never under it, at the least width drawn wide and at
-    /// the narrowest card, where a row drops its owner's column and says whose it is in its place.
-    @Test func theLongestNameStopsBeforeThePill() throws {
-        let name = String(repeating: "w", count: 63)
+    /// The rows as the frames draw them, at every width they are drawn: the narrowest card, the
+    /// least width drawn wide, and the drive's (a 1024 pt window). With a short name and the longest
+    /// the server allows (63), each row's line runs to its actions column, its pill sits where the
+    /// column puts it (the same x on every row: after the name column wide, at the line's end
+    /// narrow), a name is cut short before the pill, never under it, and nothing wraps; narrow, a row
+    /// drops its owner's column and says whose it is in its place.
+    @Test func theRowsKeepTheirColumnsAtEveryWidth() throws {
+        let long = String(repeating: "w", count: 63)
         let page = try #require(Self.page([
-            WorkspaceRow(name: name, instance: "harbor-" + name, state: .known(.running), owner: "uday"),
-            WorkspaceRow(name: "x" + name.dropFirst(), instance: "harbor-x", state: .known(.stopped), owner: "ana"),
+            WorkspaceRow(name: "dock", instance: "harbor-dock", state: .known(.running), owner: "uday"),
+            WorkspaceRow(name: long, instance: "harbor-" + long, state: .known(.running), owner: "uday"),
+            WorkspaceRow(name: "x" + long.dropFirst(), instance: "harbor-x", state: .known(.stopped), owner: "ana"),
         ]))
-        for (width, narrow) in [(ProjectView.wide, false), (Self.narrowestCard, true)] {
+        let drive = 1024.0 - Rail.width - 4 - LeftPanel.width.standard
+        for (width, narrow) in [(Self.narrowestCard, true), (ProjectView.wide, false), (drive, false)] {
             let (project, window) = try Self.project(width: width)
             defer { window.orderOut(nil) }
             project.render(page)
             project.layoutSubtreeIfNeeded()
             #expect(project.narrow == narrow, "\(width) pt is drawn \(project.narrow ? "narrow" : "wide")")
             let lines = Self.lines(project.list)
-            #expect(lines.count == 2, "\(width) pt: \(lines.count) rows drawn")
+            #expect(lines.count == 3, "\(width) pt: \(lines.count) rows drawn")
+            var pills: [NSRect] = []
             for line in lines {
-                let pill = line.convert(line.pill.alignmentRect(forFrame: line.pill.frame), from: line.pill.superview)
-                let row = try #require(line.superview).convert(line.frame, to: nil), cell = try #require(line.superview).convert(try #require(line.superview).bounds, to: nil)
+                let cell = try #require(line.superview)
+                let pill = cell.convert(line.pill.alignmentRect(forFrame: line.pill.frame), from: line.pill.superview)
+                let reach = Double(cell.bounds.width) - RowStyle.list.trailing - (narrow ? ProjectView.narrowActionsColumn : ProjectView.actionsColumn)
+                #expect(near(line.frame.maxX, reach), "\(width) pt: \(line.title.stringValue.prefix(12))'s line ends at \(line.frame.maxX), not at its actions column \(reach)")
                 for label in [line.title, line.place] {
-                    let words = line.convert(label.alignmentRect(forFrame: label.frame), from: label.superview)
+                    let words = cell.convert(label.alignmentRect(forFrame: label.frame), from: label.superview)
                     #expect(words.maxX <= pill.minX + 0.5 && words.width > 0, "\(width) pt: \(label.stringValue.prefix(12))… ends at \(words.maxX), the pill starts at \(pill.minX)")
                 }
-                #expect(line.convert(pill, to: nil).maxX <= row.maxX + 0.5 && row.maxX <= cell.maxX + 0.5, "\(width) pt: the pill (to \(line.convert(pill, to: nil).maxX)) runs past its line (to \(row.maxX)) or the line past its cell (to \(cell.maxX))")
+                #expect(line.place.frame.height <= line.title.frame.height + 0.5, "\(width) pt: \(line.place.stringValue.prefix(12)) wraps")
+                #expect(pill.maxX <= line.frame.maxX + 0.5, "\(width) pt: the pill runs past its line")
                 #expect((line.whose == nil) == narrow)
+                pills.append(pill)
             }
-            if narrow { #expect(lines.map(\.place.stringValue) == ["harbor-" + name, "ana's"]) }
+            let edges = pills.map { narrow ? $0.maxX : $0.minX }
+            #expect(edges.allSatisfy { near($0, edges[0]) }, "\(width) pt: the pills' \(narrow ? "ends" : "starts") are \(edges)")
+            if narrow { #expect(lines.map(\.place.stringValue) == ["harbor-dock", "harbor-" + long, "ana's"]) }
         }
     }
 

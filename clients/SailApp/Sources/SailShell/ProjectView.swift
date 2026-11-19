@@ -18,6 +18,9 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     }
 
     static let padding = (top: 26.0, sides: 32.0, bottom: 20.0), listGap = 18.0, footGap = 12.0, actionsColumn = 214.0
+    /// The narrow rows' actions column: room for Start and Open and ⋯, so a row's words and pill
+    /// run to it as the narrow frame draws them.
+    static let narrowActionsColumn = 144.0
     /// The room between the name's column and the buttons (the design's `.ph` gap).
     static let headGap = 20.0
     /// The least width drawn wide: the wide row's columns, insets and frame, and 150 pt for a name.
@@ -265,7 +268,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
 
     /// The list's entries: Yours (the create row first), then Other people's.
     private func fill(_ table: WorkspacesModel.Table) {
-        list.actionsColumn = narrow ? nil : Self.actionsColumn
+        list.actionsColumn = narrow ? Self.narrowActionsColumn : Self.actionsColumn
         let creating = table.creating == nil ? 0 : 1
         var entries: [SailList.Entry] = [.head("Yours", count: table.yours.count + creating)]
         if let creating = table.creating {
