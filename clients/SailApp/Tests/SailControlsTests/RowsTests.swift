@@ -36,9 +36,9 @@ import Testing
         return ControlsTests.window(holding: list, on: base)
     }
 
-    /// A list's rows: the head's tint, the hairline above a row and only one pixel of it; the
-    /// chosen row's fill at full strength while its list has the keys and at half without them,
-    /// with the 2 × 24 bar; hover's fill. At 1x and 2x, both looks.
+    /// A list's rows on paper: the head is its eyebrow alone, with no band; the hairline above a row
+    /// is one pixel; the chosen row is not filled, with the keys or without, and is found by its
+    /// 2 × 24 bar; the hovered row is not filled. At 1x and 2x, both looks.
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
     func aListsRowsAreTheSheets(_ name: String, _ look: Look) throws {
         let canvas = NSColor(Tint(look.canvas))
@@ -46,36 +46,36 @@ import Testing
         let (window, backdrop) = Self.shown(list)
         defer { window.orderOut(nil) }
         let head = list.rect(ofRow: 0), pier = list.rect(ofRow: 1), dock = list.rect(ofRow: 2)
-        #expect(near(head.height, 30) && near(pier.height, 53) && near(dock.height, 53), "\(name): rows \(head.height), \(pier.height), \(dock.height)")
+        #expect(near(head.height, 34) && near(pier.height, 53) && near(dock.height, 53), "\(name): rows \(head.height), \(pier.height), \(dock.height)")
         list.choose("dock")
         let chosen = try Self.row(list, 2)
         for scale in [1.0, 2.0] {
-            let bare = ControlsTests.swatch(canvas, [], scale: scale), hover = ControlsTests.swatch(canvas, [NSColor(look.fillHover)], scale: scale)
-            let tint = backdrop.colour(at: NSPoint(x: 200, y: head.midY), scale: scale)
-            #expect(ControlsTests.tells(tint, hover, from: bare), "\(name) at \(scale)x: the head is \(tint)")
+            let bare = ControlsTests.swatch(canvas, [], scale: scale), grey = ControlsTests.swatch(canvas, [NSColor(look.fillPressed)], scale: scale)
+            let accent = ControlsTests.swatch(canvas, [NSColor(Tint(look.accent))], scale: scale)
+            let band = backdrop.colour(at: NSPoint(x: 200, y: head.midY), scale: scale)
+            #expect(ControlsTests.tells(band, bare, from: grey), "\(name) at \(scale)x: the head has a band, \(band)")
             let line = backdrop.colour(at: NSPoint(x: 200, y: pier.minY + 0.5), scale: scale), under = backdrop.colour(at: NSPoint(x: 200, y: pier.minY + 1.5), scale: scale)
-            #expect(ControlsTests.tells(line, ControlsTests.swatch(canvas, [NSColor(look.gridLine)], scale: scale), from: bare) && ControlsTests.tells(under, bare, from: hover),
+            #expect(ControlsTests.tells(line, ControlsTests.swatch(canvas, [NSColor(look.gridLine)], scale: scale), from: bare) && ControlsTests.tells(under, bare, from: grey),
                     "\(name) at \(scale)x: the hairline \(line), under it \(under)")
             for emphasized in [true, false] {
                 chosen.isEmphasized = emphasized
                 let fill = backdrop.colour(at: NSPoint(x: 200, y: dock.midY), scale: scale), bar = backdrop.colour(at: NSPoint(x: 0.5, y: dock.midY), scale: scale)
-                let full = ControlsTests.swatch(canvas, [NSColor(look.fillSelected)], scale: scale), half = ControlsTests.swatch(canvas, [NSColor(look.fillSelectedQuiet)], scale: scale)
-                #expect(ControlsTests.tells(fill, emphasized ? full : half, from: emphasized ? half : full), "\(name) at \(scale)x, keys \(emphasized): the chosen fill is \(fill)")
-                #expect(ControlsTests.tells(bar, ControlsTests.swatch(canvas, [NSColor(Tint(look.accent))], scale: scale), from: emphasized ? full : half), "\(name): the bar is \(bar)")
+                #expect(ControlsTests.tells(fill, bare, from: grey), "\(name) at \(scale)x, keys \(emphasized): the chosen row is filled, \(fill)")
+                #expect(ControlsTests.tells(bar, accent, from: bare), "\(name): the bar is \(bar)")
                 let outside = backdrop.colour(at: NSPoint(x: 0.5, y: dock.minY + 1.5 + 13), scale: scale)
-                #expect(ControlsTests.tells(outside, emphasized ? full : half, from: ControlsTests.swatch(canvas, [NSColor(Tint(look.accent))], scale: scale)), "\(name): the bar is longer than 24 pt")
+                #expect(ControlsTests.tells(outside, bare, from: accent), "\(name): the bar is longer than 24 pt")
             }
             let rest = try Self.row(list, 1)
             rest.hovered = true
             let hovered = backdrop.colour(at: NSPoint(x: 200, y: pier.midY), scale: scale)
-            #expect(ControlsTests.tells(hovered, hover, from: bare), "\(name) at \(scale)x: the hovered row is \(hovered)")
+            #expect(ControlsTests.tells(hovered, bare, from: grey), "\(name) at \(scale)x: the hovered row is filled, \(hovered)")
             rest.hovered = false
         }
+        #expect(chosen.paint.bar && chosen.paint.strong && chosen.drawnMarks == [.accentLine], "\(name): the chosen row is not found by its bar and weight")
     }
 
-    /// The sidebar's rows, as the left panel draws a project: 30 pt, in 6 pt from each side with no
-    /// gap between rows, the hovered row's fill, the chosen row's fill and the bar at the list's own
-    /// edge, 2 × 14.
+    /// The sidebar's rows, as the left panel draws a project: 30 pt with no gap between rows, no fill
+    /// hovered or chosen, and the chosen row's bar at the list's own edge, 2 × 14.
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
     func theSidebarsRowsAreTheSheets(_ name: String, _ look: Look) throws {
         let canvas = NSColor(Tint(look.canvas))
@@ -90,19 +90,17 @@ import Testing
         hovered.hovered = true
         let chosen = try Self.row(list, 1)
         chosen.isEmphasized = true
-        let bare = ControlsTests.swatch(canvas, [], scale: 2), hover = ControlsTests.swatch(canvas, [NSColor(look.fillHover)], scale: 2)
-        let full = ControlsTests.swatch(canvas, [NSColor(look.fillSelected)], scale: 2)
-        #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: 5.5, y: dock.midY), scale: 2), bare, from: full), "\(name): the fill reaches into the margin")
-        #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: 6.5, y: dock.midY), scale: 2), full, from: bare), "\(name): the fill starts later than 6 pt in")
-        #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: 100, y: dock.minY + 0.5), scale: 2), full, from: bare), "\(name): a gap between the rows")
-        #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: 100, y: dock.midY), scale: 2), full, from: bare))
+        let bare = ControlsTests.swatch(canvas, [], scale: 2), grey = ControlsTests.swatch(canvas, [NSColor(look.fillPressed)], scale: 2)
+        for (x, y) in [(6.5, Double(dock.midY)), (100, Double(dock.minY) + 0.5), (100, Double(dock.midY))] {
+            #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: x, y: y), scale: 2), bare, from: grey), "\(name): the chosen row is filled at \(x), \(y)")
+        }
         #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: 0.5, y: dock.midY), scale: 2), ControlsTests.swatch(canvas, [NSColor(Tint(look.accent))], scale: 2), from: bare))
         let accent = ControlsTests.swatch(canvas, [NSColor(Tint(look.accent))], scale: 2)
         #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: 0.5, y: dock.minY + 7.5), scale: 2), bare, from: accent), "\(name): the bar is longer than 14 pt")
         #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: 0.5, y: dock.minY + 8.5), scale: 2), accent, from: bare), "\(name): the bar is shorter than 14 pt")
         let leadingCorner = backdrop.colour(at: NSPoint(x: 0.25, y: dock.minY + 8.25), scale: 2), trailingCorner = backdrop.colour(at: NSPoint(x: 1.75, y: dock.minY + 8.25), scale: 2)
         #expect(leadingCorner.near(accent) && !trailingCorner.near(accent), "\(name): the bar's corners are \(leadingCorner) and \(trailingCorner), not square at the edge and rounded away from it")
-        #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: 100, y: pier.midY), scale: 2), hover, from: bare), "\(name): the hovered row's fill")
+        #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: 100, y: pier.midY), scale: 2), bare, from: grey), "\(name): the hovered row is filled")
     }
 
     /// A sidebar row lays a project out as the left panel does: the tile after the disclosure's

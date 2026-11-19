@@ -1,7 +1,8 @@
 import AppKit
 import SailLook
 
-/// A project's tile (`TilePaint`): its lower-case initial in mono on its hue, 20 pt square.
+/// A project's tile (`TilePaint`): its lower-case initial in mono in an outlined well, 20 pt square;
+/// the chosen project's in full ink.
 @MainActor
 public final class Tile: NSView {
     public var look: Look {
@@ -10,6 +11,10 @@ public final class Tile: NSView {
 
     private let name: String
     private let mono: LabelFont
+    /// The chosen project's: outlined and lettered in full ink.
+    package var chosen = false {
+        didSet { if chosen != oldValue { needsDisplay = true } }
+    }
 
     public init(_ name: String, look: Look, mono: LabelFont) {
         self.name = name
@@ -33,7 +38,7 @@ public final class Tile: NSView {
     }
 
     override public func draw(_: NSRect) {
-        let paint = TilePaint(look: look), points = TilePaint.points
+        let paint = TilePaint(look: look, chosen: chosen), points = TilePaint.points
         Draw.box(bounds, radius: TilePaint.radius, fill: paint.fill, edge: paint.ring)
         if case let .icon(icon) = TilePaint.mark {
             return Draw.icon(icon, in: bounds.insetBy(dx: 3, dy: 3), ink: paint.ink)
@@ -59,8 +64,8 @@ public final class SidebarRowCell: NSView {
         didSet { if stale != oldValue { repaint() } }
     }
 
-    let tile: Tile
-    let label = NSTextField(labelWithString: "")
+    package let tile: Tile
+    package let label = NSTextField(labelWithString: "")
     let pill: Pill?
     private let name: String
 
@@ -100,16 +105,29 @@ public final class SidebarRowCell: NSView {
         nil
     }
 
+    /// The name at full weight: the project is chosen, or under the pointer.
+    private var strong = false
+
     private func repaint() {
-        label.attributedStringValue = Draw.text(name, .systemFont(ofSize: Look.Step.callout.points, weight: .medium), stale ? look.textSecondary : look.text).cut(.byTruncatingTail)
+        let weight: NSFont.Weight = strong ? .semibold : .medium
+        label.attributedStringValue = Draw.text(name, .systemFont(ofSize: Look.Step.callout.points, weight: weight), stale ? look.textSecondary : look.text).cut(.byTruncatingTail)
         tile.look = look
         pill?.look = look
     }
 }
 
+extension SidebarRowCell: MarkedRow {
+    package func mark(chosen: Bool, strong: Bool) {
+        tile.chosen = chosen
+        guard strong != self.strong else { return }
+        self.strong = strong
+        repaint()
+    }
+}
+
 extension Tile: Marked {
     package var drawnMarks: [Mark] {
-        let paint = TilePaint(look: look)
-        return look.marks(fill: paint.fill) + look.marks(line: paint.ink) + look.marks(line: paint.ring)
+        let paint = TilePaint(look: look, chosen: chosen)
+        return look.marks(fill: paint.fill, area: TilePaint.side * TilePaint.side) + look.marks(line: paint.ink) + look.marks(line: paint.ring)
     }
 }

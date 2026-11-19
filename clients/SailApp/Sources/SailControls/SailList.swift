@@ -188,6 +188,15 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         return item
     }
 
+    /// The row drawing item `id`, and how it is drawn: for the calm tests, which find the chosen row
+    /// by its bar and its weight.
+    package func row(_ id: String) -> (view: NSTableRowView, paint: RowPaint)? {
+        guard let index = entries.indices.first(where: { item(at: $0)?.id == id }),
+              let row = rowView(atRow: index, makeIfNecessary: true) as? SailRowView
+        else { return nil }
+        return (row, row.paint)
+    }
+
     /// The chosen item's id.
     public var chosen: String? {
         item(at: selectedRow)?.id
@@ -260,7 +269,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
 
     public func tableView(_: NSTableView, heightOfRow row: Int) -> CGFloat {
         let hairline = rowStyle.hairline && row > 0 ? 1.0 : 0
-        guard let item = item(at: row) else { return RowStyle.groupHeight + hairline }
+        guard let item = item(at: row) else { return rowStyle.head + hairline }
         return (item.height ?? rowStyle.height) + (rowStyle.hairline ? 1 : 0)
     }
 
@@ -339,7 +348,7 @@ final class SailRowView: NSTableRowView {
     }
 
     var paint: RowPaint {
-        item?.paint ?? RowPaint(RowState(chosen: isSelected, emphasized: isEmphasized, hovered: hovered), look: look)
+        item?.paint ?? RowPaint(RowState(chosen: isSelected, emphasized: isEmphasized, hovered: hovered))
     }
 
     /// The chosen row's bar, which says which row is chosen.
@@ -371,6 +380,7 @@ final class SailRowView: NSTableRowView {
         let paint = self.paint
         if numberOfColumns > 0, let cell = view(atColumn: 0) as? RowCell {
             cell.show(paint.actions, chosen: isSelected, keys: isEmphasized)
+            (cell.content as? MarkedRow)?.mark(chosen: isSelected, strong: paint.strong)
         }
         needsDisplay = true
     }
@@ -388,19 +398,11 @@ final class SailRowView: NSTableRowView {
     override func drawBackground(in _: NSRect) {
         let content = NSRect(x: 0, y: top, width: Double(bounds.width), height: Double(bounds.height) - top)
         if top > 0 {
-            NSColor(look.gridLine).setFill()
+            NSColor(item == nil ? look.separator : look.gridLine).setFill()
             NSBezierPath(rect: NSRect(x: 0, y: 0, width: Double(bounds.width), height: 1)).fill()
         }
-        guard item != nil else {
-            guard rowStyle != .sidebar else { return }
-            NSColor(look.groupHead).setFill()
-            return NSBezierPath(rect: content).fill()
-        }
-        let paint = self.paint, area = content.insetBy(dx: rowStyle.margin, dy: 0)
-        if let fill = paint.fill {
-            NSColor(fill).setFill()
-            NSBezierPath(roundedRect: area, xRadius: rowStyle.radius, yRadius: rowStyle.radius).fill()
-        }
+        guard item != nil else { return }
+        let paint = self.paint
         guard paint.bar else { return }
         NSColor(barInk).setFill()
         let rightToLeft = userInterfaceLayoutDirection == .rightToLeft, half = RowStyle.barWidth / 2
@@ -756,7 +758,12 @@ final class ProgressLine: NSView, Marked {
 
 extension SailRowView: Marked {
     package var drawnMarks: [Mark] {
-        let paint = paint
-        return look.marks(fill: paint.fill) + (paint.bar ? look.marks(line: barInk) : [])
+        paint.bar ? look.marks(line: barInk) : []
     }
+}
+
+/// A row's content that marks it chosen without a fill, as paper and ink does: its name at full
+/// weight while `strong` (chosen or under the pointer), and its own chosen mark.
+@MainActor package protocol MarkedRow: AnyObject {
+    func mark(chosen: Bool, strong: Bool)
 }

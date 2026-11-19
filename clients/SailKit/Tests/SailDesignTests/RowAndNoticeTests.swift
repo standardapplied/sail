@@ -8,45 +8,36 @@ import Testing
 
 /// Rows, tiles, banners, empty tiles and where a tooltip goes, as the component sheet draws them.
 @Suite struct RowAndNoticeTests {
-    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
-    func eachRowStateIsTheSheets(_ name: String, _ look: Look) {
-        let rest = RowPaint(RowState(), look: look)
-        #expect(rest.fill == nil && !rest.bar && !rest.actions)
-        let hovered = RowPaint(RowState(hovered: true), look: look)
-        #expect(hovered.fill == look.fillHover && !hovered.bar && hovered.actions)
-        let focused = RowPaint(RowState(chosen: true, emphasized: true, hovered: true), look: look)
-        #expect(focused.fill == look.fillSelected && focused.bar && focused.actions, "\(name): the chosen row of the list with the keys")
-        let quiet = RowPaint(RowState(chosen: true), look: look)
-        #expect(quiet.fill == look.fillSelectedQuiet && quiet.bar && quiet.actions, "\(name): the chosen row of a list without the keys")
-        #expect(look.fillSelectedQuiet.alpha < look.fillSelected.alpha && look.fillSelectedQuiet.rgb == look.fillSelected.rgb)
-    }
-
-    /// Calm: no row is filled with the accent at any strength; a row being created has no fill and
-    /// its line is teal (`info`, in the view); a refused one has no fill and no bar.
-    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
-    func noRowIsFilledWithTheAccent(_ name: String, _ look: Look) {
-        let states = [RowState(), RowState(hovered: true), RowState(chosen: true), RowState(chosen: true, emphasized: true, hovered: true)]
-        let paints = states.map { RowPaint($0, look: look) } + [.naming(look), .refused, .creating]
-        #expect(paints.allSatisfy { $0.fill?.rgb != look.accent }, "\(name): a row is filled with the accent")
-        #expect(RowPaint.refused.fill == nil && !RowPaint.refused.bar && RowPaint.creating.fill == nil && RowPaint.creating.progress)
-        #expect(RowPaint.naming(look).fill == look.fillSelectedQuiet && RowPaint.naming(look).bar)
+    /// On paper no row is filled: chosen, it has the bar and its name at full weight; under the
+    /// pointer, its name at full weight and its actions; the create row open has the bar; refused,
+    /// nothing; under way, its progress line.
+    @Test func eachRowStateIsTheSheets() {
+        let rest = RowPaint(RowState())
+        #expect(!rest.bar && !rest.strong && !rest.actions)
+        let hovered = RowPaint(RowState(hovered: true))
+        #expect(!hovered.bar && hovered.strong && hovered.actions)
+        for chosen in [RowPaint(RowState(chosen: true)), RowPaint(RowState(chosen: true, emphasized: true, hovered: true))] {
+            #expect(chosen.bar && chosen.strong && chosen.actions, "the chosen row is not found by its bar and its weight")
+        }
+        #expect(RowPaint.naming.bar && !RowPaint.refused.bar && !RowPaint.refused.actions && RowPaint.creating.progress && RowPaint.creating.actions)
     }
 
     @Test func theTwoRowStylesAreTheSheets() {
         let sidebar = RowStyle.sidebar, list = RowStyle.list
         #expect([sidebar.height, sidebar.margin, sidebar.leading, sidebar.radius, sidebar.bar] == [30, 6, 6, 5, 14])
+        #expect(list.head == 34 && sidebar.head == 30 && Look.Tracking.eyebrow == 0.2)
         #expect(sidebar.trailing == 6 && RowStyle.disclosure == 12 && RowStyle.gap == 7)
         #expect([list.height, list.margin, list.leading, list.trailing, list.radius, list.bar] == [52, 0, 20, 12, 0, 24])
-        #expect(list.hairline && !sidebar.hairline && RowStyle.groupHeight == 30 && RowStyle.barWidth == 2)
+        #expect(list.hairline && !sidebar.hairline && RowStyle.barWidth == 2)
     }
 
-    /// Every project's tile is the same neutral well (the owner, 19 Nov 2026): the secondary ink on
-    /// a quiet ink fill with a hairline ring, and no accent; the initial is drawn, not an icon.
+    /// Every project's tile is the same outlined well (the owner, 19 Nov 2026): no fill, the strong
+    /// hairline, the letter quiet; the chosen project's is outlined and lettered in full ink.
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
-    func everyTileIsTheSameNeutralWell(_ name: String, _ look: Look) {
-        let tile = TilePaint(look: look)
-        #expect(tile.ink == look.textSecondary && tile.fill.rgb == look.ink && tile.ring == look.separator, "\(name)")
-        #expect(tile.fill == look.well && tile.ink.rgb != look.accent && tile.fill.rgb != look.accent)
+    func everyTileIsTheSameOutlinedWell(_ name: String, _ look: Look) {
+        let tile = TilePaint(look: look), chosen = TilePaint(look: look, chosen: true)
+        #expect(tile.fill == nil && tile.ring == look.separatorStrong && tile.ink == look.textSecondary, "\(name)")
+        #expect(chosen.fill == nil && chosen.ring == look.text && chosen.ink == look.text, "\(name): the chosen well")
         #expect(TilePaint.mark == .initial && [TilePaint.side, TilePaint.points, TilePaint.radius] == [20, 11, 4])
     }
 

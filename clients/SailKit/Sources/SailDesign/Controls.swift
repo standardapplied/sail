@@ -113,7 +113,7 @@ public struct ButtonPaint: Equatable, Sendable {
             (fill, edge, label, bold) = (pressed ? look.fillPressed : Tint(look.surface), hovered ? look.text : look.separatorStrong, look.text, false)
             spinner = .plain(look)
         case .quiet:
-            (fill, edge, label, bold) = (pressed ? look.fillPressed : hovered ? look.fillHover : nil, nil, hovered ? look.text : look.textSecondary, false)
+            (fill, edge, label, bold) = (pressed ? look.fillPressed : nil, nil, hovered ? look.text : look.textSecondary, false)
             spinner = .plain(look)
         case .destructiveQuiet:
             (fill, edge, label, bold) = (Tint(look.surface), hovered ? Tint(look.error) : look.separatorStrong, Tint(look.error), false)

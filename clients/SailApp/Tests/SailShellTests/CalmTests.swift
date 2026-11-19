@@ -7,11 +7,13 @@ import SailWorkbench
 import Testing
 
 /// The calm look, counted by token so it cannot erode: terracotta fills only the one primary action
-/// in view and marks where a person acts; no row, tab or rail item is tinted with it. The numbers
-/// are the approved page's: 4 marks on a plain Workspaces page, 3 on a terminal page with a split.
+/// in view and marks where a person acts; no row, tab or rail item is tinted with it; and, paper and
+/// ink, no area is filled grey at rest. The numbers are the approved pages': 4 marks on a plain
+/// Workspaces page, 3 on a terminal page with a split, and 0 pt² of neutral fill on either.
 @MainActor @Suite struct CalmTests {
     struct Count: Equatable, CustomStringConvertible {
         var fill = 0, line = 0, tint = 0, error = 0
+        var neutral = 0.0
 
         init(_ marks: [Mark]) {
             for mark in marks {
@@ -20,6 +22,7 @@ import Testing
                 case .accentLine: line += 1
                 case .accentTint: tint += 1
                 case .errorFill, .errorInk: error += 1
+                case let .neutralFill(area): neutral += area
                 }
             }
         }
@@ -29,7 +32,7 @@ import Testing
         }
 
         var description: String {
-            "\(fill) accent fills, \(line) accent lines, \(tint) accent tints, \(error) error marks"
+            "\(fill) accent fills, \(line) accent lines, \(tint) accent tints, \(error) error marks, \(neutral) pt² of neutral fill"
         }
     }
 
@@ -74,6 +77,16 @@ import Testing
         #expect(section == Count([.accentLine, .accentLine, .accentFill]), "the section draws \(section)")
         #expect(rail == Count([.accentLine]), "the rail draws \(rail)")
         #expect(section.accent + rail.accent == 4 && section.tint + rail.tint == 0)
+        #expect(section.neutral == 0 && rail.neutral == 0, "grey at rest: the section \(section.neutral) pt², the rail \(rail.neutral) pt²")
+        let dock = try #require(view.project.list.row("dock")), harbor = try #require(view.panel.list.row("harbor"))
+        #expect(dock.paint.bar && dock.paint.strong, "dock, chosen, has no bar or no weight")
+        let line = try #require(Self.found(WorkspaceLine.self, in: dock.view).first)
+        #expect(Self.weight(line.title) == .semibold, "dock's name is not at full weight")
+        let project = try #require(Self.found(SidebarRowCell.self, in: harbor.view).first)
+        #expect(harbor.paint.bar && Self.weight(project.label) == .semibold && project.tile.chosen, "harbor, chosen, has no bar, no weight or no ink well")
+        window.makeFirstResponder(view.project.list)
+        let open = try #require(Self.found(SailButton.self, in: dock.view).first { $0.title == "Open" })
+        #expect(dock.view.isEmphasized && open.keyEquivalent == "\r", "the list holding the keys is not said by Open's ⏎")
     }
 
     /// A5: three tabs and a split: the rail's bar, the chosen tab's bar, and the cursor of the pane
@@ -96,11 +109,26 @@ import Testing
         #expect(window.makeFirstResponder(typing) && typing.holdsTheKeys, "the typing pane holds no keys")
         let rail = Count(marks(in: shell.rail)), tabs = Count(marks(in: strip)), panes = Count(marks(in: window))
         #expect(rail == Count([.accentLine]) && tabs == Count([.accentLine]) && panes == Count([.accentLine]), "the rail draws \(rail), the tabs \(tabs), the panes \(panes)")
+        #expect(rail.neutral + tabs.neutral + panes.neutral == 0, "grey at rest on the terminal page: \(rail), \(tabs), \(panes)")
+        let chosen = try #require(strip.tabs.first)
+        #expect(chosen.label.font == NSFont.systemFont(ofSize: Look.Step.callout.points, weight: .semibold) && !chosen.bar.isHidden, "the chosen tab has no weight or no underline")
         typing.inert = true
         let banner = StatusBanner(look: look)
         banner.show("This terminal ended while you were away.", button: "Open a New One")
         let ended = Count(marks(in: window)) + Count(marks(in: banner))
         #expect(ended == Count([.accentFill]), "an ended terminal and its card draw \(ended)")
+    }
+}
+
+extension CalmTests {
+    static func found<View: NSView>(_: View.Type, in view: NSView) -> [View] {
+        ((view as? View).map { [$0] } ?? []) + view.subviews.flatMap { found(View.self, in: $0) }
+    }
+
+    static func weight(_ label: NSTextField) -> NSFont.Weight? {
+        guard let font = label.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont ?? label.font else { return nil }
+        let traits = font.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any]
+        return (traits?[.weight] as? Double).map { NSFont.Weight(rawValue: $0) }
     }
 }
 
@@ -111,6 +139,7 @@ extension CalmTests.Count {
         sum.line += other.line
         sum.tint += other.tint
         sum.error += other.error
+        sum.neutral += other.neutral
         return sum
     }
 }

@@ -392,7 +392,7 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         bar.layer?.backgroundColor = NSColor(ink.bar).cgColor
         bar.isHidden = !isSelected || renaming
         label.textColor = NSColor(isSelected ? look.text : look.textSecondary)
-        let font = NSFont.systemFont(ofSize: Look.Step.callout.points, weight: isSelected ? .medium : .regular)
+        let font = NSFont.systemFont(ofSize: Look.Step.callout.points, weight: isSelected ? .semibold : .regular)
         if label.font != font { label.font = font }
         close.paint(look)
         zoomMark.image = Self.symbol("arrow.up.left.and.arrow.down.right", accessibility: "Zoomed", colour: look.textSecondary)
@@ -449,13 +449,12 @@ extension TabButton: Marked {
     /// under the pointer; the rename's ring and the chosen bar in the accent.
     var drawnInk: (fill: Tint?, edge: Tint, bar: Tint) {
         let renaming = field != nil
-        let fill = renaming ? Tint(look.surface) : isSelected ? look.fillSelected : hovering ? look.fillHover : nil
-        return (fill, Tint(look.accent), Tint(look.accent))
+        return (renaming ? Tint(look.surface) : nil, Tint(look.accent), Tint(look.accent))
     }
 
     package var drawnMarks: [Mark] {
         let ink = drawnInk, renaming = field != nil
-        return look.marks(fill: ink.fill) + (renaming ? look.marks(line: ink.edge) : []) + (isSelected && !renaming ? look.marks(line: ink.bar) : [])
+        return look.marks(fill: ink.fill, area: Double(bounds.width * bounds.height)) + (renaming ? look.marks(line: ink.edge) : []) + (isSelected && !renaming ? look.marks(line: ink.bar) : [])
     }
 }
 

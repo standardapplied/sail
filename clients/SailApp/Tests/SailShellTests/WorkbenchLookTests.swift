@@ -31,9 +31,9 @@ import Testing
         strip.show(Self.items(), selected: TabID(1))
         let selected = try #require(strip.tabs.first), other = try #require(strip.tabs.last)
         #expect(strip.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name): the strip is not chrome")
-        #expect(selected.layer?.backgroundColor == NSColor(look.fillSelected).cgColor, "\(name): the selected tab is not fillSelected")
+        #expect(selected.layer?.backgroundColor == NSColor.clear.cgColor, "\(name): the selected tab is filled")
         #expect(selected.label.textColor == NSColor(look.text))
-        #expect(selected.label.font == NSFont.systemFont(ofSize: Look.Step.callout.points, weight: .medium), "\(name): the selected title is not medium")
+        #expect(selected.label.font == NSFont.systemFont(ofSize: Look.Step.callout.points, weight: .semibold), "\(name): the selected title is not semibold")
         #expect(other.label.font == NSFont.systemFont(ofSize: Look.Step.callout.points, weight: .regular))
         strip.frame = NSRect(x: 0, y: 0, width: 600, height: ShellApp.bandHeight)
         strip.layoutSubtreeIfNeeded()
@@ -46,7 +46,6 @@ import Testing
         #expect(abs(Double(bar.minX) - Look.contentRadius) <= 0.5 && abs(Double(bar.maxX) - (width - Look.contentRadius)) <= 0.5,
                 "\(name): the bar runs \(bar.minX)–\(bar.maxX) in a tab \(width) pt wide")
         #expect(selected.bar.layer?.backgroundColor == NSColor(look.accent).cgColor, "\(name): the bar is not the accent")
-        #expect(selected.layer?.backgroundColor == NSColor(look.fillSelected).cgColor && look.fillSelected.rgb == look.ink, "\(name): the chosen pill is not ink")
         #expect(selected.drawnMarks == [.accentLine] && other.drawnMarks.isEmpty, "\(name): the tabs draw \(selected.drawnMarks) and \(other.drawnMarks)")
         #expect(!selected.bar.isHidden && other.bar.isHidden, "\(name): the bar marks the wrong tab")
         #expect(other.layer?.backgroundColor == NSColor.clear.cgColor)
@@ -55,7 +54,7 @@ import Testing
         other.mouseEntered(with: try #require(NSEvent.otherEvent(
             with: .applicationDefined, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0
         )))
-        #expect(other.layer?.backgroundColor == NSColor(look.fillHover).cgColor, "\(name): hover is not fillHover")
+        #expect(other.layer?.backgroundColor == NSColor.clear.cgColor, "\(name): a hovered tab is filled")
         #expect(!other.close.isHidden)
         for button in [selected.close, other.close, strip.add] {
             #expect(!button.isBordered, "\(name): \(button.toolTip ?? "") draws the system's bezel")
@@ -72,7 +71,7 @@ import Testing
             #expect(button.layer?.borderWidth == 0)
         }
         #expect(selected.layer.map { Double($0.cornerRadius) } == Look.contentRadius)
-        #expect(selected.label.font == NSFont.systemFont(ofSize: 13, weight: .medium))
+        #expect(selected.label.font == NSFont.systemFont(ofSize: 13, weight: .semibold))
         #expect(selected.toolTip == "api")
         #expect(!selected.mouseDownCanMoveWindow && strip.mouseDownCanMoveWindow, "\(name): a tab moves the window, or the strip's empty part does not")
         #expect(strip.accessibilityRole() == .tabGroup)
@@ -186,7 +185,7 @@ import Testing
 
     /// The rename field: no system focus ring and no box of its own; the tab's pill is the surface,
     /// ringed in the accent; the field's font and centring are the title's; its selection
-    /// `fillSelected` and its caret the accent.
+    /// `textSelection` and its caret the accent.
     @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
     func theRenameFieldIsTheLooks(_ name: String, _ look: Look) throws {
         let shell = try Self.shell(look)

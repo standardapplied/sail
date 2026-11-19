@@ -11,6 +11,8 @@ package enum Mark: Equatable, Sendable {
     case accentLine
     case errorFill
     case errorInk
+    /// A neutral fill and its area in points: grey on paper, which paper and ink draws nowhere at rest.
+    case neutralFill(Double)
 }
 
 /// A view that draws marks of its own.
@@ -19,10 +21,16 @@ package enum Mark: Equatable, Sendable {
 }
 
 package extension Look {
-    func marks(fill: Tint?) -> [Mark] {
-        guard let fill, fill.alpha > 0 else { return [] }
+    /// What a fill of `area` points draws: the accent, the error, or a neutral grey (ink at any
+    /// strength short of turned over, or an opaque tone that is neither a ground nor a colour).
+    func marks(fill: Tint?, area: Double) -> [Mark] {
+        guard let fill, fill.alpha > 0, area > 0 else { return [] }
         if fill.rgb == accent { return [fill.alpha >= 1 ? .accentFill : .accentTint] }
-        return fill.rgb == error && fill.alpha >= 1 ? [.errorFill] : []
+        if fill.rgb == error { return fill.alpha >= 1 ? [.errorFill] : [.neutralFill(area)] }
+        if fill.rgb == ink || fill.rgb == text.rgb { return fill.alpha < 0.95 ? [.neutralFill(area)] : [] }
+        let grounds = [canvas, surface, surfacePop, chrome, palette.background]
+        let colours = [accentHover, accentPressed, errorHover, errorPressed, warning, success, info, onAccent, onError, onInk]
+        return grounds.contains(fill.rgb) || colours.contains(fill.rgb) ? [] : [.neutralFill(area)]
     }
 
     func marks(line: Tint?) -> [Mark] {

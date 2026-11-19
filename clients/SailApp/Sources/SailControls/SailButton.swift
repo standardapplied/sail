@@ -353,6 +353,7 @@ public final class SailButton: NSButton {
 extension SailButton: Marked {
     package var drawnMarks: [Mark] {
         let paint = paint
-        return look.marks(fill: paint.fill) + look.marks(line: paint.edge) + look.marks(line: paint.label) + look.marks(line: paint.halo?.ring)
+        let area = Double(box.width * box.height)
+        return look.marks(fill: paint.fill, area: area) + look.marks(line: paint.edge) + look.marks(line: paint.label) + look.marks(line: paint.halo?.ring)
     }
 }

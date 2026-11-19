@@ -29,6 +29,8 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public let window: NSWindow
     public let rail: Rail
     public let account: AccountPane
+    /// The card's hairline on the paper chrome, over the card, taking no clicks.
+    let cardEdge: CardEdge
     public let workspaces: WorkspacesView
     public let thisMac: WorkbenchView
     public private(set) var look: Look
@@ -86,6 +88,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
         workspaces = WorkspacesView(look: look, title: title, mono: labels)
         rail = Rail(look: look)
+        cardEdge = CardEdge(look: look)
         super.init()
         compose()
     }
@@ -214,6 +217,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func apply(_ look: Look) {
         self.look = look
         window.backgroundColor = NSColor(look.canvas)
+        cardEdge.look = look
         rail.look = look
         account.look = look
         workspaces.look = look
@@ -288,7 +292,8 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         strip.setFrameSize(NSSize(width: max(0, Double(window.frame.width) - start), height: strip.frame.height))
     }
 
-    /// The band, the rail and the card's margin are one chrome surface, as Mast's `--chrome-bg`.
+    /// The band, the rail and the card's margin are one chrome surface: the paper, as the website's,
+    /// the card told apart by the hairline along its leading and top edges.
     private func paintChrome() {
         root.layer?.backgroundColor = NSColor(look.chrome).cgColor
     }
@@ -333,11 +338,12 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.titlebarSeparatorStyle = .none
         content.wantsLayer = true
         content.layer?.cornerRadius = Look.contentRadius
+        content.layer?.maskedCorners = root.userInterfaceLayoutDirection == .rightToLeft ? [.layerMaxXMaxYCorner] : [.layerMinXMaxYCorner]
         content.layer?.masksToBounds = true
         root.wantsLayer = true
         paintChrome()
         titleBarRow.layoutAttribute = .left
-        for view in [rail, content] as [NSView] {
+        for view in [rail, content, cardEdge] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
@@ -359,6 +365,8 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             content.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Self.cardMargin), underTheRow,
             content.topAnchor.constraint(greaterThanOrEqualTo: root.topAnchor, constant: Self.bandHeight),
             content.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Self.cardMargin),
+            cardEdge.leadingAnchor.constraint(equalTo: content.leadingAnchor), cardEdge.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            cardEdge.topAnchor.constraint(equalTo: content.topAnchor), cardEdge.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
         placeTheStrip()
         rail.onSelect = { [weak self] item in self?.select(item) }

@@ -29,7 +29,7 @@ import Testing
 
     @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
     func everyTextOnEverySurfaceIsFourAndAHalfToOne(_ name: String, _ look: Look) {
-        let surfaces = [("canvas", look.canvas), ("surface", look.surface), ("selection over canvas", look.fillSelected.over(look.canvas))]
+        let surfaces = [("canvas", look.canvas), ("surface", look.surface)]
         let texts: [(String, Tint)] = [("text", look.text), ("textSecondary", look.textSecondary)]
         for (surfaceName, surface) in surfaces {
             for (textName, text) in texts {

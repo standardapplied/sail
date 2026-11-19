@@ -399,7 +399,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         let row = CreateRow(field: field, existing: create.existing, look: look, mono: mono) { [weak self] act in self?.on(act) }
         let room = Double(bounds.width) - 2 * Self.padding.sides - 2 - RowStyle.list.leading - RowStyle.list.trailing
         let height = row.height(room: bounds.width > 0 ? room : CreateRow.column + CreateRow.gap + Double(row.buttons.fittingSize.width))
-        let paint: RowPaint = refused ? .refused : .naming(look)
+        let paint: RowPaint = refused ? .refused : .naming
         return SailList.Item(id: Self.createID, name: "", voice: "A new workspace's name", content: row, height: height, paint: paint, full: true)
     }
 
