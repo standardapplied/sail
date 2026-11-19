@@ -35,6 +35,14 @@ public struct BannerPaint: Equatable, Sendable {
         edge = Tint(ink, alpha: 0.35)
         mark = Tint(ink)
     }
+
+    /// A notice with nothing to warn of, drawn quietly: the surface, the separator for its edge, and
+    /// its mark in secondary ink.
+    public init(quiet look: Look) {
+        fill = look.surface
+        edge = look.separator
+        mark = look.textSecondary
+    }
 }
 
 /// An empty state's tile: the surface with an 8 pt grid, its edge solid when the place is only

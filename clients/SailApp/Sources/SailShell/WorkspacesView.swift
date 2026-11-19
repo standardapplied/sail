@@ -167,10 +167,12 @@ public final class WorkspacesView: NSView {
         }
     }
 
-    /// A row as a person reads it: its name, its state, and its owner when not theirs ("quay · running · ana").
+    /// A row as a person reads it: its name, its state, its owner when not theirs, and how many of
+    /// their sessions run in their own ("quay · running · ana", "dock · running · 1 session").
     private func said(_ line: WorkspacesModel.Line) -> String {
         var parts = [line.name, WorkspaceLine.pill(line).label.lowercased()]
         if let owner = line.owner { parts.append(WorkspaceLine.said(owner)) }
+        if let sessions = line.sessionsSaid { parts.append(sessions) }
         return parts.joined(separator: " · ")
     }
 
@@ -238,7 +240,40 @@ public final class WorkspacesView: NSView {
             guard era == self.era else { return }
             model.listed(answer, request: request, at: Date())
             render()
+            if case let .success(list) = answer { countSessions(in: list, by: client) }
         }
+    }
+
+    /// Asks each of the person's running workspaces in `list` for its sessions, so its row says
+    /// how many of theirs run in it, drawn once all have answered; a workspace that cannot be asked
+    /// says nothing of them. The route lists one workspace's sessions, so each is its own request.
+    private func countSessions(in list: WorkspaceList, by client: SailClient) {
+        let names = list.workspaces.filter { $0.owner == model.person.handle && $0.state == .known(.running) }.map(\.name)
+        count(names, in: list.project, by: client)
+    }
+
+    /// Asks `names` of `project` for their sessions, each request numbered, and draws once.
+    private func count(_ names: [String], in project: String, by client: SailClient) {
+        guard !names.isEmpty else { return }
+        let era = self.era
+        let asked = names.map { ($0, model.askingSessions(of: $0)) }
+        Task {
+            var answers: [(String, Int, RunnerSessions)] = []
+            for (name, request) in asked {
+                if let listing = try? await client.send(.sessions(workspace: name, project: project)) { answers.append((name, request, listing)) }
+            }
+            guard era == self.era else { return }
+            for (name, request, listing) in answers {
+                model.sessionsListed(listing, project: project, workspace: name, request: request)
+            }
+            render()
+        }
+    }
+
+    /// A runner tab in workspace `name` of `project` started or went: its row counts again.
+    func recount(project: String, name: String) {
+        guard let client, model.chosen == project else { return }
+        count([name], in: project, by: client)
     }
 
     private func choose(_ name: String) {
@@ -340,7 +375,7 @@ public final class WorkspacesView: NSView {
     /// it does not answer.
     private func terminals(in name: String, project: String, _ client: SailClient) async -> Int? {
         let handle = model.person.handle
-        return (try? await client.send(.sessions(workspace: name, project: project))).map { $0.sessions.count { $0.live && $0.opener == handle } }
+        return (try? await client.send(.sessions(workspace: name, project: project))).map { $0.live(for: handle).count }
     }
 
     /// The question open, in the library's sheet on the window: the sheet holds that one question,

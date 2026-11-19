@@ -351,6 +351,6 @@ func attachedOnRunner(write: Bool = true) async throws -> (FakeHost, TerminalSes
     let peer = try await host.accept()
     try await peer.welcome()
     _ = try await peer.acceptAttach()
-    try await watch.until("took the attach's prologue") { watch.seen.contains(.writerChanged("ada")) }
+    try await watch.until("took the attach's prologue") { watch.seen.contains { if case .writerChanged("ada", _) = $0 { true } else { false } } }
     return (host, session, peer)
 }

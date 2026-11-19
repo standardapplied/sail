@@ -148,6 +148,13 @@ public struct WorkspacesModel: Sendable {
         public let why: String?
         /// Its ⋯ menu.
         public let menu: [Entry]
+        /// How many of the person's terminal sessions run in it, on their own running workspace.
+        public let sessions: Int
+
+        /// What the row says of its sessions beside its state: nothing for none.
+        public var sessionsSaid: String? {
+            sessions == 0 ? nil : sessions == 1 ? "1 session" : "\(sessions) sessions"
+        }
         /// What is under way on it, its pill said so and its actions waiting.
         public let busy: Action?
     }
@@ -224,6 +231,11 @@ public struct WorkspacesModel: Sendable {
     private var listedAt: Date?
     private var listFailure: String?
     private var creates: [String: CreateLine] = [:]
+    /// The person's live sessions in each of their workspaces, by workspace, as last listed.
+    private var sessions: [String: Int] = [:]
+    /// The newest request for each workspace's sessions, so an older answer never replaces it.
+    private var sessionsAsked: [String: Int] = [:]
+    private var sessionsAskedCount = 0
     /// The workspace created in this project, chosen once a list shows it.
     private var choosingAfterList: [String: String] = [:]
 
@@ -275,6 +287,7 @@ public struct WorkspacesModel: Sendable {
     public mutating func choose(_ name: String) -> Int {
         chosen = name
         chosenRow = nil
+        sessions = [:]
         listFailure = nil
         listedAt = nil
         let request = listing.ask(name)
@@ -305,6 +318,21 @@ public struct WorkspacesModel: Sendable {
             guard listing.isLatest(request) else { return }
             listFailure = error.said(at: person.controlPlane)
         }
+    }
+
+    /// The number of a new request for `workspace`'s sessions in the project shown.
+    public mutating func askingSessions(of workspace: String) -> Int {
+        sessionsAskedCount += 1
+        sessionsAsked[workspace] = sessionsAskedCount
+        return sessionsAskedCount
+    }
+
+    /// Takes how many live sessions of the person's own `listing`, the answer to `request`, holds in
+    /// workspace `workspace` of the project shown, for its row; a listing for a project no longer
+    /// shown, or one older than the newest asked, is dropped.
+    public mutating func sessionsListed(_ listing: RunnerSessions, project: String, workspace: String, request: Int) {
+        guard project == chosen, sessionsAsked[workspace] == request else { return }
+        sessions[workspace] = listing.live(for: person.handle).count
     }
 
     public mutating func chooseRow(_ name: String?) {
@@ -654,7 +682,7 @@ public struct WorkspacesModel: Sendable {
         guard let create = creates[project], create.underWay else { return nil }
         return Line(
             name: create.name, instance: "\(project)-\(create.name)", state: .known(.notCreated), creating: true, mine: true, owner: nil, chosen: false,
-            primary: nil, why: "about 3 s", menu: [], busy: nil
+            primary: nil, why: "about 3 s", menu: [], sessions: 0, busy: nil
         )
     }
 
@@ -677,7 +705,8 @@ public struct WorkspacesModel: Sendable {
         return Line(
             name: row.name, instance: row.instance, state: row.state, creating: false, mine: mine, owner: owner, chosen: row.name == chosenRow,
             primary: underWay == nil ? primary : nil, why: row.whyNotOpened(for: person.handle, admin: person.admin),
-            menu: underWay == nil ? entry + [.copyName] + acts : [.copyName], busy: underWay
+            menu: underWay == nil ? entry + [.copyName] + acts : [.copyName],
+            sessions: mine && row.state == .known(.running) ? sessions[row.name] ?? 0 : 0, busy: underWay
         )
     }
 

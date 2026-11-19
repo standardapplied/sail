@@ -108,9 +108,10 @@ public final class TerminalTickets {
   /**
    * The sessions in {@code workspace} of {@code project} ({@code main} for the project's own
    * container) the holder of {@code credential} may attach to, live or ended within the host's
-   * keeping, newest first, none made before {@code since}, the workspace's own start: the host
-   * lists them for that credential as it decides its attach, and refuses one that stands for no one
-   * in a ticket's words.
+   * keeping, newest first, no ended one made before {@code since}, the workspace's own start (a
+   * live one can only be the present workspace's, whatever the wall clock said): the host lists
+   * them for that credential as it decides its attach, and refuses one that stands for no one in a
+   * ticket's words.
    */
   WorkspaceSessionsResponse sessions(
       String credential, String project, String workspace, Instant since) {
@@ -137,7 +138,9 @@ public final class TerminalTickets {
     return new WorkspaceSessionsResponse(
         listed.stream()
             .filter(info -> info.project().equals(project) && info.workspace().equals(place))
-            .filter(info -> since == null || info.createdAtMillis() >= since.toEpochMilli())
+            .filter(
+                info ->
+                    info.live() || since == null || info.createdAtMillis() >= since.toEpochMilli())
             .sorted(
                 Comparator.comparingLong(PtyMessage.SessionInfo::createdAtMillis)
                     .reversed()

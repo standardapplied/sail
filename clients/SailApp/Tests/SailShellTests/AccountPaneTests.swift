@@ -70,7 +70,10 @@ struct Signs: PasskeyAuthenticator {
 
 /// The recorded server, but the request whose route holds `holding`, after `skipped` such, is held
 /// until released, then answered by the server, or by `answer` when given; every route asked, in
-/// order.
+/// order. A row's sessions listing, asked beside each list of workspaces, is never the one held or
+/// counted: what a test holds is a person's action or a list, and a listing that matched took the
+/// place of the request a test meant, silently: one test held nothing it meant to and failed, and
+/// another passed while holding nothing at all.
 final class Held: Transport {
     private let server: RecordedServer
     private let holding: String
@@ -93,7 +96,7 @@ final class Held: Transport {
     func send(_ request: HTTPRequest) async throws(SailError) -> HTTPResponse {
         let held = state.withLock { state -> Bool in
             state.routes.append(request.route)
-            guard request.route.contains(holding) else { return false }
+            guard request.route.contains(holding), !request.route.hasSuffix("/sessions") else { return false }
             state.seen += 1
             return state.seen == skipped + 1
         }
@@ -110,12 +113,6 @@ final class Held: Transport {
     func release() {
         gate.open()
     }
-}
-
-/// How many times the pane asked before signing out, and its last question's reply.
-@MainActor final class Asked {
-    var count = 0
-    var reply: (@MainActor (Bool) -> Void)?
 }
 
 /// The account pane: a check of who is signed in (the app becoming active) holds no button, so a
@@ -285,25 +282,19 @@ final class Held: Transport {
         #expect(pane.lines.starts(with: enrolled) && pane.lines.contains { $0.hasSuffix("has ended.") }, "\(pane.lines)")
     }
 
-    /// Sign Out asks once: a second click, or the menu item, while the question is up asks
-    /// nothing; signing out then signs out.
-    @Test func signOutAsksOnceWhileItsQuestionIsUp() async throws {
+    /// Sign Out signs out at once and asks nothing, as one action of the pane's; the menu item
+    /// after it does nothing more.
+    @Test func signOutSignsOutAtOnceAskingNothing() async throws {
         let transport = Held(RecordedServer([try Exchange("whoami")]), holding: "nothing is held")
         let pane = try Self.pane(remembering: "uday", transport)
         await pane.refresh()
         #expect(pane.standing?.fde == "uday")
-        let asked = Asked()
-        pane.askBeforeSigningOut = { reply in
-            asked.count += 1
-            asked.reply = reply
-        }
+        let before = pane.actions
 
         pane.signOut.performClick(nil)
         pane.signOutHere(nil)
 
-        #expect(asked.count == 1, "Sign Out asked \(asked.count) times")
-        #expect(!pane.signOut.isEnabled && pane.isActing)
-        asked.reply?(true)
+        #expect(pane.actions == before + 1, "one action, the second asking nothing")
         #expect(pane.standing == nil && !pane.isActing && pane.signIn.isEnabled)
     }
 }

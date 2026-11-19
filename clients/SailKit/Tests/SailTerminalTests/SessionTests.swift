@@ -20,10 +20,33 @@ import Testing
         #expect(try await peer.welcome() == "")
         #expect(try await peer.read() == .create(create))
         try peer.send(.accepted)
-        #expect(try await peer.read() == .attach(session: "work", write: true))
+        #expect(try await peer.read().unnamed == .attach(session: "work", write: true))
         try peer.send(.accepted)
         try await watch.attached()
         #expect(session.state.hostBootID == "boot-1")
+        session.close()
+    }
+
+    /// A session resumed without the person asking (a restore) asks for the keyboard without taking
+    /// it from their other live client, and names itself the same on every connection, so the host
+    /// gives it back from its own lost connection.
+    @Test func aResumedSessionNeverTakesTheKeyboardAndNamesItselfTheSameEachTime() async throws {
+        let host = try FakeHost()
+        let session = TerminalSession(attach: "work", write: true, takes: false, door: .local(host.address), screen: try screen())
+        let watch = Watch(session)
+        session.start()
+        let peer = try await host.accept()
+        _ = try await peer.welcome()
+        let first = try await peer.read()
+        #expect(first.unnamed == .attach(session: "work", write: true, takes: false))
+        try peer.send(.accepted)
+        try await watch.attached()
+        peer.close()
+        let again = try await host.accept()
+        _ = try await again.welcome()
+        let second = try await again.read()
+        guard case let .attach(_, _, named, _) = first, case let .attach(_, _, renamed, _) = second else { throw HostError("no attach: \(second)") }
+        #expect(!named.isEmpty && named == renamed, "one client, one name across its reconnects")
         session.close()
     }
 
@@ -43,7 +66,7 @@ import Testing
         first.close()
         let second = try await host.accept()
         #expect(try await second.welcome() == "ticket-2")
-        #expect(try await second.read() == .attach(session: "work", write: true))
+        #expect(try await second.read().unnamed == .attach(session: "work", write: true, takes: false), "a reconnect never takes the keyboard from another live client")
         #expect(desk.requests == [.open(project: "", workspace: ""), .attach(session: "work")])
         session.close()
     }
@@ -69,7 +92,7 @@ import Testing
         first.close()
         let second = try await host.accept()
         _ = try await second.welcome()
-        #expect(try await second.read() == .attach(session: "work", write: true))
+        #expect(try await second.read().unnamed == .attach(session: "work", write: true, takes: false), "a reconnect never takes the keyboard from another live client")
         #expect(desk.requests == [.open(project: "acme", workspace: "try"), .attach(session: "work")])
         session.close()
     }
@@ -144,7 +167,7 @@ import Testing
         session.start()
         let peer = try await host.accept()
         try await peer.welcome()
-        #expect(try await peer.read() == .attach(session: "theirs", write: true))
+        #expect(try await peer.read().unnamed == .attach(session: "theirs", write: true))
         let refusal = HostRefusal(message: "There is no session 'theirs' on this box that you may attach.", remedy: [])
         try peer.send(.refused(refusal))
         try await watch.phase(.ended(.refused(refusal)))
@@ -206,7 +229,7 @@ import Testing
         session.reconnectNow()
         let again = try await host.accept()
         try await again.welcome()
-        #expect(try await again.read() == .attach(session: "work", write: true))
+        #expect(try await again.read().unnamed == .attach(session: "work", write: true, takes: false), "a reconnect never takes the keyboard from another live client")
         #expect(naps.durations == TerminalSession.retryWaits)
         session.close()
     }
@@ -446,7 +469,7 @@ import Testing
         session.attach()
         let again = try await host.accept()
         try await again.welcome()
-        #expect(try await again.read() == .attach(session: "work", write: true))
+        #expect(try await again.read().unnamed == .attach(session: "work", write: true, takes: false), "a reconnect never takes the keyboard from another live client")
         session.close()
     }
 

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyAdmissions;
@@ -44,7 +45,9 @@ class PtyHostYieldTest {
   @Test
   void endsOnlyTheNamedLiveSessionsAndAMissingHostHasNothingToEnd() throws Exception {
     assertDoesNotThrow(
-        () -> new PtyHostYield(dir.resolve("absent.sock")).end(List.of("resume-1"), "r"),
+        () ->
+            new PtyHostYield(dir.resolve("absent.sock"))
+                .end(List.of("resume-1"), new SessionYield.Ending("r", "")),
         "no socket means no host and no sessions");
 
     try (var host =
@@ -60,11 +63,14 @@ class PtyHostYieldTest {
       }
 
       new PtyHostYield(dir.resolve("h.sock"))
-          .end(List.of("resume-1", "resume-ghost"), "yielded to dispatch 2");
+          .end(
+              List.of("resume-1", "resume-ghost"),
+              new SessionYield.Ending(
+                  "yielded to dispatch 2", "Run 2 took over its conversation."));
 
       try (var client = SessionClient.connect(dir.resolve("h.sock"), "")) {
         assertEquals(
-            List.of("resume-1 yielded to dispatch 2", "shell live"),
+            List.of("resume-1 Run 2 took over its conversation.", "shell live"),
             client.list().stream()
                 .map(info -> info.name() + " " + (info.live() ? "live" : info.endedReason()))
                 .toList(),
@@ -100,7 +106,7 @@ class PtyHostYieldTest {
       }
 
       var yield = new PtyHostYield(dir.resolve("h.sock"));
-      yield.end(List.of("resume-1", "resume-2"), "r");
+      yield.end(List.of("resume-1", "resume-2"), new SessionYield.Ending("r", ""));
 
       assertEquals(
           List.of(false, false),
@@ -132,7 +138,7 @@ class PtyHostYieldTest {
       assertTrue(yield.live("resume-1"), "another FDE's terminal still holds the conversation");
       assertFalse(yield.live("resume-2"));
 
-      yield.end(List.of("resume-1"), "r");
+      yield.end(List.of("resume-1"), new SessionYield.Ending("r", ""));
 
       assertFalse(yield.live("resume-1"), "a session that ended holds nothing");
     }
@@ -155,7 +161,9 @@ class PtyHostYieldTest {
       var failed =
           assertThrows(
               IOException.class,
-              () -> new PtyHostYield(dir.resolve("h.sock")).end(List.of("resume-1"), "r"));
+              () ->
+                  new PtyHostYield(dir.resolve("h.sock"))
+                      .end(List.of("resume-1"), new SessionYield.Ending("r", "")));
       assertTrue(failed.getMessage().contains("dispatch credential"), failed.getMessage());
       assertEquals(1, host.sessionCount(), "the session it could not end is reported, not hidden");
     }

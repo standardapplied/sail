@@ -882,7 +882,7 @@ class LocalPtyHostTest {
     }
     try (var owner = Client.connect(socket())) {
       assertEquals(
-          List.of("victim displaced"),
+          List.of("victim Displaced."),
           owner.list().stream().map(info -> info.name() + " " + info.endedReason()).toList());
     }
   }

@@ -306,7 +306,7 @@ class LiveMemberDisplacementTest {
       }
 
       @Override
-      public void end(List<String> sessions, String reason) {
+      public void end(List<String> sessions, Ending ending) {
         ended.addAll(sessions);
       }
 
@@ -410,7 +410,7 @@ class LiveMemberDisplacementTest {
           }
 
           @Override
-          public void end(List<String> sessions, String reason) {}
+          public void end(List<String> sessions, Ending ending) {}
 
           @Override
           public boolean live(String name) {
@@ -445,7 +445,7 @@ class LiveMemberDisplacementTest {
           }
 
           @Override
-          public void end(List<String> sessions, String reason) {}
+          public void end(List<String> sessions, Ending ending) {}
 
           @Override
           public boolean live(String name) {
@@ -487,7 +487,7 @@ class LiveMemberDisplacementTest {
           }
 
           @Override
-          public void end(List<String> sessions, String reason) {}
+          public void end(List<String> sessions, Ending ending) {}
 
           @Override
           public boolean live(String name) throws IOException {

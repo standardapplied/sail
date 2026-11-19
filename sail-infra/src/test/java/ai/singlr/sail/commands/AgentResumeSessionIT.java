@@ -155,12 +155,13 @@ class AgentResumeSessionIT extends AbstractIncusIT {
                   .map(
                       info ->
                           info.name()
-                              + (!info.live() && info.endedReason().startsWith("yielded to run ")
+                              + (!info.live()
+                                      && info.endedReason().endsWith(" took over its conversation.")
                                   ? " ended"
                                   : " live"))
                   .toList(),
-              "the yielded session is kept ended, in the yield's words, until its retention"
-                  + " passes");
+              "the yielded session is kept ended, saying the run took over its conversation,"
+                  + " until its retention passes");
         }
         assertTrue(
             endedEvents(db).stream()

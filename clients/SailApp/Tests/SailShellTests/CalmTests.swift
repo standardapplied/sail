@@ -113,14 +113,35 @@ import Testing
         let chosen = try #require(strip.tabs.first)
         #expect(chosen.label.font == NSFont.systemFont(ofSize: Look.Step.callout.points, weight: .semibold) && !chosen.bar.isHidden, "the chosen tab has no weight or no underline")
         typing.inert = true
-        let banner = StatusBanner(look: look)
-        banner.show("This terminal ended while you were away.", button: "Open a New One")
-        let ended = Count(marks(in: window)) + Count(marks(in: banner))
+        let card = Card(look: look)
+        card.frame = NSRect(x: 0, y: 0, width: Card.width, height: 80)
+        card.show("This terminal ended while you were away.", tone: .warning, button: "Open a New One", second: "Close")
+        let ended = Count(marks(in: window)) + Count(marks(in: card))
         #expect(ended == Count([.accentFill]), "an ended terminal and its card draw \(ended)")
     }
 }
 
 extension CalmTests {
+    /// The terminal's cards (#486): information quiet on the paper, its fill the surface; a warning
+    /// or an error in its tone, never grey; one primary at most, and the error ink only on an error.
+    @Test(arguments: [Look.light, .dark])
+    func everyCardIsQuietOrInItsTone(_ look: Look) {
+        let said: [(String, BannerTone, String?)] = [
+            ("Connecting to dock on the runner", .info, nil), ("No one holds the keyboard.", .info, "Take Keyboard"),
+            ("Reconnecting to dock on the runner…", .info, "Reconnect Now"), ("This terminal ended: Workspace dock of harbor was stopped by ana.", .warning, "Open a New One"),
+            ("The runner restarted, which ends every session it held.", .warning, "Open Again"), ("The terminal screen could not be made.", .error, "Try Again"),
+        ]
+        for (words, tone, button) in said {
+            let card = Card(look: look)
+            card.frame = NSRect(x: 0, y: 0, width: Card.width, height: 80)
+            card.show(words, tone: tone, button: button)
+            let count = Count(marks(in: card))
+            #expect(count.neutral == 0 && count.tint == 0 && count.fill == (button == nil ? 0 : 1), "\(words): \(count)")
+            #expect(count.error == (tone == .error ? 1 : 0), "\(words): \(count)")
+            if tone == .info { #expect(card.bannerPaint.fill == look.surface && card.bannerPaint.edge == look.separator, "\(words) is not quiet on the paper") }
+        }
+    }
+
     static func found<View: NSView>(_: View.Type, in view: NSView) -> [View] {
         ((view as? View).map { [$0] } ?? []) + view.subviews.flatMap { found(View.self, in: $0) }
     }

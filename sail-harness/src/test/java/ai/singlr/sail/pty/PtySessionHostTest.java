@@ -110,6 +110,9 @@ class PtySessionHostTest {
 
   private final Set<String> boxless = ConcurrentHashMap.newKeySet();
 
+  /** Projects whose read fails now, as a store that is down fails it. */
+  private final Set<String> unreadable = ConcurrentHashMap.newKeySet();
+
   /** Each instance an open asked about, in order, and the projects whose instance is not theirs. */
   private final List<String> instancesAsked = new CopyOnWriteArrayList<>();
 
@@ -127,7 +130,7 @@ class PtySessionHostTest {
 
         @Override
         public void project(String project, PtyIdentity.Person who) throws IOException {
-          if (project.equals("outage")) {
+          if (project.equals("outage") || unreadable.contains(project)) {
             throw new SqliteException("database is locked", 5);
           }
           if (unheld.contains(project + ":" + who.fde())) {
@@ -455,7 +458,10 @@ class PtySessionHostTest {
               PtyMessage.Ok.class,
               PtyWire.read(dispatch),
               "nothing live to yield is nothing to do");
-          PtyWire.write(dispatch, new PtyMessage.Yield("resume-1", "yielded to dispatch 2"));
+          PtyWire.write(
+              dispatch,
+              new PtyMessage.Yield(
+                  "resume-1", "yielded to dispatch 2", "Dispatch 2 took over its conversation."));
           assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(dispatch));
         }
 
@@ -469,9 +475,10 @@ class PtySessionHostTest {
             ((PtyMessage.SessionEnded) message).reason(),
             "the ending carries the displacing reason, not the child's exit status");
         assertEquals(
-            List.of("yielded to dispatch 2"),
+            List.of("Dispatch 2 took over its conversation."),
             endedReasons(),
-            "a yielded session is kept ended, its reason listed, until its retention passes");
+            "a yielded session is kept ended, what happened listed in the past tense, until its"
+                + " retention passes");
         assertTrue(events.contains("ended:resume-1"), events.toString());
       }
     }
@@ -815,6 +822,48 @@ class PtySessionHostTest {
     }
   }
 
+  /**
+   * Round 2 R2-1: when the keyboard's holder's connection ends, its serve loop detaches it, and a
+   * client of the same person still attached hears that no one holds the keyboard.
+   */
+  @Test
+  @Timeout(30)
+  void whenTheHoldersConnectionEndsTheOthersHearTheKeyboardIsFree() throws Exception {
+    try (var ignored = startHost()) {
+      try (var watcher = connect("tok-uday")) {
+        PtyWire.write(
+            watcher,
+            new PtyMessage.Create("held", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(watcher));
+        try (var holder = connect("tok-uday")) {
+          PtyWire.write(holder, new PtyMessage.Attach("held", true, "mac-b", true));
+          assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(holder));
+          assertEquals(new PtyMessage.WriterChanged("uday", true), writerChange(holder));
+          PtyWire.write(watcher, new PtyMessage.Attach("held", true, "mac-a", false));
+          assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(watcher));
+          assertEquals(
+              new PtyMessage.WriterChanged("uday", false),
+              writerChange(watcher),
+              "the automatic attach watches the person's other client");
+        }
+        assertEquals(
+            new PtyMessage.WriterChanged("", false),
+            writerChange(watcher),
+            "the holder gone, the watcher hears no one holds the keyboard");
+      }
+    }
+  }
+
+  /** The next writer change on {@code channel}, past the attach's other frames. */
+  private static PtyMessage writerChange(SocketChannel channel) throws IOException {
+    while (true) {
+      var message = PtyWire.read(channel);
+      if (message instanceof PtyMessage.WriterChanged) {
+        return message;
+      }
+    }
+  }
+
   @Test
   void attachAnswersWithTheGeometryTheReplayAndTheWriterOnTheWire() throws Exception {
     try (var ignored = startHost()) {
@@ -855,7 +904,7 @@ class PtySessionHostTest {
               kinds.subList(kinds.size() - 2, kinds.size()),
               "the token holder is named right after the replay: " + kinds);
           assertEquals(
-              new PtyMessage.WriterChanged("uday"),
+              new PtyMessage.WriterChanged("uday", false),
               frames.getLast(),
               "a different FDE asking for write is told who holds it, not given it");
         }
@@ -1465,7 +1514,10 @@ class PtySessionHostTest {
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(dispatch));
       }
       assertFalse(Files.exists(ring), "a yield leaves no ring behind, exactly like a kill");
-      assertEquals(List.of("yielded to dispatch 2"), endedReasons());
+      assertEquals(
+          List.of("Yielded to dispatch 2."),
+          endedReasons(),
+          "a yield that gave no record is said from its reason, as a sentence");
       host.sweep(System.nanoTime() + PtySessionHost.CORPSE_RETENTION.toNanos() + 1);
       assertEquals(0, host.sessionCount(), "the ended session goes once its retention passes");
     }
@@ -1779,6 +1831,46 @@ class PtySessionHostTest {
                 + " presented no token.",
             said(PtyWire.read(mady)),
             "only the box's own process carries a caller's credential");
+      }
+    }
+  }
+
+  /**
+   * A listing for a credential whose sessions' project cannot be read now is the host's outage,
+   * never a shorter list; and a listing asked on a connection still open while the host hands its
+   * sessions over is refused, never cut short.
+   */
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void aListingIsTheHostsOutageWhenAProjectCannotBeReadAndRefusedDuringAHandoff() throws Exception {
+    network =
+        PtySessionHost.Network.listening(
+            new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), now::get, holders);
+    var shim =
+        new PtySessionHost.Handoff(
+            SdNotify.NONE,
+            Map.of(),
+            exit -> PtyChildShimTest.shim(exit, "sh", "-c", "read a", "--"));
+    try (var ignored = startHost(PtySessionHost.Limits.DEFAULTS, shim);
+        var uday = connect("tok-uday")) {
+      PtyWire.write(uday, new PtyMessage.Create("in-acme", List.of(), "/tmp", "acme", "", 80, 24));
+      assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(uday));
+      create(uday, "here", "");
+      unreadable.add("acme");
+      assertEquals(
+          "unavailable " + PtySessionHost.UNSERVED,
+          said(listFor("tok-uday")),
+          "not a list without in-acme");
+      unreadable.clear();
+      assertEquals(List.of("here live", "in-acme live"), listedFor("tok-uday"));
+
+      try (var box = connect("")) {
+        host.handoff();
+        PtyWire.write(box, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+        assertEquals(
+            "The pty host is shutting down; reconnect and try again.",
+            assertInstanceOf(PtyMessage.Err.class, PtyWire.read(box)).message(),
+            "a listing during a handoff is refused, not a short page");
       }
     }
   }

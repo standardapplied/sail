@@ -20,7 +20,9 @@ import Testing
             session: "lounge", command: ["bash", "-l"], workingDirectory: "/home/dev", project: "harbor",
             room: "harbor-design", size: TerminalSize(columns: 132, rows: 43), workspace: "dock"
         )))
-        #expect(frames["Attach"] == .attach(session: "lounge", write: true))
+        #expect(frames["Attach"] == .attach(session: "lounge", write: true, client: "pane-7f", takes: false))
+        #expect(frames["WriterChanged"] == .writerChanged(fde: "uday", yours: true))
+        #expect(frames["Yield"] == .yield(session: "lounge", reason: "a dispatch took the repos", record: "A dispatch took the repos."))
         #expect(frames["Input"] == .input(sequence: 42, bytes: Array("ls -la\r".utf8)))
         #expect(frames["Output"] == .output(lastInputSequence: 42, bytes: Array("héllo ✅\u{1b}[0m\r\n".utf8)))
         #expect(frames["Resize"] == .resize(TerminalSize(columns: 100, rows: 30)))
@@ -174,7 +176,7 @@ import Testing
     @Test func theHandshakeIsTheHostsMagicAndAnyOtherIsAnotherProtocol() throws {
         #expect(Handshake.magic == (try Goldens.magic()))
         try Handshake.check(peer: Goldens.magic())
-        for other in ["SAILPTY4", "SAILPTY6", "SAIL"] {
+        for other in ["SAILPTY5", "SAILPTY7", "SAIL"] {
             #expect(throws: TerminalWireError.otherProtocol) { try Handshake.check(peer: Array(other.utf8)) }
         }
         #expect(throws: TerminalWireError.otherProtocol) { try Handshake.check(peer: Goldens.magic() + [0x33]) }

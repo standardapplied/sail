@@ -150,7 +150,8 @@ class TerminalTicketsTest {
                               info("app-c", "acme", "", true, "ana", 1_000),
                               info("app-d", "other", "try", true, "ana", 1_000),
                               info("app-f", "acme", "try", true, "ana", 3_000),
-                              info("app-old", "acme", "try", false, "ana", 500)),
+                              info("app-old", "acme", "try", false, "ana", 500),
+                              info("app-early", "acme", "try", true, "ana", 400)),
                           "");
                 };
               }
@@ -159,19 +160,22 @@ class TerminalTicketsTest {
     var since = Instant.ofEpochMilli(1_000);
 
     assertEquals(
-        List.of("app-b", "app-f", "app-a"), names(door.sessions("tok-ana", "acme", "try", since)));
+        List.of("app-b", "app-f", "app-a", "app-early"),
+        names(door.sessions("tok-ana", "acme", "try", since)),
+        "an ended session older than the workspace is an earlier one's; a live one is this one's,"
+            + " however the wall clock stepped");
     assertEquals(List.of("tok-ana"), asked);
     assertEquals(
-        Arrays.asList(null, null, "exited(0)"),
+        Arrays.asList(null, null, "exited(0)", null),
         door.sessions("tok-ana", "acme", "try", since).sessions().stream()
             .map(WorkspaceSessionsResponse.Session::endedReason)
             .toList());
     assertEquals(
         Instant.ofEpochMilli(2_000),
-        door.sessions("tok-ana", "acme", "try", since).sessions().getLast().createdAt());
+        door.sessions("tok-ana", "acme", "try", since).sessions().get(2).createdAt());
     assertEquals(List.of("app-c"), names(door.sessions("tok-ana", "acme", "main", since)));
     assertEquals(
-        List.of("app-b", "app-f", "app-a", "app-old"),
+        List.of("app-b", "app-f", "app-a", "app-old", "app-early"),
         names(door.sessions("tok-ana", "acme", "try", null)),
         "a workspace whose start is not known keeps every session of its name");
     assertEquals(

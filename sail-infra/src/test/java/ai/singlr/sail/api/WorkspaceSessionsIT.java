@@ -131,11 +131,16 @@ class WorkspaceSessionsIT extends AbstractIncusIT {
         try (var dispatch =
             SessionClient.connect(
                 socket, Files.readString(PtySessionHost.dispatchCredentialOf(socket)).strip())) {
-          dispatch.yieldSession("app-ana", stopped);
+          dispatch.yieldSession(
+              "app-ana",
+              new SessionYield.Ending(
+                  stopped, "Workspace main of " + container + " was stopped by uday."));
         }
         var listed = door.sessions("ana", container, "main", null).sessions();
         assertEquals(
-            List.of("app-ana2 live", "app-ana " + stopped),
+            List.of(
+                "app-ana2 live",
+                "app-ana Workspace main of " + container + " was stopped by uday."),
             listed.stream()
                 .map(s -> s.name() + " " + (s.live() ? "live" : s.endedReason()))
                 .toList());

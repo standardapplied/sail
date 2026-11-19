@@ -82,7 +82,7 @@ import Testing
         view.shown()
         #expect(await RunnerTabTests.until { view.text.contains("dock") }, "\(view.text)")
         let listing = Task { await view.refresh() }
-        #expect(await RunnerTabTests.until { transport.routes.filter { $0.contains("workspaces") }.count == 2 }, "the listing asked nothing")
+        #expect(await RunnerTabTests.until { transport.routes.filter { $0.contains("workspaces") && !$0.hasSuffix("/sessions") }.count == 2 }, "the listing asked nothing")
         #expect(!view.busy && view.project.newWorkspace.isEnabled, "a listing under way held New Workspace")
         transport.release()
         await listing.value
@@ -198,11 +198,11 @@ import Testing
         view.person = Self.ana
         view.shown()
         #expect(await RunnerTabTests.until { view.text.contains("dock") }, "harbor never listed for ana: \(view.text)")
-        let lists = transport.routes.filter { $0.hasPrefix("GET /v1/projects/harbor") }.count
+        let lists = transport.routes.filter { $0.hasPrefix("GET /v1/projects/harbor") && !$0.hasSuffix("/sessions") }.count
         transport.release()
         #expect(await RunnerTabTests.until { !view.busy }, "the create never ended")
         #expect(window.firstResponder !== view.project.list, "the earlier person's create gave the list the keys")
-        #expect(transport.routes.filter { $0.hasPrefix("GET /v1/projects/harbor") }.count == lists, "the earlier person's create listed harbor again")
+        #expect(transport.routes.filter { $0.hasPrefix("GET /v1/projects/harbor") && !$0.hasSuffix("/sessions") }.count == lists, "the earlier person's create listed harbor again")
     }
 
     /// n4: a narrow row keeps who may open it, as the note at its end cut short, never dropped.
@@ -404,7 +404,7 @@ import Testing
         view.project.field.field.stringValue = "new"
         view.project.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
         view.project.on(.create)
-        #expect(await RunnerTabTests.until { transport.routes.filter { $0.contains("workspaces") }.count == 2 }, "the create was never asked")
+        #expect(await RunnerTabTests.until { transport.routes.filter { $0.contains("workspaces") && !$0.hasSuffix("/sessions") }.count == 2 }, "the create was never asked")
         #expect(view.text.contains("new · creating"), "\(view.text)")
         view.layoutSubtreeIfNeeded()
         let row = try #require(view.project.list.rowView(atRow: 1, makeIfNecessary: true))

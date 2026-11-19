@@ -3936,7 +3936,7 @@ tick, never once each. An accept that fails while the listener stays bound (out 
 passed over after 100 ms and never ends the door. A presented ticket's credential is resolved
 again against the roster. The connection then keeps `TCP_NODELAY` and TCP keepalive (a vanished peer
 found dead within about a minute, its slot, attachment and write token released), speaks the unix
-socket's `SAILPTY5` frames for its ticket's one action on its one target alone (an open ticket
+socket's `SAILPTY6` frames for its ticket's one action on its one target alone (an open ticket
 creates one session in its project and attaches to it), and may end that one session only while it
 holds its write token, so an observer never ends one (`PtyTickets.Ticket#refusal`, the host's
 ownership check still deciding the kill), each frame decided again as on the unix
@@ -3954,14 +3954,29 @@ not hold, is not found. It then asks the host on its unix socket, as the box's o
 (`Network#holders`), refusing in a ticket's words one that stands for no person, and keeps the
 sessions that person could attach to (`admitted`, then the project read as them): their own, or
 every one for an admin, so a member asking another person's workspace lists nothing of theirs. The
-API keeps that workspace's, none made before the workspace's instance (an earlier workspace of the
-name). Each says whether it lives, its clients, its keyboard's holder, its opener, its command, when
-it was opened (`created_at`) and, once ended, the host's words for why (`ended_reason`), newest
+API keeps that workspace's, no ended one made before the workspace's instance (an earlier workspace
+of the name; a live one can only be the present workspace's, whatever the wall clock said). Each says whether it lives, its clients, its keyboard's holder, its opener, its command, when
+it was opened (`created_at`) and, once ended, what happened, once and in the past tense
+(`ended_reason`: the record a yield gave, such as "Workspace dock of harbor was stopped by ana.",
+apart from the line its live terminal was shown; else `PtySession.recordOf` its reason), newest
 first. An ended one is listed for `CORPSE_RETENTION` (10 min) or until the host restarts (a handoff
 carries only live sessions), a workspace's stop included: the yield that ends it deletes its ring
 and keeps it ended, so a client back later says why it ended rather than that it is gone. An ended
 entry counts toward no cap and holds its name for no one. A listing asked while the host closes is
 refused, never a short page. Attaching to one is the ticket above.
+
+**Whose keyboard (`PtySession#attach`, `SAILPTY6`).** An `Attach` that asks to write names its
+client, which keeps its name across its own reconnects, and says whether the person asked now
+(`takes`: an open, an explicit attach). A keyboard no client holds goes to one asked now, or to the
+session's opener; anyone else (an admin's restore) watches until it takes it. A keyboard the same
+person holds goes to one asked now, to the client's own lost connection's successor, or past a
+holder whose connection is gone (a handoff keeps no client name); an automatic reconnect or a
+restore never takes it from the person's other live client, and watches. Another person's
+keyboard is taken only by `TakeWrite`. When the holder detaches, every client still attached hears
+`WriterChanged("", false)`, and the opener's client that asked to write takes the free keyboard as
+it types. Every
+`WriterChanged` says whether the keyboard is the receiving connection's (`yours`), so two clients
+of one person pressing Take Keyboard at once each know which of them types.
 
 **Files pasted into a session (`PtyUploads`).** A client uploads a file on the terminal connection
 it already holds, in frames 12-15 (`PutBegin`, `PutChunk`, `PutEnd`, `PutCancel`) answered by
@@ -4687,8 +4702,11 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   keepalive probes after 30 s idle, 5 s apart, 3 of them, so an idle session costs one probe every
   30 s and the radio may sleep between. The client keeps its view's size apart from the pty's: the
   pty's is the size the host announced or this client sent while it held the write token (the
-  host ignores a reader's resize), and a granted `takeWrite()` sends the view's size once, so the
-  new writer's pty takes it. `reconnectNow()` while attached sends the pty's size, so a connection
+  host ignores a reader's resize), and once a `WriterChanged` says the keyboard became this
+  client's (`yours`, never inferred from whom it names) it sends the view's size once, so the new
+  writer's pty takes it. A session names itself (`client`) the same on every connection and asks to
+  take the keyboard (`takes`) only on the first attach of one the person asked for; a restore and
+  every reconnect never take it from the person's other live client. `reconnectNow()` while attached sends the pty's size, so a connection
   that died during sleep is found at once without resizing anything; the protocol has no no-op
   frame, and an empty `Input` would count as typing. A connect attempt a detach or a close overtook stands down
   before it sends anything for the session. Every session, attached or not, on this Mac or a

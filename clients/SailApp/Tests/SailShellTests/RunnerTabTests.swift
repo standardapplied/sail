@@ -78,6 +78,10 @@ final class DoorTickets: TicketSource {
         }
         return door.issue(for: request)
     }
+
+    func sessions(in _: String, workspace _: String) async throws(SailError) -> RunnerSessions {
+        door.listing
+    }
 }
 
 /// A control plane behind a proxy that answers `failing` with a 502 of its own, as a proxy does
@@ -125,12 +129,14 @@ actor Proxied: Transport {
         return true
     }
 
-    static func pane(_ place: Place, runner: (any TicketSource)?) throws -> TerminalPane {
+    static func pane(
+        _ place: Place, runner: (any TicketSource)?, start: TerminalPane.Start = .open, session: String? = nil, person: String = ""
+    ) throws -> TerminalPane {
         let shell = try WorkbenchLookTests.shell(.light)
         var bench = Workbench()
-        let id = bench.newTab(session: place.newSessionName, place: place)
+        let id = bench.newTab(session: session ?? place.newSessionName, place: place)
         return try TerminalPane(
-            try #require(bench.panes[id]), start: .open, host: shell.thisMac.host, runner: runner,
+            try #require(bench.panes[id]), start: start, host: shell.thisMac.host, runner: runner, person: person,
             fonts: TerminalFonts(directory: LookTests.fonts), points: 15, look: .light
         )
     }
@@ -176,7 +182,6 @@ actor Proxied: Transport {
         let runner = try Self.pane(.workspace(project: "acme", name: "try"), runner: tickets)
         runner.begin()
         #expect(await Self.until { !tickets.requests.isEmpty })
-        #expect(!runner.holdsRunnerSession)
         let ending = try #require(runner.end(within: .seconds(2)))
         #expect(await ending.value == .gone)
         #expect(!tickets.requests.contains(.attach(session: runner.name)), "\(tickets.requests)")
