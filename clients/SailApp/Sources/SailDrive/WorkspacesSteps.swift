@@ -182,6 +182,10 @@ extension Driver {
                 return (false, "the rows: \(error)")
             }
         }
+        if let wanted = step.mayEndAProgram {
+            let said = await waitUntil(step.seconds ?? 10) { self.workbench.focused?.mayEndAProgram == wanted }
+            return (said, "the focused pane says ending it \(workbench.focused?.mayEndAProgram == true ? "may" : "may not") end a program")
+        }
         if let pick = step.menuItem, pick.count == 2 {
             let list = pane.project.list
             guard await clickRow(pick[0], in: list), let row = Self.row(pick[0], in: list), let view = list.rowView(atRow: row, makeIfNecessary: false) else {

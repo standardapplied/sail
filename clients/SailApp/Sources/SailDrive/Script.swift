@@ -169,6 +169,10 @@ struct Step: Decodable {
     /// title chosen while the menu is open (AppKit's own `performActionForItem`: a posted event does
     /// not reach a menu while AppKit tracks it).
     var menuItem: [String]?
+    /// The focused pane says ending it may end a program (true: the cursor has left the shell's
+    /// marked prompt, as a command it runs moves it), within `seconds` (10 by default): a close sent
+    /// before the shell has answered a command's Return finds the cursor still at the prompt.
+    var mayEndAProgram: Bool?
     /// The button of this title on the sheet now asking, clicked with real mouse events through the
     /// sheet's own window.
     var sheetClick: String?
