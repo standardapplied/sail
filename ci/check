@@ -12,12 +12,14 @@ readonly BAKE_TRIES=3
 readonly BAKE_STAGE_SECONDS=300
 readonly APT_LOCK_SECONDS=120
 readonly RUNNER_PACKAGES="incus zfsutils-linux"
-readonly MIRRORED_SOURCES='s#^URIs: http://(archive|security)\.ubuntu\.com/ubuntu/?$#URIs: '
+# shellcheck disable=SC2016
+readonly POINT_APT='find /etc/apt -name sources.list -o -name "*.list" -o -name "*.sources" \
+  | xargs -r sed -i -E "s#http://(archive|security)\.ubuntu\.com/ubuntu/?#$1#g" && grep -rqsF "$1" /etc/apt'
 # shellcheck disable=SC2016
 readonly FLEET_CONTAINERFILE='FROM docker.io/library/ubuntu:24.04
 ARG MIRROR
-ARG MIRRORED_SOURCES
-RUN sed -i -E "${MIRRORED_SOURCES}${MIRROR}#" /etc/apt/sources.list.d/ubuntu.sources \
+ARG POINT_APT
+RUN bash -c "$POINT_APT" _ "$MIRROR" \
     && apt-get update -qq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
         libsqlite3-0 sqlite3 openssh-server openssh-client ca-certificates curl \
@@ -238,6 +240,8 @@ bake_stage() {
 # /etc/apt/apt-mirrors.txt and which their own apt uses, else the archive. A container's sources
 # name archive.ubuntu.com and security.ubuntu.com, which stalled for whole bakes when the runner's
 # mirror answered at once (PR #485's first run: three podman builds, each three tries of 300 s).
+# POINT_APT rewrites them in whichever form the image keeps (sources.list in Incus's Ubuntu image,
+# ubuntu.sources in Docker's) and fails unless one now names the mirror.
 bake_mirror() {
   local mirror
   mirror=$(awk 'NR == 1 { print $1 }' /etc/apt/apt-mirrors.txt 2> /dev/null || true)
@@ -265,8 +269,7 @@ prepared_bake() {
   # shellcheck disable=SC2016
   bake_stage "the builder's outbound DNS" incus exec "$builder" -- bash -c \
     'for _ in $(seq 1 45); do getent hosts archive.ubuntu.com > /dev/null && exit 0; sleep 2; done; cat /etc/resolv.conf; ip -brief addr; exit 1'
-  bake_stage "point apt at $mirror" incus exec "$builder" -- \
-    sed -i -E "${MIRRORED_SOURCES}${mirror}#" /etc/apt/sources.list.d/ubuntu.sources
+  bake_stage "point apt at $mirror" incus exec "$builder" -- bash -c "$POINT_APT" _ "$mirror"
   bake_stage "apt-get update" incus exec "$builder" -- apt-get update -qq
   # shellcheck disable=SC2086
   bake_stage "apt-get install $packages" incus exec "$builder" -- env DEBIAN_FRONTEND=noninteractive \
@@ -322,7 +325,7 @@ fleet_image() {
       context=$(mktemp -d)
       printf '%s\n' "$FLEET_CONTAINERFILE" > "$context/Containerfile"
       bake_stage "podman build $name" podman build -t "$name" \
-        --build-arg MIRROR="$(bake_mirror)" --build-arg MIRRORED_SOURCES="$MIRRORED_SOURCES" "$context"
+        --build-arg MIRROR="$(bake_mirror)" --build-arg POINT_APT="$POINT_APT" "$context"
       rm -rf "$context"
       echo "Baked $name."
       ;;
