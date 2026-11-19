@@ -432,7 +432,9 @@ public final class WorkbenchView: NSView {
     /// The last sentence ``tell(_:)`` said, which the end of a restore leaves in the banner.
     private var told: String?
 
-    /// Says `sentence` in the banner for 10 s, unless something else is said meanwhile.
+    /// Says `sentence` in the banner for 10 s, unless something else is said meanwhile. The banner
+    /// sits at the top of the terminals, clear of a pane's own card at the foot, so neither covers
+    /// the other's actions.
     func tell(_ sentence: String) {
         told = sentence
         banner.show(sentence)
@@ -729,7 +731,7 @@ public final class WorkbenchView: NSView {
         NSLayoutConstraint.activate([
             empty.centerXAnchor.constraint(equalTo: centerXAnchor), empty.centerYAnchor.constraint(equalTo: centerYAnchor),
             banner.centerXAnchor.constraint(equalTo: centerXAnchor),
-            banner.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Look.Space.x3l),
+            banner.topAnchor.constraint(equalTo: topAnchor, constant: Look.Space.x3l),
             banner.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: Look.Space.l),
         ])
         emptyLabel.isHidden = true

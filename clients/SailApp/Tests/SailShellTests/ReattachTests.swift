@@ -264,6 +264,39 @@ import Testing
         #expect(bench.bannerSays == "Still running: the keyboard is with your other window or Mac.")
     }
 
+    /// The workbench's own sentence, at the top, never covers a pane's card at the foot: said at
+    /// once over a tab whose session ended while away, every action of the card is still reached
+    /// (the drive once clicked Close through "Still running").
+    @Test func theWorkbenchsSentenceNeverCoversAPanesCard() async throws {
+        let (local, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
+        defer { local.stop(); runner.stop() }
+        runner.hold("app-x")
+        runner.end("app-x", saying: Self.stopped)
+        var kept = Workbench()
+        _ = kept.newTab(session: "app-x", place: Self.dock)
+        let bench = try await Self.workbench(local: local, runner: runner, who: Who("uday"), kept: kept.arrangement(runner: "uday", holding: []))
+        let pane = try #require(bench.panes.values.first { $0.place.onRunner })
+        #expect(await RunnerTabTests.until(10) { pane.status.offers == ["Open a New One", "Close"] }, "\(pane.status)")
+        let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 630), styleMask: [.titled], backing: .buffered, defer: false)
+        bench.frame = NSRect(x: 0, y: 0, width: 960, height: 630)
+        window.contentView = bench
+        window.orderFront(nil)
+        bench.tell("Still running: the keyboard is with your other window or Mac.")
+        bench.layoutSubtreeIfNeeded()
+        #expect(bench.bannerSays != nil)
+        func buttons(_ view: NSView) -> [NSButton] {
+            ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons)
+        }
+        let actions = buttons(pane).filter { ["Open a New One", "Close"].contains($0.title) && !$0.isHiddenOrHasHiddenAncestor }
+        #expect(actions.count == 2)
+        for action in actions {
+            let middle = action.convert(NSPoint(x: action.bounds.midX, y: action.bounds.midY), to: nil)
+            let hit = try #require(bench.superview).convert(middle, from: nil)
+            let reached = bench.hitTest(hit)
+            #expect(reached === action || reached?.isDescendant(of: action) == true, "a click on \(action.title) reaches \(String(describing: reached))")
+        }
+    }
+
     /// Minor 3: a listing answered after its person signed out, someone else signing in meanwhile,
     /// opens nothing for the one signed in now.
     @Test func anOpenWhoseListingOutlivesItsSignInOpensNothing() async throws {
