@@ -287,13 +287,27 @@ import Testing
     static let lightOnly: [NSColor] = {
         let dark = Dictionary(uniqueKeysWithValues: Mirror(reflecting: Look.dark).children.compactMap { child in child.label.map { ($0, child.value) } })
         return Mirror(reflecting: Look.light).children.compactMap { child -> NSColor? in
-            guard let label = child.label, let light = Self.tint(child.value), let other = dark[label].flatMap(Self.tint), light != other else { return nil }
+            guard let label = child.label, let light = Self.tint(child.value), let other = dark[label].flatMap({ Self.tint($0) }), light != other else { return nil }
             return NSColor(light)
         }
     }()
 
-    static func tint(_ value: Any) -> Tint? {
-        (value as? Tint) ?? (value as? RGB).map { Tint($0) }
+    /// A colour token's tint: a tint, or an sRGB colour (the type a tint is made of) at full opacity.
+    nonisolated static func tint(_ value: Any) -> Tint? {
+        func cast<Wanted>(_ value: Any, like _: Wanted) -> Wanted? {
+            value as? Wanted
+        }
+        return (value as? Tint) ?? cast(value, like: Tint(0).rgb).map { Tint($0) }
+    }
+
+    /// A look switched while the section is hidden is taken when it is shown, not before.
+    @Test func aLookSwitchedWhileHiddenIsTakenOnShowing() async throws {
+        let (view, _, _) = try await Self.listed()
+        view.isHidden = true
+        view.look = .dark
+        #expect(view.project.look == .light, "a hidden section redrew for a look nobody sees")
+        view.isHidden = false
+        #expect(view.project.look == .dark && view.panel.look == .dark && Self.keptLight(under: view).isEmpty)
     }
 
     /// Every view shown under `root` that still carries the light look: a stored look that is not
@@ -322,7 +336,9 @@ import Testing
             if let ground = view.layer?.backgroundColor, Self.lightOnly.contains(where: { $0.cgColor == ground }) {
                 kept.append("\(type(of: view))'s ground")
             }
-            view.subviews.forEach(walk)
+            for subview in view.subviews {
+                walk(subview)
+            }
         }
         walk(root)
         return kept

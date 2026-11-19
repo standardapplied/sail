@@ -23,14 +23,16 @@ public final class WorkspacesView: NSView {
     var onOpen: @MainActor (_ project: String, _ name: String) -> Void = { _, _ in }
     var onSignIn: @MainActor () -> Void = {}
     var onAskWhoIsSignedIn: @MainActor () -> Void = {}
+    /// Its look, taken at once while shown and on being shown while hidden: a look switched under
+    /// another section costs that section's redraw nothing (the drive's panes4 step waited 101 ms when it did).
     var look: Look {
         didSet {
-            panel.look = look
-            project.look = look
-            paint()
-            render()
+            guard look != oldValue else { return }
+            if isHidden { lookOwed = true } else { relook() }
         }
     }
+
+    private var lookOwed = false
 
     package let panel: LeftPanel
     package let project: ProjectView
@@ -82,6 +84,19 @@ public final class WorkspacesView: NSView {
         project.on = { [weak self] act in self?.act(act) }
         paint()
         render()
+    }
+
+    private func relook() {
+        lookOwed = false
+        panel.look = look
+        project.look = look
+        paint()
+        render()
+    }
+
+    override public func viewDidUnhide() {
+        super.viewDidUnhide()
+        if lookOwed { relook() }
     }
 
     /// The section's ground, the card's canvas, as the approved frames draw it around the list.
