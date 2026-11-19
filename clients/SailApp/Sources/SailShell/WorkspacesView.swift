@@ -98,6 +98,7 @@ public final class WorkspacesView: NSView {
 
     private func relook() {
         lookOwed = false
+        if project.fieldHasKeys { keys = .field }
         panel.look = look
         project.look = look
         paint()
@@ -219,11 +220,11 @@ public final class WorkspacesView: NSView {
     }
 
     private func choose(_ name: String) {
+        guard name != model.chosen else { return }
         if overlaid {
             overlaid = false
             arrange()
         }
-        guard name != model.chosen else { return }
         let request = model.choose(name)
         render()
         list(request)

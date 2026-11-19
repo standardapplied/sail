@@ -627,17 +627,18 @@ final class CreateRow: NSView {
     }
 
     /// The row's height when its content has `room` across, and its column the width that leaves:
-    /// the hairline, 12 pt, then the field with its lines, at least the design's 76 pt.
+    /// 12 pt, then the field with its lines, at least the design's 76 pt; the list draws the row
+    /// 1 pt taller, its hairline, as the design's 89 pt row is.
     func height(room: Double) -> Double {
         let width = max(min(Self.column, room - Self.gap - Double(buttons.fittingSize.width)), 1)
         fieldWidth?.constant = width
         field.setFrameSize(NSSize(width: width + 2 * Look.haloRoom, height: Double(field.frame.height)))
-        return (1 + Self.padding + max(Self.least, words)).rounded(.up)
+        return (Self.padding + max(Self.least, words)).rounded(.up)
     }
 
-    /// The row centres its content, so this is the row's height less 25 pt (the hairline and 12 pt
-    /// twice): the field then starts 12 pt under the hairline, as the design's row is padded only
-    /// above, and its lines run to the row's foot.
+    /// The row centres its content under its hairline, so this is its height less 12 pt twice: the
+    /// field then starts 12 pt under the hairline, as the design's row is padded only above, and its
+    /// lines run to the row's foot.
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: max(Self.least, words) - Self.padding)
     }

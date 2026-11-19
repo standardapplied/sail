@@ -186,6 +186,8 @@ struct Step: Decodable {
     /// The name field holds the keys (true) or does not (false); with `fieldHolds`, it holds that name.
     var keysInField: Bool?
     var fieldHolds: String?
+    /// The list holds the keys (true) or does not (false), within `seconds` (5 by default).
+    var keysInList: Bool?
     /// The Workspaces row chosen is the one of this name, within `seconds` (10 by default).
     var listChosen: String?
     /// A proxy answers this route ("GET /v1/projects/harbor/workspaces") with a 502 from now on;

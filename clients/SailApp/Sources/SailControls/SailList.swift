@@ -66,8 +66,13 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         case item(Item)
     }
 
+    /// Its look: a change redraws the rows and never tells `onChoose`, as no one chose.
     public var look: Look {
-        didSet { reloadData() }
+        didSet {
+            reloading = true
+            reloadData()
+            reloading = false
+        }
     }
 
     public let rowStyle: RowStyle
