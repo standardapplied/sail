@@ -1385,7 +1385,7 @@ resilience() {
   check "$run" "it reaches main within 30 s, no sail sync asked" reaches_main_unasked "$run" "after-api$x"
   check "$run" "the pty host restarts on client" on "$run" client "sudo systemctl restart sail-pty-host"
   check "$run" "the session outlives the pty host's restart" session_is "$run" client "ticker$x" live
-  check "$run" "from main, a session on client that counts outlives its killed client and client's sail migrate (the terminal host is restarted onto the installed binary, as an upgrade does), is listed live through client's API, and reattaches by a new ticket with what it printed meanwhile replayed" \
+  check "$run" "a counting session on client outlives its killed client and client's sail migrate (the terminal host is restarted onto the installed binary, as an upgrade does), is listed live and reattaches by a new ticket, its output replayed" \
     reattach_after_upgrade "$run" client main client "numbers$x"
   check "$run" "incus restarts on client" on "$run" client "sudo systemctl restart incus"
   check "$run" "the session incus ended reads as ended" session_is "$run" client "ticker$x" ended
