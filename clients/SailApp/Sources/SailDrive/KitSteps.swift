@@ -347,13 +347,15 @@ final class Kit {
         let open = button("Open", .primary, size: .small), check = button("Check Again", .secondary)
         open.shortcut("\r", mono: mono)
         check.shortcut("r", modifiers: .command, mono: mono)
+        let create = button("Create", .primary, size: .small)
+        create.hint("\r", mono: mono)
         row("Sizes, symbols and hints", [
             held("button-small-create", button("Create", .primary, size: .small)), held("button-symbol-build-template", button("Build Template", .primary, icon: .hammer)),
             held("button-large-sign-in", button("Sign In with Passkey", .primary, size: .large)),
             held("button-symbol-new-workspace", button("New Workspace", .secondary, icon: .plus)),
             held("button-icon-list-again", SailButton(icon: .refresh, label: "List Again", look: look, target: presses, action: #selector(KitPresses.press(_:)))),
             held("button-icon-more", SailButton(icon: .more, label: "More", size: .small, look: look, target: presses, action: #selector(KitPresses.press(_:)))),
-            held("button-hint-open", open), held("button-hint-check-again", check),
+            held("button-hint-open", open), held("button-hint-check-again", check), held("button-hint-create", create),
         ])
     }
 
@@ -435,6 +437,13 @@ final class Kit {
         ], showing: [statesHeld])
         let (keys, keysHeld) = listed(["harbor", "lighthouse", "marina"].map { .item(project($0, nil)) }, .sidebar, width: 235)
         row("Chosen, the list holding the keys", [listRow("sidebar-chosen", keys, keysHeld, row: 0, id: "harbor", state: ["focused"])], showing: [keysHeld])
+        let stale = { (name: String) -> SailList.Entry in
+            let cell = SidebarRowCell(name, template: nil, look: self.look, mono: self.mono)
+            cell.stale = true
+            return .item(SailList.Item(id: name, name: name, voice: name, content: cell))
+        }
+        let (dimmed, dimmedHeld) = listed(["harbor", "demo"].map { stale($0) }, .sidebar, width: 235)
+        row("A refresh that failed: the names in the secondary ink", [listRow("sidebar-stale", dimmed, dimmedHeld, row: 0, id: "harbor")], showing: [dimmedHeld])
         let names = ["harbor", "demo", "lighthouse", "marina", "atlas", "keel", "quarry", "beacon", "tidewater", "cove", "7seas"]
         row("Tiles", names.map { held("tile-\($0)", Tile($0, look: look, mono: mono)) })
     }
