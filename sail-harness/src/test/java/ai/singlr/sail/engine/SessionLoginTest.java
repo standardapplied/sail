@@ -198,7 +198,8 @@ class SessionLoginTest {
     assertEquals(
         "args: [--dangerously-bypass-approvals-and-sandbox] [-c] [model_provider=sail] [-c]"
             + " [model_providers.sail={name=\"OpenAI\", base_url=\"https://api.openai.com/v1\","
-            + " env_key=\"CODEX_API_KEY\", wire_api=\"responses\"}]\nkey: "
+            + " env_key=\"CODEX_API_KEY\", wire_api=\"responses\"}] [-c]"
+            + " [shell_environment_policy.set.CODEX_API_KEY=\"\"]\nkey: "
             + fingerprint(KEY)
             + "\n",
         ran.output(),

@@ -342,7 +342,7 @@ class HarnessGoldenTest {
             "",
             " -c model_provider=sail -c 'model_providers.sail={name=\"OpenAI\","
                 + " base_url=\"https://api.openai.com/v1\", env_key=\"CODEX_API_KEY\","
-                + " wire_api=\"responses\"}'"),
+                + " wire_api=\"responses\"}' -c 'shell_environment_policy.set.CODEX_API_KEY=\"\"'"),
         CODEX.interactiveLogin(CODEX.loginKind("api-key")));
     assertEquals(List.of(".claude/.credentials.json", ".claude.json"), CLAUDE_CODE.storedLogins());
     assertEquals(List.of(".codex/auth.json"), CODEX.storedLogins());

@@ -4076,7 +4076,10 @@ the harness keeps nothing of the login: Claude Code's token from its variable; i
 in `ANTHROPIC_API_KEY` is asked about, shown as `sk-ant-…` and its last 20 characters, and those 20
 kept in `~/.claude.json`; Codex's key read from `CODEX_API_KEY` by a provider of its own config
 (`-c model_provider=sail -c model_providers.sail={…, env_key="CODEX_API_KEY", …}`), since its
-built-in provider takes an interactive key only from `auth.json`. The file is withdrawn
+built-in provider takes an interactive key only from `auth.json`, and set empty in the shell
+Codex starts for its commands (`shell_environment_policy.set.CODEX_API_KEY`, one key by its dotted
+path, so a project's own policy stands), whose snapshot Codex writes, `0644`, with every exported
+variable. The file is withdrawn
 (`PtyAdmission.withdraw`, idempotent) when the hand-over fails, when the session is then refused,
 and when an agent session ends whatever happened (`ended`, beside the uploads' cleanup); every give
 removes `~/.sail/sessions`. `inside` starts the harness with nothing handed over, for a person who

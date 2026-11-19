@@ -127,7 +127,10 @@ final class Codex implements Harness {
    * ({@code auth.json}), where it would rest after the session. A provider of its own config,
    * declared on the command line ({@code model_providers}), reads the key from the environment
    * instead ({@code env_key}), so nothing of it is stored: the OpenAI API under the id {@code
-   * sail}, which Codex does not reserve.
+   * sail}, which Codex does not reserve. The variable is set empty in the shell Codex starts for
+   * its commands ({@code shell_environment_policy.set}, one key by its dotted path, so a project's
+   * own policy stands), whose snapshot Codex writes to {@code ~/.codex/shell_snapshots}, {@code
+   * 0644}, every exported variable in it (codex-cli 0.163 and 0.170).
    */
   @Override
   public InteractiveLogin interactiveLogin(LoginKind kind) {
@@ -136,7 +139,9 @@ final class Codex implements Harness {
         " -c model_provider=sail -c 'model_providers.sail={name=\"OpenAI\","
             + " base_url=\"https://api.openai.com/v1\", env_key=\""
             + kind.variable()
-            + "\", wire_api=\"responses\"}'");
+            + "\", wire_api=\"responses\"}' -c 'shell_environment_policy.set."
+            + kind.variable()
+            + "=\"\"'");
   }
 
   /** Its own store, where {@code codex login} keeps a ChatGPT sign-in or a key. */
