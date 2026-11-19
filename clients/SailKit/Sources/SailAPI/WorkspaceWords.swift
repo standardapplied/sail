@@ -52,51 +52,24 @@ extension WorkspaceList {
 }
 
 extension WorkspaceRow {
-    /// Its row as a person reads it, a part each: its name, its state, and its owner when that is
-    /// not `handle` ("quay · running · ana").
-    public func reading(for handle: String) -> String {
-        ([name, said] + (owner(apartFrom: handle).map { [$0] } ?? [])).joined(separator: " · ")
-    }
-
-    /// Why Open is not offered on it to `handle`, in a sentence; nil when it is.
-    public func notOpened(for handle: String, admin: Bool) -> String? {
-        guard !opens(for: handle, admin: admin) else { return nil }
-        guard let owner else { return "No one owns \(name): only an admin can open it." }
-        return "\(name) is \(owner)'s: only \(owner) or an admin can open it."
-    }
-
-    /// Its state in words.
-    public var said: String {
-        switch state {
-        case .known(.running): "running"
-        case .known(.stopped): "stopped"
-        case .known(.frozen): "paused"
-        case .known(.incomplete): "not whole, create it again"
-        case .known(.notCreated): "not created"
-        case let .unknown(raw): raw
-        }
-    }
-
-    /// Its owner when that is not `handle`, said at its row's trailing edge.
-    public func owner(apartFrom handle: String) -> String? {
-        owner == handle ? nil : owner
-    }
-
-    /// Whether opening it starts it first: the server starts a stopped workspace it is asked to
-    /// open a terminal in (`Workspaces.startExisting`).
-    public var startsWhenOpened: Bool {
-        state == .known(.stopped)
-    }
-
-    /// Whether it is up, its dot filled.
-    public var isUp: Bool {
-        state == .known(.running)
-    }
+    /// The owner the server names when the workspace's owner's account is not active, removed or
+    /// disabled alike (`Workspaces.REMOVED_OWNER`): never a handle.
+    public static let removedOwner = "removed"
 
     /// Whether the app offers Open on it: a person's own, or any to an admin. The server decides
     /// either way.
     public func opens(for handle: String, admin: Bool) -> Bool {
         admin || owner == handle
+    }
+
+    /// Why Open is not offered on it to `handle`, as its row says it; nil when it is.
+    public func whyNotOpened(for handle: String, admin: Bool) -> String? {
+        guard !opens(for: handle, admin: admin) else { return nil }
+        switch owner {
+        case nil: return "No one owns it: only an admin opens it"
+        case Self.removedOwner?: return "Its owner’s account is not active: only an admin opens it"
+        case let owner?: return "Only \(owner) or an admin opens it"
+        }
     }
 }
 

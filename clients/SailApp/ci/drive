@@ -170,7 +170,13 @@ open_drive() {
   : > "$out_dir/$run-errors.txt"
   : > "$private_dir/$run-started"
   rm -f "$private_dir/$run-hung"
-  watch_drive "$run" "$2" &
+  local script="" previous=""
+  for argument in "$@"; do
+    [[ $previous == --drive ]] && script=$argument
+    previous=$argument
+  done
+  [[ -n $script ]] || { echo "ci/drive: the $run run names no --drive script" >&2; return 134; }
+  watch_drive "$run" "$script" &
   watcher=$!
   disown
   perl -e 'alarm shift; exec @ARGV' "${SAIL_DRIVE_ALARM_SECONDS:-600}" open -W -n -a "$app" --stdout "$out_dir/$run-output.txt" \

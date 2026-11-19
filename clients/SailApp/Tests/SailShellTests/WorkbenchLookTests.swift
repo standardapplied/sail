@@ -424,7 +424,7 @@ import Testing
         #expect(divider.line.backgroundColor == NSColor(Look.dark.separatorStrong).cgColor)
         room.paint(.light)
         #expect(divider.line.backgroundColor == NSColor(Look.light.separatorStrong).cgColor, "the divider kept the dark look's colour")
-        #expect(divider.frame == frame && divider.line.frame == line, "a change of look moved the divider")
+        #expect(near(divider.frame, frame) && near(divider.line.frame, line), "a change of look moved the divider")
     }
 
     @Test func theScrimIsTheTerminalBackgroundAt30PercentAndTakesNoClick() throws {

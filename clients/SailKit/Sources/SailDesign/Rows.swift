@@ -41,11 +41,37 @@ public struct RowPaint: Equatable, Sendable {
     public let fill: Tint?
     public let bar: Bool
     public let actions: Bool
+    /// A 2 pt accent line runs along its foot: something under way, about as long as it takes.
+    public let progress: Bool
 
     public init(_ state: RowState, look: Look) {
         fill = state.chosen ? (state.emphasized ? look.fillSelected : look.fillSelectedQuiet) : state.hovered ? look.fillHover : nil
         bar = state.chosen
         actions = state.chosen || state.hovered
+        progress = false
+    }
+
+    private init(fill: Tint?, bar: Bool, actions: Bool, progress: Bool) {
+        self.fill = fill
+        self.bar = bar
+        self.actions = actions
+        self.progress = progress
+    }
+
+    /// A create row open for a name: drawn chosen, quietly, its field holding the keys.
+    public static func naming(_ look: Look) -> Self {
+        Self(fill: look.fillSelectedQuiet, bar: true, actions: false, progress: false)
+    }
+
+    /// A create row refused: the error's tint (the design's 5 %), no bar.
+    public static func refused(_ look: Look) -> Self {
+        Self(fill: Tint(look.error, alpha: 0.05), bar: false, actions: false, progress: false)
+    }
+
+    /// A row being created: the quiet chosen fill, its actions (how long, a spinner) shown, the
+    /// progress line along its foot.
+    public static func creating(_ look: Look) -> Self {
+        Self(fill: look.fillSelectedQuiet, bar: false, actions: true, progress: true)
     }
 }
 

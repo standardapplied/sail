@@ -112,18 +112,20 @@ import Testing
         let dots: [PillState: Tint] = [
             .running: Tint(look.success), .starting: Tint(look.info), .creating: Tint(look.info), .stopped: look.textTertiary,
             .paused: Tint(look.warning), .incomplete: Tint(look.error), .noTemplate: Tint(look.warning), .building: Tint(look.info),
-            .buildFailed: Tint(look.error),
+            .buildFailed: Tint(look.error), .notCreated: look.textTertiary, .error: Tint(look.error), .unknown: look.textTertiary,
         ]
         for state in PillState.allCases {
             let paint = PillPaint(state, look: look)
-            let failed = state == .incomplete || state == .buildFailed
+            let failed = state == .incomplete || state == .buildFailed || state == .error
             #expect(paint.dot == dots[state], "\(name) \(state)'s dot")
             #expect(paint.text == (failed ? Tint(look.error) : look.textSecondary), "\(name) \(state)'s label")
             #expect(paint.edge == (failed ? Tint(look.error, alpha: 0.45) : look.separatorStrong), "\(name) \(state)'s edge")
-            #expect(paint.dashed == (state == .noTemplate) && paint.hollow == (state == .stopped))
+            #expect(paint.dashed == (state == .noTemplate) && paint.hollow == (state == .stopped || state == .notCreated))
             #expect(state.pulses == [.starting, .creating, .building].contains(state))
         }
-        #expect(PillState.allCases.map(\.label) == ["Running", "Starting", "Creating", "Stopped", "Paused", "Not whole", "No template", "Building", "Build failed"])
+        #expect(PillState.allCases.map(\.label) == [
+            "Running", "Starting", "Creating", "Stopped", "Paused", "Not whole", "No template", "Building", "Build failed", "Not created", "Error", "Unknown",
+        ])
         #expect([PillSize.regular.height, PillSize.regular.dot, PillSize.regular.text, PillSize.regular.tracking] == [20, 6, 10, 0.08])
         #expect([PillSize.small.height, PillSize.small.dot, PillSize.small.text, PillSize.small.tracking] == [18, 5, 9, 0.06])
     }
@@ -190,5 +192,11 @@ import Testing
         for unnamed in ["", "ab", "\u{F750}", "\u{E000}", "\u{0}", "\u{1}"] {
             #expect(Shortcut.said(unnamed, command: true) == nil, "\(unnamed.unicodeScalars.map { String($0.value, radix: 16) }) is said")
         }
+    }
+
+    /// An age as the frames write it ("listed 4 min ago"), the same wherever the app says one.
+    @Test func anAgeIsSaidAsTheFramesWriteIt() {
+        let ages: [Double] = [-5, 0.4, 1, 59.9, 60, 240, 3599, 3600, 7300, 86400, 200_000]
+        #expect(ages.map(Ago.said) == ["just now", "just now", "1 s ago", "59 s ago", "1 min ago", "4 min ago", "59 min ago", "1 h ago", "2 h ago", "1 d ago", "2 d ago"])
     }
 }

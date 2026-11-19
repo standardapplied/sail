@@ -30,6 +30,8 @@ public enum WorkspaceState: String, CaseIterable, Sendable {
     case running, stopped, frozen
     case notCreated = "not_created"
     case incomplete
+    /// Its instance is in Incus's error state.
+    case error
 }
 
 extension Endpoint where Response == WorkspaceList {

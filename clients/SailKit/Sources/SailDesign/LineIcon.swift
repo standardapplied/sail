@@ -2,7 +2,7 @@
 /// with round caps and joins (the ⋯ is three filled dots). Drawn by the app, so every icon a control
 /// shows is the design's, not a system symbol.
 public enum LineIcon: String, CaseIterable, Sendable {
-    case refresh, hammer, plus, more, info, warning, error, box, layers
+    case refresh, hammer, plus, more, info, warning, error, box, layers, cloudOff
 
     public static let side = 24.0, width = 1.75
 
@@ -45,6 +45,11 @@ public enum LineIcon: String, CaseIterable, Sendable {
         case .info: return [.circle(Point(12, 12), radius: 9), line((12, 11), (12, 16.5)), line((12, 7.6), (12, 7.7))]
         case .warning: return [line((12, 3.8), (21, 19.5), (3, 19.5), closed: true), line((12, 10), (12, 14.2)), line((12, 17), (12, 17.1))]
         case .error: return [.circle(Point(12, 12), radius: 9), line((12, 7.5), (12, 13)), line((12, 16.2), (12, 16.3))]
+        case .cloudOff:
+            return [
+                .arc(Point(6.7, 14.9), radius: 3.61, from: 85.2, to: 265.2), .arc(Point(12.33, 12.23), radius: 6, from: -171.1, to: -21.8),
+                .arc(Point(17, 14.2), radius: 4.3, from: -77.9, to: 87.3), line((17.2, 18.5), (7, 18.5)), line((4, 4), (20, 20)),
+            ]
         case .more: return [.dot(Point(5.5, 12), radius: 1.2), .dot(Point(12, 12), radius: 1.2), .dot(Point(18.5, 12), radius: 1.2)]
         }
     }

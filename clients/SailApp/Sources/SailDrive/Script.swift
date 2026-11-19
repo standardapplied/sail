@@ -4,6 +4,9 @@ import Foundation
 /// object naming one action; `name` labels it in the report and its saved image.
 struct Script: Decodable {
     let steps: [Step]
+    /// A failed step is recorded and the next one runs: a script whose frames each set their own
+    /// state shows every frame whatever fails, and fails at its end naming every failed step.
+    var goesOn: Bool?
 }
 
 struct Step: Decodable {
@@ -141,22 +144,53 @@ struct Step: Decodable {
     /// "refusal-forbidden-not-assignee"]`) as that golden from now on, held this many seconds when
     /// a third is given.
     var golden: [String]?
-    /// The Workspaces pane says this, within `seconds` (10 by default), no call under way.
+    /// The Workspaces section says this, within `seconds` (10 by default), no call under way.
     var workspaces: String?
-    /// This name typed into the Workspaces pane's field and Create pressed; the call waited for.
-    var create: String?
     /// The controls' gallery sheet of this name ("button", "field", "pill", "spinner") shot in
     /// every state and look, cut into `<control>-<state>-<look>.png`.
     var kit: String?
+    /// The projects listed from now on, each its name and its template's state ("missing").
+    var projects: [[String]]?
+    /// ⌃⌘S pressed (View ▸ Show Sidebar), and whether the panel is then shown (over the content)
+    /// or hidden again, within `seconds` (5 by default).
+    var showSidebar: Bool?
+    /// The Workspaces section shows its skeleton bars (true) or none (false), within `seconds` (5 by
+    /// default).
+    var skeletons: Bool?
     /// The Workspaces row of this name selected and Open pressed: a tab on the runner.
     var open: String?
-    /// The Workspaces row of this name selected, what its button then says told.
+    /// The Workspaces row of this name clicked: chosen, with the list holding the keys (its Open
+    /// says ⏎), within `seconds` (5 by default).
     var chooseRow: String?
+    /// The left panel's project of this name clicked once the panel lists it; the section then
+    /// names it, within `seconds` (10 by default).
+    var chooseProject: String?
+    /// The window's frame made `[width, height]`, its top left kept: each frame shot at the
+    /// design's size.
+    var window: [Double]?
+    /// The Workspaces section no longer says this, within `seconds` (10 by default).
+    var notSaid: String?
+    /// The Workspaces button of this title clicked with a real mouse-down and mouse-up through the
+    /// window ("Create", "Cancel").
+    var clickButton: String?
+    /// The create row is open (true) or gone (false), within `seconds` (5 by default).
+    var createRowOpen: Bool?
+    /// The name field holds the keys (true) or does not (false); with `fieldHolds`, it holds that name.
+    var keysInField: Bool?
+    var fieldHolds: String?
+    /// The list holds the keys (true) or does not (false), within `seconds` (5 by default).
+    var keysInList: Bool?
+    /// The Workspaces section says this while a person's action is under way, within `seconds` (5
+    /// by default).
+    var whileBusy: String?
     /// The Workspaces row chosen is the one of this name, within `seconds` (10 by default).
     var listChosen: String?
     /// A proxy answers this route ("GET /v1/projects/harbor/workspaces") with a 502 from now on;
     /// empty, no route.
     var proxyFails: String?
+    /// This route ("GET /v1/projects") cannot reach the control plane from now on; `proxyFails`
+    /// empty clears it.
+    var unreachable: String?
     /// The drive's runner door holds this many sessions, within `seconds` (15 by default): the
     /// host's session list.
     var doorLists: Int?
@@ -168,8 +202,6 @@ struct Step: Decodable {
     var pressStatus: String?
     /// Sign Out pressed on the account, answered no further: what follows it asks.
     var signOutNow: Bool?
-    /// This name typed into the Workspaces pane's field and Create pressed; the call not waited for.
-    var createStarts: String?
     /// A ticket was asked with these fields (`{"action": "open", "workspace": "dock"}`), within
     /// `seconds` (15 by default).
     var ticketAsked: [String: String]?

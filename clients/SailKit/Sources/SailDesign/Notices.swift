@@ -127,3 +127,24 @@ public struct TooltipPlacement: Equatable, Sendable {
         arrow = clamp(Double(anchor.midX) - x, Self.arrowInset, width - Self.arrowInset)
     }
 }
+
+/// The shadow a layer floating over the content takes (the panel slid over it, popovers, toasts,
+/// sheets): a hairline ring and two soft layers, deeper in the dark look. In-flow surfaces stay flat.
+public enum PopShadow {
+    public struct Layer: Equatable, Sendable {
+        public let y: Double, blur: Double, spread: Double, color: Tint
+
+        public init(y: Double, blur: Double, spread: Double = 0, color: Tint) {
+            self.y = y
+            self.blur = blur
+            self.spread = spread
+            self.color = color
+        }
+    }
+
+    public static func layers(_ look: Look) -> [Layer] {
+        look.palette.isDark
+            ? [Layer(y: 0, blur: 0, spread: 1, color: Tint(0x000000, alpha: 0.5)), Layer(y: 6, blur: 14, color: Tint(0x000000, alpha: 0.35)), Layer(y: 18, blur: 44, color: Tint(0x000000, alpha: 0.5))]
+            : [Layer(y: 0, blur: 0, spread: 0.5, color: Tint(0x0E1217, alpha: 0.05)), Layer(y: 4, blur: 10, color: Tint(0x0E1217, alpha: 0.07)), Layer(y: 14, blur: 36, color: Tint(0x0E1217, alpha: 0.14))]
+    }
+}

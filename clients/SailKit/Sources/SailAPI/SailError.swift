@@ -157,6 +157,20 @@ extension SailError: CustomStringConvertible {
         }
     }
 
+    /// What went wrong as a person reads it where the control plane's address is known: the address
+    /// said in place of the transport's own text ("Sail cannot reach the control plane at
+    /// main.acme.dev."); a refusal is the server's sentence, as ``description`` says it.
+    public func said(at address: String) -> String {
+        guard !address.isEmpty else { return description }
+        return switch self {
+        case .unreachable: "Sail cannot reach the control plane at \(address)."
+        case let .unexpected(_, status): "The control plane at \(address) answered with an error (\(status))."
+        case .undecodable: "The control plane at \(address) sent an answer this app cannot read."
+        case .notAnEventStream: "The control plane's proxy at \(address) answered in place of its event stream."
+        case .refused, .unsendable, .signIn: description
+        }
+    }
+
     /// The route the failure came from, for a log; nil for one that names none.
     public var route: String? {
         switch self {
