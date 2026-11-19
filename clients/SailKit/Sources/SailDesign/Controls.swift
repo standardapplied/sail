@@ -331,3 +331,16 @@ public enum TextLine {
         (baseline * scale).rounded(.down) / scale
     }
 }
+
+/// The quiet scroller, after Mast's terminal scrollbar (`components.css` `.term-scrollbar`): a
+/// 12 pt overlay track inset 4 pt top and bottom, drawing nothing of its own; a 6 pt thumb in
+/// 3 pt corners, 3 pt from the edge, in the look's text at 35 %, and 55 % hovered or dragged.
+public enum ScrollerStyle {
+    public static let track = 12.0, thumb = 6.0, radius = 3.0, edge = 3.0, inset = 4.0
+    public static let rest = 0.35, active = 0.55
+
+    /// The thumb's ink in `look`, hovered or dragged (`active`) or at rest.
+    public static func ink(_ look: Look, active: Bool) -> Tint {
+        Tint(look.text.rgb, alpha: active ? Self.active : rest)
+    }
+}

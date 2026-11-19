@@ -176,7 +176,7 @@ import Testing
         window.orderFront(nil)
         pane.begin()
         #expect(await RunnerTabTests.until(10) { pane.status.offers == ["Open a New One", "Close"] }, "\(pane.status)")
-        #expect(WorkspacesViewTests.outOfReach(in: room).isEmpty, "\(WorkspacesViewTests.outOfReach(in: room))")
+        #expect(WorkspacesReachTests.outOfReach(in: room).isEmpty, "\(WorkspacesReachTests.outOfReach(in: room))")
 
         runner.hold("app-k")
         let held = try RunnerTabTests.pane(Self.dock, runner: DoorTickets(runner), start: .attach, session: "app-k", person: "uday")
@@ -188,7 +188,7 @@ import Testing
         runner.takeKeyboard("app-k", by: "ana")
         #expect(await RunnerTabTests.until(10) { held.status.offers == ["Take Keyboard"] }, "\(held.status)")
         #expect(held.status.says == "Typing here is paused: the keyboard is with ana now.", "someone else is named")
-        #expect(WorkspacesViewTests.outOfReach(in: room).isEmpty, "\(WorkspacesViewTests.outOfReach(in: room))")
+        #expect(WorkspacesReachTests.outOfReach(in: room).isEmpty, "\(WorkspacesReachTests.outOfReach(in: room))")
     }
 
     /// The door's tickets, its listing answered with `refusal`.

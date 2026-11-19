@@ -27,6 +27,7 @@ public final class WorkspacesView: NSView {
             } else {
                 model = WorkspacesModel(person: person)
                 era += 1
+                project.forgetList()
             }
         }
     }
@@ -39,11 +40,11 @@ public final class WorkspacesView: NSView {
     var look: Look {
         didSet {
             guard look != oldValue else { return }
-            if isHidden { lookOwed = true } else { relook() }
+            painter.lookChanged(hidden: isHidden)
         }
     }
 
-    private var lookOwed = false
+    private lazy var painter = PaintWhenShown { [unowned self] in self.relook() }
     /// How many times the section was painted for a change of look: none while it is hidden, once
     /// when it is next shown.
     package private(set) var lookPaints = 0
@@ -108,7 +109,6 @@ public final class WorkspacesView: NSView {
     }
 
     private func relook() {
-        lookOwed = false
         lookPaints += 1
         let typing = project.fieldHasKeys
         panel.look = look
@@ -120,7 +120,7 @@ public final class WorkspacesView: NSView {
 
     override public func viewDidUnhide() {
         super.viewDidUnhide()
-        if lookOwed { relook() }
+        painter.shown()
     }
 
     /// The section's ground, the card's canvas, as the approved frames draw it around the list.
@@ -344,7 +344,9 @@ public final class WorkspacesView: NSView {
         draw()
         let naming = model.screen.createOpen, shown = window?.isKeyWindow == true && !project.isHiddenOrHasHiddenAncestor
         switch claim {
-        case .field? where shown && naming: project.focusField()
+        case .field? where shown && naming:
+            project.showCreateRow()
+            project.focusField()
         case .list? where shown: window?.makeFirstResponder(project.list)
         default: if typing, naming { project.focusField() }
         }
@@ -378,7 +380,7 @@ public final class WorkspacesView: NSView {
             }
         case (_, .loading?):
             card.isHidden = true
-            panel.renderLoading(who: model.who, controlPlane: model.person.controlPlane)
+            panel.renderLoading(who: model.who, handle: model.person.handle, controlPlane: model.person.controlPlane)
             setPanel(shown: true)
             project.isHidden = false
             project.renderLoading()

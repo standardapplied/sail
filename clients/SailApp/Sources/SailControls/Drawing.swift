@@ -88,3 +88,16 @@ enum Draw {
         dots.fill()
     }
 }
+
+extension NSAttributedString {
+    /// These words cut at `mode` with an ellipsis where they do not fit their one line. An
+    /// attributed label draws with its words' own line breaking, whatever the field's
+    /// `lineBreakMode`, so a cut is set here; any other paragraph style is kept.
+    public func cut(_ mode: NSLineBreakMode) -> NSAttributedString {
+        let cut = NSMutableAttributedString(attributedString: self)
+        let style = ((length > 0 ? attribute(.paragraphStyle, at: 0, effectiveRange: nil) : nil) as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle ?? NSMutableParagraphStyle()
+        style.lineBreakMode = mode
+        cut.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: cut.length))
+        return cut
+    }
+}

@@ -36,6 +36,8 @@ public struct WorkspacesModel: Sendable {
         public let chosen: String?
         /// Who is signed in and their role ("ana · member").
         public let who: String
+        /// Who is signed in alone, which the foot sets apart from the role.
+        public let handle: String
         public let controlPlane: String
         /// What the panel says when it lists no project.
         public let emptyLine: String?
@@ -334,7 +336,7 @@ public struct WorkspacesModel: Sendable {
     public var screen: Screen {
         guard let projects else { return projectsFailure.map { .unreachable(unreachable($0)) } ?? .loading }
         let panel = Panel(
-            projects: projects.map { Project(name: $0.name, mark: Self.mark($0.template)) }, chosen: chosen, who: who, controlPlane: person.controlPlane,
+            projects: projects.map { Project(name: $0.name, mark: Self.mark($0.template)) }, chosen: chosen, who: who, handle: person.handle, controlPlane: person.controlPlane,
             emptyLine: projects.isEmpty ? "No project is open to you yet." : nil,
             stale: projectsFailure != nil || (chosen != nil && listing.listed == chosen && listFailure != nil)
         )
@@ -426,7 +428,7 @@ public struct WorkspacesModel: Sendable {
         let name = project.name, listed = listing.listed == name, unready = Self.unready(project)
         let banner = listFailure.map { Notice(tone: .error, title: "Couldn’t list \(name)’s workspaces", line: $0, tryAgain: true) } ?? projectsBanner
         let rows = listed ? WorkspaceList(project: name, workspaces: listing.rows).rows(for: person.handle) : []
-        if let unready, rows.isEmpty, listed || listFailure != nil {
+        if let unready, rows.isEmpty, listed, listFailure == nil {
             return Page(
                 name: name, lede: unready.lede, canCreate: false, createWhy: unready.why, banner: projectsBanner,
                 body: .empty(Empty(title: unready.title, body: unready.body, line: nil, action: .checkAgain, missing: true)), stale: false, listedAt: nil
@@ -437,7 +439,9 @@ public struct WorkspacesModel: Sendable {
         if !listed {
             body = listFailure == nil ? .loading : .unlisted
         } else {
-            if rows.isEmpty, create == nil {
+            if rows.isEmpty, create == nil, let unready {
+                body = .empty(Empty(title: unready.title, body: unready.body, line: nil, action: .checkAgain, missing: true))
+            } else if rows.isEmpty, create == nil {
                 body = .empty(Empty(
                     title: "No workspaces in \(name) yet",
                     body: "A workspace is your own copy of \(name) on the runner, created from its template in about 3 s. Open it and it becomes a terminal tab.",

@@ -21,9 +21,6 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     /// The create row's and the creating row's ids: never a workspace's name, so neither shares an
     /// id with a listed row of the same name.
     static let createID = "\u{0}create", creatingID = "\u{0}creating"
-    /// The narrow rows' actions column: room for Start and Open and ⋯, so a row's words and pill
-    /// run to it as the narrow frame draws them.
-    static let narrowActionsColumn = 144.0
     /// The room between the name's column and the buttons (the design's `.ph` gap), and between two
     /// buttons (`.ph-acts`, `.acts`): the stacks place the buttons' boxes, not their halos.
     static let headGap = 20.0, buttonGap = 6.0
@@ -54,8 +51,36 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     private let titleFont: TitleFont
     private let column = NSStackView()
     private let head = NSView()
-    private let foot = NSView()
-    private let frameView = ListFrame()
+    let foot = NSView()
+    private let frameView: ListFrame
+
+    /// The narrow rows' actions column: the widest actions a narrow row shows (Start and Open with
+    /// no keycap, which narrow rows drop; ⋯ beside it), measured, so every list's pills stand at
+    /// one x and a row's name keeps the rest; a note ("Only uday or an admin opens it") is cut within it.
+    lazy var narrowActionsColumn: Double = {
+        let start = SailButton("Start and Open", kind: .primary, size: .small, look: look, target: nil, action: nil)
+        let more = SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil)
+        let boxes = [start, more].map { Double($0.alignmentRect(forFrame: NSRect(origin: .zero, size: $0.fittingSize)).width) }
+        return (boxes.reduce(0, +) + Self.buttonGap).rounded(.up)
+    }()
+    /// The project whose rows the list last held: its rows drawn again keep the person's scroll;
+    /// another project's, or anyone's after a change of person, start at the top.
+    private var filled: String?
+
+    /// Someone else signed in: whatever list comes next starts at its top.
+    func forgetList() {
+        filled = nil
+    }
+
+    /// The create row brought into view with the Yours head over it, as it opens or comes back
+    /// refused; not on every redraw while it is open.
+    func showCreateRow() {
+        list.scrollRowToVisible(0)
+    }
+    /// The list's scroll view, for the drive.
+    package var listScroll: NSScrollView? {
+        frameView.scroll
+    }
     /// The head, the list, the foot and the loading bars span the column, whatever their content's width.
     private lazy var spans = [head, foot, frameView, loadingWords, loadingList].map { $0.widthAnchor.constraint(equalTo: column.widthAnchor) }
     private var page: WorkspacesModel.Page?
@@ -67,6 +92,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         self.mono = mono
         self.titleFont = titleFont
         list = SailList(rowStyle: .list, look: look, mono: mono)
+        frameView = ListFrame(scrolling: list, look: look)
         listAgain = SailButton(icon: .refresh, label: "List Again", look: look, target: nil, action: nil)
         newWorkspace = SailButton("New Workspace", kind: .secondary, icon: .plus, look: look, target: nil, action: nil)
         newWorkspaceIcon = SailButton(icon: .plus, label: "New Workspace", kind: .secondary, look: look, target: nil, action: nil)
@@ -89,8 +115,6 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             label.lineBreakMode = .byTruncatingTail
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
-        frameView.look = look
-        frameView.addSubview(list)
         buildHead()
         buildFoot()
         column.orientation = .vertical
@@ -150,7 +174,13 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         case .unlisted: break
         case let .empty(empty): views.append(Self.framed(emptyState(empty), look: look))
         case let .list(table):
-            fill(table)
+            if let scroll = frameView.scroll, filled == page.name {
+                scroll.keepingScroll { fill(table) }
+            } else {
+                fill(table)
+                frameView.scroll?.scrollToTop()
+            }
+            filled = page.name
             frameView.alphaValue = page.stale ? 0.55 : 1
             let listed = table.count + (table.creating == nil ? 0 : 1)
             count.attributedStringValue = micro(page.stale ? Self.listed(page.listedAt) : "\(listed) workspace\(listed == 1 ? "" : "s")")
@@ -281,8 +311,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     /// `content` in the list's frame: at `height`, or, with none, at its own height 52 pt in from the
     /// frame's top and bottom (an empty state in place of the list).
     private static func framed(_ content: NSView, height: Double? = nil, look: Look) -> ListFrame {
-        let frame = ListFrame()
-        frame.look = look
+        let frame = ListFrame(look: look)
         frame.height = height
         frame.addSubview(content)
         guard height == nil else { return frame }
@@ -318,7 +347,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
 
     /// The list's entries: Yours (the create row first), then Other people's.
     private func fill(_ table: WorkspacesModel.Table) {
-        list.actionsColumn = narrow ? Self.narrowActionsColumn : Self.actionsColumn
+        list.actionsColumn = narrow ? narrowActionsColumn : Self.actionsColumn
+        list.returnKeyShown = !narrow
         let creating = table.creating == nil ? 0 : 1
         var entries: [SailList.Entry] = [.head("Yours", count: table.yours.count + creating)]
         if let creating = table.creating {
@@ -331,12 +361,11 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         list.entries = entries
         list.choose((table.yours + table.others).first(where: \.chosen)?.name)
         let height = entries.indices.reduce(0.0) { $0 + Double(list.tableView(list, heightOfRow: $1)) }
-        list.frame = NSRect(x: 0, y: 0, width: Double(frameView.bounds.width), height: height)
         frameView.height = height
     }
 
     private func item(_ line: WorkspacesModel.Line) -> SailList.Item {
-        let content = WorkspaceLine(line, narrow: narrow, look: look, mono: mono)
+        let narrow = narrow, look = look, mono = mono
         let actions: [SailList.Action] = line.menu.map { entry in
             switch entry {
             case .open: SailList.Action("Open") { [weak self] in self?.on(.open(line.name)) }
@@ -348,7 +377,9 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         if let owner = line.owner { said.append(WorkspaceLine.said(owner)) }
         if let sessions = line.sessionsSaid { said.append(sessions) }
         if let why = line.why { said.append(why) }
-        return SailList.Item(id: line.name, name: line.name, voice: said.joined(separator: ", "), content: content, actions: actions, note: line.why)
+        return SailList.Item(
+            id: line.name, name: line.name, voice: said.joined(separator: ", "), content: WorkspaceLine(line, narrow: narrow, look: look, mono: mono), actions: actions, note: line.why
+        )
     }
 
     /// The create under way as the row it will be, in the quiet chosen fill: its name and instance,
@@ -456,249 +487,5 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     /// List Again, Check Again and Try Again: the projects and the list asked again.
     @objc private func askAgain(_: Any?) {
         on(.checkAgain)
-    }
-}
-
-/// The list's frame: the surface in 6 pt corners with a hairline, holding the list at its height;
-/// with no height, what it holds is placed by constraints.
-@MainActor
-final class ListFrame: NSView {
-    var height: Double? = 0 {
-        didSet { invalidateIntrinsicContentSize() }
-    }
-
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: height.map { $0 + 2 } ?? NSView.noIntrinsicMetric)
-    }
-
-    var look = Look.light {
-        didSet { needsDisplay = true }
-    }
-
-    override var isFlipped: Bool {
-        true
-    }
-
-    override func layout() {
-        super.layout()
-        guard let height else { return }
-        subviews.first?.frame = NSRect(x: 1, y: 1, width: Double(bounds.width) - 2, height: height)
-    }
-
-    override func draw(_: NSRect) {
-        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: Look.contentRadius - 0.5, yRadius: Look.contentRadius - 0.5)
-        NSColor(Tint(look.surface)).setFill()
-        shape.fill()
-        NSColor(look.separator).setStroke()
-        shape.stroke()
-    }
-}
-
-/// The list before it is listed, as the design's loading frame draws it: the head and three rows,
-/// with skeleton bars where a row's name, instance, pill and owner will be, in the wide row's columns.
-@MainActor
-final class SkeletonRows: NSView {
-    static let words: [(name: Double, place: Double)] = [(64, 104), (48, 88), (80, 120)]
-    static let height = RowStyle.groupHeight + Double(words.count) * RowStyle.list.height
-
-    var look: Look {
-        didSet {
-            for bar in bars.joined() {
-                bar.look = look
-            }
-            needsDisplay = true
-        }
-    }
-
-    private let bars: [[Skeleton]]
-
-    init(look: Look) {
-        self.look = look
-        bars = [[Skeleton(width: 46, height: 8, look: look)]] + Self.words.map { words in
-            [Skeleton(width: words.name, look: look), Skeleton(width: words.place, height: 8, look: look), Skeleton(width: 74, height: 18, look: look), Skeleton(width: 60, look: look)]
-        }
-        super.init(frame: .zero)
-        for bar in bars.joined() {
-            addSubview(bar)
-        }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    override var isFlipped: Bool {
-        true
-    }
-
-    /// Each row's pill where the wide row's pill column starts, its owner after it, and the name's
-    /// two lines at the row's leading inset.
-    override func layout() {
-        super.layout()
-        let leading = RowStyle.list.leading, pill = max(leading + 130, Double(bounds.width) - RowStyle.list.trailing - ProjectView.actionsColumn - WorkspaceLine.ownerColumn - WorkspaceLine.pillColumn)
-        bars[0][0].frame = NSRect(x: leading, y: (RowStyle.groupHeight - 8) / 2, width: 46, height: 8)
-        for (index, row) in bars.dropFirst().enumerated() {
-            let top = RowStyle.groupHeight + Double(index) * RowStyle.list.height
-            let at = [(leading, top + 14), (leading, top + 30), (pill, top + 17), (pill + WorkspaceLine.pillColumn, top + 21)]
-            for (bar, (x, y)) in zip(row, at) {
-                bar.frame = NSRect(origin: NSPoint(x: x, y: y), size: bar.intrinsicContentSize)
-            }
-        }
-    }
-
-    override func draw(_: NSRect) {
-        NSColor(look.fillHover).setFill()
-        NSRect(x: 0, y: 0, width: Double(bounds.width), height: RowStyle.groupHeight).fill()
-        NSColor(look.gridLine).setFill()
-        for index in Self.words.indices {
-            NSRect(x: 0, y: RowStyle.groupHeight + Double(index) * RowStyle.list.height, width: Double(bounds.width), height: 1).fill()
-        }
-    }
-}
-
-/// The create row as the approved frames draw it: the name field (a 250 pt box) with the server's rule
-/// under it, or its refusal running the column's width (at most 440 pt), and, when the name is
-/// already listed, a line under that: "Show dock or choose another name."; Cancel and Create with ⏎
-/// at the row's end, level with the box. While it is under way the field waits and Create says so.
-@MainActor
-final class CreateRow: NSView {
-    /// The design's create row (`f-create`, `f-refused`): 12 pt above the field, at least 76 pt for
-    /// the field and its lines, under the row's 1 pt hairline.
-    static let column = 440.0, box = 250.0, gap = 16.0, padding = 12.0, below = 7.0, least = 76.0
-
-    let field: SailTextField
-    let cancel: SailButton
-    let create: SailButton
-    let buttons: NSStackView
-    /// "Show dock or choose another name.", for a name already listed.
-    let showLine: NSStackView?
-    /// The field's width, held against this row rather than on the field, which every create row
-    /// shares: the constraint goes when the field moves to the next row.
-    private var fieldWidth: NSLayoutConstraint?
-
-    init(field: SailTextField, existing: String?, look: Look, mono: LabelFont, on: @escaping @MainActor (ProjectView.Act) -> Void) {
-        let runs = Runs(on)
-        let cancel = SailButton("Cancel", kind: .quiet, size: .small, look: look, target: runs, action: #selector(Runs.cancel(_:)))
-        let create = SailButton("Create", kind: .primary, size: .small, look: look, target: runs, action: #selector(Runs.create(_:)))
-        create.hint("\r", mono: mono)
-        let buttons = NSStackView(views: [cancel, create])
-        buttons.spacing = ProjectView.buttonGap
-        self.field = field
-        self.cancel = cancel
-        self.create = create
-        self.buttons = buttons
-        showLine = existing.map { name in
-            runs.existing = name
-            return Self.showLine(name, look: look, target: runs)
-        }
-        super.init(frame: .zero)
-        self.runs = runs
-        var views: [NSView] = [field, buttons]
-        if let showLine { views.append(showLine) }
-        for view in views {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(view)
-        }
-        let fieldWidth = field.trailingAnchor.constraint(equalTo: leadingAnchor, constant: Self.column)
-        fieldWidth.priority = .defaultHigh
-        self.fieldWidth = fieldWidth
-        var constraints = [
-            field.leadingAnchor.constraint(equalTo: leadingAnchor), field.topAnchor.constraint(equalTo: topAnchor, constant: Self.padding), fieldWidth,
-            field.trailingAnchor.constraint(lessThanOrEqualTo: buttons.leadingAnchor, constant: -Self.gap),
-            buttons.trailingAnchor.constraint(equalTo: trailingAnchor),
-            buttons.topAnchor.constraint(equalTo: field.topAnchor, constant: (field.size.height - ButtonSize.small.height) / 2),
-        ]
-        if let showLine {
-            constraints += [
-                showLine.leadingAnchor.constraint(equalTo: field.leadingAnchor), showLine.topAnchor.constraint(equalTo: field.bottomAnchor, constant: Self.below),
-                showLine.trailingAnchor.constraint(lessThanOrEqualTo: buttons.leadingAnchor, constant: -Self.gap),
-            ]
-        }
-        NSLayoutConstraint.activate(constraints)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    override var isFlipped: Bool {
-        true
-    }
-
-    /// The row's height when its content has `room` across, and its column the width that leaves:
-    /// 12 pt, then the field with its lines, at least the design's 76 pt; the list draws the row
-    /// 1 pt taller, its hairline, as the design's 89 pt row is.
-    func height(room: Double) -> Double {
-        let beside = room - Self.gap - Double(buttons.fittingSize.width), width = max(min(Self.column, beside), 1)
-        fieldWidth?.constant = width
-        field.setFrameSize(NSSize(width: width + 2 * Look.haloRoom, height: Double(field.frame.height)))
-        lineHeight = showLine.map { Self.height(of: $0, room: beside) }
-        return (Self.padding + max(Self.least, words)).rounded(.up)
-    }
-
-    /// The show line's height as it is drawn: its words wrap where it is narrower than they are,
-    /// so they are measured at the room beside the buttons and held to that width.
-    private var lineHeight: Double?
-
-    private static func height(of line: NSStackView, room: Double) -> Double {
-        guard let show = line.arrangedSubviews.first, let rest = line.arrangedSubviews.last as? NSTextField, let cell = rest.cell else {
-            return Double(line.fittingSize.height)
-        }
-        let width = max(room - Double(show.fittingSize.width) - Double(line.spacing), 1)
-        rest.preferredMaxLayoutWidth = width
-        let words = cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude)).height
-        return max(Double(show.fittingSize.height), Double(ceil(words)))
-    }
-
-    /// The whole row under its hairline, its 12 pt above the field included, so every line it draws
-    /// is inside its bounds and takes clicks: one drawn past them is seen and never hit.
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: Self.padding + max(Self.least, words))
-    }
-
-    /// The field with the line under its box, and the show line under that.
-    private var words: Double {
-        Double(field.intrinsicContentSize.height) + (showLine.map { Self.below + (lineHeight ?? Double($0.fittingSize.height)) } ?? 0)
-    }
-
-    private static func showLine(_ name: String, look: Look, target: Runs) -> NSStackView {
-        let font = NSFont.systemFont(ofSize: Look.Step.footnote.points)
-        let show = NSButton(title: "Show \(name)", target: target, action: #selector(Runs.show(_:)))
-        show.isBordered = false
-        show.attributedTitle = NSAttributedString(string: "Show \(name)", attributes: [
-            .font: NSFont.systemFont(ofSize: Look.Step.footnote.points, weight: .medium), .foregroundColor: NSColor(look.accentText),
-        ])
-        let rest = NSTextField(labelWithAttributedString: NSAttributedString(string: "or choose another name.", attributes: [.font: font, .foregroundColor: NSColor(look.textTertiary)]))
-        let line = NSStackView(views: [show, rest])
-        line.spacing = 4
-        line.alignment = .firstBaseline
-        return line
-    }
-
-    private var runs: Runs?
-
-    /// The row's buttons' target.
-    @MainActor
-    final class Runs: NSObject {
-        let on: @MainActor (ProjectView.Act) -> Void
-        var existing: String?
-
-        init(_ on: @escaping @MainActor (ProjectView.Act) -> Void) {
-            self.on = on
-        }
-
-        @objc func cancel(_: Any?) {
-            on(.cancelCreate)
-        }
-
-        @objc func create(_: Any?) {
-            on(.create)
-        }
-
-        @objc func show(_: Any?) {
-            if let existing { on(.show(existing)) }
-        }
     }
 }
