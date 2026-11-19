@@ -94,14 +94,14 @@ import Testing
         #expect(!view.panel.isHidden)
         window.setContentSize(NSSize(width: 700, height: 640))
         view.layoutSubtreeIfNeeded()
-        #expect(view.panel.isHidden && view.project.frame.minX == 0)
+        #expect(view.panel.isHidden && near(view.project.frame.minX, 0))
         view.toggleSidebar(nil)
         view.layoutSubtreeIfNeeded()
-        #expect(!view.panel.isHidden && view.project.frame.minX == 0, "the panel slides over the content")
+        #expect(!view.panel.isHidden && near(view.project.frame.minX, 0), "the panel slides over the content")
         view.toggleSidebar(nil)
         window.setContentSize(NSSize(width: 1000, height: 640))
         view.layoutSubtreeIfNeeded()
-        #expect(!view.panel.isHidden && view.project.frame.minX == view.panel.frame.maxX)
+        #expect(!view.panel.isHidden && near(view.project.frame.minX, view.panel.frame.maxX))
     }
 
     /// Someone else's row names its owner; the person's own rows leave that column empty, at its
@@ -166,6 +166,9 @@ import Testing
             return Double(cell.convert(line.pill.alignmentRect(forFrame: line.pill.frame), from: line.pill.superview).maxX)
         }
         #expect(ends.count == 2 && abs(ends[0] - ends[1]) < 0.5, "the pills end at \(ends)")
+        for line in Self.lines(project.list) {
+            #expect(line.place.frame.height <= line.title.frame.height, "\(line.place.stringValue) wraps to \(line.place.frame.height) pt")
+        }
     }
 
     /// The line under the name takes all the room the buttons leave, less the design's 20 pt, as the
@@ -262,7 +265,7 @@ import Testing
         let pill = row.convert(line.pill.bounds, from: line.pill), end = row.convert(note.bounds, from: note)
         #expect(end.minX > pill.maxX && row.convert(spinner.bounds, from: spinner).minX > end.maxX, "about 3 s and the spinner are not after the pill")
         let foot = try #require(row.subviews.first { String(describing: type(of: $0)) == "ProgressLine" }, "no line along the row's foot")
-        #expect(foot.frame.height == 2 && abs(Double(foot.frame.maxY - row.bounds.height)) < 0.5 && foot.frame.width == row.bounds.width, "the line is at \(foot.frame)")
+        #expect(near(foot.frame.height, 2) && near(foot.frame.maxY, row.bounds.height) && near(foot.frame.width, row.bounds.width), "the line is at \(foot.frame)")
         #expect(!view.project.newWorkspace.isEnabled && view.project.newWorkspace.why == "The runner creates one workspace at a time")
         transport.release()
         #expect(await RunnerTabTests.until { !view.text.contains("creating") }, "\(view.text)")
@@ -461,4 +464,18 @@ import Testing
         panel.resize(to: 260)
         #expect(panel.widthConstraint.constant == 260)
     }
+}
+
+/// Measured geometry agrees within half a point: never compared exactly, as layout and conversions
+/// round.
+func near(_ a: CGFloat, _ b: CGFloat) -> Bool {
+    abs(a - b) < 0.5
+}
+
+func near(_ a: NSPoint, _ b: NSPoint) -> Bool {
+    near(a.x, b.x) && near(a.y, b.y)
+}
+
+func near(_ a: NSRect, _ b: NSRect) -> Bool {
+    near(a.origin, b.origin) && near(a.width, b.width) && near(a.height, b.height)
 }

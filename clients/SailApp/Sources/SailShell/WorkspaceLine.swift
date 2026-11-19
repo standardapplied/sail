@@ -30,6 +30,7 @@ final class WorkspaceLine: NSStackView {
         super.init(frame: .zero)
         for label in [title, place] {
             label.lineBreakMode = .byTruncatingTail
+            label.maximumNumberOfLines = 1
             label.setContentCompressionResistancePriority(Self.cutShort, for: .horizontal)
         }
         let words = NSStackView(views: [title, place])

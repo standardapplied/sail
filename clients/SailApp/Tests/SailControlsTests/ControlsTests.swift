@@ -307,7 +307,7 @@ import Testing
     func theIconIsCentredOnTheBox(_ size: ButtonSize) {
         let more = Self.sized(SailButton(icon: .more, label: "More", size: size, look: .light, target: nil, action: nil))
         let icon = more.arrangement().mark ?? .zero, box = more.box
-        #expect(Double(icon.width) == ButtonSize.icon && icon.midX == box.midX && icon.midY == box.midY, "the icon is \(icon) in \(box)")
+        #expect(near(icon.width, ButtonSize.icon) && near(icon.midX, box.midX) && near(icon.midY, box.midY), "the icon is \(icon) in \(box)")
         let canvas = NSColor(Tint(Look.light.canvas)), ink = NSColor(ButtonPaint(.quiet, ButtonState(), look: .light).label)
         let middle = NSPoint(x: box.midX, y: box.midY), between = NSPoint(x: box.midX + 2, y: box.midY)
         let right = Self.swatch(canvas, [ink], scale: 2), wrong = Self.swatch(canvas, [], scale: 2)
@@ -339,7 +339,7 @@ import Testing
         let line = try #require(field.lineRect(width: Double(field.bounds.width)))
         #expect(abs(Double(line.minX) - (Look.haloRoom + FieldSize.mark + FieldSize.gap)) < 0.5)
         field.error = nil
-        #expect(field.field.accessibilityHelp() == "Lowercase letters, digits and dashes." && field.intrinsicContentSize.height == helped)
+        #expect(field.field.accessibilityHelp() == "Lowercase letters, digits and dashes." && near(field.intrinsicContentSize.height, helped))
     }
 
     /// Disabled: the box and its text at 45%, the eyebrow and the help as they were.
@@ -355,7 +355,7 @@ import Testing
 
     @Test func theSmallFieldIsTwentyEightOnTheCanvasAndSecureIsSecure() throws {
         let small = try Self.field(.light, size: .small)
-        #expect(small.box.height == 28 && small.paint.fill == Tint(Look.light.canvas))
+        #expect(near(small.box.height, 28) && small.paint.fill == Tint(Look.light.canvas))
         let secure = try Self.field(.light, secure: true), plain = try Self.field(.light)
         #expect(secure.field is NSSecureTextField && !(plain.field is NSSecureTextField))
         #expect(plain.field.accessibilityLabel() == "Name")
@@ -372,9 +372,9 @@ import Testing
                 pill.frame = NSRect(origin: .zero, size: pill.intrinsicContentSize)
                 pill.needsLayout = true
                 pill.layoutSubtreeIfNeeded()
-                #expect(Double(pill.frame.height) == size.height)
+                #expect(near(pill.frame.height, size.height))
                 let dot = pill.dot.frame
-                #expect(Double(dot.minX) == size.leading, "\(name) \(state): the dot starts \(dot.minX) pt in, not \(size.leading)")
+                #expect(near(dot.minX, size.leading), "\(name) \(state): the dot starts \(dot.minX) pt in, not \(size.leading)")
                 let middle = Self.colour(pill, on: canvas, at: NSPoint(x: dot.midX, y: dot.midY), scale: 2)
                 let wanted = state == .stopped ? Self.swatch(canvas, [], scale: 2) : Self.swatch(canvas, [NSColor(pill.paint.dot)], scale: 2)
                 #expect(Self.tells(middle, wanted, from: Self.swatch(canvas, [NSColor(look.text)], scale: 2)), "\(name) \(state) \(size): the dot is \(middle)")
@@ -592,4 +592,18 @@ extension [Double] {
     func near(_ other: [Double]) -> Bool {
         count == other.count && zip(self, other).allSatisfy { abs($0 - $1) <= 3 }
     }
+}
+
+/// Measured geometry agrees within half a point: never compared exactly, as layout and conversions
+/// round.
+func near(_ a: CGFloat, _ b: CGFloat) -> Bool {
+    abs(a - b) < 0.5
+}
+
+func near(_ a: NSPoint, _ b: NSPoint) -> Bool {
+    near(a.x, b.x) && near(a.y, b.y)
+}
+
+func near(_ a: NSRect, _ b: NSRect) -> Bool {
+    near(a.origin, b.origin) && near(a.width, b.width) && near(a.height, b.height)
 }

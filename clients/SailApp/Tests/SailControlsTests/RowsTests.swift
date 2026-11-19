@@ -46,7 +46,7 @@ import Testing
         let (window, backdrop) = Self.shown(list)
         defer { window.orderOut(nil) }
         let head = list.rect(ofRow: 0), pier = list.rect(ofRow: 1), dock = list.rect(ofRow: 2)
-        #expect(head.height == 30 && pier.height == 53 && dock.height == 53, "\(name): rows \(head.height), \(pier.height), \(dock.height)")
+        #expect(near(head.height, 30) && near(pier.height, 53) && near(dock.height, 53), "\(name): rows \(head.height), \(pier.height), \(dock.height)")
         list.choose("dock")
         let chosen = try Self.row(list, 2)
         for scale in [1.0, 2.0] {
@@ -85,7 +85,7 @@ import Testing
         defer { window.orderOut(nil) }
         list.choose("dock")
         let pier = list.rect(ofRow: 0), dock = list.rect(ofRow: 1)
-        #expect(pier.height == 30 && dock.minY == pier.maxY)
+        #expect(near(pier.height, 30) && near(dock.minY, pier.maxY))
         let hovered = try Self.row(list, 0)
         hovered.hovered = true
         let chosen = try Self.row(list, 1)
@@ -121,7 +121,7 @@ import Testing
         let pill = try #require(cell.pill)
         let tile = cell.convert(cell.tile.frame, to: row)
         let badge = cell.convert(pill.alignmentRect(forFrame: pill.frame), to: row)
-        #expect(tile.minX == 31 && tile.width == 20 && abs(Double(tile.midY) - 15) <= 0.5, "the tile is at \(tile)")
+        #expect(near(tile.minX, 31) && near(tile.width, 20) && abs(Double(tile.midY) - 15) <= 0.5, "the tile is at \(tile)")
         let name = try #require(backdrop.ink(in: NSRect(x: 52, y: 2, width: 60, height: 26)))
         #expect(abs(Double(name.minX) - 58) <= 1, "the name's ink starts at \(name.minX), not at the mockup's 58")
         let trailing = Double(row.bounds.width) - 12
@@ -177,7 +177,7 @@ import Testing
         let away = scroll.contentView.bounds.origin.y
         #expect(away > 0)
         list.entries = entries
-        #expect(list.chosen == "w0" && scroll.contentView.bounds.origin.y == away, "new rows scrolled back to the chosen one")
+        #expect(list.chosen == "w0" && near(scroll.contentView.bounds.origin.y, away), "new rows scrolled back to the chosen one")
     }
 
     /// A row with no actions, as every sidebar row is, opens no menu on a right-click.
@@ -252,10 +252,10 @@ import Testing
         holder.addSubview(more)
         let corner = more.convert(MenuOpener.corner(under: more), to: holder), box = more.alignmentRect(forFrame: more.frame)
         let first = Double(box.minY) - 2 - MenuOpener.menuPadding
-        #expect(corner == NSPoint(x: Double(box.minX), y: first), "⋯'s menu's first item goes at \(corner), not its padding and 2 pt under the box \(box) at its leading corner")
+        #expect(near(corner, NSPoint(x: Double(box.minX), y: first)), "⋯'s menu's first item goes at \(corner), not its padding and 2 pt under the box \(box) at its leading corner")
         more.userInterfaceLayoutDirection = .rightToLeft
         let mirrored = more.convert(MenuOpener.corner(under: more), to: holder)
-        #expect(mirrored == NSPoint(x: Double(box.maxX), y: first), "right to left, ⋯'s menu's first item goes at \(mirrored), not under the box's right corner")
+        #expect(near(mirrored, NSPoint(x: Double(box.maxX), y: first)), "right to left, ⋯'s menu's first item goes at \(mirrored), not under the box's right corner")
     }
 
     /// An icon-only button's tooltip: not at once, shown within the platform's delay under the

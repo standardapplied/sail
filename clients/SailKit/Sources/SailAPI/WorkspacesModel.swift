@@ -333,7 +333,7 @@ public struct WorkspacesModel: Sendable {
         guard Self.mark(project.template) != .noTemplate else {
             return Page(
                 name: name, lede: "\(name) has no template yet, so no workspace can be created in it.", canCreate: false, createWhy: createWhy(project),
-                banner: banner,
+                banner: nil,
                 body: .empty(Empty(
                     title: "\(name) isn’t ready yet",
                     body: "\(name) has no template yet. An admin builds \(name)’s template on the runner first; then you can create workspaces here.",
