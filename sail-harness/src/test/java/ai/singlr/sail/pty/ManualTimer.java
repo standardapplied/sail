@@ -42,7 +42,10 @@ final class ManualTimer implements PtyUploads.Timer {
   /**
    * Moves the clock on by {@code delay} until a task that long has run. The one awaited may be
    * cancelled before the clock moves, as a write's deadline is when its write finishes meanwhile (a
-   * 64 KiB chunk fits a pipe that is not read); the next one set is then awaited and run.
+   * 64 KiB chunk fits a pipe that is not read); the next one set is then awaited and run. The wait
+   * has no bound of its own, so the test's timeout bounds it; and each pass moves the clock even
+   * when nothing ran, so after enough passes a task of a longer delay (an idle timeout) comes due
+   * too: a test that sets one reads which ran.
    */
   void fireSet(Duration delay) throws InterruptedException {
     awaitDue(delay);

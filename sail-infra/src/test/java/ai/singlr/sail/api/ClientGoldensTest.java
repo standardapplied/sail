@@ -620,7 +620,7 @@ class ClientGoldensTest {
         new PtyMessage.Welcome("boot-7"),
         new PtyMessage.Create(
             "lounge", List.of("bash", "-l"), "/home/dev", PROJECT, ROOM, 132, 43, "dock"),
-        new PtyMessage.Attach("lounge", true),
+        new PtyMessage.Attach("lounge", true, "pane-7f", false),
         new PtyMessage.Input(42, "ls -la\r".getBytes(StandardCharsets.UTF_8)),
         new PtyMessage.Resize(100, 30),
         new PtyMessage.TakeWrite(),
@@ -644,7 +644,7 @@ class ClientGoldensTest {
         new PtyMessage.Output(42, "héllo ✅\u001b[0m\r\n".getBytes(StandardCharsets.UTF_8)),
         new PtyMessage.ReplayBegin(true),
         new PtyMessage.ReplayEnd(),
-        new PtyMessage.WriterChanged("uday"),
+        new PtyMessage.WriterChanged("uday", true),
         new PtyMessage.Resized(100, 30),
         new PtyMessage.Paused(),
         new PtyMessage.Continued(),

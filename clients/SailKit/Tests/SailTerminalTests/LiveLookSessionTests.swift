@@ -32,11 +32,11 @@ import Testing
         observer.start()
         let seen = try await host.accept()
         try await seen.welcome()
-        #expect(try await seen.read() == .attach(session: "work", write: false))
-        try seen.send([.accepted, .replayBegin(safe: true), output("\u{1b}[?2031hready"), .replayEnd, .writerChanged(fde: "ada")])
+        #expect(try await seen.read().unnamed == .attach(session: "work", write: false))
+        try seen.send([.accepted, .replayBegin(safe: true), output("\u{1b}[?2031hready"), .replayEnd, .writerChanged(fde: "ada", yours: false)])
         try peer.send(output("\u{1b}[?2031hready"))
         try await watch.text("ready")
-        try await watched.until("took the prologue") { watched.seen.contains(.writerChanged("ada")) }
+        try await watched.until("took the prologue") { watched.seen.contains(.writerChanged("ada", yours: false)) }
 
         try observer.setPalette(.light)
         observer.send(KeyInput(key: .o, text: "o"))
@@ -51,7 +51,7 @@ import Testing
         #expect(try await Self.input(peer) == Self.dark)
         observer.takeWrite()
         #expect(try await seen.read() == .takeWrite)
-        try seen.send(.writerChanged(fde: "bob"))
+        try seen.send(.writerChanged(fde: "bob", yours: true))
         #expect(try await Self.input(seen) == Self.light, "the new writer's look becomes the program's")
         observer.close()
         writer.close()
@@ -79,7 +79,7 @@ import Testing
         try session.setPalette(.light)
         let again = try await host.accept()
         try await again.welcome()
-        #expect(try await again.read() == .attach(session: "work", write: true))
+        #expect(try await again.read().unnamed == .attach(session: "work", write: true, takes: false), "a reconnect never takes the keyboard from another live client")
         try again.send([.accepted, .replayBegin(safe: true), output((subscribed ? "\u{1b}[?2031h" : "") + "history"), .replayEnd, output(" live")])
         try await watch.text("history live")
         session.send(KeyInput(key: .k, text: "k"))
@@ -107,7 +107,7 @@ import Testing
         let peer = try await host.accept()
         try await peer.welcome()
         _ = try await peer.acceptAttach(columns: 80, rows: 24)
-        try await watch.until("took the attach's prologue") { watch.seen.contains(.writerChanged("ada")) }
+        try await watch.until("took the attach's prologue") { watch.seen.contains { if case .writerChanged("ada", _) = $0 { true } else { false } } }
         let told = Mutex(0)
         let (tells, sink) = AsyncStream.makeStream(of: Void.self)
         session.onScreenChange { _ in

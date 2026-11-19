@@ -171,17 +171,26 @@ func output(_ text: String, applied: Int64 = 0) -> Frame {
     .output(lastInputSequence: applied, bytes: Array(text.utf8))
 }
 
+extension Frame {
+    /// This frame with an attach's client left out: each session names itself anew.
+    var unnamed: Frame {
+        guard case let .attach(session, write, _, takes) = self else { return self }
+        return .attach(session: session, write: write, takes: takes)
+    }
+}
+
 extension FakeHost.Peer {
     /// Takes an attach (the create before it too, when there is one) and accepts it, then sends the
-    /// attach's prologue: the geometry, an empty replay and the writer.
-    func acceptAttach(columns: Int32 = 80, rows: Int32 = 24, writer: String = "ada") async throws -> Frame {
+    /// attach's prologue: the geometry, an empty replay and the writer, which is this client when it
+    /// asked to write.
+    func acceptAttach(columns: Int32 = 80, rows: Int32 = 24) async throws -> Frame {
         var frame = try await read()
         if case .create = frame {
             try send(.accepted)
             frame = try await read()
         }
-        guard case .attach = frame else { throw HostError("expected an attach, got \(frame)") }
-        try send([.accepted, .resized(TerminalSize(columns: columns, rows: rows)), .replayBegin(safe: true), .replayEnd, .writerChanged(fde: writer)])
+        guard case let .attach(_, write, _, _) = frame else { throw HostError("expected an attach, got \(frame)") }
+        try send([.accepted, .resized(TerminalSize(columns: columns, rows: rows)), .replayBegin(safe: true), .replayEnd, .writerChanged(fde: "ada", yours: write)])
         return frame
     }
 }
@@ -225,7 +234,7 @@ func attachedLocally(
     let peer = try await host.accept()
     try await peer.welcome()
     _ = try await peer.acceptAttach(columns: size.columns, rows: size.rows)
-    try await watch.until("took the attach's prologue") { watch.seen.contains(.writerChanged("ada")) }
+    try await watch.until("took the attach's prologue") { watch.seen.contains { if case .writerChanged("ada", _) = $0 { true } else { false } } }
     return (host, session, peer, watch)
 }
 

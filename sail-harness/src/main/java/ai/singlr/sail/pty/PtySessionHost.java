@@ -785,7 +785,9 @@ public final class PtySessionHost implements AutoCloseable {
                   break;
                 }
                 reply(channel, new PtyMessage.Ok());
-                subscriberId = session.attach(msg -> reply(channel, msg), m.write(), who.fde());
+                subscriberId =
+                    session.attach(
+                        msg -> reply(channel, msg), m.write(), who.fde(), m.client(), m.takes());
                 attached = session;
               }
               log("attached", principal, m.session(), m.write() ? "write" : "observe");

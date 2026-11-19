@@ -133,7 +133,7 @@ import Testing
         peer.close()
         let again = try await host.accept()
         try await again.welcome()
-        #expect(try await again.read() == .attach(session: "work", write: true))
+        #expect(try await again.read().unnamed == .attach(session: "work", write: true, takes: false), "a reconnect never takes the keyboard from another live client")
         try again.send([.accepted, .replayBegin(safe: true), output("history", applied: applied), .replayEnd])
         try await watch.text("history")
         #expect(session.state.possiblyLostInputs == dropped)
@@ -152,7 +152,7 @@ import Testing
         peer.close()
         let again = try await host.accept()
         try await again.welcome()
-        #expect(try await again.read() == .attach(session: "work", write: true))
+        #expect(try await again.read().unnamed == .attach(session: "work", write: true, takes: false), "a reconnect never takes the keyboard from another live client")
         let replays = session.replays
         try again.send([.accepted, .replayBegin(safe: true), .replayEnd])
         try await watch.until("finished the replay") { session.replays > replays }
@@ -176,8 +176,8 @@ import Testing
         try await live.welcome()
         #expect(try await live.read() == .create(create))
         try live.send(.accepted)
-        #expect(try await live.read() == .attach(session: "work", write: true))
-        try live.send([.accepted, .writerChanged(fde: "ada")])
+        #expect(try await live.read().unnamed == .attach(session: "work", write: true))
+        try live.send([.accepted, .writerChanged(fde: "ada", yours: true)])
         try await watch.attached()
         try? stale.send(.welcome(hostBootID: "boot-1"))
         await #expect(throws: (any Error).self) { try await stale.read() }
@@ -220,7 +220,7 @@ import Testing
         try await watch.text("quiet")
         session.send(KeyInput(key: .k, text: "k"))
         #expect(try await peer.read() == .input(sequence: 1, bytes: Array("k".utf8)))
-        try peer.send([.writerChanged(fde: "ada"), output("\u{1b}[6n")])
+        try peer.send([.writerChanged(fde: "ada", yours: true), output("\u{1b}[6n")])
         guard case let .input(_, bytes) = try await peer.read() else { return }
         #expect(bytes.starts(with: Array("\u{1b}[".utf8)) && bytes.last == UInt8(ascii: "R"))
         session.close()
@@ -249,8 +249,8 @@ import Testing
         session.start()
         let peer = try await host.accept()
         try await peer.welcome()
-        #expect(try await peer.read() == .attach(session: "theirs", write: false))
-        try peer.send([.accepted, .writerChanged(fde: "eng"), output("\u{1b}[6nwatching")])
+        #expect(try await peer.read().unnamed == .attach(session: "theirs", write: false))
+        try peer.send([.accepted, .writerChanged(fde: "eng", yours: false), output("\u{1b}[6nwatching")])
         try await watch.text("watching")
         session.send(KeyInput(key: .q, text: "q"))
         #expect(try await peer.read() == .input(sequence: 1, bytes: Array("q".utf8)))
@@ -266,7 +266,7 @@ import Testing
         let peer = try await host.accept()
         try await peer.welcome()
         _ = try await peer.read()
-        try peer.send([.accepted, .replayBegin(safe: true), output("before", applied: 100), .replayEnd, .writerChanged(fde: "ada")])
+        try peer.send([.accepted, .replayBegin(safe: true), output("before", applied: 100), .replayEnd, .writerChanged(fde: "ada", yours: true)])
         try await watch.text("before")
         #expect(session.latencyReport.echoed.count == 0)
         session.send(KeyInput(key: .x, text: "x"))
@@ -429,9 +429,9 @@ import Testing
         #expect(try await peer.read() == .resize(TerminalSize(columns: 100, rows: 30)))
         session.takeWrite()
         #expect(try await peer.read() == .takeWrite)
-        try peer.send(.writerChanged(fde: "ada"))
+        try peer.send(.writerChanged(fde: "ada", yours: true))
         #expect(try await peer.read() == .resize(TerminalSize(columns: 100, rows: 30)))
-        try peer.send(.writerChanged(fde: "eng"))
+        try peer.send(.writerChanged(fde: "eng", yours: false))
         session.send(KeyInput(key: .q, text: "q"))
         guard case .input = try await peer.read() else { throw HostError("a second size went to the host") }
         session.reconnectNow()
@@ -453,9 +453,9 @@ import Testing
         session.start()
         let peer = try await host.accept()
         try await peer.welcome()
-        #expect(try await peer.read() == .attach(session: "theirs", write: false))
-        try peer.send([.accepted, .resized(TerminalSize(columns: 80, rows: 24)), .replayBegin(safe: true), .replayEnd, .writerChanged(fde: "eng")])
-        try await watch.until("took the prologue") { watch.seen.contains(.writerChanged("eng")) }
+        #expect(try await peer.read().unnamed == .attach(session: "theirs", write: false))
+        try peer.send([.accepted, .resized(TerminalSize(columns: 80, rows: 24)), .replayBegin(safe: true), .replayEnd, .writerChanged(fde: "eng", yours: false)])
+        try await watch.until("took the prologue") { watch.seen.contains(.writerChanged("eng", yours: false)) }
         return (host, session, peer)
     }
 
@@ -586,8 +586,8 @@ import Testing
         async let ended = Door.runner(desk).end("app-a")
         let peer = try await host.accept()
         #expect(try await peer.welcome() == "ticket-1")
-        #expect(try await peer.read() == .attach(session: "app-a", write: true))
-        try peer.send([.accepted, .replayBegin(safe: true), output("$ "), .replayEnd, .writerChanged(fde: "uday")])
+        #expect(try await peer.read().unnamed == .attach(session: "app-a", write: true))
+        try peer.send([.accepted, .replayBegin(safe: true), output("$ "), .replayEnd, .writerChanged(fde: "uday", yours: true)])
         #expect(try await peer.read() == .kill(session: "app-a"))
         try peer.send([.sessionEnded(reason: "ended"), .accepted])
         #expect(await ended == .ended)
@@ -602,8 +602,8 @@ import Testing
         let ended = Task { await Door.runner(desk).end("app-a") }
         let peer = try await host.accept()
         try await peer.welcome()
-        #expect(try await peer.read() == .attach(session: "app-a", write: true))
-        try peer.send([.accepted, .writerChanged(fde: "ana")])
+        #expect(try await peer.read().unnamed == .attach(session: "app-a", write: true))
+        try peer.send([.accepted, .writerChanged(fde: "ana", yours: false)])
         #expect(try await peer.read() == .kill(session: "app-a"))
         let words = FakeRunnerDoor.notTheWriter
         try peer.send(.refused(HostRefusal(message: words, remedy: [])))

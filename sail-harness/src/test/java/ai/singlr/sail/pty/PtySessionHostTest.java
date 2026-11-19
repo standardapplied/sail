@@ -862,7 +862,7 @@ class PtySessionHostTest {
               kinds.subList(kinds.size() - 2, kinds.size()),
               "the token holder is named right after the replay: " + kinds);
           assertEquals(
-              new PtyMessage.WriterChanged("uday"),
+              new PtyMessage.WriterChanged("uday", false),
               frames.getLast(),
               "a different FDE asking for write is told who holds it, not given it");
         }

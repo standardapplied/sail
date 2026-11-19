@@ -1,6 +1,6 @@
 import SailAPI
 
-/// One message of the `SAILPTY5` terminal protocol, in either direction: the host's `PtyMessage`.
+/// One message of the `SAILPTY6` terminal protocol, in either direction: the host's `PtyMessage`.
 /// The client sends the requests and receives the notifications; both are modelled so every frame
 /// round-trips through ``FrameCodec``.
 public enum Frame: Equatable, Sendable {
@@ -9,7 +9,11 @@ public enum Frame: Equatable, Sendable {
     /// session that died from one the host lost by restarting.
     case welcome(hostBootID: String)
     case create(SessionCreate)
-    case attach(session: String, write: Bool)
+    /// Attaches to `session`, asking for the keyboard when `write`. `client` names this client across
+    /// its own reconnects; `takes` says the person asked now, which takes the keyboard from their
+    /// own other client too. Without it a write request never takes it from another live client of
+    /// theirs, and watches.
+    case attach(session: String, write: Bool, client: String = "", takes: Bool = true)
     /// Input toward the pty; `sequence` is echoed back on output as the last input the host applied.
     case input(sequence: Int64, bytes: [UInt8])
     case resize(TerminalSize)
@@ -50,7 +54,8 @@ public enum Frame: Equatable, Sendable {
     /// starts on a clean terminal boundary.
     case replayBegin(safe: Bool)
     case replayEnd
-    case writerChanged(fde: String)
+    /// `fde` holds the keyboard now; `yours` when it is this connection that holds it.
+    case writerChanged(fde: String, yours: Bool)
     case resized(TerminalSize)
     case paused
     case continued

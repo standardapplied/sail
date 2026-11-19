@@ -82,7 +82,18 @@ public sealed interface PtyMessage {
     return named == null || named.isBlank() || named.equals("main") ? "" : named;
   }
 
-  record Attach(String session, boolean write) implements PtyMessage {}
+  /**
+   * Attaches to {@code session}, asking for the keyboard when {@code write}. {@code client} names
+   * the asking client across its own reconnects, so a write request takes the keyboard back from
+   * that client's own lost connection; {@code takes} says the person asked for it now (an open, an
+   * explicit attach), which takes it from their own other client too. Without {@code takes} a write
+   * request (an automatic reconnect, a restore) never takes it from another live client of theirs.
+   */
+  record Attach(String session, boolean write, String client, boolean takes) implements PtyMessage {
+    public Attach(String session, boolean write) {
+      this(session, write, "", true);
+    }
+  }
 
   record Input(long seq, byte[] bytes) implements PtyMessage {}
 
@@ -286,7 +297,11 @@ public sealed interface PtyMessage {
 
   record ReplayEnd() implements PtyMessage {}
 
-  record WriterChanged(String fde) implements PtyMessage {}
+  /**
+   * {@code fde} holds the keyboard now; {@code yours} when it is the receiving connection that
+   * holds it, so two clients of one person each know which of them types.
+   */
+  record WriterChanged(String fde, boolean yours) implements PtyMessage {}
 
   record Resized(int cols, int rows) implements PtyMessage {}
 

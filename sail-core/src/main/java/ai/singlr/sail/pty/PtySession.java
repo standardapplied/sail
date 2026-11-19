@@ -71,7 +71,7 @@ public final class PtySession implements AutoCloseable {
     BACKLOG
   }
 
-  private record Subscriber(long id, Client client, SubscriberQueue queue) {}
+  private record Subscriber(long id, Client client, SubscriberQueue queue, String asker) {}
 
   private record Keystroke(long seq, byte[] bytes) {}
 
@@ -323,6 +323,7 @@ public final class PtySession implements AutoCloseable {
   private final long createdAt = System.nanoTime();
   private volatile long writerId = -1;
   private volatile String writerFde = "";
+  private volatile String writerClient = "";
   private int cols;
   private int rows;
   private volatile String endedReason;
@@ -784,7 +785,7 @@ public final class PtySession implements AutoCloseable {
         var snapshot = new java.util.ArrayList<PtyMessage>();
         snapshot.add(new PtyMessage.Resized(cols, rows));
         snapshot.addAll(replayMessages(RESYNC_TAIL));
-        snapshot.add(new PtyMessage.WriterChanged(writerFde));
+        snapshot.add(new PtyMessage.WriterChanged(writerFde, subscriber.id() == writerId));
         subscriber.queue().replaceWith(snapshot);
       } catch (IOException e) {
         subscriber.queue().force(new PtyMessage.SessionEnded("resync failed: " + e.getMessage()));
@@ -814,23 +815,33 @@ public final class PtySession implements AutoCloseable {
     return List.copyOf(messages);
   }
 
+  /** Attaches a client as one that asks now ({@code takes}), on behalf of no named client. */
+  public long attach(Client client, boolean wantsWrite, String fde) throws IOException {
+    return attach(client, wantsWrite, fde, "", true);
+  }
+
   /**
    * Attaches a client. Its queue is seeded, in order, with the pty's live geometry, the replay, and
    * the write token's holder, then the live stream follows. A write request takes the token when it
-   * is free — or when its holder is this same FDE on another connection: a laptop that slept left a
-   * ghost attachment parked on the box holding the keyboard, and the same person coming back is the
-   * one who should have it. The displaced connection hears {@code WriterChanged} and its next input
-   * is refused. A different FDE's token is never taken here — that is {@link #takeWrite}, an
-   * explicit act — so the newcomer learns it is an observer instead.
+   * is free, or when its holder is this same FDE and either asked for it now ({@code takes}), or
+   * the holder is this same {@code asker}'s own earlier connection (a laptop that slept left a
+   * ghost attachment parked on the box holding the keyboard), or the holder's connection is gone
+   * (the host was handed over). Without {@code takes}, an automatic reconnect never takes the
+   * keyboard from the person's other live client: it watches, and hears so. The displaced
+   * connection hears {@code WriterChanged} and its next input is refused. A different FDE's token
+   * is never taken here — that is {@link #takeWrite}, an explicit act — so the newcomer learns it
+   * is an observer.
    */
-  public long attach(Client client, boolean wantsWrite, String fde) throws IOException {
+  public long attach(Client client, boolean wantsWrite, String fde, String asker, boolean takes)
+      throws IOException {
     if (endedReason != null) {
       throw new IOException("Session '" + name() + "' has ended: " + endedReason + ".");
     }
     var firstAttach = !everAttached;
     everAttached = true;
     var subscriber =
-        new Subscriber(subscriberIds.incrementAndGet(), client, new SubscriberQueue(queueCapacity));
+        new Subscriber(
+            subscriberIds.incrementAndGet(), client, new SubscriberQueue(queueCapacity), asker);
     synchronized (fanout) {
       subscriber.queue().force(new PtyMessage.Resized(cols, rows));
       replayMessages(replayMax).forEach(subscriber.queue()::force);
@@ -840,10 +851,10 @@ public final class PtySession implements AutoCloseable {
       }
     }
     synchronized (this) {
-      if (wantsWrite && (writerId < 0 || writerFde.equals(fde))) {
-        grant(subscriber.id, fde);
+      if (wantsWrite && mayTake(fde, asker, takes)) {
+        grant(subscriber.id, fde, asker);
       } else {
-        subscriber.queue().force(new PtyMessage.WriterChanged(writerFde));
+        subscriber.queue().force(new PtyMessage.WriterChanged(writerFde, false));
         if (firstAttach) {
           persistMeta();
         }
@@ -919,7 +930,15 @@ public final class PtySession implements AutoCloseable {
     if (!subscribers.containsKey(subscriberId)) {
       throw new IllegalArgumentException("No attached subscriber " + subscriberId + ".");
     }
-    grant(subscriberId, fde);
+    grant(subscriberId, fde, subscribers.get(subscriberId).asker());
+  }
+
+  private boolean mayTake(String fde, String asker, boolean takes) {
+    return writerId < 0
+        || writerFde.equals(fde)
+            && (takes
+                || !subscribers.containsKey(writerId)
+                || !asker.isEmpty() && asker.equals(writerClient));
   }
 
   /**
@@ -928,11 +947,17 @@ public final class PtySession implements AutoCloseable {
    * instant has already cleared the roster and queued the ending, and the grant must not throw
    * after the host said {@code Ok} — the ending is what the newcomer hears.
    */
-  private void grant(long subscriberId, String fde) {
+  private void grant(long subscriberId, String fde, String asker) {
     writerId = subscriberId;
     writerFde = fde;
-    var changed = new PtyMessage.WriterChanged(fde);
-    subscribers.values().forEach(subscriber -> subscriber.queue().force(changed));
+    writerClient = asker;
+    subscribers
+        .values()
+        .forEach(
+            subscriber ->
+                subscriber
+                    .queue()
+                    .force(new PtyMessage.WriterChanged(fde, subscriber.id() == subscriberId)));
     persistMeta();
   }
 
@@ -968,6 +993,7 @@ public final class PtySession implements AutoCloseable {
     if (writerId == subscriberId) {
       writerId = -1;
       writerFde = "";
+      writerClient = "";
       persistMeta();
     }
   }

@@ -1,6 +1,6 @@
 import SailAPI
 
-/// The `SAILPTY5` framing, byte for byte as the host's `PtyWire` writes it: a big-endian `Int32`
+/// The `SAILPTY6` framing, byte for byte as the host's `PtyWire` writes it: a big-endian `Int32`
 /// length, then the payload, a type byte and its fields. Integers are big-endian; strings and byte
 /// blobs are an `Int32` length and the bytes; a list is an `Int32` count and its entries.
 public enum FrameCodec {
@@ -117,7 +117,7 @@ private extension Frame {
                 .string(create.session), .strings(create.command), .string(create.workingDirectory),
                 .string(create.project), .string(create.room),
             ] + create.size.fields + [.string(create.workspace)]
-        case let .attach(session, write): [.string(session), .bool(write)]
+        case let .attach(session, write, client, takes): [.string(session), .bool(write), .string(client), .bool(takes)]
         case let .input(sequence, bytes): [.int64(sequence), .blob(bytes)]
         case let .resize(size), let .resized(size): size.fields
         case let .listSessions(after, limit): [.string(after), .int32(limit), .string("")]
@@ -137,7 +137,7 @@ private extension Frame {
         case let .putRefused(id, kind, limit): [.int32(id), .string(kind.rawValue), .int64(limit)]
         case let .output(lastInputSequence, bytes): [.int64(lastInputSequence), .blob(bytes)]
         case let .replayBegin(safe): [.bool(safe)]
-        case let .writerChanged(fde): [.string(fde)]
+        case let .writerChanged(fde, yours): [.string(fde), .bool(yours)]
         case let .sessionEnded(reason): [.string(reason)]
         case let .sessionInfo(info): info.fields + info.place
         case let .sessions(page):
@@ -214,7 +214,7 @@ private struct Cursor {
         case 9: .hello(token: try string())
         case 32: .welcome(hostBootID: try string())
         case 1: .create(try create())
-        case 2: .attach(session: try string(), write: try bool())
+        case 2: .attach(session: try string(), write: try bool(), client: try string(), takes: try bool())
         case 3: .input(sequence: try int64(), bytes: try blob())
         case 4: .resize(try size())
         case 5: .takeWrite
@@ -243,7 +243,7 @@ private struct Cursor {
         case 20: .output(lastInputSequence: try int64(), bytes: try blob())
         case 21: .replayBegin(safe: try bool())
         case 22: .replayEnd
-        case 23: .writerChanged(fde: try string())
+        case 23: .writerChanged(fde: try string(), yours: try bool())
         case 24: .resized(try size())
         case 25: .paused
         case 26: .continued

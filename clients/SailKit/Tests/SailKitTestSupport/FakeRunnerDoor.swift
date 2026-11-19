@@ -41,8 +41,10 @@ public final class FakeRunnerDoor: Sendable {
         var unused: [String: TicketRequest] = [:]
         var used: Set<String> = []
         var live: [String] = []
-        /// Each live session's writer: the connection's number, or 0 for someone else.
+        /// Each live session's writer: the connection's number, or 0 for a client not this door's.
         var writers: [String: Int] = [:]
+        /// Who the client not this door's is, while it holds a session's keyboard.
+        var holders: [String: String] = [:]
         var connections = 0
         var kills: [String] = []
         /// Every session it made, oldest first, and the reasons of those it ended on its own.
@@ -167,7 +169,10 @@ public final class FakeRunnerDoor: Sendable {
 
     /// Someone else holds `session`'s write token from now on: an attach asking for it observes.
     public func holdWrite(_ session: String) {
-        state.withLock { $0.writers[session] = 0 }
+        state.withLock { state in
+            state.writers[session] = 0
+            state.holders[session] = "someone"
+        }
     }
 
     /// Someone else lets go of `session`'s write token.
@@ -212,15 +217,20 @@ public final class FakeRunnerDoor: Sendable {
     }
 
     /// `fde` takes `session`'s keyboard, as its person's other Mac or an admin does: every connection
-    /// attached to it hears so.
+    /// attached to it hears so, and that it is not theirs.
     public func takeKeyboard(_ session: String, by fde: String) {
-        state.withLock { $0.writers[session] = 0 }
-        announce(session, writer: fde)
+        state.withLock { state in
+            state.writers[session] = 0
+            state.holders[session] = fde
+        }
+        announce(session, writer: fde, holder: nil)
     }
 
-    private func announce(_ session: String, writer: String) {
+    /// Every connection attached to `session` hears `writer` holds it, `holder` being the connection
+    /// that does, nil for a client not this door's.
+    private func announce(_ session: String, writer: String, holder: Int32?) {
         let connections = state.withLock { $0.attached[session] ?? [] }
-        connections.forEach { answer(.writerChanged(fde: writer), on: $0) }
+        connections.forEach { answer(.writerChanged(fde: writer, yours: $0 == holder), on: $0) }
     }
 
     private static func session(of ticket: TicketRequest) -> String? {
@@ -323,21 +333,23 @@ public final class FakeRunnerDoor: Sendable {
                 if creates.withLock({ $0.losing }) { return }
                 opened = create.session
                 answer(.accepted, on: connection)
-            case let .attach(session, write):
+            case let .attach(session, write, _, takes):
                 let live = state.withLock { state in
                     guard state.live.contains(session) else { return false }
-                    if write, state.writers[session] != 0 { state.writers[session] = number }
+                    let holder = state.writers[session]
+                    if write, holder == nil || takes && (holder != 0 || state.holders[session] == person) { state.writers[session] = number }
                     state.attached[session, default: []].append(connection)
                     return true
                 }
                 answer(live ? .accepted : .refused(HostRefusal(message: "No live session '\(session)' to attach.", remedy: [])), on: connection)
                 if live, let person {
-                    answer(.writerChanged(fde: state.withLock { $0.writers[session] == 0 } ? "someone" : person), on: connection)
+                    let (holder, outside) = state.withLock { ($0.writers[session], $0.holders[session]) }
+                    answer(.writerChanged(fde: holder == 0 ? outside ?? "someone" : person, yours: holder == number), on: connection)
                 }
             case .takeWrite:
                 guard let person, let session = opened ?? Self.session(of: ticket) else { continue }
                 state.withLock { $0.writers[session] = number }
-                announce(session, writer: person)
+                announce(session, writer: person, holder: connection)
             case let .kill(session):
                 let ended = state.withLock { state in
                     state.kills.append(session)
@@ -351,6 +363,9 @@ public final class FakeRunnerDoor: Sendable {
                 }
                 answer(.sessionEnded(reason: "ended"), on: connection)
                 answer(.accepted, on: connection)
+            case .input:
+                guard let session = opened ?? Self.session(of: ticket), state.withLock({ $0.writers[session] != number }) else { continue }
+                answer(.refused(HostRefusal(message: "You do not hold the write token.", remedy: [])), on: connection)
             default:
                 continue
             }
@@ -364,7 +379,7 @@ public final class FakeRunnerDoor: Sendable {
             case let .create(create):
                 made(create.session)
                 answer(.accepted, on: connection)
-            case let .attach(session, _):
+            case let .attach(session, _, _, _):
                 let live = state.withLock { $0.live.contains(session) }
                 answer(live ? .accepted : .refused(HostRefusal(message: "No live session '\(session)' to attach.", remedy: [])), on: connection)
             case let .kill(session):
@@ -422,7 +437,7 @@ public final class FakeRunnerDoor: Sendable {
         let covered = switch frame {
         case let .create(create):
             if case let .open(project, workspace) = ticket { opened == nil && create.project == project && create.workspace == workspace } else { false }
-        case let .attach(session, _): session == own
+        case let .attach(session, _, _, _): session == own
         case let .kill(session): session == own
         default: true
         }

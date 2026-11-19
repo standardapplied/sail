@@ -95,8 +95,9 @@ public final class TerminalSession: Sendable {
         /// token since, and the host has not refused its input as a reader's. A reader sends none
         /// of the terminal's own answers.
         var writing = true
-        /// A `TakeWrite` was sent and the host's grant, a `WriterChanged`, is still to come.
-        var takingWrite = false
+        /// The next attach takes the keyboard from the person's other live client: the first, when
+        /// the person asked for this session now. A reconnect or a restore never does.
+        var takes = true
         var replaying = false
         /// Replays this session has finished.
         var replays = 0
@@ -132,10 +133,17 @@ public final class TerminalSession: Sendable {
         self.init(intent: .open(create), door: door, screen: screen)
     }
 
-    /// A session that attaches to `session` through `door`, asking for the write token when `write`.
-    public convenience init(attach session: String, write: Bool, door: Door, screen: Screen) {
+    /// A session that attaches to `session` through `door`, asking for the write token when `write`:
+    /// taking it from the person's other live client when `takes` (the person asked now), and never
+    /// otherwise (a restore).
+    public convenience init(attach session: String, write: Bool, takes: Bool = true, door: Door, screen: Screen) {
         self.init(intent: .attach(session: session, write: write), door: door, screen: screen)
+        core.withLock { $0.takes = takes }
     }
+
+    /// This client's name across its own reconnects, so the host gives the keyboard back to it from
+    /// its own lost connection.
+    let client = UUID().uuidString
 
     /// As the public ones, waiting with `sleep`, giving each connect and answer `timeout` seconds,
     /// counting a connection a success once attached for `stableAfter`, timing a render hold's
@@ -477,11 +485,7 @@ public final class TerminalSession: Sendable {
     /// Asks the host for the write token, which it grants to any attached client; once granted, the
     /// view's size goes to the host, so the pty takes the new writer's size.
     public func takeWrite() {
-        let connection = core.withLock { core -> Connection? in
-            if core.connection != nil { core.takingWrite = true }
-            return core.connection
-        }
-        guard let connection else { return }
+        guard let connection = core.withLock({ $0.connection }) else { return }
         send(.takeWrite, on: connection)
     }
 
@@ -634,7 +638,8 @@ public final class TerminalSession: Sendable {
                 connection.close()
                 return standDown
             }
-            try connection.request(.attach(session: session, write: write))
+            let takes = core.withLock { $0.takes }
+            try connection.request(.attach(session: session, write: write, client: client, takes: takes))
         } catch {
             connection.close()
             return Self.outcome(of: error, at: door)
@@ -647,7 +652,7 @@ public final class TerminalSession: Sendable {
             core.inFlight = nil
             core.state.paused = false
             core.writing = write
-            core.takingWrite = false
+            core.takes = false
             core.accounting = !core.unconfirmed.isEmpty
             core.numbered = false
             return nil
@@ -793,15 +798,12 @@ public final class TerminalSession: Sendable {
             sendInput(effects.reply, handedIn: nil)
             emit(.resized(size))
             screenChanged(at: clock.now)
-        case let .writerChanged(fde):
+        case let .writerChanged(fde, yours):
             let (granted, fit) = core.withLock { core -> (Bool, TerminalSize?) in
                 core.state.writer = fde
-                guard core.takingWrite else {
-                    if case let .attach(_, write) = core.intent { core.writing = write }
-                    return (false, nil)
-                }
-                core.takingWrite = false
-                core.writing = true
+                let was = core.writing
+                core.writing = yours
+                guard yours, !was else { return (false, nil) }
                 if case let .attach(session, _) = core.intent { core.intent = .attach(session: session, write: true) }
                 guard let view = core.viewSize, view != core.ptySize else { return (true, nil) }
                 core.ptySize = view
@@ -813,7 +815,7 @@ public final class TerminalSession: Sendable {
             if granted {
                 sendInput(screen.schemeReport(), handedIn: nil)
             }
-            emit(.writerChanged(fde))
+            emit(.writerChanged(fde, yours: yours))
         case .paused:
             core.withLock { $0.state.paused = true }
             emit(.paused)

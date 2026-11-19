@@ -1137,7 +1137,7 @@ class PtySessionTest {
       var kinds = frames.stream().map(m -> m.getClass().getSimpleName()).toList();
       assertEquals("ReplayBegin", kinds.get(1), "then the replay: " + kinds);
       assertEquals(
-          new PtyMessage.WriterChanged("uday"),
+          new PtyMessage.WriterChanged("uday", false),
           frames.get(kinds.indexOf("ReplayEnd") + 1),
           "and the token holder right after the replay: " + frames);
     }
@@ -1230,10 +1230,65 @@ class PtySessionTest {
           session.input(otherId, 3, "nope\n".getBytes(StandardCharsets.UTF_8)));
       var kinds = other.messages.stream().map(m -> m.getClass().getSimpleName()).toList();
       assertEquals(
-          new PtyMessage.WriterChanged("uday"),
+          new PtyMessage.WriterChanged("uday", false),
           List.copyOf(other.messages).get(kinds.indexOf("ReplayEnd") + 1),
           "and is told who holds it right after the replay: " + other.messages);
     }
+  }
+
+  /**
+   * An automatic reconnect asks for the keyboard without taking it: it never takes it from the
+   * person's other live client, which keeps typing, and the reconnect hears it is not its own. It
+   * takes it back from its own lost connection, and asking now takes it from the other client. Each
+   * connection hears whether the keyboard is its own.
+   */
+  @Test
+  void anAutomaticReconnectNeverTakesTheKeyboardFromThePersonsOtherLiveClient() throws Exception {
+    try (var session = session("read a; echo got:$a; read b; echo got:$b; read c")) {
+      var other = new Collector();
+      var otherId = session.attach(other, true, "uday", "mac-b", true);
+      other.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(new PtyMessage.WriterChanged("uday", true), lastWriter(other));
+
+      var waking = new Collector();
+      var wakingId = session.attach(waking, true, "uday", "mac-a", false);
+      waking.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(otherId, session.writerId(), "the other Mac keeps typing");
+      assertEquals(
+          new PtyMessage.WriterChanged("uday", false),
+          lastWriter(waking),
+          "the reconnect hears the keyboard is with the person, and not its own");
+      assertEquals(
+          PtySession.WriteOutcome.NOT_WRITER,
+          session.input(wakingId, 1, "x\n".getBytes(StandardCharsets.UTF_8)));
+
+      var again = new Collector();
+      var againId = session.attach(again, true, "uday", "mac-b", false);
+      again.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(againId, session.writerId(), "a client takes it back from its own ghost");
+      assertEquals(new PtyMessage.WriterChanged("uday", true), lastWriter(again));
+      other.awaitMessage(new PtyMessage.WriterChanged("uday", false));
+      waking.awaitMessage(new PtyMessage.WriterChanged("uday", false));
+
+      var asked = new Collector();
+      var askedId = session.attach(asked, true, "uday", "mac-a", true);
+      asked.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(askedId, session.writerId(), "asking now takes it from the other client");
+      again.awaitMessage(new PtyMessage.WriterChanged("uday", false));
+
+      session.detach(askedId);
+      var back = new Collector();
+      var backId = session.attach(back, true, "uday", "mac-c", false);
+      back.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(backId, session.writerId(), "a keyboard no client holds is taken back");
+    }
+  }
+
+  private static PtyMessage lastWriter(Collector client) {
+    return List.copyOf(client.messages).reversed().stream()
+        .filter(PtyMessage.WriterChanged.class::isInstance)
+        .findFirst()
+        .orElseThrow();
   }
 
   @Test
@@ -1440,7 +1495,7 @@ class PtySessionTest {
       assertEquals("ReplayBegin", kinds.get(continuedAt + 2), "then the replay: " + kinds);
       var replayEndAt = kinds.subList(continuedAt, kinds.size()).indexOf("ReplayEnd") + continuedAt;
       assertEquals(
-          new PtyMessage.WriterChanged("uday"),
+          new PtyMessage.WriterChanged("uday", true),
           frames.get(replayEndAt + 1),
           "and the writer the overflow discarded is answered again after it: " + kinds);
     } finally {

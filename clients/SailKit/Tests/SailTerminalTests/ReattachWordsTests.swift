@@ -33,28 +33,30 @@ import Testing
         #expect(RunnerReturn.of("app-a", .failure(.unreachable("no network"))) == nil)
     }
 
-    /// The attach's own answer names this person when the keyboard came here; another person's
-    /// name leaves it with them. After that, a change this client did not ask for takes it away,
-    /// this person's other Mac included, and Take Keyboard's answer brings it back.
-    @Test func theKeyboardIsElsewhereWhenSomeoneElseTookIt() {
+    /// The keyboard is here exactly when the host says it is this client's, whoever it names: a
+    /// change naming this person on another of their clients takes it away, and one naming someone
+    /// else in answer to Take Keyboard is never read as the grant. Closing while it is elsewhere
+    /// says where the session goes on.
+    @Test func theKeyboardIsHereOnlyWhenTheHostSaysItIsThisClients() {
         var keyboard = Keyboard()
-        keyboard.writerChanged(to: "ana", me: "ana")
-        #expect(keyboard.elsewhere == nil)
-        keyboard.writerChanged(to: "ana", me: "ana")
+        keyboard.writerChanged(to: "ana", yours: true, me: "ana")
+        #expect(keyboard.elsewhere == nil && keyboard.said == nil && keyboard.stillRunning == nil)
+        keyboard.writerChanged(to: "ana", yours: false, me: "ana")
         #expect(keyboard.said == "Typing here is paused: you took the keyboard in another window or on another Mac.")
-        keyboard.taking()
-        keyboard.writerChanged(to: "ana", me: "ana")
-        #expect(keyboard.elsewhere == nil)
-        keyboard.writerChanged(to: "uday", me: "ana")
-        #expect(keyboard.elsewhere == "uday")
+        #expect(keyboard.stillRunning == "Still running: the keyboard is with your other window or Mac.")
+        keyboard.writerChanged(to: "uday", yours: false, me: "ana")
+        #expect(keyboard.elsewhere == "uday", "someone else taking it as Take Keyboard is pressed is not the grant")
         #expect(keyboard.said == "Typing here is paused: the keyboard is with uday now.", "someone else is named")
-        keyboard.attached()
-        keyboard.writerChanged(to: "ana", me: "ana")
+        #expect(keyboard.stillRunning == "Still running: the keyboard is with uday.")
+        keyboard.writerChanged(to: "ana", yours: true, me: "ana")
         #expect(keyboard.elsewhere == nil)
+        keyboard.writerChanged(to: "", yours: false, me: "ana")
+        #expect(keyboard.elsewhere == nil, "no one holds it")
 
-        var observer = Keyboard()
-        observer.writerChanged(to: "ana", me: "uday")
-        #expect(observer.elsewhere == "ana")
+        var first = Keyboard(), second = Keyboard()
+        first.writerChanged(to: "ana", yours: false, me: "ana")
+        second.writerChanged(to: "ana", yours: true, me: "ana")
+        #expect(first.said != nil && second.said == nil, "of two of one person's clients pressing at once, the one that holds it never says paused")
     }
 
     /// A signed-in source lists for its own person only, as it asks tickets.

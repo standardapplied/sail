@@ -23,7 +23,7 @@ import java.util.List;
  */
 public final class PtyWire {
 
-  static final byte[] MAGIC = "SAILPTY5".getBytes(StandardCharsets.US_ASCII);
+  static final byte[] MAGIC = "SAILPTY6".getBytes(StandardCharsets.US_ASCII);
   static final int MAX_FRAME = 1 << 20;
 
   private PtyWire() {}
@@ -34,7 +34,7 @@ public final class PtyWire {
     var peer = ByteBuffer.allocate(MAGIC.length);
     readFully(in, peer);
     if (!ByteBuffer.wrap(MAGIC).equals(peer.flip())) {
-      throw new IOException("Peer is not speaking sail pty protocol v5; refusing the connection.");
+      throw new IOException("Peer is not speaking sail pty protocol v6; refusing the connection.");
     }
   }
 
@@ -99,7 +99,7 @@ public final class PtyWire {
       }
       case PtyMessage.Attach m -> {
         out.type(2).string(m.session());
-        out.bool(m.write());
+        out.bool(m.write()).string(m.client()).bool(m.takes());
       }
       case PtyMessage.Input m -> {
         out.type(3);
@@ -152,7 +152,7 @@ public final class PtyWire {
         out.bool(m.safe());
       }
       case PtyMessage.ReplayEnd m -> out.type(22);
-      case PtyMessage.WriterChanged m -> out.type(23).string(m.fde());
+      case PtyMessage.WriterChanged m -> out.type(23).string(m.fde()).bool(m.yours());
       case PtyMessage.Resized m -> {
         out.type(24);
         out.i32(m.cols()).i32(m.rows());
@@ -274,7 +274,7 @@ public final class PtyWire {
               in.getInt(),
               in.getInt(),
               string(in));
-      case 2 -> new PtyMessage.Attach(string(in), in.get() == 1);
+      case 2 -> new PtyMessage.Attach(string(in), in.get() == 1, string(in), in.get() == 1);
       case 3 -> new PtyMessage.Input(in.getLong(), bytes(in));
       case 4 -> new PtyMessage.Resize(in.getInt(), in.getInt());
       case 5 -> new PtyMessage.TakeWrite();
@@ -301,7 +301,7 @@ public final class PtyWire {
       case 20 -> new PtyMessage.Output(in.getLong(), bytes(in));
       case 21 -> new PtyMessage.ReplayBegin(in.get() == 1);
       case 22 -> new PtyMessage.ReplayEnd();
-      case 23 -> new PtyMessage.WriterChanged(string(in));
+      case 23 -> new PtyMessage.WriterChanged(string(in), in.get() == 1);
       case 24 -> new PtyMessage.Resized(in.getInt(), in.getInt());
       case 25 -> new PtyMessage.Paused();
       case 26 -> new PtyMessage.Continued();
