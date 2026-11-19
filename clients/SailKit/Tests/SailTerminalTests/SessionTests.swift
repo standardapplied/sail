@@ -474,14 +474,31 @@ import Testing
         _ = host
     }
 
-    @Test func aHostOfAnotherProtocolEndsTheSessionNamingTheOlderSide() async throws {
+    /// A host whose magic is not this protocol's ends the session at once, said as another version
+    /// of Sail's, never which side is older; nothing is tried again.
+    @Test func aHostOfAnotherProtocolEndsTheSessionAsAnotherVersion() async throws {
         let host = try FakeHost()
         let session = TerminalSession(open: create, door: .local(host.address), screen: try screen())
         let watch = Watch(session)
         session.start()
         let peer = try await host.accept()
-        try peer.send(raw: Array("SAILPTY2".utf8))
-        try await watch.phase(.ended(.refused(HostRefusal(message: "the terminal host is older than this app: upgrade sail on it", remedy: []))))
+        try peer.send(raw: Array("SAILPTY3".utf8))
+        let said = "This app and the terminal host are different versions of Sail, so they cannot talk."
+        try await watch.phase(.ended(.refused(HostRefusal(message: said, remedy: []))))
+    }
+
+    /// A runner whose host speaks another protocol is said as that runner being another version of
+    /// Sail, at once: no wait, no retry.
+    @Test func aRunnerOfAnotherProtocolEndsTheSessionAsAnotherVersion() async throws {
+        let host = try FakeHost(tcp: ())
+        let session = TerminalSession(attach: "app-a", write: true, door: .runner(TicketDesk(address: host.address)), screen: try screen())
+        let watch = Watch(session)
+        session.start()
+        let peer = try await host.accept()
+        try peer.send(raw: Array("SAILPTY3".utf8))
+        let said = TerminalSession.otherVersion(at: .runner(TicketDesk(address: host.address)))
+        #expect(said == "This app and that runner are different versions of Sail, so they cannot talk. Bring both to the same version, then open it again.")
+        try await watch.phase(.ended(.refused(HostRefusal(message: said, remedy: []))))
     }
 
     @Test func aHostThatRefusesTheHelloEndsTheSessionInItsWords() async throws {

@@ -25,6 +25,14 @@ public final class LocalHost: Sendable {
     public static let startedElsewhere = "Another program started this Mac's terminal host while Sail was starting its own. Close it, then try again."
     public static let stoppedSentence = "This Mac's terminal host was stopped, and with it these terminals."
 
+    /// What answers at the socket speaks another version of Sail's terminal protocol: this build
+    /// cannot talk to it, and a host of its own would only lose the socket's lock to it. Ending it is
+    /// the person's, with `kill` and the pid serving there when it is known.
+    public static func otherVersion(pid: pid_t?) -> String {
+        let command = pid.map { "kill \($0)" } ?? #"pkill -f "_pty-host --local""#
+        return "This Mac's terminal host is from another version of Sail, and this one cannot talk to it. End it in Terminal with \(command), then try again."
+    }
+
     /// What holds another copy's host: how many of its terminals have a client. The host does not
     /// tell whose client it is (another copy of Sail, or a `sail session attach`), and its session
     /// names are its own, never shown to the person.
@@ -79,7 +87,12 @@ public final class LocalHost: Sendable {
                 copyFailure = error
             }
         }
-        if await answers() {
+        switch await probe() {
+        case .none:
+            break
+        case .otherVersion:
+            throw .host(Self.otherVersion(pid: servingProcess()?.pid))
+        case .serving:
             guard let copy else {
                 if let copyFailure { await say("This build's terminal host could not be copied (\(copyFailure)), so the one already running is used.") }
                 _ = truncate(log, 0)
@@ -211,7 +224,23 @@ public final class LocalHost: Sendable {
     }
 
     private func answers() async -> Bool {
-        (try? await SessionListing.sessions(at: address, timeout: 1)) != nil
+        await probe() == .serving
+    }
+
+    /// What answers at the socket: a host this build can talk to, one whose magic is another
+    /// protocol's, or none.
+    private func probe() async -> Probe {
+        do throws(TerminalError) {
+            _ = try await SessionListing.sessions(at: address, timeout: 1)
+            return .serving
+        } catch {
+            if case .otherProtocol = error { return .otherVersion }
+            return .none
+        }
+    }
+
+    private enum Probe {
+        case none, serving, otherVersion
     }
 
     func start(_ binary: String) throws(ShellError) {

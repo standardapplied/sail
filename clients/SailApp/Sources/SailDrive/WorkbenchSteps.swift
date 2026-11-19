@@ -859,7 +859,7 @@ extension Driver {
     private func otherHost(_ state: String) async -> (Bool, String) {
         let host = workbench.host
         func serving() -> String { host.servingProcess()?.executable ?? "none" }
-        let ours = { serving().contains("/Application Support/Sail/Host/") }
+        let ours = { serving().contains("/Application Support/Sail/Host/") && !serving().contains("/other-build/") }
         let other = { serving().contains("/other-build/") }
         let says = { (text: String) in self.workbench.bannerSays?.contains(text) == true }
         if state == "free" {
