@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import SailLook
 @testable import SailShell
+import SailVT
 import SailWorkbench
 import Testing
 
