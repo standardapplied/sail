@@ -83,7 +83,8 @@ import Testing
         #expect(handleFont.contains("Medium") && !restFont.contains("Medium"), "the handle is \(handleFont), the rest \(restFont)")
     }
 
-    /// r3-2: the longest taken name at the narrowest card: "Show …" is cut at its end, and "or
+    /// r3-2: the longest taken name at the narrowest card: "Show …" is cut at its end yet reads as a
+    /// link (the line runs under Cancel and Create, which sit level with the box above it), and "or
     /// choose another name." keeps its whole width on the one line.
     @Test func aLongTakenNameNeverSqueezesTheWordsAfterIt() async throws {
         let server = RecordedServer([try Exchange("projects"), try WorkspacesReachTests.longRows(), try Exchange("refusal-conflict-workspace-exists")])
@@ -101,10 +102,10 @@ import Testing
         let row = try #require(view.project.list.rowView(atRow: 1, makeIfNecessary: true))
         row.layoutSubtreeIfNeeded()
         let line = try #require(WorkspacesViewTests.found(CreateRow.self, in: row).first?.showLine)
-        let show = try #require(WorkspacesViewTests.found(LinkButton.self, in: line).first)
-        let rest = try #require(WorkspacesViewTests.found(NSTextField.self, in: line).first)
+        let show = try #require(line.arrangedSubviews.first as? LinkButton)
+        let rest = try #require(line.arrangedSubviews.last as? NSTextField)
         #expect(Double(rest.frame.width) >= Double(rest.intrinsicContentSize.width) - 0.5, "the words after the link have \(rest.frame.width) of \(rest.intrinsicContentSize.width) pt")
-        #expect(Double(show.frame.width) < Double(show.intrinsicContentSize.width) && show.frame.width > 20, "the link is \(show.frame.width) pt of \(show.intrinsicContentSize.width)")
+        #expect(Double(show.frame.width) < Double(show.intrinsicContentSize.width) && show.frame.width > 40, "the link is \(show.frame.width) pt of \(show.intrinsicContentSize.width)")
         #expect(Double(line.frame.height) < 2 * Look.Step.footnote.points, "the show line wraps to \(line.frame.height) pt")
     }
 

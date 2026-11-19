@@ -58,7 +58,7 @@ final class CreateRow: NSView {
         if let showLine {
             constraints += [
                 showLine.leadingAnchor.constraint(equalTo: field.leadingAnchor), showLine.topAnchor.constraint(equalTo: field.bottomAnchor, constant: Self.below),
-                showLine.trailingAnchor.constraint(lessThanOrEqualTo: buttons.leadingAnchor, constant: -Self.gap),
+                showLine.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             ]
         }
         NSLayoutConstraint.activate(constraints)

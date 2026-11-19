@@ -61,6 +61,15 @@ actor GoldenDesk: Transport {
         held["GET /v1/projects/harbor/workspaces"] = .zero
     }
 
+    /// From now on harbor's workspaces are the three of the golden and one more of `name`, the person's.
+    func answerTaken(_ name: String) throws {
+        let exchange = try Exchange("workspaces-three")
+        guard var body = try JSONSerialization.jsonObject(with: exchange.body) as? [String: Any], let rows = body["workspaces"] as? [[String: Any]] else { return }
+        body["workspaces"] = rows + [["name": name, "instance": "harbor-\(name)", "state": "running", "owner": "uday"]]
+        answers["GET /v1/projects/harbor/workspaces"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: try JSONSerialization.data(withJSONObject: body))
+        held["GET /v1/projects/harbor/workspaces"] = .zero
+    }
+
     /// From now on `project`'s workspaces are listed as none.
     func answerNoRows(_ project: String) throws {
         let exchange = try Exchange("workspaces-three")
@@ -141,6 +150,14 @@ extension Driver {
                 return (true, "")
             } catch {
                 return (false, "the projects golden: \(error)")
+            }
+        }
+        if let name = step.takenName {
+            do {
+                try await GoldenDesk.shared.answerTaken(name)
+                return (true, "")
+            } catch {
+                return (false, "the taken name: \(error)")
             }
         }
         if let project = step.noRows {
