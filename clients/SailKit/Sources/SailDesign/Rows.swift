@@ -51,11 +51,27 @@ public struct RowPaint: Equatable, Sendable {
         progress = false
     }
 
-    public init(fill: Tint?, bar: Bool, actions: Bool = false, progress: Bool = false) {
+    private init(fill: Tint?, bar: Bool, actions: Bool, progress: Bool) {
         self.fill = fill
         self.bar = bar
         self.actions = actions
         self.progress = progress
+    }
+
+    /// A create row open for a name: drawn chosen, quietly, its field holding the keys.
+    public static func naming(_ look: Look) -> Self {
+        Self(fill: look.fillSelectedQuiet, bar: true, actions: false, progress: false)
+    }
+
+    /// A create row refused: the error's tint (the design's 5 %), no bar.
+    public static func refused(_ look: Look) -> Self {
+        Self(fill: Tint(look.error, alpha: 0.05), bar: false, actions: false, progress: false)
+    }
+
+    /// A row being created: the quiet chosen fill, its actions (how long, a spinner) shown, the
+    /// progress line along its foot.
+    public static func creating(_ look: Look) -> Self {
+        Self(fill: look.fillSelectedQuiet, bar: false, actions: true, progress: true)
     }
 }
 

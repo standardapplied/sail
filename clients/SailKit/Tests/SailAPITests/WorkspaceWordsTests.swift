@@ -78,7 +78,7 @@ import Testing
     }
 
     /// A1: yours first, running before the rest, each by name; the project's own container left out;
-    /// another person's named as theirs; each state in words.
+    /// why Open is not offered: whose it is, no one's, or a former member's.
     @Test func theListIsYoursFirstInWords() {
         let list = WorkspaceList(project: "acme", workspaces: [
             WorkspaceRow(name: "main", instance: "acme", state: .known(.running), owner: nil),
@@ -90,19 +90,12 @@ import Testing
         ])
         let rows = list.rows(for: "ana")
         #expect(rows.map(\.name) == ["try", "fix", "half", "dock", "old"])
-        #expect(rows.map { $0.reading(for: "ana") } == [
-            "try · running", "fix · stopped", "half · not whole, create it again", "dock · running · uday", "old · paused",
-        ])
-        #expect(rows.map { $0.notOpened(for: "ana", admin: false) } == [
-            nil, nil, nil, "dock is uday's: only uday or an admin can open it.", "No one owns old: only an admin can open it.",
-        ])
-        #expect(rows.allSatisfy { $0.notOpened(for: "ana", admin: true) == nil })
-        #expect(rows.map(\.said) == ["running", "stopped", "not whole, create it again", "running", "paused"])
+        #expect(rows.map { $0.whyNotOpened(for: "ana", admin: false) } == [nil, nil, nil, "Only uday or an admin opens it", "No one owns it: only an admin opens it"])
+        #expect(rows.allSatisfy { $0.whyNotOpened(for: "ana", admin: true) == nil })
         #expect(rows.map { $0.opens(for: "ana", admin: false) } == [true, true, true, false, false])
         #expect(rows.allSatisfy { $0.opens(for: "uday", admin: true) })
-        #expect(rows.map { $0.owner(apartFrom: "ana") } == [nil, nil, nil, "uday", nil])
-        #expect(rows.map(\.startsWhenOpened) == [false, true, false, false, false], "only a stopped one: opening starts it")
-        #expect(rows.map(\.isUp) == [true, false, false, true, false])
+        let left = WorkspaceRow(name: "x", instance: "acme-x", state: .known(.stopped), owner: WorkspaceRow.removedOwner)
+        #expect(left.whyNotOpened(for: "ana", admin: false) == "Its owner is no longer a member: only an admin opens it", "the server's marker read as a handle")
     }
 
     /// A call that ended in anything but an answer is said in words by its kind, never as the enum's

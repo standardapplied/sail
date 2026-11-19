@@ -376,9 +376,9 @@ import Testing
                 let dot = pill.dot.frame
                 #expect(near(dot.minX, size.leading), "\(name) \(state): the dot starts \(dot.minX) pt in, not \(size.leading)")
                 let middle = Self.colour(pill, on: canvas, at: NSPoint(x: dot.midX, y: dot.midY), scale: 2)
-                let wanted = state == .stopped ? Self.swatch(canvas, [], scale: 2) : Self.swatch(canvas, [NSColor(pill.paint.dot)], scale: 2)
+                let wanted = pill.paint.hollow ? Self.swatch(canvas, [], scale: 2) : Self.swatch(canvas, [NSColor(pill.paint.dot)], scale: 2)
                 #expect(Self.tells(middle, wanted, from: Self.swatch(canvas, [NSColor(look.text)], scale: 2)), "\(name) \(state) \(size): the dot is \(middle)")
-                if state == .stopped {
+                if pill.paint.hollow {
                     let ring = Self.colour(pill, on: canvas, at: NSPoint(x: dot.minX + 0.5, y: dot.midY), scale: 2)
                     #expect(Self.tells(ring, Self.swatch(canvas, [NSColor(look.textTertiary)], scale: 2), from: wanted), "\(name): the stopped dot's ring is \(ring)")
                 }

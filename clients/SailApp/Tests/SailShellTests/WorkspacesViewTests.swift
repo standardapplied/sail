@@ -126,11 +126,11 @@ import Testing
     /// narrow), a name is cut short before the pill, never under it, and nothing wraps; narrow, a row
     /// drops its owner's column and says whose it is in its place.
     @Test func theRowsKeepTheirColumnsAtEveryWidth() throws {
-        let long = String(repeating: "w", count: 63)
+        let long = String(repeating: "w", count: 63), handle = String(repeating: "k", count: 63)
         let page = try #require(Self.page([
             WorkspaceRow(name: "dock", instance: "harbor-dock", state: .known(.running), owner: "uday"),
             WorkspaceRow(name: long, instance: "harbor-" + long, state: .known(.running), owner: "uday"),
-            WorkspaceRow(name: "x" + long.dropFirst(), instance: "harbor-x", state: .known(.stopped), owner: "ana"),
+            WorkspaceRow(name: "x" + long.dropFirst(), instance: "harbor-x", state: .known(.stopped), owner: handle),
         ]))
         let drive = 1024.0 - Rail.width - 4 - LeftPanel.width.standard
         for (width, narrow) in [(Self.narrowestCard, true), (ProjectView.wide, false), (drive, false)] {
@@ -154,11 +154,15 @@ import Testing
                 #expect(line.place.frame.height <= line.title.frame.height + 0.5, "\(width) pt: \(line.place.stringValue.prefix(12)) wraps")
                 #expect(pill.maxX <= line.frame.maxX + 0.5, "\(width) pt: the pill runs past its line")
                 #expect((line.whose == nil) == narrow)
+                if let whose = line.whose, let label = Self.found(NSTextField.self, in: whose).first {
+                    let end = whose.convert(label.alignmentRect(forFrame: label.frame), from: label.superview).maxX
+                    #expect(end <= whose.bounds.maxX + 0.5 && label.frame.height <= line.title.frame.height + 0.5, "\(width) pt: the owner runs to \(end) in its \(whose.bounds.width) pt column")
+                }
                 pills.append(pill)
             }
             let edges = pills.map { narrow ? $0.maxX : $0.minX }
             #expect(edges.allSatisfy { near($0, edges[0]) }, "\(width) pt: the pills' \(narrow ? "ends" : "starts") are \(edges)")
-            if narrow { #expect(lines.map(\.place.stringValue) == ["harbor-dock", "harbor-" + long, "ana's"]) }
+            if narrow { #expect(lines.map(\.place.stringValue) == ["harbor-dock", "harbor-" + long, handle + "'s"]) }
         }
     }
 
@@ -214,18 +218,30 @@ import Testing
 
     /// A refused name keeps its box at 250 pt with the refusal under it across the column, and
     /// "Show dock or choose another name." on a line under that; Cancel and Create stay level with
-    /// the box at the row's end, clear of both lines. Typing on takes the refusal away and keeps the
-    /// keys in the field.
+    /// the box at the row's end, clear of both lines. The open row is the design's 89 pt with its
+    /// field 12 pt under the hairline. The field holds the keys when it opens, when the refusal
+    /// comes back, after a redraw (the app made active again), and as typing takes the refusal away.
     @Test func aRefusalSaysWhatToDoUnderTheField() async throws {
         let server = RecordedServer([try Exchange("projects"), try Exchange("workspaces-three"), try Exchange("refusal-conflict-workspace-exists")])
         let (view, _) = try Self.view(server, width: 1000)
         view.shown()
         #expect(await RunnerTabTests.until { view.text.contains("dock") })
         view.project.on(.newWorkspace)
-        view.project.field.field.stringValue = "dock"
-        view.project.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
+        let typing = try #require(view.window?.firstResponder as? NSTextView, "New Workspace left the field without the keys")
+        #expect(typing.delegate === view.project.field.field)
+        typing.insertText("dock", replacementRange: NSRange(location: NSNotFound, length: 0))
+        #expect(view.project.field.field.stringValue == "dock")
+        view.project.list.layoutSubtreeIfNeeded()
+        let open = try #require(view.project.list.rowView(atRow: 1, makeIfNecessary: true))
+        open.layoutSubtreeIfNeeded()
+        let openRow = try #require(Self.found(CreateRow.self, in: open).first)
+        let box = open.convert(openRow.field.alignmentRect(forFrame: openRow.field.frame), from: openRow)
+        #expect(near(open.frame.height, 89) && near(box.minY, 1 + CreateRow.padding), "the open row is \(open.frame.height) pt, its field at \(box.minY)")
         view.project.on(.create)
         #expect(await RunnerTabTests.until { view.text.contains("exists already") }, "\(view.text)")
+        #expect(view.project.fieldHasKeys, "the refusal came back to a field without the keys")
+        await view.refresh()
+        #expect(view.project.fieldHasKeys, "the projects asked again (the app made active) took the keys from the field")
         view.layoutSubtreeIfNeeded()
         view.project.list.layoutSubtreeIfNeeded()
         let row = try #require(view.project.list.rowView(atRow: 1, makeIfNecessary: true))
@@ -240,11 +256,12 @@ import Testing
         #expect(line.minY >= field.maxY + CreateRow.below - 0.5 && abs(Double(line.minX - field.minX)) < 0.5, "the show line is at \(line), the field \(field)")
         #expect(buttons.minX >= max(field.maxX, line.maxX) + CreateRow.gap - 0.5, "Cancel starts at \(buttons.minX), the words end at \(max(field.maxX, line.maxX))")
         #expect(buttons.maxY <= field.minY + create.field.size.height + 0.5, "the buttons hang below the box")
-        #expect(Double(row.frame.height) >= Double(line.maxY) + 2 * CreateRow.padding - 0.5, "the row (\(row.frame.height) pt) is shorter than its words")
+        #expect(Double(row.frame.height) >= 1 + CreateRow.padding + Double(line.maxY) - 0.5, "the row (\(row.frame.height) pt) is shorter than its words")
         view.project.on(.show("dock"))
         #expect(view.project.list.chosen == "dock")
-        view.project.field.field.stringValue = "docks"
-        view.project.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
+        let again = try #require(view.window?.firstResponder as? NSTextView, "Show dock took the keys from the field")
+        again.insertText("s", replacementRange: NSRange(location: NSNotFound, length: 0))
+        #expect(view.project.field.field.stringValue == "docks")
         #expect(!view.text.contains("exists already"), "the refusal stayed once the name changed")
         let editor = view.window?.firstResponder as? NSTextView
         #expect(editor?.delegate === view.project.field.field && editor?.selectedRange() == NSRange(location: 5, length: 0), "the name field lost the keys as its refusal went")
@@ -282,6 +299,52 @@ import Testing
         transport.release()
         #expect(await RunnerTabTests.until { !view.text.contains("creating") }, "\(view.text)")
         #expect(view.project.newWorkspace.isEnabled && view.project.newWorkspace.why == nil)
+        #expect(await RunnerTabTests.until { view.window?.firstResponder === view.project.list }, "after the create the list does not hold the keys, so ⏎ opens nothing")
+    }
+
+    /// Check Again on a project with no template asks for the projects again, where its template's
+    /// state is said, not only for its workspaces.
+    @Test func checkAgainAsksForTheProjects() async throws {
+        let server = RecordedServer([try Exchange("projects"), try Exchange("workspaces-three")])
+        let (view, _) = try Self.view(server)
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("dock") })
+        let before = await server.requests.filter { $0.route == "GET /v1/projects" }.count
+        view.project.on(.checkAgain)
+        await view.refresh()
+        let after = await server.requests.filter { $0.route == "GET /v1/projects" }.count
+        #expect(after >= before + 2, "Check Again asked the projects \(after - before) times, counting the refresh's own")
+    }
+
+    /// The longest handle the server allows (63) in the owner column, and in the panel's foot with
+    /// its role unconfirmed beside a 60-character control plane: each cut short inside its column,
+    /// on one line, in full on hover.
+    @Test func longHandlesAndHostsStayInTheirColumns() throws {
+        let handle = String(repeating: "k", count: 63), host = String(repeating: "h", count: 52) + ".acme.dev"
+        let page = try #require(Self.page([WorkspaceRow(name: "quay", instance: "harbor-quay", state: .known(.running), owner: handle)]))
+        let drive = 1024.0 - Rail.width - 4 - LeftPanel.width.standard
+        for width in [ProjectView.wide, drive] {
+            let (project, window) = try Self.project(width: width)
+            defer { window.orderOut(nil) }
+            project.render(page)
+            project.layoutSubtreeIfNeeded()
+            let line = try #require(Self.lines(project.list).first)
+            let whose = try #require(line.whose)
+            let label = try #require(Self.found(NSTextField.self, in: whose).first)
+            let end = whose.convert(label.alignmentRect(forFrame: label.frame), from: label.superview).maxX
+            #expect(end <= whose.bounds.maxX + 0.5 && label.frame.height < 2 * 16, "\(width) pt: the handle ends at \(end) in a \(whose.bounds.width) pt column")
+            #expect(line.ownerTip?.text == handle)
+        }
+        let panel = LeftPanel(look: .light, mono: try LabelFont(directory: LookTests.fonts))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: LeftPanel.width.standard, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.orderOut(nil) }
+        window.contentView = panel
+        panel.renderLoading(who: "\(handle) · role not yet confirmed", controlPlane: host)
+        panel.layoutSubtreeIfNeeded()
+        for label in [panel.who, panel.place] {
+            let frame = panel.convert(label.alignmentRect(forFrame: label.frame), from: label.superview)
+            #expect(frame.maxX <= panel.bounds.width - 14 + 0.5 && frame.height < 2 * 16, "the foot's \(label.stringValue.prefix(12))… runs to \(frame.maxX) of \(panel.bounds.width)")
+        }
     }
 
     /// New Workspace off in a project with no template says why, through the library's tooltip.
@@ -302,7 +365,7 @@ import Testing
         none.projectsListed(.success(ProjectList(projects: [], total: 0)))
         guard case let .shown(_, .noProjects(empty)) = none.screen else { Issue.record("no empty state: \(none.screen)"); return }
         let shown: [(String, () -> Void)] = [
-            ("a list", {}), ("no project", { view.project.renderEmpty(empty) }),
+            ("a list", {}), ("no project", { view.project.renderEmpty(empty) }), ("loading", { view.project.renderLoading() }),
             ("the card", { view.signedOut() }),
         ]
         for (what, show) in shown {
@@ -313,6 +376,11 @@ import Testing
             view.layoutSubtreeIfNeeded()
             #expect(abs(Double(view.frame.width) - Self.narrowestCard) < 0.5, "with \(what) shown the card stays \(view.frame.width) pt")
         }
+        view.panel.resize(to: LeftPanel.width.most)
+        view.project.renderLoading()
+        window.setContentSize(NSSize(width: 740, height: 640))
+        view.layoutSubtreeIfNeeded()
+        #expect(near(view.frame.width, 740), "the loading bars held the card at \(view.frame.width) pt beside the widest panel")
     }
 
     /// The light look's colours that the dark look does not share: any of them left on a view after
@@ -402,7 +470,7 @@ import Testing
                 model.beginCreate()
                 model.type("dock")
                 _ = model.sendCreate()
-                _ = model.created(.failure(.unreachable("lost")))
+                _ = model.created(.failure(.unreachable("lost")), project: "harbor")
             }),
             ("under way", model { model in
                 model.beginCreate()
@@ -435,7 +503,6 @@ import Testing
                 show()
                 project.layoutSubtreeIfNeeded()
                 project.look = .dark
-                show()
                 project.layoutSubtreeIfNeeded()
                 project.list.layoutSubtreeIfNeeded()
                 for row in 0 ..< project.list.numberOfRows {

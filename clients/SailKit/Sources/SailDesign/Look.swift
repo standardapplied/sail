@@ -111,7 +111,7 @@ public struct Look: Equatable, Sendable {
 
     /// The type steps, in points.
     public enum Step: Double {
-        case caption = 10, micro = 11, footnote = 12, callout = 13, body = 14, title2 = 22, title1 = 26
+        case caption = 10, micro = 11, footnote = 12, callout = 13, body = 14, headline = 15, title2 = 22, title1 = 26
 
         public var points: Double {
             rawValue

@@ -16,17 +16,21 @@ final class WorkspaceLine: NSStackView {
     let pill: Pill
     /// The owner's column; nil when narrow.
     let whose: NSView?
+    /// The owner's handle in full, on hover (a tracking area does not keep its owner).
+    let ownerTip: Tooltip?
 
     init(_ line: WorkspacesModel.Line, narrow: Bool, look: Look, mono: LabelFont) {
         title = NSTextField(labelWithAttributedString: NSAttributedString(string: line.name, attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.body.points, weight: .medium), .foregroundColor: NSColor(look.text),
         ]))
-        let below = narrow ? line.owner.map { "\($0)'s" } ?? line.instance : line.instance
+        let below = narrow ? line.owner.map { Self.whose($0) } ?? line.instance : line.instance
         place = NSTextField(labelWithAttributedString: NSAttributedString(string: below, attributes: [
             .font: mono.font(Look.Step.micro.points, .regular) as NSFont, .foregroundColor: NSColor(look.textTertiary),
         ]))
-        pill = Pill(Self.pill(line.state), look: look, mono: mono)
-        whose = narrow ? nil : Self.column(line.owner.map { Self.owner($0, look: look) }, width: Self.ownerColumn)
+        pill = Pill(Self.pill(line), look: look, mono: mono)
+        let owned = narrow ? nil : line.owner.map { Self.owner($0, look: look) }
+        ownerTip = owned?.tip
+        whose = narrow ? nil : Self.column(owned?.view, width: Self.ownerColumn)
         super.init(frame: .zero)
         for label in [title, place] {
             label.lineBreakMode = .byTruncatingTail
@@ -58,17 +62,36 @@ final class WorkspaceLine: NSStackView {
         nil
     }
 
-    /// The pill a workspace's state shows.
-    static func pill(_ state: Open<WorkspaceState>) -> PillState {
-        switch state {
-        case .known(.running): return .running
-        case .known(.stopped): return .stopped
-        case .known(.frozen): return .paused
-        case .known(.notCreated): return .creating
-        default: return .incomplete
+    /// The pill a row shows: Creating only for the create under way here; each state the server
+    /// sends by its own word, and Unknown for one this app does not know.
+    static func pill(_ line: WorkspacesModel.Line) -> PillState {
+        guard !line.creating else { return .creating }
+        return switch line.state {
+        case .known(.running): .running
+        case .known(.stopped): .stopped
+        case .known(.frozen): .paused
+        case .known(.notCreated): .notCreated
+        case .known(.incomplete): .incomplete
+        case .known(.error): .error
+        case .unknown: .unknown
         }
     }
 
+    /// Whose a row is, said in words ("ana", "a former member", "no one").
+    nonisolated static func said(_ owner: WorkspacesModel.Owner) -> String {
+        switch owner {
+        case let .person(handle): handle
+        case .formerMember: "a former member"
+        case .nobody: "no one"
+        }
+    }
+
+    /// Whose a row is under its name when narrow ("ana's", "a former member's", "no one's").
+    nonisolated static func whose(_ owner: WorkspacesModel.Owner) -> String {
+        said(owner) + "'s"
+    }
+
+    /// A column `width` wide holding `view` at its start, never past its end.
     private static func column(_ view: NSView?, width: Double) -> NSView {
         let column = NSView()
         column.widthAnchor.constraint(equalToConstant: width).isActive = true
@@ -76,19 +99,33 @@ final class WorkspaceLine: NSStackView {
         view.translatesAutoresizingMaskIntoConstraints = false
         column.addSubview(view)
         NSLayoutConstraint.activate([
-            view.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            view.leadingAnchor.constraint(equalTo: column.leadingAnchor), view.trailingAnchor.constraint(lessThanOrEqualTo: column.trailingAnchor),
             view.centerYAnchor.constraint(equalTo: column.centerYAnchor), column.heightAnchor.constraint(greaterThanOrEqualTo: view.heightAnchor),
         ])
         return column
     }
 
-    private static func owner(_ handle: String, look: Look) -> NSView {
-        let name = NSTextField(labelWithAttributedString: NSAttributedString(string: handle, attributes: [
-            .font: NSFont.systemFont(ofSize: Look.Step.callout.points), .foregroundColor: NSColor(look.textSecondary),
+    /// The owner's column: a person's initial and handle, cut at its end in the column, in full on
+    /// hover; a former member or no one in the tertiary ink, with no initial.
+    private static func owner(_ owner: WorkspacesModel.Owner, look: Look) -> (view: NSView, tip: Tooltip) {
+        let person: String? = switch owner {
+        case let .person(handle): handle
+        case .formerMember, .nobody: nil
+        }
+        let name = NSTextField(labelWithAttributedString: NSAttributedString(string: said(owner), attributes: [
+            .font: NSFont.systemFont(ofSize: Look.Step.callout.points), .foregroundColor: NSColor(person == nil ? look.textTertiary : look.textSecondary),
         ]))
-        let row = NSStackView(views: [Initial(handle, look: look), name])
+        name.lineBreakMode = .byTruncatingTail
+        name.maximumNumberOfLines = 1
+        name.setContentCompressionResistancePriority(cutShort, for: .horizontal)
+        let tooltip = Tooltip(said(owner), look: look, mono: nil)
+        tooltip.attach(to: name, saying: said(owner))
+        var views: [NSView] = person.map { [Initial($0, look: look)] } ?? []
+        views.append(name)
+        let row = NSStackView(views: views)
         row.spacing = 7
         row.alignment = .centerY
-        return row
+        row.setClippingResistancePriority(.defaultLow, for: .horizontal)
+        return (row, tooltip)
     }
 }

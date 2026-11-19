@@ -87,7 +87,7 @@ import Testing
         #expect(table.yours.allSatisfy { $0.mine && $0.owner == nil } && table.others.allSatisfy { !$0.mine && $0.owner != nil }, "an owner is said only on someone else's row")
         let member = try #require(Self.table(Self.listed(Self.ana)))
         let theirs = try #require(member.others.first)
-        #expect(theirs.primary == nil && theirs.why == "Only \(theirs.owner ?? "") or an admin opens it" && theirs.menu == [.copyName])
+        #expect(theirs.primary == nil && theirs.owner == .person("uday") && theirs.why == "Only uday or an admin opens it" && theirs.menu == [.copyName])
         let admin = try #require(table.others.first)
         #expect(admin.primary != nil && admin.why == nil, "an admin opens anyone's")
     }
@@ -197,7 +197,7 @@ import Testing
         #expect(Self.table(model)?.create?.name == "new", "typing changed a create under way")
         model.projectsListed(Self.answer(.projects, "projects"))
         #expect(Self.table(model)?.create?.underWay == true, "listing the projects again lost the create")
-        let answered = model.created(Self.answer(try Endpoint.createWorkspace("new", project: "harbor"), "workspace-create"))
+        let answered = model.created(Self.answer(try Endpoint.createWorkspace("new", project: "harbor"), "workspace-create"), project: "harbor")
         let request = try #require(answered)
         model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-made"), request: request, at: Self.at)
         let table = try #require(Self.table(model))
@@ -212,7 +212,7 @@ import Testing
         model.beginCreate()
         model.type("dock")
         _ = model.sendCreate()
-        let request = model.created(Self.answer(try Endpoint.createWorkspace("dock", project: "harbor"), "refusal-conflict-workspace-exists"))
+        let request = model.created(Self.answer(try Endpoint.createWorkspace("dock", project: "harbor"), "refusal-conflict-workspace-exists"), project: "harbor")
         #expect(request == nil, "nothing to list again after a refusal")
         let create = try #require(Self.table(model)?.create)
         #expect(create.name == "dock" && !create.underWay && create.existing == "dock")
@@ -230,7 +230,7 @@ import Testing
         model.beginCreate()
         model.type("new")
         _ = model.sendCreate()
-        _ = model.created(Self.answer(try Endpoint.createWorkspace("new", project: "harbor"), golden))
+        _ = model.created(Self.answer(try Endpoint.createWorkspace("new", project: "harbor"), golden), project: "harbor")
         return Self.table(model)?.create
     }
 
@@ -257,5 +257,167 @@ import Testing
                 #expect(!line.contains("sail ") && !line.contains("/v1/") && !line.contains("--force") && !line.contains("project "), "\(golden): \(line)")
             }
         }
+    }
+    // MARK: Review round 1
+
+    static func two(_ person: WorkspacesModel.Person = Self.uday) -> WorkspacesModel {
+        var model = WorkspacesModel(person: person)
+        let ready = { (name: String) in ProjectSummary(name: name, containerStatus: .known(.running), template: .known(.ready)) }
+        model.projectsListed(.success(ProjectList(projects: [ready("harbor"), ready("demo")], total: 2)))
+        let request = model.choose("harbor")
+        model.listed(answer(.workspaces(project: "harbor"), "workspaces-three"), request: request, at: at)
+        return model
+    }
+
+    static func send(_ name: String, _ model: inout WorkspacesModel) {
+        model.beginCreate()
+        model.type(name)
+        _ = model.sendCreate()
+    }
+
+    /// M1: a refusal lands on the project it was asked for, never under another's field.
+    @Test func aRefusalLandsOnItsOwnProject() throws {
+        var model = Self.two()
+        Self.send("dock", &model)
+        let demo = model.choose("demo")
+        model.listed(.success(WorkspaceList(project: "demo", workspaces: [
+            WorkspaceRow(name: "a", instance: "demo-a", state: .known(.running), owner: "uday"),
+        ])), request: demo, at: Self.at)
+        model.beginCreate()
+        model.type("fresh")
+        let request = model.created(Self.answer(try Endpoint.createWorkspace("dock", project: "harbor"), "refusal-conflict-workspace-exists"), project: "harbor")
+        #expect(request == nil)
+        #expect(Self.page(model)?.name == "demo")
+        let typed = try #require(Self.table(model)?.create)
+        #expect(typed == WorkspacesModel.CreateLine(name: "fresh", underWay: false, refusal: [], existing: nil), "harbor's refusal landed in demo: \(typed)")
+        let harbor = model.choose("harbor")
+        model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-three"), request: harbor, at: Self.at)
+        let back = try #require(Self.table(model)?.create)
+        #expect(back.name == "dock" && back.refusal.first?.contains("exists already") == true && back.existing == "dock")
+    }
+
+    /// M1: a success in one project leaves another's half-typed name alone, and chooses its row only
+    /// in its own project.
+    @Test func aSuccessKeepsAnotherProjectsTypedName() throws {
+        var model = Self.two()
+        Self.send("new", &model)
+        let demo = model.choose("demo")
+        model.listed(.success(WorkspaceList(project: "demo", workspaces: [
+            WorkspaceRow(name: "a", instance: "demo-a", state: .known(.running), owner: "uday"),
+        ])), request: demo, at: Self.at)
+        model.beginCreate()
+        model.type("half-typed")
+        let request = model.created(Self.answer(try Endpoint.createWorkspace("new", project: "harbor"), "workspace-create"), project: "harbor")
+        #expect(request == nil, "harbor's success listed demo again")
+        #expect(Self.table(model)?.create?.name == "half-typed", "harbor's success took demo's typed name")
+        let harbor = model.choose("harbor")
+        model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-made"), request: harbor, at: Self.at)
+        #expect(Self.table(model)?.yours.first(where: \.chosen)?.name == "new", "the created row was not chosen in its own project")
+    }
+
+    /// M1: one create at a time in a project, wherever the person went meanwhile; its answer never
+    /// erases a row typed since.
+    @Test func oneCreateAtATimeInAProjectAcrossChoices() throws {
+        var model = Self.two()
+        Self.send("new", &model)
+        _ = model.choose("demo")
+        _ = model.choose("harbor")
+        #expect(Self.page(model)?.canCreate == false && Self.page(model)?.createWhy == "The runner creates one workspace at a time")
+        model.beginCreate()
+        model.type("new2")
+        #expect(model.sendCreate() == nil, "a second create was sent while the first was under way")
+        #expect(Self.table(model)?.creating?.name == "new", "choosing away and back lost the create under way")
+    }
+
+    /// M2: the projects asked again and refused while projects are shown: a banner over the page and
+    /// the panel dimmed, never silence; an older answer is dropped.
+    @Test func aFailedProjectsRefreshIsSaid() throws {
+        var model = Self.listed(Self.ana)
+        let older = model.askingProjects(), newer = model.askingProjects()
+        model.projectsListed(.failure(.unreachable("lost")), request: newer)
+        guard case let .shown(panel, .project(page)) = model.screen else { Issue.record("\(model.screen)"); return }
+        #expect(panel.stale && page.banner == WorkspacesModel.Notice(tone: .error, title: "Couldn’t list your projects", line: "Sail cannot reach the control plane at main.acme.dev.", tryAgain: true))
+        model.projectsListed(.success(ProjectList(projects: [], total: 0)), request: older)
+        guard case .shown(_, .project) = model.screen else { Issue.record("an older answer was taken: \(model.screen)"); return }
+        let again = model.askingProjects()
+        model.projectsListed(Self.answer(.projects, "projects"), request: again)
+        guard case let .shown(fresh, _) = model.screen else { return }
+        #expect(!fresh.stale && Self.page(model)?.banner == nil)
+    }
+
+    /// M3: only a current template offers New Workspace; each other state says what is true.
+    @Test(arguments: [
+        (TemplateState.missing, "demo isn’t ready yet", "demo has no template yet"),
+        (.failed, "demo’s template could not be built", "demo’s template could not be built"),
+        (.building, "demo’s template is being built", "demo’s template is being built"),
+    ])
+    func onlyACurrentTemplateOffersCreate(_ state: TemplateState, _ title: String, _ why: String) throws {
+        var model = WorkspacesModel(person: Self.uday)
+        model.projectsListed(.success(ProjectList(projects: [ProjectSummary(name: "demo", containerStatus: .known(.running), template: .known(state))], total: 1)))
+        let page = try #require(Self.page(model))
+        guard case let .empty(empty) = page.body else { Issue.record("\(page.body)"); return }
+        #expect(!page.canCreate && page.createWhy == why && empty.title == title && empty.action == .checkAgain)
+        #expect(!empty.body.contains("about 3 s") && !page.lede.contains("Your own copies"))
+        model.beginCreate()
+        #expect(model.sendCreate() == nil)
+    }
+
+    /// M5: rows say what is true of the server's owners: no one's, a former member's, never
+    /// "removed" as a handle.
+    @Test func ownersAreSaidAsTheyAre() throws {
+        var model = WorkspacesModel(person: Self.ana)
+        model.projectsListed(Self.answer(.projects, "projects"))
+        let request = model.choose("harbor")
+        model.listed(.success(WorkspaceList(project: "harbor", workspaces: [
+            WorkspaceRow(name: "orphan", instance: "harbor-orphan", state: .known(.stopped), owner: nil),
+            WorkspaceRow(name: "left", instance: "harbor-left", state: .known(.error), owner: WorkspaceRow.removedOwner),
+            WorkspaceRow(name: "made", instance: "harbor-made", state: .known(.notCreated), owner: "uday"),
+        ])), request: request, at: Self.at)
+        let others = try #require(Self.table(model)).others
+        let byName = Dictionary(uniqueKeysWithValues: others.map { ($0.name, $0) })
+        #expect(byName["orphan"]?.owner == .nobody && byName["orphan"]?.why == "No one owns it: only an admin opens it")
+        #expect(byName["left"]?.owner == .formerMember && byName["left"]?.why == "Its owner is no longer a member: only an admin opens it")
+        #expect(byName["left"]?.state == .known(.error))
+        #expect(byName["made"]?.creating == false, "a listed not-created row was drawn as being created here")
+    }
+
+    /// m11: a role confirmed or changed keeps what is shown and under way.
+    @Test func aNewRoleKeepsWhatIsShown() throws {
+        var model = Self.listed(Self.uday)
+        Self.send("new", &model)
+        model.person = WorkspacesModel.Person(handle: "uday", admin: true, confirmed: false, controlPlane: "main.acme.dev")
+        #expect(model.chosen == "harbor" && Self.table(model)?.creating?.name == "new")
+    }
+
+    /// m17: an admin with no project is told what they can do, not to wait for an admin.
+    @Test func anAdminWithNoProjectIsToldToAddOne() {
+        var model = WorkspacesModel(person: Self.uday)
+        model.projectsListed(.success(ProjectList(projects: [], total: 0)))
+        guard case let .shown(_, .noProjects(empty)) = model.screen else { Issue.record("\(model.screen)"); return }
+        #expect(empty.body.hasPrefix("Add a project on main.acme.dev") && !empty.body.contains("An admin adds you"))
+    }
+
+    /// m23: the reviewer's surviving mutants, each a behaviour.
+    @Test func whatChoosingAndCreatingKeepAndDrop() throws {
+        var model = Self.two()
+        Self.send("new", &model)
+        model.cancelCreate()
+        #expect(Self.table(model)?.creating?.name == "new", "Cancel took away a create under way")
+        model.chooseRow("dock")
+        let failed = model.listAgain()
+        model.listed(.failure(.unreachable("lost")), request: failed, at: Self.at)
+        let demo = model.choose("demo")
+        #expect(model.chosenRow == nil, "the chosen row followed into another project")
+        #expect(Self.page(model)?.banner == nil, "harbor's failure was carried into demo")
+        model.listed(.failure(.unreachable("lost")), request: demo, at: Self.at)
+        #expect(Self.page(model)?.body == .unlisted, "a failed first list was drawn as loading")
+        let harbor = model.choose("harbor")
+        model.listed(.success(WorkspaceList(project: "harbor", workspaces: [
+            WorkspaceRow(name: "paused", instance: "harbor-paused", state: .known(.frozen), owner: "uday"),
+        ])), request: harbor, at: Self.at)
+        #expect(Self.table(model)?.yours.first?.primary == .startAndOpen, "a paused workspace offered no Start and Open")
+        model.chooseRow("paused")
+        _ = model.created(Self.answer(try Endpoint.createWorkspace("new", project: "harbor"), "workspace-create"), project: "harbor")
+        #expect(Self.table(model)?.yours.first(where: \.chosen)?.name == "paused", "the created row was chosen before a list showed it")
     }
 }

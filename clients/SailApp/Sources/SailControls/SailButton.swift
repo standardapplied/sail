@@ -110,8 +110,21 @@ public final class SailButton: NSButton {
         needsDisplay = true
     }
 
-    /// The shortcut's words, from the key equivalent; nil when it shows none.
+    /// The key that presses it shown after the label, where the key reaches it another way than its
+    /// key equivalent (Create ⏎, pressed by Return in the name field it sits beside).
+    public func hint(_ key: String, mono: LabelFont) {
+        hintKey = key
+        self.mono = mono
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
+
+    /// The key shown by ``hint(_:mono:)``.
+    private var hintKey: String?
+
+    /// The shortcut's words, from the key equivalent or the hint; nil when it shows none.
     var shortcutWords: String? {
+        if let hintKey { return Shortcut.said(hintKey) }
         guard showsShortcut, !keyEquivalent.isEmpty else { return nil }
         let held = keyEquivalentModifierMask
         return Shortcut.said(keyEquivalent, control: held.contains(.control), option: held.contains(.option), shift: held.contains(.shift), command: held.contains(.command))

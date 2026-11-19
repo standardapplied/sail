@@ -18,11 +18,15 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     }
 
     static let padding = (top: 26.0, sides: 32.0, bottom: 20.0), listGap = 18.0, footGap = 12.0, actionsColumn = 214.0
+    /// The create row's and the creating row's ids: never a workspace's name, so neither shares an
+    /// id with a listed row of the same name.
+    static let createID = "\u{0}create", creatingID = "\u{0}creating"
     /// The narrow rows' actions column: room for Start and Open and ⋯, so a row's words and pill
     /// run to it as the narrow frame draws them.
     static let narrowActionsColumn = 144.0
-    /// The room between the name's column and the buttons (the design's `.ph` gap).
-    static let headGap = 20.0
+    /// The room between the name's column and the buttons (the design's `.ph` gap), and between two
+    /// buttons (`.ph-acts`, `.acts`): the stacks place the buttons' boxes, not their halos.
+    static let headGap = 20.0, buttonGap = 6.0
     /// The least width drawn wide: the wide row's columns, insets and frame, and 150 pt for a name.
     static let wide = 2 * padding.sides + 2 + RowStyle.list.leading + RowStyle.list.trailing + WorkspaceLine.pillColumn + WorkspaceLine.ownerColumn
         + actionsColumn + 150
@@ -72,9 +76,11 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         newWorkspace.keyEquivalent = "n"
         newWorkspace.keyEquivalentModifierMask = .command
         newWorkspaceIcon.shortcut("n", modifiers: .command, mono: mono)
-        for button in [listAgain, newWorkspace, newWorkspaceIcon] {
+        listAgain.target = self
+        listAgain.action = #selector(askAgain(_:))
+        for button in [newWorkspace, newWorkspaceIcon] {
             button.target = self
-            button.action = #selector(pressed(_:))
+            button.action = #selector(beginCreate(_:))
         }
         list.onChoose = { [weak self] in self?.on(.chose($0)) }
         field.field.delegate = self
@@ -120,6 +126,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     /// Draws `page`.
     func render(_ page: WorkspacesModel.Page) {
         self.page = page
+        drawn = .page(page)
+        ages = nil
         title.attributedStringValue = NSAttributedString(string: page.name, attributes: [
             .font: titleFont.font(.title1) as NSFont, .foregroundColor: NSColor(look.text), .kern: -0.012 * Look.Step.title1.points,
         ])
@@ -146,6 +154,9 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             frameView.alphaValue = page.stale ? 0.55 : 1
             let listed = table.count + (table.creating == nil ? 0 : 1)
             count.attributedStringValue = micro(page.stale ? Self.listed(page.listedAt) : "\(listed) workspace\(listed == 1 ? "" : "s")")
+            ages = page.stale ? Timer.scheduledTimer(withTimeInterval: Self.ageTick, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.retellAge() }
+            } : nil
             views += [frameView, spacer(Self.footGap), foot]
         }
         show(views)
@@ -164,7 +175,24 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         loadingRows.look = look
         loadingList.look = look
         buildFoot()
-        if let page { render(page) }
+        switch drawn {
+        case let .page(page)?: render(page)
+        case .loading?: renderLoading()
+        case let .empty(empty)?: renderEmpty(empty)
+        case nil: break
+        }
+    }
+
+    /// What it last drew, drawn again in a new look.
+    private enum Drawn {
+        case page(WorkspacesModel.Page), loading, empty(WorkspacesModel.Empty)
+    }
+
+    private var drawn: Drawn?
+
+    /// The name field holds the keys now.
+    var fieldHasKeys: Bool {
+        (window?.firstResponder as? NSTextView)?.delegate === field.field
     }
 
     private static func found<Found: NSView>(_ kind: Found.Type, in view: NSView) -> [Found] {
@@ -184,6 +212,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     /// under it will be, and the list's skeleton.
     func renderLoading() {
         page = nil
+        drawn = .loading
+        ages = nil
         centred?.removeFromSuperview()
         show([loadingWords, spacer(Self.listGap + 11), loadingList])
     }
@@ -191,7 +221,12 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     /// Bars for the name and the line under it, made once: a skeleton shows 150 ms after it enters
     /// the window, so one drawn anew at each redraw (a change of look) would never be seen.
     private lazy var loadingWords: NSStackView = {
-        let words = NSStackView(views: [Skeleton(width: 160, height: 22, look: look), Skeleton(width: 340, height: 8, look: look)])
+        let bars = [Skeleton(width: 160, height: 22, look: look), Skeleton(width: 340, height: 8, look: look)]
+        for bar in bars {
+            bar.setContentCompressionResistancePriority(WorkspacesView.yields, for: .horizontal)
+        }
+        let words = NSStackView(views: bars)
+        words.setClippingResistancePriority(WorkspacesView.yields, for: .horizontal)
         words.orientation = .vertical
         words.alignment = .leading
         words.spacing = 14
@@ -227,6 +262,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     /// Draws only `empty`, centred in the view: no project to show.
     func renderEmpty(_ empty: WorkspacesModel.Empty) {
         page = nil
+        drawn = .empty(empty)
+        ages = nil
         show([])
         centred?.removeFromSuperview()
         let state = emptyState(empty)
@@ -262,6 +299,19 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         return false
     }
 
+    /// How often "listed … ago" is said again while the list is stale.
+    static let ageTick = 15.0
+
+    /// Says again how long ago the stale list was listed; stopped by the next redraw.
+    private var ages: Timer? {
+        didSet { oldValue?.invalidate() }
+    }
+
+    private func retellAge() {
+        guard let page, page.stale else { return }
+        count.attributedStringValue = micro(Self.listed(page.listedAt))
+    }
+
     private static func listed(_ at: Date?) -> String {
         "listed " + (at.map { Ago.said(Date().timeIntervalSince($0)) } ?? "earlier")
     }
@@ -294,17 +344,20 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             case .copyName: SailList.Action("Copy Name", key: "c", modifiers: .command, onRow: false) { [weak self] in self?.on(.copyName(line.name)) }
             }
         }
-        let said = [line.name, WorkspaceLine.pill(line.state).label.lowercased()] + (line.owner.map { [$0] } ?? [])
-        return SailList.Item(id: line.name, name: line.name, voice: said.joined(separator: ", "), content: content, actions: actions, note: line.why)
+        var said = [line.name, WorkspaceLine.pill(line).label.lowercased()]
+        if let owner = line.owner { said.append(WorkspaceLine.said(owner)) }
+        if let why = line.why { said.append(why) }
+        return SailList.Item(id: line.name, name: line.name, voice: said.joined(separator: ", "), content: content, actions: actions, note: narrow ? nil : line.why)
     }
 
     /// The create under way as the row it will be, in the quiet chosen fill: its name and instance,
     /// Creating, "about 3 s" with a spinner, and the progress line along its foot.
     private func creatingItem(_ line: WorkspacesModel.Line) -> SailList.Item {
         let content = WorkspaceLine(line, narrow: narrow, look: look, mono: mono)
-        let paint = RowPaint(fill: look.fillSelectedQuiet, bar: false, actions: true, progress: true)
-        let voice = [line.name, WorkspaceLine.pill(line.state).label.lowercased(), line.why].compactMap { $0 }.joined(separator: ", ")
-        return SailList.Item(id: line.name, name: line.name, voice: voice, content: content, note: line.why, paint: paint, accessory: Spinner(look: look))
+        let voice = [line.name, WorkspaceLine.pill(line).label.lowercased(), line.why].compactMap { $0 }.joined(separator: ", ")
+        return SailList.Item(
+            id: Self.creatingID, name: line.name, voice: voice, content: content, note: line.why, paint: .creating(look), accessory: Spinner(look: look)
+        )
     }
 
     /// The create row, taking the whole row: drawn chosen while open, in the error's tint once refused.
@@ -312,13 +365,12 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         let refused = !create.refusal.isEmpty
         field.error = refused ? create.refusal.joined(separator: " ") : nil
         field.help = WorkspacesModel.nameRule
-        field.isEnabled = !create.underWay
         if field.field.stringValue != create.name { field.field.stringValue = create.name }
-        let row = CreateRow(field: field, underWay: create.underWay, existing: create.existing, look: look, mono: mono) { [weak self] act in self?.on(act) }
+        let row = CreateRow(field: field, existing: create.existing, look: look, mono: mono) { [weak self] act in self?.on(act) }
         let room = Double(bounds.width) - 2 * Self.padding.sides - 2 - RowStyle.list.leading - RowStyle.list.trailing
         let height = row.height(room: bounds.width > 0 ? room : CreateRow.column + CreateRow.gap + Double(row.buttons.fittingSize.width))
-        let paint = refused ? RowPaint(fill: Tint(look.error, alpha: 0.05), bar: false) : RowPaint(fill: look.fillSelectedQuiet, bar: true)
-        return SailList.Item(id: "\u{0}create", name: "", voice: "A new workspace's name", content: row, height: height, paint: paint, full: true)
+        let paint: RowPaint = refused ? .refused(look) : .naming(look)
+        return SailList.Item(id: Self.createID, name: "", voice: "A new workspace's name", content: row, height: height, paint: paint, full: true)
     }
 
     /// The name and the line under it, taking the room the buttons leave (less the design's 20 pt):
@@ -330,7 +382,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         words.spacing = 6
         words.setClippingResistancePriority(.defaultLow, for: .horizontal)
         buttons.setViews([listAgain, newWorkspace, newWorkspaceIcon], in: .leading)
-        buttons.spacing = 6 - 2 * Look.haloRoom
+        buttons.spacing = Self.buttonGap
         buttons.setHuggingPriority(.required, for: .horizontal)
         for view in [words, buttons] {
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -372,14 +424,14 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     }
 
     private func banner(_ notice: WorkspacesModel.Notice) -> Banner {
-        let again = notice.tryAgain ? SailButton("Try Again", kind: .secondary, size: .small, look: look, target: self, action: #selector(pressed(_:))) : nil
+        let again = notice.tryAgain ? SailButton("Try Again", kind: .secondary, size: .small, look: look, target: self, action: #selector(askAgain(_:))) : nil
         return Banner(notice.tone == .error ? .error : .warning, title: notice.title, line: notice.line.isEmpty ? nil : notice.line, action: again, look: look)
     }
 
     private func emptyState(_ empty: WorkspacesModel.Empty) -> NSView {
         let action = empty.action == .newWorkspace
-            ? SailButton("New Workspace", kind: .primary, icon: .plus, look: look, target: self, action: #selector(pressed(_:)))
-            : SailButton("Check Again", kind: .secondary, look: look, target: self, action: #selector(pressed(_:)))
+            ? SailButton("New Workspace", kind: .primary, icon: .plus, look: look, target: self, action: #selector(beginCreate(_:)))
+            : SailButton("Check Again", kind: .secondary, look: look, target: self, action: #selector(askAgain(_:)))
         action.shortcut(empty.action == .newWorkspace ? "n" : "r", modifiers: .command, mono: mono)
         return EmptyState(icon: empty.missing ? .layers : .box, title: empty.title, body: empty.body, actions: [action], line: empty.line, lineFirst: true, missing: empty.missing, look: look, titleFont: titleFont, mono: mono)
     }
@@ -395,17 +447,14 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         return view
     }
 
-    @objc private func pressed(_ sender: NSButton) {
-        switch sender {
-        case listAgain: on(.listAgain)
-        case newWorkspace, newWorkspaceIcon: on(.newWorkspace)
-        default:
-            switch sender.title {
-            case "New Workspace": on(.newWorkspace)
-            case "Check Again", "Try Again": on(.checkAgain)
-            default: break
-            }
-        }
+    /// New Workspace, in the head or the empty state.
+    @objc private func beginCreate(_: Any?) {
+        on(.newWorkspace)
+    }
+
+    /// List Again, Check Again and Try Again: the projects and the list asked again.
+    @objc private func askAgain(_: Any?) {
+        on(.checkAgain)
     }
 }
 
@@ -513,7 +562,9 @@ final class SkeletonRows: NSView {
 /// at the row's end, level with the box. While it is under way the field waits and Create says so.
 @MainActor
 final class CreateRow: NSView {
-    static let column = 440.0, box = 250.0, gap = 16.0, padding = 12.0, below = 7.0
+    /// The design's create row (`f-create`, `f-refused`): 12 pt above the field, at least 76 pt for
+    /// the field and its lines, under the row's 1 pt hairline.
+    static let column = 440.0, box = 250.0, gap = 16.0, padding = 12.0, below = 7.0, least = 76.0
 
     let field: SailTextField
     let cancel: SailButton
@@ -525,16 +576,13 @@ final class CreateRow: NSView {
     /// shares: the constraint goes when the field moves to the next row.
     private var fieldWidth: NSLayoutConstraint?
 
-    init(field: SailTextField, underWay: Bool, existing: String?, look: Look, mono: LabelFont, on: @escaping @MainActor (ProjectView.Act) -> Void) {
+    init(field: SailTextField, existing: String?, look: Look, mono: LabelFont, on: @escaping @MainActor (ProjectView.Act) -> Void) {
         let runs = Runs(on)
         let cancel = SailButton("Cancel", kind: .quiet, size: .small, look: look, target: runs, action: #selector(Runs.cancel(_:)))
         let create = SailButton("Create", kind: .primary, size: .small, look: look, target: runs, action: #selector(Runs.create(_:)))
-        create.shortcut("\r", mono: mono)
-        create.keyEquivalent = ""
-        if underWay { create.fly("Creating") }
-        cancel.isEnabled = !underWay
+        create.hint("\r", mono: mono)
         let buttons = NSStackView(views: [cancel, create])
-        buttons.spacing = 6 - 2 * Look.haloRoom
+        buttons.spacing = ProjectView.buttonGap
         self.field = field
         self.cancel = cancel
         self.create = create
@@ -579,16 +627,19 @@ final class CreateRow: NSView {
     }
 
     /// The row's height when its content has `room` across, and its column the width that leaves:
-    /// the field with its line, the line under that, and 12 pt above and below; never under a list row's.
+    /// the hairline, 12 pt, then the field with its lines, at least the design's 76 pt.
     func height(room: Double) -> Double {
         let width = max(min(Self.column, room - Self.gap - Double(buttons.fittingSize.width)), 1)
         fieldWidth?.constant = width
         field.setFrameSize(NSSize(width: width + 2 * Look.haloRoom, height: Double(field.frame.height)))
-        return max(RowStyle.list.height, (2 * Self.padding + words).rounded(.up))
+        return (1 + Self.padding + max(Self.least, words)).rounded(.up)
     }
 
+    /// The row centres its content, so this is the row's height less 25 pt (the hairline and 12 pt
+    /// twice): the field then starts 12 pt under the hairline, as the design's row is padded only
+    /// above, and its lines run to the row's foot.
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: words)
+        NSSize(width: NSView.noIntrinsicMetric, height: max(Self.least, words) - Self.padding)
     }
 
     /// The field with the line under its box, and the show line under that.

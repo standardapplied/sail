@@ -7,7 +7,8 @@ import SailLook
 /// Workspaces view; before anyone is signed in, or with nothing listed, one card saying why. It asks
 /// the control plane, hands the answers to ``WorkspacesModel`` and draws what the model says. Only
 /// a person's action holds a control (#462): a refresh never does. Under a 720 pt card the panel
-/// hides, and ⌃⌘S (View ▸ Show Sidebar) slides it over the content.
+/// hides, and ⌃⌘S (View ▸ Show Sidebar) shows it over the content until a project is chosen or
+/// Escape; on a wider card ⌃⌘S hides and shows it beside the content.
 @MainActor
 public final class WorkspacesView: NSView {
     static let narrow = 720.0, cardWidth = 440.0
@@ -16,8 +17,17 @@ public final class WorkspacesView: NSView {
     static let yields = NSLayoutConstraint.Priority.defaultLow
 
     var client: SailClient?
+    /// Who is signed in: someone else, or another control plane, starts the section afresh; their
+    /// role confirmed or changed keeps what is shown and under way.
     var person = WorkspacesModel.Person(handle: "", admin: false, confirmed: false, controlPlane: "") {
-        didSet { if person != oldValue { model = WorkspacesModel(person: person) } }
+        didSet {
+            guard person != oldValue else { return }
+            if person.handle == oldValue.handle, person.controlPlane == oldValue.controlPlane {
+                model.person = person
+            } else {
+                model = WorkspacesModel(person: person)
+            }
+        }
     }
 
     var onOpen: @MainActor (_ project: String, _ name: String) -> Void = { _, _ in }
@@ -139,8 +149,8 @@ public final class WorkspacesView: NSView {
 
     /// A row as a person reads it: its name, its state, and its owner when not theirs ("quay · running · ana").
     private func said(_ line: WorkspacesModel.Line) -> String {
-        var parts = [line.name, WorkspaceLine.pill(line.state).label.lowercased()]
-        if let owner = line.owner { parts.append(owner) }
+        var parts = [line.name, WorkspaceLine.pill(line).label.lowercased()]
+        if let owner = line.owner { parts.append(WorkspaceLine.said(owner)) }
         return parts.joined(separator: " · ")
     }
 
@@ -184,15 +194,17 @@ public final class WorkspacesView: NSView {
 
     // MARK: Asking the control plane
 
+    /// The projects asked again, and the chosen project's workspaces after them: Check Again, ⌘R,
+    /// Try Again and showing the section all ask both, so a template built meanwhile is seen.
     @discardableResult
     private func askProjects() -> Task<Void, Never> {
-        model.askingProjects()
+        let asked = model.askingProjects()
         render()
         return Task {
             guard let client else { return }
             let answer = await Self.result { () async throws(SailError) in try await client.send(.projects) }
             if case .failure = answer { triedAt = Date() }
-            if let request = model.projectsListed(answer) { list(request) }
+            if let request = model.projectsListed(answer, request: asked) { list(request) }
             render()
         }
     }
@@ -207,6 +219,10 @@ public final class WorkspacesView: NSView {
     }
 
     private func choose(_ name: String) {
+        if overlaid {
+            overlaid = false
+            arrange()
+        }
         guard name != model.chosen else { return }
         let request = model.choose(name)
         render()
@@ -237,33 +253,42 @@ public final class WorkspacesView: NSView {
             NSPasteboard.general.setString(name, forType: .string)
         case .newWorkspace:
             model.beginCreate()
+            keys = .field
             render()
-            project.focusField()
         case let .typed(name):
             let refused = model.screen.createRefused
             model.type(name)
             guard refused else { return }
             render()
-            project.focusField()
         case .create:
             guard let name = model.sendCreate() else { return }
             render()
             byAPerson { [weak self] in
                 guard let self else { return }
                 let answer = await Self.result { () async throws(SailError) in try await client.send(.createWorkspace(name, project: projectName)) }
-                if let request = model.created(answer) { list(request) }
+                if case .failure = answer { keys = .field } else if model.chosen == projectName { keys = .list }
+                if let request = model.created(answer, project: projectName) { list(request) }
             }
         case .cancelCreate:
             model.cancelCreate()
+            keys = .list
             render()
         case let .chose(name): model.chooseRow(name)
         case let .show(name):
             model.chooseRow(name)
             render()
         case .listAgain, .checkAgain:
-            if case .shown(_, .project) = model.screen { list(model.listAgain()) } else { askProjects() }
+            askProjects()
         }
     }
+
+    /// Where the keys go after the next redraw, by what the person did: back into the name field
+    /// (New Workspace, a refusal), or to the list (a create done or cancelled, so ⏎ opens).
+    private enum Keys {
+        case field, list
+    }
+
+    private var keys: Keys?
 
     private static func result<Value>(_ work: () async throws(SailError) -> Value) async -> Result<Value, SailError> {
         do throws(SailError) {
@@ -275,7 +300,21 @@ public final class WorkspacesView: NSView {
 
     // MARK: Drawing
 
+    /// Draws what the model says. A redraw takes the shared name field out of the window, so the
+    /// keys it held are given back to it, or to whatever the person's action asked for.
     private func render() {
+        let typing = project.fieldHasKeys
+        draw()
+        let naming = model.screen.createOpen
+        switch keys {
+        case .field? where naming: project.focusField()
+        case .list?: window?.makeFirstResponder(project.list)
+        default: if typing, naming { project.focusField() }
+        }
+        if keys != .field || naming { keys = nil }
+    }
+
+    private func draw() {
         let screen: WorkspacesModel.Screen? = door == .signedIn ? model.screen : nil
         switch (door, screen) {
         case let (_, .shown(panelModel, content)?):
@@ -292,7 +331,7 @@ public final class WorkspacesView: NSView {
             }
         case (_, .loading?):
             card.isHidden = true
-            panel.renderLoading()
+            panel.renderLoading(who: model.who, controlPlane: model.person.controlPlane)
             setPanel(shown: true)
             project.isHidden = false
             project.renderLoading()
@@ -348,9 +387,25 @@ public final class WorkspacesView: NSView {
     }
 
     /// ⌃⌘S: the hidden panel slides over the content, or away.
+    /// ⌃⌘S: on a narrow card the panel shown over the content or put away; on a wider one, hidden
+    /// or shown beside it.
     @objc package func toggleSidebar(_: Any?) {
-        overlaid.toggle()
+        if isNarrow { overlaid.toggle() } else { tucked.toggle() }
         arrange()
+    }
+
+    /// Escape puts away the panel shown over the content.
+    override public func cancelOperation(_ sender: Any?) {
+        guard overlaid else { return super.cancelOperation(sender) }
+        overlaid = false
+        arrange()
+    }
+
+    /// The panel put away on a wide card by ⌃⌘S.
+    private var tucked = false
+
+    private var isNarrow: Bool {
+        Double(bounds.width) < Self.narrow
     }
 
     override public func setFrameSize(_ newSize: NSSize) {
@@ -358,12 +413,13 @@ public final class WorkspacesView: NSView {
         arrange()
     }
 
-    /// The panel beside the content, hidden under a narrow card unless slid over it; changed only
-    /// when it changes, never from inside a layout pass.
+    /// The panel beside the content, put away by ⌃⌘S, or hidden under a narrow card unless shown
+    /// over it. It runs from `setFrameSize`, inside the superview's layout pass, and swaps the
+    /// content's constraints only when the panel's place changes (crossing 720 pt, or ⌃⌘S).
     private func arrange() {
         guard let contentLeading, let contentFull else { return }
-        let narrow = Double(bounds.width) < Self.narrow, beside = panelShown && !narrow
-        let hidden = !panelShown || (narrow && !overlaid)
+        let narrow = isNarrow, beside = panelShown && !narrow && !tucked
+        let hidden = !panelShown || (narrow ? !overlaid : tucked)
         if panel.isHidden != hidden { panel.isHidden = hidden }
         guard contentLeading.isActive != beside else { return }
         if beside {
@@ -381,5 +437,20 @@ extension WorkspacesModel.Screen {
     var createRefused: Bool {
         guard case let .shown(_, .project(page)) = self, case let .list(table) = page.body else { return false }
         return !(table.create?.refusal.isEmpty ?? true)
+    }
+
+    /// The create row is open for a name, not under way.
+    var createOpen: Bool {
+        guard case let .shown(_, .project(page)) = self, case let .list(table) = page.body, let create = table.create else { return false }
+        return !create.underWay
+    }
+}
+
+extension WorkspacesView: NSMenuItemValidation {
+    /// View ▸ Show Sidebar says Hide Sidebar while the panel is shown.
+    public func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        guard item.action == #selector(toggleSidebar(_:)) else { return true }
+        item.title = panel.isHidden ? "Show Sidebar" : "Hide Sidebar"
+        return !isHidden && panelShown
     }
 }

@@ -183,6 +183,12 @@ public struct FieldPaint: Equatable, Sendable {
 /// error states colour the whole pill; starting, creating and building pulse; no template is dashed.
 public enum PillState: CaseIterable, Sendable {
     case running, starting, creating, stopped, paused, incomplete, noTemplate, building, buildFailed
+    /// A workspace listed but never made: hollow, as stopped.
+    case notCreated
+    /// A workspace whose instance is in Incus's error state.
+    case error
+    /// A state this app does not know.
+    case unknown
 
     public var label: String {
         switch self {
@@ -195,6 +201,9 @@ public enum PillState: CaseIterable, Sendable {
         case .noTemplate: "No template"
         case .building: "Building"
         case .buildFailed: "Build failed"
+        case .notCreated: "Not created"
+        case .error: "Error"
+        case .unknown: "Unknown"
         }
     }
 
@@ -234,17 +243,17 @@ public struct PillPaint: Equatable, Sendable {
     public let hollow: Bool
 
     public init(_ state: PillState, look: Look) {
-        let failed = state == .incomplete || state == .buildFailed
+        let failed = state == .incomplete || state == .buildFailed || state == .error
         text = failed ? Tint(look.error) : look.textSecondary
         edge = failed ? Tint(look.error, alpha: 0.45) : look.separatorStrong
         dashed = state == .noTemplate
-        hollow = state == .stopped
+        hollow = state == .stopped || state == .notCreated
         dot = switch state {
         case .running: Tint(look.success)
         case .starting, .creating, .building: Tint(look.info)
         case .paused, .noTemplate: Tint(look.warning)
-        case .incomplete, .buildFailed: Tint(look.error)
-        case .stopped: look.textTertiary
+        case .incomplete, .buildFailed, .error: Tint(look.error)
+        case .stopped, .notCreated, .unknown: look.textTertiary
         }
     }
 }

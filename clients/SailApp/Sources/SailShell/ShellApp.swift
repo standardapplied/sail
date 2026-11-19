@@ -110,7 +110,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         askWhoIsSignedIn()
     }
 
-    /// Asks the control plane who is signed in, then tells the Workspaces pane what it learnt when
+    /// Asks the control plane who is signed in, then tells the Workspaces section what it learnt when
     /// no one is: signed out, or the control plane could not be asked, in its words.
     private func askWhoIsSignedIn() {
         Task {
@@ -320,7 +320,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func compose() {
         window.title = Self.title
-        window.contentMinSize = NSSize(width: 480, height: 600)
+        window.minSize = NSSize(width: 480, height: 600)
         window.delegate = self
         window.isReleasedWhenClosed = false
         apply(look)

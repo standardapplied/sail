@@ -217,7 +217,9 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     public func tableView(_: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
         guard entries.indices.contains(row) else { return nil }
         switch entries[row] {
-        case let .head(title, count): return HeadCell(title, count: count, look: look, mono: mono, hairline: rowStyle.hairline && row > 0)
+        case let .head(title, count):
+            let leading = rowStyle == .sidebar ? rowStyle.margin + rowStyle.leading + RowStyle.disclosure + RowStyle.gap : RowStyle.list.leading
+            return HeadCell(title, count: count, leading: leading, look: look, mono: mono, hairline: rowStyle.hairline && row > 0)
         case let .item(item): return RowCell(item, rowStyle: rowStyle, actionsColumn: actionsColumn, look: look, mono: mono)
         }
     }
@@ -325,6 +327,7 @@ final class SailRowView: NSTableRowView {
             NSBezierPath(rect: NSRect(x: 0, y: 0, width: Double(bounds.width), height: 1)).fill()
         }
         guard item != nil else {
+            guard rowStyle != .sidebar else { return }
             NSColor(look.fillHover).setFill()
             return NSBezierPath(rect: content).fill()
         }
@@ -375,8 +378,11 @@ final class HeadCell: NSView {
     private let title: NSAttributedString
     private let count: NSAttributedString
     private let hairline: Bool
+    /// Where its words start: a list's leading inset, or a sidebar's tiles.
+    private let leading: Double
 
-    init(_ title: String, count: Int, look: Look, mono: LabelFont, hairline: Bool) {
+    init(_ title: String, count: Int, leading: Double, look: Look, mono: LabelFont, hairline: Bool) {
+        self.leading = leading
         let font = mono.font(Look.Step.caption.points) as NSFont
         self.title = Draw.text(title, font, look.textTertiary, tracking: Look.Tracking.eyebrow, upper: true)
         self.count = Draw.text("\(count)", font, Tint(look.textTertiary.rgb, alpha: look.textTertiary.alpha * 0.8), tracking: Look.Tracking.eyebrow)
@@ -399,7 +405,7 @@ final class HeadCell: NSView {
     override func draw(_: NSRect) {
         let points = Look.Step.caption.points, top = hairline ? 1.0 : 0
         let baseline = TextLine.baseline(top: top + (Double(bounds.height) - top - points) / 2, points: points, lineHeight: points)
-        let titleWidth = Double(title.size().width), countWidth = Double(count.size().width), leading = RowStyle.list.leading
+        let titleWidth = Double(title.size().width), countWidth = Double(count.size().width)
         if userInterfaceLayoutDirection == .rightToLeft {
             let x = Double(bounds.width) - leading - titleWidth
             Draw.line(title, x: x, baseline: baseline)

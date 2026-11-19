@@ -29,6 +29,9 @@ package final class LeftPanel: NSView {
     /// Skeleton rows, each a tile and a name, before any project is listed.
     private let skeletons: [(tile: Skeleton, name: Skeleton)]
     private let mono: LabelFont
+    /// The foot's lines in full, on hover, when cut short.
+    private lazy var whoTip = Tooltip("", look: look, mono: nil)
+    private lazy var placeTip = Tooltip("", look: look, mono: nil)
     private(set) var widthConstraint: NSLayoutConstraint!
     private var projects: [WorkspacesModel.Project] = []
     /// What it last showed, drawn again in a new look.
@@ -48,7 +51,13 @@ package final class LeftPanel: NSView {
             addSubview(tile)
             addSubview(name)
         }
-        heading.font = .systemFont(ofSize: 15, weight: .semibold)
+        heading.font = .systemFont(ofSize: Look.Step.headline.points, weight: .semibold)
+        for (label, tip, cut) in [(who, whoTip, NSLineBreakMode.byTruncatingTail), (place, placeTip, .byTruncatingMiddle)] {
+            label.lineBreakMode = cut
+            label.maximumNumberOfLines = 1
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            tip.attach(to: label, saying: "")
+        }
         heading.textColor = NSColor(look.text)
         let foot = NSStackView(views: [who, place])
         foot.orientation = .vertical
@@ -65,6 +74,7 @@ package final class LeftPanel: NSView {
             widthConstraint, heading.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
             heading.centerYAnchor.constraint(equalTo: topAnchor, constant: Self.header / 2),
             foot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14), foot.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+            foot.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -14),
         ])
         list.onChoose = { [weak self] name in if let name { self?.onChoose(name) } }
     }
@@ -85,6 +95,8 @@ package final class LeftPanel: NSView {
     private func relook() {
         heading.textColor = NSColor(look.text)
         list.look = look
+        whoTip.look = look
+        placeTip.look = look
         for (tile, name) in skeletons {
             tile.look = look
             name.look = look
@@ -100,7 +112,7 @@ package final class LeftPanel: NSView {
         loading(false)
         emptyLine.isHidden = panel.emptyLine == nil
         emptyLine.attributedStringValue = NSAttributedString(string: panel.emptyLine ?? "", attributes: [
-            .font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .foregroundColor: NSColor(look.textSecondary),
+            .font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .foregroundColor: NSColor(look.textTertiary),
         ])
         if panel.projects != projects {
             projects = panel.projects
@@ -109,17 +121,29 @@ package final class LeftPanel: NSView {
             }
         }
         if list.chosen != panel.chosen { list.choose(panel.chosen) }
-        who.attributedStringValue = Self.foot(panel.who, look.textSecondary, mono)
-        place.attributedStringValue = Self.foot(panel.controlPlane, look.textTertiary, mono)
+        list.alphaValue = panel.stale ? Self.stale : 1
+        foot(who: panel.who, controlPlane: panel.controlPlane)
         needsLayout = true
     }
 
-    /// Skeleton rows in place of the projects, and no one named yet.
-    func renderLoading() {
+    /// What is shown when its refresh failed: dimmed, as the design's stale frame draws the panel.
+    static let stale = 0.55
+
+    /// Skeleton rows in place of the projects; who is signed in is known already.
+    func renderLoading(who: String, controlPlane: String) {
         loading(true)
         emptyLine.isHidden = true
-        who.stringValue = ""
-        place.stringValue = ""
+        foot(who: who, controlPlane: controlPlane)
+    }
+
+    /// The foot: who in full where it fits, cut at its end where it does not (a handle can be 63
+    /// characters), the control plane cut in its middle, which keeps both ends of a host; each in
+    /// full on hover.
+    private func foot(who: String, controlPlane: String) {
+        self.who.attributedStringValue = Self.foot(who, look.textSecondary, mono, cut: .byTruncatingTail)
+        place.attributedStringValue = Self.foot(controlPlane, look.textTertiary, mono, cut: .byTruncatingMiddle)
+        whoTip.text = who
+        placeTip.text = controlPlane
     }
 
     private func loading(_ loading: Bool) {
@@ -147,8 +171,9 @@ package final class LeftPanel: NSView {
         }
     }
 
-    private static func foot(_ words: String, _ ink: Tint, _ mono: LabelFont) -> NSAttributedString {
+    private static func foot(_ words: String, _ ink: Tint, _ mono: LabelFont, cut: NSLineBreakMode) -> NSAttributedString {
         let lines = NSMutableParagraphStyle()
+        lines.lineBreakMode = cut
         lines.minimumLineHeight = (Look.Step.micro.points * 1.5).rounded()
         lines.maximumLineHeight = lines.minimumLineHeight
         return NSAttributedString(string: words, attributes: [.font: mono.font(Look.Step.micro.points, .regular) as NSFont, .foregroundColor: NSColor(ink), .paragraphStyle: lines])
@@ -185,6 +210,13 @@ package final class LeftPanel: NSView {
     }
 
     // MARK: The edge
+
+    /// The drag edge takes the mouse over the rows too: the list runs to the panel's edge.
+    override public func hitTest(_ point: NSPoint) -> NSView? {
+        guard let superview, !isHidden else { return super.hitTest(point) }
+        let at = convert(point, from: superview)
+        return bounds.contains(at) && Double(at.x) >= Double(bounds.width) - Self.edge ? self : super.hitTest(point)
+    }
 
     override public func resetCursorRects() {
         addCursorRect(NSRect(x: Double(bounds.width) - Self.edge, y: 0, width: Self.edge, height: Double(bounds.height)), cursor: .resizeLeftRight)

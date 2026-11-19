@@ -144,9 +144,9 @@ struct Step: Decodable {
     /// "refusal-forbidden-not-assignee"]`) as that golden from now on, held this many seconds when
     /// a third is given.
     var golden: [String]?
-    /// The Workspaces pane says this, within `seconds` (10 by default), no call under way.
+    /// The Workspaces section says this, within `seconds` (10 by default), no call under way.
     var workspaces: String?
-    /// This name typed into the Workspaces pane's field and Create pressed; the call waited for.
+    /// This name typed into the Workspaces section's create row and Create pressed; the call waited for.
     var create: String?
     /// The controls' gallery sheet of this name ("button", "field", "pill", "spinner") shot in
     /// every state and look, cut into `<control>-<state>-<look>.png`.
@@ -157,11 +157,9 @@ struct Step: Decodable {
     /// and the workspace or name it is on; it passes when what it does shows (the create row open
     /// or gone, the row shown chosen).
     var act: [String]?
-    /// The Workspaces card made this many points wide, the window grown or shrunk for it.
-    var cardWidth: Double?
     /// The projects listed from now on, each its name and its template's state ("missing").
     var projects: [[String]]?
-    /// View ▸ Show Sidebar (⌃⌘S) chosen, and whether the panel is then shown (slid over the
+    /// View ▸ Show Sidebar (⌃⌘S) chosen, and whether the panel is then shown (over the
     /// content) or hidden again.
     var showSidebar: Bool?
     /// The Workspaces section shows its skeleton bars (true) or none (false), within `seconds` (5 by
@@ -172,9 +170,22 @@ struct Step: Decodable {
     /// The Workspaces row of this name selected with the list holding the keys (its Open says ⏎),
     /// what its button then says told.
     var chooseRow: String?
-    /// The left panel's project of this name chosen, as a click on its row does; the pane then
+    /// The left panel's project of this name chosen, as a click on its row does; the section then
     /// names it, within `seconds` (10 by default).
     var chooseProject: String?
+    /// The window's frame made `[width, height]`, its top left kept: each frame shot at the
+    /// design's size.
+    var window: [Double]?
+    /// The Workspaces section no longer says this, within `seconds` (10 by default).
+    var notSaid: String?
+    /// The Workspaces button of this title clicked with a real mouse-down and mouse-up through the
+    /// window ("Create", "Cancel").
+    var clickButton: String?
+    /// The create row is open (true) or gone (false), within `seconds` (5 by default).
+    var createRowOpen: Bool?
+    /// The name field holds the keys (true) or does not (false); with `fieldHolds`, it holds that name.
+    var keysInField: Bool?
+    var fieldHolds: String?
     /// The Workspaces row chosen is the one of this name, within `seconds` (10 by default).
     var listChosen: String?
     /// A proxy answers this route ("GET /v1/projects/harbor/workspaces") with a 502 from now on;
@@ -194,8 +205,6 @@ struct Step: Decodable {
     var pressStatus: String?
     /// Sign Out pressed on the account, answered no further: what follows it asks.
     var signOutNow: Bool?
-    /// This name typed into the Workspaces pane's field and Create pressed; the call not waited for.
-    var createStarts: String?
     /// A ticket was asked with these fields (`{"action": "open", "workspace": "dock"}`), within
     /// `seconds` (15 by default).
     var ticketAsked: [String: String]?

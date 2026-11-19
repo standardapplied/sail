@@ -81,7 +81,7 @@ actor GoldenDesk: Transport {
     }
 }
 
-/// The drive's steps on the Workspaces pane and the runner's tabs, against ``GoldenDesk``.
+/// The drive's steps on the Workspaces section and the runner's tabs, against ``GoldenDesk``.
 extension Driver {
     /// Opens the create row and types `name` into its field as a person does: the field changes
     /// and says so.
@@ -153,6 +153,30 @@ extension Driver {
             shell.account.signOutHere(nil)
             return (true, "")
         }
+        if let open = step.createRowOpen {
+            let shown = await waitUntil(step.seconds ?? 5) { (pane.project.field.window != nil) == open }
+            return (shown, "the create row \(pane.project.field.window != nil ? "open" : "gone")")
+        }
+        if let keys = step.keysInField {
+            let held = await waitUntil(step.seconds ?? 5) {
+                pane.project.fieldHasKeys == keys && step.fieldHolds.map { pane.project.field.field.stringValue == $0 } != false
+            }
+            return (held, "the field \(pane.project.fieldHasKeys ? "holds" : "does not hold") the keys and the name \(pane.project.field.field.stringValue); first responder \(String(describing: shell.window.firstResponder.map { type(of: $0) }))")
+        }
+        if let size = step.window, size.count == 2 {
+            let frame = shell.window.frame
+            shell.window.setFrame(NSRect(x: frame.minX, y: frame.maxY - size[1], width: size[0], height: size[1]), display: true)
+            pane.layoutSubtreeIfNeeded()
+            let now = shell.window.frame.size
+            return (abs(Double(now.width) - size[0]) < 0.5 && abs(Double(now.height) - size[1]) < 0.5, "the window is \(now.width) × \(now.height)")
+        }
+        if let gone = step.notSaid {
+            let went = await waitUntil(step.seconds ?? 10) { !pane.busy && !pane.text.contains(gone) }
+            return (went, "the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
+        }
+        if let title = step.clickButton {
+            return await clickButton(title, in: pane)
+        }
         if let wanted = step.chooseProject {
             let listed = await waitUntil(step.seconds ?? 10) {
                 pane.panel.list.choose(wanted)
@@ -166,12 +190,6 @@ extension Driver {
             shell.window.makeFirstResponder(pane.project.list)
             pane.project.list.choose(wanted)
             return (pane.project.list.chosen == wanted, "chosen: \(pane.project.list.chosen ?? "none")")
-        }
-        if let wanted = step.createStarts {
-            typeName(wanted, into: pane)
-            pane.project.on(.create)
-            let shown = pane.busy && !pane.project.newWorkspace.isEnabled && pane.text.contains("\(wanted) · creating")
-            return (shown, "while creating: \(pane.text.replacingOccurrences(of: "\n", with: " | "))")
         }
         if let wanted = step.create {
             let before = pane.ended
@@ -219,12 +237,6 @@ extension Driver {
             }
             return (shown, "the create row \(open() ? "open" : "closed"); chosen \(pane.project.list.chosen ?? "none")")
         }
-        if let width = step.cardWidth {
-            let extra = Double(shell.window.frame.width) - Double(pane.frame.width)
-            shell.window.setContentSize(NSSize(width: width + extra, height: Double(shell.window.contentLayoutRect.height)))
-            pane.layoutSubtreeIfNeeded()
-            return (Double(pane.frame.width) == width, "the card is \(pane.frame.width) pt; the panel \(pane.panel.isHidden ? "hidden" : "shown")")
-        }
         if let shown = step.skeletons {
             let visible = { Self.found(Skeleton.self, in: pane).filter { !$0.isHiddenOrHasHiddenAncestor } }
             let found = await waitUntil(step.seconds ?? 5) { shown ? !visible().isEmpty && visible().allSatisfy { $0.alphaValue == 1 } : visible().isEmpty }
@@ -262,8 +274,29 @@ extension Driver {
     }
 
     /// Waits, at most `seconds`, until `condition` holds, asking it again every 50 ms.
+    /// Clicks the shown button titled `title` in `pane` as a person does: a mouse-down sent through
+    /// the window with its mouse-up queued behind it, so the button's own tracking takes both.
+    private func clickButton(_ title: String, in pane: WorkspacesView) async -> (Bool, String) {
+        pane.layoutSubtreeIfNeeded()
+        guard let button = Self.views(in: pane).compactMap({ $0 as? SailButton }).first(where: { $0.title == title && !$0.isHiddenOrHasHiddenAncestor }),
+              let window = button.window
+        else { return (false, "no \(title) shown") }
+        let middle = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
+        func event(_ type: NSEvent.EventType) -> NSEvent? {
+            NSEvent.mouseEvent(
+                with: type, location: middle, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0
+            )
+        }
+        guard let down = event(.leftMouseDown), let up = event(.leftMouseUp) else { return (false, "AppKit gave no mouse events for the click") }
+        NSApp.postEvent(up, atStart: false)
+        window.sendEvent(down)
+        await Task.yield()
+        return (true, "clicked \(title)")
+    }
+
     private func waitUntilAsync(_ seconds: Double, _ condition: () async -> Bool) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(seconds)
+        let deadline = ContinuousClock.now + .seconds(failedSoFar ? min(seconds, Self.afterAFailure) : seconds)
         while !(await condition()) {
             guard ContinuousClock.now < deadline else { return false }
             try? await Task.sleep(for: .milliseconds(50))

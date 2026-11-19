@@ -27,6 +27,14 @@ final class Driver {
     var askedAtStart = 0
     private let steps: [Step]
     private let goesOn: Bool
+    /// A script that goes on past a failed step waits at most this long at each later wait, so a
+    /// run that failed early prints its summary before the drive's alarm.
+    static let afterAFailure = 3.0
+
+    /// A step has failed and the script goes on.
+    var failedSoFar: Bool {
+        goesOn && results.contains { !$0.ok }
+    }
     let out: URL
     var results: [Result] = []
     var measures: [Measure] = []
@@ -766,7 +774,7 @@ final class Driver {
     }
 
     func waitUntil(_ seconds: Double, _ condition: @MainActor () -> Bool) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(seconds)
+        let deadline = ContinuousClock.now + .seconds(failedSoFar ? min(seconds, Self.afterAFailure) : seconds)
         while !condition() {
             guard ContinuousClock.now < deadline else { return false }
             try? await Task.sleep(for: .milliseconds(10))
