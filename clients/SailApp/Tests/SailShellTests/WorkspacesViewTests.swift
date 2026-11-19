@@ -150,6 +150,24 @@ import Testing
         }
     }
 
+    /// Narrow, a row still runs to its end: its pill sits there whatever the name's length, as the
+    /// narrow frame draws it, not just after the name.
+    @Test func narrowRowsPutThePillAtTheirEnd() throws {
+        let page = try #require(Self.page([
+            WorkspaceRow(name: "dock", instance: "harbor-dock", state: .known(.running), owner: "uday"),
+            WorkspaceRow(name: "lighthouse-keeper", instance: "harbor-lighthouse-keeper", state: .known(.running), owner: "uday"),
+        ]))
+        let (project, window) = try Self.project(width: Self.narrowestCard)
+        defer { window.orderOut(nil) }
+        project.render(page)
+        project.layoutSubtreeIfNeeded()
+        let ends = try Self.lines(project.list).map { line in
+            let cell = try #require(line.superview)
+            return Double(cell.convert(line.pill.alignmentRect(forFrame: line.pill.frame), from: line.pill.superview).maxX)
+        }
+        #expect(ends.count == 2 && abs(ends[0] - ends[1]) < 0.5, "the pills end at \(ends)")
+    }
+
     /// The line under the name takes all the room the buttons leave, less the design's 20 pt, as the
     /// approved head (a flex row) gives it: one line at the app's designed width (a 1180 pt window),
     /// wrapped only where its words are wider than that room, never cut short; gone at the narrowest

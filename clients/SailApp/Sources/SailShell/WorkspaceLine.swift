@@ -36,6 +36,7 @@ final class WorkspaceLine: NSStackView {
         words.orientation = .vertical
         words.alignment = .leading
         words.spacing = 3
+        words.setHuggingPriority(.defaultLow, for: .horizontal)
         pill.setContentHuggingPriority(.required, for: .horizontal)
         let shown: [NSView] = narrow ? [words, pill] : [words, Self.column(pill, width: Self.pillColumn), whose].compactMap { $0 }
         distribution = .fill

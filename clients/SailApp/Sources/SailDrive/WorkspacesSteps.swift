@@ -154,7 +154,11 @@ extension Driver {
             return (true, "")
         }
         if let wanted = step.chooseProject {
-            pane.panel.list.choose(wanted)
+            let listed = await waitUntil(step.seconds ?? 10) {
+                pane.panel.list.choose(wanted)
+                return pane.panel.list.chosen == wanted
+            }
+            guard listed else { return (false, "the panel never listed \(wanted): chosen \(pane.panel.list.chosen ?? "none")") }
             let named = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.hasPrefix("Workspaces\n\(wanted)\n") }
             return (named, "chosen: \(pane.panel.list.chosen ?? "none"); the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
         }
