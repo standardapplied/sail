@@ -134,6 +134,28 @@ import Testing
         #expect(abs(Double(scroll.contentView.bounds.minY) - 300) < 0.5, "a refresh pulled the list to \(scroll.contentView.bounds.minY) pt, back to the create row")
     }
 
+    /// R2-1: a half-typed name survives the create row being scrolled out of the window and back
+    /// (the list makes only the rows on screen): the field holds the whole name and the keys.
+    @Test func aHalfTypedNameSurvivesScrollingAwayAndBack() async throws {
+        let (view, window) = try WorkspacesViewTests.view(RecordedServer([try Exchange("projects"), try Self.rows(30)]), width: 1024 - Rail.width - 4)
+        defer { window.orderOut(nil) }
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("ws-30") }, "\(view.text)")
+        view.project.on(.newWorkspace)
+        let half = try #require(window.firstResponder as? NSTextView, "the field never took the keys")
+        half.insertText("half-", replacementRange: NSRange(location: NSNotFound, length: 0))
+        let scroll = try #require(view.project.listScroll)
+        for offset in [Double(scroll.documentView?.frame.height ?? 0) - Double(scroll.contentSize.height), 0] {
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: offset))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            view.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+        }
+        let rest = try #require(window.firstResponder as? NSTextView, "scrolled away and back, the field lost the keys to \(String(describing: window.firstResponder))")
+        rest.insertText("name", replacementRange: NSRange(location: NSNotFound, length: 0))
+        #expect(view.project.fieldHasKeys && view.project.field.field.stringValue == "half-name", "the field holds \(view.project.field.field.stringValue)")
+    }
+
     /// Minor 7: a list that fits does not bounce; one that runs past its frame does.
     @Test func onlyAScrollingListBounces() async throws {
         let (few, fewWindow, _) = try await WorkspacesViewTests.listed()
@@ -152,7 +174,7 @@ import Testing
     /// screen: three hundred rows within 60 ms, where building every row took 118 ms. The times for
     /// three hundred rows and for thirty are said, which shows whether the cost is the screenful.
     @Test func aLongListRedrawsOnlyWhatIsOnScreen() throws {
-        func best(_ count: Int) throws -> Duration {
+        func best(_ count: Int) throws -> (time: Duration, made: Int) {
             let rows = (1 ... count).map { WorkspaceRow(name: String(format: "ws-%03d", $0), instance: String(format: "harbor-ws-%03d", $0), state: .known(.running), owner: $0.isMultiple(of: 2) ? "ana" : "uday") }
             let page = try #require(WorkspacesViewTests.page(rows))
             let (project, window) = try WorkspacesViewTests.project(width: 1024 - Rail.width - 4 - LeftPanel.width.standard)
@@ -160,26 +182,38 @@ import Testing
             project.render(page)
             project.layoutSubtreeIfNeeded()
             var times: [Duration] = []
+            let made = project.list.rowsMade
             for _ in 0 ..< 3 {
                 let start = ContinuousClock.now
                 project.render(page)
                 project.layoutSubtreeIfNeeded()
                 times.append(ContinuousClock.now - start)
             }
-            return times.min() ?? .zero
+            return (times.min() ?? .zero, (project.list.rowsMade - made) / 3)
         }
         let many = try best(300), few = try best(30)
-        print("workspaces: a redraw takes \(many) for three hundred rows, \(few) for thirty")
-        #expect(many < .milliseconds(60), "three hundred rows take \(many) to redraw: every row is built again, not only those on screen")
+        print("workspaces: a redraw makes \(many.made) rows in \(many.time) for three hundred, \(few.made) in \(few.time) for thirty")
+        #expect(many.made <= few.made + 2 && many.made < 30, "a redraw of three hundred rows makes \(many.made) of them, thirty make \(few.made): not only those on screen")
+        #expect(many.time < .milliseconds(60), "three hundred rows take \(many.time) to redraw")
     }
 
     /// The narrow rows' actions column is the widest actions a row shows, measured and said; the
     /// reach sweep, with the list holding the keys, checks a chosen row's actions fit it.
     @Test func theNarrowActionsColumnIsTheWidestActions() throws {
+        let page = try #require(WorkspacesViewTests.page([WorkspaceRow(name: "pier", instance: "harbor-pier", state: .known(.stopped), owner: "uday")]))
         let (project, window) = try WorkspacesViewTests.project(width: WorkspacesViewTests.narrowestCard)
         defer { window.orderOut(nil) }
-        print("workspaces: the narrow actions column is \(project.narrowActionsColumn) pt")
-        #expect(project.narrowActionsColumn > 90, "the narrow actions column is \(project.narrowActionsColumn) pt")
+        project.render(page)
+        #expect(window.makeFirstResponder(project.list))
+        project.list.choose("pier")
+        project.layoutSubtreeIfNeeded()
+        let row = try #require(project.list.rowView(atRow: 1, makeIfNecessary: true))
+        row.layoutSubtreeIfNeeded()
+        let buttons = WorkspacesViewTests.found(SailButton.self, in: row).filter { !$0.isHiddenOrHasHiddenAncestor }
+        let boxes = buttons.map { row.convert($0.alignmentRect(forFrame: $0.frame), from: $0.superview) }
+        let shown = (boxes.map(\.maxX).max() ?? 0) - (boxes.map(\.minX).min() ?? 0)
+        print("workspaces: the narrow actions column is \(project.narrowActionsColumn) pt; a chosen stopped row's actions take \(shown) pt")
+        #expect(buttons.count == 2 && abs(Double(shown) - project.narrowActionsColumn) < 0.5, "the column is \(project.narrowActionsColumn) pt, the widest actions take \(shown) pt")
     }
 
     /// Twenty projects scroll between the panel's header and its foot, which stays put.

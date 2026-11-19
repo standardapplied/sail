@@ -98,7 +98,7 @@ public final class SailTextField: NSView {
     }
 
     /// The eyebrow's line, 10 pt as Mast sets it (line height 1), the gap under it, then the box.
-    var box: NSRect {
+    package var box: NSRect {
         let top = Look.haloRoom + (label == nil ? 0 : Look.Step.caption.points + FieldSize.gap)
         let room = max(Double(bounds.width) - 2 * Look.haloRoom, 0), width = min(boxWidth ?? room, room)
         return NSRect(x: rightToLeft ? Look.haloRoom + room - width : Look.haloRoom, y: top, width: width, height: size.height)

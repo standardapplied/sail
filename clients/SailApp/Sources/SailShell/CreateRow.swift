@@ -19,9 +19,27 @@ final class CreateRow: NSView {
     let buttons: NSStackView
     /// "Show dock or choose another name.", for a name already listed.
     let showLine: NSStackView?
+    /// The field held the keys when a scroll took the row out of the window (the list makes only the
+    /// rows on screen): they are given back when it returns, unless someone gave them elsewhere.
+    private var keysOwed = false
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil, let window, (window.firstResponder as? NSTextView)?.delegate === field.field { keysOwed = true }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard keysOwed, let window else { return }
+        keysOwed = false
+        guard window.firstResponder == nil || window.firstResponder === window, window.makeFirstResponder(field.field), let editor = field.field.currentEditor() else { return }
+        editor.selectedRange = NSRange(location: (field.field.stringValue as NSString).length, length: 0)
+    }
+
+    /// The field's lines: the row's width, at most the 440 pt column; its box stays clear of the buttons.
+    private var fieldWidth: NSLayoutConstraint?
     /// The field's width, held against this row rather than on the field, which every create row
     /// shares: the constraint goes when the field moves to the next row.
-    private var fieldWidth: NSLayoutConstraint?
 
     init(field: SailTextField, existing: String?, look: Look, mono: LabelFont, on: @escaping @MainActor (ProjectView.Act) -> Void) {
         let runs = Runs(on)
@@ -46,12 +64,12 @@ final class CreateRow: NSView {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
-        let fieldWidth = field.trailingAnchor.constraint(equalTo: leadingAnchor, constant: Self.column)
+        let fieldWidth = field.widthAnchor.constraint(equalToConstant: Self.column)
         fieldWidth.priority = .defaultHigh
         self.fieldWidth = fieldWidth
         var constraints = [
             field.leadingAnchor.constraint(equalTo: leadingAnchor), field.topAnchor.constraint(equalTo: topAnchor, constant: Self.padding), fieldWidth,
-            field.trailingAnchor.constraint(lessThanOrEqualTo: buttons.leadingAnchor, constant: -Self.gap),
+            field.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
             buttons.trailingAnchor.constraint(equalTo: trailingAnchor),
             buttons.topAnchor.constraint(equalTo: field.topAnchor, constant: (field.size.height - ButtonSize.small.height) / 2),
         ]
@@ -77,9 +95,10 @@ final class CreateRow: NSView {
     /// 12 pt, then the field with its lines, at least the design's 76 pt; the list draws the row
     /// 1 pt taller, its hairline, as the design's 89 pt row is.
     func height(room: Double) -> Double {
-        let width = max(min(Self.column, room - Self.gap - Double(buttons.fittingSize.width)), 1)
-        fieldWidth?.constant = width
-        field.setFrameSize(NSSize(width: width + 2 * Look.haloRoom, height: Double(field.frame.height)))
+        let lines = max(min(Self.column, room), 1)
+        field.boxWidth = max(min(Self.box, room - Self.gap - Double(buttons.fittingSize.width)), 1)
+        fieldWidth?.constant = lines
+        field.setFrameSize(NSSize(width: lines + 2 * Look.haloRoom, height: Double(field.frame.height)))
         return (Self.padding + max(Self.least, words)).rounded(.up)
     }
 

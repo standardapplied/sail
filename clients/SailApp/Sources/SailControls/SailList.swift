@@ -82,6 +82,19 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         }
     }
 
+    /// Where the pointer is in the window while the app is active and its window key; nil, not
+    /// known. Tests place it (`pointer`).
+    private var pointerNow: NSPoint? {
+        if let pointer { return pointer() }
+        guard let window, NSApplication.shared.isActive, window.isKeyWindow else { return nil }
+        return window.mouseLocationOutsideOfEventStream
+    }
+
+    package var pointer: (@MainActor () -> NSPoint?)?
+
+    /// Rows made, each a cell for a row on screen: a redraw makes a screenful, not every row.
+    package private(set) var rowsMade = 0
+
     /// Reloads the rows with the one under the pointer drawn hovered, its actions shown: a new row
     /// does not know the pointer is over it until the pointer moves. While the app is active the
     /// row is found where the pointer is; otherwise the row hovered before is hovered again.
@@ -89,8 +102,10 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         let hovered = (0 ..< numberOfRows).first { (rowView(atRow: $0, makeIfNecessary: false) as? SailRowView)?.hovered == true }.flatMap { item(at: $0)?.id }
         reloadData()
         let row: Int?
-        if let window, NSApplication.shared.isActive, window.isKeyWindow {
-            let under = self.row(at: convert(window.mouseLocationOutsideOfEventStream, from: nil))
+        if let point = pointerNow {
+            let inList = convert(point, from: nil), content = window?.contentView
+            let hit = content.flatMap { $0.hitTest($0.superview?.convert(point, from: nil) ?? point) }
+            let under = visibleRect.contains(inList) && hit?.isDescendant(of: self) == true ? self.row(at: inList) : -1
             row = under >= 0 ? under : nil
         } else {
             row = hovered.flatMap { id in entries.indices.first { item(at: $0)?.id == id } }
@@ -252,7 +267,9 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         case let .head(title, count):
             let leading = rowStyle == .sidebar ? rowStyle.margin + rowStyle.leading + RowStyle.disclosure + RowStyle.gap : RowStyle.list.leading
             return HeadCell(title, count: count, leading: leading, look: look, mono: mono, hairline: rowStyle.hairline && row > 0)
-        case let .item(item): return RowCell(item, rowStyle: rowStyle, actionsColumn: actionsColumn, returnKey: returnKeyShown, look: look, mono: mono)
+        case let .item(item):
+            rowsMade += 1
+            return RowCell(item, rowStyle: rowStyle, actionsColumn: actionsColumn, returnKey: returnKeyShown, look: look, mono: mono)
         }
     }
 

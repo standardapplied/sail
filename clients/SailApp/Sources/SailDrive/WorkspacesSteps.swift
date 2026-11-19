@@ -197,12 +197,27 @@ extension Driver {
                 )
             }
             guard let down = mouse(.leftMouseDown, at: from), let drag = mouse(.leftMouseDragged, at: to), let up = mouse(.leftMouseUp, at: to) else { return (false, "AppKit gave no mouse events") }
+            // AppKit's tracking loop runs the common modes' timers: one samples the thumb while the
+            // drag is held, one lets go of it.
+            var sampled = 0, drawnDragged = 0
+            let sampler = Timer(timeInterval: 0.005, repeats: true) { _ in
+                MainActor.assumeIsolated {
+                    sampled += 1
+                    if scroller.dragging { drawnDragged += 1 }
+                }
+            }
+            let letGo = Timer(timeInterval: 0.08, repeats: false) { _ in
+                MainActor.assumeIsolated { NSApp.postEvent(up, atStart: false) }
+            }
+            RunLoop.main.add(sampler, forMode: .common)
+            RunLoop.main.add(letGo, forMode: .common)
             NSApp.postEvent(drag, atStart: false)
-            NSApp.postEvent(up, atStart: false)
             window.sendEvent(down)
+            sampler.invalidate()
             await Task.yield()
             let moved = view.contentView.bounds.minY != before
-            return (scroller.drags == drags + 1 && !scroller.dragging && moved, "drags \(scroller.drags - drags), the thumb \(scroller.dragging ? "still" : "no longer") drawn dragged, the list \(moved ? "moved" : "did not move") from \(before) to \(view.contentView.bounds.minY)")
+            let held = drawnDragged > 0, released = !scroller.dragging
+            return (scroller.drags == drags + 1 && held && released && moved, "the thumb drawn dragged in \(drawnDragged) of \(sampled) samples while held, \(released ? "released" : "still dragged") after; the list \(moved ? "moved" : "did not move") from \(before) to \(view.contentView.bounds.minY)")
         }
         if let scroll = step.scrollTo, scroll.count == 2, let fraction = Double(scroll[1]) {
             guard let view: NSScrollView = scroll[0] == "panel" ? pane.panel.scroll : pane.project.listScroll else { return (false, "no list to scroll") }
@@ -341,8 +356,9 @@ extension Driver {
         let middle = window.convertPoint(toScreen: view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil))
         let top = Double(NSScreen.screens.first?.frame.maxY ?? 0)
         var routed = true
-        while Double(view.contentView.bounds.minY) < wanted - 0.5 {
-            let step = Int32(-min(40, wanted - Double(view.contentView.bounds.minY)).rounded(.up))
+        while abs(Double(view.contentView.bounds.minY) - wanted) > 0.5 {
+            let left = wanted - Double(view.contentView.bounds.minY)
+            let step = Int32((left > 0 ? -min(40, left) : min(40, -left)).rounded(left > 0 ? .down : .up))
             guard let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: step, wheel2: 0, wheel3: 0) else { return (false, "no scroll-wheel event") }
             wheel.location = CGPoint(x: Double(middle.x), y: top - Double(middle.y))
             wheel.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window.windowNumber))

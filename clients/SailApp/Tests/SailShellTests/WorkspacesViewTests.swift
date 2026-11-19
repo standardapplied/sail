@@ -371,9 +371,10 @@ import Testing
         #expect(Set(words) == ["or choose another name.", "Show dock"], "\(words)")
         let field = create.field.alignmentRect(forFrame: create.field.frame), line = showLine.frame
         let buttons = create.buttons.alignmentRect(forFrame: create.buttons.frame)
-        #expect(field.width > CreateRow.box && field.width <= CreateRow.column, "the field's column is \(field.width) pt")
+        let fieldBox = create.convert(create.field.box, from: create.field)
+        #expect(fieldBox.width <= CreateRow.box + 0.5 && near(field.width, min(CreateRow.column, create.bounds.width)), "the box is \(fieldBox.width) pt, the field's lines \(field.width) pt in a \(create.bounds.width) pt row")
         #expect(line.minY >= field.maxY + CreateRow.below - 0.5 && abs(Double(line.minX - field.minX)) < 0.5, "the show line is at \(line), the field \(field)")
-        #expect(buttons.minX >= field.maxX + CreateRow.gap - 0.5, "Cancel starts at \(buttons.minX), the field ends at \(field.maxX)")
+        #expect(buttons.minX >= fieldBox.maxX + CreateRow.gap - 0.5, "Cancel starts at \(buttons.minX), the box ends at \(fieldBox.maxX)")
         #expect(buttons.maxY <= line.minY + 0.5 || buttons.minX >= line.maxX + CreateRow.gap - 0.5, "the show line runs under Cancel and Create: \(line), the buttons \(buttons)")
         #expect(buttons.maxY <= field.minY + create.field.size.height + 0.5, "the buttons hang below the box")
         #expect(Double(row.frame.height) >= 1 + Double(line.maxY) - 0.5, "the row (\(row.frame.height) pt) is shorter than its words")

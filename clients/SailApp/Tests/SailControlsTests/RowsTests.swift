@@ -277,6 +277,36 @@ import Testing
         return (list, scroll, window)
     }
 
+    /// R2-2: a redraw lights the row under the pointer only where the pointer really is over it:
+    /// over a row on screen, yes; over a foot below the scrolled list (a row scrolled out lies
+    /// under it) or over a view laid over the list (the panel slid over the content), no.
+    @Test func aRedrawLightsOnlyARowThePointerIsReallyOver() throws {
+        let list = SailList(rowStyle: .list, look: .light, mono: try ControlsTests.mono())
+        list.entries = (1 ... 30).map { .item(SailList.Item(id: "ws-\($0)", name: "ws-\($0)", voice: "ws-\($0)", content: NSTextField(labelWithString: "ws-\($0)"))) }
+        let scroll = QuietScrollView(look: .light)
+        scroll.documentView = list
+        scroll.frame = NSRect(x: 0, y: 60, width: 400, height: 200)
+        list.frame = NSRect(x: 0, y: 0, width: 400, height: Double(list.rect(ofRow: list.numberOfRows - 1).maxY))
+        let foot = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 60)), over = NSView(frame: NSRect(x: 0, y: 160, width: 200, height: 100))
+        let page = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 260))
+        for view in [scroll, foot, over] {
+            page.addSubview(view)
+        }
+        let window = TestWindow(contentRect: page.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.orderOut(nil) }
+        window.contentView = page
+        window.orderFront(nil)
+        func lit(at point: NSPoint) -> [Int] {
+            list.pointer = { point }
+            let same = list.entries
+            list.entries = same
+            return (0 ..< list.numberOfRows).filter { (list.rowView(atRow: $0, makeIfNecessary: false) as? SailRowView)?.hovered == true }
+        }
+        #expect(lit(at: NSPoint(x: 300, y: 200)).count == 1, "the row under the pointer was not lit")
+        #expect(lit(at: NSPoint(x: 300, y: 30)) == [], "a row scrolled out under the foot was lit")
+        #expect(lit(at: NSPoint(x: 100, y: 200)) == [], "a row under a view laid over the list was lit")
+    }
+
     /// Home chooses the first item and shows the head above it, as AppKit's lists scroll to their
     /// very top; End chooses the last.
     @Test func homeShowsTheHeadAboveTheFirstItem() throws {
