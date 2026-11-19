@@ -13,7 +13,7 @@ import SailLook
 @MainActor
 package final class ProjectView: NSView, NSTextFieldDelegate {
     enum Act: Equatable {
-        case open(String), startAndOpen(String), copyName(String)
+        case open(String), startAndOpen(String), copyName(String), stop(String), delete(String)
         case newWorkspace, listAgain, checkAgain, typed(String), create, cancelCreate, chose(String?), show(String)
     }
 
@@ -371,6 +371,11 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             case .open: SailList.Action("Open") { [weak self] in self?.on(.open(line.name)) }
             case .startAndOpen: SailList.Action("Start and Open") { [weak self] in self?.on(.startAndOpen(line.name)) }
             case .copyName: SailList.Action("Copy Name", key: "c", modifiers: .command, onRow: false) { [weak self] in self?.on(.copyName(line.name)) }
+            case .stop: SailList.Action("Stop", onRow: false, startsGroup: true) { [weak self] in self?.on(.stop(line.name)) }
+            case .delete:
+                SailList.Action("Delete", key: "\u{8}", modifiers: .command, onRow: false, startsGroup: !line.menu.contains(.stop), destructive: true) { [weak self] in
+                    self?.on(.delete(line.name))
+                }
             }
         }
         var said = [line.name, WorkspaceLine.pill(line).label.lowercased()]

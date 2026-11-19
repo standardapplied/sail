@@ -83,7 +83,8 @@ public struct WorkspaceListing: Sendable {
     /// The project the rows were listed for.
     public private(set) var listed: String?
     public private(set) var rows: [WorkspaceRow] = []
-    private var latest = 0
+    /// The latest request's number.
+    public private(set) var latest = 0
 
     public init() {}
 
@@ -102,6 +103,14 @@ public struct WorkspaceListing: Sendable {
         self.rows = rows
         listed = asking
         return true
+    }
+
+    /// Row `name` as an action's answer left it, until a list asked after that answer is taken: only
+    /// the latest request's list is, so a list already in flight cannot bring the old state back.
+    /// Nil `state` takes the row out (deleted).
+    public mutating func settle(_ name: String, as state: WorkspaceState?) {
+        guard let state else { return rows.removeAll { $0.name == name } }
+        rows = rows.map { $0.name == name ? WorkspaceRow(name: $0.name, instance: $0.instance, state: .known(state), owner: $0.owner) : $0 }
     }
 
     /// Whether request `number` is still the one shown.

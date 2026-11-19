@@ -323,6 +323,7 @@ final class Kit {
         case "banner": banners()
         case "empty": empties()
         case "scroller": scrollers()
+        case "sheet": sheets()
         default: break
         }
     }
@@ -402,6 +403,23 @@ final class Kit {
         row("Spinner · on accent", [held("spinner", Spinner(look: look)), busy])
         let frame = SkeletonFrame(look: look)
         row("Skeleton row", [held("skeleton-row", frame)])
+    }
+
+    /// The library's sheet as Stop, Delete and Delete Anyway ask it, each at its own size.
+    private func sheets() {
+        let asked: [(String, String, String, String, ButtonKind)] = [
+            ("stop", "Stop dock?", "Your 2 terminals in it end. Its files stay, and Start and Open brings it back.", "Stop", .destructiveQuiet),
+            ("delete", "Delete exp-ui?", "Its files on the runner go with it, and any terminal open in it ends. Commits you pushed are kept by the repo host.", "Delete Workspace", .destructive),
+            ("anyway", "Delete dock anyway?", "Workspace dock of harbor, uday's, holds work: app holds uncommitted changes.", "Delete Anyway", .destructive),
+        ]
+        row("Sheet · stop, delete, delete anyway", asked.map { name, title, body, confirm, kind in
+            let sheet = Sheet(title: title, body: body, confirm: confirm, kind: kind, look: look, titleFont: self.title)
+            let content = sheet.laidOut()
+            let size = content.frame.size
+            content.widthAnchor.constraint(equalToConstant: size.width).isActive = true
+            content.heightAnchor.constraint(equalToConstant: size.height).isActive = true
+            return held("sheet-\(name)", content)
+        })
     }
 
     /// The quiet scroller at rest, hovered and dragged, a third of the way down: each a scroller of

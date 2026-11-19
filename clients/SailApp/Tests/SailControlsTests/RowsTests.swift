@@ -307,6 +307,23 @@ import Testing
         #expect(lit(at: NSPoint(x: 100, y: 200)) == [], "a row under a view laid over the list was lit")
     }
 
+    /// A tooltip up over a row is put away when the rows are drawn again (a refresh, a change of
+    /// look): its row is a new one, and the old tooltip would stay up over the window, in the old look.
+    @Test func aRedrawPutsAwayATooltipThatIsUp() throws {
+        let list = SailList(rowStyle: .list, look: .light, mono: try ControlsTests.mono())
+        list.entries = [.item(SailList.Item(id: "dock", name: "dock", voice: "dock", content: NSTextField(labelWithString: "dock"), note: "Only uday or an admin opens it"))]
+        let (window, _) = Self.shown(list)
+        defer { window.orderOut(nil) }
+        list.choose("dock")
+        let cell = try #require(try Self.row(list, 0).view(atColumn: 0) as? RowCell)
+        let tip = try #require(cell.noteTip)
+        tip.show()
+        #expect(window.childWindows?.isEmpty == false, "the tooltip never showed")
+        let same = list.entries
+        list.entries = same
+        #expect(window.childWindows?.isEmpty != false, "a tooltip stayed up over rows drawn again")
+    }
+
     /// Home chooses the first item and shows the head above it, as AppKit's lists scroll to their
     /// very top; End chooses the last.
     @Test func homeShowsTheHeadAboveTheFirstItem() throws {

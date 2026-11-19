@@ -544,6 +544,13 @@ import Testing
         #expect(view.project.look == .dark && view.panel.look == .dark && Self.keptLight(under: view).isEmpty)
     }
 
+    /// Everything `view` shows that still carries the light look: under it, and in its window's
+    /// attached sheet and child windows (a tooltip up), each of which floats over it.
+    static func keptLightAnywhere(_ view: NSView) -> [String] {
+        let floating = ([view.window?.attachedSheet].compactMap { $0 } + (view.window?.childWindows ?? [])).compactMap(\.contentView)
+        return keptLight(under: view) + floating.flatMap { keptLight(under: $0).map { "a floating window: \($0)" } }
+    }
+
     /// Every view shown under `root` that still carries the light look: a stored look that is not
     /// the dark one (anywhere in its class chain), words in a light-only colour, or a light ground.
     static func keptLight(under root: NSView) -> [String] {
@@ -658,10 +665,15 @@ import Testing
         #expect(await RunnerTabTests.until { unreached.text.contains("reach") }, "\(unreached.text)")
         let (signedOut, _) = try Self.view(RecordedServer([]))
         signedOut.signedOut()
-        for (name, view) in [("listed", listed), ("loading", loading), ("out of reach", unreached), ("signed out", signedOut)] {
+        let (asking, askingWindow) = try Self.view(RecordedServer([try Exchange("projects"), try Exchange("workspaces-three"), try Exchange("workspace-sessions")]))
+        asking.shown()
+        #expect(await RunnerTabTests.until { asking.text.contains("dock") }, "\(asking.text)")
+        asking.project.on(.delete("dock"))
+        #expect(await RunnerTabTests.until { askingWindow.attachedSheet != nil }, "Delete asked nothing")
+        for (name, view) in [("listed", listed), ("loading", loading), ("out of reach", unreached), ("signed out", signedOut), ("a sheet asking", asking)] {
             view.look = .dark
             view.layoutSubtreeIfNeeded()
-            let kept = Self.keptLight(under: view)
+            let kept = Self.keptLightAnywhere(view)
             #expect(kept.isEmpty, "\(name): kept the light look: \(kept)")
         }
     }

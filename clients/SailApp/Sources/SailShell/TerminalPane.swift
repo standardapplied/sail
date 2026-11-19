@@ -199,7 +199,7 @@ public final class TerminalPane: NSView {
     /// Whether ending the session may end a program the person is running: false only while the
     /// attached cursor is on the shell's prompt, as the shell marked it (OSC 133), or the session is
     /// over. A session not attached cannot say, so it may.
-    var mayEndAProgram: Bool {
+    package var mayEndAProgram: Bool {
         guard let session else { return false }
         switch session.state.phase {
         case .ended: return false

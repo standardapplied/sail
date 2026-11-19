@@ -110,7 +110,7 @@ import Testing
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
     func eachPillIsTheSheets(_ name: String, _ look: Look) {
         let dots: [PillState: Tint] = [
-            .running: Tint(look.success), .starting: Tint(look.info), .creating: Tint(look.info), .stopped: look.textTertiary,
+            .running: Tint(look.success), .starting: Tint(look.info), .stopping: Tint(look.info), .deleting: Tint(look.info), .creating: Tint(look.info), .stopped: look.textTertiary,
             .paused: Tint(look.warning), .incomplete: Tint(look.error), .noTemplate: Tint(look.warning), .building: Tint(look.info),
             .buildFailed: Tint(look.error), .notCreated: look.textTertiary, .error: Tint(look.error), .unknown: look.textTertiary,
         ]
@@ -121,10 +121,10 @@ import Testing
             #expect(paint.text == (failed ? Tint(look.error) : look.textSecondary), "\(name) \(state)'s label")
             #expect(paint.edge == (failed ? Tint(look.error, alpha: 0.45) : look.separatorStrong), "\(name) \(state)'s edge")
             #expect(paint.dashed == (state == .noTemplate) && paint.hollow == (state == .stopped || state == .notCreated))
-            #expect(state.pulses == [.starting, .creating, .building].contains(state))
+            #expect(state.pulses == [.starting, .stopping, .deleting, .creating, .building].contains(state))
         }
         #expect(PillState.allCases.map(\.label) == [
-            "Running", "Starting", "Creating", "Stopped", "Paused", "Not whole", "No template", "Building", "Build failed", "Not created", "Error", "Unknown",
+            "Running", "Starting", "Stopping", "Deleting", "Creating", "Stopped", "Paused", "Not whole", "No template", "Building", "Build failed", "Not created", "Error", "Unknown",
         ])
         #expect([PillSize.regular.height, PillSize.regular.dot, PillSize.regular.text, PillSize.regular.tracking] == [20, 6, 10, 0.08])
         #expect([PillSize.small.height, PillSize.small.dot, PillSize.small.text, PillSize.small.tracking] == [18, 5, 9, 0.06])
