@@ -3,16 +3,26 @@ import SailLook
 
 /// The content card's edge on the paper chrome, as the website's nav meets its page: a 1 pt
 /// hairline along the card's leading and top edges, round at the top-leading corner. It lies over
-/// the card and takes no clicks.
+/// the card and takes no clicks. It hosts a shape layer and draws nothing itself: the card is the
+/// whole window, and a view that size painting its own bitmap would be drawn again at every change
+/// of look, over the terminals' frames.
 @MainActor
 final class CardEdge: NSView {
     var look: Look {
-        didSet { needsDisplay = true }
+        didSet { if look != oldValue { shape.strokeColor = NSColor(look.separator).cgColor } }
     }
+
+    let shape = CAShapeLayer()
 
     init(look: Look) {
         self.look = look
         super.init(frame: .zero)
+        shape.fillColor = nil
+        shape.lineWidth = 1
+        shape.strokeColor = NSColor(look.separator).cgColor
+        shape.actions = ["path": NSNull(), "strokeColor": NSNull(), "bounds": NSNull(), "position": NSNull()]
+        layer = shape
+        wantsLayer = true
         setAccessibilityElement(false)
     }
 
@@ -21,33 +31,26 @@ final class CardEdge: NSView {
         nil
     }
 
-    override var isFlipped: Bool {
-        true
-    }
-
     override func hitTest(_: NSPoint) -> NSView? {
         nil
     }
 
-    /// The hairline's path: up the leading edge, round the corner, along the top.
-    var edge: NSBezierPath {
-        let radius = Look.contentRadius, inset = 0.5, height = Double(bounds.height), width = Double(bounds.width)
-        let path = NSBezierPath()
-        path.move(to: NSPoint(x: inset, y: height))
-        path.line(to: NSPoint(x: inset, y: radius))
-        path.appendArc(withCenter: NSPoint(x: radius, y: radius), radius: radius - inset, startAngle: 180, endAngle: 270)
-        path.line(to: NSPoint(x: width, y: inset))
-        guard userInterfaceLayoutDirection == .rightToLeft else { return path }
-        var mirror = AffineTransform(scaleByX: -1, byY: 1)
-        mirror.append(AffineTransform(translationByX: width, byY: 0))
-        path.transform(using: mirror)
-        return path
+    override func layout() {
+        super.layout()
+        shape.path = edge
     }
 
-    override func draw(_: NSRect) {
-        NSColor(look.separator).setStroke()
-        let path = edge
-        path.lineWidth = 1
-        path.stroke()
+    /// The hairline's path in the layer's own space (y up): up the leading edge, round the corner,
+    /// along the top.
+    var edge: CGPath {
+        let radius = Look.contentRadius, inset = 0.5, height = Double(bounds.height), width = Double(bounds.width)
+        let rightToLeft = userInterfaceLayoutDirection == .rightToLeft
+        let x = { (value: Double) in rightToLeft ? width - value : value }
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: x(inset), y: 0))
+        path.addLine(to: CGPoint(x: x(inset), y: height - radius))
+        path.addArc(tangent1End: CGPoint(x: x(inset), y: height - inset), tangent2End: CGPoint(x: x(radius), y: height - inset), radius: radius - inset)
+        path.addLine(to: CGPoint(x: x(width), y: height - inset))
+        return path
     }
 }
