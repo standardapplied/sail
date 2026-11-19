@@ -527,6 +527,7 @@ import Testing
         harness.link.output(" and more")
         harness.view.drawNowIfIdle()
         #expect(ContinuousClock.now - began < .milliseconds(50), "the main thread waited for the drawable")
+        #expect(await harness.until { !onMain.withLock { $0 }.isEmpty }, "the drawable was asked for, on the view's own thread")
         let served = ContinuousClock.now
         await harness.drainMain()
         #expect(ContinuousClock.now - served < .milliseconds(500), "the main queue was held while the drawable was withheld (2 s)")

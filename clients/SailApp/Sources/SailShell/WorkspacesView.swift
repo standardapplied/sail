@@ -44,6 +44,9 @@ public final class WorkspacesView: NSView {
     }
 
     private var lookOwed = false
+    /// How many times the section was painted for a change of look: none while it is hidden, once
+    /// when it is next shown.
+    package private(set) var lookPaints = 0
 
     package let panel: LeftPanel
     /// The pop shadow the panel casts while it is slid over the content; none beside it.
@@ -106,6 +109,7 @@ public final class WorkspacesView: NSView {
 
     private func relook() {
         lookOwed = false
+        lookPaints += 1
         let typing = project.fieldHasKeys
         panel.look = look
         panelShadow.look = look

@@ -48,7 +48,7 @@ public final class Rail: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         for item in Item.allCases {
-            let button = NSButton(image: Self.image(item), target: self, action: #selector(pick(_:)))
+            let button = NSButton(image: Self.image(item, colour: look.textSecondary), target: self, action: #selector(pick(_:)))
             button.isBordered = false
             button.wantsLayer = true
             button.layer?.cornerRadius = Look.contentRadius
@@ -103,7 +103,7 @@ public final class Rail: NSView {
             bars[each]?.layer?.backgroundColor = NSColor(look.accentText).cgColor
             let chosen = each == item
             button.layer?.backgroundColor = chosen ? NSColor(look.fillSelected).cgColor : NSColor.clear.cgColor
-            button.contentTintColor = chosen ? NSColor(look.accentText) : NSColor(look.textSecondary)
+            button.image = Self.image(each, colour: chosen ? Tint(look.accentText) : look.textSecondary)
             bars[each]?.isHidden = !chosen
         }
     }
@@ -117,8 +117,8 @@ public final class Rail: NSView {
         onSelect(item)
     }
 
-    private static func image(_ item: Item) -> NSImage {
-        let image = NSImage(systemSymbolName: item.symbol, accessibilityDescription: item.title) ?? NSImage()
-        return image.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 20, weight: .regular)) ?? image
+    /// `item`'s symbol in `colour`, made once (``SymbolInk``).
+    private static func image(_ item: Item, colour: Tint) -> NSImage {
+        SymbolInk.image(item.symbol, points: 20, weight: .regular, colour: colour, accessibility: item.title)
     }
 }

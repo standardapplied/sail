@@ -53,7 +53,18 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     private let defaults: UserDefaults
     /// The look it is drawn in; a new one repaints it.
     var look: Look {
-        didSet { paint() }
+        didSet { painter.lookChanged(hidden: isHidden) }
+    }
+
+    private lazy var painter = PaintWhenShown { [unowned self] in self.paint() }
+
+    /// How many times the pane was painted, wherever from: none while it is hidden at a change of
+    /// look.
+    package private(set) var lookPaints = 0
+
+    override public func viewDidUnhide() {
+        super.viewDidUnhide()
+        painter.shown()
     }
 
     private let mono: TerminalFonts
@@ -275,6 +286,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     private func paint() {
+        lookPaints += 1
         layer?.backgroundColor = NSColor(look.canvas).cgColor
         heading.textColor = NSColor(look.text)
         who.textColor = NSColor(look.textSecondary)

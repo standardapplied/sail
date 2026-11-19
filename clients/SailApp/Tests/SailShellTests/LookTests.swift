@@ -50,7 +50,7 @@ import Testing
         for look in [Look.dark, Look.light] {
             let button = AccentButton("Sign In with Passkey", look: look, target: nil, action: #selector(NSApplication.terminate(_:)))
             let font = try #require(button.attributedTitle.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
-            let ink = button.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+            let ink = button.ink
             #expect(NSFontManager.shared.traits(of: font).contains(.boldFontMask) || font.pointSize >= 18, "the accent label is not large text")
             #expect(ink == NSColor(look.onAccent))
         }

@@ -292,5 +292,7 @@ struct Step: Decodable {
         var dimmed: [Bool]?
         /// "No terminal is open" shows.
         var empty: Bool?
+        /// Which tabs the strip marks as holding a terminal that may still be running.
+        var unended: [Bool]?
     }
 }

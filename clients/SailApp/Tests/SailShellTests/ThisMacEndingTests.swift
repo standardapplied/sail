@@ -159,10 +159,111 @@ import Testing
         #expect(bench.focused === pane, "shown, so what it says is seen")
         #expect(pane.status.says == EndOutcome.mayStillRun("This terminal", [words], onThisMac: true) + " Close Anyway leaves it there.")
         #expect(door.sessions.contains(pane.name))
+        #expect(bench.strip.tabs.map(\.showsUnended) == [false, true], "its tab is marked")
+        #expect(bench.strip.tabs[1].accessibilityLabel()?.hasSuffix("a terminal in it may still be running") == true, "and VoiceOver says so")
         door.refuseKills(saying: nil)
         #expect(pane.press("End Again"))
+        #expect(pane.status.says == nil, "the old sentence goes as the new end begins")
         #expect(await RunnerTabTests.until(10) { bench.panes[pane.id] == nil && bench.model.panes[pane.id] == nil })
         #expect(!door.sessions.contains(pane.name) && door.sessions.count == 1, "only the other tab's session is left")
+    }
+
+    /// Closed from the workbench, an end the host has not answered once the delay passes says the
+    /// pane is ending.
+    @Test func theWorkbenchSaysAnEndStillUnansweredAfterTheDelay() async throws {
+        let door = try FakeRunnerDoor(thisMac: true)
+        defer {
+            door.releaseKills()
+            door.stop()
+        }
+        let bench = try await Self.workbench(at: door, tabs: 2)
+        let pane = try #require(bench.focused)
+        let naps = HeldNaps()
+        pane.nap = { await naps.nap($0) }
+        door.holdKills()
+        bench.closePane(nil)
+        #expect(await RunnerTabTests.until(5) { naps.count == 1 }, "the delay began")
+        #expect(pane.status.says == nil)
+        naps.pass()
+        #expect(await RunnerTabTests.until(5) { pane.status.says == "Ending this terminal…" }, "the pane says \(pane.status.says ?? "nothing")")
+        door.releaseKills()
+        #expect(await RunnerTabTests.until(10) { bench.panes[pane.id] == nil })
+    }
+
+    /// An end the host answers late, once the person has moved on, takes nothing from them: the
+    /// focus stays where they put it, and the pane says so in its tab, which is marked.
+    @Test func aLateUnconfirmedEndAfterThePersonMovedOnTakesNoFocus() async throws {
+        let door = try FakeRunnerDoor(thisMac: true)
+        defer {
+            door.releaseKills()
+            door.stop()
+        }
+        let bench = try await Self.workbench(at: door, tabs: 3)
+        let ids = bench.model.tabs.map(\.focused)
+        let pane = try #require(bench.panes[ids[2]])
+        let words = "Session '\(pane.name)' is not yours."
+        door.refuseKills(saying: words)
+        door.holdKills()
+        bench.closePane(nil)
+        #expect(bench.model.focusedPane?.id == ids[1], "the focus moved on as the end began")
+        bench.model.focus(ids[0])
+        bench.apply()
+        door.releaseKills()
+        #expect(await RunnerTabTests.until(10) { pane.status.offers == ["End Again", "Close Anyway"] }, "the pane says \(pane.status.says ?? "nothing")")
+        #expect(bench.model.focusedPane?.id == ids[0] && bench.focused !== pane, "the focus stayed where the person put it")
+        #expect(bench.strip.tabs.map(\.showsUnended) == [false, false, true], "its tab is marked")
+        #expect(pane.status.says == EndOutcome.mayStillRun("This terminal", [words], onThisMac: true) + " Close Anyway leaves it there.")
+    }
+
+    /// Closing a zoomed pane moves the focus to a pane the person sees: the zoom ends as the focus
+    /// leaves it, so no key goes to a pane the zoom hides.
+    @Test func closingAZoomedPaneFocusesAPaneThatIsSeen() async throws {
+        let door = try FakeRunnerDoor(thisMac: true)
+        defer {
+            door.releaseKills()
+            door.stop()
+        }
+        let bench = try await Self.workbench(at: door, tabs: 1)
+        let place = Place.thisMac(folder: "/")
+        let room = CGSize(width: 800, height: 600), least = CGSize(width: 100, height: 100)
+        let made = bench.model.split(.sideBySide, session: place.newSessionName, place: place, in: room, minimum: least, scale: 2)
+        let split = try #require(made)
+        let pane = try #require(bench.model.panes[split])
+        _ = try #require(bench.makeView(pane, start: .open, points: 15))
+        bench.apply()
+        #expect(await RunnerTabTests.until(10) { bench.panes.values.allSatisfy(\.attachedOnce) }, "both attached")
+        bench.zoomSplit(nil)
+        let zoomed = try #require(bench.focused)
+        #expect(bench.model.selectedTab?.zoomed == zoomed.id)
+        door.holdKills()
+        bench.closePane(nil)
+        let focused = try #require(bench.focused)
+        #expect(focused !== zoomed && !focused.isHidden, "the keys go to a pane the person sees")
+        #expect(bench.model.selectedTab?.zoomed == nil, "the zoom ended as the focus left it")
+    }
+
+    /// A person who moved away and back before a late answer still moved: the unended pane takes
+    /// no focus.
+    @Test func aLateUnconfirmedEndAfterThePersonMovedAwayAndBackTakesNoFocus() async throws {
+        let door = try FakeRunnerDoor(thisMac: true)
+        defer {
+            door.releaseKills()
+            door.stop()
+        }
+        let bench = try await Self.workbench(at: door, tabs: 3)
+        let ids = bench.model.tabs.map(\.focused)
+        let pane = try #require(bench.panes[ids[2]])
+        door.refuseKills(saying: "Session '\(pane.name)' is not yours.")
+        door.holdKills()
+        bench.closePane(nil)
+        #expect(bench.model.focusedPane?.id == ids[1])
+        bench.model.focus(ids[0])
+        bench.apply()
+        bench.model.focus(ids[1])
+        bench.apply()
+        door.releaseKills()
+        #expect(await RunnerTabTests.until(10) { pane.status.offers == ["End Again", "Close Anyway"] }, "the pane says \(pane.status.says ?? "nothing")")
+        #expect(bench.model.focusedPane?.id == ids[1], "back where it was, the person keeps the focus")
     }
 
     @Test func anAttachedPanesEndIsTheHostsAnswer() async throws {

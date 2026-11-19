@@ -4691,8 +4691,10 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   its workspace running until someone ends it or stops the workspace, and on this Mac the next
   launch opens it as a tab of its own. A pane stays until its end is confirmed, the focus moving
   on as the end begins (so a second ⌘W closes the next pane), saying it is ending only past
-  `TerminalPane.endingSaidAfter` (200 ms; a healthy host closes it as at once), and shown, saying
-  so, when it is not confirmed, with End Again and Close Anyway. A refusal is kept whole on every path
+  `TerminalPane.endingSaidAfter` (200 ms; a healthy host closes it as at once), and, when it is not
+  confirmed, saying so with End Again and Close Anyway: shown only while the focus is still where
+  the close left it, else in place, its tab marked, the keys staying where the person is. A zoomed
+  pane being ended keeps its zoom until it goes (`Workbench.focus(_:keepingZoom:)`). A refusal is kept whole on every path
   (`SessionEnd.refused(HostRefusal)`, `.ticketRefused(Refusal)`), the host's reason apart from its
   typed remedy, and said by `Said.lines`, the one composition: the sentence and, for a command the
   app knows, who acts; a call that fails is said by its kind, never its route

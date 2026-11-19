@@ -241,6 +241,9 @@ extension Driver {
         if let empty = expected.empty, empty != saysNoTerminal { misses.append(empty ? "'No terminal is open' is not shown" : "'No terminal is open' shows") }
         guard let tab = model.selectedTab else { return misses + (expected.tabs == [] ? [] : ["no tab"]) }
         if let focus = expected.focus, tab.layout.leaves.firstIndex(of: tab.focused) != focus { misses.append("pane \(focus) is not focused") }
+        if let unended = expected.unended, unended != workbench.strip.tabs.map(\.showsUnended) {
+            misses.append("the tabs marked unended are \(workbench.strip.tabs.map(\.showsUnended)), not \(unended)")
+        }
         if let dimmed = expected.dimmed, dimmed != orderedPanes.map(\.isDimmed) { misses.append("the dimmed panes are \(orderedPanes.map(\.isDimmed)), not \(dimmed)") }
         if let focused = workbench.focused, shell.window.isKeyWindow, shell.window.firstResponder !== focused.terminal {
             misses.append("the focused pane is not the first responder")
@@ -554,14 +557,14 @@ extension Driver {
         panes4["echo output to committed p95 ms"] = echoed.outputToCommitted.p95
         panes4["peak resident memory at one pane MB"] = before
         panes4["peak resident memory at four panes MB"] = four
-        let switched = await switchLooks(grid, times: 4)
-        budgets["the look switched 4 times, four panes' scrollback full: each pane drew each look, none waited, nor the main thread held, over 100 ms (\(switched.said))"] =
-            switched.ok
+        for (bound, met) in await switchLooks(grid, times: 4) {
+            budgets["the look switched 4 times, four panes' scrollback full, \(bound)"] = met
+        }
         await unlimitedFloods(floods, start: { generate(Self.paneLoad.lines * 151, every: 0, marker: 3) }, stop: stop)
         press("w", ["command", "option"])
         _ = await sheet("Close", asking: "Its 4 terminals will end.", within: 5)
         let splits = await timeSplits(10)
-        budgets["⌘D to the new pane's first committed frame p95 <= 100 ms (\(splits.said))"] = splits.ours <= 100
+        budgets["⌘D to the new pane's first committed frame p95 <= 100 ms, which over ten splits is the slowest of them (\(splits.said))"] = splits.ours <= 100
         panes4["⌘D to first committed frame p95 ms"] = splits.total
         panes4["⌘D to first committed frame, less the drive's own thread's hold, p95 ms"] = splits.ours
         panes4["of which ⌘D handled (pane, view, session made) p95 ms"] = splits.handled
@@ -723,7 +726,13 @@ extension Driver {
     /// within 5 s.
     func setLook(_ appearance: NSAppearance.Name?) async -> Bool {
         NSApp.appearance = appearance.flatMap { NSAppearance(named: $0) }
-        return await waitUntil(5) {
+        return await lookDrawn()
+    }
+
+    /// Whether the shell took the app's look and every terminal shown drew a frame in its palette,
+    /// within 5 s.
+    private func lookDrawn() async -> Bool {
+        await waitUntil(5) {
             let look = ShellApp.look(of: NSApp.effectiveAppearance)
             return self.shell.look == look && self.shownTerminals.allSatisfy { pane in
                 pane.terminal.lastFrame.map { $0.colors.background == look.palette.background } ?? true
@@ -736,47 +745,164 @@ extension Driver {
         workbench.panes.values.filter { $0.window != nil && !$0.isHiddenOrHasHiddenAncestor }
     }
 
+    /// The most a switch after the first may hold the main thread, counted as ours and clipped to
+    /// the switch: half the 100 ms within which a change reads as instant, the other half the panes'
+    /// frames'. The first switch the four panes' views see is AppKit's first measuring of their
+    /// text in the other look, so it is reported, not judged.
+    static let lookSwitchHold = 50.0
+    /// The most the first switch may hold the main thread, counted as ours: about two and a half
+    /// times the 54–58 ms seen, so a cost of ours that lands only there cannot pass unseen.
+    static let firstSwitchHold = 150.0
+    /// How long no pane's screen may change before the switches, so they measure the looks alone,
+    /// not a prompt or a flood's tail still arriving.
+    static let quietBeforeSwitching = 0.3
+
     /// The look switched `times` times, each the other of the one before, with the four panes'
-    /// scrollback full: every pane must draw each look, and none may wait to show it, nor the main
-    /// thread be held, over 100 ms (``flood(_:)``, net of the machine's share), counted from each
-    /// screen's change. Told apart: the panes' draws and each main-thread hold over 60 ms with its
-    /// stacks (AppKit drawing the window again shows there).
-    private func switchLooks(_ grid: [TerminalPane], times: Int) async -> (ok: Bool, said: String) {
+    /// scrollback full and quiet (the spec `sail-app-a-change-of-look-holds-the-main-thread-briefly`).
+    /// Judged, numbered in the order judged so the first missed is listed first, only what holds
+    /// whatever the machine: the panes quiet before the switches; every pane drew every look by
+    /// the step's end; no symbol resolved by switches 2 to 4, between looks already shown
+    /// (``SymbolInk/resolutions``); no layout of the workbench's tabs during any switch
+    /// (``WorkbenchView/tabLayouts``); each switch after the first held the main thread at most
+    /// ``lookSwitchHold``, counted as ours and clipped to it; no pane waited over 100 ms to show a
+    /// change, net of the machine's share (``flood(_:)``). Reported and not judged: the first
+    /// switch's hold, every switch's main-thread CPU time, and an empty window's own switches. Nothing of the drive's runs on the main
+    /// thread inside a switch: the stacks are described, and every line printed, after the last.
+    private func switchLooks(_ grid: [TerminalPane], times: Int) async -> [(String, Bool)] {
+        let empty = await emptyWindowSwitches()
+        let quiet = await settled(grid)
         grid.forEach { $0.terminal.resetLatency() }
         mainThread.reset()
         ownThread.reset()
-        var reached: [String] = []
+        var switches: [(at: Double, setting: Double, took: Double, span: Span)] = []
         var drawn = 0
-        for _ in 0 ..< times {
+        var resolvedLater = 0
+        var resolvedFirst = 0
+        let keptBefore = SymbolInk.kept
+        let laidOut = workbench.tabLayouts
+        for index in 0 ..< times {
             let other: NSAppearance.Name = shell.look == .dark ? .aqua : .darkAqua
+            let resolved = SymbolInk.resolutions
             let began = ContinuousClock.now
             let at = CACurrentMediaTime()
-            if await setLook(other) { drawn += 1 }
-            let took = (ContinuousClock.now - began) / .milliseconds(1)
-            reached.append("\(Self.ms(took)) ms")
-            print(String(format: "look switch at %.3f: the last pane drew it %.1f ms after the switch", at, took))
+            NSApp.appearance = NSAppearance(named: other)
+            let setting = (CACurrentMediaTime() - at) * 1000
+            if await lookDrawn() { drawn += 1 }
+            await drawnAndCommitted()
+            let span = Span(at, CACurrentMediaTime())
+            if index > 0 { resolvedLater += SymbolInk.resolutions - resolved } else { resolvedFirst = SymbolInk.resolutions - resolved }
+            switches.append((at, setting, (ContinuousClock.now - began) / .milliseconds(1), span))
         }
-        for gap in mainThread.stalls.gaps where gap.length > 0.06 {
-            print(String(format: "look switch: main thread held %.3f–%.3f (%.1f ms), the drive's own thread %.1f ms of it", gap.start, gap.end, gap.length * 1000,
-                         ownThread.stalls.shared(with: gap) * 1000))
-            mainStacks.told(gap).forEach { print("look switch: main thread held: \($0)") }
+        let layouts = workbench.tabLayouts - laidOut
+        let holds = switches.map { heldWithin($0.span) }
+        let cpus = switches.map { mainStacks.cpu(in: $0.span) }
+        for (index, done) in switches.enumerated() {
+            let cpu = cpus[index].map { String(format: "%.1f ms", $0) } ?? "not covered by the looks"
+            print(String(format: "look switch %d at %.3f: setting the appearance took %.1f ms on the main thread; the last pane drew it %.1f ms after the switch; ", index + 1, done.at, done.setting, done.took)
+                + "the main thread's longest hold in it, ours, \(Self.ms(holds[index].ours)) ms, its CPU time in it \(cpu)")
+            if let gap = holds[index].gap {
+                print(String(format: "look switch %d: the main thread's longest hold %.3f–%.3f (%.1f ms)", index + 1, gap.start, gap.end, gap.length * 1000))
+                mainStacks.told(gap, frames: MainStacks.depth).forEach { print("look switch \(index + 1): main thread held: \($0)") }
+            }
         }
         let judged = grid.map { flood($0.terminal.latency) }
         let worst = judged.max { $0.ours < $1.ours }
         let changes = grid.map { $0.terminal.latency.changes }
         let draws = grid.map { $0.terminal.latency.refresh.max }.reduce(0, +)
         _ = await setLook(nil)
+        let longest = holds.map(\.ours).max() ?? 0
+        let later = holds.dropFirst().map(\.ours).max() ?? 0
+        let beyond = holds.map { $0.ours - empty.second }
         panes4["look switched, ours, the worst pane ms"] = worst?.ours ?? 0
+        panes4["look switched, the main thread's longest hold, ours ms"] = longest
+        panes4["look switched first, the main thread's hold, ours ms (reported, not judged)"] = holds.first?.ours ?? 0
+        panes4["look switched first, the main thread's CPU time ms"] = (cpus.first ?? nil) ?? -1
+        panes4["look switched after the first, the main thread's longest hold, ours ms"] = later
+        panes4["look switched, the main thread's CPU time in a switch, the most ms"] = cpus.compactMap(\.self).max() ?? -1
+        panes4["look switched, the longest hold less an empty window's second switch ms"] = beyond.max() ?? 0
+        panes4["look switched, an empty window's first switch, ours ms"] = empty.first
+        panes4["look switched, an empty window's second switch, ours ms"] = empty.second
         panes4["look switched, the four panes' longest draws summed ms"] = draws
-        let ok = drawn == times && (worst?.ours ?? 0) <= 100 && changes.allSatisfy { $0 >= times }
-        return (ok, "all four drew \(drawn) of \(times) switches, each from the switch to the last drawn (polled every 10 ms) \(reached.joined(separator: ", ")); "
-            + "the four panes' longest draws summed \(Self.ms(draws)) ms; screen changes a pane \(changes.map { "\($0)" }.joined(separator: ", ")); the worst pane: \(worst?.said ?? "none")")
+        let perSwitch = holds.map { Self.ms($0.ours) }.joined(separator: ", ")
+        let cpuSaid = cpus.map { $0.map { Self.ms($0) } ?? "?" }.joined(separator: ", ")
+        print("look switch: the main thread's longest hold a switch, ours and clipped to it (after the first, judged at \(Self.ms(Self.lookSwitchHold)) ms), \(perSwitch) ms; its CPU time a switch \(cpuSaid) ms; "
+            + "an empty window's own first switch \(Self.ms(empty.first)) ms and second \(Self.ms(empty.second)) ms")
+        let changed = changes.map { "\($0)" }.joined(separator: ", ")
+        let quietSaid = "no screen changed for \(Self.ms(Self.quietBeforeSwitching * 1000)) ms before them"
+        let reached = switches.map { "\(Self.ms($0.took)) ms" }.joined(separator: ", ")
+        let drewSaid = "drawn \(drawn) of \(times), screen changes a pane \(changed), the last pane drawing each (polled every 10 ms) \(reached) after it"
+        let laterHolds = holds.dropFirst().map { Self.ms($0.ours) }.joined(separator: ", ")
+        let firstHold = Self.ms(holds.first?.ours ?? 0)
+        let firstCPU = (cpus.first ?? nil).map { Self.ms($0) } ?? "?"
+        let firstSaid = "ours \(firstHold) ms, its CPU time \(firstCPU) ms; \(resolvedFirst) symbol images resolved, \(keptBefore) kept before it"
+        let laterSaid = "ours, clipped to each: \(laterHolds) ms; the first, reported: \(firstHold) ms, its CPU time \(firstCPU) ms"
+        let waitSaid = "the worst pane, ours \(Self.ms(worst?.ours ?? 0)) ms: \(worst?.said ?? "none"); the four panes' longest draws summed \(Self.ms(draws)) ms"
+        return [
+            ("1: the four panes quiet before the switches (\(quiet ? quietSaid : "a screen still changing after 5 s"))", quiet),
+            ("2: every pane drew every look (\(drewSaid))", drawn == times && changes.allSatisfy { $0 >= times }),
+            ("3: no symbol resolved by switches 2 to \(times), between looks already shown (\(resolvedLater) resolved)", resolvedLater == 0),
+            ("4: no layout of the workbench's tabs during the switches (\(layouts) laid out)", layouts == 0),
+            ("5: the first switch held the main thread at most \(Self.ms(Self.firstSwitchHold)) ms and resolved at most one symbol image per one kept (\(firstSaid))",
+             (holds.first?.ours ?? 0) <= Self.firstSwitchHold && resolvedFirst <= keptBefore),
+            ("6: each switch after the first held the main thread at most \(Self.ms(Self.lookSwitchHold)) ms (\(laterSaid))", later <= Self.lookSwitchHold),
+            ("7: no pane waited over 100 ms to show a change (\(waitSaid))", (worst?.ours ?? 0) <= 100),
+        ]
+    }
+
+    /// The main thread's longest hold inside `span`, each of its stalls clipped to the span, so one
+    /// that began before it (the drive's own work between switches) counts only from its start.
+    private func heldWithin(_ span: Span) -> (ours: Double, said: String, gap: Span?) {
+        let clipped = mainThread.stalls.gaps.compactMap { gap -> Span? in
+            let part = Span(max(gap.start, span.start), min(gap.end, span.end))
+            return part.length > 0 ? part : nil
+        }.max { $0.length < $1.length }
+        let held = ours(clipped, less: Heartbeat.interval)
+        return (held.ours, held.said, clipped)
+    }
+
+    /// AppKit's own change of look for a window with nothing of ours in it, at the shell window's
+    /// size, measured as the four panes' switches are: the main thread's longest hold, counted as
+    /// ours, over its first change (the window never drawn in the other look) and its second.
+    private func emptyWindowSwitches() async -> (first: Double, second: Double) {
+        let window = NSWindow(contentRect: shell.window.frame, styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: shell.look == .dark ? .darkAqua : .aqua)
+        window.orderFront(nil)
+        await drawnAndCommitted(window)
+        var held: [Double] = []
+        for _ in 0 ..< 2 {
+            let dark = window.appearance?.name == .darkAqua
+            mainThread.reset()
+            ownThread.reset()
+            let at = CACurrentMediaTime()
+            window.appearance = NSAppearance(named: dark ? .aqua : .darkAqua)
+            await drawnAndCommitted(window)
+            held.append(heldWithin(Span(at, CACurrentMediaTime())).ours)
+        }
+        window.orderOut(nil)
+        shell.window.makeKeyAndOrderFront(nil)
+        await drawnAndCommitted()
+        return (held[0], held[1])
+    }
+
+    /// Whether no pane's screen changed for ``quietBeforeSwitching``, within `seconds`.
+    private func settled(_ grid: [TerminalPane], within seconds: Double = 5) async -> Bool {
+        var last = grid.map { $0.terminal.latency.changes }
+        var since = CACurrentMediaTime()
+        return await waitUntil(seconds) {
+            let now = grid.map { $0.terminal.latency.changes }
+            if now != last {
+                last = now
+                since = CACurrentMediaTime()
+            }
+            return CACurrentMediaTime() - since >= Self.quietBeforeSwitching
+        }
     }
 
     /// Returns once the window has drawn what it owes and that drawing is committed to the window
     /// server (the transaction's completion), at most 2 s: the fact a shot of the screen waits on.
-    private func drawnAndCommitted() async {
-        shell.window.displayIfNeeded()
+    private func drawnAndCommitted(_ window: NSWindow? = nil) async {
+        (window ?? shell.window).displayIfNeeded()
         let committed = Mutex(false)
         CATransaction.begin()
         CATransaction.setCompletionBlock { committed.withLock { $0 = true } }
@@ -995,6 +1121,7 @@ extension Driver {
             _ = await waitUntil(10) { Self.committed(self.pane?.terminal) > 0 }
             mainThread.reset()
             ownThread.reset()
+            let visibleAtKey = shell.window.occlusionState.contains(.visible)
             let began = CACurrentMediaTime()
             press("d", ["command"])
             handled.append((CACurrentMediaTime() - began) * 1000)
@@ -1007,15 +1134,36 @@ extension Driver {
             held.append(mainThread.longest)
             ownHeld.append(ownThread.stalls.shared(with: wait) * 1000)
             ours.append(self.ours(wait).ours)
+            if wait.length > 0.1, let view = made?.terminal {
+                print(splitMarks(of: view, in: wait, number: totals.count, visibleAtKey: visibleAtKey))
+            }
             samples.append(String(format: "handled %.1f, first frame %.1f, own thread %.1f, ours %.1f", handled.last ?? 0, totals.last ?? 0, ownHeld.last ?? 0, ours.last ?? 0))
             _ = await waitUntil(5) { made?.session?.state.phase == .attached }
             press("w", ["command", "option"])
             _ = await sheet("Close", asking: nil, within: 5)
         }
         panes4["a thread of the drive's own, held during a split p95 ms"] = Self.p95(ownHeld)
-        let said = "p95 waited \(Self.ms(Self.p95(totals))) ms, the drive's own thread held \(Self.ms(Self.p95(ownHeld))) ms, ours "
+        let said = "p95 (the slowest of \(totals.count)) waited \(Self.ms(Self.p95(totals))) ms, the drive's own thread held \(Self.ms(Self.p95(ownHeld))) ms, ours "
             + "\(Self.ms(Self.p95(ours))) ms; each split in ms: " + samples.joined(separator: " | ")
         return (Self.p95(totals), Self.p95(ours), said, Self.p95(handled), Self.p95(held))
+    }
+
+    /// What a split's new view did between ⌘D and its first frame, for a split over 100 ms: its
+    /// drawable asks, its refreshes by outcome, the drawables it threw for their size, and whether
+    /// the window read as visible at ⌘D and at the end. What these say decides a late first frame:
+    /// asks covering the wait are the system's drawable coming late; a view not asking while it
+    /// read as hidden is our deferral; drawables thrown are our retry.
+    private func splitMarks(of view: TerminalView, in wait: Span, number: Int, visibleAtKey: Bool) -> String {
+        let asks = view.drawableAsks(in: wait)
+        let asked = asks.reduce(0) { $0 + $1.overlap(wait) } * 1000
+        let longest = (asks.map { $0.overlap(wait) }.max() ?? 0) * 1000
+        let offsets = asks.map { String(format: "+%.1f ms for %.1f ms", ($0.start - wait.start) * 1000, $0.length * 1000) }.joined(separator: ", ")
+        let outcomes = zip(RefreshOutcome.allCases, view.refreshOutcomes).map { "\($0) \($1)" }.joined(separator: ", ")
+        let visibleNow = shell.window.occlusionState.contains(.visible)
+        return String(format: "split %d: %.1f ms to its first frame; drawable asks in it %d, %.1f ms in all, the longest %.1f ms", number, wait.length * 1000, asks.count, asked, longest)
+            + (asks.isEmpty ? "; " : " (each from ⌘D: \(offsets)); ")
+            + "refreshes by outcome: \(outcomes); drawables thrown for their size \(view.drawablesThrownForSize); "
+            + "the window visible at ⌘D \(visibleAtKey ? "yes" : "no"), at the end \(visibleNow ? "yes" : "no")"
     }
 
     static func p95(_ values: [Double]) -> Double {
