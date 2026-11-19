@@ -104,6 +104,12 @@ public struct Look: Equatable, Sendable {
         InkMark(fill: nil, ink: textSecondary, edge: separatorStrong)
     }
 
+    /// The content card's edge where it meets the chrome: a hairline along its leading and top
+    /// edges; nil draws none, and nothing lies over the card.
+    public var cardEdge: Tint? {
+        separator
+    }
+
     /// The chosen project's letter well: outlined, and lettered, in full ink.
     public var wellChosen: InkMark {
         InkMark(fill: nil, ink: text, edge: text)

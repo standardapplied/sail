@@ -29,7 +29,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public let window: NSWindow
     public let rail: Rail
     public let account: AccountPane
-    /// The card's hairline on the paper chrome, over the card, taking no clicks.
+    /// The card's hairline on the chrome, over the card's edge, taking no clicks.
     let cardEdge: CardEdge
     public let workspaces: WorkspacesView
     public let thisMac: WorkbenchView

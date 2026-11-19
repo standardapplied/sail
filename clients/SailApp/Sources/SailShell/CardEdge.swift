@@ -1,29 +1,34 @@
 import AppKit
 import SailLook
 
-/// The content card's edge on the paper chrome, as the website's nav meets its page: a 1 pt
-/// hairline along the card's leading and top edges, round at the top-leading corner. It lies over
-/// the card and takes no clicks. It hosts a shape layer and draws nothing itself: the card is the
-/// whole window, and a view that size painting its own bitmap would be drawn again at every change
-/// of look, over the terminals' frames.
+/// The content card's edge on the chrome, as the website's nav meets its page: a 1 pt hairline on
+/// the card's leading and top edges, round at the top-leading corner. It lies over the card and
+/// draws only two 1 pt lines and the 6 pt corner, each its own small layer, under an empty host:
+/// a full-card bitmap was painted again at every change of look (the four-pane switch held the
+/// main thread twice as long), and a full-card shape layer over the terminals was drawn again with
+/// every frame they committed (their drawables held back 80 to 100 ms in the drive's floods).
 @MainActor
 final class CardEdge: NSView {
     var look: Look {
-        didSet { if look != oldValue { shape.strokeColor = NSColor(look.separator).cgColor } }
+        didSet { if look != oldValue { paint() } }
     }
 
-    let shape = CAShapeLayer()
+    private let leadingLine = CALayer(), topLine = CALayer(), corner = CAShapeLayer()
 
     init(look: Look) {
         self.look = look
         super.init(frame: .zero)
-        shape.fillColor = nil
-        shape.lineWidth = 1
-        shape.strokeColor = NSColor(look.separator).cgColor
-        shape.actions = ["path": NSNull(), "strokeColor": NSNull(), "bounds": NSNull(), "position": NSNull()]
-        layer = shape
+        let host = CALayer()
+        for line in [leadingLine, topLine, corner] as [CALayer] {
+            line.actions = ["bounds": NSNull(), "position": NSNull(), "backgroundColor": NSNull(), "strokeColor": NSNull(), "path": NSNull()]
+            host.addSublayer(line)
+        }
+        corner.fillColor = nil
+        corner.lineWidth = 1
+        layer = host
         wantsLayer = true
         setAccessibilityElement(false)
+        paint()
     }
 
     @available(*, unavailable)
@@ -35,22 +40,32 @@ final class CardEdge: NSView {
         nil
     }
 
-    override func layout() {
-        super.layout()
-        shape.path = edge
+    /// How far the round corner reaches along each edge: the card's radius.
+    static let reach = Look.contentRadius
+
+    /// Its lines in the look's edge; with none, hidden, so no layer lies over the card.
+    private func paint() {
+        isHidden = look.cardEdge == nil
+        guard let edge = look.cardEdge.map({ NSColor($0).cgColor }) else { return }
+        leadingLine.backgroundColor = edge
+        topLine.backgroundColor = edge
+        corner.strokeColor = edge
     }
 
-    /// The hairline's path in the layer's own space (y up): up the leading edge, round the corner,
-    /// along the top.
-    var edge: CGPath {
-        let radius = Look.contentRadius, inset = 0.5, height = Double(bounds.height), width = Double(bounds.width)
+    /// The lines and the corner in the layer's own space (y up), the leading edge on the right when
+    /// the layout runs right to left.
+    override func layout() {
+        super.layout()
+        let width = Double(bounds.width), height = Double(bounds.height), reach = Self.reach
         let rightToLeft = userInterfaceLayoutDirection == .rightToLeft
-        let x = { (value: Double) in rightToLeft ? width - value : value }
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: x(inset), y: 0))
-        path.addLine(to: CGPoint(x: x(inset), y: height - radius))
-        path.addArc(tangent1End: CGPoint(x: x(inset), y: height - inset), tangent2End: CGPoint(x: x(radius), y: height - inset), radius: radius - inset)
-        path.addLine(to: CGPoint(x: x(width), y: height - inset))
-        return path
+        let x = { (left: Double, span: Double) in rightToLeft ? width - left - span : left }
+        leadingLine.frame = CGRect(x: x(0, 1), y: 0, width: 1, height: max(0, height - reach))
+        topLine.frame = CGRect(x: x(reach, max(0, width - reach)), y: height - 1, width: max(0, width - reach), height: 1)
+        corner.frame = CGRect(x: x(0, reach), y: height - reach, width: reach, height: reach)
+        let path = CGMutablePath(), radius = reach - 0.5
+        let start = CGPoint(x: rightToLeft ? reach - 0.5 : 0.5, y: 0), end = CGPoint(x: rightToLeft ? 0 : reach, y: radius)
+        path.move(to: start)
+        path.addArc(tangent1End: CGPoint(x: start.x, y: radius), tangent2End: end, radius: radius)
+        corner.path = path
     }
 }
