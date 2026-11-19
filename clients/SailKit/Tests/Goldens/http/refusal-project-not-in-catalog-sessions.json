@@ -1,0 +1,41 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/projects/harbor/workspaces/dock/sessions"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Create it with 'project create harbor', or sync it from main with 'sync'.",
+        "code": "project_not_in_catalog",
+        "field_errors": [],
+        "message": "Project 'harbor' is not in the catalog.",
+        "remedy": [
+          {
+            "text": "Create it with '"
+          },
+          {
+            "args": [
+              "harbor"
+            ],
+            "run": "sail",
+            "verb": "project create"
+          },
+          {
+            "text": "', or sync it from main with '"
+          },
+          {
+            "args": [],
+            "run": "sail",
+            "verb": "sync"
+          },
+          {
+            "text": "'."
+          }
+        ]
+      },
+      "schema_version": 1
+    },
+    "status": 404
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/projects/harbor/workspaces/gone/sessions"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "List them with: project workspace list harbor.",
+        "code": "not_found",
+        "field_errors": [],
+        "message": "Project 'harbor' has no workspace 'gone' on this box.",
+        "remedy": [
+          {
+            "text": "List them with: "
+          },
+          {
+            "args": [
+              "harbor"
+            ],
+            "run": "sail",
+            "verb": "project workspace list"
+          },
+          {
+            "text": "."
+          }
+        ]
+      },
+      "schema_version": 1
+    },
+    "status": 404
+  }
+}

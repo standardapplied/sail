@@ -64,11 +64,13 @@ class PtyHostYieldTest {
 
       try (var client = SessionClient.connect(dir.resolve("h.sock"), "")) {
         assertEquals(
-            List.of("shell"),
-            client.list().stream().map(PtyMessage.SessionInfo::name).toList(),
+            List.of("resume-1 yielded to dispatch 2", "shell live"),
+            client.list().stream()
+                .map(info -> info.name() + " " + (info.live() ? "live" : info.endedReason()))
+                .toList(),
             "the named live session ended, the unnamed one lives, the absent one is skipped");
       }
-      assertEquals(1, host.sessionCount());
+      assertEquals(2, host.sessionCount(), "the ended one is kept until its retention passes");
     }
   }
 
@@ -97,9 +99,13 @@ class PtyHostYieldTest {
             "an FDE, even the box owner, holds no yield authority");
       }
 
-      new PtyHostYield(dir.resolve("h.sock")).end(List.of("resume-1", "resume-2"), "r");
+      var yield = new PtyHostYield(dir.resolve("h.sock"));
+      yield.end(List.of("resume-1", "resume-2"), "r");
 
-      assertEquals(0, host.sessionCount(), "both ended, mady's included");
+      assertEquals(
+          List.of(false, false),
+          List.of(yield.live("resume-1"), yield.live("resume-2")),
+          "both ended, mady's included");
     }
   }
 
@@ -129,7 +135,6 @@ class PtyHostYieldTest {
       yield.end(List.of("resume-1"), "r");
 
       assertFalse(yield.live("resume-1"), "a session that ended holds nothing");
-      assertEquals(0, host.sessionCount());
     }
   }
 
@@ -178,7 +183,7 @@ class PtyHostYieldTest {
 
   private static PtyMessage.SessionInfo session(
       String name, boolean live, String project, String workspace) {
-    return new PtyMessage.SessionInfo(
-        name, "i-" + name, live, 0, "", "", List.of(), project, workspace, "ada");
+    return new PtyMessage.SessionInfo(name, "i-" + name, live, 0, "", "", List.of())
+        .placed(project, workspace, "ada");
   }
 }

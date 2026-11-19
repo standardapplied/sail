@@ -1,6 +1,6 @@
 import SailAPI
 
-/// One message of the `SAILPTY4` terminal protocol, in either direction: the host's `PtyMessage`.
+/// One message of the `SAILPTY5` terminal protocol, in either direction: the host's `PtyMessage`.
 /// The client sends the requests and receives the notifications; both are modelled so every frame
 /// round-trips through ``FrameCodec``.
 public enum Frame: Equatable, Sendable {
@@ -130,10 +130,15 @@ public struct SessionInfo: Equatable, Sendable {
     public var workspace: String
     /// The person who opened the session.
     public var opener: String
+    /// When it was opened, in milliseconds since the epoch.
+    public var createdAtMillis: Int64
+    /// The host's words for why it ended, empty while it lives.
+    public var endedReason: String
 
     public init(
         name: String, instanceID: String, live: Bool, attached: Int32, writerFDE: String, room: String,
-        command: [String], project: String = "", workspace: String = "", opener: String = ""
+        command: [String], project: String = "", workspace: String = "", opener: String = "",
+        createdAtMillis: Int64 = 0, endedReason: String = ""
     ) {
         self.name = name
         self.instanceID = instanceID
@@ -145,6 +150,8 @@ public struct SessionInfo: Equatable, Sendable {
         self.project = project
         self.workspace = workspace
         self.opener = opener
+        self.createdAtMillis = createdAtMillis
+        self.endedReason = endedReason
     }
 }
 

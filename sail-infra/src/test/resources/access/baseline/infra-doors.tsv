@@ -8,6 +8,32 @@ a machine token asks a ticket to open a terminal in workspace ghost of acme	deni
 a machine token asks a ticket to open a terminal in workspace loose of acme	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
 a machine token asks a ticket to open a terminal in workspace spare of acme	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
 a machine token asks a ticket to open a terminal in workspace try of acme	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+a machine token lists the sessions in workspace main of acme	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+a machine token lists the sessions in workspace try of acme	denied FORBIDDEN 403 Token 'corpus-ci' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+ada's room agent credential asks a ticket to attach to ghost	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's room agent credential asks a ticket to attach to lounge	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's room agent credential asks a ticket to open a terminal in acme	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's room agent credential asks a ticket to open a terminal in beta	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's room agent credential asks a ticket to open a terminal in delta	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's room agent credential asks a ticket to open a terminal in omega	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's room agent credential asks a ticket to open a terminal in workspace ghost of acme	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's room agent credential asks a ticket to open a terminal in workspace loose of acme	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's room agent credential asks a ticket to open a terminal in workspace spare of acme	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's room agent credential asks a ticket to open a terminal in workspace try of acme	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's room agent credential lists the sessions in workspace main of acme	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's room agent credential lists the sessions in workspace try of acme	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's run credential asks a ticket to attach to ghost	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's run credential asks a ticket to attach to lounge	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's run credential asks a ticket to open a terminal in acme	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's run credential asks a ticket to open a terminal in beta	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's run credential asks a ticket to open a terminal in delta	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's run credential asks a ticket to open a terminal in omega	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's run credential asks a ticket to open a terminal in workspace ghost of acme	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's run credential asks a ticket to open a terminal in workspace loose of acme	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's run credential asks a ticket to open a terminal in workspace spare of acme	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's run credential asks a ticket to open a terminal in workspace try of acme	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's run credential lists the sessions in workspace main of acme	denied FORBIDDEN 403 The credential is not valid or has expired. | 
+ada's run credential lists the sessions in workspace try of acme	denied FORBIDDEN 403 The credential is not valid or has expired. | 
 approve review-ada as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot approve reviews. | Only an operator lane (CLI or API token) may do this.
 approve review-ada as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot approve reviews. | Only an operator lane (CLI or API token) may do this.
 approve review-ada as agent member ada-agent beta	denied NOT_FOUND 404 Review 'review-ada' not found. | 
@@ -2708,6 +2734,8 @@ fde ada asks a ticket to open a terminal in workspace ghost of acme	denied NOT_F
 fde ada asks a ticket to open a terminal in workspace loose of acme	ok TicketResponse
 fde ada asks a ticket to open a terminal in workspace spare of acme	ok TicketResponse
 fde ada asks a ticket to open a terminal in workspace try of acme	ok TicketResponse
+fde ada lists the sessions in workspace main of acme	ok WorkspaceSessionsResponse lounge
+fde ada lists the sessions in workspace try of acme	ok WorkspaceSessionsResponse
 fde ada pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde ada pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde ada pins a terminal to b-room on a node as cli admin root all	ok admitted
@@ -2732,6 +2760,8 @@ fde bob asks a ticket to open a terminal in workspace ghost of acme	denied NOT_F
 fde bob asks a ticket to open a terminal in workspace loose of acme	denied FORBIDDEN 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
 fde bob asks a ticket to open a terminal in workspace spare of acme	ok TicketResponse
 fde bob asks a ticket to open a terminal in workspace try of acme	denied FORBIDDEN 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+fde bob lists the sessions in workspace main of acme	ok WorkspaceSessionsResponse
+fde bob lists the sessions in workspace try of acme	ok WorkspaceSessionsResponse
 fde bob pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde bob pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde bob pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -2754,6 +2784,8 @@ fde root asks a ticket to open a terminal in workspace ghost of acme	denied NOT_
 fde root asks a ticket to open a terminal in workspace loose of acme	ok TicketResponse
 fde root asks a ticket to open a terminal in workspace spare of acme	ok TicketResponse
 fde root asks a ticket to open a terminal in workspace try of acme	ok TicketResponse
+fde root lists the sessions in workspace main of acme	ok WorkspaceSessionsResponse lounge
+fde root lists the sessions in workspace try of acme	ok WorkspaceSessionsResponse
 fde root pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde root pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde root pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -2776,6 +2808,8 @@ fde sam asks a ticket to open a terminal in workspace ghost of acme	denied NOT_F
 fde sam asks a ticket to open a terminal in workspace loose of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
 fde sam asks a ticket to open a terminal in workspace spare of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
 fde sam asks a ticket to open a terminal in workspace try of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+fde sam lists the sessions in workspace main of acme	ok WorkspaceSessionsResponse
+fde sam lists the sessions in workspace try of acme	ok WorkspaceSessionsResponse
 fde sam pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde sam pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde sam pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -2798,6 +2832,8 @@ fde vic asks a ticket to open a terminal in workspace ghost of acme	denied NOT_F
 fde vic asks a ticket to open a terminal in workspace loose of acme	denied FORBIDDEN 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
 fde vic asks a ticket to open a terminal in workspace spare of acme	denied FORBIDDEN 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
 fde vic asks a ticket to open a terminal in workspace try of acme	denied FORBIDDEN 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+fde vic lists the sessions in workspace main of acme	ok WorkspaceSessionsResponse
+fde vic lists the sessions in workspace try of acme	ok WorkspaceSessionsResponse
 fde vic pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde vic pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde vic pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -19842,6 +19878,8 @@ the host token asks a ticket to open a terminal in workspace ghost of acme	denie
 the host token asks a ticket to open a terminal in workspace loose of acme	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
 the host token asks a ticket to open a terminal in workspace spare of acme	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
 the host token asks a ticket to open a terminal in workspace try of acme	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+the host token lists the sessions in workspace main of acme	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
+the host token lists the sessions in workspace try of acme	denied FORBIDDEN 403 Token 'admin' is bound to no FDE, so it is issued no ticket: the host's own token is the box's person, who exists only on the unix socket, and a machine token acts for no one. Use a token of your own. | 
 unseat the agent of ada-born-in-attic on ada's box as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 unseat the agent of ada-born-in-attic on ada's box as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 unseat the agent of ada-born-in-attic on ada's box as agent member ada-agent beta	denied ROOM_NOT_FOUND 404 Room 'ada-born-in-attic' was not found. | 

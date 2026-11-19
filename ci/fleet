@@ -242,12 +242,24 @@ suffix_of() {
   [[ $n == 1 ]] || echo "-a$n"
 }
 
+# A check's log file name: its name made safe and cut to 160 bytes, then 8 hex digits of the whole
+# name's hash, so a long name is still a legal file name and two long names never share one.
+log_name() {
+  local safe
+  safe=$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')
+  printf '%s-%s.log' "${safe:0:160}" "$(printf '%s' "$1" | sha256sum | cut -c1-8)"
+}
+
 check() {
   local run=$1 name=$2
   shift 2
   local dir log
   dir=$(log_dir "$run")
-  log="$dir/$(echo "$name" | tr -c 'A-Za-z0-9._-' '_').log"
+  log="$dir/$(log_name "$name")"
+  if ! { : > "$log"; } 2> /dev/null; then
+    echo "FAIL $name (its log $log could not be opened, so it did not run)" | tee -a "$dir/report.txt"
+    return 1
+  fi
   if "$@" > "$log" 2>&1; then
     echo "PASS $name" | tee -a "$dir/report.txt"
   else
@@ -833,8 +845,8 @@ def read(conn):
     return payload[0], payload[1:]
 def present(ticket):
     conn = socket.create_connection((ip, 7072), timeout=30)
-    conn.sendall(b"SAILPTY4")
-    if exactly(conn, 8) != b"SAILPTY4":
+    conn.sendall(b"SAILPTY5")
+    if exactly(conn, 8) != b"SAILPTY5":
         raise SystemExit("not a sail pty host")
     conn.sendall(frame(9, text(ticket)))
     return conn, read(conn)
@@ -863,6 +875,104 @@ again, (kind, payload) = present(ticket)
 if kind != 31 or b"presented already" not in payload:
     raise SystemExit("the second presentation was not refused as used: frame %d" % kind)
 print("the same ticket, presented again, is refused")'
+
+# With "open", opens session NAME in acme's container over a ticket, starts it counting (n-1, n-2,
+# ...), prints the last number it saw and is killed, so the host sees its client vanish unsaid; with "back", waits up to 60 s for
+# the API and the host to answer again, lists the container's sessions through the API, attaches to
+# NAME by a new ticket, and says what the replay and the live stream showed. Run from another box
+# over HOST's private address, as the app does.
+readonly REATTACH='import json, os, re, signal, socket, struct, sys, time, urllib.error, urllib.request
+ip, name, phase, token = sys.argv[1], sys.argv[2], sys.argv[3], sys.stdin.readline().strip()
+def text(value):
+    raw = value.encode()
+    return struct.pack(">i", len(raw)) + raw
+def frame(kind, payload=b""):
+    return struct.pack(">i", 1 + len(payload)) + bytes([kind]) + payload
+def exactly(conn, count):
+    data = b""
+    while len(data) < count:
+        more = conn.recv(count - len(data))
+        if not more:
+            raise SystemExit("the host closed the connection")
+        data += more
+    return data
+def read(conn):
+    payload = exactly(conn, struct.unpack(">i", exactly(conn, 4))[0])
+    return payload[0], payload[1:]
+def api(method, path, body=None):
+    asked = urllib.request.Request("http://%s:7071%s" % (ip, path), method=method,
+        data=None if body is None else json.dumps(body).encode(),
+        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+    return json.load(urllib.request.urlopen(asked, timeout=30))
+def present(ticket):
+    conn = socket.create_connection((ip, 7072), timeout=30)
+    conn.sendall(b"SAILPTY5")
+    if exactly(conn, 8) != b"SAILPTY5":
+        raise SystemExit("not a sail pty host")
+    conn.sendall(frame(9, text(ticket)))
+    kind, payload = read(conn)
+    if kind != 32:
+        raise SystemExit("the ticket was not welcomed: frame %d %r" % (kind, payload))
+    return conn
+def numbers(seen):
+    return [int(n) for n in re.findall(rb"n-(\d+)\r?\n", seen)]
+def answered(ask):
+    deadline = time.time() + 60
+    while True:
+        try:
+            return ask()
+        except (OSError, urllib.error.URLError) as unanswered:
+            if time.time() > deadline:
+                raise SystemExit("no answer within 60 s: %s" % unanswered)
+            time.sleep(1)
+if phase == "open":
+    conn = present(api("POST", "/v1/terminal/tickets", {"action": "open", "project": "acme"})["ticket"])
+    create = text(name) + struct.pack(">i", 0) + text("/tmp") + text("acme") + text("")
+    conn.sendall(frame(1, create + struct.pack(">ii", 80, 24) + text("")))
+    conn.sendall(frame(2, text(name) + b"\x01"))
+    line = b"i=0; while true; do i=$((i+1)); echo n-$i; sleep 0.2; done\r"
+    conn.sendall(frame(3, struct.pack(">q", 1) + struct.pack(">i", len(line)) + line))
+    seen = b""
+    while len([n for n in numbers(seen)]) < 3:
+        kind, payload = read(conn)
+        if kind == 31:
+            raise SystemExit("refused: %r" % payload)
+        if kind == 20:
+            seen += payload[12:]
+    print(max(numbers(seen)), flush=True)
+    os.kill(os.getpid(), signal.SIGKILL)
+else:
+    dropped = int(sys.argv[4])
+    listed = answered(lambda: api("GET", "/v1/projects/acme/workspaces/main/sessions"))["sessions"]
+    mine = [s for s in listed if s["name"] == name]
+    if not mine or not mine[0]["live"] or mine[0]["attached"] != 0:
+        raise SystemExit("the session is not listed live with no client: %r" % listed)
+    print("listed through the API: %s live, %d attached" % (name, mine[0]["attached"]))
+    conn = answered(lambda: present(api("POST", "/v1/terminal/tickets", {"action": "attach", "session": name})["ticket"]))
+    conn.sendall(frame(2, text(name) + b"\x01"))
+    replay, live, replaying = b"", b"", False
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        kind, payload = read(conn)
+        if kind == 31:
+            raise SystemExit("refused: %r" % payload)
+        if kind == 21:
+            replaying = True
+        elif kind == 22:
+            replaying = False
+        elif kind == 20:
+            if replaying:
+                replay += payload[12:]
+            else:
+                live += payload[12:]
+                if numbers(replay) and numbers(live) and max(numbers(live)) > max(numbers(replay)):
+                    break
+    missed = [n for n in numbers(replay) if n > dropped]
+    if not missed:
+        raise SystemExit("the replay holds nothing printed after the drop at n-%d: %r" % (dropped, replay[-200:]))
+    if not numbers(live) or max(numbers(live)) <= max(numbers(replay)):
+        raise SystemExit("no new number came after the replay")
+    print("the replay shows n-%d to n-%d, printed while no client was attached, and n-%d came live after it" % (min(missed), max(missed), max(numbers(live))))'
 
 readonly CLOSE_PRIVATELY='handle=$1 api=$2 terminal=$3 status=0
 sudo sail host config set api-listen "$api" > /dev/null || status=1
@@ -893,6 +1003,51 @@ direct_terminal() {
   else
     on "$run" "$from" "cat > /tmp/sail-direct-terminal.py" <<< "$DIRECT_TERMINAL" || status=1
     [[ $status == 0 ]] && { on "$run" "$from" "python3 /tmp/sail-direct-terminal.py $ip $workspace" <<< "$token" || status=1; }
+  fi
+  on "$run" "$host" "cat > /tmp/sail-close-privately && bash /tmp/sail-close-privately $handle $before" <<< "$CLOSE_PRIVATELY" || status=1
+  return $status
+}
+
+# From box FROM, over box HOST's private address: HANDLE opens session NAME in acme's container
+# that counts, and drops it; HOST's sail migrate, the step an upgrade runs on the new binary,
+# reinstalls and restarts its pty host, which hands its sessions over, the host's process id
+# changing or the row fails (migrate is fail-soft about the restart); then HANDLE lists NAME live
+# with no client through HOST's API, attaches by a new ticket, and sees the numbers printed while
+# no client was attached replayed, and new ones after. HOST's listeners are set and put back as
+# direct_terminal sets them.
+reattach_after_upgrade() {
+  local run=$1 host=$2 from=$3 handle=$4 name=$5 ip before token dropped was now status=0
+  ip=$(internal_ip "$run" "$host")
+  [[ -n $ip ]] || { echo "$host has no address"; return 1; }
+  before=$(on "$run" "$host" "sudo sail host status --json" | python3 -I -c "$LISTEN_SETTINGS") || before=""
+  [[ $before =~ ^[^[:space:]]+\ [^[:space:]]+$ ]] || { echo "could not read $host's listeners: '$before'"; return 1; }
+  token=$(on "$run" "$host" "cat > /tmp/sail-listen-privately && bash /tmp/sail-listen-privately $ip $handle" <<< "$LISTEN_PRIVATELY")
+  if [[ -z $token ]]; then
+    echo "no token for $handle"
+    status=1
+  else
+    on "$run" "$from" "cat > /tmp/sail-reattach.py" <<< "$REATTACH" || status=1
+    if [[ $status == 0 ]]; then
+      dropped=$(on "$run" "$from" "python3 /tmp/sail-reattach.py $ip $name open" <<< "$token")
+      if [[ $dropped =~ ^[0-9]+$ ]]; then
+        echo "$name counted to n-$dropped and its client was killed"
+      else
+        echo "$name did not count: '$dropped'"
+        status=1
+      fi
+    fi
+    if [[ $status == 0 ]]; then
+      was=$(on "$run" "$host" "systemctl show -p MainPID --value sail-pty-host")
+      on "$run" "$host" "sudo sail migrate" || status=1
+      now=$(on "$run" "$host" "systemctl show -p MainPID --value sail-pty-host")
+      if [[ $was =~ ^[1-9][0-9]*$ && $now =~ ^[1-9][0-9]*$ && $was != "$now" ]]; then
+        echo "$host's sail migrate restarted its pty host onto the installed binary: process $was, then $now"
+      else
+        echo "$host's pty host was not restarted by sail migrate: process '$was' before, '$now' after"
+        status=1
+      fi
+    fi
+    [[ $status == 0 ]] && { on "$run" "$from" "python3 /tmp/sail-reattach.py $ip $name back $dropped" <<< "$token" || status=1; }
   fi
   on "$run" "$host" "cat > /tmp/sail-close-privately && bash /tmp/sail-close-privately $handle $before" <<< "$CLOSE_PRIVATELY" || status=1
   return $status
@@ -1250,6 +1405,8 @@ resilience() {
   check "$run" "it reaches main within 30 s, no sail sync asked" reaches_main_unasked "$run" "after-api$x"
   check "$run" "the pty host restarts on client" on "$run" client "sudo systemctl restart sail-pty-host"
   check "$run" "the session outlives the pty host's restart" session_is "$run" client "ticker$x" live
+  check "$run" "a counting session on client outlives its killed client and client's sail migrate (the terminal host is restarted onto the installed binary, as an upgrade does), is listed live and reattaches by a new ticket, its output replayed" \
+    reattach_after_upgrade "$run" client main client "numbers$x"
   check "$run" "incus restarts on client" on "$run" client "sudo systemctl restart incus"
   check "$run" "the session incus ended reads as ended" session_is "$run" client "ticker$x" ended
   check "$run" "client opens a new session in acme, attaches and detaches" opens_session "$run" client "ticker2$x"

@@ -148,7 +148,20 @@ class AgentResumeSessionIT extends AbstractIncusIT {
           terminal.await("[sail: session ended — " + reason + "]");
           assertEquals(reason, terminal.ending(), "the attached client hears why it ended");
         }
-        assertEquals(0, host.sessionCount());
+        try (var client = SessionClient.connect(socket)) {
+          assertEquals(
+              List.of(plan.session() + " ended"),
+              client.list().stream()
+                  .map(
+                      info ->
+                          info.name()
+                              + (!info.live() && info.endedReason().startsWith("yielded to run ")
+                                  ? " ended"
+                                  : " live"))
+                  .toList(),
+              "the yielded session is kept ended, in the yield's words, until its retention"
+                  + " passes");
+        }
         assertTrue(
             endedEvents(db).stream()
                 .anyMatch(

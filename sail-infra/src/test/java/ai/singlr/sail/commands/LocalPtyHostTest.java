@@ -881,7 +881,9 @@ class LocalPtyHostTest {
       assertEquals(new PtyMessage.Ok(), dispatch.answer());
     }
     try (var owner = Client.connect(socket())) {
-      assertEquals(List.of(), owner.list());
+      assertEquals(
+          List.of("victim displaced"),
+          owner.list().stream().map(info -> info.name() + " " + info.endedReason()).toList());
     }
   }
 

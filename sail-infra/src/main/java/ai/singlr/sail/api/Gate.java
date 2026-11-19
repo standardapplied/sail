@@ -36,7 +36,10 @@ sealed interface Gate {
   /** Managing the org's people, tokens and pairings. */
   Gate PEOPLE = new ManagesPeople();
 
-  /** A terminal ticket, which the terminal host decides as it decides that open or attach. */
+  /**
+   * A terminal ticket, which the terminal host decides as it decides that open or attach; or a
+   * listing of sessions, kept to those the host's attach rule lets the caller attach.
+   */
   Gate TERMINAL = new Terminal();
 
   /**

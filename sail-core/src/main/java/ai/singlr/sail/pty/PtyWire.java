@@ -23,7 +23,7 @@ import java.util.List;
  */
 public final class PtyWire {
 
-  static final byte[] MAGIC = "SAILPTY4".getBytes(StandardCharsets.US_ASCII);
+  static final byte[] MAGIC = "SAILPTY5".getBytes(StandardCharsets.US_ASCII);
   static final int MAX_FRAME = 1 << 20;
 
   private PtyWire() {}
@@ -34,7 +34,7 @@ public final class PtyWire {
     var peer = ByteBuffer.allocate(MAGIC.length);
     readFully(in, peer);
     if (!ByteBuffer.wrap(MAGIC).equals(peer.flip())) {
-      throw new IOException("Peer is not speaking sail pty protocol v4; refusing the connection.");
+      throw new IOException("Peer is not speaking sail pty protocol v5; refusing the connection.");
     }
   }
 
@@ -114,7 +114,7 @@ public final class PtyWire {
       case PtyMessage.Detach m -> out.type(6);
       case PtyMessage.ListSessions m -> {
         out.type(7).string(m.after());
-        out.i32(m.limit());
+        out.i32(m.limit()).string(m.credential());
       }
       case PtyMessage.Kill m -> out.type(8).string(m.session());
       case PtyMessage.Yield m -> out.type(10).string(m.session()).string(m.reason());
@@ -250,9 +250,13 @@ public final class PtyWire {
     return out.string(info.writerFde()).string(info.room()).stringList(info.command());
   }
 
-  /** Where a session runs and who opened it: its project, its workspace and its opener. */
+  /**
+   * Where a session runs, who opened it and when, and why it ended: its project, its workspace, its
+   * opener, its creation in epoch milliseconds and its ended reason, blank while it lives.
+   */
   private static Writer encodePlace(Writer out, PtyMessage.SessionInfo info) {
-    return out.string(info.project()).string(info.workspace()).string(info.opener());
+    out.string(info.project()).string(info.workspace()).string(info.opener());
+    return out.i64(info.createdAtMillis()).string(info.endedReason());
   }
 
   private static PtyMessage decode(ByteBuffer in) throws IOException {
@@ -274,7 +278,7 @@ public final class PtyWire {
       case 4 -> new PtyMessage.Resize(in.getInt(), in.getInt());
       case 5 -> new PtyMessage.TakeWrite();
       case 6 -> new PtyMessage.Detach();
-      case 7 -> new PtyMessage.ListSessions(string(in), in.getInt());
+      case 7 -> new PtyMessage.ListSessions(string(in), in.getInt(), string(in));
       case 8 -> new PtyMessage.Kill(string(in));
       case 10 -> new PtyMessage.Yield(string(in), string(in));
       case 11 ->
@@ -301,7 +305,7 @@ public final class PtyWire {
       case 25 -> new PtyMessage.Paused();
       case 26 -> new PtyMessage.Continued();
       case 27 -> new PtyMessage.SessionEnded(string(in));
-      case 28 -> decodeInfo(in).placed(string(in), string(in), string(in));
+      case 28 -> placed(decodeInfo(in), in);
       case 29 -> {
         var count = bounded(in);
         var sessions = new ArrayList<PtyMessage.SessionInfo>(count);
@@ -315,7 +319,7 @@ public final class PtyWire {
               "Corrupt pty frame: a page places " + placed + " sessions but holds " + count + ".");
         }
         for (var i = 0; i < count; i++) {
-          sessions.set(i, sessions.get(i).placed(string(in), string(in), string(in)));
+          sessions.set(i, placed(sessions.get(i), in));
         }
         yield new PtyMessage.Sessions(List.copyOf(sessions), next);
       }
@@ -324,6 +328,12 @@ public final class PtyWire {
       case 32 -> new PtyMessage.Welcome(string(in));
       default -> throw new IOException("Unknown pty frame type " + type + ".");
     };
+  }
+
+  /** {@code info} with what {@link #encodePlace} wrote for it. */
+  private static PtyMessage.SessionInfo placed(PtyMessage.SessionInfo info, ByteBuffer in)
+      throws IOException {
+    return info.placed(string(in), string(in), string(in)).lived(in.getLong(), string(in));
   }
 
   private static PtyMessage.SessionInfo decodeInfo(ByteBuffer in) throws IOException {

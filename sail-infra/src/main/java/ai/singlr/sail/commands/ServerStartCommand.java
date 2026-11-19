@@ -53,6 +53,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.RoleRule;
+import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.BoxDatabase;
@@ -272,17 +273,7 @@ public final class ServerStartCommand implements Runnable {
             operations.liveMembers()::turnState,
             new SailApiServer.PrivateNetwork(
                 privateApi,
-                terminal.map(
-                    address ->
-                        new TerminalTickets(
-                            (credential, action, target, workspace) ->
-                                SessionClient.ticket(
-                                    SailPaths.ptySocketPath(),
-                                    credential,
-                                    action,
-                                    target,
-                                    workspace),
-                            address))));
+                terminal.map(address -> new TerminalTickets(new PtyHostDoor(), address))));
     var sweeper = new ExpiredRowSweeper(dbPath);
     var eventSweeper = new EventRetentionSweeper(eventStore);
     var retentionSweeper = operations.retentionSweeper();
@@ -537,6 +528,21 @@ public final class ServerStartCommand implements Runnable {
               Event.SAIL_AGENT,
               HostInfo.hostname(),
               Map.of("status", s.status().wire(), "since", DateTimeUtils.format(s.updatedAt()))));
+    }
+  }
+
+  /** The runner's terminal host, asked on its unix socket for the caller of an API request. */
+  private static final class PtyHostDoor implements TerminalTickets.Host {
+    @Override
+    public PtyMessage ticket(
+        String credential, PtyMessage.TicketAction action, String target, String workspace)
+        throws IOException {
+      return SessionClient.ticket(SailPaths.ptySocketPath(), credential, action, target, workspace);
+    }
+
+    @Override
+    public PtyMessage sessions(String credential) throws IOException {
+      return SessionClient.sessionsFor(SailPaths.ptySocketPath(), credential);
     }
   }
 }

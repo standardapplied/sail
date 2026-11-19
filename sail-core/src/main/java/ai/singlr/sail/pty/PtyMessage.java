@@ -96,9 +96,15 @@ public sealed interface PtyMessage {
    * Asks for one page of the caller's sessions, in name order, strictly after {@code after} (blank
    * for the first page) and at most {@code limit} long. The host clamps {@code limit} to {@link
    * #PAGE_LIMIT} and bounds a session's command at creation to {@link #MAX_COMMAND_BYTES} of wire
-   * bytes, so a full page always fits one frame however many sessions exist.
+   * bytes, so a full page always fits one frame however many sessions exist. {@code credential},
+   * blank for the connection's own, is the one an API request carries: the box's own process asks
+   * for its caller, and the host resolves it and decides as it decides that caller's attach.
    */
-  record ListSessions(String after, int limit) implements PtyMessage {}
+  record ListSessions(String after, int limit, String credential) implements PtyMessage {
+    public ListSessions(String after, int limit) {
+      this(after, limit, "");
+    }
+  }
 
   record Kill(String session) implements PtyMessage {}
 
@@ -290,7 +296,8 @@ public sealed interface PtyMessage {
    * command} is the child as requested (the default login shell when none was), so a client can
    * tell an agent session from a plain shell; {@code room} is blank when the session is not
    * room-bound, {@code project} when it is in none, and {@code workspace} when it runs in the
-   * project's own container; {@code opener} is the person who opened it.
+   * project's own container; {@code opener} is the person who opened it, {@code createdAtMillis}
+   * when, and {@code endedReason} why it ended, blank while it lives.
    */
   record SessionInfo(
       String name,
@@ -302,7 +309,9 @@ public sealed interface PtyMessage {
       List<String> command,
       String project,
       String workspace,
-      String opener)
+      String opener,
+      long createdAtMillis,
+      String endedReason)
       implements PtyMessage {
 
     /** A session in no workspace, its opener unsaid. */
@@ -314,7 +323,7 @@ public sealed interface PtyMessage {
         String writerFde,
         String room,
         List<String> command) {
-      this(name, instanceId, live, attached, writerFde, room, command, "", "", "");
+      this(name, instanceId, live, attached, writerFde, room, command, "", "", "", 0, "");
     }
 
     /**
@@ -323,7 +332,35 @@ public sealed interface PtyMessage {
      */
     public SessionInfo placed(String project, String workspace, String opener) {
       return new SessionInfo(
-          name, instanceId, live, attached, writerFde, room, command, project, workspace, opener);
+          name,
+          instanceId,
+          live,
+          attached,
+          writerFde,
+          room,
+          command,
+          project,
+          workspace,
+          opener,
+          createdAtMillis,
+          endedReason);
+    }
+
+    /** This session, opened at {@code createdAtMillis} and ended for {@code endedReason}. */
+    public SessionInfo lived(long createdAtMillis, String endedReason) {
+      return new SessionInfo(
+          name,
+          instanceId,
+          live,
+          attached,
+          writerFde,
+          room,
+          command,
+          project,
+          workspace,
+          opener,
+          createdAtMillis,
+          endedReason);
     }
   }
 

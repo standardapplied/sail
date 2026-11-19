@@ -12,7 +12,9 @@ import ai.singlr.sail.access.baseline.Cast;
 import ai.singlr.sail.access.baseline.Corpus;
 import ai.singlr.sail.access.baseline.World;
 import ai.singlr.sail.commands.SessionClient;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
@@ -30,6 +32,7 @@ import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyChildShim;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.pty.SdNotify;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -341,8 +344,22 @@ class AccessDoorsBaselineTest {
       }
       var door =
           new TerminalTickets(
-              (credential, action, target, workspace) ->
-                  SessionClient.ticket(socket, credential, action, target, workspace),
+              new TerminalTickets.Host() {
+                @Override
+                public PtyMessage ticket(
+                    String credential,
+                    PtyMessage.TicketAction action,
+                    String target,
+                    String workspace)
+                    throws IOException {
+                  return SessionClient.ticket(socket, credential, action, target, workspace);
+                }
+
+                @Override
+                public PtyMessage sessions(String credential) throws IOException {
+                  return SessionClient.sessionsFor(socket, credential);
+                }
+              },
               host.tcpAddress().orElseThrow());
       var askers = new LinkedHashMap<String, String>();
       for (var fde :
@@ -352,6 +369,8 @@ class AccessDoorsBaselineTest {
       askers.put("a machine token", new TokenStore(world.db).create("corpus-ci", "admin").token());
       askers.put(
           "the host token", new TokenStore(world.db).create(HostToken.NAME, "admin").token());
+      askers.put("ada's run credential", runCredential(world, Cast.ADA_RUN));
+      askers.put("ada's room agent credential", runCredential(world, Cast.ADA_ROOM_RUN));
       for (var asker : askers.entrySet()) {
         for (var project : List.of("acme", "beta", "delta", "omega")) {
           var label = asker.getKey() + " asks a ticket to open a terminal in " + project;
@@ -380,6 +399,14 @@ class AccessDoorsBaselineTest {
                           door.issue(
                               asker.getValue(),
                               Map.of("action", "open", "project", "acme", "workspace", workspace))),
+                  null));
+        }
+        for (var workspace : List.of("main", "try")) {
+          var label = asker.getKey() + " lists the sessions in workspace " + workspace + " of acme";
+          corpus.put(
+              label,
+              answer(
+                  new Door(label, ops -> door.sessions(asker.getValue(), "acme", workspace, null)),
                   null));
         }
         for (var session : List.of("lounge", "ghost")) {
@@ -762,6 +789,23 @@ class AccessDoorsBaselineTest {
   }
 
   /** A login session of FDE {@code fde}'s, as the gateway mints one for the pty host. */
+  /**
+   * A live credential for run {@code run}, as a run's agent presents one, in place of the one its
+   * dispatch minted, which no one here holds: asked last, after every door that reads the run.
+   */
+  private static String runCredential(World world, String run) {
+    var credential = Secrets.mint("sailrun");
+    world.db.execute("DELETE FROM run_credentials WHERE run_id = ?", run);
+    world.db.execute(
+        "INSERT INTO run_credentials (run_id, credential_hash, created_at, expires_at)"
+            + " VALUES (?, ?, ?, ?)",
+        run,
+        Secrets.hash(credential),
+        DateTimeUtils.now(),
+        null);
+    return credential;
+  }
+
   private static String session(World world, String fde) {
     return new AuthSessionStore(world.db)
         .create(new FdeStore(world.db).byHandle(fde).orElseThrow().id(), Duration.ofHours(1))

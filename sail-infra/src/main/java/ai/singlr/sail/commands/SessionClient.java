@@ -140,6 +140,35 @@ public final class SessionClient implements AutoCloseable {
     }
   }
 
+  /**
+   * Every page of the sessions the holder of {@code credential} may attach to, asked on {@code
+   * socket} by this box's own process as a ticket is: the {@link PtyMessage.Sessions}, or the
+   * host's refusal ({@link PtyMessage.TicketRefused}, {@link PtyMessage.Err}) as it answered.
+   */
+  public static PtyMessage sessionsFor(Path socket, String credential) throws IOException {
+    try (var client = connect(socket, "")) {
+      var all = new ArrayList<PtyMessage.SessionInfo>();
+      var after = "";
+      while (true) {
+        PtyWire.write(
+            client.channel, new PtyMessage.ListSessions(after, PtyMessage.PAGE_LIMIT, credential));
+        var reply = PtyWire.read(client.channel);
+        if (!(reply instanceof PtyMessage.Sessions(var page, var next))) {
+          return reply;
+        }
+        all.addAll(page);
+        if (next.isEmpty()) {
+          return new PtyMessage.Sessions(List.copyOf(all), "");
+        }
+        if (next.compareTo(after) <= 0) {
+          throw new IOException(
+              "The host's session listing cursor went backwards; refusing to loop.");
+        }
+        after = next;
+      }
+    }
+  }
+
   /** Sends the attach request and confirms it; frame traffic then belongs to the caller. */
   public SocketChannel attach(String name, boolean write) throws IOException {
     PtyWire.write(channel, new PtyMessage.Attach(name, write));

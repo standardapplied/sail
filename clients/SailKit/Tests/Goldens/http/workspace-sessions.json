@@ -1,0 +1,35 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/projects/harbor/workspaces/dock/sessions"
+  },
+  "response": {
+    "body": {
+      "schema_version": 1,
+      "sessions": [
+        {
+          "attached": 1,
+          "command": [
+            "claude"
+          ],
+          "created_at": "2025-11-18T10:00:00.000Z",
+          "live": true,
+          "name": "app-1f2e3d4c",
+          "opener": "uday",
+          "writer": "uday"
+        },
+        {
+          "attached": 0,
+          "command": [],
+          "created_at": "2025-11-18T09:00:00.000Z",
+          "ended_reason": "Workspace dock of harbor is being stopped by ana, which ends this terminal.",
+          "live": false,
+          "name": "app-5a6b7c8d",
+          "opener": "uday",
+          "writer": ""
+        }
+      ]
+    },
+    "status": 200
+  }
+}
