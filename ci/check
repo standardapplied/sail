@@ -12,8 +12,13 @@ readonly BAKE_TRIES=3
 readonly BAKE_STAGE_SECONDS=300
 readonly APT_LOCK_SECONDS=120
 readonly RUNNER_PACKAGES="incus zfsutils-linux"
+readonly MIRRORED_SOURCES='s#^URIs: http://(archive|security)\.ubuntu\.com/ubuntu/?$#URIs: '
+# shellcheck disable=SC2016
 readonly FLEET_CONTAINERFILE='FROM docker.io/library/ubuntu:24.04
-RUN apt-get update -qq \
+ARG MIRROR
+ARG MIRRORED_SOURCES
+RUN sed -i -E "${MIRRORED_SOURCES}${MIRROR}#" /etc/apt/sources.list.d/ubuntu.sources \
+    && apt-get update -qq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
         libsqlite3-0 sqlite3 openssh-server openssh-client ca-certificates curl \
     && mkdir -p /run/sshd'
@@ -229,6 +234,16 @@ bake_stage() {
   exit 1
 }
 
+# The Ubuntu mirror a bake's containers fetch from: the runner's own, which GitHub's runners list in
+# /etc/apt/apt-mirrors.txt and which their own apt uses, else the archive. A container's sources
+# name archive.ubuntu.com and security.ubuntu.com, which stalled for whole bakes when the runner's
+# mirror answered at once (PR #485's first run: three podman builds, each three tries of 300 s).
+bake_mirror() {
+  local mirror
+  mirror=$(awk 'NR == 1 { print $1 }' /etc/apt/apt-mirrors.txt 2> /dev/null || true)
+  echo "${mirror:-http://archive.ubuntu.com/ubuntu/}"
+}
+
 # ProjectProvisioner's baseline, as its source names it, and what the incus suites add to it.
 prepared_packages() {
   local baseline
@@ -241,14 +256,17 @@ prepared_packages() {
 }
 
 prepared_bake() {
-  local alias builder=sail-it-image-builder packages
+  local alias builder=sail-it-image-builder packages mirror
   alias=$(prepared_alias)
   packages=$(prepared_packages)
+  mirror=$(bake_mirror)
   bake_stage "launch the builder from images:ubuntu/24.04" \
     bash -c "incus delete --force $builder > /dev/null 2>&1; incus launch images:ubuntu/24.04 $builder"
   # shellcheck disable=SC2016
   bake_stage "the builder's outbound DNS" incus exec "$builder" -- bash -c \
     'for _ in $(seq 1 45); do getent hosts archive.ubuntu.com > /dev/null && exit 0; sleep 2; done; cat /etc/resolv.conf; ip -brief addr; exit 1'
+  bake_stage "point apt at $mirror" incus exec "$builder" -- \
+    sed -i -E "${MIRRORED_SOURCES}${mirror}#" /etc/apt/sources.list.d/ubuntu.sources
   bake_stage "apt-get update" incus exec "$builder" -- apt-get update -qq
   # shellcheck disable=SC2086
   bake_stage "apt-get install $packages" incus exec "$builder" -- env DEBIAN_FRONTEND=noninteractive \
@@ -303,7 +321,8 @@ fleet_image() {
     bake)
       context=$(mktemp -d)
       printf '%s\n' "$FLEET_CONTAINERFILE" > "$context/Containerfile"
-      bake_stage "podman build $name" podman build -q -t "$name" "$context"
+      bake_stage "podman build $name" podman build -t "$name" \
+        --build-arg MIRROR="$(bake_mirror)" --build-arg MIRRORED_SOURCES="$MIRRORED_SOURCES" "$context"
       rm -rf "$context"
       echo "Baked $name."
       ;;
@@ -324,7 +343,9 @@ fleet_image() {
 
 # The runner's own packages, kept as .deb files: fetched from Zabbly's stable repository and the
 # Ubuntu mirror once (the incus action keeps them per runner image and week), and installed from
-# those files with no index and no network, the same way after a fetch as after a restore.
+# those files by dpkg, which never reaches a mirror, the same way after a fetch as after a restore.
+# apt given the files and --no-download still wanted archives from the mirror ("Unable to fetch
+# some archives").
 runner_packages() {
   local verb=${1:-} dir=${2:-} package
   [[ -n $dir ]] || usage
@@ -346,7 +367,7 @@ runner_packages() {
     install)
       package=${3:-}
       [[ -n $package && -d $dir/$package ]] || { echo "ci/check: no files of '$package' in $dir." >&2; exit 1; }
-      sudo apt-get install -y --no-download "$dir/$package"/*.deb
+      sudo env DEBIAN_FRONTEND=noninteractive dpkg -i "$dir/$package"/*.deb
       ;;
     *) usage ;;
   esac
