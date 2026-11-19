@@ -527,7 +527,8 @@ public final class WorkbenchView: NSView {
     private func leaving(elsewhere views: [TerminalPane]) -> [TerminalPane] {
         let elsewhere = views.filter(\.keyboardElsewhere)
         guard let first = elsewhere.first else { return views }
-        let said = Card.fitting(model.tab(holding: first.id).map { model.title(of: $0.id) } ?? "This terminal") { first.stillRunning($0) ?? $0 }
+        let title = model.tab(holding: first.id).map { model.title(of: $0.id) } ?? "This terminal"
+        let said = Card.fitting(title, width: min(Card.width, Double(bounds.width) - 2 * Look.Space.l)) { first.stillRunning($0) ?? $0 }
         for view in elsewhere {
             view.detach()
             remove(view)

@@ -22,6 +22,13 @@ public struct Keyboard: Equatable, Sendable {
         free = !yours && writer.isEmpty
     }
 
+    /// Who opened the session could not be learned (its listing refused, or not naming it): a free
+    /// keyboard is said anyway, since silence is the worse answer, and if this client is the opener
+    /// after all its first key takes the keyboard and the words go.
+    public mutating func openerNotLearned() {
+        opener = ""
+    }
+
     /// The keyboard is free and who opened the session is not known yet: ask it.
     public var needsOpener: Bool {
         free && opener == nil

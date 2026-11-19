@@ -397,12 +397,14 @@ public final class TerminalPane: NSView {
     /// Who opened this session, from its workspace's listing, so a keyboard no one holds is said to
     /// anyone else, whose typing does not take it.
     private func learnOpener() async {
-        guard case let .workspace(project, workspace) = place, let tickets,
-              let listing = try? await tickets.sessions(in: project, workspace: workspace),
-              let opener = listing.sessions.first(where: { $0.name == name })?.opener
-        else { return }
+        guard case let .workspace(project, workspace) = place, let tickets else { return }
+        let listing = try? await tickets.sessions(in: project, workspace: workspace)
         let wasSaid = keyboard.said
-        keyboard.opener = opener
+        if let opener = listing?.sessions.first(where: { $0.name == name })?.opener {
+            keyboard.opener = opener
+        } else {
+            keyboard.openerNotLearned()
+        }
         sayKeyboard(wasSaid)
     }
 

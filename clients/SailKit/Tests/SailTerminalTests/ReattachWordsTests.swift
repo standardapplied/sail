@@ -75,6 +75,13 @@ import Testing
         admin.writerChanged(to: "ana", yours: true, me: "ana")
         #expect(admin.said == nil, "taken")
 
+        var unknown = Keyboard()
+        unknown.writerChanged(to: "", yours: false, me: "uday")
+        unknown.openerNotLearned()
+        #expect(unknown.said == "No one holds the keyboard." && !unknown.needsOpener, "an opener that cannot be learned is never silence")
+        unknown.writerChanged(to: "uday", yours: true, me: "uday")
+        #expect(unknown.said == nil, "the opener's first key took it")
+
         var opener = Keyboard()
         opener.opener = "uday"
         opener.writerChanged(to: "", yours: false, me: "uday")

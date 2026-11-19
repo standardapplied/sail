@@ -9,32 +9,31 @@ import SailLook
 /// mirrored right to left.
 @MainActor
 public final class Card: NSView {
-    static let width = 420.0
-
-    /// The width a card's words take at its widest.
-    static var wordsWidth: Double {
-        width - Banner.padding.leading - Banner.mark - Banner.gap - Banner.padding.trailing
-    }
+    public static let width = 420.0
 
     /// `words(name)`, `name` cut in its middle as little as it takes for the words to keep to
-    /// `lines` lines of a card at its widest.
-    public static func fitting(_ name: String, lines: Int = 2, in words: (String) -> String) -> String {
-        let font = NSFont.systemFont(ofSize: Look.Step.callout.points)
+    /// `lines` lines in a card `width` wide, measured by the label the card draws them with; left
+    /// whole when the words around it need more on their own, since no cut could win.
+    public static func fitting(_ name: String, lines: Int = 2, width: Double = Card.width, in words: (String) -> String) -> String {
+        let label = NSTextField(wrappingLabelWithString: "")
+        label.font = .systemFont(ofSize: Look.Step.callout.points)
+        let room = width - Banner.padding.leading - Banner.mark - Banner.gap - Banner.padding.trailing
         func height(_ text: String) -> Double {
-            Double(NSAttributedString(string: text, attributes: [.font: font]).boundingRect(
-                with: NSSize(width: wordsWidth - 4, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading]
-            ).height)
+            label.stringValue = text
+            return Double(label.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: room, height: .greatestFiniteMagnitude)).height ?? 0)
         }
-        let most = height(String(repeating: "X\n", count: lines - 1) + "X") + 0.5
+        let most = height(Array(repeating: "X", count: lines).joined(separator: "\n")) + 0.5
+        guard height(words(name)) > most else { return words(name) }
         var kept = Array(name)
-        var said = words(name)
-        while height(said) > most, kept.count > 2 {
+        while kept.count > 2 {
             kept.remove(at: kept.count / 2)
             let half = kept.count / 2
-            said = words(String(kept[..<half]) + "…" + String(kept[half...]))
+            let said = words(String(kept[..<half]) + "…" + String(kept[half...]))
+            if height(said) <= most { return said }
         }
-        return said
+        return words(name)
     }
+
     private let message = NSTextField(wrappingLabelWithString: "")
     private let primary: SailButton
     private let secondary: SailButton
