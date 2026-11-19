@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 
 readonly MODULES="sail-core sail-harness sail-infra"
 readonly DEFAULT_IT_SECONDS=10
+readonly SPLIT_IT_SECONDS=360
 readonly PREPARED_SOURCE=sail-infra/src/test/java/ai/singlr/sail/engine/AbstractIncusIT.java
 
 usage() {
@@ -100,15 +101,32 @@ it_classes() {
     | sort
 }
 
-shard() {
-  local index=${1:-} count=${2:-}
-  [[ $index =~ ^[1-9][0-9]*$ && $count =~ ^[1-9][0-9]*$ && $index -le $count ]] || usage
-  shift 2
+# Each IT class with its recorded cost, a class over SPLIT_IT_SECONDS as that many parts of its
+# methods (`methods`), each "Class#a+b+..." costing its share, so no one class outlasts a shard.
+it_units() {
+  local cost class parts part
   it_classes "$@" \
     | awk -v fallback="$DEFAULT_IT_SECONDS" '
         NR == FNR { seconds[$2] = $1; next }
         { cost = ($1 in seconds) ? seconds[$1] : fallback; print cost, $1 }
       ' ci/it-seconds - \
+    | while read -r cost class; do
+        if (( cost <= SPLIT_IT_SECONDS )); then
+          echo "$cost $class"
+          continue
+        fi
+        parts=$(( (cost + SPLIT_IT_SECONDS - 1) / SPLIT_IT_SECONDS ))
+        for part in $(seq 1 "$parts"); do
+          echo "$(( cost / parts )) $(methods "$class" "$part" "$parts")"
+        done
+      done
+}
+
+shard() {
+  local index=${1:-} count=${2:-}
+  [[ $index =~ ^[1-9][0-9]*$ && $count =~ ^[1-9][0-9]*$ && $index -le $count ]] || usage
+  shift 2
+  it_units "$@" \
     | sort -k1,1nr -k2,2 \
     | awk -v index_="$index" -v count="$count" '
         {
