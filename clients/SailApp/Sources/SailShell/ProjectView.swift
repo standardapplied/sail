@@ -603,7 +603,7 @@ final class CreateRow: NSView {
         fieldWidth.priority = .defaultHigh
         self.fieldWidth = fieldWidth
         var constraints = [
-            field.leadingAnchor.constraint(equalTo: leadingAnchor), field.topAnchor.constraint(equalTo: topAnchor), fieldWidth,
+            field.leadingAnchor.constraint(equalTo: leadingAnchor), field.topAnchor.constraint(equalTo: topAnchor, constant: Self.padding), fieldWidth,
             field.trailingAnchor.constraint(lessThanOrEqualTo: buttons.leadingAnchor, constant: -Self.gap),
             buttons.trailingAnchor.constraint(equalTo: trailingAnchor),
             buttons.topAnchor.constraint(equalTo: field.topAnchor, constant: (field.size.height - ButtonSize.small.height) / 2),
@@ -636,11 +636,10 @@ final class CreateRow: NSView {
         return (Self.padding + max(Self.least, words)).rounded(.up)
     }
 
-    /// The row centres its content under its hairline, so this is its height less 12 pt twice: the
-    /// field then starts 12 pt under the hairline, as the design's row is padded only above, and its
-    /// lines run to the row's foot.
+    /// The whole row under its hairline, its 12 pt above the field included, so every line it draws
+    /// is inside its bounds and takes clicks: one drawn past them is seen and never hit.
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: max(Self.least, words) - Self.padding)
+        NSSize(width: NSView.noIntrinsicMetric, height: Self.padding + max(Self.least, words))
     }
 
     /// The field with the line under its box, and the show line under that.

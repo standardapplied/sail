@@ -375,7 +375,10 @@ import Testing
         #expect(line.minY >= field.maxY + CreateRow.below - 0.5 && abs(Double(line.minX - field.minX)) < 0.5, "the show line is at \(line), the field \(field)")
         #expect(buttons.minX >= max(field.maxX, line.maxX) + CreateRow.gap - 0.5, "Cancel starts at \(buttons.minX), the words end at \(max(field.maxX, line.maxX))")
         #expect(buttons.maxY <= field.minY + create.field.size.height + 0.5, "the buttons hang below the box")
-        #expect(Double(row.frame.height) >= 1 + CreateRow.padding + Double(line.maxY) - 0.5, "the row (\(row.frame.height) pt) is shorter than its words")
+        #expect(Double(row.frame.height) >= 1 + Double(line.maxY) - 0.5, "the row (\(row.frame.height) pt) is shorter than its words")
+        let show = try #require(Self.found(NSButton.self, in: showLine).first)
+        let middle = create.superview?.convert(NSPoint(x: show.bounds.midX, y: show.bounds.midY), from: show) ?? .zero
+        #expect(create.hitTest(middle) === show, "a click on Show dock's middle reaches \(String(describing: create.hitTest(middle))), not the button")
         view.project.on(.show("dock"))
         #expect(view.project.list.chosen == "dock")
         let again = try #require(view.window?.firstResponder as? NSTextView, "Show dock took the keys from the field")
