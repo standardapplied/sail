@@ -109,6 +109,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     /// row is found where the pointer is; otherwise the row hovered before is hovered again.
     private func reloadKeepingHover() {
         let hovered = (0 ..< numberOfRows).first { (rowView(atRow: $0, makeIfNecessary: false) as? SailRowView)?.hovered == true }.flatMap { item(at: $0)?.id }
+        Tooltip.putAway()
         reloadData()
         let row: Int?
         if let point = pointerNow {
