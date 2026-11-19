@@ -5,6 +5,8 @@
 public struct Keyboard: Equatable, Sendable {
     /// Who holds the keyboard while this client does not; nil while it is here.
     public private(set) var elsewhere: String?
+    /// The person this client is, as the last change was read for.
+    private var me = ""
     private var answering = Answer.attach
 
     private enum Answer: Equatable, Sendable {
@@ -25,6 +27,7 @@ public struct Keyboard: Equatable, Sendable {
 
     /// The host said `writer` holds the keyboard; `me` is the person this client is.
     public mutating func writerChanged(to writer: String, me: String) {
+        self.me = me
         switch answering {
         case .attach: elsewhere = writer == me || writer.isEmpty ? nil : writer
         case .take: elsewhere = nil
@@ -33,8 +36,12 @@ public struct Keyboard: Equatable, Sendable {
         answering = .nothing
     }
 
-    /// What the pane says while the keyboard is elsewhere.
+    /// What the pane says while the keyboard is elsewhere: where it went when this person took it
+    /// (the host tells only that it is them, not which window or Mac), and who has it when someone
+    /// else did.
     public var said: String? {
-        elsewhere.map { "Typing here is paused: the keyboard is with \($0) now." }
+        guard let elsewhere else { return nil }
+        guard elsewhere != me else { return "Typing here is paused: you took the keyboard in another window or on another Mac." }
+        return "Typing here is paused: the keyboard is with \(elsewhere) now."
     }
 }

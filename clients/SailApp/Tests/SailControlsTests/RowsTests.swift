@@ -395,6 +395,53 @@ import Testing
         }
     }
 
+    /// A card over a terminal: drawn in its tone as a banner is, its mark in the leading padding,
+    /// its words and both its actions inside its edge, the primary first, neither over the other,
+    /// each reached by a click at its middle and 2 pt inside each edge, at most 420 pt wide, and the
+    /// mark mirrored right to left; hidden, it offers nothing.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func aCardHoldsItsWordsAndBothActionsInsideItsEdgeEachReached(_ name: String, _ look: Look) throws {
+        let canvas = NSColor(Tint(look.canvas))
+        let card = Card(look: look)
+        card.show(
+            "This terminal ended: Workspace dock of harbor was stopped by ana, after a long afternoon of work in it.",
+            tone: .warning, button: "Open a New One", second: "Close"
+        )
+        card.frame = NSRect(x: 0, y: 0, width: 600, height: 400)
+        let (window, backdrop) = ControlsTests.window(holding: card, on: canvas)
+        defer { window.close() }
+        card.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([card.leadingAnchor.constraint(equalTo: backdrop.leadingAnchor), card.topAnchor.constraint(equalTo: backdrop.topAnchor)])
+        backdrop.layoutSubtreeIfNeeded()
+        #expect(card.frame.width <= 420.5 && card.frame.width > 200, "\(name): the card is \(card.frame)")
+        let buttons = card.subviews.flatMap(\.subviews).flatMap { [$0] + $0.subviews }.compactMap { $0 as? SailButton }.filter { !$0.isHidden }
+        #expect(buttons.map(\.title) == ["Open a New One", "Close"] && card.offers == ["Open a New One", "Close"])
+        let boxes = buttons.map { card.convert($0.alignmentRect(forFrame: $0.bounds), from: $0) }
+        for box in boxes {
+            #expect(card.bounds.insetBy(dx: 10, dy: 10).contains(box), "\(name): an action at \(box) is not inside the card's padding \(card.bounds)")
+        }
+        #expect(boxes[0].maxX <= boxes[1].minX, "\(name): the primary \(boxes[0]) is not before the secondary \(boxes[1])")
+        #expect(abs(Double(boxes[0].minY - boxes[1].minY)) < 0.5)
+        let words = try #require(card.subviews.flatMap(\.subviews).first { $0 is NSTextField })
+        let wordsBox = card.convert(words.bounds, from: words)
+        #expect(wordsBox.minX >= card.markBox.maxX && wordsBox.maxX <= card.bounds.maxX - 10 && wordsBox.maxY <= boxes[0].minY, "\(name): the words at \(wordsBox)")
+        #expect(card.markBox.minX >= 12 && card.markBox.maxX <= wordsBox.minX)
+        for (button, face) in zip(buttons, boxes) {
+            let inner = face.insetBy(dx: 2, dy: 2)
+            for point in [NSPoint(x: inner.midX, y: inner.midY), NSPoint(x: inner.minX, y: inner.midY), NSPoint(x: inner.maxX, y: inner.midY), NSPoint(x: inner.midX, y: inner.minY), NSPoint(x: inner.midX, y: inner.maxY)] {
+                let hit = backdrop.hitTest(backdrop.convert(point, from: card))
+                #expect(hit === button || hit?.isDescendant(of: button) == true, "\(name): a click at \(point) on \(button.title) reaches \(String(describing: hit))")
+            }
+        }
+        let paint = BannerPaint(.warning, look: look)
+        let fill = ControlsTests.colour(card, on: canvas, at: NSPoint(x: 6, y: Double(card.frame.height) - 4), scale: 2)
+        #expect(ControlsTests.tells(fill, ControlsTests.swatch(canvas, [NSColor(Tint(paint.fill))], scale: 2), from: ControlsTests.swatch(canvas, [NSColor(Tint(look.surface))], scale: 2)), "\(name): the fill is \(fill)")
+        card.userInterfaceLayoutDirection = .rightToLeft
+        #expect(abs(Double(card.bounds.width - card.markBox.maxX) - 12 - 1) < 1, "\(name): right to left, the mark is at \(card.markBox)")
+        card.hide()
+        #expect(card.offers.isEmpty && card.shown == nil)
+    }
+
     /// The empty state: the tile's 8 pt grid on the surface, solid or dashed, the column at most
     /// 400 pt, and VoiceOver's order: the title, the body, then the action.
     @Test func theEmptyStateIsTheSheets() throws {

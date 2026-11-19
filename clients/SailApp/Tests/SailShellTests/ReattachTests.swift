@@ -21,7 +21,7 @@ import Testing
 /// back to it as the person it is, and says when it cannot.
 @MainActor @Suite(.serialized) struct ReattachTests {
     static let dock = Place.workspace(project: "harbor", name: "dock")
-    static let stopped = "Workspace dock of harbor is being stopped by ana, which ends this terminal."
+    static let stopped = "Workspace dock of harbor was stopped by ana."
 
     /// This Mac's workbench over `local`, restored from `kept`, its runner tabs reaching `runner`
     /// as whoever `who` names.
@@ -159,6 +159,38 @@ import Testing
         #expect(await RunnerTabTests.until(10) { busy.attachedOnce }, "attached again once the host answers")
     }
 
+    /// The ended card and the keyboard card sit inside the pane, in a window as a person sees it,
+    /// with every action reached by a click at its middle and 2 pt inside each edge.
+    @Test func theCardsSitInsideThePaneAndEveryActionIsReached() async throws {
+        let runner = try FakeRunnerDoor(person: "uday")
+        defer { runner.stop() }
+        runner.hold("app-x")
+        runner.end("app-x", saying: Self.stopped)
+        let pane = try RunnerTabTests.pane(Self.dock, runner: DoorTickets(runner), start: .attach, session: "app-x", person: "uday")
+        let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 360), styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.close() }
+        let room = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 360))
+        pane.frame = room.bounds
+        room.addSubview(pane)
+        window.contentView = room
+        window.orderFront(nil)
+        pane.begin()
+        #expect(await RunnerTabTests.until(10) { pane.status.offers == ["Open a New One", "Close"] }, "\(pane.status)")
+        #expect(WorkspacesViewTests.outOfReach(in: room).isEmpty, "\(WorkspacesViewTests.outOfReach(in: room))")
+
+        runner.hold("app-k")
+        let held = try RunnerTabTests.pane(Self.dock, runner: DoorTickets(runner), start: .attach, session: "app-k", person: "uday")
+        held.frame = room.bounds
+        pane.removeFromSuperview()
+        room.addSubview(held)
+        held.begin()
+        #expect(await RunnerTabTests.until(10) { held.attachedOnce })
+        runner.takeKeyboard("app-k", by: "ana")
+        #expect(await RunnerTabTests.until(10) { held.status.offers == ["Take Keyboard"] }, "\(held.status)")
+        #expect(held.status.says == "Typing here is paused: the keyboard is with ana now.", "someone else is named")
+        #expect(WorkspacesViewTests.outOfReach(in: room).isEmpty, "\(WorkspacesViewTests.outOfReach(in: room))")
+    }
+
     /// The door's tickets, its listing answered with `refusal`.
     final class Answering: TicketSource {
         let tickets: DoorTickets
@@ -190,7 +222,7 @@ import Testing
         #expect(pane.status.says == nil, "the keyboard came here")
 
         runner.takeKeyboard("app-k", by: "uday")
-        #expect(await RunnerTabTests.until(10) { pane.status.says == "Typing here is paused: the keyboard is with uday now." }, "\(pane.status)")
+        #expect(await RunnerTabTests.until(10) { pane.status.says == "Typing here is paused: you took the keyboard in another window or on another Mac." }, "\(pane.status)")
         #expect(pane.status.offers == ["Take Keyboard"])
         #expect(pane.press("Take Keyboard"))
         #expect(await RunnerTabTests.until(10) { pane.status.says == nil }, "\(pane.status)")

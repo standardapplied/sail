@@ -1,5 +1,6 @@
 import AppKit
 import SailAPI
+import SailControls
 import SailLook
 import SailSurface
 import SailTerminal
@@ -35,7 +36,7 @@ public final class WorkbenchView: NSView {
     private let fonts: TerminalFonts
     private var tabViews: [TabID: TabView] = [:]
     private var shownSelected: TabID?
-    private let banner: StatusBanner
+    private let banner: Card
     private let emptyLabel = NSTextField(labelWithString: "No terminal is open")
     private let newTerminal: AccentButton
     private var started = false
@@ -69,7 +70,7 @@ public final class WorkbenchView: NSView {
         } catch {
             throw .resources("the terminal's fonts cannot be read: \(error)")
         }
-        banner = StatusBanner(look: look)
+        banner = Card(look: look)
         strip = TabStrip(look: look)
         newTerminal = AccentButton("New Terminal", look: look, target: nil, action: #selector(WorkbenchView.newTab(_:)))
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))

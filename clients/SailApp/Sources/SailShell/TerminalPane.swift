@@ -1,5 +1,6 @@
 import AppKit
 import SailAPI
+import SailControls
 import SailLook
 import SailSurface
 import SailTerminal
@@ -61,7 +62,7 @@ public final class TerminalPane: NSView {
     /// The person the pane's runner session is reached as, empty when no one is named.
     let person: String
     private var keyboard = Keyboard()
-    private let banner: StatusBanner
+    private let banner: Card
     private let scrim = Scrim()
     private let latency = NSTextField(labelWithString: "")
     private var latencyTimer: Timer?
@@ -89,7 +90,7 @@ public final class TerminalPane: NSView {
         } catch {
             throw .resources("the terminal cannot start: \(error)")
         }
-        banner = StatusBanner(look: look)
+        banner = Card(look: look)
         super.init(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
         compose()
     }
@@ -330,11 +331,11 @@ public final class TerminalPane: NSView {
         }
         switch said.offer {
         case .openANewOne:
-            banner.show(said.said, button: "Open a New One", handler: { [weak self] in MainActor.assumeIsolated { self?.openAgain() } }, second: "Close", secondHandler: close)
+            banner.show(said.said, tone: .warning, button: "Open a New One", handler: { [weak self] in MainActor.assumeIsolated { self?.openAgain() } }, second: "Close", secondHandler: close)
         case .tryAgain:
-            banner.show(said.said, button: "Try Again", handler: { [weak self] in MainActor.assumeIsolated { self?.attachAgain() } }, second: "Close", secondHandler: close)
+            banner.show(said.said, tone: .warning, button: "Try Again", handler: { [weak self] in MainActor.assumeIsolated { self?.attachAgain() } }, second: "Close", secondHandler: close)
         case .close:
-            banner.show(said.said, button: "Close", handler: close)
+            banner.show(said.said, tone: .warning, button: "Close", handler: close)
         }
     }
 

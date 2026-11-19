@@ -14,7 +14,7 @@ import Testing
     /// terminal host not answering, in its words, offering Try Again; nothing when the listing names
     /// it live or fails otherwise.
     @Test func aRefusedReattachIsSaidFromTheWorkspacesListing() {
-        let stopped = "Workspace dock of harbor is being stopped by uday, which ends this terminal."
+        let stopped = "Workspace dock of harbor was stopped by uday."
         let listing = Result<RunnerSessions, SailError>.success(RunnerSessions(sessions: [
             Self.session("app-a", live: false, ended: stopped), Self.session("app-b", live: false, ended: "exited(0)"),
             Self.session("app-c", live: true), Self.session("app-d", live: false),
@@ -41,12 +41,13 @@ import Testing
         keyboard.writerChanged(to: "ana", me: "ana")
         #expect(keyboard.elsewhere == nil)
         keyboard.writerChanged(to: "ana", me: "ana")
-        #expect(keyboard.said == "Typing here is paused: the keyboard is with ana now.")
+        #expect(keyboard.said == "Typing here is paused: you took the keyboard in another window or on another Mac.")
         keyboard.taking()
         keyboard.writerChanged(to: "ana", me: "ana")
         #expect(keyboard.elsewhere == nil)
         keyboard.writerChanged(to: "uday", me: "ana")
         #expect(keyboard.elsewhere == "uday")
+        #expect(keyboard.said == "Typing here is paused: the keyboard is with uday now.", "someone else is named")
         keyboard.attached()
         keyboard.writerChanged(to: "ana", me: "ana")
         #expect(keyboard.elsewhere == nil)
