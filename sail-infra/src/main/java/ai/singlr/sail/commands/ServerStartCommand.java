@@ -541,11 +541,8 @@ public final class ServerStartCommand implements Runnable {
     }
 
     @Override
-    public List<PtyMessage.SessionInfo> sessions() throws IOException {
-      var socket = SailPaths.ptySocketPath();
-      try (var client = SessionClient.connect(socket, PtyHostYield.dispatchCredential(socket))) {
-        return client.list();
-      }
+    public PtyMessage sessions(String credential) throws IOException {
+      return SessionClient.sessionsFor(SailPaths.ptySocketPath(), credential);
     }
   }
 }

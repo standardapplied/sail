@@ -8,13 +8,11 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.pty.PtyMessage;
-import ai.singlr.sail.pty.PtySessionHost;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.time.Instant;
 import java.util.Comparator;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -43,11 +41,12 @@ public final class TerminalTickets {
         throws IOException;
 
     /**
-     * Every session the host holds, live or ended within its keeping, as it lists them for its
-     * dispatch credential. A host that lists none here says so by throwing, which is the terminal's
-     * outage.
+     * The host's listing for the holder of {@code credential}, every page of it: the {@link
+     * PtyMessage.Sessions} it may attach to, live or ended within the host's keeping, or a {@link
+     * PtyMessage.TicketRefused} or {@link PtyMessage.Err} saying why not. A host that lists none
+     * here says so by throwing, which is the terminal's outage.
      */
-    default List<PtyMessage.SessionInfo> sessions() throws IOException {
+    default PtyMessage sessions(String credential) throws IOException {
       throw new IOException("This terminal host lists no sessions here.");
     }
   }
@@ -108,24 +107,37 @@ public final class TerminalTickets {
 
   /**
    * The sessions in {@code workspace} of {@code project} ({@code main} for the project's own
-   * container) that {@code actor} may attach to, live or ended within the host's keeping, newest
-   * first: by the host's own rule for an attach, those whose opener's box {@code actor} operates
-   * (their own, or every one for an admin).
+   * container) the holder of {@code credential} may attach to, live or ended within the host's
+   * keeping, newest first, none made before {@code since}, the workspace's own start: the host
+   * lists them for that credential as it decides its attach, and refuses one that stands for no one
+   * in a ticket's words.
    */
-  WorkspaceSessionsResponse sessions(Actor actor, String project, String workspace) {
+  WorkspaceSessionsResponse sessions(
+      String credential, String project, String workspace, Instant since) {
     NameValidator.requireValidProjectName(project);
     NameValidator.requireValidWorkspaceName(workspace);
     var place = workspace.equals("main") ? "" : workspace;
-    List<PtyMessage.SessionInfo> listed;
+    PtyMessage answer;
     try {
-      listed = host.sessions();
+      answer = host.sessions(credential);
     } catch (IOException unreachable) {
       throw ApiException.of(ErrorCode.TERMINAL_UNAVAILABLE, unreachable);
     }
+    var listed =
+        switch (answer) {
+          case PtyMessage.Sessions(var sessions, var next) -> sessions;
+          case PtyMessage.TicketRefused(var kind, var reason, var remedy) ->
+              throw new ApiException(code(kind), reason, remedy);
+          case PtyMessage.Err(var reason, var remedy) ->
+              throw new ApiException(ErrorCode.TERMINAL_UNAVAILABLE, reason, remedy);
+          default ->
+              throw new ApiException(
+                  ErrorCode.TERMINAL_UNAVAILABLE, "The terminal host listed no sessions.");
+        };
     return new WorkspaceSessionsResponse(
         listed.stream()
             .filter(info -> info.project().equals(project) && info.workspace().equals(place))
-            .filter(info -> PtySessionHost.mayAttach(actor, info.opener()))
+            .filter(info -> since == null || info.createdAtMillis() >= since.toEpochMilli())
             .sorted(
                 Comparator.comparingLong(PtyMessage.SessionInfo::createdAtMillis)
                     .reversed()

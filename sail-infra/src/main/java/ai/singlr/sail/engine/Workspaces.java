@@ -288,6 +288,11 @@ public final class Workspaces {
       map.put("owner", owner);
       return map;
     }
+
+    /** When its instance was created, nil when Incus did not say: what began its present life. */
+    public Instant started() {
+      return createdAt == null ? null : DateTimeUtils.parse(createdAt);
+    }
   }
 
   /**

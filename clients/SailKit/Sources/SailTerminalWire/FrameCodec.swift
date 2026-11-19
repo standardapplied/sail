@@ -120,7 +120,7 @@ private extension Frame {
         case let .attach(session, write): [.string(session), .bool(write)]
         case let .input(sequence, bytes): [.int64(sequence), .blob(bytes)]
         case let .resize(size), let .resized(size): size.fields
-        case let .listSessions(after, limit): [.string(after), .int32(limit)]
+        case let .listSessions(after, limit): [.string(after), .int32(limit), .string("")]
         case let .kill(session): [.string(session)]
         case let .yield(session, reason): [.string(session), .string(reason)]
         case let .issueTicket(action, target, credential, workspace):
@@ -219,7 +219,7 @@ private struct Cursor {
         case 4: .resize(try size())
         case 5: .takeWrite
         case 6: .detach
-        case 7: .listSessions(after: try string(), limit: try int32())
+        case 7: try listing()
         case 8: .kill(session: try string())
         case 10: .yield(session: try string(), reason: try string())
         case 11:
@@ -263,6 +263,14 @@ private struct Cursor {
         )
     }
 
+
+    /// A listing as this client asks one, for itself: the credential the box's own process carries
+    /// for an API caller is read and set aside, as this client never carries one.
+    private mutating func listing() throws(TerminalWireError) -> Frame {
+        let frame = Frame.listSessions(after: try string(), limit: try int32())
+        _ = try string()
+        return frame
+    }
 
     private mutating func session() throws(TerminalWireError) -> SessionInfo {
         SessionInfo(

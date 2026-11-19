@@ -1010,12 +1010,13 @@ direct_terminal() {
 
 # From box FROM, over box HOST's private address: HANDLE opens session NAME in acme's container
 # that counts, and drops it; HOST's sail migrate, the step an upgrade runs on the new binary,
-# reinstalls and restarts its pty host, which hands its sessions over; then HANDLE lists NAME live
+# reinstalls and restarts its pty host, which hands its sessions over, the host's process id
+# changing or the row fails (migrate is fail-soft about the restart); then HANDLE lists NAME live
 # with no client through HOST's API, attaches by a new ticket, and sees the numbers printed while
 # no client was attached replayed, and new ones after. HOST's listeners are set and put back as
 # direct_terminal sets them.
 reattach_after_upgrade() {
-  local run=$1 host=$2 from=$3 handle=$4 name=$5 ip before token dropped status=0
+  local run=$1 host=$2 from=$3 handle=$4 name=$5 ip before token dropped was now status=0
   ip=$(internal_ip "$run" "$host")
   [[ -n $ip ]] || { echo "$host has no address"; return 1; }
   before=$(on "$run" "$host" "sudo sail host status --json" | python3 -I -c "$LISTEN_SETTINGS") || before=""
@@ -1036,8 +1037,15 @@ reattach_after_upgrade() {
       fi
     fi
     if [[ $status == 0 ]]; then
+      was=$(on "$run" "$host" "systemctl show -p MainPID --value sail-pty-host")
       on "$run" "$host" "sudo sail migrate" || status=1
-      echo "$host's sail migrate restarted its pty host onto the installed binary"
+      now=$(on "$run" "$host" "systemctl show -p MainPID --value sail-pty-host")
+      if [[ $was =~ ^[1-9][0-9]*$ && $now =~ ^[1-9][0-9]*$ && $was != "$now" ]]; then
+        echo "$host's sail migrate restarted its pty host onto the installed binary: process $was, then $now"
+      else
+        echo "$host's pty host was not restarted by sail migrate: process '$was' before, '$now' after"
+        status=1
+      fi
     fi
     [[ $status == 0 ]] && { on "$run" "$from" "python3 /tmp/sail-reattach.py $ip $name back $dropped" <<< "$token" || status=1; }
   fi

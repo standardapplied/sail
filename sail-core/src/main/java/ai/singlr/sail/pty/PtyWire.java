@@ -114,7 +114,7 @@ public final class PtyWire {
       case PtyMessage.Detach m -> out.type(6);
       case PtyMessage.ListSessions m -> {
         out.type(7).string(m.after());
-        out.i32(m.limit());
+        out.i32(m.limit()).string(m.credential());
       }
       case PtyMessage.Kill m -> out.type(8).string(m.session());
       case PtyMessage.Yield m -> out.type(10).string(m.session()).string(m.reason());
@@ -278,7 +278,7 @@ public final class PtyWire {
       case 4 -> new PtyMessage.Resize(in.getInt(), in.getInt());
       case 5 -> new PtyMessage.TakeWrite();
       case 6 -> new PtyMessage.Detach();
-      case 7 -> new PtyMessage.ListSessions(string(in), in.getInt());
+      case 7 -> new PtyMessage.ListSessions(string(in), in.getInt(), string(in));
       case 8 -> new PtyMessage.Kill(string(in));
       case 10 -> new PtyMessage.Yield(string(in), string(in));
       case 11 ->

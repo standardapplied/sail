@@ -12,7 +12,9 @@ import ai.singlr.sail.access.baseline.Cast;
 import ai.singlr.sail.access.baseline.Corpus;
 import ai.singlr.sail.access.baseline.World;
 import ai.singlr.sail.commands.SessionClient;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
@@ -42,7 +44,6 @@ import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -355,12 +356,8 @@ class AccessDoorsBaselineTest {
                 }
 
                 @Override
-                public List<PtyMessage.SessionInfo> sessions() throws IOException {
-                  var dispatch =
-                      Files.readString(PtySessionHost.dispatchCredentialOf(socket)).strip();
-                  try (var client = SessionClient.connect(socket, dispatch)) {
-                    return client.list();
-                  }
+                public PtyMessage sessions(String credential) throws IOException {
+                  return SessionClient.sessionsFor(socket, credential);
                 }
               },
               host.tcpAddress().orElseThrow());
@@ -372,6 +369,8 @@ class AccessDoorsBaselineTest {
       askers.put("a machine token", new TokenStore(world.db).create("corpus-ci", "admin").token());
       askers.put(
           "the host token", new TokenStore(world.db).create(HostToken.NAME, "admin").token());
+      askers.put("ada's run credential", runCredential(world, Cast.ADA_RUN));
+      askers.put("ada's room agent credential", runCredential(world, Cast.ADA_ROOM_RUN));
       for (var asker : askers.entrySet()) {
         for (var project : List.of("acme", "beta", "delta", "omega")) {
           var label = asker.getKey() + " asks a ticket to open a terminal in " + project;
@@ -402,14 +401,13 @@ class AccessDoorsBaselineTest {
                               Map.of("action", "open", "project", "acme", "workspace", workspace))),
                   null));
         }
-        if (asker.getKey().startsWith("fde ")) {
-          var who = pty.identity(asker.getValue()).actor();
-          for (var workspace : List.of("main", "try")) {
-            var label =
-                asker.getKey() + " lists the sessions in workspace " + workspace + " of acme";
-            corpus.put(
-                label, answer(new Door(label, ops -> door.sessions(who, "acme", workspace)), null));
-          }
+        for (var workspace : List.of("main", "try")) {
+          var label = asker.getKey() + " lists the sessions in workspace " + workspace + " of acme";
+          corpus.put(
+              label,
+              answer(
+                  new Door(label, ops -> door.sessions(asker.getValue(), "acme", workspace, null)),
+                  null));
         }
         for (var session : List.of("lounge", "ghost")) {
           var label = asker.getKey() + " asks a ticket to attach to " + session;
@@ -791,6 +789,23 @@ class AccessDoorsBaselineTest {
   }
 
   /** A login session of FDE {@code fde}'s, as the gateway mints one for the pty host. */
+  /**
+   * A live credential for run {@code run}, as a run's agent presents one, in place of the one its
+   * dispatch minted, which no one here holds: asked last, after every door that reads the run.
+   */
+  private static String runCredential(World world, String run) {
+    var credential = Secrets.mint("sailrun");
+    world.db.execute("DELETE FROM run_credentials WHERE run_id = ?", run);
+    world.db.execute(
+        "INSERT INTO run_credentials (run_id, credential_hash, created_at, expires_at)"
+            + " VALUES (?, ?, ?, ?)",
+        run,
+        Secrets.hash(credential),
+        DateTimeUtils.now(),
+        null);
+    return credential;
+  }
+
   private static String session(World world, String fde) {
     return new AuthSessionStore(world.db)
         .create(new FdeStore(world.db).byHandle(fde).orElseThrow().id(), Duration.ofHours(1))

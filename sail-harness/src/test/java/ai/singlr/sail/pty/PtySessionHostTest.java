@@ -1125,8 +1125,12 @@ class PtySessionHostTest {
     }
   }
 
+  /**
+   * An ended entry is a record of how a session ended, not a session: anyone may open one of its
+   * name, which replaces the record, as the owner's own reuse does.
+   */
   @Test
-  void aForeignMemberCannotEvictAnothersCorpseByReusingItsName() throws Exception {
+  void anyoneMayOpenASessionOverAnothersEndedEntry() throws Exception {
     try (var ignored = startHost()) {
       try (var uday = connect("tok-uday")) {
         PtyWire.write(
@@ -1136,17 +1140,16 @@ class PtySessionHostTest {
         awaitCorpse(uday, "keep");
       }
       try (var mady = connect("tok-mady")) {
-        PtyWire.write(mady, new PtyMessage.Create("keep", List.of("sh"), "/tmp", "", "", 80, 24));
+        PtyWire.write(
+            mady,
+            new PtyMessage.Create("keep", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
         assertInstanceOf(
-            PtyMessage.Err.class,
-            readControl(mady),
-            "a foreign member cannot reuse an owner's name, even a corpse");
+            PtyMessage.Ok.class, readControl(mady), "an ended entry holds its name for no one");
       }
       try (var uday = connect("tok-uday")) {
         PtyWire.write(uday, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
         var listed = (PtyMessage.Sessions) readControl(uday);
-        assertEquals(1, listed.sessions().size(), "the owner's corpse is left intact");
-        assertEquals("keep", listed.sessions().getFirst().name());
+        assertEquals(List.of(), listed.sessions(), "the record is replaced by mady's live session");
       }
     }
   }
@@ -1726,6 +1729,110 @@ class PtySessionHostTest {
       }
       assertInstanceOf(
           PtyMessage.Ticket.class, askTicket("tok-uday", PtyMessage.TicketAction.OPEN, "beta"));
+    }
+  }
+
+  /**
+   * The API's listing for its caller is that caller's attach: the box's own process carries the
+   * caller's credential, the host resolves it as a ticket's, and keeps what that person could
+   * attach to (their own or an admin's every one, in a project they may read), live or ended. A
+   * credential that stands for no one is refused in a ticket's words, and only the box's own
+   * process may carry one.
+   */
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void aListingForACredentialIsWhatItsHolderMayAttachTo() throws Exception {
+    network =
+        PtySessionHost.Network.listening(
+            new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), now::get, holders);
+    unheld.add("beta:root");
+    var shim =
+        new PtySessionHost.Handoff(
+            SdNotify.NONE,
+            Map.of(),
+            exit -> PtyChildShimTest.shim(exit, "sh", "-c", "read a", "--"));
+    try (var ignored = startHost(PtySessionHost.Limits.DEFAULTS, shim);
+        var uday = connect("tok-uday")) {
+      for (var place : List.of("acme", "beta")) {
+        PtyWire.write(
+            uday, new PtyMessage.Create("in-" + place, List.of(), "/tmp", place, "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(uday));
+      }
+      create(uday, "done", "");
+      try (var dispatch = connect(dispatchCredential())) {
+        PtyWire.write(dispatch, new PtyMessage.Yield("done", "yielded to run 7"));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(dispatch));
+      }
+
+      assertEquals(List.of("done ended", "in-acme live", "in-beta live"), listedFor("tok-uday"));
+      assertEquals(List.of(), listedFor("tok-mady"), "a member lists nothing of another's");
+      assertEquals(
+          List.of("done ended", "in-acme live"),
+          listedFor("tok-root"),
+          "an admin lists every one in a project it may read, and none outside it");
+      assertEquals(
+          "forbidden The credential is not valid or has expired.", said(listFor("tok-nobody")));
+      try (var mady = connect("tok-mady")) {
+        PtyWire.write(mady, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT, "tok-uday"));
+        assertEquals(
+            "forbidden A ticket is asked by this box's own process alone, on a connection that"
+                + " presented no token.",
+            said(PtyWire.read(mady)),
+            "only the box's own process carries a caller's credential");
+      }
+    }
+  }
+
+  private PtyMessage listFor(String credential) throws IOException {
+    try (var channel = connect("")) {
+      PtyWire.write(channel, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT, credential));
+      return PtyWire.read(channel);
+    }
+  }
+
+  private List<String> listedFor(String credential) throws IOException {
+    return ((PtyMessage.Sessions) listFor(credential))
+        .sessions().stream().map(info -> info.name() + (info.live() ? " live" : " ended")).toList();
+  }
+
+  /**
+   * An ended entry holds nothing but how it ended: it counts toward no cap, and anyone may open a
+   * session of its name, though while it lived only its opener and an admin could.
+   */
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void anEndedEntryHoldsNoNameAndCountsTowardNoCap() throws Exception {
+    try (var ignored = startHost(new PtySessionHost.Limits(1, 8, 64, 2))) {
+      try (var uday = connect("tok-uday")) {
+        create(uday, "resume-7", "");
+        try (var mady = connect("tok-mady")) {
+          PtyWire.write(
+              mady,
+              new PtyMessage.Create(
+                  "resume-7", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
+          assertEquals(
+              "Session 'resume-7' is not yours.",
+              assertInstanceOf(PtyMessage.Err.class, PtyWire.read(mady)).message(),
+              "a live one is its opener's");
+        }
+        try (var dispatch = connect(dispatchCredential())) {
+          PtyWire.write(dispatch, new PtyMessage.Yield("resume-7", "yielded to run 7"));
+          assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(dispatch));
+        }
+        create(uday, "again", "");
+      }
+      try (var mady = connect("tok-mady")) {
+        create(mady, "resume-7", "");
+      }
+      try (var root = connect("tok-root")) {
+        PtyWire.write(
+            root,
+            new PtyMessage.Create("third", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
+        assertEquals(
+            "The host is at its session cap of 2; kill one first.",
+            assertInstanceOf(PtyMessage.Err.class, PtyWire.read(root)).message(),
+            "the host's cap counts the two live sessions alone");
+      }
     }
   }
 
