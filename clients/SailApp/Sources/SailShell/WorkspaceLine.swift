@@ -77,18 +77,24 @@ final class WorkspaceLine: NSStackView {
         }
     }
 
-    /// Whose a row is, said in words ("ana", "an inactive account", "no one").
+    /// Whose a row is in its owner's 104 pt column ("ana", "inactive", "no one"): an owner whose
+    /// account is not active is said in a word that fits it.
     nonisolated static func said(_ owner: WorkspacesModel.Owner) -> String {
         switch owner {
         case let .person(handle): handle
-        case .inactive: "an inactive account"
+        case .inactive: "inactive"
         case .nobody: "no one"
         }
     }
 
-    /// Whose a row is under its name when narrow ("ana's", "an inactive account's", "no one's").
+    /// Whose a row is under its name when narrow, where there is room ("ana's", "an inactive
+    /// account's", "no one's").
     nonisolated static func whose(_ owner: WorkspacesModel.Owner) -> String {
-        said(owner) + "'s"
+        switch owner {
+        case let .person(handle): handle + "'s"
+        case .inactive: "an inactive account's"
+        case .nobody: "no one's"
+        }
     }
 
     /// A column `width` wide holding `view` at its start, never past its end.

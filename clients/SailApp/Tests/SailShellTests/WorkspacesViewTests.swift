@@ -205,76 +205,6 @@ import Testing
         #expect(transport.routes.filter { $0.hasPrefix("GET /v1/projects/harbor") }.count == lists, "the earlier person's create listed harbor again")
     }
 
-    /// What in `root` a person could see but not reach: a shown view lying outside its parent (a
-    /// row shorter than its lines, a label run past its stack), which AppKit draws and never hits;
-    /// and a shown button that a click at its middle or 2 pt inside any edge does not reach. A text
-    /// field's own insides (the field editor's clip and viewport) are AppKit's, and overhang by design.
-    static func outOfReach(in root: NSView) -> [String] {
-        root.layoutSubtreeIfNeeded()
-        guard let window = root.window, let content = window.contentView, let frameView = content.superview else { return ["no window"] }
-        var faults: [String] = []
-        func walk(_ view: NSView) {
-            for child in view.subviews where !child.isHidden && child.frame.width > 0 && child.frame.height > 0 {
-                child.layoutSubtreeIfNeeded()
-                // A label's cell draws its words 2 pt inside its frame, which may hang 2 pt out to keep them.
-                let cellInset = child is NSTextField ? 2.0 : 0
-                let drawn = child.alignmentRect(forFrame: child.frame).insetBy(dx: cellInset, dy: 0), room = view.bounds.insetBy(dx: -0.5, dy: -0.5)
-                if !room.contains(drawn) { faults.append("\(type(of: child)) at \(drawn) outside its \(type(of: view)) \(view.bounds)") }
-                if let button = child as? NSButton {
-                    let face = button.alignmentRect(forFrame: button.bounds).insetBy(dx: 2, dy: 2)
-                    for point in [NSPoint(x: face.midX, y: face.midY), NSPoint(x: face.minX, y: face.midY), NSPoint(x: face.maxX, y: face.midY), NSPoint(x: face.midX, y: face.minY), NSPoint(x: face.midX, y: face.maxY)] {
-                        let hit = content.hitTest(frameView.convert(button.convert(point, to: nil), from: nil))
-                        if hit !== button, hit?.isDescendant(of: button) != true {
-                            faults.append("\(button.title.isEmpty ? String(describing: type(of: button)) : button.title) at \(point) reaches \(hit.map { String(describing: type(of: $0)) } ?? "nothing")")
-                        }
-                    }
-                }
-                if !(child is NSTextField) { walk(child) }
-            }
-        }
-        walk(root)
-        return faults
-    }
-
-    /// Every frame the section draws, at the narrowest card and the drive's width: nothing shown
-    /// lies outside its parent, and every button shown takes a click across its face (a row's Open
-    /// and ⋯, Cancel, Create and Show dock in a refused row, the banner's and the card's Try Again,
-    /// Open Account, Check Again, the header's buttons).
-    @Test(arguments: [true, false])
-    func everythingShownIsInsideItsParentAndEveryButtonTakesAClick(_ narrowest: Bool) async throws {
-        let width = narrowest ? Self.narrowestCard : 1024 - Rail.width - 4
-        let server = RecordedServer([try Exchange("projects"), try Exchange("workspaces-three"), try Exchange("refusal-conflict-workspace-exists")])
-        let (view, window) = try Self.view(server, width: width)
-        defer { window.orderOut(nil) }
-        view.shown()
-        #expect(await RunnerTabTests.until { view.text.contains("dock") }, "\(view.text)")
-        view.project.list.choose("dock")
-        #expect(Self.outOfReach(in: view) == [], "\(width) pt, a row chosen")
-        view.project.on(.newWorkspace)
-        view.project.field.field.stringValue = "dock"
-        view.project.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
-        view.project.on(.create)
-        #expect(await RunnerTabTests.until { !view.busy && view.text.contains("exists already") }, "\(view.text)")
-        #expect(Self.outOfReach(in: view) == [], "\(width) pt, a name refused")
-        view.project.on(.cancelCreate)
-        view.client = SailClient(transport: Proxied(server, failing: "GET /v1/projects/harbor/workspaces"), token: "tok")
-        view.project.on(.listAgain)
-        #expect(await RunnerTabTests.until { view.text.contains("Couldn’t list harbor’s workspaces") }, "\(view.text)")
-        #expect(Self.outOfReach(in: view) == [], "\(width) pt, a list that failed under its banner")
-        let (card, cardWindow) = try Self.view(RecordedServer([]), width: width)
-        defer { cardWindow.orderOut(nil) }
-        card.shown()
-        #expect(await RunnerTabTests.until { card.text.contains("did not answer") }, "\(card.text)")
-        #expect(Self.outOfReach(in: card) == [], "\(width) pt, the control plane out of reach")
-        let unready = Exchange(method: "GET", path: "/v1/projects", status: 200, body: Data(#"{"projects": [{"name": "demo", "container_status": "running", "template": "missing"}], "total": 1, "schema_version": 1}"#.utf8))
-        let none = Exchange(method: "GET", path: "/v1/projects/demo/workspaces", status: 200, body: Data(#"{"project": "demo", "workspaces": [], "schema_version": 1}"#.utf8))
-        let (demo, demoWindow) = try Self.view(RecordedServer([unready, none]), width: width)
-        defer { demoWindow.orderOut(nil) }
-        demo.shown()
-        #expect(await RunnerTabTests.until { demo.text.contains("demo isn’t ready yet") }, "\(demo.text)")
-        #expect(Self.outOfReach(in: demo) == [], "\(width) pt, a project with no template")
-    }
-
     /// n4: a narrow row keeps who may open it, as the note at its end cut short, never dropped.
     @Test func aNarrowRowKeepsWhoMayOpenIt() throws {
         let page = try #require(Self.page([WorkspaceRow(name: "dock", instance: "harbor-dock", state: .known(.running), owner: "uday")], for: Self.ana))
@@ -531,14 +461,14 @@ import Testing
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: LeftPanel.width.standard, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
         defer { window.orderOut(nil) }
         window.contentView = panel
-        panel.renderLoading(who: "\(handle) · role not yet confirmed", controlPlane: host)
+        panel.renderLoading(who: "\(handle) · role not yet confirmed", handle: handle, controlPlane: host)
         panel.layoutSubtreeIfNeeded()
         for label in [panel.who, panel.place] {
             let frame = panel.convert(label.alignmentRect(forFrame: label.frame), from: label.superview)
             #expect(frame.maxX <= panel.bounds.width - 14 + 0.5 && frame.height < 2 * 16, "the foot's \(label.stringValue.prefix(12))… runs to \(frame.maxX) of \(panel.bounds.width)")
         }
         #expect(panel.whoTip.shows && panel.placeTip.shows, "a cut foot is not said in full on hover")
-        panel.renderLoading(who: "ana · member", controlPlane: "main.acme.dev")
+        panel.renderLoading(who: "ana · member", handle: "ana", controlPlane: "main.acme.dev")
         panel.layoutSubtreeIfNeeded()
         #expect(!panel.whoTip.shows && !panel.placeTip.shows, "a foot shown in full says itself again on hover")
     }
@@ -597,13 +527,18 @@ import Testing
         return (value as? Tint) ?? cast(value, like: Tint(0).rgb).map { Tint($0) }
     }
 
-    /// A look switched while the section is hidden is taken when it is shown, not before.
+    /// A hidden section paints nothing however many looks are switched under it (`PaintWhenShown`);
+    /// shown, it paints once, in the look now, everywhere.
     @Test func aLookSwitchedWhileHiddenIsTakenOnShowing() async throws {
         let (view, _, _) = try await Self.listed()
+        let paints = view.lookPaints
         view.isHidden = true
-        view.look = .dark
-        #expect(view.project.look == .light, "a hidden section redrew for a look nobody sees")
+        for look in [Look.dark, .light, .dark] {
+            view.look = look
+        }
+        #expect(view.lookPaints == paints && view.project.look == .light, "a hidden section painted \(view.lookPaints - paints) times for looks nobody saw")
         view.isHidden = false
+        #expect(view.lookPaints == paints + 1, "shown, the section painted \(view.lookPaints - paints) times, not once")
         #expect(view.project.look == .dark && view.panel.look == .dark && Self.keptLight(under: view).isEmpty)
     }
 

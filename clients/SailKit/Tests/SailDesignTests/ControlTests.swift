@@ -199,4 +199,13 @@ import Testing
         let ages: [Double] = [-5, 0.4, 1, 59.9, 60, 240, 3599, 3600, 7300, 86400, 200_000]
         #expect(ages.map(Ago.said) == ["just now", "just now", "1 s ago", "59 s ago", "1 min ago", "4 min ago", "59 min ago", "1 h ago", "2 h ago", "1 d ago", "2 d ago"])
     }
+
+    /// The quiet scroller is Mast's terminal scrollbar in points: a 12 pt track inset 4 pt, a
+    /// 6 pt thumb in 3 pt corners 3 pt from the edge, the text ink at 35 %, 55 % hovered or dragged.
+    @Test(arguments: [Look.light, .dark])
+    func theScrollerIsMastsTerminalScrollbar(_ look: Look) {
+        #expect(ScrollerStyle.track == 12 && ScrollerStyle.inset == 4 && ScrollerStyle.thumb == 6 && ScrollerStyle.radius == 3 && ScrollerStyle.edge == 3)
+        #expect(ScrollerStyle.ink(look, active: false) == Tint(look.text.rgb, alpha: 0.35))
+        #expect(ScrollerStyle.ink(look, active: true) == Tint(look.text.rgb, alpha: 0.55))
+    }
 }

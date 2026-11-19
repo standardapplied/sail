@@ -322,6 +322,7 @@ final class Kit {
         case "tooltip": tooltips()
         case "banner": banners()
         case "empty": empties()
+        case "scroller": scrollers()
         default: break
         }
     }
@@ -356,6 +357,7 @@ final class Kit {
             held("button-icon-list-again", SailButton(icon: .refresh, label: "List Again", look: look, target: presses, action: #selector(KitPresses.press(_:)))),
             held("button-icon-more", SailButton(icon: .more, label: "More", size: .small, look: look, target: presses, action: #selector(KitPresses.press(_:)))),
             held("button-hint-open", open), held("button-hint-check-again", check), held("button-hint-create", create),
+            held("button-link-show-dock", LinkButton("Show dock", look: look, target: presses, action: #selector(KitPresses.press(_:)))),
         ])
     }
 
@@ -400,6 +402,24 @@ final class Kit {
         row("Spinner · on accent", [held("spinner", Spinner(look: look)), busy])
         let frame = SkeletonFrame(look: look)
         row("Skeleton row", [held("skeleton-row", frame)])
+    }
+
+    /// The quiet scroller at rest, hovered and dragged, each over a list scrolled a third of the way,
+    /// held shown (as with Always show scroll bars) so the sheet can be cut whatever AppKit's fade.
+    private func scrollers() {
+        row("Quiet scroller · rest, hover, dragged", ["rest", "hover", "dragged"].map { state in
+            let scroll = QuietScrollView(look: look)
+            scroll.scrollerStyle = .legacy
+            scroll.scroller.hovered = state == "hover"
+            scroll.scroller.dragging = state == "dragged"
+            let rows = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 360))
+            scroll.documentView = rows
+            scroll.widthAnchor.constraint(equalToConstant: 160).isActive = true
+            scroll.heightAnchor.constraint(equalToConstant: 120).isActive = true
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: 80))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            return held("scroller-\(state)", scroll)
+        })
     }
 
     /// The design's list specimen: a head, pier at rest and under the pointer, and dock chosen with

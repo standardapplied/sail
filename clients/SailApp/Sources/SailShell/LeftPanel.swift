@@ -21,6 +21,8 @@ package final class LeftPanel: NSView {
     }
 
     package let list: SailList
+    /// The projects scroll here, between the header and the foot.
+    package let scroll: QuietScrollView
     let heading = NSTextField(labelWithString: "Workspaces")
     let who = NSTextField(labelWithString: "")
     let place = NSTextField(labelWithString: "")
@@ -38,11 +40,14 @@ package final class LeftPanel: NSView {
     private var stale = false
     /// What it last showed, drawn again in a new look.
     private var shown: WorkspacesModel.Panel?
+    /// What its foot last said, drawn again in a new look while loading.
+    private var footSaid: (who: String, handle: String, controlPlane: String)?
 
     init(look: Look, mono: LabelFont) {
         self.look = look
         self.mono = mono
         list = SailList(rowStyle: .sidebar, look: look, mono: mono)
+        scroll = QuietScrollView(look: look)
         skeletons = [70.0, 52, 88, 60, 74].map { (tile: Skeleton(width: TilePaint.side, height: TilePaint.side, look: look), name: Skeleton(width: $0, look: look)) }
         super.init(frame: .zero)
         emptyLine.isHidden = true
@@ -66,11 +71,12 @@ package final class LeftPanel: NSView {
         foot.orientation = .vertical
         foot.alignment = .leading
         foot.spacing = 0
-        for view in [heading, list, foot] as [NSView] {
+        for view in [heading, foot] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
-        list.translatesAutoresizingMaskIntoConstraints = true
+        scroll.documentView = list
+        addSubview(scroll)
         let width = UserDefaults.standard.object(forKey: Self.remembered) as? Double ?? Self.width.standard
         widthConstraint = widthAnchor.constraint(equalToConstant: Self.clamped(width))
         NSLayoutConstraint.activate([
@@ -98,6 +104,7 @@ package final class LeftPanel: NSView {
     private func relook() {
         heading.textColor = NSColor(look.text)
         list.look = look
+        scroll.look = look
         whoTip.look = look
         placeTip.look = look
         for (tile, name) in skeletons {
@@ -105,7 +112,11 @@ package final class LeftPanel: NSView {
             name.look = look
         }
         projects = []
-        if let shown { render(shown) }
+        if let shown {
+            render(shown)
+        } else if let said = footSaid {
+            foot(who: said.who, handle: said.handle, controlPlane: said.controlPlane)
+        }
         needsDisplay = true
     }
 
@@ -125,29 +136,39 @@ package final class LeftPanel: NSView {
             }
         }
         if list.chosen != panel.chosen { list.choose(panel.chosen) }
-        foot(who: panel.who, controlPlane: panel.controlPlane)
+        foot(who: panel.who, handle: panel.handle, controlPlane: panel.controlPlane)
         needsLayout = true
     }
 
-    /// Skeleton rows in place of the projects; who is signed in is known already.
-    func renderLoading(who: String, controlPlane: String) {
+    /// The PROJECTS head with skeleton rows under it in place of the projects; who is signed in
+    /// is known already.
+    func renderLoading(who: String, handle: String, controlPlane: String) {
+        shown = nil
+        projects = []
+        list.entries = [.head("Projects", count: nil)]
         loading(true)
         emptyLine.isHidden = true
-        foot(who: who, controlPlane: controlPlane)
+        foot(who: who, handle: handle, controlPlane: controlPlane)
     }
 
-    /// The foot: who in full where it fits, cut at its end where it does not (a handle can be 63
-    /// characters), the control plane cut in its middle, which keeps both ends of a host; each in
-    /// full on hover.
-    private func foot(who: String, controlPlane: String) {
-        self.who.attributedStringValue = Self.foot(who, look.textSecondary, mono, cut: .byTruncatingTail)
+    /// The foot as the frame draws it (`.side-f`): mono 11 in the tertiary ink, the handle alone
+    /// weight 500 in the secondary ("**ana** · member"); who in full where it fits, cut at its end
+    /// where it does not (a handle can be 63 characters), the control plane cut in its middle,
+    /// which keeps both ends of a host; each in full on hover.
+    private func foot(who: String, handle: String, controlPlane: String) {
+        footSaid = (who, handle, controlPlane)
+        let line = NSMutableAttributedString(attributedString: Self.foot(who, look.textTertiary, mono, cut: .byTruncatingTail))
+        if who.hasPrefix(handle) {
+            let set = NSRange(location: 0, length: (handle as NSString).length)
+            line.addAttributes([.font: mono.font(Look.Step.micro.points, .medium) as NSFont, .foregroundColor: NSColor(look.textSecondary)], range: set)
+        }
+        self.who.attributedStringValue = line
         place.attributedStringValue = Self.foot(controlPlane, look.textTertiary, mono, cut: .byTruncatingMiddle)
         whoTip.text = who
         placeTip.text = controlPlane
     }
 
     private func loading(_ loading: Bool) {
-        list.isHidden = loading
         for (tile, name) in skeletons {
             tile.isHidden = !loading
             name.isHidden = !loading
@@ -189,7 +210,8 @@ package final class LeftPanel: NSView {
         super.layout()
         let top = Self.header + 4
         let rows = Double(list.rect(ofRow: max(list.numberOfRows - 1, 0)).maxY)
-        list.frame = NSRect(x: 0, y: top, width: Double(bounds.width), height: min(rows, max(footTop - top, 0)))
+        scroll.frame = NSRect(x: 0, y: top, width: Double(bounds.width) - Look.hairline, height: min(rows, max(footTop - top, 0)))
+        list.frame = NSRect(x: 0, y: 0, width: Double(scroll.contentSize.width), height: rows)
         let under = top + RowStyle.groupHeight
         emptyLine.frame = NSRect(x: 14, y: under + 8, width: max(Double(bounds.width) - 28, 0), height: Double(emptyLine.intrinsicContentSize.height))
         for (index, (tile, name)) in skeletons.enumerated() {

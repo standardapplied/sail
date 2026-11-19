@@ -47,6 +47,20 @@ actor GoldenDesk: Transport {
         held["GET /v1/projects"] = .zero
     }
 
+    /// From now on harbor's workspaces are `count` made-up rows: alternately the person's (uday's)
+    /// and ana's, running, stopped, paused and not created in turn.
+    func answerRows(_ count: Int) throws {
+        let exchange = try Exchange("workspaces-three")
+        let states = ["running", "stopped", "frozen", "not_created"]
+        let rows = (1 ... max(count, 1)).map { index in
+            let name = String(format: "ws-%02d", index)
+            return ["name": name, "instance": "harbor-\(name)", "state": states[index % states.count], "owner": index.isMultiple(of: 2) ? "ana" : "uday"]
+        }
+        let body: [String: Any] = ["project": "harbor", "schema_version": 1, "workspaces": rows]
+        answers["GET /v1/projects/harbor/workspaces"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: try JSONSerialization.data(withJSONObject: body))
+        held["GET /v1/projects/harbor/workspaces"] = .zero
+    }
+
     /// From now on a proxy answers `route` with a 502 of its own; nil, nothing.
     func fail(_ route: String?, unreached: Bool = false) {
         failing = route
@@ -120,6 +134,22 @@ extension Driver {
             } catch {
                 return (false, "the projects golden: \(error)")
             }
+        }
+        if let count = step.rows {
+            do {
+                try await GoldenDesk.shared.answerRows(count)
+                return (true, "")
+            } catch {
+                return (false, "the rows: \(error)")
+            }
+        }
+        if let scroll = step.scrollTo, scroll.count == 2, let fraction = Double(scroll[1]) {
+            guard let view: NSScrollView = scroll[0] == "panel" ? pane.panel.scroll : pane.project.listScroll else { return (false, "no list to scroll") }
+            let scrollable = await waitUntil(step.seconds ?? 10) {
+                Double(view.documentView?.frame.height ?? 0) > Double(view.contentSize.height) + 1
+            }
+            guard scrollable else { return (false, "nothing to scroll: \(view.documentView?.frame.height ?? 0) pt of rows in \(view.contentSize.height) pt") }
+            return await turnWheel(over: view, to: fraction)
         }
         if let route = step.unreachable {
             await GoldenDesk.shared.fail(route, unreached: true)
@@ -238,6 +268,27 @@ extension Driver {
     }
 
     /// Waits, at most `seconds`, until `condition` holds, asking it again every 50 ms.
+    /// Scrolls `view` to `fraction` of the way down with real scroll-wheel events, in pixel steps as
+    /// a trackpad's are, handed to the scroll view (one made from a `CGEvent` carries no window to
+    /// hit-test in); it passes once the clip view is there.
+    private func turnWheel(over view: NSScrollView, to fraction: Double) async -> (Bool, String) {
+        guard view.window != nil, let document = view.documentView else { return (false, "the scroll view is not in a window") }
+        let room = Double(document.frame.height) - Double(view.contentSize.height)
+        guard room > 0 else { return (false, "nothing to scroll: the rows are \(document.frame.height) pt in \(view.contentSize.height) pt") }
+        let wanted = room * min(max(fraction, 0), 1)
+        while Double(view.contentView.bounds.minY) < wanted - 0.5 {
+            let step = Int32(-min(40, wanted - Double(view.contentView.bounds.minY)).rounded(.up))
+            guard let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: step, wheel2: 0, wheel3: 0) else { return (false, "no scroll-wheel event") }
+            guard let event = NSEvent(cgEvent: wheel) else { return (false, "AppKit took no scroll-wheel event") }
+            let before = view.contentView.bounds.minY
+            view.scrollWheel(with: event)
+            await Task.yield()
+            guard view.contentView.bounds.minY != before else { return (false, "the wheel moved nothing at \(before) of \(room) pt") }
+        }
+        view.flashScrollers()
+        return (true, "scrolled \(view.contentView.bounds.minY) of \(room) pt")
+    }
+
     /// Clicks the shown button titled `title` in `pane` as a person does.
     private func clickButton(_ title: String, in pane: WorkspacesView) async -> (Bool, String) {
         pane.layoutSubtreeIfNeeded()

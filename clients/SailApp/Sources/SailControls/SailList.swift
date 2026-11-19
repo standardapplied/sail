@@ -62,7 +62,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     }
 
     public enum Entry {
-        case head(String, count: Int)
+        /// A group head with its count; with none, its title alone (a list still loading).
+        case head(String, count: Int?)
         case item(Item)
     }
 
@@ -386,16 +387,16 @@ final class HeadCell: NSView {
     /// Where its words start: a list's leading inset, or a sidebar's tiles.
     private let leading: Double
 
-    init(_ title: String, count: Int, leading: Double, look: Look, mono: LabelFont, hairline: Bool) {
+    init(_ title: String, count: Int?, leading: Double, look: Look, mono: LabelFont, hairline: Bool) {
         self.leading = leading
         let font = mono.font(Look.Step.caption.points) as NSFont
         self.title = Draw.text(title, font, look.textTertiary, tracking: Look.Tracking.eyebrow, upper: true)
-        self.count = Draw.text("\(count)", font, Tint(look.textTertiary.rgb, alpha: look.textTertiary.alpha * 0.8), tracking: Look.Tracking.eyebrow)
+        self.count = Draw.text(count.map { "\($0)" } ?? "", font, Tint(look.textTertiary.rgb, alpha: look.textTertiary.alpha * 0.8), tracking: Look.Tracking.eyebrow)
         self.hairline = hairline
         super.init(frame: .zero)
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
-        setAccessibilityLabel("\(title), \(count)")
+        setAccessibilityLabel(count.map { "\(title), \($0)" } ?? title)
     }
 
     @available(*, unavailable)
