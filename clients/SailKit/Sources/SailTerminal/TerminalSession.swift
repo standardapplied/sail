@@ -484,9 +484,12 @@ public final class TerminalSession: Sendable {
 
     /// Asks the host for the write token, which it grants to any attached client; once granted, the
     /// view's size goes to the host, so the pty takes the new writer's size.
-    public func takeWrite() {
-        guard let connection = core.withLock({ $0.connection }) else { return }
+    /// Answers whether it was asked: false while no connection is attached, so the asking is said.
+    @discardableResult
+    public func takeWrite() -> Bool {
+        guard let connection = core.withLock({ $0.connection }) else { return false }
         send(.takeWrite, on: connection)
+        return true
     }
 
     private func supervise(_ generation: Int) async {

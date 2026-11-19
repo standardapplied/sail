@@ -226,6 +226,15 @@ public final class FakeRunnerDoor: Sendable {
         announce(session, writer: fde, holder: nil)
     }
 
+    /// The client not this door's that holds `session`'s keyboard leaves it, as its person quitting
+    /// Sail there does: every connection attached hears no one holds it.
+    public func leaveKeyboard(_ session: String) {
+        state.withLock { state in
+            if state.writers[session] == 0 { state.writers[session] = nil }
+        }
+        announce(session, writer: "", holder: nil)
+    }
+
     /// Every connection attached to `session` hears `writer` holds it, `holder` being the connection
     /// that does, nil for a client not this door's.
     private func announce(_ session: String, writer: String, holder: Int32?) {
@@ -364,8 +373,18 @@ public final class FakeRunnerDoor: Sendable {
                 answer(.sessionEnded(reason: "ended"), on: connection)
                 answer(.accepted, on: connection)
             case .input:
-                guard let session = opened ?? Self.session(of: ticket), state.withLock({ $0.writers[session] != number }) else { continue }
-                answer(.refused(HostRefusal(message: "You do not hold the write token.", remedy: [])), on: connection)
+                guard let session = opened ?? Self.session(of: ticket) else { continue }
+                let took = state.withLock { state -> Bool? in
+                    if state.writers[session] == number { return false }
+                    guard state.writers[session] == nil else { return nil }
+                    state.writers[session] = number
+                    return true
+                }
+                switch took {
+                case nil: answer(.refused(HostRefusal(message: "You do not hold the write token.", remedy: [])), on: connection)
+                case true?: if let person { announce(session, writer: person, holder: connection) }
+                case false?: continue
+                }
             default:
                 continue
             }

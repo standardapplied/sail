@@ -25,10 +25,10 @@ public struct Keyboard: Equatable, Sendable {
         return "Typing here is paused: the keyboard is with \(elsewhere) now."
     }
 
-    /// What closing this client's tab says while the keyboard is elsewhere, the session going on
-    /// there: nil while it is here.
-    public var stillRunning: String? {
+    /// What closing this client's tab, named `tab`, says while the keyboard is elsewhere, the
+    /// session going on there: nil while it is here or no one holds it.
+    public func stillRunning(_ tab: String) -> String? {
         guard let elsewhere else { return nil }
-        return "Still running: the keyboard is with \(elsewhere == me ? "your other window or Mac" : elsewhere)."
+        return "\(tab) is still running: the keyboard is with \(elsewhere == me ? "your other window or Mac" : elsewhere)."
     }
 }

@@ -70,10 +70,15 @@ public final class TerminalPane: NSView {
     private var refusedSaid = false
     /// Says a refused key: the system's alert sound, as a Mac says a key that goes nowhere.
     package var beep: @MainActor () -> Void = { NSSound.beep() }
-    /// Where the session goes on while the keyboard is elsewhere, so closing this tab only detaches
-    /// it: nil while the keyboard is here.
-    package var stillRunning: String? {
-        keyboard.stillRunning
+    /// Whether the keyboard is with another client, so closing this tab only detaches it.
+    package var keyboardElsewhere: Bool {
+        keyboard.elsewhere != nil
+    }
+
+    /// Where the session of this tab, named `tab`, goes on while the keyboard is elsewhere: nil while
+    /// it is here or no one holds it.
+    package func stillRunning(_ tab: String) -> String? {
+        keyboard.stillRunning(tab)
     }
     private let banner: Card
     private let scrim = Scrim()
@@ -377,11 +382,17 @@ public final class TerminalPane: NSView {
         refusedSaid = false
         if let said = keyboard.said {
             banner.show(said, button: "Take Keyboard", returns: false) { [weak self] in
-                MainActor.assumeIsolated { self?.session?.takeWrite() }
+                MainActor.assumeIsolated { self?.takeKeyboard() }
             }
         } else if let wasSaid, banner.shown == wasSaid {
             banner.hide()
         }
+    }
+
+    /// Take Keyboard: asked of the host, or, with no connection attached, said why it cannot be yet.
+    private func takeKeyboard() {
+        guard session?.takeWrite() != true else { return }
+        banner.show("This terminal is not connected, so the keyboard cannot be taken yet; it reconnects on its own.", tone: .warning)
     }
 
     private func compose() {

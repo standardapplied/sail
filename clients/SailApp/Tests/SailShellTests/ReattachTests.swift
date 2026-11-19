@@ -258,12 +258,48 @@ import Testing
         if atPrompt { _ = pane.session?.screen.feed(Array("\u{1b}]133;A\u{07}$ \u{1b}]133;B\u{07}ls\r\n\u{1b}]133;C\u{07}\u{1b}]133;D;0\u{07}\u{1b}]133;A\u{07}$ \u{1b}]133;B\u{07}".utf8)) }
         #expect(pane.mayEndAProgram == !atPrompt)
         runner.takeKeyboard(pane.name, by: "uday")
-        #expect(await RunnerTabTests.until(10) { pane.stillRunning != nil })
+        #expect(await RunnerTabTests.until(10) { pane.keyboardElsewhere })
         bench.model.focus(pane.id)
         bench.closePane(nil)
         #expect(bench.panes[pane.id] == nil, "the tab went")
         #expect(runner.sessions == [pane.name] && runner.kills.isEmpty, "nothing was ended")
-        #expect(bench.bannerSays == "Still running: the keyboard is with your other window or Mac.")
+        #expect(bench.bannerSays == "harbor · dock is still running: the keyboard is with your other window or Mac.", "the sentence names the tab it is about")
+    }
+
+    /// Round 2 R2-1: when the keyboard's holder leaves (the person quits Sail on the other Mac), the
+    /// paused card goes, and Close ends the session by the close rule rather than saying it runs on.
+    @Test func whenTheHolderLeavesThePausedCardGoesAndCloseEnds() async throws {
+        let (local, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
+        defer { local.stop(); runner.stop() }
+        let bench = try await Self.workbench(local: local, runner: runner, who: Who("uday"))
+        bench.openWorkspace(project: "harbor", name: "dock")
+        #expect(await RunnerTabTests.until(10) { Self.runnerSessions(bench).count == 1 })
+        #expect(await Self.attached(bench))
+        let pane = try #require(bench.panes.values.first { $0.place.onRunner })
+        runner.takeKeyboard(pane.name, by: "uday")
+        #expect(await RunnerTabTests.until(10) { pane.status.offers == ["Take Keyboard"] }, "\(pane.status)")
+        runner.leaveKeyboard(pane.name)
+        #expect(await RunnerTabTests.until(10) { pane.status.says == nil && !pane.keyboardElsewhere }, "the paused card goes: \(pane.status)")
+        bench.model.focus(pane.id)
+        bench.closePane(nil)
+        #expect(await RunnerTabTests.until(10) { runner.kills.contains(pane.name) && runner.sessions.isEmpty }, "Close ended it: \(runner.kills)")
+        #expect(bench.bannerSays?.contains("still running") != true)
+    }
+
+    /// Round 2 R2-4: Take Keyboard is never silent: with the connection lost the card offers it no
+    /// more (the reconnect's card replaces it), and a press that finds no connection says why.
+    @Test func takeKeyboardIsNeverSilentWhileDisconnected() async throws {
+        let runner = try FakeRunnerDoor(person: "uday")
+        runner.hold("app-k")
+        let pane = try RunnerTabTests.pane(Self.dock, runner: DoorTickets(runner), start: .attach, session: "app-k", person: "uday")
+        pane.begin()
+        #expect(await RunnerTabTests.until(10) { pane.attachedOnce })
+        runner.takeKeyboard("app-k", by: "uday")
+        #expect(await RunnerTabTests.until(10) { pane.status.offers == ["Take Keyboard"] })
+        pane.session?.close()
+        #expect(pane.press("Take Keyboard"))
+        #expect(pane.status.says == "This terminal is not connected, so the keyboard cannot be taken yet; it reconnects on its own.")
+        runner.stop()
     }
 
     /// The workbench's own sentence sits 32 pt below the terminals' top, or a small gap below the first
@@ -290,7 +326,7 @@ import Testing
         bench.frame = NSRect(x: 0, y: 0, width: 960, height: 630)
         window.contentView = bench
         window.orderFront(nil)
-        bench.tell("Still running: the keyboard is with your other window or Mac.")
+        bench.tell("harbor · dock 2 is still running: the keyboard is with your other window or Mac.")
         bench.layoutSubtreeIfNeeded()
         let sentence = try #require(bench.subviews.compactMap { $0 as? Card }.first { !$0.isHidden })
         let place = sentence.frame
@@ -317,10 +353,10 @@ import Testing
         let (local, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
         defer { local.stop(); runner.stop() }
         let bench = try await Self.workbench(local: local, runner: runner, who: Who("uday"))
-        bench.tell("Still running: the keyboard is with your other window or Mac.")
-        bench.tell("Still running: the keyboard is with ana.")
+        bench.tell("harbor · dock 2 is still running: the keyboard is with your other window or Mac.")
+        bench.tell("harbor · dock is still running: the keyboard is with ana.")
         #expect(bench.subviews.compactMap { $0 as? Card }.filter { !$0.isHidden }.count == 1)
-        #expect(bench.bannerSays == "Still running: the keyboard is with ana.")
+        #expect(bench.bannerSays == "harbor · dock is still running: the keyboard is with ana.")
     }
 
     static func buttons(_ view: NSView) -> [NSButton] {

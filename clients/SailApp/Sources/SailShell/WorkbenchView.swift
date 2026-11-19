@@ -525,15 +525,17 @@ public final class WorkbenchView: NSView {
     /// on where its keyboard is, which is said once. Ending one is done there, or after Take
     /// Keyboard. Answers the rest, whose sessions closing ends.
     private func leaving(elsewhere views: [TerminalPane]) -> [TerminalPane] {
-        let elsewhere = views.filter { $0.stillRunning != nil }
-        guard let said = elsewhere.first?.stillRunning else { return views }
+        let elsewhere = views.filter(\.keyboardElsewhere)
+        guard let first = elsewhere.first, let said = first.stillRunning(model.tab(holding: first.id).map { model.title(of: $0.id) } ?? "This terminal") else {
+            return views
+        }
         for view in elsewhere {
             view.detach()
             remove(view)
         }
         apply()
         tell(said)
-        return views.filter { $0.stillRunning == nil }
+        return views.filter { !$0.keyboardElsewhere }
     }
 
     /// The tab a command acts on: the one whose menu it came from (a tab's menu acts on that tab,

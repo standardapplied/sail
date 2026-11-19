@@ -402,6 +402,11 @@ extension Driver {
             door.hold(session)
             return (true, "")
         }
+        if step.doorHolderLeaves == true {
+            guard let door = GoldenDesk.door, let focused = workbench.focused else { return (false, "no door or no focused terminal") }
+            door.leaveKeyboard(focused.name)
+            return (true, "")
+        }
         if step.doorTakesKeyboard == true {
             guard let door = GoldenDesk.door, let focused = workbench.focused else { return (false, "no door or no focused terminal") }
             door.takeKeyboard(focused.name, by: "uday")

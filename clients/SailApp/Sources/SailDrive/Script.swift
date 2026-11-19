@@ -252,6 +252,9 @@ struct Step: Decodable {
     var doorHolds: String?
     /// The person's other Mac takes the focused terminal's keyboard at the runner's door.
     var doorTakesKeyboard: Bool?
+    /// The client not the app's that holds the focused terminal's keyboard leaves it, as its person
+    /// quitting Sail on the other Mac does.
+    var doorHolderLeaves: Bool?
     /// The runner's door ends every session it holds in these words, as a workspace's stop does.
     var doorEnds: String?
     /// The focused terminal's banner button of this title pressed.
