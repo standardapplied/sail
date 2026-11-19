@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -1145,6 +1146,43 @@ class ProjectProvisionerTest {
             .contains(
                 "incus launch ubuntu-24.04 simple --profile singlr-base -c user.sail.project=simple"),
         String.join("\n", shell.invocations()));
+  }
+
+  @Test
+  void aLaunchFromAVirtualMachineImageIsRefusedNamingTheHostInitThatHealsIt() {
+    var shell =
+        minimalSuccessShell()
+            .onOk(
+                "incus image list local:",
+                "[{\"fingerprint\":\"9cbfd6cffda6aa\",\"type\":\"virtual-machine\","
+                    + "\"aliases\":[{\"name\":\"ubuntu-24.04\"}]}]");
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
+
+    var failure =
+        assertThrows(
+            IOException.class,
+            () ->
+                provisioner.provision(
+                    minimalConfig(), hostYaml(), none(minimalConfig()), GIT, null));
+
+    var said = assertInstanceOf(Remedied.class, failure);
+    assertEquals(
+        "This runner's image ubuntu-24.04 is the virtual-machine image 9cbfd6cffda6, which it"
+            + " cannot run as a container.",
+        said.reason());
+    assertEquals(
+        "Cache the container image in its place: sudo sail host init --storage zfs --pool devpool"
+            + " --yes",
+        OperatorCommand.SUDO.render(said.remedy()));
+    assertTrue(shell.invocations().stream().noneMatch(c -> c.startsWith("incus launch")));
+  }
+
+  @Test
+  void aProjectsOwnImageIsTheProjectsToChange() {
+    assertEquals(
+        "Give the project a container image.",
+        ProjectProvisioner.healing("debian/12", hostYaml()).plain());
   }
 
   @Test

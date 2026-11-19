@@ -461,7 +461,11 @@ class MigrateCommandTest {
   void initAndMigrateWriteTheSameNeedrestartPolicy(@TempDir Path dir) throws Exception {
     var provisioning =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onOk("incus storage list", "[{\"name\": \"devpool\", \"driver\": \"dir\"}]");
+            .onOk("incus storage list", "[{\"name\": \"devpool\", \"driver\": \"dir\"}]")
+            .onOk(
+                "incus image list local:",
+                "[{\"fingerprint\": \"990054afd627\", \"type\": \"container\","
+                    + " \"aliases\": [{\"name\": \"ubuntu-24.04\"}]}]");
     new HostProvisioner(provisioning, null, OperatorCommand.SUDO)
         .provision(
             new PoolSource.Dir(),
