@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.commands.SessionClient;
+import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -31,8 +32,8 @@ import org.junit.jupiter.api.io.TempDir;
  * A workspace's terminal sessions listed through the API's door from a real terminal host whose
  * sessions run inside a real Incus container: each person lists their own, newest first, an admin
  * every one, and a workspace with none lists nothing; a session its workspace's stop ended is
- * listed ended, in the stop's words. The host is asked as its dispatch credential, as the API asks
- * it in production; who may attach to which is the host's own attach rule.
+ * listed ended, in the stop's words. The host is asked for each caller's own credential, as the API
+ * asks it in production, and keeps what that caller could attach to.
  */
 class WorkspaceSessionsIT extends AbstractIncusIT {
 
@@ -45,7 +46,8 @@ class WorkspaceSessionsIT extends AbstractIncusIT {
     var container = "sail-it-pty-list";
     var ana = new Actor("ana", Role.MEMBER, Actor.Lane.API);
     var ben = new Actor("ben", Role.MEMBER, Actor.Lane.API);
-    var people = Map.of("ana", ana, "ben", ben);
+    var admin = new Actor("uday", Role.ADMIN, Actor.Lane.API);
+    var people = Map.of("ana", ana, "ben", ben, "uday", admin);
     var socket = dir.resolve("h.sock");
     try {
       launch(container);
@@ -60,7 +62,7 @@ class WorkspaceSessionsIT extends AbstractIncusIT {
               socket,
               dir.resolve("s"),
               64 * 1024,
-              token -> new PtyIdentity.Person(people.get(token)),
+              token -> new PtyIdentity.Person(token.isEmpty() ? admin : people.get(token)),
               new PtyAdmission() {
                 @Override
                 public void box(PtyIdentity.Person who) {}
@@ -72,7 +74,16 @@ class WorkspaceSessionsIT extends AbstractIncusIT {
                 public void room(String room, String project, PtyIdentity.Person who) {}
               },
               PtyEvents.NONE,
-              "0.0.0-test")) {
+              "0.0.0-test",
+              PtySessionHost.Handoff.NONE,
+              PtySessionHost.Network.on(
+                  new InetSocketAddress(InetAddress.getLoopbackAddress(), 0),
+                  hash ->
+                      people.keySet().stream()
+                          .filter(token -> Secrets.hash(token).equals(hash))
+                          .findFirst()
+                          .map(token -> new PtyIdentity.Person(people.get(token)))
+                          .orElseThrow(() -> new IOException("The credential is not valid."))))) {
         host.start();
         try (var asAna = SessionClient.connect(socket, "ana");
             var asBen = SessionClient.connect(socket, "ben")) {
@@ -94,26 +105,22 @@ class WorkspaceSessionsIT extends AbstractIncusIT {
                   }
 
                   @Override
-                  public List<PtyMessage.SessionInfo> sessions() throws IOException {
-                    var dispatch =
-                        Files.readString(PtySessionHost.dispatchCredentialOf(socket)).strip();
-                    try (var client = SessionClient.connect(socket, dispatch)) {
-                      return client.list();
-                    }
+                  public PtyMessage sessions(String credential) throws IOException {
+                    return SessionClient.sessionsFor(socket, credential);
                   }
                 },
                 new InetSocketAddress(InetAddress.getLoopbackAddress(), 7072));
 
-        var admin = new Actor("uday", Role.ADMIN, Actor.Lane.API);
-        assertEquals(List.of("app-ana2", "app-ana"), names(door.sessions(ana, container, "main")));
-        assertEquals(List.of("app-ben"), names(door.sessions(ben, container, "main")));
+        assertEquals(
+            List.of("app-ana2", "app-ana"), names(door.sessions("ana", container, "main", null)));
+        assertEquals(List.of("app-ben"), names(door.sessions("ben", container, "main", null)));
         assertEquals(
             List.of("app-ana2", "app-ana", "app-ben"),
-            names(door.sessions(admin, container, "main")));
-        assertEquals(List.of(), names(door.sessions(ana, container, "dock")));
+            names(door.sessions("uday", container, "main", null)));
+        assertEquals(List.of(), names(door.sessions("ana", container, "dock", null)));
         assertEquals(
             List.of(List.of("sleep", "600"), List.of("sleep", "600")),
-            door.sessions(ana, container, "main").sessions().stream()
+            door.sessions("ana", container, "main", null).sessions().stream()
                 .map(WorkspaceSessionsResponse.Session::command)
                 .toList());
 
@@ -126,7 +133,7 @@ class WorkspaceSessionsIT extends AbstractIncusIT {
                 socket, Files.readString(PtySessionHost.dispatchCredentialOf(socket)).strip())) {
           dispatch.yieldSession("app-ana", stopped);
         }
-        var listed = door.sessions(ana, container, "main").sessions();
+        var listed = door.sessions("ana", container, "main", null).sessions();
         assertEquals(
             List.of("app-ana2 live", "app-ana " + stopped),
             listed.stream()
