@@ -432,10 +432,19 @@ public final class WorkbenchView: NSView {
     /// The last sentence ``tell(_:)`` said, which the end of a restore leaves in the banner.
     private var told: String?
 
+    /// Where the banner's top sits: 32 pt below the terminals' top, or lower, a small gap below the
+    /// first row of the tallest font shown.
+    private var bannerTop = NSLayoutConstraint()
+
     /// Says `sentence` in the banner for 10 s, unless something else is said meanwhile. The banner
-    /// sits at the top of the terminals, clear of a pane's own card at the foot, so neither covers
-    /// the other's actions.
+    /// sits at the top of the terminals, below their first row and clear of a pane's own card at
+    /// the foot, so it hides no first line and neither covers the other's actions.
     func tell(_ sentence: String) {
+        let firstRow = panes.values.map { pane in
+            let metrics = pane.terminal.metrics
+            return Double(metrics.padding.height + metrics.height) / metrics.scale
+        }.max() ?? 0
+        bannerTop.constant = max(Look.Space.x3l, firstRow + Look.Space.s)
         told = sentence
         banner.show(sentence)
         Task { [weak self] in
@@ -726,12 +735,13 @@ public final class WorkbenchView: NSView {
         empty.spacing = Look.Space.m
         empty.translatesAutoresizingMaskIntoConstraints = false
         banner.translatesAutoresizingMaskIntoConstraints = false
+        bannerTop = banner.topAnchor.constraint(equalTo: topAnchor, constant: Look.Space.x3l)
         addSubview(empty)
         addSubview(banner)
         NSLayoutConstraint.activate([
             empty.centerXAnchor.constraint(equalTo: centerXAnchor), empty.centerYAnchor.constraint(equalTo: centerYAnchor),
             banner.centerXAnchor.constraint(equalTo: centerXAnchor),
-            banner.topAnchor.constraint(equalTo: topAnchor, constant: Look.Space.x3l),
+            bannerTop,
             banner.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: Look.Space.l),
         ])
         emptyLabel.isHidden = true

@@ -1,7 +1,9 @@
 import AppKit
 import Foundation
 import SailAPI
+import SailControls
 import SailKitTestSupport
+import SailLook
 @testable import SailShell
 import SailTerminal
 import SailVT
@@ -264,37 +266,65 @@ import Testing
         #expect(bench.bannerSays == "Still running: the keyboard is with your other window or Mac.")
     }
 
-    /// The workbench's own sentence, at the top, never covers a pane's card at the foot: said at
-    /// once over a tab whose session ended while away, every action of the card is still reached
-    /// (the drive once clicked Close through "Still running").
-    @Test func theWorkbenchsSentenceNeverCoversAPanesCard() async throws {
+    /// The workbench's own sentence sits 32 pt below the terminals' top, or a small gap below the first
+    /// row of the tallest font shown (the band and its tab strip are above the terminals, so it never
+    /// reaches them), one card line tall, and never over a pane's card at the foot: in one pane, side by side and stacked,
+    /// with the sentence showing, every action of every card is reached (the drive once clicked
+    /// Close through "Still running").
+    @Test(arguments: [nil, Axis.sideBySide, Axis.stacked])
+    func theWorkbenchsSentenceNeverCoversAPanesCardOrAFirstRow(_ split: Axis?) async throws {
         let (local, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
         defer { local.stop(); runner.stop() }
-        runner.hold("app-x")
-        runner.end("app-x", saying: Self.stopped)
         var kept = Workbench()
         _ = kept.newTab(session: "app-x", place: Self.dock)
+        if let split { _ = kept.split(split, session: "app-y", place: Self.dock, in: CGSize(width: 960, height: 630), minimum: CGSize(width: 100, height: 60), scale: 2) }
+        for session in kept.panes.values.map(\.session) {
+            runner.hold(session)
+            runner.end(session, saying: Self.stopped)
+        }
         let bench = try await Self.workbench(local: local, runner: runner, who: Who("uday"), kept: kept.arrangement(runner: "uday", holding: []))
-        let pane = try #require(bench.panes.values.first { $0.place.onRunner })
-        #expect(await RunnerTabTests.until(10) { pane.status.offers == ["Open a New One", "Close"] }, "\(pane.status)")
+        let panes = bench.panes.values.filter(\.place.onRunner)
+        #expect(panes.count == (split == nil ? 1 : 2))
+        #expect(await RunnerTabTests.until(10) { panes.allSatisfy { $0.status.offers == ["Open a New One", "Close"] } }, "\(panes.map(\.status))")
         let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 630), styleMask: [.titled], backing: .buffered, defer: false)
         bench.frame = NSRect(x: 0, y: 0, width: 960, height: 630)
         window.contentView = bench
         window.orderFront(nil)
         bench.tell("Still running: the keyboard is with your other window or Mac.")
         bench.layoutSubtreeIfNeeded()
-        #expect(bench.bannerSays != nil)
-        func buttons(_ view: NSView) -> [NSButton] {
-            ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons)
+        let sentence = try #require(bench.subviews.compactMap { $0 as? Card }.first { !$0.isHidden })
+        let place = sentence.frame
+        let rows = panes.map { Double($0.terminal.metrics.padding.height + $0.terminal.metrics.height) / $0.terminal.metrics.scale }
+        #expect(abs(Double(place.minY) - max(32, (rows.max() ?? 0) + Look.Space.s)) < 0.5 && Double(place.height) <= 40, "the sentence is at \(place), the first rows end at \(rows)")
+        for pane in panes {
+            let metrics = pane.terminal.metrics
+            let paneFrame = bench.convert(pane.bounds, from: pane)
+            let firstRow = Double(paneFrame.minY) + Double(metrics.padding.height + metrics.height) / metrics.scale
+            if paneFrame.intersects(place) { #expect(Double(place.minY) >= firstRow, "the sentence at \(place) covers \(pane.name)'s first row, which ends at \(firstRow)") }
+            let card = try #require(pane.subviews.compactMap { $0 as? Card }.first { !$0.isHidden })
+            #expect(!bench.convert(card.bounds, from: card).intersects(place), "the sentence at \(place) lies over \(pane.name)'s card")
+            for action in Self.buttons(card) where ["Open a New One", "Close"].contains(action.title) {
+                let middle = action.convert(NSPoint(x: action.bounds.midX, y: action.bounds.midY), to: nil)
+                let reached = bench.hitTest(try #require(bench.superview).convert(middle, from: nil))
+                #expect(reached === action || reached?.isDescendant(of: action) == true, "a click on \(pane.name)'s \(action.title) reaches \(String(describing: reached))")
+            }
         }
-        let actions = buttons(pane).filter { ["Open a New One", "Close"].contains($0.title) && !$0.isHiddenOrHasHiddenAncestor }
-        #expect(actions.count == 2)
-        for action in actions {
-            let middle = action.convert(NSPoint(x: action.bounds.midX, y: action.bounds.midY), to: nil)
-            let hit = try #require(bench.superview).convert(middle, from: nil)
-            let reached = bench.hitTest(hit)
-            #expect(reached === action || reached?.isDescendant(of: action) == true, "a click on \(action.title) reaches \(String(describing: reached))")
-        }
+    }
+
+    /// Two of the workbench's sentences never stack: the newer replaces the older in its one banner,
+    /// and the older's time running out leaves the newer said.
+    @Test func aNewerSentenceReplacesTheOlder() async throws {
+        let (local, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
+        defer { local.stop(); runner.stop() }
+        let bench = try await Self.workbench(local: local, runner: runner, who: Who("uday"))
+        bench.tell("Still running: the keyboard is with your other window or Mac.")
+        bench.tell("Still running: the keyboard is with ana.")
+        #expect(bench.subviews.compactMap { $0 as? Card }.filter { !$0.isHidden }.count == 1)
+        #expect(bench.bannerSays == "Still running: the keyboard is with ana.")
+    }
+
+    static func buttons(_ view: NSView) -> [NSButton] {
+        ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons)
     }
 
     /// Minor 3: a listing answered after its person signed out, someone else signing in meanwhile,

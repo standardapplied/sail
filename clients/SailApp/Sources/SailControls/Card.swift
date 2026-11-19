@@ -13,6 +13,8 @@ public final class Card: NSView {
     private let message = NSTextField(wrappingLabelWithString: "")
     private let primary: SailButton
     private let secondary: SailButton
+    /// The actions' row, taking no room when the card offers none.
+    private let actions: NSStackView
     private var tone = BannerTone.info
     private var primaryHandler: () -> Void = {}
     private var secondaryHandler: () -> Void = {}
@@ -25,16 +27,17 @@ public final class Card: NSView {
         self.look = look
         primary = SailButton("", kind: .primary, look: look, target: nil, action: nil)
         secondary = SailButton("", kind: .secondary, look: look, target: nil, action: nil)
+        actions = NSStackView(views: [primary, secondary])
         super.init(frame: .zero)
         message.font = .systemFont(ofSize: Look.Step.callout.points)
         primary.target = self
         primary.action = #selector(actPrimary)
         secondary.target = self
         secondary.action = #selector(actSecondary)
-        let buttons = NSStackView(views: [primary, secondary])
-        buttons.spacing = Look.Space.s
-        buttons.detachesHiddenViews = true
-        let stack = NSStackView(views: [message, buttons])
+        actions.spacing = Look.Space.s
+        actions.detachesHiddenViews = true
+        let stack = NSStackView(views: [message, actions])
+        stack.detachesHiddenViews = true
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Look.Space.m
@@ -79,6 +82,7 @@ public final class Card: NSView {
         primary.title = button ?? ""
         secondary.isHidden = second == nil
         secondary.title = second ?? ""
+        actions.isHidden = button == nil && second == nil
         setAccessibilityLabel(text)
         isHidden = false
         needsDisplay = true
