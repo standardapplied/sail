@@ -21,7 +21,9 @@ import Testing
             room: "harbor-design", size: TerminalSize(columns: 132, rows: 43), workspace: "dock",
             agent: SessionAgent(harness: "codex", mode: "full", inside: true)
         )))
-        #expect(frames["Attach"] == .attach(session: "lounge", write: true))
+        #expect(frames["Attach"] == .attach(session: "lounge", write: true, client: "pane-7f", takes: false))
+        #expect(frames["WriterChanged"] == .writerChanged(fde: "uday", yours: true))
+        #expect(frames["Yield"] == .yield(session: "lounge", reason: "a dispatch took the repos", record: "A dispatch took the repos."))
         #expect(frames["Input"] == .input(sequence: 42, bytes: Array("ls -la\r".utf8)))
         #expect(frames["Output"] == .output(lastInputSequence: 42, bytes: Array("héllo ✅\u{1b}[0m\r\n".utf8)))
         #expect(frames["Resize"] == .resize(TerminalSize(columns: 100, rows: 30)))

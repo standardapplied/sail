@@ -168,6 +168,12 @@ class PtyWireTest {
     assertEquals(
         new PtyMessage.Sessions(List.of(info, plain), ""),
         roundTrip(new PtyMessage.Sessions(List.of(info, plain), "")));
+    var coded =
+        new PtyMessage.Err(
+            "No Codex CLI login stored for ana.",
+            Remedy.of("Store one: ", Remedy.sail("agent login", "codex"), "."),
+            "login_not_stored");
+    assertEquals(coded, roundTrip(coded), "a refusal's code survives the wire");
   }
 
   @Test
@@ -240,8 +246,24 @@ class PtyWireTest {
         ((PtyMessage.Welcome) roundTrip(new PtyMessage.Welcome("boot-7"))).hostBootId(),
         "the host's boot id rides the Hello reply");
     assertEquals(
-        new PtyMessage.Yield("resume-1", "yielded to dispatch 2"),
-        roundTrip(new PtyMessage.Yield("resume-1", "yielded to dispatch 2")));
+        new PtyMessage.Yield("resume-1", "yielded to dispatch 2", "Dispatch 2 took it over."),
+        roundTrip(
+            new PtyMessage.Yield("resume-1", "yielded to dispatch 2", "Dispatch 2 took it over.")),
+        "a yield's record crosses the wire apart from its line");
+    assertEquals(
+        new PtyMessage.Attach("lounge", true, "pane-7f", false),
+        roundTrip(new PtyMessage.Attach("lounge", true, "pane-7f", false)),
+        "an attach names its client and whether it takes the keyboard now");
+    assertEquals(
+        new PtyMessage.Attach("lounge", false, "", true),
+        roundTrip(new PtyMessage.Attach("lounge", false)));
+    assertEquals(
+        new PtyMessage.WriterChanged("uday", true),
+        roundTrip(new PtyMessage.WriterChanged("uday", true)),
+        "a writer change says whether the keyboard is the receiving connection's");
+    assertEquals(
+        new PtyMessage.WriterChanged("", false),
+        roundTrip(new PtyMessage.WriterChanged("", false)));
     assertInstanceOf(PtyMessage.TakeWrite.class, roundTrip(new PtyMessage.TakeWrite()));
     assertInstanceOf(PtyMessage.ReplayEnd.class, roundTrip(new PtyMessage.ReplayEnd()));
     assertEquals(
@@ -374,12 +396,14 @@ class PtyWireTest {
 
     var v2 = Pipe.open();
     var v2Reply = Pipe.open();
-    v2.sink().write(ByteBuffer.wrap("SAILPTY4".getBytes(StandardCharsets.US_ASCII)));
+    v2.sink().write(ByteBuffer.wrap("SAILPTY5".getBytes(StandardCharsets.US_ASCII)));
     var skew =
         assertThrows(IOException.class, () -> PtyWire.handshake(v2.source(), v2Reply.sink()));
     assertTrue(
-        skew.getMessage().contains("v5"),
-        "a v4 peer lists no session's life and is refused by name: " + skew.getMessage());
+        skew.getMessage().contains("v6"),
+        "a v5 peer, whose yield carries no record and whose keyboard frames say no client, is"
+            + " refused by name: "
+            + skew.getMessage());
   }
 
   @Test

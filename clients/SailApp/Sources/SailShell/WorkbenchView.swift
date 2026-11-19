@@ -1,5 +1,6 @@
 import AppKit
 import SailAPI
+import SailControls
 import SailLook
 import SailSurface
 import SailTerminal
@@ -27,6 +28,8 @@ public final class WorkbenchView: NSView {
     var signedIn: @MainActor @Sendable () -> (handle: String, tickets: any TicketSource)? = { nil }
     /// Asked to show the account, where a runner tab's lapsed sign-in is signed in again.
     var onSignIn: @MainActor () -> Void = {}
+    /// A runner tab in a workspace attached or went, so what counts its sessions counts again.
+    var onRunnerTabs: @MainActor (_ project: String, _ name: String) -> Void = { _, _ in }
 
     var look: Look {
         didSet { paint() }
@@ -35,7 +38,7 @@ public final class WorkbenchView: NSView {
     private let fonts: TerminalFonts
     private var tabViews: [TabID: TabView] = [:]
     private var shownSelected: TabID?
-    private let banner: StatusBanner
+    private let banner: Card
     private let emptyLabel = NSTextField(labelWithString: "No terminal is open")
     private let newTerminal: AccentButton
     private var started = false
@@ -46,26 +49,34 @@ public final class WorkbenchView: NSView {
     private(set) var restored = false
     /// Workspaces asked to open before the first restore, opened once it has replaced the model.
     private var pendingWorkspaces: [Place] = []
+    /// Runner tabs kept aside while no one is signed in, and whose they are: still kept with the
+    /// arrangement, and brought back by that person's sign-in alone.
+    private var held: [Arrangement.Tab] = []
+    private var heldFor: String?
 
-    convenience init(fonts directory: URL, helper: String?, look: Look) throws(ShellError) {
+    convenience init(fonts directory: URL, helper: String?, look: Look, defaults: UserDefaults = .standard) throws(ShellError) {
         let host: LocalHost
         do {
             host = try LocalHost(binary: helper)
         } catch {
             throw .host("this Mac's terminal host has no place to listen: \(error)")
         }
-        try self.init(fonts: directory, host: host, look: look)
+        try self.init(fonts: directory, host: host, look: look, defaults: defaults)
     }
 
-    init(fonts directory: URL, host: LocalHost, look: Look) throws(ShellError) {
+    /// Where the arrangement is kept: the app's own defaults, or a test's.
+    private let defaults: UserDefaults
+
+    init(fonts directory: URL, host: LocalHost, look: Look, defaults: UserDefaults = .standard) throws(ShellError) {
         self.look = look
         self.host = host
+        self.defaults = defaults
         do {
             fonts = try TerminalFonts(directory: directory)
         } catch {
             throw .resources("the terminal's fonts cannot be read: \(error)")
         }
-        banner = StatusBanner(look: look)
+        banner = Card(look: look)
         strip = TabStrip(look: look)
         newTerminal = AccentButton("New Terminal", look: look, target: nil, action: #selector(WorkbenchView.newTab(_:)))
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
@@ -100,23 +111,61 @@ public final class WorkbenchView: NSView {
             try await host.ensureServing { [weak self] sentence in await self?.tell(sentence) }
             listed = try await SessionListing.sessions(at: host.address)
         } catch {
-            banner.show(Said.sentence("\(error)"), button: "Try Again") { [weak self] in
+            banner.show(Said.sentence("\(error)"), tone: .error, button: "Try Again") { [weak self] in
                 Task { await self?.restore() }
             }
             return
         }
         if banner.shown != told { banner.hide() }
-        let kept = UserDefaults.standard.data(forKey: Self.arrangementKey).flatMap { try? JSONDecoder().decode(Arrangement.self, from: $0) }
-        model = Workbench.restore(kept, live: listed.filter(\.live).map(\.name), home: NSHomeDirectory())
+        let kept = defaults.data(forKey: Self.arrangementKey).flatMap { try? JSONDecoder().decode(Arrangement.self, from: $0) }
+        let person = signedIn()?.handle
+        model = Workbench.restore(kept, live: listed.filter(\.live).map(\.name) + (kept?.runnerSessions(for: person) ?? []), home: NSHomeDirectory())
+        if person == nil, let kept {
+            held = kept.runnerTabs
+            heldFor = kept.runner
+        }
         restored = true
         for pane in model.panes.values.sorted(by: { $0.id < $1.id }) {
-            if makeView(pane, start: .attach, points: FontLadder.standard) == nil { model.close(pane.id) }
+            if makeView(pane, start: .resume, points: FontLadder.standard) == nil { model.close(pane.id) }
         }
         model.fit(in: room, minimum: minimum(of: Array(panes.values)), scale: scale)
         let waiting = pendingWorkspaces
         pendingWorkspaces = []
-        if model.tabs.isEmpty, waiting.isEmpty { openTab() } else { apply() }
-        waiting.forEach(openTab(in:))
+        if model.tabs.isEmpty, waiting.isEmpty, held.isEmpty { openTab() } else { apply() }
+        for case let .workspace(project, name) in waiting {
+            openWorkspace(project: project, name: name)
+        }
+    }
+
+    /// Who is signed in changed: signed out, the runner tabs leave the window and keep their
+    /// places for that person, their sessions running on; that person signed in again, they come
+    /// back attached; anyone else signed in, they are dropped.
+    func standingChanged() {
+        guard restored else { return }
+        let person = signedIn()?.handle
+        guard let person else {
+            let leaving = panes.values.filter(\.place.onRunner)
+            guard !leaving.isEmpty else { return }
+            if held.isEmpty { heldFor = Self.runnerPerson(of: leaving) }
+            held += model.arrangement.runnerTabs
+            leaving.forEach { $0.detach() }
+            leaving.forEach(remove)
+            return apply()
+        }
+        guard !held.isEmpty else { return }
+        let coming = heldFor == person ? model.adopt(held) : []
+        held = []
+        heldFor = nil
+        for id in coming {
+            if let pane = model.panes[id], makeView(pane, start: .resume, points: points) == nil { model.close(id) }
+        }
+        if model.selectedTab == nil, let tab = coming.lazy.compactMap(model.tab(holding:)).first { model.select(tab.id) }
+        apply()
+    }
+
+    /// The person the runner panes `views` were reached as.
+    private static func runnerPerson(of views: [TerminalPane]) -> String? {
+        views.map(\.person).first { !$0.isEmpty }
     }
 
     func detachAll() {
@@ -236,8 +285,9 @@ public final class WorkbenchView: NSView {
     private func keep() {
         pendingKeep?.cancel()
         pendingKeep = nil
-        guard restored, let data = try? JSONEncoder().encode(model.arrangement), data != kept else { return }
-        UserDefaults.standard.set(data, forKey: Self.arrangementKey)
+        let arrangement = model.arrangement(runner: held.isEmpty ? signedIn()?.handle : heldFor, holding: held)
+        guard restored, let data = try? JSONEncoder().encode(arrangement), data != kept else { return }
+        defaults.set(data, forKey: Self.arrangementKey)
         kept = data
     }
 
@@ -248,14 +298,21 @@ public final class WorkbenchView: NSView {
         guard let tab = model.tab(holding: pane.id) else { return nil }
         let view: TerminalPane
         do {
-            let tickets = pane.place.onRunner ? signedIn().map { SignedInTickets(for: $0.handle, current: signedIn) } : nil
-            view = try TerminalPane(pane, start: start, host: host, runner: tickets, fonts: fonts, points: points, look: look)
+            let reached = pane.place.onRunner ? signedIn() : nil
+            let tickets = reached.map { SignedInTickets(for: $0.handle, current: signedIn) }
+            view = try TerminalPane(
+                pane, start: start, host: host, runner: tickets, person: reached?.handle ?? "", fonts: fonts, points: points, look: look
+            )
         } catch {
-            banner.show(Said.sentence(error.description))
+            banner.show(Said.sentence(error.description), tone: .error)
             return nil
         }
         view.onEvent = { [weak self] view, event in self?.handle(event, from: view) }
         view.onSignIn = { [weak self] in self?.onSignIn() }
+        view.onClose = { [weak self] view in
+            self?.remove(view)
+            self?.apply()
+        }
         view.terminal.contextMenu = { [weak self] in self?.paneMenu() }
         view.terminal.onFocus = { [weak self, id = pane.id] in self?.focusClicked(id) }
         panes[pane.id] = view
@@ -263,8 +320,8 @@ public final class WorkbenchView: NSView {
         return view
     }
 
-    private func open(_ id: PaneID, points: Double) {
-        if let pane = model.panes[id], makeView(pane, start: .open, points: points) == nil {
+    private func open(_ id: PaneID, start: TerminalPane.Start = .open, points: Double) {
+        if let pane = model.panes[id], makeView(pane, start: start, points: points) == nil {
             model.close(id)
         }
         apply()
@@ -274,10 +331,18 @@ public final class WorkbenchView: NSView {
         model.close(view.id)
         view.removeFromSuperview()
         panes[view.id] = nil
+        runnerTabsChanged(view)
+    }
+
+    private func runnerTabsChanged(_ view: TerminalPane) {
+        guard case let .workspace(project, name) = view.place else { return }
+        onRunnerTabs(project, name)
     }
 
     private func handle(_ event: SessionEvent, from view: TerminalPane) {
         switch event {
+        case .phase(.attached):
+            runnerTabsChanged(view)
         case let .screen(.title(title)):
             model.setTitle(title, of: view.id)
             showTitles()
@@ -367,8 +432,19 @@ public final class WorkbenchView: NSView {
     /// The last sentence ``tell(_:)`` said, which the end of a restore leaves in the banner.
     private var told: String?
 
-    /// Says `sentence` in the banner for 10 s, unless something else is said meanwhile.
+    /// Where the banner's top sits: 32 pt below the terminals' top, or lower, a small gap below the
+    /// first row of the tallest font shown.
+    private var bannerTop = NSLayoutConstraint()
+
+    /// Says `sentence` in the banner for 10 s, unless something else is said meanwhile. The banner
+    /// sits at the top of the terminals, below their first row and clear of a pane's own card at
+    /// the foot, so it hides no first line and neither covers the other's actions.
     func tell(_ sentence: String) {
+        let firstRow = panes.values.map { pane in
+            let metrics = pane.terminal.metrics
+            return Double(metrics.padding.height + metrics.height) / metrics.scale
+        }.max() ?? 0
+        bannerTop.constant = max(Look.Space.x3l, firstRow + Look.Space.s)
         told = sentence
         banner.show(sentence)
         Task { [weak self] in
@@ -381,33 +457,40 @@ public final class WorkbenchView: NSView {
         openTab(in: newPlace())
     }
 
-    /// A tab with a terminal in workspace `name` of `project`, beside this Mac's own; before the
-    /// first restore, once it is done, as it replaces the model.
+    /// Workspace `name` of `project` beside this Mac's terminals: a tab attached to each of the
+    /// person's live sessions there that no tab holds, newest first, or a tab with a new one when
+    /// there are none (or they cannot be listed); before the first restore, once it is done.
     func openWorkspace(project: String, name: String) {
         let place = Place.workspace(project: project, name: name)
         guard restored else { return pendingWorkspaces.append(place) }
-        openTab(in: place)
+        guard let reached = signedIn() else { return openTab(in: place) }
+        Task { [weak self] in
+            let listed = try? await reached.tickets.sessions(in: project, workspace: name)
+            self?.open(place, attaching: listed, for: reached.handle)
+        }
+    }
+
+    /// Opens `place` for `person`, still the one signed in: a tab attached to each of their live
+    /// sessions there that no tab holds, newest first; when every one is in a tab already, the
+    /// newest's tab is chosen and nothing starts (a split of one of its panes starts one); with none,
+    /// a new one.
+    func open(_ place: Place, attaching listed: RunnerSessions?, for person: String) {
+        guard signedIn()?.handle == person else { return }
+        let held = Set(model.panes.values.map(\.session) + self.held.flatMap(\.layout.sessions))
+        let mine = listed?.live(for: person) ?? []
+        let theirs = mine.filter { !held.contains($0.name) }
+        let panes = model.panes.values
+        if theirs.isEmpty, let newest = mine.lazy.compactMap({ session in panes.first { $0.session == session.name }?.id }).first {
+            model.focus(newest)
+            return apply()
+        }
+        guard !theirs.isEmpty else { return openTab(in: place) }
+        let size = points
+        theirs.forEach { open(model.newTab(session: $0.name, place: place), start: .attach, points: size) }
     }
 
     private func openTab(in place: Place) {
         open(model.newTab(session: place.newSessionName, place: place), points: points)
-    }
-
-    /// The panes whose sessions are on the runner, which do not outlive the app.
-    var runnerPanes: [TerminalPane] {
-        panes.values.filter(\.place.onRunner).sorted { $0.id < $1.id }
-    }
-
-    /// What a person calls `view`: its tab's title, never its session's name.
-    func title(of view: TerminalPane) -> String {
-        model.tab(holding: view.id).map { model.title(of: $0.id) } ?? view.place.label ?? "A terminal on the runner"
-    }
-
-    /// Takes every runner tab away, its session ended or left to the runner: what follows a
-    /// sign-out, so no tab outlives the sign-in it was opened under.
-    func removeRunnerPanes() {
-        runnerPanes.forEach(remove)
-        apply()
     }
 
     @objc public func newTab(_: Any?) {
@@ -434,8 +517,25 @@ public final class WorkbenchView: NSView {
     }
 
     @objc public func closePane(_: Any?) {
-        guard let pane = focused else { return }
+        guard let pane = focused, !leaving(elsewhere: [pane]).isEmpty else { return }
         confirm(ending: [pane], question: "Close this terminal?", detail: "The program running in it will end.")
+    }
+
+    /// Closes those of `views` whose keyboard is elsewhere by detaching them only: each session goes
+    /// on where its keyboard is, which is said once. Ending one is done there, or after Take
+    /// Keyboard. Answers the rest, whose sessions closing ends.
+    private func leaving(elsewhere views: [TerminalPane]) -> [TerminalPane] {
+        let elsewhere = views.filter(\.keyboardElsewhere)
+        guard let first = elsewhere.first, let said = first.stillRunning(model.tab(holding: first.id).map { model.title(of: $0.id) } ?? "This terminal") else {
+            return views
+        }
+        for view in elsewhere {
+            view.detach()
+            remove(view)
+        }
+        apply()
+        tell(said)
+        return views.filter { !$0.keyboardElsewhere }
     }
 
     /// The tab a command acts on: the one whose menu it came from (a tab's menu acts on that tab,
@@ -453,7 +553,8 @@ public final class WorkbenchView: NSView {
     /// Ends `tab`'s terminals, asking first when one may end a running program. Closing a tab
     /// chooses no tab: it is not selected first, so a rename open in another tab goes on.
     private func close(_ tab: Tab) {
-        let views = tab.layout.leaves.compactMap { panes[$0] }
+        let views = leaving(elsewhere: tab.layout.leaves.compactMap { panes[$0] })
+        guard !views.isEmpty else { return }
         let question = closeQuestion(for: tab, terminals: views.count)
         guard views.count > 1 else {
             return confirm(ending: views, question: question, detail: "The program running in it will end.")
@@ -471,7 +572,7 @@ public final class WorkbenchView: NSView {
     /// Closes every tab but this one, asking first as Close Tab does.
     @objc public func closeOtherTabs(_ sender: Any?) {
         guard let kept = tab(for: sender)?.id else { return }
-        let views = model.tabs.filter { $0.id != kept }.flatMap(\.layout.leaves).compactMap { panes[$0] }
+        let views = leaving(elsewhere: model.tabs.filter { $0.id != kept }.flatMap(\.layout.leaves).compactMap { panes[$0] })
         guard !views.isEmpty else { return }
         confirm(ending: views, question: "Close the other tabs?", detail: "Their \(views.count == 1 ? "terminal" : "\(views.count) terminals") will end.")
     }
@@ -480,8 +581,7 @@ public final class WorkbenchView: NSView {
     /// attached may.
     private func confirm(ending views: [TerminalPane], question: String, detail: String) {
         guard views.contains(where: \.mayEndAProgram), let window else { return end(views) }
-        let onThisMac = views.allSatisfy { !$0.place.onRunner }
-        Confirmation.ask(question, detail: detail + (onThisMac ? " Quitting Sail instead leaves every terminal running." : ""), action: "Close", on: window) { [weak self] close in
+        Confirmation.ask(question, detail: detail + " Quitting Sail instead leaves every terminal running.", action: "Close", on: window) { [weak self] close in
             if close { self?.end(views) }
         }
     }
@@ -637,12 +737,13 @@ public final class WorkbenchView: NSView {
         empty.spacing = Look.Space.m
         empty.translatesAutoresizingMaskIntoConstraints = false
         banner.translatesAutoresizingMaskIntoConstraints = false
+        bannerTop = banner.topAnchor.constraint(equalTo: topAnchor, constant: Look.Space.x3l)
         addSubview(empty)
         addSubview(banner)
         NSLayoutConstraint.activate([
             empty.centerXAnchor.constraint(equalTo: centerXAnchor), empty.centerYAnchor.constraint(equalTo: centerYAnchor),
             banner.centerXAnchor.constraint(equalTo: centerXAnchor),
-            banner.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Look.Space.x3l),
+            bannerTop,
             banner.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: Look.Space.l),
         ])
         emptyLabel.isHidden = true

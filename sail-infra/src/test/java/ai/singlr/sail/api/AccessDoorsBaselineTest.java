@@ -51,9 +51,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -71,6 +73,7 @@ import org.junit.jupiter.api.io.TempDir;
  * <p>It lives beside the routers because the requests they parse are theirs alone; each is built by
  * the router's own parser.
  */
+@Timeout(value = 600, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
 class AccessDoorsBaselineTest {
 
   private static final Set<Actor.Lane> DOOR_LANES =

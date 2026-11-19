@@ -71,12 +71,22 @@ public final class PtySession implements AutoCloseable {
     BACKLOG
   }
 
-  private record Subscriber(long id, Client client, SubscriberQueue queue) {}
+  private record Subscriber(
+      long id,
+      Client client,
+      SubscriberQueue queue,
+      String asker,
+      String fde,
+      boolean wantsWrite) {}
 
   private record Keystroke(long seq, byte[] bytes) {}
 
   /** What was lost when no exit file survives a handoff: the reason names it, never a silent 0. */
   public static final String STATUS_LOST = "exited (status lost across a host handoff)";
+
+  private static final String IO_ERROR = "io-error: ";
+  private static final java.util.regex.Pattern EXITED =
+      java.util.regex.Pattern.compile("exited\\((-?\\d+)\\)");
 
   private static final long PID_REUSE_SLACK_MILLIS = 5_000;
 
@@ -335,10 +345,12 @@ public final class PtySession implements AutoCloseable {
   private final long createdAt = System.nanoTime();
   private volatile long writerId = -1;
   private volatile String writerFde = "";
+  private volatile String writerClient = "";
   private int cols;
   private int rows;
   private volatile String endedReason;
   private volatile String yieldedReason;
+  private volatile String yieldedRecord;
   private volatile long endedAtNanos;
   private volatile boolean everAttached;
   private volatile boolean handedOff;
@@ -718,7 +730,7 @@ public final class PtySession implements AutoCloseable {
         }
       }
     } catch (IOException e) {
-      failure = handedOff ? null : "io-error: " + e.getMessage();
+      failure = handedOff ? null : IO_ERROR + e.getMessage();
     } finally {
       try {
         if (!handedOff) {
@@ -795,7 +807,7 @@ public final class PtySession implements AutoCloseable {
         var snapshot = new java.util.ArrayList<PtyMessage>();
         snapshot.add(new PtyMessage.Resized(cols, rows));
         snapshot.addAll(replayMessages(RESYNC_TAIL));
-        snapshot.add(new PtyMessage.WriterChanged(writerFde));
+        snapshot.add(new PtyMessage.WriterChanged(writerFde, subscriber.id() == writerId));
         subscriber.queue().replaceWith(snapshot);
       } catch (IOException e) {
         subscriber.queue().force(new PtyMessage.SessionEnded("resync failed: " + e.getMessage()));
@@ -825,23 +837,44 @@ public final class PtySession implements AutoCloseable {
     return List.copyOf(messages);
   }
 
+  /** Attaches a client as one that asks now ({@code takes}), on behalf of no named client. */
+  public long attach(Client client, boolean wantsWrite, String fde) throws IOException {
+    return attach(client, wantsWrite, fde, "", true);
+  }
+
   /**
    * Attaches a client. Its queue is seeded, in order, with the pty's live geometry, the replay, and
-   * the write token's holder, then the live stream follows. A write request takes the token when it
-   * is free — or when its holder is this same FDE on another connection: a laptop that slept left a
-   * ghost attachment parked on the box holding the keyboard, and the same person coming back is the
-   * one who should have it. The displaced connection hears {@code WriterChanged} and its next input
-   * is refused. A different FDE's token is never taken here — that is {@link #takeWrite}, an
-   * explicit act — so the newcomer learns it is an observer instead.
+   * the write token's holder, then the live stream follows. A write request takes the token:
+   *
+   * <ul>
+   *   <li>when no one holds it, if the person asked for it now ({@code takes}), or is the session's
+   *       opener; anyone else (an admin's app restoring a tab) watches until it takes it;
+   *   <li>when this same FDE holds it, if the person asked for it now, or the holder is this same
+   *       {@code asker}'s own earlier connection (a laptop that slept left a ghost attachment
+   *       holding the keyboard), or the holder's connection is gone (the host was handed over, and
+   *       the holder's client name is not kept across it).
+   * </ul>
+   *
+   * Without {@code takes}, an automatic reconnect never takes the keyboard from the person's other
+   * live client: it watches, and hears so. The displaced connection hears {@code WriterChanged} and
+   * its next input is refused. A different FDE's held token is never taken here — that is {@link
+   * #takeWrite}, an explicit act — so the newcomer learns it is an observer.
    */
-  public long attach(Client client, boolean wantsWrite, String fde) throws IOException {
+  public long attach(Client client, boolean wantsWrite, String fde, String asker, boolean takes)
+      throws IOException {
     if (endedReason != null) {
       throw new IOException("Session '" + name() + "' has ended: " + endedReason + ".");
     }
     var firstAttach = !everAttached;
     everAttached = true;
     var subscriber =
-        new Subscriber(subscriberIds.incrementAndGet(), client, new SubscriberQueue(queueCapacity));
+        new Subscriber(
+            subscriberIds.incrementAndGet(),
+            client,
+            new SubscriberQueue(queueCapacity),
+            asker,
+            fde,
+            wantsWrite);
     synchronized (fanout) {
       subscriber.queue().force(new PtyMessage.Resized(cols, rows));
       replayMessages(replayMax).forEach(subscriber.queue()::force);
@@ -851,10 +884,10 @@ public final class PtySession implements AutoCloseable {
       }
     }
     synchronized (this) {
-      if (wantsWrite && (writerId < 0 || writerFde.equals(fde))) {
-        grant(subscriber.id, fde);
+      if (wantsWrite && mayTake(fde, asker, takes)) {
+        grant(subscriber.id, fde, asker);
       } else {
-        subscriber.queue().force(new PtyMessage.WriterChanged(writerFde));
+        subscriber.queue().force(new PtyMessage.WriterChanged(writerFde, false));
         if (firstAttach) {
           persistMeta();
         }
@@ -907,7 +940,7 @@ public final class PtySession implements AutoCloseable {
    * drained by the writer thread; the sequence rides future output.
    */
   public WriteOutcome input(long subscriberId, long seq, byte[] bytes) {
-    if (subscriberId != writerId) {
+    if (subscriberId != writerId && !takesTheFreeKeyboard(subscriberId)) {
       return WriteOutcome.NOT_WRITER;
     }
     if (!inputBudget.tryAcquire(bytes.length)) {
@@ -930,7 +963,33 @@ public final class PtySession implements AutoCloseable {
     if (!subscribers.containsKey(subscriberId)) {
       throw new IllegalArgumentException("No attached subscriber " + subscriberId + ".");
     }
-    grant(subscriberId, fde);
+    grant(subscriberId, fde, subscribers.get(subscriberId).asker());
+  }
+
+  private boolean mayTake(String fde, String asker, boolean takes) {
+    if (writerId < 0) {
+      return takes || fde.equals(origin.ownerFde());
+    }
+    return writerFde.equals(fde)
+        && (takes
+            || !subscribers.containsKey(writerId)
+            || !asker.isEmpty() && asker.equals(writerClient));
+  }
+
+  /**
+   * A keyboard no one holds goes to the opener's client that asked to write as it types, as its
+   * restore would have taken it; anyone else's keys stay refused until it takes the keyboard.
+   */
+  private synchronized boolean takesTheFreeKeyboard(long subscriberId) {
+    var subscriber = subscribers.get(subscriberId);
+    if (writerId >= 0
+        || subscriber == null
+        || !subscriber.wantsWrite()
+        || !subscriber.fde().equals(origin.ownerFde())) {
+      return false;
+    }
+    grant(subscriberId, subscriber.fde(), subscriber.asker());
+    return true;
   }
 
   /**
@@ -939,11 +998,17 @@ public final class PtySession implements AutoCloseable {
    * instant has already cleared the roster and queued the ending, and the grant must not throw
    * after the host said {@code Ok} — the ending is what the newcomer hears.
    */
-  private void grant(long subscriberId, String fde) {
+  private void grant(long subscriberId, String fde, String asker) {
     writerId = subscriberId;
     writerFde = fde;
-    var changed = new PtyMessage.WriterChanged(fde);
-    subscribers.values().forEach(subscriber -> subscriber.queue().force(changed));
+    writerClient = asker;
+    subscribers
+        .values()
+        .forEach(
+            subscriber ->
+                subscriber
+                    .queue()
+                    .force(new PtyMessage.WriterChanged(fde, subscriber.id() == subscriberId)));
     persistMeta();
   }
 
@@ -979,7 +1044,10 @@ public final class PtySession implements AutoCloseable {
     if (writerId == subscriberId) {
       writerId = -1;
       writerFde = "";
+      writerClient = "";
       persistMeta();
+      var free = new PtyMessage.WriterChanged("", false);
+      subscribers.values().forEach(left -> left.queue().force(free));
     }
   }
 
@@ -1002,6 +1070,44 @@ public final class PtySession implements AutoCloseable {
 
   public String endedReason() {
     return endedReason;
+  }
+
+  /**
+   * What happened to the session, once and in the past tense, for a listing: the record its yield
+   * gave, or {@link #recordOf} its reason; null while it lives.
+   */
+  public String endedRecord() {
+    var reason = endedReason;
+    if (reason == null) {
+      return null;
+    }
+    var given = yieldedRecord;
+    return given == null || given.isBlank() ? recordOf(reason) : given;
+  }
+
+  /**
+   * {@code reason}, a session's end as its live terminal is told it, said as what happened: a
+   * program's exit with its status, a status lost across a restart, a terminal host that could no
+   * longer read it, or the reason as a sentence.
+   */
+  public static String recordOf(String reason) {
+    var exited = EXITED.matcher(reason);
+    if (exited.matches()) {
+      return "Its program exited with status " + exited.group(1) + ".";
+    }
+    if (reason.equals(STATUS_LOST)) {
+      return "Its program exited while the terminal host restarted, and its status was lost.";
+    }
+    if (reason.startsWith(IO_ERROR)) {
+      return sentence(
+          "The terminal host could no longer read it: " + reason.substring(IO_ERROR.length()));
+    }
+    return sentence(
+        reason.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + reason.substring(1));
+  }
+
+  private static String sentence(String text) {
+    return text.endsWith(".") ? text : text + ".";
   }
 
   public int attachedCount() {
@@ -1047,9 +1153,18 @@ public final class PtySession implements AutoCloseable {
    * keeps its own reason.
    */
   public void end(String reason) {
+    end(reason, "");
+  }
+
+  /**
+   * As {@link #end(String)}, its listing saying {@code record} of it: what happened, once, in the
+   * past tense; blank for {@link #recordOf} to say it from {@code reason}.
+   */
+  public void end(String reason, String record) {
     synchronized (fanout) {
       if (endedReason == null && yieldedReason == null) {
         yieldedReason = reason;
+        yieldedRecord = record;
         var notice =
             ("\r\n[sail: session ended \u2014 " + reason + "]\r\n")
                 .getBytes(StandardCharsets.UTF_8);

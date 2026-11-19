@@ -29,11 +29,13 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 @EnabledOnOs(OS.LINUX)
+@Timeout(value = 120, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
 class AttachLoopTest {
 
   @TempDir Path dir;
@@ -67,8 +69,8 @@ class AttachLoopTest {
         var rendered = stdout.toString(StandardCharsets.UTF_8);
         assertTrue(rendered.contains("pty-says:hello"));
         assertTrue(
-            rendered.contains("[sail: uday holds the write token]"),
-            "the host's answer to the attach names the keyboard's holder: " + rendered);
+            rendered.contains("[sail: you hold the write token]"),
+            "the host's answer to the attach says the keyboard is this client's: " + rendered);
       }
     }
   }
@@ -80,8 +82,9 @@ class AttachLoopTest {
     PtyWire.write(sink, new PtyMessage.ReplayBegin(false));
     PtyWire.write(sink, new PtyMessage.Output(-1, "old\n".getBytes(StandardCharsets.UTF_8)));
     PtyWire.write(sink, new PtyMessage.ReplayEnd());
-    PtyWire.write(sink, new PtyMessage.WriterChanged("mady"));
-    PtyWire.write(sink, new PtyMessage.WriterChanged(""));
+    PtyWire.write(sink, new PtyMessage.WriterChanged("mady", false));
+    PtyWire.write(sink, new PtyMessage.WriterChanged("", false));
+    PtyWire.write(sink, new PtyMessage.WriterChanged("uday", true));
     PtyWire.write(sink, new PtyMessage.SessionEnded("exited(0)"));
     var stdout = new ByteArrayOutputStream();
 
@@ -95,7 +98,8 @@ class AttachLoopTest {
             "[sail: history resumes mid-sequence; the screen settles on the next redraw]",
             "old",
             "[sail: mady holds the write token]",
-            "[sail: nobody holds the write token]");
+            "[sail: nobody holds the write token]",
+            "[sail: you hold the write token]");
     var at = -1;
     for (var line : expectedOrder) {
       var next = rendered.indexOf(line, at + 1);

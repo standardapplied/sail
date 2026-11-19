@@ -40,6 +40,16 @@ public enum TicketRequest: Equatable, Sendable {
 /// Whoever hands out terminal tickets: the control plane, for its caller.
 public protocol TicketSource: Sendable {
     func ticket(for request: TicketRequest) async throws(SailError) -> TerminalTicket
+    /// The caller's sessions in workspace `workspace` of `project` (`main` for its container),
+    /// newest first: what a reattach asks before it opens anything.
+    func sessions(in project: String, workspace: String) async throws(SailError) -> RunnerSessions
+}
+
+extension TicketSource {
+    /// A source that lists nothing says so, rather than answering an empty list it never asked.
+    public func sessions(in _: String, workspace _: String) async throws(SailError) -> RunnerSessions {
+        throw .unsendable("This ticket source lists no sessions.")
+    }
 }
 
 extension SailClient: TicketSource {
@@ -48,6 +58,10 @@ extension SailClient: TicketSource {
         case let .open(project, workspace): try await send(.terminalTicket(open: project, workspace: workspace))
         case let .attach(session): try await send(.terminalTicket(attach: session))
         }
+    }
+
+    public func sessions(in project: String, workspace: String) async throws(SailError) -> RunnerSessions {
+        try await send(.sessions(workspace: workspace, project: project))
     }
 }
 
@@ -64,8 +78,17 @@ public final class SignedInTickets: TicketSource {
     }
 
     public func ticket(for request: TicketRequest) async throws(SailError) -> TerminalTicket {
+        try await signedIn().ticket(for: request)
+    }
+
+    public func sessions(in project: String, workspace: String) async throws(SailError) -> RunnerSessions {
+        try await signedIn().sessions(in: project, workspace: workspace)
+    }
+
+    /// The tickets of the person signed in now, refused unless they are this source's person.
+    private func signedIn() async throws(SailError) -> any TicketSource {
         guard let signedIn = await current() else { throw .signIn(.signedOut) }
         guard signedIn.handle == handle else { throw .signIn(.another(owner: handle, signedIn: signedIn.handle)) }
-        return try await signedIn.tickets.ticket(for: request)
+        return signedIn.tickets
     }
 }

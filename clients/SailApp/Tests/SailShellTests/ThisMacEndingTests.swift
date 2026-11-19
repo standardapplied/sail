@@ -44,7 +44,7 @@ import Testing
         let place = Place.thisMac(folder: "/")
         let id = bench.newTab(session: place.newSessionName, place: place)
         let pane = try TerminalPane(
-            try #require(bench.panes[id]), start: .open, host: host, runner: nil,
+            try #require(bench.panes[id]), start: .open, host: host, runner: nil, person: "",
             fonts: TerminalFonts(directory: LookTests.fonts), points: 15, look: .light
         )
         pane.begin()
@@ -66,7 +66,7 @@ import Testing
 
     /// This Mac's workbench of `tabs` tabs of one pane each, every one attached through the door.
     static func workbench(at door: FakeRunnerDoor, tabs: Int) async throws -> WorkbenchView {
-        let bench = try WorkbenchView(fonts: LookTests.fonts, host: Self.host(at: door), look: .light)
+        let bench = try WorkbenchView(fonts: LookTests.fonts, host: Self.host(at: door), look: .light, defaults: ReattachTests.defaults())
         let place = Place.thisMac(folder: "/")
         let ids = (0 ..< tabs).map { _ in bench.model.newTab(session: place.newSessionName, place: place) }
         for id in ids {

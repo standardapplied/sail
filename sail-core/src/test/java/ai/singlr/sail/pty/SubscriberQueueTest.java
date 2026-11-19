@@ -134,14 +134,14 @@ class SubscriberQueueTest {
     queue.enqueue(out(1));
     queue.force(new PtyMessage.Resized(80, 24));
     for (var i = 0; i < 100_000; i++) {
-      queue.force(new PtyMessage.WriterChanged("fde-" + i));
+      queue.force(new PtyMessage.WriterChanged("fde-" + i, false));
     }
     queue.force(new PtyMessage.Resized(100, 40));
     queue.force(new PtyMessage.SessionEnded("gone"));
 
     assertEquals(1, ((PtyMessage.Output) queue.next()).lastInputSeq(), "output is untouched");
     assertEquals(
-        new PtyMessage.WriterChanged("fde-99999"),
+        new PtyMessage.WriterChanged("fde-99999", false),
         queue.next(),
         "only the latest writer is pending — a TakeWrite storm cannot grow the queue");
     assertEquals(
@@ -156,7 +156,7 @@ class SubscriberQueueTest {
     queue.force(new PtyMessage.ReplayBegin(true));
     queue.enqueue(out(1));
     queue.force(new PtyMessage.ReplayEnd());
-    queue.force(new PtyMessage.WriterChanged("uday"));
+    queue.force(new PtyMessage.WriterChanged("uday", false));
     queue.force(new PtyMessage.Resized(100, 40));
     queue.force(new PtyMessage.Resized(90, 30));
 
@@ -168,7 +168,7 @@ class SubscriberQueueTest {
     assertInstanceOf(PtyMessage.ReplayBegin.class, queue.next());
     assertEquals(1, ((PtyMessage.Output) queue.next()).lastInputSeq());
     assertInstanceOf(PtyMessage.ReplayEnd.class, queue.next());
-    assertEquals(new PtyMessage.WriterChanged("uday"), queue.next());
+    assertEquals(new PtyMessage.WriterChanged("uday", false), queue.next());
     assertEquals(
         new PtyMessage.Resized(90, 30),
         queue.next(),

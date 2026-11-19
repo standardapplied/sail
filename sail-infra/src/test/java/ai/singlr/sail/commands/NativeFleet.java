@@ -391,7 +391,7 @@ public final class NativeFleet implements AutoCloseable {
   }
 
   /**
-   * The fleet's image, which {@code ci/check fleet-image bake} builds before any test (the CI lane
+   * The fleet's image, which {@code ci/images fleet-image bake} builds before any test (the CI lane
    * restores it from a cache or bakes it on a miss): the build is the only step that reaches an
    * external host for packages, and no test builds it, so a missing image fails every test at once,
    * naming the bake, instead of each retrying a build until the job's own limit.
@@ -405,7 +405,7 @@ public final class NativeFleet implements AutoCloseable {
         run(COMMAND_DEADLINE, List.of("podman", "image", "exists", IMAGE)).exit(),
         "the fleet's image "
             + IMAGE
-            + " is not on this machine: bake it with ci/check fleet-image bake");
+            + " is not on this machine: bake it with ci/images fleet-image bake");
     imageReady = true;
   }
 

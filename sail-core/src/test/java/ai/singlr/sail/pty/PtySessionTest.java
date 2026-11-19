@@ -232,6 +232,25 @@ class PtySessionTest {
     }
   }
 
+  /**
+   * What a listing says of an ended session is what happened, once and in the past tense: a
+   * program's exit with its status, a status lost across a restart, a terminal host that could no
+   * longer read it, or any other reason as a sentence. (A host that stops for good lists nothing:
+   * it ends and forgets every session.)
+   */
+  @Test
+  void anEndIsRecordedAsWhatHappened() {
+    assertEquals("Its program exited with status 0.", PtySession.recordOf("exited(0)"));
+    assertEquals("Its program exited with status 137.", PtySession.recordOf("exited(137)"));
+    assertEquals(
+        "Its program exited while the terminal host restarted, and its status was lost.",
+        PtySession.recordOf(PtySession.STATUS_LOST));
+    assertEquals(
+        "The terminal host could no longer read it: Input/output error.",
+        PtySession.recordOf("io-error: Input/output error"));
+    assertEquals("Yielded to dispatch 2.", PtySession.recordOf("yielded to dispatch 2"));
+  }
+
   @Test
   void aResumedSessionNeverAdoptsAProcessThatBeganAfterItWasCreated() throws Exception {
     var files = SessionFiles.in(dir, "r");
@@ -651,6 +670,99 @@ class PtySessionTest {
       observer.awaitFrame(PtyMessage.WriterChanged.class);
     } finally {
       session.close();
+    }
+  }
+
+  /**
+   * Round 4 m1: after a handoff the keyboard's holder has no connection and no client name; the
+   * same person's automatic reconnect, from any client of theirs, takes it back, and another
+   * person's watches.
+   */
+  @Test
+  void afterAHandoffThePersonsAutomaticReconnectTakesTheirKeyboardBackAndAnotherWatches()
+      throws Exception {
+    var session = resumed("read a", false);
+    try {
+      var other = new Collector();
+      session.attach(other, true, "mady", "mady-mac", false);
+      other.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals("uday", session.writerFde(), "another person watches");
+      assertEquals(new PtyMessage.WriterChanged("uday", false), lastWriter(other));
+
+      var back = new Collector();
+      var backId = session.attach(back, true, "uday", "another-mac", false);
+      back.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(backId, session.writerId(), "the person's reconnect takes their keyboard back");
+      assertEquals(new PtyMessage.WriterChanged("uday", true), lastWriter(back));
+    } finally {
+      session.close();
+    }
+  }
+
+  /**
+   * Round 2 R2-1: when the keyboard's holder leaves, every client still attached hears that no one
+   * holds it; the session's opener, attached to write, takes it by typing, and another person
+   * attached to write does not.
+   */
+  @Test
+  void whenTheHolderLeavesEveryoneHearsTheKeyboardIsFreeAndTheOpenerTypingTakesIt()
+      throws Exception {
+    try (var session = session("read a; echo got:$a; read b")) {
+      var holder = new Collector();
+      var holderId = session.attach(holder, true, "uday", "mac-b", true);
+      var watcher = new Collector();
+      var watcherId = session.attach(watcher, true, "uday", "mac-a", false);
+      var admin = new Collector();
+      var adminId = session.attach(admin, true, "mady", "admin-mac", false);
+      admin.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(holderId, session.writerId());
+
+      session.detach(holderId);
+      watcher.awaitMessage(new PtyMessage.WriterChanged("", false));
+      admin.awaitMessage(new PtyMessage.WriterChanged("", false));
+      assertEquals(
+          PtySession.WriteOutcome.NOT_WRITER,
+          session.input(adminId, 1, "x\n".getBytes(StandardCharsets.UTF_8)),
+          "another person's typing never takes it");
+      assertEquals(
+          PtySession.WriteOutcome.ACCEPTED,
+          session.input(watcherId, 2, "hi\n".getBytes(StandardCharsets.UTF_8)),
+          "the opener's typing takes the free keyboard");
+      watcher.awaitOutput("got:hi");
+      assertEquals(watcherId, session.writerId());
+      watcher.awaitMessage(new PtyMessage.WriterChanged("uday", true));
+    }
+  }
+
+  /**
+   * Item 3: without an explicit take, only the session's opener takes a free keyboard; an admin
+   * restoring a tab watches until they take it, and taking it now takes it.
+   */
+  @Test
+  void aFreeKeyboardGoesWithoutATakeOnlyToTheOpener() throws Exception {
+    try (var session = session("read a")) {
+      var admin = new Collector();
+      session.attach(admin, true, "mady", "admin-mac", false);
+      admin.awaitFrame(PtyMessage.WriterChanged.class);
+      assertTrue(session.writerId() < 0, "an admin's restore watches a free keyboard");
+      assertEquals(new PtyMessage.WriterChanged("", false), lastWriter(admin));
+
+      var opener = new Collector();
+      var openerId = session.attach(opener, true, "uday", "mac-a", false);
+      opener.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(openerId, session.writerId(), "the opener's restore takes it");
+
+      var asked = new Collector();
+      var askedId = session.attach(asked, true, "mady", "admin-mac", true);
+      asked.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(
+          openerId, session.writerId(), "an admin asking now still never takes the opener's");
+      session.detach(openerId);
+      var again = new Collector();
+      var againId = session.attach(again, true, "mady", "admin-mac-2", true);
+      again.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(againId, session.writerId(), "an admin asking now takes a free keyboard");
+      session.detach(askedId);
     }
   }
 
@@ -1118,7 +1230,7 @@ class PtySessionTest {
       var kinds = frames.stream().map(m -> m.getClass().getSimpleName()).toList();
       assertEquals("ReplayBegin", kinds.get(1), "then the replay: " + kinds);
       assertEquals(
-          new PtyMessage.WriterChanged("uday"),
+          new PtyMessage.WriterChanged("uday", false),
           frames.get(kinds.indexOf("ReplayEnd") + 1),
           "and the token holder right after the replay: " + frames);
     }
@@ -1211,10 +1323,65 @@ class PtySessionTest {
           session.input(otherId, 3, "nope\n".getBytes(StandardCharsets.UTF_8)));
       var kinds = other.messages.stream().map(m -> m.getClass().getSimpleName()).toList();
       assertEquals(
-          new PtyMessage.WriterChanged("uday"),
+          new PtyMessage.WriterChanged("uday", false),
           List.copyOf(other.messages).get(kinds.indexOf("ReplayEnd") + 1),
           "and is told who holds it right after the replay: " + other.messages);
     }
+  }
+
+  /**
+   * An automatic reconnect asks for the keyboard without taking it: it never takes it from the
+   * person's other live client, which keeps typing, and the reconnect hears it is not its own. It
+   * takes it back from its own lost connection, and asking now takes it from the other client. Each
+   * connection hears whether the keyboard is its own.
+   */
+  @Test
+  void anAutomaticReconnectNeverTakesTheKeyboardFromThePersonsOtherLiveClient() throws Exception {
+    try (var session = session("read a; echo got:$a; read b; echo got:$b; read c")) {
+      var other = new Collector();
+      var otherId = session.attach(other, true, "uday", "mac-b", true);
+      other.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(new PtyMessage.WriterChanged("uday", true), lastWriter(other));
+
+      var waking = new Collector();
+      var wakingId = session.attach(waking, true, "uday", "mac-a", false);
+      waking.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(otherId, session.writerId(), "the other Mac keeps typing");
+      assertEquals(
+          new PtyMessage.WriterChanged("uday", false),
+          lastWriter(waking),
+          "the reconnect hears the keyboard is with the person, and not its own");
+      assertEquals(
+          PtySession.WriteOutcome.NOT_WRITER,
+          session.input(wakingId, 1, "x\n".getBytes(StandardCharsets.UTF_8)));
+
+      var again = new Collector();
+      var againId = session.attach(again, true, "uday", "mac-b", false);
+      again.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(againId, session.writerId(), "a client takes it back from its own ghost");
+      assertEquals(new PtyMessage.WriterChanged("uday", true), lastWriter(again));
+      other.awaitMessage(new PtyMessage.WriterChanged("uday", false));
+      waking.awaitMessage(new PtyMessage.WriterChanged("uday", false));
+
+      var asked = new Collector();
+      var askedId = session.attach(asked, true, "uday", "mac-a", true);
+      asked.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(askedId, session.writerId(), "asking now takes it from the other client");
+      again.awaitMessage(new PtyMessage.WriterChanged("uday", false));
+
+      session.detach(askedId);
+      var back = new Collector();
+      var backId = session.attach(back, true, "uday", "mac-c", false);
+      back.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(backId, session.writerId(), "a keyboard no client holds is taken back");
+    }
+  }
+
+  private static PtyMessage lastWriter(Collector client) {
+    return List.copyOf(client.messages).reversed().stream()
+        .filter(PtyMessage.WriterChanged.class::isInstance)
+        .findFirst()
+        .orElseThrow();
   }
 
   @Test
@@ -1421,7 +1588,7 @@ class PtySessionTest {
       assertEquals("ReplayBegin", kinds.get(continuedAt + 2), "then the replay: " + kinds);
       var replayEndAt = kinds.subList(continuedAt, kinds.size()).indexOf("ReplayEnd") + continuedAt;
       assertEquals(
-          new PtyMessage.WriterChanged("uday"),
+          new PtyMessage.WriterChanged("uday", true),
           frames.get(replayEndAt + 1),
           "and the writer the overflow discarded is answered again after it: " + kinds);
     } finally {

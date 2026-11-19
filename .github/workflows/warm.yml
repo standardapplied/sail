@@ -1,0 +1,36 @@
+name: Warm caches
+
+# Refills what CI prepares once a week (ci/images) on main, early in the ISO week the caches are
+# keyed on, so a pull request's lanes restore it instead of paying the cold path: the incus suites'
+# prepared image, the native fleet's image and the runner's own packages. Caches made on main are
+# read by every branch.
+on:
+  schedule:
+    - cron: '30 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # The prepared and fleet images are one cache each, whatever runner restores them. The runner's
+  # packages are kept per runner image (ImageOS-ImageVersion), and GitHub chooses the machine, and
+  # with it the image, for each job: Azure's and AWS's runners carry different image versions. No
+  # run can name the image it gets, so three jobs try for both, and a runner image none of them
+  # landed on is filled by the first lane that lands on it, which pays the fetch once.
+  warm:
+    name: Warm the caches (try ${{ matrix.try }} of 3)
+    strategy:
+      fail-fast: false
+      matrix:
+        try: [1, 2, 3]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: The runner's packages and the prepared image
+        uses: ./.github/actions/incus
+
+      - name: The fleet's image
+        uses: ./.github/actions/fleet-image

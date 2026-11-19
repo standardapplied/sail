@@ -38,6 +38,7 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "refusal-conflict-workspace-exists": { _ = try await $0.send(.createWorkspace("dock", project: "harbor")) },
     "refusal-forbidden-not-assignee": { _ = try await $0.send(.startWorkspace("dock", project: "harbor")) },
     "workspace-sessions": { _ = try await $0.send(.sessions(workspace: "dock", project: "harbor")) },
+    "refusal-not-found-session": { _ = try await $0.send(.terminalTicket(attach: "app-gone")) },
     "workspace-sessions-not-theirs": { _ = try await $0.send(.sessions(workspace: "dock", project: "harbor")) },
     "refusal-not-found-workspace": { _ = try await $0.send(.sessions(workspace: "gone", project: "harbor")) },
     "refusal-project-not-in-catalog-sessions": { _ = try await $0.send(.sessions(workspace: "dock", project: "harbor")) },
@@ -140,7 +141,7 @@ func answer<Response>(
             RunnerSession(
                 name: "app-5a6b7c8d", live: false, attached: 0, writer: "", opener: "uday", command: [],
                 createdAt: Date(timeIntervalSince1970: 1_763_456_400),
-                endedReason: "Workspace dock of harbor is being stopped by ana, which ends this terminal."
+                endedReason: "Workspace dock of harbor was stopped by ana."
             ),
         ]))
         #expect(try sessions.decode(response(try Exchange("workspace-sessions-not-theirs"))) == RunnerSessions(sessions: []))

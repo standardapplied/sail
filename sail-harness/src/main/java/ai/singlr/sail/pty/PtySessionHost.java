@@ -789,7 +789,9 @@ public final class PtySessionHost implements AutoCloseable {
                   break;
                 }
                 reply(channel, new PtyMessage.Ok());
-                subscriberId = session.attach(msg -> reply(channel, msg), m.write(), who.fde());
+                subscriberId =
+                    session.attach(
+                        msg -> reply(channel, msg), m.write(), who.fde(), m.client(), m.takes());
                 attached = session;
               }
               log("attached", principal, m.session(), m.write() ? "write" : "observe");
@@ -871,7 +873,7 @@ public final class PtySessionHost implements AutoCloseable {
                 reply(
                     channel,
                     who instanceof PtyIdentity.Dispatch
-                        ? yieldSession(m.session(), m.reason())
+                        ? yieldSession(m.session(), m.reason(), m.record())
                         : new PtyMessage.Err("Yield requires host dispatch authority."));
             default -> reply(channel, new PtyMessage.Err("Unexpected client frame."));
           }
@@ -1041,7 +1043,8 @@ public final class PtySessionHost implements AutoCloseable {
    * The sessions the holder of the credential {@code request} carries may attach to, live or ended:
    * resolved as a ticket's holder is, refused in a ticket's words when it stands for no one, and
    * kept by the attach's own rule ({@link #admitted}, then the project read as that person), so a
-   * listing shows nothing its caller could not attach to.
+   * listing shows nothing its caller could not attach to. A project that cannot be read now (the
+   * store down) is the host's outage, never a shorter list.
    */
   private PtyMessage listSessionsFor(PtyMessage.ListSessions request) {
     var unoffered = doorRefusal(request.credential());
@@ -1052,13 +1055,23 @@ public final class PtySessionHost implements AutoCloseable {
     if (!(resolved instanceof Holder.Of(var who))) {
       return ((Holder.Refused) resolved).answer();
     }
-    var readable = new HashMap<String, Boolean>();
-    return listSessions(
-        who,
-        new PtyMessage.ListSessions(request.after(), request.limit()),
+    var refusals = new HashMap<String, Optional<Refusal>>();
+    Predicate<PtySession> readable =
         session ->
-            readable.computeIfAbsent(
-                session.origin().project(), project -> projectRefusal(project, who) == null));
+            refusals
+                .computeIfAbsent(
+                    session.origin().project(),
+                    project -> Optional.ofNullable(projectRefusal(project, who)))
+                .isEmpty();
+    var listed =
+        listSessions(who, new PtyMessage.ListSessions(request.after(), request.limit()), readable);
+    var unanswered =
+        refusals.values().stream()
+            .flatMap(Optional::stream)
+            .anyMatch(refusal -> refusal.kind() == PtyMessage.TicketRefusal.UNAVAILABLE);
+    return unanswered
+        ? new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.UNAVAILABLE, UNSERVED)
+        : listed;
   }
 
   /**
@@ -1619,7 +1632,7 @@ public final class PtySessionHost implements AutoCloseable {
         .placed(session.origin().project(), session.origin().workspace(), session.ownerFde())
         .lived(
             session.createdAtMillis(),
-            java.util.Objects.requireNonNullElse(session.endedReason(), ""))
+            java.util.Objects.requireNonNullElse(session.endedRecord(), ""))
         .running(session.origin().agent());
   }
 
@@ -1647,7 +1660,7 @@ public final class PtySessionHost implements AutoCloseable {
    * kill, but the session is kept ended, as one whose program exited is, so its listing says why
    * until {@link #CORPSE_RETENTION} passes.
    */
-  private synchronized PtyMessage yieldSession(String name, String reason) {
+  private synchronized PtyMessage yieldSession(String name, String reason, String record) {
     if (closed) {
       return SHUTTING_DOWN;
     }
@@ -1655,7 +1668,7 @@ public final class PtySessionHost implements AutoCloseable {
     if (session == null || !session.live()) {
       return new PtyMessage.Ok();
     }
-    session.end(reason);
+    session.end(reason, record);
     deleteFiles(SessionFiles.in(sessionsDir, name), session.ownerFde(), name);
     return new PtyMessage.Ok();
   }

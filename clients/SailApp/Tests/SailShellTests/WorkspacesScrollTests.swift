@@ -171,10 +171,11 @@ import Testing
     }
 
     /// Minor 4: a redraw (a list's answer, a change of look; never per frame) builds only the rows on
-    /// screen: three hundred rows within 60 ms, where building every row took 118 ms. The times for
-    /// three hundred rows and for thirty are said, which shows whether the cost is the screenful.
+    /// screen: about a screenful of rows whatever the list's length, and the words of no row it did
+    /// not make, so a return to building every row fails by count. The times for three hundred rows
+    /// and for thirty are said, not bounded: a shared runner measured the same path from 20 to 61 ms.
     @Test func aLongListRedrawsOnlyWhatIsOnScreen() throws {
-        func best(_ count: Int) throws -> (time: Duration, made: Int) {
+        func best(_ count: Int) throws -> (time: Duration, made: Int, words: Int) {
             let rows = (1 ... count).map { WorkspaceRow(name: String(format: "ws-%03d", $0), instance: String(format: "harbor-ws-%03d", $0), state: .known(.running), owner: $0.isMultiple(of: 2) ? "ana" : "uday") }
             let page = try #require(WorkspacesViewTests.page(rows))
             let (project, window) = try WorkspacesViewTests.project(width: 1024 - Rail.width - 4 - LeftPanel.width.standard)
@@ -182,19 +183,19 @@ import Testing
             project.render(page)
             project.layoutSubtreeIfNeeded()
             var times: [Duration] = []
-            let made = project.list.rowsMade
+            let made = project.list.rowsMade, words = WorkspaceLine.made
             for _ in 0 ..< 3 {
                 let start = ContinuousClock.now
                 project.render(page)
                 project.layoutSubtreeIfNeeded()
                 times.append(ContinuousClock.now - start)
             }
-            return (times.min() ?? .zero, (project.list.rowsMade - made) / 3)
+            return (times.min() ?? .zero, (project.list.rowsMade - made) / 3, (WorkspaceLine.made - words) / 3)
         }
         let many = try best(300), few = try best(30)
         print("workspaces: a redraw makes \(many.made) rows in \(many.time) for three hundred, \(few.made) in \(few.time) for thirty")
         #expect(many.made <= few.made + 2 && many.made < 30, "a redraw of three hundred rows makes \(many.made) of them, thirty make \(few.made): not only those on screen")
-        #expect(many.time < .milliseconds(60), "three hundred rows take \(many.time) to redraw")
+        #expect(many.words == many.made && few.words == few.made, "a redraw made the words of \(many.words) rows for \(many.made) rows made of three hundred, \(few.words) for \(few.made) of thirty")
     }
 
     /// The narrow rows' actions column is the widest actions a row shows, measured and said; the

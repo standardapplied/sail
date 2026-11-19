@@ -44,6 +44,12 @@ public struct RunnerSessions: Codable, Equatable, Sendable {
     public init(sessions: [RunnerSession]) {
         self.sessions = sessions
     }
+
+    /// The live sessions `handle` opened, in the listing's order (newest first): what a person's
+    /// terminals in a workspace are, for its count, its Stop and Delete questions and its Open.
+    public func live(for handle: String) -> [RunnerSession] {
+        sessions.filter { $0.live && $0.opener == handle }
+    }
 }
 
 /// One terminal session on the runner: whether it lives, how many clients it has, who holds its

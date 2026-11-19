@@ -296,18 +296,13 @@ public final class WorkspaceDoors {
   private void endTerminals(String project, String name, String done) {
     var who = Objects.requireNonNullElse(Actor.current().handle(), "an admin");
     try {
+      var workspace = "Workspace " + name + " of " + project;
       sessions.endIn(
           project,
           name,
-          "Workspace "
-              + name
-              + " of "
-              + project
-              + " is being "
-              + done
-              + " by "
-              + who
-              + ", which ends this terminal.");
+          new SessionYield.Ending(
+              workspace + " is being " + done + " by " + who + ", which ends this terminal.",
+              workspace + " was " + done + " by " + who + "."));
     } catch (IOException untold) {
       System.err.println(
           "  [workspaces] the terminals of workspace "

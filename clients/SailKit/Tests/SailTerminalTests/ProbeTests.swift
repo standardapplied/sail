@@ -57,7 +57,7 @@ import Testing
         let steps = try await reconnected { peer in
             try peer.send([
                 .accepted, .resized(TerminalSize(columns: 20, rows: 3)), .replayBegin(safe: true), output("kept"), .replayEnd,
-                .writerChanged(fde: "ada"),
+                .writerChanged(fde: "ada", yours: true),
             ])
         }
         #expect(steps.map(\.ok) == [true, true, true, true, true, true])
@@ -89,7 +89,7 @@ import Testing
         #expect(try await first.read() == .resize(TerminalSize(columns: 20, rows: 3)), "reconnect now")
         let ending = try await host.accept()
         #expect(try await ending.welcome() == "ticket-2")
-        #expect(try await ending.read() == .attach(session: "work", write: true))
+        #expect(try await ending.read().unnamed == .attach(session: "work", write: true))
         try ending.send(.accepted)
         #expect(try await ending.read() == .kill(session: "work"))
         try ending.send(.accepted)

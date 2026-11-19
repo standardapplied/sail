@@ -860,7 +860,7 @@ if kind != 32:
     raise SystemExit("the ticket was not welcomed: frame %d" % kind)
 create = text("direct") + struct.pack(">i", 0) + text("/tmp") + text("acme") + text("")
 conn.sendall(frame(1, create + struct.pack(">ii", 80, 24) + text(workspace) + text("") + text("") + b"\x00"))
-conn.sendall(frame(2, text("direct") + b"\x01"))
+conn.sendall(frame(2, text("direct") + b"\x01" + text("") + b"\x01"))
 line = b"echo $((6*7))-over-tcp\r"
 conn.sendall(frame(3, struct.pack(">q", 1) + struct.pack(">i", len(line)) + line))
 seen = b""
@@ -929,7 +929,7 @@ if phase == "open":
     conn = present(api("POST", "/v1/terminal/tickets", {"action": "open", "project": "acme"})["ticket"])
     create = text(name) + struct.pack(">i", 0) + text("/tmp") + text("acme") + text("")
     conn.sendall(frame(1, create + struct.pack(">ii", 80, 24) + text("") + text("") + text("") + b"\x00"))
-    conn.sendall(frame(2, text(name) + b"\x01"))
+    conn.sendall(frame(2, text(name) + b"\x01" + text("") + b"\x01"))
     line = b"i=0; while true; do i=$((i+1)); echo n-$i; sleep 0.2; done\r"
     conn.sendall(frame(3, struct.pack(">q", 1) + struct.pack(">i", len(line)) + line))
     seen = b""
@@ -949,7 +949,7 @@ else:
         raise SystemExit("the session is not listed live with no client: %r" % listed)
     print("listed through the API: %s live, %d attached" % (name, mine[0]["attached"]))
     conn = answered(lambda: present(api("POST", "/v1/terminal/tickets", {"action": "attach", "session": name})["ticket"]))
-    conn.sendall(frame(2, text(name) + b"\x01"))
+    conn.sendall(frame(2, text(name) + b"\x01" + text("") + b"\x01"))
     replay, live, replaying = b"", b"", False
     deadline = time.time() + 30
     while time.time() < deadline:

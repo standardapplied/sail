@@ -3954,14 +3954,29 @@ not hold, is not found. It then asks the host on its unix socket, as the box's o
 (`Network#holders`), refusing in a ticket's words one that stands for no person, and keeps the
 sessions that person could attach to (`admitted`, then the project read as them): their own, or
 every one for an admin, so a member asking another person's workspace lists nothing of theirs. The
-API keeps that workspace's, none made before the workspace's instance (an earlier workspace of the
-name). Each says whether it lives, its clients, its keyboard's holder, its opener, its command, when
-it was opened (`created_at`) and, once ended, the host's words for why (`ended_reason`), newest
+API keeps that workspace's, no ended one made before the workspace's instance (an earlier workspace
+of the name; a live one can only be the present workspace's, whatever the wall clock said). Each says whether it lives, its clients, its keyboard's holder, its opener, its command, when
+it was opened (`created_at`) and, once ended, what happened, once and in the past tense
+(`ended_reason`: the record a yield gave, such as "Workspace dock of harbor was stopped by ana.",
+apart from the line its live terminal was shown; else `PtySession.recordOf` its reason), newest
 first. An ended one is listed for `CORPSE_RETENTION` (10 min) or until the host restarts (a handoff
 carries only live sessions), a workspace's stop included: the yield that ends it deletes its ring
 and keeps it ended, so a client back later says why it ended rather than that it is gone. An ended
 entry counts toward no cap and holds its name for no one. A listing asked while the host closes is
 refused, never a short page. Attaching to one is the ticket above.
+
+**Whose keyboard (`PtySession#attach`, `SAILPTY6`).** An `Attach` that asks to write names its
+client, which keeps its name across its own reconnects, and says whether the person asked now
+(`takes`: an open, an explicit attach). A keyboard no client holds goes to one asked now, or to the
+session's opener; anyone else (an admin's restore) watches until it takes it. A keyboard the same
+person holds goes to one asked now, to the client's own lost connection's successor, or past a
+holder whose connection is gone (a handoff keeps no client name); an automatic reconnect or a
+restore never takes it from the person's other live client, and watches. Another person's
+keyboard is taken only by `TakeWrite`. When the holder detaches, every client still attached hears
+`WriterChanged("", false)`, and the opener's client that asked to write takes the free keyboard as
+it types. Every
+`WriterChanged` says whether the keyboard is the receiving connection's (`yours`), so two clients
+of one person pressing Take Keyboard at once each know which of them types.
 
 **Files pasted into a session (`PtyUploads`).** A client uploads a file on the terminal connection
 it already holds, in frames 12-15 (`PutBegin`, `PutChunk`, `PutEnd`, `PutCancel`) answered by
@@ -4734,8 +4749,11 @@ against them before it is used. Both expose one module, `GhosttyVt`. The termina
   keepalive probes after 30 s idle, 5 s apart, 3 of them, so an idle session costs one probe every
   30 s and the radio may sleep between. The client keeps its view's size apart from the pty's: the
   pty's is the size the host announced or this client sent while it held the write token (the
-  host ignores a reader's resize), and a granted `takeWrite()` sends the view's size once, so the
-  new writer's pty takes it. `reconnectNow()` while attached sends the pty's size, so a connection
+  host ignores a reader's resize), and once a `WriterChanged` says the keyboard became this
+  client's (`yours`, never inferred from whom it names) it sends the view's size once, so the new
+  writer's pty takes it. A session names itself (`client`) the same on every connection and asks to
+  take the keyboard (`takes`) only on the first attach of one the person asked for; a restore and
+  every reconnect never take it from the person's other live client. `reconnectNow()` while attached sends the pty's size, so a connection
   that died during sleep is found at once without resizing anything; the protocol has no no-op
   frame, and an empty `Input` would count as typing. A connect attempt a detach or a close overtook stands down
   before it sends anything for the session. Every session, attached or not, on this Mac or a
@@ -5010,10 +5028,15 @@ to end, which wait only for the one native build:
   class, one with no recorded time included, in exactly one shard, longest first onto the
   lightest, from the per-class seconds in `ci/it-seconds`. A class's line there is only a weight:
   refresh it from a run's failsafe times when the shards drift apart.
-- **Incus is set up by one action.** `.github/actions/incus` installs it, opens its containers'
-  egress, fetches the base image and restores the suites' prepared image (the base plus every
-  package they install, `AbstractIncusIT`'s bake) from a cache kept per week and per source that
-  defines it; a shard that baked it on a miss keeps it with `ci/check prepared-image export`.
+- **What CI installs is prepared once a week and kept in caches.** `ci/images` holds the
+  recipes, and nothing else, so a cache key that hashes it changes only with a recipe: the incus
+  suites' prepared image (the base plus every package the suites and a project's provisioning
+  install), the native fleet's Podman image, and the runner's own incus and ZFS tools as `.deb`
+  files. `.github/actions/incus` (which also installs Incus from those files, opens its
+  containers' egress and fetches the base image) and `.github/actions/fleet-image` restore them,
+  or on a miss bake them before any test from the runner's own Ubuntu mirror, each stage tried 3
+  times for at most 300 s; no test installs a package. They are kept per ISO week, the runner's
+  packages also per runner image, and `warm.yml` refills them on main early each week.
 - **Dependencies come from a cache.** Every job restores `~/.m2` through the `maven-cache`
   action, one cache per kind of job keyed on the poms, so each kind keeps what it alone resolves;
   this repository's own modules are never cached.

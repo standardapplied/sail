@@ -124,10 +124,14 @@ public final class AttachLoop {
           }
           case PtyMessage.Paused paused -> narrate(stdout, "output paused — falling behind");
           case PtyMessage.Continued resumed -> narrate(stdout, "output resumed");
-          case PtyMessage.WriterChanged(var fde) ->
+          case PtyMessage.WriterChanged(var fde, var yours) ->
               narrate(
                   stdout,
-                  fde.isBlank() ? "nobody holds the write token" : fde + " holds the write token");
+                  yours
+                      ? "you hold the write token"
+                      : fde.isBlank()
+                          ? "nobody holds the write token"
+                          : fde + " holds the write token");
           case PtyMessage.ReplayBegin(var safe) -> {
             if (!safe) {
               narrate(

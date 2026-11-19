@@ -32,6 +32,13 @@ public interface SessionYield {
 
   Hold NO_HOLD = () -> {};
 
+  /**
+   * How a session is ended: {@code line}, what its terminal shows last at the moment, and {@code
+   * record}, what its listing says happened, once and in the past tense, while the ended session is
+   * kept.
+   */
+  record Ending(String line, String record) {}
+
   SessionYield NONE =
       new SessionYield() {
         @Override
@@ -40,7 +47,7 @@ public interface SessionYield {
         }
 
         @Override
-        public void end(List<String> sessions, String reason) {}
+        public void end(List<String> sessions, Ending ending) {}
       };
 
   /** The host session {@code sail agent attach} opens for a run's resumed conversation. */
@@ -56,17 +63,17 @@ public interface SessionYield {
   Hold lock(String project) throws IOException;
 
   /**
-   * Ends every live session among {@code sessions} with {@code reason}; names with no live session
-   * are skipped. Throws when the host refused or could not be reached while sessions may still be
-   * live.
+   * Ends every live session among {@code sessions} as {@code ending} says; names with no live
+   * session are skipped. Throws when the host refused or could not be reached while sessions may
+   * still be live.
    */
-  void end(List<String> sessions, String reason) throws IOException;
+  void end(List<String> sessions, Ending ending) throws IOException;
 
   /**
-   * Ends every live session in workspace {@code workspace} of {@code project} with {@code reason},
-   * the line its terminal shows last. A seam with no host ends nothing.
+   * Ends every live session in workspace {@code workspace} of {@code project} as {@code ending}
+   * says. A seam with no host ends nothing.
    */
-  default void endIn(String project, String workspace, String reason) throws IOException {}
+  default void endIn(String project, String workspace, Ending ending) throws IOException {}
 
   /**
    * Whether the host runs a session named {@code session} now. A live member asks before it starts
