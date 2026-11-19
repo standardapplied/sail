@@ -488,6 +488,20 @@ extension WorkspacesModelTests {
         #expect(Self.table(model)?.yours.first(where: \.chosen)?.name == "new", "harbor's created row was not chosen after demo's")
     }
 
+    /// n8: a row created in demo is never chosen in harbor's list, though harbor has a row of its name.
+    @Test func aCreatedRowIsChosenOnlyInItsOwnProject() throws {
+        var model = Self.two()
+        let demo = model.choose("demo")
+        model.listed(.success(WorkspaceList(project: "demo", workspaces: [])), request: demo, at: Self.at)
+        Self.send("pier", &model)
+        let harbor = model.choose("harbor")
+        let timings = WorkspaceTimings(cloneMs: 0, startMs: 0, readyMs: 0, totalMs: 0, readySteps: [:])
+        let pier = WorkspaceCreated(project: "demo", workspace: "pier", instance: "demo-pier", owner: "uday", template: "v1", stale: false, timings: timings)
+        #expect(model.created(.success(pier), project: "demo") == nil, "demo's create listed harbor")
+        model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-three"), request: harbor, at: Self.at)
+        #expect(Self.table(model)?.yours.first(where: \.chosen) == nil, "demo's created pier was chosen in harbor's list")
+    }
+
     /// n8: a list that fails dims the panel too, as a projects failure does.
     @Test func aFailedListDimsThePanel() {
         var model = Self.listed(Self.ana)
