@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import AppKit
+import SailControls
 import CoreText
 import SailLook
 @testable import SailShell
@@ -103,7 +104,7 @@ import Testing
         for pane in [shell.account, shell.thisMac, shell.thisMac.strip] as [NSView] {
             for button in buttons(pane) {
                 walked += 1
-                #expect(button.keyEquivalent != "\r" || button is AccentButton, "\(name): \(button.title) is the system-drawn default")
+                #expect(button.keyEquivalent != "\r" || button is AccentButton || button is SailButton, "\(name): \(button.title) is the system-drawn default")
             }
         }
         #expect(walked >= 4)

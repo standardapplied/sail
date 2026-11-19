@@ -168,7 +168,6 @@ import Testing
         runner.end("app-x", saying: Self.stopped)
         let pane = try RunnerTabTests.pane(Self.dock, runner: DoorTickets(runner), start: .attach, session: "app-x", person: "uday")
         let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 360), styleMask: [.titled], backing: .buffered, defer: false)
-        defer { window.close() }
         let room = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 360))
         pane.frame = room.bounds
         room.addSubview(pane)

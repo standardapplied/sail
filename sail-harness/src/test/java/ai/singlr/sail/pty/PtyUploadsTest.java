@@ -354,7 +354,7 @@ class PtyUploadsTest {
       timer.awaitDue(PtyUploads.WRITE_DEADLINE);
       handled(channel);
 
-      timer.fire(PtyUploads.WRITE_DEADLINE);
+      timer.fireSet(PtyUploads.WRITE_DEADLINE);
       assertEquals(new PtyMessage.PutRefused(1, PutRefusal.STALLED, 0), refusal(channel));
       c.awaitFinished(UploadCopy.ABORT);
       assertEquals(List.of(), ContainerDirectory.held(onlySession()));
