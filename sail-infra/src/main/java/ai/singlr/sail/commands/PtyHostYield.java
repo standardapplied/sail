@@ -52,7 +52,7 @@ final class PtyHostYield implements SessionYield {
   }
 
   @Override
-  public void end(List<String> sessions, String reason) throws IOException {
+  public void end(List<String> sessions, Ending ending) throws IOException {
     if (!Files.exists(socket)) {
       return;
     }
@@ -60,7 +60,7 @@ final class PtyHostYield implements SessionYield {
     try (var client = SessionClient.connect(socket, dispatchCredential(socket))) {
       for (var name : sessions) {
         try {
-          client.yieldSession(name, reason);
+          client.yieldSession(name, ending);
         } catch (IOException refused) {
           failures =
               failures.then(failures.isEmpty() ? "" : "; ", name + ": ", Remedied.whole(refused));
@@ -73,7 +73,7 @@ final class PtyHostYield implements SessionYield {
   }
 
   @Override
-  public void endIn(String project, String workspace, String reason) throws IOException {
+  public void endIn(String project, String workspace, Ending ending) throws IOException {
     if (!Files.exists(socket)) {
       return;
     }
@@ -81,7 +81,7 @@ final class PtyHostYield implements SessionYield {
     try (var client = SessionClient.connect(socket, dispatchCredential(socket))) {
       in = liveIn(client.list(), project, workspace);
     }
-    end(in, reason);
+    end(in, ending);
   }
 
   /**

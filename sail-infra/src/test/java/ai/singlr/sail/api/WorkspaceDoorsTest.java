@@ -82,11 +82,11 @@ class WorkspaceDoorsTest {
         }
 
         @Override
-        public void end(List<String> names, String reason) {}
+        public void end(List<String> names, Ending ending) {}
 
         @Override
-        public void endIn(String project, String workspace, String reason) {
-          ended.add(project + "/" + workspace + ": " + reason);
+        public void endIn(String project, String workspace, Ending ending) {
+          ended.add(project + "/" + workspace + ": " + ending.line() + " | " + ending.record());
         }
       };
 
@@ -221,7 +221,8 @@ class WorkspaceDoorsTest {
     assertEquals(List.of("stop"), changes(box));
     assertEquals(
         List.of(
-            "acme/try: Workspace try of acme is being stopped by ada, which ends this terminal."),
+            "acme/try: Workspace try of acme is being stopped by ada, which ends this terminal. |"
+                + " Workspace try of acme was stopped by ada."),
         ended);
   }
 
@@ -318,7 +319,8 @@ class WorkspaceDoorsTest {
     assertEquals(List.of("read", "delete"), changes(box));
     assertEquals(
         List.of(
-            "acme/try: Workspace try of acme is being deleted by ada, which ends this terminal."),
+            "acme/try: Workspace try of acme is being deleted by ada, which ends this terminal. |"
+                + " Workspace try of acme was deleted by ada."),
         ended);
   }
 
@@ -749,10 +751,10 @@ class WorkspaceDoorsTest {
           }
 
           @Override
-          public void end(List<String> names, String reason) {}
+          public void end(List<String> names, Ending ending) {}
 
           @Override
-          public void endIn(String project, String workspace, String reason) throws IOException {
+          public void endIn(String project, String workspace, Ending ending) throws IOException {
             throw new IOException("the session host did not answer");
           }
         };
@@ -840,7 +842,8 @@ class WorkspaceDoorsTest {
     assertTrue(failed.getMessage().contains("Error: busy"), failed.getMessage());
     assertEquals(
         List.of(
-            "acme/try: Workspace try of acme is being stopped by ada, which ends this terminal."),
+            "acme/try: Workspace try of acme is being stopped by ada, which ends this terminal. |"
+                + " Workspace try of acme was stopped by ada."),
         told);
     assertEquals(List.of(), ended, "a stop refused for its live run tells no terminal");
   }

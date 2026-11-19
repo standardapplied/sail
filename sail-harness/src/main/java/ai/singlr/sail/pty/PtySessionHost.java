@@ -867,7 +867,7 @@ public final class PtySessionHost implements AutoCloseable {
                 reply(
                     channel,
                     who instanceof PtyIdentity.Dispatch
-                        ? yieldSession(m.session(), m.reason())
+                        ? yieldSession(m.session(), m.reason(), m.record())
                         : new PtyMessage.Err("Yield requires host dispatch authority."));
             default -> reply(channel, new PtyMessage.Err("Unexpected client frame."));
           }
@@ -1500,7 +1500,7 @@ public final class PtySessionHost implements AutoCloseable {
         .placed(session.origin().project(), session.origin().workspace(), session.ownerFde())
         .lived(
             session.createdAtMillis(),
-            java.util.Objects.requireNonNullElse(session.endedReason(), ""));
+            java.util.Objects.requireNonNullElse(session.endedRecord(), ""));
   }
 
   private synchronized PtyMessage kill(String name, PtyIdentity who) {
@@ -1527,7 +1527,7 @@ public final class PtySessionHost implements AutoCloseable {
    * kill, but the session is kept ended, as one whose program exited is, so its listing says why
    * until {@link #CORPSE_RETENTION} passes.
    */
-  private synchronized PtyMessage yieldSession(String name, String reason) {
+  private synchronized PtyMessage yieldSession(String name, String reason, String record) {
     if (closed) {
       return SHUTTING_DOWN;
     }
@@ -1535,7 +1535,7 @@ public final class PtySessionHost implements AutoCloseable {
     if (session == null || !session.live()) {
       return new PtyMessage.Ok();
     }
-    session.end(reason);
+    session.end(reason, record);
     deleteFiles(SessionFiles.in(sessionsDir, name), session.ownerFde(), name);
     return new PtyMessage.Ok();
   }

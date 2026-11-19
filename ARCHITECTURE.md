@@ -3954,9 +3954,11 @@ not hold, is not found. It then asks the host on its unix socket, as the box's o
 (`Network#holders`), refusing in a ticket's words one that stands for no person, and keeps the
 sessions that person could attach to (`admitted`, then the project read as them): their own, or
 every one for an admin, so a member asking another person's workspace lists nothing of theirs. The
-API keeps that workspace's, none made before the workspace's instance (an earlier workspace of the
-name). Each says whether it lives, its clients, its keyboard's holder, its opener, its command, when
-it was opened (`created_at`) and, once ended, the host's words for why (`ended_reason`), newest
+API keeps that workspace's, no ended one made before the workspace's instance (an earlier workspace
+of the name; a live one can only be the present workspace's, whatever the wall clock said). Each says whether it lives, its clients, its keyboard's holder, its opener, its command, when
+it was opened (`created_at`) and, once ended, what happened, once and in the past tense
+(`ended_reason`: the record a yield gave, such as "Workspace dock of harbor was stopped by ana.",
+apart from the line its live terminal was shown; else `PtySession.recordOf` its reason), newest
 first. An ended one is listed for `CORPSE_RETENTION` (10 min) or until the host restarts (a handoff
 carries only live sessions), a workspace's stop included: the yield that ends it deletes its ring
 and keeps it ended, so a client back later says why it ended rather than that it is gone. An ended

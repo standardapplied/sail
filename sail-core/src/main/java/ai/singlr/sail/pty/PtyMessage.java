@@ -115,9 +115,15 @@ public sealed interface PtyMessage {
    * or admin, whose verb is {@link Kill}. Idempotent: a session that is not live has nothing to end
    * and answers {@code Ok}. Unlike a kill, every attached client first sees {@code reason} as a
    * terminal line in the stream, and the session ends with that reason rather than the child's exit
-   * status, so the room's ending event names why.
+   * status, so the room's ending event names why. {@code record} is what happened, said once in the
+   * past tense, which a listing gives while the ended session is kept; blank for the host to say it
+   * from {@code reason}.
    */
-  record Yield(String session, String reason) implements PtyMessage {}
+  record Yield(String session, String reason, String record) implements PtyMessage {
+    public Yield(String session, String reason) {
+      this(session, reason, "");
+    }
+  }
 
   /** What a {@link Ticket} lets its holder do: open a session in a project, or attach to one. */
   enum TicketAction {

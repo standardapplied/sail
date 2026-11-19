@@ -232,6 +232,25 @@ class PtySessionTest {
     }
   }
 
+  /**
+   * What a listing says of an ended session is what happened, once and in the past tense: a
+   * program's exit with its status, a status lost across a restart, a terminal host that could no
+   * longer read it, or any other reason as a sentence. (A host that stops for good lists nothing:
+   * it ends and forgets every session.)
+   */
+  @Test
+  void anEndIsRecordedAsWhatHappened() {
+    assertEquals("Its program exited with status 0.", PtySession.recordOf("exited(0)"));
+    assertEquals("Its program exited with status 137.", PtySession.recordOf("exited(137)"));
+    assertEquals(
+        "Its program exited while the terminal host restarted, and its status was lost.",
+        PtySession.recordOf(PtySession.STATUS_LOST));
+    assertEquals(
+        "The terminal host could no longer read it: Input/output error.",
+        PtySession.recordOf("io-error: Input/output error"));
+    assertEquals("Yielded to dispatch 2.", PtySession.recordOf("yielded to dispatch 2"));
+  }
+
   @Test
   void aResumedSessionNeverAdoptsAProcessThatBeganAfterItWasCreated() throws Exception {
     var files = SessionFiles.in(dir, "r");

@@ -122,7 +122,7 @@ private extension Frame {
         case let .resize(size), let .resized(size): size.fields
         case let .listSessions(after, limit): [.string(after), .int32(limit), .string("")]
         case let .kill(session): [.string(session)]
-        case let .yield(session, reason): [.string(session), .string(reason)]
+        case let .yield(session, reason, record): [.string(session), .string(reason), .string(record)]
         case let .issueTicket(action, target, credential, workspace):
             [.string(action.rawValue), .string(target), .string(credential), .string(workspace)]
         case let .ticket(ticket): [.string(ticket)]
@@ -221,7 +221,7 @@ private struct Cursor {
         case 6: .detach
         case 7: try listing()
         case 8: .kill(session: try string())
-        case 10: .yield(session: try string(), reason: try string())
+        case 10: .yield(session: try string(), reason: try string(), record: try string())
         case 11:
             .issueTicket(
                 action: Open(rawValue: try string()), target: try string(), credential: try string(),

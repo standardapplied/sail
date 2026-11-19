@@ -627,7 +627,7 @@ class ClientGoldensTest {
         new PtyMessage.Detach(),
         new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT),
         new PtyMessage.Kill("lounge"),
-        new PtyMessage.Yield("lounge", "a dispatch took the repos"),
+        new PtyMessage.Yield("lounge", "a dispatch took the repos", "A dispatch took the repos."),
         new PtyMessage.IssueTicket(PtyMessage.TicketAction.OPEN, PROJECT, "sail_uday", "dock"),
         new PtyMessage.Ticket("tkt_harbor"),
         new PtyMessage.PutBegin(7, "", 64L << 20),
@@ -818,8 +818,7 @@ class ClientGoldensTest {
                                           .placed(PROJECT, "dock", "uday")
                                           .lived(
                                               1_763_456_400_000L,
-                                              "Workspace dock of harbor is being stopped by ana, which"
-                                                  + " ends this terminal."),
+                                              "Workspace dock of harbor was stopped by ana."),
                                       new PtyMessage.SessionInfo(
                                               "app-1f2e3d4c",
                                               "i-1",

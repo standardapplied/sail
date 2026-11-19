@@ -19,7 +19,7 @@ public enum Frame: Equatable, Sendable {
     case listSessions(after: String, limit: Int32)
     case kill(session: String)
     /// Ends a session for whatever displaced it; only the host's dispatch authority sends it.
-    case yield(session: String, reason: String)
+    case yield(session: String, reason: String, record: String)
     /// Asks for a ticket for the holder of `credential` to take `action` on `target`, a project or a
     /// session, once over the host's TCP listener; the API asks it for a client, which is answered the
     /// ticket over HTTP.

@@ -140,7 +140,7 @@ func answer<Response>(
             RunnerSession(
                 name: "app-5a6b7c8d", live: false, attached: 0, writer: "", opener: "uday", command: [],
                 createdAt: Date(timeIntervalSince1970: 1_763_456_400),
-                endedReason: "Workspace dock of harbor is being stopped by ana, which ends this terminal."
+                endedReason: "Workspace dock of harbor was stopped by ana."
             ),
         ]))
         #expect(try sessions.decode(response(try Exchange("workspace-sessions-not-theirs"))) == RunnerSessions(sessions: []))

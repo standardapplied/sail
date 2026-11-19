@@ -458,7 +458,10 @@ class PtySessionHostTest {
               PtyMessage.Ok.class,
               PtyWire.read(dispatch),
               "nothing live to yield is nothing to do");
-          PtyWire.write(dispatch, new PtyMessage.Yield("resume-1", "yielded to dispatch 2"));
+          PtyWire.write(
+              dispatch,
+              new PtyMessage.Yield(
+                  "resume-1", "yielded to dispatch 2", "Dispatch 2 took over its conversation."));
           assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(dispatch));
         }
 
@@ -472,9 +475,10 @@ class PtySessionHostTest {
             ((PtyMessage.SessionEnded) message).reason(),
             "the ending carries the displacing reason, not the child's exit status");
         assertEquals(
-            List.of("yielded to dispatch 2"),
+            List.of("Dispatch 2 took over its conversation."),
             endedReasons(),
-            "a yielded session is kept ended, its reason listed, until its retention passes");
+            "a yielded session is kept ended, what happened listed in the past tense, until its"
+                + " retention passes");
         assertTrue(events.contains("ended:resume-1"), events.toString());
       }
     }
@@ -1468,7 +1472,10 @@ class PtySessionHostTest {
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(dispatch));
       }
       assertFalse(Files.exists(ring), "a yield leaves no ring behind, exactly like a kill");
-      assertEquals(List.of("yielded to dispatch 2"), endedReasons());
+      assertEquals(
+          List.of("Yielded to dispatch 2."),
+          endedReasons(),
+          "a yield that gave no record is said from its reason, as a sentence");
       host.sweep(System.nanoTime() + PtySessionHost.CORPSE_RETENTION.toNanos() + 1);
       assertEquals(0, host.sessionCount(), "the ended session goes once its retention passes");
     }

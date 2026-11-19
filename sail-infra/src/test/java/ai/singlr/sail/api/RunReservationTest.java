@@ -141,7 +141,7 @@ class RunReservationTest {
   }
 
   interface Ender {
-    void end(List<String> sessions, String reason) throws IOException;
+    void end(List<String> sessions, SessionYield.Ending ending) throws IOException;
   }
 
   /** A seam with no lock to hold — a box with no host — that ends through {@code ender}. */
@@ -153,8 +153,8 @@ class RunReservationTest {
       }
 
       @Override
-      public void end(List<String> sessions, String reason) throws IOException {
-        ender.end(sessions, reason);
+      public void end(List<String> sessions, Ending ending) throws IOException {
+        ender.end(sessions, ending);
       }
     };
   }
@@ -399,9 +399,9 @@ class RunReservationTest {
     var reasons = new ArrayList<String>();
     sessionYield =
         ending(
-            (sessions, reason) -> {
+            (sessions, ending) -> {
               ended.addAll(sessions);
-              reasons.add(reason);
+              reasons.add(ending.line() + " | " + ending.record());
             });
 
     reserveBuild(null, DispatchGate.ROOM_FULL_ROLE, List.of("app"));
@@ -410,14 +410,16 @@ class RunReservationTest {
         List.of(SessionYield.resumeSession(overlapping)),
         ended,
         "only the conversation over the reserved repo yields; the disjoint one lives on");
-    assertEquals(List.of("yielded to run " + RUN_ID), reasons);
+    assertEquals(
+        List.of("yielded to run " + RUN_ID + " | Run " + RUN_ID + " took over its conversation."),
+        reasons);
   }
 
   @Test
   void aSpecsClaimDisplacesNoConversationATerminalOpensInTheProjectsContainer() {
     completedRun("old-spec", List.of("app"));
     sessionYield =
-        ending((sessions, reason) -> fail("a spec's run lives in its own workspace: " + sessions));
+        ending((sessions, ending) -> fail("a spec's run lives in its own workspace: " + sessions));
 
     assertNotNull(reserveBuild("old-spec", "build", List.of("app")));
   }
@@ -426,7 +428,7 @@ class RunReservationTest {
   void aReadOnlyRoomWakeDisplacesNoConversation() {
     completedRun("old-spec", List.of("app"));
     sessionYield =
-        ending((sessions, reason) -> fail("a read-only wake reserves nothing and ends nothing"));
+        ending((sessions, ending) -> fail("a read-only wake reserves nothing and ends nothing"));
 
     assertNotNull(reserveBuild("old-spec", DispatchGate.ROOM_ROLE, List.of()));
   }
@@ -436,7 +438,7 @@ class RunReservationTest {
     completedRun("old-spec", List.of("app"));
     sessionYield =
         ending(
-            (sessions, reason) -> {
+            (sessions, ending) -> {
               throw new IOException("Session 'resume-x' belongs to mady.");
             });
 
@@ -462,7 +464,7 @@ class RunReservationTest {
           }
 
           @Override
-          public void end(List<String> sessions, String reason) {
+          public void end(List<String> sessions, Ending ending) {
             claimedWhileHeld.set(
                 held.get() && "running".equals(runStore.findById(RUN_ID).orElseThrow().status()));
           }
@@ -487,7 +489,7 @@ class RunReservationTest {
           }
 
           @Override
-          public void end(List<String> sessions, String reason) {
+          public void end(List<String> sessions, Ending ending) {
             fail("nothing is claimed, so nothing yields");
           }
         };

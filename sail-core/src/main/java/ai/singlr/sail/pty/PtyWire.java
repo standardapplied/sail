@@ -117,7 +117,8 @@ public final class PtyWire {
         out.i32(m.limit()).string(m.credential());
       }
       case PtyMessage.Kill m -> out.type(8).string(m.session());
-      case PtyMessage.Yield m -> out.type(10).string(m.session()).string(m.reason());
+      case PtyMessage.Yield m ->
+          out.type(10).string(m.session()).string(m.reason()).string(m.record());
       case PtyMessage.IssueTicket m ->
           out.type(11)
               .string(m.action().wire())
@@ -280,7 +281,7 @@ public final class PtyWire {
       case 6 -> new PtyMessage.Detach();
       case 7 -> new PtyMessage.ListSessions(string(in), in.getInt(), string(in));
       case 8 -> new PtyMessage.Kill(string(in));
-      case 10 -> new PtyMessage.Yield(string(in), string(in));
+      case 10 -> new PtyMessage.Yield(string(in), string(in), string(in));
       case 11 ->
           new PtyMessage.IssueTicket(
               PtyMessage.TicketAction.of(string(in)), string(in), string(in), string(in));

@@ -78,6 +78,10 @@ public final class PtySession implements AutoCloseable {
   /** What was lost when no exit file survives a handoff: the reason names it, never a silent 0. */
   public static final String STATUS_LOST = "exited (status lost across a host handoff)";
 
+  private static final String IO_ERROR = "io-error: ";
+  private static final java.util.regex.Pattern EXITED =
+      java.util.regex.Pattern.compile("exited\\((-?\\d+)\\)");
+
   private static final long PID_REUSE_SLACK_MILLIS = 5_000;
 
   private static final long KILL_WAIT_SECONDS = 5;
@@ -323,6 +327,7 @@ public final class PtySession implements AutoCloseable {
   private int rows;
   private volatile String endedReason;
   private volatile String yieldedReason;
+  private volatile String yieldedRecord;
   private volatile long endedAtNanos;
   private volatile boolean everAttached;
   private volatile boolean handedOff;
@@ -702,7 +707,7 @@ public final class PtySession implements AutoCloseable {
         }
       }
     } catch (IOException e) {
-      failure = handedOff ? null : "io-error: " + e.getMessage();
+      failure = handedOff ? null : IO_ERROR + e.getMessage();
     } finally {
       try {
         if (!handedOff) {
@@ -988,6 +993,44 @@ public final class PtySession implements AutoCloseable {
     return endedReason;
   }
 
+  /**
+   * What happened to the session, once and in the past tense, for a listing: the record its yield
+   * gave, or {@link #recordOf} its reason; null while it lives.
+   */
+  public String endedRecord() {
+    var reason = endedReason;
+    if (reason == null) {
+      return null;
+    }
+    var given = yieldedRecord;
+    return given == null || given.isBlank() ? recordOf(reason) : given;
+  }
+
+  /**
+   * {@code reason}, a session's end as its live terminal is told it, said as what happened: a
+   * program's exit with its status, a status lost across a restart, a terminal host that could no
+   * longer read it, or the reason as a sentence.
+   */
+  public static String recordOf(String reason) {
+    var exited = EXITED.matcher(reason);
+    if (exited.matches()) {
+      return "Its program exited with status " + exited.group(1) + ".";
+    }
+    if (reason.equals(STATUS_LOST)) {
+      return "Its program exited while the terminal host restarted, and its status was lost.";
+    }
+    if (reason.startsWith(IO_ERROR)) {
+      return sentence(
+          "The terminal host could no longer read it: " + reason.substring(IO_ERROR.length()));
+    }
+    return sentence(
+        reason.substring(0, 1).toUpperCase(java.util.Locale.ROOT) + reason.substring(1));
+  }
+
+  private static String sentence(String text) {
+    return text.endsWith(".") ? text : text + ".";
+  }
+
   public int attachedCount() {
     return subscribers.size();
   }
@@ -1031,9 +1074,18 @@ public final class PtySession implements AutoCloseable {
    * keeps its own reason.
    */
   public void end(String reason) {
+    end(reason, "");
+  }
+
+  /**
+   * As {@link #end(String)}, its listing saying {@code record} of it: what happened, once, in the
+   * past tense; blank for {@link #recordOf} to say it from {@code reason}.
+   */
+  public void end(String reason, String record) {
     synchronized (fanout) {
       if (endedReason == null && yieldedReason == null) {
         yieldedReason = reason;
+        yieldedRecord = record;
         var notice =
             ("\r\n[sail: session ended \u2014 " + reason + "]\r\n")
                 .getBytes(StandardCharsets.UTF_8);
