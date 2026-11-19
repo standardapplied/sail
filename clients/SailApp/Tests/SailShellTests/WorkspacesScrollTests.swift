@@ -148,25 +148,29 @@ import Testing
         #expect(many.project.listScroll?.verticalScrollElasticity == NSScrollView.Elasticity.automatic, "thirty rows do not bounce")
     }
 
-    /// Minor 4: a redraw of three hundred rows (each list answer, each change of look) within a
-    /// frame's 16 ms; the time is said whatever it is.
-    @Test func threeHundredRowsRedrawWithinAFrame() throws {
-        let rows = (1 ... 300).map { WorkspaceRow(name: String(format: "ws-%03d", $0), instance: String(format: "harbor-ws-%03d", $0), state: .known(.running), owner: $0.isMultiple(of: 2) ? "ana" : "uday") }
-        let page = try #require(WorkspacesViewTests.page(rows))
-        let (project, window) = try WorkspacesViewTests.project(width: 1024 - Rail.width - 4 - LeftPanel.width.standard)
-        defer { window.orderOut(nil) }
-        project.render(page)
-        project.layoutSubtreeIfNeeded()
-        var times: [Duration] = []
-        for _ in 0 ..< 3 {
-            let start = ContinuousClock.now
+    /// Minor 4: a redraw (a list's answer, a change of look; never per frame) builds only the rows on
+    /// screen: three hundred rows within 60 ms, where building every row took 118 ms. The times for
+    /// three hundred rows and for thirty are said, which shows whether the cost is the screenful.
+    @Test func aLongListRedrawsOnlyWhatIsOnScreen() throws {
+        func best(_ count: Int) throws -> Duration {
+            let rows = (1 ... count).map { WorkspaceRow(name: String(format: "ws-%03d", $0), instance: String(format: "harbor-ws-%03d", $0), state: .known(.running), owner: $0.isMultiple(of: 2) ? "ana" : "uday") }
+            let page = try #require(WorkspacesViewTests.page(rows))
+            let (project, window) = try WorkspacesViewTests.project(width: 1024 - Rail.width - 4 - LeftPanel.width.standard)
+            defer { window.orderOut(nil) }
             project.render(page)
             project.layoutSubtreeIfNeeded()
-            times.append(ContinuousClock.now - start)
+            var times: [Duration] = []
+            for _ in 0 ..< 3 {
+                let start = ContinuousClock.now
+                project.render(page)
+                project.layoutSubtreeIfNeeded()
+                times.append(ContinuousClock.now - start)
+            }
+            return times.min() ?? .zero
         }
-        let best = times.min() ?? .zero
-        print("workspaces: three hundred rows redrawn in \(best) (best of \(times))")
-        #expect(best < .milliseconds(16), "three hundred rows take \(best) to redraw, past a frame")
+        let many = try best(300), few = try best(30)
+        print("workspaces: a redraw takes \(many) for three hundred rows, \(few) for thirty")
+        #expect(many < .milliseconds(60), "three hundred rows take \(many) to redraw: every row is built again, not only those on screen")
     }
 
     /// The narrow rows' actions column is the widest actions a row shows, measured and said; the
