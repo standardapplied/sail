@@ -6,26 +6,6 @@ cd "$(dirname "$0")/.."
 readonly MODULES="sail-core sail-harness sail-infra"
 readonly DEFAULT_IT_SECONDS=10
 readonly SPLIT_IT_SECONDS=360
-readonly PREPARED_SOURCE=sail-infra/src/test/java/ai/singlr/sail/engine/AbstractIncusIT.java
-readonly PROVISIONER_SOURCE=sail-infra/src/main/java/ai/singlr/sail/engine/ProjectProvisioner.java
-readonly FLEET_SOURCE=sail-infra/src/test/java/ai/singlr/sail/commands/NativeFleet.java
-readonly BAKE_TRIES=3
-readonly BAKE_STAGE_SECONDS=300
-readonly APT_LOCK_SECONDS=120
-readonly RUNNER_PACKAGES="incus zfsutils-linux"
-# shellcheck disable=SC2016
-readonly POINT_APT='find /etc/apt -name sources.list -o -name "*.list" -o -name "*.sources" \
-  | xargs -r sed -i -E "s#http://(archive|security)\.ubuntu\.com/ubuntu/?#$1#g" && grep -rqsF "$1" /etc/apt'
-# shellcheck disable=SC2016
-readonly FLEET_CONTAINERFILE='FROM docker.io/library/ubuntu:24.04
-ARG MIRROR
-ARG POINT_APT
-RUN bash -c "$POINT_APT" _ "$MIRROR" \
-    && apt-get update -qq \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-        libsqlite3-0 sqlite3 openssh-server openssh-client ca-certificates curl \
-    && mkdir -p /run/sshd'
-
 usage() {
   cat >&2 <<'EOF'
 Usage:
@@ -40,17 +20,6 @@ Usage:
                                 run the IT classes of that shard under -Pintegration
   ci/check methods CLASS INDEX COUNT
                                 print CLASS#a+b+... : every COUNT-th of its @Test methods from INDEX
-  ci/check prepared-image bake|alias
-                                bake the incus suites' prepared image on this host, or print its alias
-  ci/check prepared-image import|export DIR
-                                load the incus suites' prepared image from DIR, or keep it there
-  ci/check fleet-image bake     build the native fleet's Podman image on this host
-  ci/check runner-packages fetch DIR
-                                download the .deb files of incus and of zfsutils-linux into DIR
-  ci/check runner-packages install DIR PACKAGE
-                                install PACKAGE from its files in DIR, with no network
-  ci/check fleet-image import|export DIR
-                                load the native fleet's image from DIR, or keep it there
   ci/check local-host BINARY    run BINARY's own terminal host as the app's agent does, in this
                                 account's home, which must hold none: it serves, a second exits 1
                                 naming it, and SIGTERM stops it leaving only its lock
@@ -228,172 +197,6 @@ methods() {
   echo "$class#$picked"
 }
 
-prepared_alias() {
-  local alias
-  alias=$(sed -n 's/.*PREPARED_ALIAS = "\([^"]*\)";.*/\1/p' "$PREPARED_SOURCE")
-  if [[ -z $alias ]]; then
-    echo "ci/check: $PREPARED_SOURCE names no PREPARED_ALIAS." >&2
-    exit 1
-  fi
-  echo "$alias"
-}
-
-# A stage of a bake: tried BAKE_TRIES times, each for at most BAKE_STAGE_SECONDS, and the bake
-# fails naming the stage when no try succeeds. A bake is the only step of a lane that reaches an
-# external host for packages; no test does.
-bake_stage() {
-  local stage=$1 try
-  shift
-  for try in $(seq 1 "$BAKE_TRIES"); do
-    if timeout "$BAKE_STAGE_SECONDS" "$@"; then
-      return
-    fi
-    echo "ci/check: $stage failed (try $try of $BAKE_TRIES)." >&2
-  done
-  echo "ci/check: the bake failed at '$stage' after $BAKE_TRIES tries." >&2
-  exit 1
-}
-
-# The Ubuntu mirror a bake's containers fetch from: the runner's own, which GitHub's runners list in
-# /etc/apt/apt-mirrors.txt and which their own apt uses, else the archive. A container's sources
-# name archive.ubuntu.com and security.ubuntu.com, which stalled for whole bakes when the runner's
-# mirror answered at once (PR #485's first run: three podman builds, each three tries of 300 s).
-# POINT_APT rewrites them in whichever form the image keeps (sources.list in Incus's Ubuntu image,
-# ubuntu.sources in Docker's) and fails unless one now names the mirror.
-bake_mirror() {
-  local mirror
-  mirror=$(awk 'NR == 1 { print $1 }' /etc/apt/apt-mirrors.txt 2> /dev/null || true)
-  echo "${mirror:-http://archive.ubuntu.com/ubuntu/}"
-}
-
-# ProjectProvisioner's baseline, as its source names it, and what the incus suites add to it.
-prepared_packages() {
-  local baseline
-  baseline=$(sed -n '/BASELINE_PACKAGES =/,/;/p' "$PROVISIONER_SOURCE" | grep -o '"[^"]*"' | tr -d '"')
-  if [[ -z $baseline ]]; then
-    echo "ci/check: $PROVISIONER_SOURCE names no BASELINE_PACKAGES." >&2
-    exit 1
-  fi
-  printf '%s\n' "$baseline" python3 podman uidmap sqlite3 | awk '!seen[$0]++' | paste -sd' ' -
-}
-
-prepared_bake() {
-  local alias builder=sail-it-image-builder packages mirror
-  alias=$(prepared_alias)
-  packages=$(prepared_packages)
-  mirror=$(bake_mirror)
-  bake_stage "launch the builder from images:ubuntu/24.04" \
-    bash -c "incus delete --force $builder > /dev/null 2>&1; incus launch images:ubuntu/24.04 $builder"
-  # shellcheck disable=SC2016
-  bake_stage "the builder's outbound DNS" incus exec "$builder" -- bash -c \
-    'for _ in $(seq 1 45); do getent hosts archive.ubuntu.com > /dev/null && exit 0; sleep 2; done; cat /etc/resolv.conf; ip -brief addr; exit 1'
-  bake_stage "point apt at $mirror" incus exec "$builder" -- bash -c "$POINT_APT" _ "$mirror"
-  bake_stage "apt-get update" incus exec "$builder" -- apt-get update -qq
-  # shellcheck disable=SC2086
-  bake_stage "apt-get install $packages" incus exec "$builder" -- env DEBIAN_FRONTEND=noninteractive \
-    apt-get install -y -qq -o DPkg::Lock::Timeout="$APT_LOCK_SECONDS" $packages
-  bake_stage "stop the builder" incus stop "$builder"
-  bake_stage "publish $alias" incus publish "$builder" --alias "$alias"
-  incus delete --force "$builder"
-  echo "Baked $alias: images:ubuntu/24.04 with $packages."
-}
-
-prepared_image() {
-  local verb=${1:-} dir=${2:-}
-  case $verb in
-    bake) prepared_bake; return ;;
-    alias) prepared_alias; return ;;
-  esac
-  [[ -n $dir ]] || usage
-  local alias
-  alias=$(prepared_alias)
-  case $verb in
-    import)
-      incus image import "$dir/prepared.tar.gz" --alias "$alias"
-      echo "Imported $alias from $dir."
-      ;;
-    export)
-      if incus image show "$alias" > /dev/null 2>&1; then
-        mkdir -p "$dir"
-        incus image export "$alias" "$dir/prepared"
-        echo "Kept $alias in $dir."
-      else
-        echo "No $alias on this host; nothing to keep."
-      fi
-      ;;
-    *) usage ;;
-  esac
-}
-
-fleet_image_name() {
-  local name
-  name=$(sed -n 's/.*private static final String IMAGE = "\([^"]*\)";.*/\1/p' "$FLEET_SOURCE")
-  if [[ -z $name ]]; then
-    echo "ci/check: $FLEET_SOURCE names no IMAGE." >&2
-    exit 1
-  fi
-  echo "$name"
-}
-
-fleet_image() {
-  local verb=${1:-} dir=${2:-} name context
-  name=$(fleet_image_name)
-  case $verb in
-    bake)
-      context=$(mktemp -d)
-      printf '%s\n' "$FLEET_CONTAINERFILE" > "$context/Containerfile"
-      bake_stage "podman build $name" podman build -t "$name" \
-        --build-arg MIRROR="$(bake_mirror)" --build-arg POINT_APT="$POINT_APT" "$context"
-      rm -rf "$context"
-      echo "Baked $name."
-      ;;
-    import)
-      [[ -n $dir ]] || usage
-      podman load -q -i "$dir/fleet-image.tar"
-      echo "Imported $name from $dir."
-      ;;
-    export)
-      [[ -n $dir ]] || usage
-      mkdir -p "$dir"
-      podman save -q -o "$dir/fleet-image.tar" "$name"
-      echo "Kept $name in $dir."
-      ;;
-    *) usage ;;
-  esac
-}
-
-# The runner's own packages, kept as .deb files: fetched from Zabbly's stable repository and the
-# Ubuntu mirror once (the incus action keeps them per runner image and week), and installed from
-# those files by dpkg, which never reaches a mirror, the same way after a fetch as after a restore.
-# apt given the files and --no-download still wanted archives from the mirror ("Unable to fetch
-# some archives").
-runner_packages() {
-  local verb=${1:-} dir=${2:-} package
-  [[ -n $dir ]] || usage
-  case $verb in
-    fetch)
-      sudo find /etc/apt/sources.list.d -type f ! -name ubuntu.sources -delete
-      bake_stage "fetch Zabbly's key" sudo curl -fsSL --create-dirs -o /etc/apt/keyrings/zabbly.asc https://pkgs.zabbly.com/key.asc
-      printf 'Enabled: yes\nTypes: deb\nURIs: https://pkgs.zabbly.com/incus/stable\nSuites: %s\nComponents: main\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/zabbly.asc\n' \
-        "$(sed -n 's/^VERSION_CODENAME=//p' /etc/os-release)" "$(dpkg --print-architecture)" \
-        | sudo tee /etc/apt/sources.list.d/zabbly-incus-stable.sources > /dev/null
-      bake_stage "apt-get update" sudo apt-get update
-      for package in $RUNNER_PACKAGES; do
-        sudo apt-get clean
-        bake_stage "download $package" sudo apt-get install -y --download-only "$package"
-        mkdir -p "$dir/$package"
-        cp /var/cache/apt/archives/*.deb "$dir/$package/"
-      done
-      ;;
-    install)
-      package=${3:-}
-      [[ -n $package && -d $dir/$package ]] || { echo "ci/check: no files of '$package' in $dir." >&2; exit 1; }
-      sudo env DEBIAN_FRONTEND=noninteractive dpkg -i "$dir/$package"/*.deb
-      ;;
-    *) usage ;;
-  esac
-}
-
 LOCAL_HOST_PID=""
 LOCAL_HOST_LEFT=()
 
@@ -515,9 +318,6 @@ case ${1:-} in
   shard) shift; shard "$@" ;;
   its) shift; its "$@" ;;
   methods) shift; methods "$@" ;;
-  prepared-image) shift; prepared_image "$@" ;;
-  fleet-image) shift; fleet_image "$@" ;;
-  runner-packages) shift; runner_packages "$@" ;;
   local-host) shift; local_host "$@" ;;
   min-macos) shift; min_macos "$@" ;;
   *) usage ;;
