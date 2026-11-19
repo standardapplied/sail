@@ -61,7 +61,8 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     init(
         fonts: URL, helper: String?, look: Look, passkeys: (@escaping @MainActor @Sendable () -> NSWindow?) -> any PasskeyAuthenticator,
-        connect: @escaping @Sendable (ControlPlane) -> any Transport = { URLSessionTransport(base: $0.url) }
+        connect: @escaping @Sendable (ControlPlane) -> any Transport = { URLSessionTransport(base: $0.url) },
+        defaults: UserDefaults = .standard
     ) throws(ShellError) {
         self.look = look
         let window = ShellWindow(
@@ -79,7 +80,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } catch {
             throw .resources("the app's fonts cannot be read: \(error)")
         }
-        thisMac = try WorkbenchView(fonts: fonts, helper: helper, look: look)
+        thisMac = try WorkbenchView(fonts: fonts, helper: helper, look: look, defaults: defaults)
         account = AccountPane(
             account: Account(authenticator: passkeys { [weak window] in window }, vault: KeychainVault(), connect: connect), look: look, title: title,
             mono: mono
@@ -347,6 +348,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         thisMac.onSignIn = { [weak self] in self?.select(.account) }
         workspaces.onSignIn = { [weak self] in self?.select(.account) }
         workspaces.onAskWhoIsSignedIn = { [weak self] in self?.askWhoIsSignedIn() }
+        thisMac.onRunnerTabs = { [weak self] project, name in self?.workspaces.recount(project: project, name: name) }
         workspaces.onOpen = { [weak self] project, name in
             self?.select(.thisMac)
             self?.thisMac.openWorkspace(project: project, name: name)

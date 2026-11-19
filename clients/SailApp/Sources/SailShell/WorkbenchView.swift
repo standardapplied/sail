@@ -28,6 +28,8 @@ public final class WorkbenchView: NSView {
     var signedIn: @MainActor @Sendable () -> (handle: String, tickets: any TicketSource)? = { nil }
     /// Asked to show the account, where a runner tab's lapsed sign-in is signed in again.
     var onSignIn: @MainActor () -> Void = {}
+    /// A runner tab in a workspace attached or went, so what counts its sessions counts again.
+    var onRunnerTabs: @MainActor (_ project: String, _ name: String) -> Void = { _, _ in }
 
     var look: Look {
         didSet { paint() }
@@ -52,19 +54,23 @@ public final class WorkbenchView: NSView {
     private var held: [Arrangement.Tab] = []
     private var heldFor: String?
 
-    convenience init(fonts directory: URL, helper: String?, look: Look) throws(ShellError) {
+    convenience init(fonts directory: URL, helper: String?, look: Look, defaults: UserDefaults = .standard) throws(ShellError) {
         let host: LocalHost
         do {
             host = try LocalHost(binary: helper)
         } catch {
             throw .host("this Mac's terminal host has no place to listen: \(error)")
         }
-        try self.init(fonts: directory, host: host, look: look)
+        try self.init(fonts: directory, host: host, look: look, defaults: defaults)
     }
 
-    init(fonts directory: URL, host: LocalHost, look: Look) throws(ShellError) {
+    /// Where the arrangement is kept: the app's own defaults, or a test's.
+    private let defaults: UserDefaults
+
+    init(fonts directory: URL, host: LocalHost, look: Look, defaults: UserDefaults = .standard) throws(ShellError) {
         self.look = look
         self.host = host
+        self.defaults = defaults
         do {
             fonts = try TerminalFonts(directory: directory)
         } catch {
@@ -111,7 +117,7 @@ public final class WorkbenchView: NSView {
             return
         }
         if banner.shown != told { banner.hide() }
-        let kept = UserDefaults.standard.data(forKey: Self.arrangementKey).flatMap { try? JSONDecoder().decode(Arrangement.self, from: $0) }
+        let kept = defaults.data(forKey: Self.arrangementKey).flatMap { try? JSONDecoder().decode(Arrangement.self, from: $0) }
         let person = signedIn()?.handle
         model = Workbench.restore(kept, live: listed.filter(\.live).map(\.name) + (kept?.runnerSessions(for: person) ?? []), home: NSHomeDirectory())
         if person == nil, let kept {
@@ -120,7 +126,7 @@ public final class WorkbenchView: NSView {
         }
         restored = true
         for pane in model.panes.values.sorted(by: { $0.id < $1.id }) {
-            if makeView(pane, start: .attach, points: FontLadder.standard) == nil { model.close(pane.id) }
+            if makeView(pane, start: .resume, points: FontLadder.standard) == nil { model.close(pane.id) }
         }
         model.fit(in: room, minimum: minimum(of: Array(panes.values)), scale: scale)
         let waiting = pendingWorkspaces
@@ -151,7 +157,7 @@ public final class WorkbenchView: NSView {
         held = []
         heldFor = nil
         for id in coming {
-            if let pane = model.panes[id], makeView(pane, start: .attach, points: points) == nil { model.close(id) }
+            if let pane = model.panes[id], makeView(pane, start: .resume, points: points) == nil { model.close(id) }
         }
         if model.selectedTab == nil, let tab = coming.lazy.compactMap(model.tab(holding:)).first { model.select(tab.id) }
         apply()
@@ -281,7 +287,7 @@ public final class WorkbenchView: NSView {
         pendingKeep = nil
         let arrangement = model.arrangement(runner: held.isEmpty ? signedIn()?.handle : heldFor, holding: held)
         guard restored, let data = try? JSONEncoder().encode(arrangement), data != kept else { return }
-        UserDefaults.standard.set(data, forKey: Self.arrangementKey)
+        defaults.set(data, forKey: Self.arrangementKey)
         kept = data
     }
 
@@ -325,10 +331,18 @@ public final class WorkbenchView: NSView {
         model.close(view.id)
         view.removeFromSuperview()
         panes[view.id] = nil
+        runnerTabsChanged(view)
+    }
+
+    private func runnerTabsChanged(_ view: TerminalPane) {
+        guard case let .workspace(project, name) = view.place else { return }
+        onRunnerTabs(project, name)
     }
 
     private func handle(_ event: SessionEvent, from view: TerminalPane) {
         switch event {
+        case .phase(.attached):
+            runnerTabsChanged(view)
         case let .screen(.title(title)):
             model.setTitle(title, of: view.id)
             showTitles()
@@ -445,9 +459,19 @@ public final class WorkbenchView: NSView {
         }
     }
 
-    private func open(_ place: Place, attaching listed: RunnerSessions?, for person: String) {
+    /// Opens `place` for `person`, still the one signed in: a tab attached to each of their live
+    /// sessions there that no tab holds, newest first; when every one is in a tab already, the
+    /// newest's tab is chosen and nothing starts (a new one is New Terminal's); with none, a new one.
+    func open(_ place: Place, attaching listed: RunnerSessions?, for person: String) {
+        guard signedIn()?.handle == person else { return }
         let held = Set(model.panes.values.map(\.session) + self.held.flatMap(\.layout.sessions))
-        let theirs = (listed?.live(for: person) ?? []).filter { !held.contains($0.name) }
+        let mine = listed?.live(for: person) ?? []
+        let theirs = mine.filter { !held.contains($0.name) }
+        let panes = model.panes.values
+        if theirs.isEmpty, let newest = mine.lazy.compactMap({ session in panes.first { $0.session == session.name }?.id }).first {
+            model.focus(newest)
+            return apply()
+        }
         guard !theirs.isEmpty else { return openTab(in: place) }
         let size = points
         theirs.forEach { open(model.newTab(session: $0.name, place: place), start: .attach, points: size) }
@@ -481,8 +505,23 @@ public final class WorkbenchView: NSView {
     }
 
     @objc public func closePane(_: Any?) {
-        guard let pane = focused else { return }
+        guard let pane = focused, !leaving(elsewhere: [pane]).isEmpty else { return }
         confirm(ending: [pane], question: "Close this terminal?", detail: "The program running in it will end.")
+    }
+
+    /// Closes those of `views` whose keyboard is elsewhere by detaching them only: each session goes
+    /// on where its keyboard is, which is said once. Ending one is done there, or after Take
+    /// Keyboard. Answers the rest, whose sessions closing ends.
+    private func leaving(elsewhere views: [TerminalPane]) -> [TerminalPane] {
+        let elsewhere = views.filter { $0.stillRunning != nil }
+        guard let said = elsewhere.first?.stillRunning else { return views }
+        for view in elsewhere {
+            view.detach()
+            remove(view)
+        }
+        apply()
+        tell(said)
+        return views.filter { $0.stillRunning == nil }
     }
 
     /// The tab a command acts on: the one whose menu it came from (a tab's menu acts on that tab,
@@ -500,7 +539,8 @@ public final class WorkbenchView: NSView {
     /// Ends `tab`'s terminals, asking first when one may end a running program. Closing a tab
     /// chooses no tab: it is not selected first, so a rename open in another tab goes on.
     private func close(_ tab: Tab) {
-        let views = tab.layout.leaves.compactMap { panes[$0] }
+        let views = leaving(elsewhere: tab.layout.leaves.compactMap { panes[$0] })
+        guard !views.isEmpty else { return }
         let question = closeQuestion(for: tab, terminals: views.count)
         guard views.count > 1 else {
             return confirm(ending: views, question: question, detail: "The program running in it will end.")
@@ -518,7 +558,7 @@ public final class WorkbenchView: NSView {
     /// Closes every tab but this one, asking first as Close Tab does.
     @objc public func closeOtherTabs(_ sender: Any?) {
         guard let kept = tab(for: sender)?.id else { return }
-        let views = model.tabs.filter { $0.id != kept }.flatMap(\.layout.leaves).compactMap { panes[$0] }
+        let views = leaving(elsewhere: model.tabs.filter { $0.id != kept }.flatMap(\.layout.leaves).compactMap { panes[$0] })
         guard !views.isEmpty else { return }
         confirm(ending: views, question: "Close the other tabs?", detail: "Their \(views.count == 1 ? "terminal" : "\(views.count) terminals") will end.")
     }

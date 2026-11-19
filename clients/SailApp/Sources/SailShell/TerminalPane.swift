@@ -14,9 +14,13 @@ import SailWorkbench
 /// The terminal takes the look's palette as the look changes, while it runs.
 @MainActor
 public final class TerminalPane: NSView {
+    /// How the pane comes to its session: opening a new one, attaching as the person asked now
+    /// (taking the keyboard from their other client), or resuming one without being asked (a
+    /// restore, a sign-in coming back), which never takes it from their other live client.
     public enum Start: Equatable, Sendable {
         case open
         case attach
+        case resume
     }
 
     /// How much of the terminal background lies over a pane that is not focused (Ghostty's
@@ -62,6 +66,15 @@ public final class TerminalPane: NSView {
     /// The person the pane's runner session is reached as, empty when no one is named.
     let person: String
     private var keyboard = Keyboard()
+    /// A key typed while the keyboard is elsewhere was refused, and said: once until it moves again.
+    private var refusedSaid = false
+    /// Says a refused key: the system's alert sound, as a Mac says a key that goes nowhere.
+    package var beep: @MainActor () -> Void = { NSSound.beep() }
+    /// Where the session goes on while the keyboard is elsewhere, so closing this tab only detaches
+    /// it: nil while the keyboard is here.
+    package var stillRunning: String? {
+        keyboard.stillRunning
+    }
     private let banner: Card
     private let scrim = Scrim()
     private let latency = NSTextField(labelWithString: "")
@@ -120,6 +133,8 @@ public final class TerminalPane: NSView {
             TerminalSession(open: place.sessionCreate(session: name, size: size), door: door, screen: screen)
         case .attach:
             TerminalSession(attach: name, write: true, door: door, screen: screen)
+        case .resume:
+            TerminalSession(attach: name, write: true, takes: false, door: door, screen: screen)
         }
         session = next
         banner.show(place.label.map { "Connecting to \($0) on the runner" } ?? "Connecting to this Mac's terminal host")
@@ -228,6 +243,11 @@ public final class TerminalPane: NSView {
         (banner.shown, banner.offers)
     }
 
+    /// Whether the banner's first button answers Return now.
+    package var statusReturns: Bool {
+        banner.returns
+    }
+
     /// Presses the banner's button titled `title`, as a click does; false when none is so titled.
     public func press(_ title: String) -> Bool {
         banner.press(title)
@@ -262,10 +282,12 @@ public final class TerminalPane: NSView {
         switch event {
         case .phase(.attached):
             attachedOnce = true
-            keyboard.attached()
             banner.hide()
-        case let .writerChanged(writer) where place.onRunner && !person.isEmpty:
-            showKeyboard(writer)
+        case let .writerChanged(writer, yours) where place.onRunner && !person.isEmpty:
+            showKeyboard(writer, yours: yours)
+        case .refused where keyboard.said != nil && !refusedSaid:
+            refusedSaid = true
+            beep()
         case .phase(.reconnecting) where place.onRunner:
             banner.show("Reconnecting to \(place.label ?? "the runner")…", button: "Reconnect Now") { [weak self] in
                 MainActor.assumeIsolated { self?.session?.reconnectNow() }
@@ -346,17 +368,16 @@ public final class TerminalPane: NSView {
         begin()
     }
 
-    /// Who holds the keyboard now that the host said `writer` does: while it is with someone else
-    /// the pane says so and offers to take it back; once it is here again, the line goes.
-    private func showKeyboard(_ writer: String) {
+    /// Who holds the keyboard now that the host said `writer` does, `yours` when this client: while
+    /// it is elsewhere the pane says so and offers to take it back, Return staying with the terminal;
+    /// once it is here again, the line goes.
+    private func showKeyboard(_ writer: String, yours: Bool) {
         let wasSaid = keyboard.said
-        keyboard.writerChanged(to: writer, me: person)
+        keyboard.writerChanged(to: writer, yours: yours, me: person)
+        refusedSaid = false
         if let said = keyboard.said {
-            banner.show(said, button: "Take Keyboard") { [weak self] in
-                MainActor.assumeIsolated {
-                    self?.keyboard.taking()
-                    self?.session?.takeWrite()
-                }
+            banner.show(said, button: "Take Keyboard", returns: false) { [weak self] in
+                MainActor.assumeIsolated { self?.session?.takeWrite() }
             }
         } else if let wasSaid, banner.shown == wasSaid {
             banner.hide()

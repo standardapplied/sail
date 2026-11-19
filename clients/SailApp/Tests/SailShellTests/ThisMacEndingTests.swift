@@ -66,7 +66,7 @@ import Testing
 
     /// This Mac's workbench of `tabs` tabs of one pane each, every one attached through the door.
     static func workbench(at door: FakeRunnerDoor, tabs: Int) async throws -> WorkbenchView {
-        let bench = try WorkbenchView(fonts: LookTests.fonts, host: Self.host(at: door), look: .light)
+        let bench = try WorkbenchView(fonts: LookTests.fonts, host: Self.host(at: door), look: .light, defaults: ReattachTests.defaults())
         let place = Place.thisMac(folder: "/")
         let ids = (0 ..< tabs).map { _ in bench.model.newTab(session: place.newSessionName, place: place) }
         for id in ids {

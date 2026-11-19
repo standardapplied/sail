@@ -41,21 +41,38 @@ import Testing
     }
 
     /// R7: a person's own running workspace says how many of their live sessions run in it, beside
-    /// its state; an ended one, someone else's, or another workspace's count nothing.
+    /// its state, "1 session" for one; an ended one, someone else's, another workspace's, another
+    /// project's of the same name, or someone else's row count nothing.
     @Test func aRunningWorkspaceOfTheirsSaysHowManyOfTheirSessionsRunInIt() {
         func session(_ name: String, live: Bool = true, opener: String = "uday") -> RunnerSession {
             RunnerSession(name: name, live: live, attached: 0, writer: "", opener: opener, command: [], createdAt: Self.at, endedReason: nil)
         }
         var model = Self.listed(Self.uday)
-        model.sessionsListed(RunnerSessions(sessions: [
-            session("app-a"), session("app-b"), session("app-c", live: false), session("app-d", opener: "ana"),
-        ]), project: "harbor", workspace: "dock")
-        model.sessionsListed(RunnerSessions(sessions: [session("app-e")]), project: "harbor", workspace: "pier")
-        model.sessionsListed(RunnerSessions(sessions: [session("app-f")]), project: "other", workspace: "quay")
+        func listed(_ sessions: [RunnerSession], project: String = "harbor", workspace: String) {
+            model.sessionsListed(RunnerSessions(sessions: sessions), project: project, workspace: workspace, request: model.askingSessions(of: workspace))
+        }
+        listed([session("app-a"), session("app-b"), session("app-c", live: false), session("app-d", opener: "ana")], workspace: "dock")
+        listed([session("app-e")], workspace: "pier")
+        listed([session("app-f")], workspace: "quay")
+        listed([session("app-g"), session("app-h"), session("app-i")], project: "other", workspace: "dock")
         let lines = (Self.table(model)?.yours ?? []) + (Self.table(model)?.others ?? [])
-        #expect(lines.map { "\($0.name) \($0.sessionsSaid ?? "-")" } == ["dock 2 sessions", "pier -", "quay -"])
+        #expect(lines.map { "\($0.name) \($0.sessionsSaid ?? "-")" } == ["dock 2 sessions", "pier -", "quay -"], "a late count from another project's dock lands nowhere")
+        listed([session("app-a")], workspace: "dock")
+        #expect(Self.table(model)?.yours.first { $0.name == "dock" }?.sessionsSaid == "1 session")
         _ = model.choose("harbor")
         #expect(Self.table(model)?.yours.allSatisfy { $0.sessions == 0 } != false, "a new choice forgets the counts")
+    }
+
+    /// Of two counts asked of one workspace, an older answer arriving last never replaces the newer.
+    @Test func anOlderCountNeverReplacesANewerOne() {
+        func session(_ name: String) -> RunnerSession {
+            RunnerSession(name: name, live: true, attached: 0, writer: "", opener: "uday", command: [], createdAt: Self.at, endedReason: nil)
+        }
+        var model = Self.listed(Self.uday)
+        let older = model.askingSessions(of: "dock"), newer = model.askingSessions(of: "dock")
+        model.sessionsListed(RunnerSessions(sessions: [session("app-a"), session("app-b")]), project: "harbor", workspace: "dock", request: newer)
+        model.sessionsListed(RunnerSessions(sessions: [session("app-a")]), project: "harbor", workspace: "dock", request: older)
+        #expect(Self.table(model)?.yours.first { $0.name == "dock" }?.sessions == 2)
     }
 
     /// A person's terminals in a listing are its live sessions they opened, newest first as listed:

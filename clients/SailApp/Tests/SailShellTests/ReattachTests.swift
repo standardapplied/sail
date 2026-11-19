@@ -4,6 +4,7 @@ import SailAPI
 import SailKitTestSupport
 @testable import SailShell
 import SailTerminal
+import SailVT
 import SailWorkbench
 import Synchronization
 import Testing
@@ -20,18 +21,23 @@ import Testing
 /// A session on the runner outlives the app, the sign-out and the tab's own client: the app comes
 /// back to it as the person it is, and says when it cannot.
 @MainActor @Suite(.serialized) struct ReattachTests {
+    /// Defaults of a test's own, so no suite running beside it reads or overwrites its arrangement.
+    static func defaults() -> UserDefaults {
+        let name = "sail.tests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name) ?? .standard
+        defaults.removePersistentDomain(forName: name)
+        return defaults
+    }
+
     static let dock = Place.workspace(project: "harbor", name: "dock")
     static let stopped = "Workspace dock of harbor was stopped by ana."
 
     /// This Mac's workbench over `local`, restored from `kept`, its runner tabs reaching `runner`
     /// as whoever `who` names.
     static func workbench(local: FakeRunnerDoor, runner: FakeRunnerDoor, who: Who, kept: Arrangement? = nil) async throws -> WorkbenchView {
-        if let kept {
-            UserDefaults.standard.set(try JSONEncoder().encode(kept), forKey: WorkbenchView.arrangementKey)
-        } else {
-            UserDefaults.standard.removeObject(forKey: WorkbenchView.arrangementKey)
-        }
-        let bench = try WorkbenchView(fonts: LookTests.fonts, host: ThisMacEndingTests.host(at: local), look: .light)
+        let defaults = Self.defaults()
+        if let kept { defaults.set(try JSONEncoder().encode(kept), forKey: WorkbenchView.arrangementKey) }
+        let bench = try WorkbenchView(fonts: LookTests.fonts, host: ThisMacEndingTests.host(at: local), look: .light, defaults: defaults)
         let tickets = DoorTickets(runner)
         bench.signedIn = { who.handle.map { ($0, tickets) } }
         bench.shown()
@@ -223,8 +229,69 @@ import Testing
         runner.takeKeyboard("app-k", by: "uday")
         #expect(await RunnerTabTests.until(10) { pane.status.says == "Typing here is paused: you took the keyboard in another window or on another Mac." }, "\(pane.status)")
         #expect(pane.status.offers == ["Take Keyboard"])
+        #expect(!pane.statusReturns, "Return belongs to the terminal, never to Take Keyboard")
+        var beeps = 0
+        pane.beep = { beeps += 1 }
+        pane.session?.send(KeyInput(key: .a, text: "a"))
+        pane.session?.send(KeyInput(key: .b, text: "b"))
+        #expect(await RunnerTabTests.until(10) { beeps == 1 }, "a key that goes nowhere is said, once")
         #expect(pane.press("Take Keyboard"))
         #expect(await RunnerTabTests.until(10) { pane.status.says == nil }, "\(pane.status)")
+        #expect(beeps == 1)
+    }
+
+    /// M1: closing a tab whose keyboard is on the person's other Mac only detaches it, at a prompt
+    /// or with a program running: the session goes on there, said once, and nothing is ended.
+    @Test(arguments: [true, false])
+    func closingATabWhoseKeyboardIsElsewhereEndsNothing(_ atPrompt: Bool) async throws {
+        let (local, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
+        defer { local.stop(); runner.stop() }
+        let bench = try await Self.workbench(local: local, runner: runner, who: Who("uday"))
+        bench.openWorkspace(project: "harbor", name: "dock")
+        #expect(await RunnerTabTests.until(10) { Self.runnerSessions(bench).count == 1 })
+        #expect(await Self.attached(bench))
+        let pane = try #require(bench.panes.values.first { $0.place.onRunner })
+        if atPrompt { _ = pane.session?.screen.feed(Array("\u{1b}]133;A\u{07}$ \u{1b}]133;B\u{07}ls\r\n\u{1b}]133;C\u{07}\u{1b}]133;D;0\u{07}\u{1b}]133;A\u{07}$ \u{1b}]133;B\u{07}".utf8)) }
+        #expect(pane.mayEndAProgram == !atPrompt)
+        runner.takeKeyboard(pane.name, by: "uday")
+        #expect(await RunnerTabTests.until(10) { pane.stillRunning != nil })
+        bench.model.focus(pane.id)
+        bench.closePane(nil)
+        #expect(bench.panes[pane.id] == nil, "the tab went")
+        #expect(runner.sessions == [pane.name] && runner.kills.isEmpty, "nothing was ended")
+        #expect(bench.bannerSays == "Still running: the keyboard is with your other window or Mac.")
+    }
+
+    /// Minor 8: Open on a workspace whose live sessions are all in tabs chooses the newest's tab
+    /// and starts nothing.
+    @Test func openingAWorkspaceWhoseSessionsAreAllInTabsChoosesTheNewest() async throws {
+        let (local, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
+        defer { local.stop(); runner.stop() }
+        runner.hold("app-old")
+        runner.hold("app-new")
+        let bench = try await Self.workbench(local: local, runner: runner, who: Who("uday"))
+        bench.openWorkspace(project: "harbor", name: "dock")
+        #expect(await RunnerTabTests.until(10) { Set(Self.runnerSessions(bench)) == ["app-old", "app-new"] })
+        #expect(await Self.attached(bench))
+        let newest = try #require(bench.panes.values.first { $0.name == "app-new" })
+        bench.model.focus(try #require(bench.panes.values.first { $0.name == "app-old" }).id)
+        bench.openWorkspace(project: "harbor", name: "dock")
+        #expect(await RunnerTabTests.until(10) { bench.model.focusedPane?.id == newest.id }, "the newest's tab is chosen")
+        #expect(Self.runnerSessions(bench).count == 2 && runner.sessions.count == 2, "nothing started")
+    }
+
+    /// Minor 3: a listing answered after its person signed out, someone else signing in meanwhile,
+    /// opens nothing for the one signed in now.
+    @Test func anOpenWhoseListingOutlivesItsSignInOpensNothing() async throws {
+        let (local, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
+        defer { local.stop(); runner.stop() }
+        let who = Who("uday")
+        let bench = try await Self.workbench(local: local, runner: runner, who: who)
+        let before = bench.model.panes.count
+        who.handle = "ben"
+        let theirs = RunnerSession(name: "app-a", live: true, attached: 0, writer: "", opener: "uday", command: [], createdAt: Date(), endedReason: nil)
+        bench.open(Self.dock, attaching: RunnerSessions(sessions: [theirs]), for: "uday")
+        #expect(bench.model.panes.count == before, "nothing opened under another person")
     }
 
     /// R1: quitting detaches the runner's terminals and asks nothing; the runner keeps them.

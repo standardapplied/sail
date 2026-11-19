@@ -233,6 +233,9 @@ public struct WorkspacesModel: Sendable {
     private var creates: [String: CreateLine] = [:]
     /// The person's live sessions in each of their workspaces, by workspace, as last listed.
     private var sessions: [String: Int] = [:]
+    /// The newest request for each workspace's sessions, so an older answer never replaces it.
+    private var sessionsAsked: [String: Int] = [:]
+    private var sessionsAskedCount = 0
     /// The workspace created in this project, chosen once a list shows it.
     private var choosingAfterList: [String: String] = [:]
 
@@ -317,10 +320,18 @@ public struct WorkspacesModel: Sendable {
         }
     }
 
-    /// Takes how many live sessions of the person's own `listing` holds in workspace `workspace` of
-    /// the project shown, for its row; a listing for a project no longer shown is dropped.
-    public mutating func sessionsListed(_ listing: RunnerSessions, project: String, workspace: String) {
-        guard project == chosen else { return }
+    /// The number of a new request for `workspace`'s sessions in the project shown.
+    public mutating func askingSessions(of workspace: String) -> Int {
+        sessionsAskedCount += 1
+        sessionsAsked[workspace] = sessionsAskedCount
+        return sessionsAskedCount
+    }
+
+    /// Takes how many live sessions of the person's own `listing`, the answer to `request`, holds in
+    /// workspace `workspace` of the project shown, for its row; a listing for a project no longer
+    /// shown, or one older than the newest asked, is dropped.
+    public mutating func sessionsListed(_ listing: RunnerSessions, project: String, workspace: String, request: Int) {
+        guard project == chosen, sessionsAsked[workspace] == request else { return }
         sessions[workspace] = listing.live(for: person.handle).count
     }
 

@@ -414,7 +414,12 @@ extension Driver {
         }
         if let title = step.pressStatus {
             guard let focused = workbench.focused else { return (false, "no focused terminal") }
-            return (focused.press(title), "the banner said \(focused.status.says ?? "nothing")")
+            let said = focused.status.says ?? "nothing"
+            focused.layoutSubtreeIfNeeded()
+            guard let button = Self.views(in: focused).compactMap({ $0 as? NSButton }).first(where: { $0.title == title && !$0.isHiddenOrHasHiddenAncestor }),
+                  await click(button, at: NSPoint(x: button.bounds.midX, y: button.bounds.midY))
+            else { return (false, "no \(title) on the card, which said \(said)") }
+            return (true, "clicked \(title) on the card, which said \(said)")
         }
         if step.signOutNow == true {
             shell.account.signOutHere(nil)

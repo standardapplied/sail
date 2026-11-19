@@ -50,6 +50,8 @@ struct Step: Decodable {
     var gridColumns: Bool?
     var text: String?
     var banner: String?
+    /// The workbench's own banner says this, as a closed tab's session going on elsewhere is said.
+    var workbenchSays: String?
     /// The focused pane's banner no longer says this, within `seconds` (15 by default).
     var bannerGone: String?
     var seconds: Double?

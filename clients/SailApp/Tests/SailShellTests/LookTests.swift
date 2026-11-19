@@ -96,7 +96,7 @@ import Testing
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let passkey = SoftwarePasskey(file: folder.appending(path: "passkey.json"))
-        let shell = try ShellApp(fonts: Self.fonts, helper: nil, look: look) { _ in passkey }
+        let shell = try ShellApp(fonts: Self.fonts, helper: nil, look: look, passkeys: { _ in passkey }, defaults: ReattachTests.defaults())
         func buttons(_ view: NSView) -> [NSButton] {
             ((view as? NSButton).map { [$0] } ?? []) + view.subviews.flatMap(buttons)
         }
@@ -120,7 +120,7 @@ import Testing
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let passkey = SoftwarePasskey(file: folder.appending(path: "passkey.json"))
-        let shell = try ShellApp(fonts: Self.fonts, helper: nil, look: look) { _ in passkey }
+        let shell = try ShellApp(fonts: Self.fonts, helper: nil, look: look, passkeys: { _ in passkey }, defaults: ReattachTests.defaults())
         let window = shell.window
         #expect(window.styleMask.contains(.fullSizeContentView))
         #expect(window.titlebarAppearsTransparent)
@@ -153,7 +153,7 @@ import Testing
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let passkey = SoftwarePasskey(file: folder.appending(path: "passkey.json"))
-        let shell = try ShellApp(fonts: Self.fonts, helper: nil, look: look) { _ in passkey }
+        let shell = try ShellApp(fonts: Self.fonts, helper: nil, look: look, passkeys: { _ in passkey }, defaults: ReattachTests.defaults())
         shell.select(.account)
         shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }

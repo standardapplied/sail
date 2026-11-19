@@ -65,6 +65,8 @@ import Testing
             #expect(paint.fill == look.surface.blended(toward: ink, by: 0.08) && paint.edge == Tint(ink, alpha: 0.35) && paint.mark == Tint(ink), "\(name) \(tone)")
         }
         #expect(BannerTone.allCases.map(\.icon) == [.info, .warning, .error])
+        let quiet = BannerPaint(quiet: look)
+        #expect(quiet.fill == look.surface && quiet.edge == look.separator && quiet.mark == look.textSecondary, "\(name): information is drawn quietly")
     }
 
     @Test func anEmptyTileIsDashedOnlyWhenSomethingIsMissing() {

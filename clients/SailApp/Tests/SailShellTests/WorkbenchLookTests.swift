@@ -16,7 +16,7 @@ import Testing
         let folder = FileManager.default.temporaryDirectory.appending(path: "sail-tabs-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let passkey = SoftwarePasskey(file: folder.appending(path: "passkey.json"))
-        return try ShellApp(fonts: LookTests.fonts, helper: nil, look: look) { _ in passkey }
+        return try ShellApp(fonts: LookTests.fonts, helper: nil, look: look, passkeys: { _ in passkey }, defaults: ReattachTests.defaults())
     }
 
     static func items() -> [TabStrip.Item] {

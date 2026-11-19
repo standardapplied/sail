@@ -245,16 +245,35 @@ public final class WorkspacesView: NSView {
     }
 
     /// Asks each of the person's running workspaces in `list` for its sessions, so its row says
-    /// how many of theirs run in it; a workspace that cannot be asked says nothing of them.
+    /// how many of theirs run in it, drawn once all have answered; a workspace that cannot be asked
+    /// says nothing of them. The route lists one workspace's sessions, so each is its own request.
     private func countSessions(in list: WorkspaceList, by client: SailClient) {
+        let names = list.workspaces.filter { $0.owner == model.person.handle && $0.state == .known(.running) }.map(\.name)
+        count(names, in: list.project, by: client)
+    }
+
+    /// Asks `names` of `project` for their sessions, each request numbered, and draws once.
+    private func count(_ names: [String], in project: String, by client: SailClient) {
+        guard !names.isEmpty else { return }
         let era = self.era
-        for row in list.workspaces where row.owner == model.person.handle && row.state == .known(.running) {
-            Task {
-                guard let listing = try? await client.send(.sessions(workspace: row.name, project: list.project)), era == self.era else { return }
-                model.sessionsListed(listing, project: list.project, workspace: row.name)
-                render()
+        let asked = names.map { ($0, model.askingSessions(of: $0)) }
+        Task {
+            var answers: [(String, Int, RunnerSessions)] = []
+            for (name, request) in asked {
+                if let listing = try? await client.send(.sessions(workspace: name, project: project)) { answers.append((name, request, listing)) }
             }
+            guard era == self.era else { return }
+            for (name, request, listing) in answers {
+                model.sessionsListed(listing, project: project, workspace: name, request: request)
+            }
+            render()
         }
+    }
+
+    /// A runner tab in workspace `name` of `project` started or went: its row counts again.
+    func recount(project: String, name: String) {
+        guard let client, model.chosen == project else { return }
+        count([name], in: project, by: client)
     }
 
     private func choose(_ name: String) {

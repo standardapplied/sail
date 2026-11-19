@@ -2,9 +2,10 @@ import AppKit
 import SailLook
 
 /// A card over what it is about (a terminal), saying where things stand and what to do about it:
-/// drawn as a banner is (`BannerPaint`: the tone mixed into the surface in content corners, its edge,
-/// its 16 pt mark), its words in callout ink, a primary action and at most one secondary beside it,
-/// the primary answering Return while it shows. At most 420 pt wide, padded as a banner, its mark
+/// drawn as a banner is (`BannerPaint`, in content corners, its edge, its 16 pt mark), information on
+/// the quiet surface and a warning or an error in its tone; its words in callout ink, a primary
+/// action and at most one secondary beside it, the primary answering Return while it shows unless
+/// Return belongs to what the card is over. At most 420 pt wide, padded as a banner, its mark
 /// mirrored right to left.
 @MainActor
 public final class Card: NSView {
@@ -26,7 +27,6 @@ public final class Card: NSView {
         secondary = SailButton("", kind: .secondary, look: look, target: nil, action: nil)
         super.init(frame: .zero)
         message.font = .systemFont(ofSize: Look.Step.callout.points)
-        primary.isDefault = true
         primary.target = self
         primary.action = #selector(actPrimary)
         secondary.target = self
@@ -64,11 +64,13 @@ public final class Card: NSView {
     }
 
     /// Shows `text` in `tone`, with `button` running `handler` when there is something to do, and
-    /// `second` running `secondHandler` beside it when there is another.
+    /// `second` running `secondHandler` beside it when there is another; `button` answers Return when
+    /// `returns`.
     public func show(
-        _ text: String, tone: BannerTone = .info, button: String? = nil, handler: @escaping () -> Void = {}, second: String? = nil,
-        secondHandler: @escaping () -> Void = {}
+        _ text: String, tone: BannerTone = .info, button: String? = nil, returns: Bool = true, handler: @escaping () -> Void = {},
+        second: String? = nil, secondHandler: @escaping () -> Void = {}
     ) {
+        primary.isDefault = returns
         message.stringValue = text
         self.tone = tone
         primaryHandler = handler
@@ -91,6 +93,11 @@ public final class Card: NSView {
     /// What the card says now, nil when hidden.
     public var shown: String? {
         isHidden ? nil : message.stringValue
+    }
+
+    /// Whether its primary answers Return now.
+    public var returns: Bool {
+        !isHidden && primary.isDefault
     }
 
     /// The actions it offers now, the primary first; none while hidden.
@@ -121,7 +128,7 @@ public final class Card: NSView {
     }
 
     override public func draw(_: NSRect) {
-        let paint = BannerPaint(tone, look: look)
+        let paint = tone == .info ? BannerPaint(quiet: look) : BannerPaint(tone, look: look)
         Draw.box(bounds, radius: Look.contentRadius, fill: Tint(paint.fill), edge: paint.edge)
         Draw.icon(tone.icon, in: markBox, ink: paint.mark)
     }

@@ -44,4 +44,15 @@ import Testing
         #expect(bench.tabs.map { $0.layout.leaves.compactMap { bench.panes[$0]?.session } } == [["mac-1"], ["app-a"], ["app-b", "app-c"]])
         #expect(bench.adopt(held).isEmpty)
     }
+
+    /// A held session a tab opened meanwhile (Open on its workspace) is adopted never twice: its
+    /// held tab brings only the sessions no pane holds.
+    @Test func aHeldSessionAlreadyOpenIsNeverAdoptedAgain() {
+        let kept = Self.kept()
+        var bench = Workbench.restore(kept, live: ["mac-1"], home: "/")
+        bench.newTab(session: "app-b", place: .workspace(project: "harbor", name: "dock"))
+        let made = bench.adopt(kept.runnerTabs)
+        #expect(made.compactMap { bench.panes[$0]?.session }.sorted() == ["app-a", "app-c"])
+        #expect(bench.panes.values.filter { $0.session == "app-b" }.count == 1, "one pane per session")
+    }
 }
