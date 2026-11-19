@@ -72,6 +72,51 @@ import Testing
     }
 }
 
+extension WorkspacesSheetTests {
+    /// R2-1: someone else signs in while a confirmed stop counts its terminals again: nothing is
+    /// sent, and the next Delete still asks.
+    @Test func aSignInDuringAStopsRecountLeavesNothingHeld() async throws {
+        let server = RecordedServer([
+            try Exchange("projects"), try Exchange("workspaces-three"), try Exchange("workspace-sessions"), try Exchange("workspace-stop"),
+        ])
+        let (view, window) = try WorkspacesViewTests.view(server)
+        defer { window.orderOut(nil) }
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("dock") }, "\(view.text)")
+        view.project.on(.stop("dock"))
+        #expect(await RunnerTabTests.until { Driverless.words(window.attachedSheet?.contentView).contains("Stop dock?") }, "a stop with a terminal open asked nothing")
+        Driverless.button("Stop", in: window.attachedSheet?.contentView)?.performClick(nil)
+        view.person = WorkspacesViewTests.ana
+        view.person = WorkspacesViewTests.uday
+        #expect(await RunnerTabTests.until { !view.busy && window.attachedSheet == nil }, "the recount never ended")
+        let routes = await server.requests.map(\.route)
+        #expect(!routes.contains { $0.hasSuffix("/dock/stop") }, "the stop went out for someone no longer signed in: \(routes)")
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("dock") }, "\(view.text)")
+        view.project.on(.delete("dock"))
+        #expect(await RunnerTabTests.until { Driverless.words(window.attachedSheet?.contentView).contains("Delete dock?") }, "after the sign-in, Delete asked nothing")
+        window.attachedSheet?.cancelOperation(nil)
+    }
+
+    /// R2-6: a Delete Anyway answered while This Mac is shown waits, and asks once Workspaces is.
+    @Test func aQuestionWaitsForTheSectionToBeShown() async throws {
+        let server = RecordedServer([try Exchange("projects"), try Exchange("workspaces-three"), try Exchange("refusal-workspace-holds-work")])
+        let (view, window) = try WorkspacesViewTests.view(server)
+        defer { window.orderOut(nil) }
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("dock") }, "\(view.text)")
+        view.project.on(.delete("dock"))
+        #expect(await RunnerTabTests.until { window.attachedSheet != nil }, "Delete asked nothing")
+        Driverless.button("Delete Workspace", in: window.attachedSheet?.contentView)?.performClick(nil)
+        view.isHidden = true
+        #expect(await RunnerTabTests.until { !view.busy }, "the delete never ended")
+        #expect(window.attachedSheet == nil, "Delete Anyway asked over another section")
+        view.isHidden = false
+        #expect(await RunnerTabTests.until { Driverless.words(window.attachedSheet?.contentView).contains("Delete dock anyway?") }, "shown again, the section did not ask Delete Anyway")
+        window.attachedSheet?.cancelOperation(nil)
+    }
+}
+
 /// A sheet's words and buttons, found in its view tree.
 @MainActor enum Driverless {
     static func words(_ view: NSView?) -> String {

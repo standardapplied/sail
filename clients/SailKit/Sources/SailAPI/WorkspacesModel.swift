@@ -296,6 +296,7 @@ public struct WorkspacesModel: Sendable {
             listedAt = at
             listFailure = nil
             if let project = listing.listed, let since = refused[project]?.since, request > since { refused[project] = nil }
+            if let project = listing.listed { forgetGone(in: project, request: request) }
             if let project = listing.listed, let wanted = choosingAfterList[project], listing.rows.contains(where: { $0.name == wanted }) {
                 chosenRow = wanted
                 choosingAfterList[project] = nil
@@ -371,26 +372,17 @@ public struct WorkspacesModel: Sendable {
     /// runner tells the person only of their own terminals. Nothing is asked while a question is
     /// open or the row is under way.
     public mutating func ask(_ action: Action, _ name: String, terminals: Int?) -> Asked? {
-        guard let project = chosen, asking == nil, busy[project]?[name] == nil, let row = listing.rows.first(where: { $0.name == name }) else { return nil }
+        guard let project = chosen, busy[project]?[name] == nil, let row = listing.rows.first(where: { $0.name == name }) else { return nil }
+        guard asking == nil else {
+            notAsked(action, name, project: project)
+            return nil
+        }
         let mine = row.owner == person.handle
         switch action {
         case .stop:
-            let ends: String
-            if mine {
-                switch terminals {
-                case 0?: return send(.stop, name, project: project) ? .send(project: project, name: name, action: .stop) : nil
-                case 1?: ends = "Your terminal in it ends."
-                case let count?: ends = "Your \(count) terminals in it end."
-                case nil: ends = "Any terminal open in it ends."
-                }
-            } else {
-                let owner = row.owner.flatMap { $0 == WorkspaceRow.removedOwner ? nil : $0 }
-                ends = owner.map { "Any terminal \($0) has open in it ends." } ?? "Any terminal open in it ends."
-            }
-            return .question(open(Question(
-                project: project, name: name, action: .stop, title: "Stop \(name)?", body: "\(ends) Its files stay, and Start and Open brings it back.", confirm: "Stop",
-                terminals: mine ? terminals : nil, detail: nil, asked: 0
-            )))
+            if mine, terminals == 0 { return send(.stop, name, project: project) ? .send(project: project, name: name, action: .stop) : nil }
+            let owner = row.owner.flatMap { $0 == WorkspaceRow.removedOwner ? nil : $0 }
+            return .question(open(Self.stop(name, project: project, ends: mine ? Self.yours(terminals) : owner.map { "Any terminal \($0) has open in it ends." } ?? Self.yours(nil), terminals: mine ? terminals : nil)))
         case .delete:
             return .question(open(Question(
                 project: project, name: name, action: .delete(force: false), title: "Delete \(name)?",
@@ -398,6 +390,29 @@ public struct WorkspacesModel: Sendable {
                 confirm: "Delete Workspace", terminals: nil, detail: nil, asked: 0
             )))
         }
+    }
+
+    private static func stop(_ name: String, project: String, ends: String, terminals: Int?) -> Question {
+        Question(
+            project: project, name: name, action: .stop, title: "Stop \(name)?", body: "\(ends) Its files stay, and Start and Open brings it back.", confirm: "Stop",
+            terminals: terminals, detail: nil, asked: 0
+        )
+    }
+
+    private static func yours(_ terminals: Int?) -> String {
+        switch terminals {
+        case 1?: "Your terminal in it ends."
+        case let count?: "Your \(count) terminals in it end."
+        case nil: "Any terminal open in it ends."
+        }
+    }
+
+    /// A choice not taken because another question is open, said over the page (never over a
+    /// refusal) until the next list: choosing it again once that one is answered asks it.
+    private mutating func notAsked(_ action: Action, _ name: String, project: String) {
+        guard refused[project] == nil else { return }
+        let verb = action == .stop ? "Stop" : "Delete"
+        refused[project] = (Notice(tone: .warning, title: "\(name) is not asked about yet: answer the question open, then choose \(verb) again.", line: "", tryAgain: false), listing.latest)
     }
 
     private mutating func open(_ question: Question) -> Question {
@@ -422,16 +437,25 @@ public struct WorkspacesModel: Sendable {
     /// `question`, an open stop, asked again in its new words: the person's terminals in it grew to
     /// `terminals` while it was asked. Nil, and nothing changed, when it is not the question open.
     public mutating func askAgain(_ question: Question, terminals: Int) -> Question? {
-        guard asking == question, question.action == .stop, question.project == chosen else { return nil }
-        asking = nil
-        guard case let .question(again)? = ask(.stop, question.name, terminals: terminals) else { return nil }
-        return again
+        guard asking == question, question.action == .stop, question.terminals != nil else { return nil }
+        return open(Self.stop(question.name, project: question.project, ends: Self.yours(terminals), terminals: terminals))
     }
 
     /// `question` cancelled (or answered): the next waiting in the project shown, if any, is asked.
     public mutating func cancel(_ question: Question) {
         guard asking == question else { return }
         asking = nil
+        askNextWaiting()
+    }
+
+    /// Questions about workspaces no longer in `project`'s list are not asked: a waiting one is
+    /// dropped, and an open one is withdrawn and said.
+    private mutating func forgetGone(in project: String, request: Int) {
+        let names = Set(listing.rows.map(\.name))
+        waiting.removeAll { $0.project == project && !names.contains($0.name) }
+        guard let open = asking, open.project == project, !names.contains(open.name) else { return }
+        asking = nil
+        refused[project] = (Notice(tone: .warning, title: "\(open.name) is no longer in \(project), so Sail stopped asking about it.", line: "", tryAgain: false), request)
         askNextWaiting()
     }
 
@@ -456,8 +480,13 @@ public struct WorkspacesModel: Sendable {
         busy[project]?[name] = nil
         let request = project == chosen ? listAgain() : nil
         switch result {
-        case .success:
-            break
+        case let .success(answer):
+            guard request != nil, listing.listed == project else { break }
+            switch answer.change {
+            case .known(.deleted): listing.settle(name, as: nil)
+            case .known(.stopped), .known(.alreadyStopped): listing.settle(name, as: .stopped)
+            default: break
+            }
         case let .failure(.refused(refusal)) where refusal.code == .known(.workspaceHoldsWork) && action == .delete(force: false) && project == chosen:
             let (said, detail) = Self.holdsWork(refusal.message, name)
             questionsAsked += 1

@@ -84,6 +84,11 @@ public final class Sheet: NSObject {
         parent.beginSheet(window)
     }
 
+    /// Ends the sheet unanswered, as Cancel does, when what it asks has gone; nothing once it ended.
+    public func withdraw() {
+        end(false)
+    }
+
     @objc private func cancelled(_: Any?) {
         end(false)
     }

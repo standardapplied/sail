@@ -760,6 +760,104 @@ extension WorkspacesModelTests {
         #expect(refused != nil, "a refused stop did not list again")
     }
 
+    static func harbor(_ rows: [(String, WorkspaceState, String)]) -> Result<WorkspaceList, SailError> {
+        .success(WorkspaceList(project: "harbor", workspaces: rows.map { WorkspaceRow(name: $0.0, instance: "harbor-\($0.0)", state: .known($0.1), owner: $0.2) }))
+    }
+
+    static func deleted(_ name: String) -> Result<WorkspaceChanged, SailError> {
+        .success(WorkspaceChanged(project: "harbor", workspace: name, instance: "harbor-\(name)", change: .known(.deleted), timings: nil))
+    }
+
+    /// pier's Delete Anyway waiting behind dock's open question.
+    static func pierWaitsBehindDock(_ model: inout WorkspacesModel) throws -> WorkspacesModel.Question {
+        let pier = try asks(&model, .delete(force: false), "pier", terminals: nil)
+        _ = try confirms(&model, pier)
+        let dock = try asks(&model, .delete(force: false), "dock", terminals: nil)
+        _ = model.changed(.delete(force: false), "pier", project: "harbor", try holdsWork("pier"))
+        #expect(model.asking == dock && model.questionsWaiting == 1)
+        return dock
+    }
+
+    /// R2-2: cancelling the open question asks the one waiting.
+    @Test func cancellingAsksTheQuestionWaiting() throws {
+        var model = Self.listed(Self.uday)
+        let dock = try Self.pierWaitsBehindDock(&model)
+        model.cancel(dock)
+        #expect(model.asking?.title == "Delete pier anyway?" && model.questionsWaiting == 0, "cancelling dock did not ask pier's Delete Anyway")
+    }
+
+    /// R2-2: a question waiting for harbor is never asked over demo, and is asked when harbor is
+    /// chosen again.
+    @Test func aWaitingQuestionIsAskedOnlyInItsOwnProject() throws {
+        var model = Self.two()
+        let dock = try Self.pierWaitsBehindDock(&model)
+        _ = model.choose("demo")
+        model.cancel(dock)
+        #expect(model.asking == nil && model.questionsWaiting == 1, "harbor's pier was asked over demo")
+        _ = model.choose("harbor")
+        #expect(model.asking?.title == "Delete pier anyway?" && model.asking?.project == "harbor", "choosing harbor did not ask pier's Delete Anyway")
+    }
+
+    /// R2-2: a new action clears the banner an old one left.
+    @Test func aNewActionClearsAnOldRefusal() throws {
+        var model = Self.listed(Self.uday)
+        _ = model.ask(.stop, "dock", terminals: 0)
+        _ = model.changed(.stop, "dock", project: "harbor", .failure(.unreachable("lost")))
+        #expect(Self.page(model)?.banner != nil)
+        _ = model.ask(.stop, "dock", terminals: 0)
+        #expect(Self.page(model)?.banner == nil, "the old refusal stayed over a new stop")
+    }
+
+    /// A stop's or a delete's answer sets its row at once, stopped or gone, and a list asked before
+    /// that answer, still in flight, cannot bring "running" back.
+    @Test func anAnswerSetsItsRowUntilAListAskedAfterIt() throws {
+        var model = Self.listed(Self.uday)
+        let inFlight = model.listAgain()
+        _ = model.ask(.stop, "dock", terminals: 0)
+        let after = model.changed(.stop, "dock", project: "harbor", Self.stopped)
+        #expect(Self.row(model, "dock")?.state == .known(.stopped) && Self.row(model, "dock")?.busy == nil, "dock reads \(String(describing: Self.row(model, "dock")?.state)) after its stop")
+        model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-three"), request: inFlight, at: Self.at)
+        #expect(Self.row(model, "dock")?.state == .known(.stopped), "a list asked before the stop brought running back")
+        model.listed(Self.harbor([("dock", .stopped, "uday"), ("pier", .stopped, "uday")]), request: try #require(after), at: Self.at)
+        #expect(Self.row(model, "dock")?.state == .known(.stopped))
+        let delete = try Self.asks(&model, .delete(force: false), "pier", terminals: nil)
+        _ = try Self.confirms(&model, delete)
+        _ = model.changed(.delete(force: false), "pier", project: "harbor", Self.deleted("pier"))
+        #expect(Self.row(model, "pier") == nil, "pier stayed listed after it was deleted")
+    }
+
+    /// R2-3: a choice not taken because a question is open is said, not dropped silently.
+    @Test func aChoiceNotTakenWhileAQuestionIsOpenIsSaid() throws {
+        var model = Self.listed(Self.uday)
+        _ = try Self.asks(&model, .delete(force: false), "dock", terminals: nil)
+        let second = model.ask(.stop, "pier", terminals: 2)
+        #expect(second == nil && Self.page(model)?.banner?.title == "pier is not asked about yet: answer the question open, then choose Stop again.", "\(String(describing: Self.page(model)?.banner))")
+    }
+
+    /// R2-4: a stop whose terminals grew is asked again in its own project's words, whichever is shown.
+    @Test func aStopIsAskedAgainInItsOwnProject() throws {
+        var model = Self.two()
+        let asked = try Self.asks(&model, .stop, "dock", terminals: 1)
+        _ = model.choose("demo")
+        let grew = model.askAgain(asked, terminals: 2)
+        let again = try #require(grew, "the stop was not asked again once demo was shown")
+        #expect(again.project == "harbor" && again.body.hasPrefix("Your 2 terminals in it end."))
+    }
+
+    /// R2-5: a question about a workspace no longer listed is not asked: waiting, it is dropped;
+    /// open, it is withdrawn and said.
+    @Test func aQuestionAboutAWorkspaceGoneIsNotAsked() throws {
+        var model = Self.listed(Self.uday)
+        let dock = try Self.pierWaitsBehindDock(&model)
+        let again = model.listAgain()
+        model.listed(Self.harbor([("dock", .running, "uday")]), request: again, at: Self.at)
+        #expect(model.questionsWaiting == 0, "pier's Delete Anyway still waits, pier gone")
+        #expect(model.asking == dock)
+        let later = model.listAgain()
+        model.listed(Self.harbor([]), request: later, at: Self.at)
+        #expect(model.asking == nil && Self.page(model)?.banner?.title == "dock is no longer in harbor, so Sail stopped asking about it.", "\(String(describing: Self.page(model)?.banner))")
+    }
+
     /// Minor 2: a server that could not look says so in Sail's words; its own text goes to the log.
     @Test func couldNotTellIsSaidInSailsWords() throws {
         var model = Self.listed(Self.uday)

@@ -117,7 +117,7 @@ public final class WorkspacesView: NSView {
         let typing = project.fieldHasKeys
         panel.look = look
         panelShadow.look = look
-        question?.look = look
+        question?.sheet.look = look
         project.look = look
         paint()
         render(typing: typing)
@@ -126,6 +126,7 @@ public final class WorkspacesView: NSView {
     override public func viewDidUnhide() {
         super.viewDidUnhide()
         painter.shown()
+        showQuestion()
     }
 
     /// The section's ground, the card's canvas, as the approved frames draw it around the list.
@@ -315,13 +316,13 @@ public final class WorkspacesView: NSView {
     // MARK: Stop and delete
 
     /// The sheet asking now, held while it shows.
-    private var question: Sheet?
+    private var question: (sheet: Sheet, asked: WorkspacesModel.Question)?
 
     /// Asks before `action` on `name`. A stop counts the person's own terminals in it first, from
     /// the runner's sessions, so its sheet says what ends; one of their own that ends none is sent
-    /// at once. Nothing is asked while a question is open.
+    /// at once. One chosen while a question is open is not asked, and the page says so.
     private func ask(_ action: WorkspacesModel.Action, _ name: String) {
-        guard let client, let project = model.chosen, model.asking == nil else { return }
+        guard let client, let project = model.chosen else { return }
         let era = self.era
         byAPerson { [weak self] in
             guard let self else { return }
@@ -344,12 +345,12 @@ public final class WorkspacesView: NSView {
 
     /// The question open, in the library's sheet on the window: the sheet holds that one question,
     /// and confirming it sends exactly that, to its own project. A question waiting its turn is
-    /// shown once this one ends.
+    /// shown once this one ends, and only over this section, never over This Mac's terminals.
     private func showQuestion() {
-        guard let asked = model.asking, let window, question == nil else { return }
+        guard let asked = model.asking, let window, question == nil, !isHiddenOrHasHiddenAncestor else { return }
         if let detail = asked.detail { NSLog("Sail: %@", detail) }
         let sheet = Sheet(title: asked.title, body: asked.body, confirm: asked.confirm, kind: asked.action == .stop ? .destructiveQuiet : .destructive, look: look, titleFont: titleFont)
-        question = sheet
+        question = (sheet, asked)
         sheet.ask(on: window) { [weak self] confirmed in
             guard let self else { return }
             guard confirmed else {
@@ -372,9 +373,9 @@ public final class WorkspacesView: NSView {
         byAPerson { [weak self] in
             guard let self else { return }
             let now = await terminals(in: asked.name, project: asked.project, client)
+            question = nil
             guard era == self.era else { return }
             guard let now, now > counted, model.askAgain(asked, terminals: now) != nil else { return sendConfirmed(asked) }
-            question = nil
             showQuestion()
         }
     }
@@ -432,6 +433,10 @@ public final class WorkspacesView: NSView {
     /// keys it held are given back to it. A `claim` is honoured then or never, and only while the
     /// project's page is shown in the key window.
     private func render(claim: Keys? = nil, typing: Bool? = nil) {
+        if let shown = question, model.asking != shown.asked {
+            question = nil
+            shown.sheet.withdraw()
+        }
         let typing = typing ?? project.fieldHasKeys
         draw()
         let naming = model.screen.createOpen, shown = window?.isKeyWindow == true && !project.isHiddenOrHasHiddenAncestor

@@ -22,6 +22,19 @@ actor GoldenDesk: Transport {
     private(set) var asked: [HTTPRequest] = []
     /// Each route as it is answered, after any hold: what the app has been told, in order.
     private(set) var answered: [String] = []
+    private var holding: Set<String> = []
+    private var heldAnswers: [String: [CheckedContinuation<Void, Never>]] = [:]
+
+    /// From now on `route` is answered only once ``release(_:)`` names it.
+    func hold(_ route: String) {
+        holding.insert(route)
+    }
+
+    /// Gives `route`'s held answers now, and its later ones at once.
+    func release(_ route: String) {
+        holding.remove(route)
+        heldAnswers.removeValue(forKey: route)?.forEach { $0.resume() }
+    }
 
     init() {
         let first = ["passkey-login-start", "passkey-login-finish", "whoami", "projects", "workspaces", "workspace-create", "terminal-ticket-workspace"]
@@ -97,12 +110,12 @@ actor GoldenDesk: Transport {
     }
 
     /// From now on a plain delete of `name` is refused as holding work, in the recorded sentence for
-    /// dock with its name replaced, the answer held `after`.
-    func refuseDelete(_ name: String, after: Duration) throws {
+    /// dock with its name replaced.
+    func refuseDelete(_ name: String) throws {
         let refusal = try Exchange("refusal-workspace-holds-work")
         let said = String(decoding: refusal.body, as: UTF8.self).replacingOccurrences(of: "dock", with: name)
         answers["DELETE /v1/projects/harbor/workspaces/\(name)"] = HTTPResponse(status: refusal.status, headers: refusal.headers, body: Data(said.utf8))
-        held["DELETE /v1/projects/harbor/workspaces/\(name)"] = after
+        held["DELETE /v1/projects/harbor/workspaces/\(name)"] = .zero
     }
 
     /// From now on `project`'s workspaces are listed as none.
@@ -122,6 +135,7 @@ actor GoldenDesk: Transport {
     func send(_ request: HTTPRequest) async throws(SailError) -> HTTPResponse {
         asked.append(request)
         if let after = held[request.route], after > .zero { try? await Task.sleep(for: after) }
+        if holding.contains(request.route) { await withCheckedContinuation { heldAnswers[request.route, default: []].append($0) } }
         defer { answered.append(request.route) }
         guard request.route != failing else { throw unreached ? SailError.unreachable("Could not connect to the server.") : SailError.unexpected(route: request.route, status: 502) }
         guard let answer = answers[request.route] else { throw .unreachable("no golden answers \(request.route)") }
@@ -220,9 +234,26 @@ extension Driver {
                 return (false, "the list could not be changed: \(error)")
             }
         }
-        if let refusal = step.refuseDelete, refusal.count == 2, let seconds = Int(refusal[1]) {
+        if let route = step.holdAnswers {
+            await GoldenDesk.shared.hold(route)
+            return (true, "")
+        }
+        if let route = step.releaseAnswers {
+            await GoldenDesk.shared.release(route)
+            return (true, "")
+        }
+        if let pair = step.saysWithoutFirst, pair.count == 2 {
+            var first: String?
+            let said = await waitUntil(step.seconds ?? 10) {
+                if first == nil, pane.text.contains(pair[1]) { first = pane.text }
+                return first != nil || pane.text.contains(pair[0])
+            }
+            let shown = said && first == nil
+            return (shown, (first.map { "said '\(pair[1])' first: " + $0 } ?? "the pane says: " + pane.text).replacingOccurrences(of: "\n", with: " | "))
+        }
+        if let name = step.refuseDelete {
             do {
-                try await GoldenDesk.shared.refuseDelete(refusal[0], after: .seconds(seconds))
+                try await GoldenDesk.shared.refuseDelete(name)
                 return (true, "")
             } catch {
                 return (false, "the refusal: \(error)")

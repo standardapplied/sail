@@ -146,9 +146,14 @@ public final class SailButton: NSButton {
         }
     }
 
-    /// Return presses it: a sheet's or a banner's primary. There is never a window-wide default.
+    /// Return presses it: a sheet's or a banner's primary, or a destructive sheet's Cancel. There is
+    /// never a window-wide default. One not primary is drawn focused, its halo on, as the kit draws
+    /// it, Full Keyboard Access on or not: the halo shows which button Return presses.
     public var isDefault = false {
-        didSet { keyEquivalent = isDefault ? "\r" : "" }
+        didSet {
+            keyEquivalent = isDefault ? "\r" : ""
+            needsDisplay = true
+        }
     }
 
     /// In flight under `word` (Opening, Starting, Creating), or, given nil, back to its title.
@@ -164,7 +169,7 @@ public final class SailButton: NSButton {
     }
 
     var drawnState: ButtonState {
-        ButtonState(enabled: isEnabled, hovered: hovered, pressed: isHighlighted, focused: focused && window?.isKeyWindow == true, busy: busyWord != nil)
+        ButtonState(enabled: isEnabled, hovered: hovered, pressed: isHighlighted, focused: (focused || (isDefault && kind != .primary)) && window?.isKeyWindow == true, busy: busyWord != nil)
     }
 
     var paint: ButtonPaint {

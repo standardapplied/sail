@@ -176,9 +176,16 @@ struct Step: Decodable {
     /// `[name, "stopped" | "gone"]`: harbor's list from now on as it is answered now, that row stopped
     /// or left out, as the runner lists it after a stop or a delete.
     var relistAs: [String]?
-    /// `[name, seconds]`: a plain delete of that harbor workspace refused as holding work, in the
-    /// server's sentence naming it, the answer held that long.
-    var refuseDelete: [String]?
+    /// A plain delete of that harbor workspace refused as holding work, in the server's sentence
+    /// naming it.
+    var refuseDelete: String?
+    /// This route's answers are held, from now on, until `releaseAnswers` names it.
+    var holdAnswers: String?
+    /// The answers held for this route are given now, and its later ones at once.
+    var releaseAnswers: String?
+    /// `[words, never]`: the pane comes to say `words` within `seconds` (10 by default) and never says
+    /// `never` meanwhile, the pane read every 10 ms.
+    var saysWithoutFirst: [String]?
     /// How many Delete Anyway questions wait behind the sheet open, within `seconds` (10 by default).
     var questionsWaiting: Int?
     /// `[route, words]`: the control plane has answered `route` while the sheet still says `words`,
