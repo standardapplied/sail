@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Fails when a suite or a test that started never ended, read from Swift Testing's own event stream
+# (EVENTS..., written by `swift test --event-stream-output-path`), and when no stream holds a test.
+# The console is not the record: on macOS runners it drops end lines (a hundred in a run whose
+# totals passed), so it can neither prove nor disprove that every test ended.
+set -euo pipefail
+
+[[ $# -ge 1 ]] || { echo "usage: scripts/ends EVENTS..." >&2; exit 2; }
+
+ids() {
+  jq -r --arg kind "$1" 'select(.kind == "event" and .payload.kind == $kind) | .payload.testID' "${@:2}" | sort
+}
+
+started=$(ids testStarted "$@")
+ended=$(ids testEnded "$@")
+[[ -n $started ]] || { echo "scripts/ends: no test started in $*" >&2; exit 1; }
+missing=$(comm -23 <(printf '%s\n' "$started") <(printf '%s\n' "$ended") | grep . || true)
+if [[ -n $missing ]]; then
+  echo "scripts/ends: $(grep -c . <<< "$missing") started and never ended:" >&2
+  sed 's/^/scripts\/ends:   /' <<< "$missing" >&2
+  exit 1
+fi
+echo "scripts/ends: every one of $(grep -c . <<< "$started") suites and tests that started ended"

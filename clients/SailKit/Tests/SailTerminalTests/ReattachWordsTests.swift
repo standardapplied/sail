@@ -61,6 +61,33 @@ import Testing
         #expect(first.said != nil && second.said == nil, "of two of one person's clients pressing at once, the one that holds it never says paused")
     }
 
+    /// A keyboard no one holds is said only to someone other than the session's opener (an admin
+    /// watching), with Take Keyboard; the opener is told nothing, since typing takes it. Until the
+    /// opener is known, nothing is said and it is asked for.
+    @Test func aFreeKeyboardIsSaidOnlyToSomeoneOtherThanItsOpener() {
+        var admin = Keyboard()
+        admin.writerChanged(to: "uday", yours: false, me: "ana")
+        admin.writerChanged(to: "", yours: false, me: "ana")
+        #expect(admin.said == nil && admin.needsOpener, "the opener is not known yet")
+        admin.opener = "uday"
+        #expect(admin.said == "No one holds the keyboard." && !admin.needsOpener)
+        #expect(admin.stillRunning("harbor · dock") == nil)
+        admin.writerChanged(to: "ana", yours: true, me: "ana")
+        #expect(admin.said == nil, "taken")
+
+        var unknown = Keyboard()
+        unknown.writerChanged(to: "", yours: false, me: "uday")
+        unknown.openerNotLearned()
+        #expect(unknown.said == "No one holds the keyboard." && !unknown.needsOpener, "an opener that cannot be learned is never silence")
+        unknown.writerChanged(to: "uday", yours: true, me: "uday")
+        #expect(unknown.said == nil, "the opener's first key took it")
+
+        var opener = Keyboard()
+        opener.opener = "uday"
+        opener.writerChanged(to: "", yours: false, me: "uday")
+        #expect(opener.said == nil && !opener.needsOpener, "the opener's typing takes it")
+    }
+
     /// A signed-in source lists for its own person only, as it asks tickets.
     @Test func aSignedInSourceListsForItsOwnPersonAlone() async throws {
         let listing = RunnerSessions(sessions: [Self.session("app-a", live: true)])
