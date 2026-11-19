@@ -279,16 +279,19 @@ final class Held: Transport {
         #expect(pane.lines.starts(with: enrolled) && pane.lines.contains { $0.hasSuffix("has ended.") }, "\(pane.lines)")
     }
 
-    /// Sign Out signs out at once and asks nothing; the menu item after it does nothing more.
+    /// Sign Out signs out at once and asks nothing, as one action of the pane's; the menu item
+    /// after it does nothing more.
     @Test func signOutSignsOutAtOnceAskingNothing() async throws {
         let transport = Held(RecordedServer([try Exchange("whoami")]), holding: "nothing is held")
         let pane = try Self.pane(remembering: "uday", transport)
         await pane.refresh()
         #expect(pane.standing?.fde == "uday")
+        let before = pane.actions
 
         pane.signOut.performClick(nil)
         pane.signOutHere(nil)
 
+        #expect(pane.actions == before + 1, "one action, the second asking nothing")
         #expect(pane.standing == nil && !pane.isActing && pane.signIn.isEnabled)
     }
 }

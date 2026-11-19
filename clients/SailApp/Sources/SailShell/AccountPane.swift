@@ -167,7 +167,9 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     /// for the same person's next sign-in.
     @objc public func signOutHere(_: Any?) {
         guard standing != nil, acting == 0 else { return }
+        begin(clearing: false)
         signOutNow()
+        end()
     }
 
     private func signOutNow() {
