@@ -177,6 +177,10 @@ class DirectTerminalTest {
           "404 terminal_not_offered This runner offers no terminal over the network; ask an admin.",
           statusAndError(send(base, "POST", "/v1/terminal/tickets", ada, OPEN_ACME)));
       assertEquals(
+          "404 terminal_not_offered This runner offers no terminal over the network; ask an admin.",
+          statusAndError(
+              send(base, "GET", "/v1/projects/acme/workspaces/main/sessions", ada, null)));
+      assertEquals(
           "404 not_found API endpoint was not found.",
           statusAndError(send(base, "GET", "/v1/terminal/tickets", ada, null)));
       assertEquals(
