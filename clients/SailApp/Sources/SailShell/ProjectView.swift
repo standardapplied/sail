@@ -54,12 +54,11 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     let foot = NSView()
     private let frameView: ListFrame
 
-    /// The narrow rows' actions column: the widest actions any row shows (Start and Open with its
-    /// ⏎, ⋯ beside it), measured, so every list's pills stand at one x and a row's name keeps the
-    /// rest; a note ("Only uday or an admin opens it") is cut within it.
+    /// The narrow rows' actions column: the widest actions a narrow row shows (Start and Open with
+    /// no keycap, which narrow rows drop; ⋯ beside it), measured, so every list's pills stand at
+    /// one x and a row's name keeps the rest; a note ("Only uday or an admin opens it") is cut within it.
     lazy var narrowActionsColumn: Double = {
         let start = SailButton("Start and Open", kind: .primary, size: .small, look: look, target: nil, action: nil)
-        start.shortcut("\r", mono: mono)
         let more = SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil)
         let boxes = [start, more].map { Double($0.alignmentRect(forFrame: NSRect(origin: .zero, size: $0.fittingSize)).width) }
         return (boxes.reduce(0, +) + Self.buttonGap).rounded(.up)
@@ -349,6 +348,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     /// The list's entries: Yours (the create row first), then Other people's.
     private func fill(_ table: WorkspacesModel.Table) {
         list.actionsColumn = narrow ? narrowActionsColumn : Self.actionsColumn
+        list.returnKeyShown = !narrow
         let creating = table.creating == nil ? 0 : 1
         var entries: [SailList.Entry] = [.head("Yours", count: table.yours.count + creating)]
         if let creating = table.creating {

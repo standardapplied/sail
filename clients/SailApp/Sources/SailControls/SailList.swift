@@ -103,6 +103,9 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     /// A width kept for every row's actions, so the rows' content lines up in columns whatever
     /// actions each shows; nil, the content runs to its row's actions.
     public var actionsColumn: Double?
+    /// The chosen row's first action shows ⏎ while the list holds the keys; off, it shows none,
+    /// and Return still presses it (a narrow row's actions column has no room for the keycap).
+    public var returnKeyShown = true
     public var onChoose: @MainActor (String?) -> Void = { _ in }
     private let mono: LabelFont
 
@@ -249,7 +252,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         case let .head(title, count):
             let leading = rowStyle == .sidebar ? rowStyle.margin + rowStyle.leading + RowStyle.disclosure + RowStyle.gap : RowStyle.list.leading
             return HeadCell(title, count: count, leading: leading, look: look, mono: mono, hairline: rowStyle.hairline && row > 0)
-        case let .item(item): return RowCell(item, rowStyle: rowStyle, actionsColumn: actionsColumn, look: look, mono: mono)
+        case let .item(item): return RowCell(item, rowStyle: rowStyle, actionsColumn: actionsColumn, returnKey: returnKeyShown, look: look, mono: mono)
         }
     }
 
@@ -455,13 +458,16 @@ final class HeadCell: NSView {
 final class RowCell: NSView {
     let content: NSView
     let actions = NSStackView()
+    /// Its first action shows ⏎ while chosen with the list's keys.
+    private let returnKey: Bool
     private let first: SailButton?
     private let runs: [Run]
     private var shown = false
     /// The note in full on hover while it is cut short (a tracking area does not keep its owner).
     let noteTip: Tooltip?
 
-    init(_ item: SailList.Item, rowStyle: RowStyle, actionsColumn: Double?, look: Look, mono: LabelFont) {
+    init(_ item: SailList.Item, rowStyle: RowStyle, actionsColumn: Double?, returnKey: Bool = true, look: Look, mono: LabelFont) {
+        self.returnKey = returnKey
         content = item.content
         let runs = item.actions.map { Run($0) }
         self.runs = runs
@@ -469,7 +475,7 @@ final class RowCell: NSView {
         let onRow = runs.filter { $0.action.onRow }
         if let primary = onRow.first {
             let first = SailButton(primary.action.title, kind: .secondary, size: .small, look: look, target: primary, action: #selector(Run.go(_:)))
-            first.shortcut("\r", mono: mono)
+            if returnKey { first.shortcut("\r", mono: mono) }
             first.keyEquivalent = ""
             self.first = first
             buttons.append(first)
@@ -539,7 +545,7 @@ final class RowCell: NSView {
     /// while the row is chosen, and Return its key (shown as ⏎) only while the list holds the keys.
     func show(_ shown: Bool, chosen: Bool, keys: Bool) {
         if let first {
-            let kind: ButtonKind = chosen ? .primary : .secondary, key = chosen && keys ? "\r" : ""
+            let kind: ButtonKind = chosen ? .primary : .secondary, key = chosen && keys && returnKey ? "\r" : ""
             if first.kind != kind { first.kind = kind }
             if first.keyEquivalent != key { first.keyEquivalent = key }
         }
