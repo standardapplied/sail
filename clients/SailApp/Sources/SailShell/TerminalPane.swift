@@ -311,17 +311,38 @@ public final class TerminalPane: NSView {
         }
     }
 
-    /// A runner session the runner would not attach, said from its workspace's listing: ended, in
-    /// the host's words, or no longer on the runner; offering Open a New One and Close. A listing
-    /// that cannot be had, or lists it live, leaves the refusal's own words.
+    /// A runner session the runner would not attach, said from its workspace's listing
+    /// (``RunnerReturn``): ended in the host's words, or no longer on the runner, offering Open a
+    /// New One; its workspace not on this runner, offering Close alone; the terminal host not
+    /// answering, offering Try Again. A listing that cannot be had otherwise, or lists it live,
+    /// leaves the refusal's own words. Close is always there.
     private func showReturn(refused end: SessionEnd) async {
-        guard case let .workspace(project, workspace) = place else { return }
-        let listing = try? await tickets?.sessions(in: project, workspace: workspace)
-        let said = listing.flatMap { RunnerReturn.said(name, in: $0) } ?? end.said.joined(separator: " ")
-        banner.show(
-            said, button: "Open a New One", handler: { [weak self] in MainActor.assumeIsolated { self?.openAgain() } }, second: "Close",
-            secondHandler: { [weak self] in MainActor.assumeIsolated { self.map { $0.onClose($0) } } }
-        )
+        guard case let .workspace(project, workspace) = place, let tickets else { return }
+        let listing: Result<RunnerSessions, SailError>
+        do {
+            listing = .success(try await tickets.sessions(in: project, workspace: workspace))
+        } catch {
+            listing = .failure(error)
+        }
+        let close: () -> Void = { [weak self] in MainActor.assumeIsolated { self.map { $0.onClose($0) } } }
+        guard let said = RunnerReturn.of(name, listing) else {
+            return banner.show(end.said.joined(separator: " "), button: "Close", handler: close)
+        }
+        switch said.offer {
+        case .openANewOne:
+            banner.show(said.said, button: "Open a New One", handler: { [weak self] in MainActor.assumeIsolated { self?.openAgain() } }, second: "Close", secondHandler: close)
+        case .tryAgain:
+            banner.show(said.said, button: "Try Again", handler: { [weak self] in MainActor.assumeIsolated { self?.attachAgain() } }, second: "Close", secondHandler: close)
+        case .close:
+            banner.show(said.said, button: "Close", handler: close)
+        }
+    }
+
+    /// The same session attached again, on a new ticket: Try Again once the runner answers.
+    func attachAgain() {
+        session?.close()
+        session = nil
+        begin()
     }
 
     /// Who holds the keyboard now that the host said `writer` does: while it is with someone else

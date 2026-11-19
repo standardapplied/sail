@@ -135,6 +135,49 @@ import Testing
         #expect(await RunnerTabTests.until(10) { runner.createsReceived == 1 && ended.attachedOnce }, "a new one opened in the workspace")
     }
 
+    /// The workspace's listing not found (deleted, or on another runner) says so, offering Close
+    /// alone; the runner's terminal host not answering is said in its words, with Try Again, which
+    /// attaches the same session again once it answers.
+    @Test func aReattachWhoseWorkspaceIsNotHereOrWhoseHostIsBusySaysSo() async throws {
+        let runner = try FakeRunnerDoor(person: "uday")
+        defer { runner.stop() }
+        let elsewhere = try RunnerTabTests.pane(
+            Self.dock, runner: Answering(runner, .refused(Refusal(code: .known(.notFound), message: "Project 'harbor' has no workspace 'dock' on this box."))),
+            start: .attach, session: "app-x", person: "uday"
+        )
+        elsewhere.begin()
+        #expect(await RunnerTabTests.until(10) { elsewhere.status.says == RunnerReturn.elsewhere }, "\(elsewhere.status)")
+        #expect(elsewhere.status.offers == ["Close"])
+
+        let busyAnswer = Answering(runner, .refused(Refusal(code: .known(.terminalUnavailable), message: "The pty host is shutting down; reconnect and try again.")))
+        let busy = try RunnerTabTests.pane(Self.dock, runner: busyAnswer, start: .attach, session: "app-y", person: "uday")
+        busy.begin()
+        #expect(await RunnerTabTests.until(10) { busy.status.says == "The pty host is shutting down; reconnect and try again." }, "\(busy.status)")
+        #expect(busy.status.offers == ["Try Again", "Close"])
+        runner.hold("app-y")
+        #expect(busy.press("Try Again"))
+        #expect(await RunnerTabTests.until(10) { busy.attachedOnce }, "attached again once the host answers")
+    }
+
+    /// The door's tickets, its listing answered with `refusal`.
+    final class Answering: TicketSource {
+        let tickets: DoorTickets
+        let refusal: SailError
+
+        init(_ door: FakeRunnerDoor, _ refusal: SailError) {
+            tickets = DoorTickets(door)
+            self.refusal = refusal
+        }
+
+        func ticket(for request: TicketRequest) async throws(SailError) -> TerminalTicket {
+            try await tickets.ticket(for: request)
+        }
+
+        func sessions(in _: String, workspace _: String) async throws(SailError) -> RunnerSessions {
+            throw refusal
+        }
+    }
+
     /// R11: the keyboard taken by this person's other Mac is said, with Take Keyboard, which takes
     /// it back and the line goes.
     @Test func theKeyboardTakenElsewhereIsSaidAndTakeKeyboardTakesItBack() async throws {

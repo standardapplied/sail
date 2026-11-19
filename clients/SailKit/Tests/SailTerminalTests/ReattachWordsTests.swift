@@ -9,17 +9,28 @@ import Testing
         RunnerSession(name: name, live: live, attached: 0, writer: "", opener: "ana", command: [], createdAt: Date(), endedReason: ended)
     }
 
-    @Test func aRefusedReattachIsSaidEndedInTheHostsWordsOrGone() {
+    /// A refused reattach is said from the workspace's listing: ended in the host's words, or gone,
+    /// offering a new one there; the workspace not on this runner, offering Close alone; the
+    /// terminal host not answering, in its words, offering Try Again; nothing when the listing names
+    /// it live or fails otherwise.
+    @Test func aRefusedReattachIsSaidFromTheWorkspacesListing() {
         let stopped = "Workspace dock of harbor is being stopped by uday, which ends this terminal."
-        let listing = RunnerSessions(sessions: [
+        let listing = Result<RunnerSessions, SailError>.success(RunnerSessions(sessions: [
             Self.session("app-a", live: false, ended: stopped), Self.session("app-b", live: false, ended: "exited(0)"),
             Self.session("app-c", live: true), Self.session("app-d", live: false),
-        ])
-        #expect(RunnerReturn.said("app-a", in: listing) == "This terminal ended: \(stopped)")
-        #expect(RunnerReturn.said("app-b", in: listing) == "This terminal ended: exited(0).")
-        #expect(RunnerReturn.said("app-c", in: listing) == nil)
-        #expect(RunnerReturn.said("app-d", in: listing) == RunnerReturn.gone)
-        #expect(RunnerReturn.said("app-gone", in: listing) == RunnerReturn.gone)
+        ]))
+        #expect(RunnerReturn.of("app-a", listing) == RunnerReturn(said: "This terminal ended: \(stopped)", offer: .openANewOne))
+        #expect(RunnerReturn.of("app-b", listing)?.said == "This terminal ended: exited(0).")
+        #expect(RunnerReturn.of("app-c", listing) == nil)
+        #expect(RunnerReturn.of("app-d", listing) == RunnerReturn(said: RunnerReturn.gone, offer: .openANewOne))
+        #expect(RunnerReturn.of("app-gone", listing)?.said == RunnerReturn.gone)
+        for code in [ErrorCode.notFound, .projectNotInCatalog] {
+            let notHere = Result<RunnerSessions, SailError>.failure(.refused(Refusal(code: .known(code), message: "Project 'harbor' has no workspace 'dock' on this box.")))
+            #expect(RunnerReturn.of("app-a", notHere) == RunnerReturn(said: RunnerReturn.elsewhere, offer: .close))
+        }
+        let busy = Result<RunnerSessions, SailError>.failure(.refused(Refusal(code: .known(.terminalUnavailable), message: "The pty host is shutting down; reconnect and try again.")))
+        #expect(RunnerReturn.of("app-a", busy) == RunnerReturn(said: "The pty host is shutting down; reconnect and try again.", offer: .tryAgain))
+        #expect(RunnerReturn.of("app-a", .failure(.unreachable("no network"))) == nil)
     }
 
     /// The attach's own answer names this person when the keyboard came here; another person's
