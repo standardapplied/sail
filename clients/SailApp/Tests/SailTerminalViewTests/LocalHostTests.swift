@@ -209,10 +209,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: folder) }
         let started = folder.appending(path: "started")
         let binary = folder.appending(path: "sail")
-        try "#!/bin/sh
-touch '\(started.path)'
-exit 3
-".write(to: binary, atomically: true, encoding: .utf8)
+        try "#!/bin/sh\ntouch '\(started.path)'\nexit 3\n".write(to: binary, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: binary.path)
         let address = try HostAddress.local(home: folder.path)
         guard case let .unix(path) = address else {
