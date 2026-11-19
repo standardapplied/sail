@@ -42,6 +42,31 @@ import Testing
         #expect(abs(Double(frame.frame.height) - rows - 2) < 0.5, "three rows' frame is \(frame.frame.height) pt for \(rows) pt of rows")
     }
 
+    /// A change of look redraws both lists where the person left them: the list part way down its
+    /// thirty rows, and the panel part way down its twenty projects, neither jumping to its top or
+    /// to the chosen row.
+    @Test func aChangeOfLookKeepsBothScrolls() async throws {
+        let names = (["harbor"] + (2 ... 20).map { "project-\($0)" }).map { #"{"name": "\#($0)", "container_status": "running", "template": "ready"}"# }
+        let projects = Exchange(method: "GET", path: "/v1/projects", status: 200, body: Data(#"{"projects": [\#(names.joined(separator: ", "))], "total": 20, "schema_version": 1}"#.utf8))
+        let (view, window) = try WorkspacesViewTests.view(RecordedServer([projects, try Self.rows(30)]), width: 1024 - Rail.width - 4)
+        defer { window.orderOut(nil) }
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("ws-30") }, "\(view.text)")
+        view.layoutSubtreeIfNeeded()
+        let list = try #require(view.project.listScroll), panel = view.panel.scroll
+        for scroll in [list, panel] {
+            let room = Double(scroll.documentView?.frame.height ?? 0) - Double(scroll.contentSize.height)
+            #expect(room > 40, "nothing to scroll: \(room) pt")
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: (room / 2).rounded()))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        }
+        let before = [list, panel].map { Double($0.contentView.bounds.minY) }
+        view.look = .dark
+        view.layoutSubtreeIfNeeded()
+        let after = [list, panel].map { Double($0.contentView.bounds.minY) }
+        #expect(zip(before, after).allSatisfy { abs($0 - $1) < 0.5 }, "a change of look moved the scroll from \(before) to \(after) (the list's, the panel's)")
+    }
+
     /// Twenty projects scroll between the panel's header and its foot, which stays put.
     @Test func twentyProjectsScrollAboveThePanelsFoot() throws {
         let panel = LeftPanel(look: .light, mono: try LabelFont(directory: LookTests.fonts))

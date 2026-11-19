@@ -115,7 +115,7 @@ package final class LeftPanel: NSView {
         }
         projects = []
         if let shown {
-            render(shown)
+            scroll.keepingScroll { render(shown) }
         } else if let said = footSaid {
             foot(who: said.who, handle: said.handle, controlPlane: said.controlPlane)
         }

@@ -56,6 +56,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     private let head = NSView()
     let foot = NSView()
     private let frameView: ListFrame
+    /// The project whose rows the list last held: its rows drawn again keep the person's scroll.
+    private var filled: String?
     /// The list's scroll view, for the drive.
     package var listScroll: NSScrollView? {
         frameView.scroll
@@ -153,7 +155,13 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         case .unlisted: break
         case let .empty(empty): views.append(Self.framed(emptyState(empty), look: look))
         case let .list(table):
-            fill(table)
+            if let scroll = frameView.scroll, filled == page.name {
+                scroll.keepingScroll { fill(table) }
+            } else {
+                fill(table)
+            }
+            filled = page.name
+            if table.create != nil { list.scrollRowToVisible(1) }
             frameView.alphaValue = page.stale ? 0.55 : 1
             let listed = table.count + (table.creating == nil ? 0 : 1)
             count.attributedStringValue = micro(page.stale ? Self.listed(page.listedAt) : "\(listed) workspace\(listed == 1 ? "" : "s")")
@@ -332,7 +340,6 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         if !table.others.isEmpty { entries += [.head("Other people's", count: table.others.count)] + table.others.map { .item(item($0)) } }
         list.entries = entries
         list.choose((table.yours + table.others).first(where: \.chosen)?.name)
-        if table.create != nil { list.scrollRowToVisible(1) }
         let height = entries.indices.reduce(0.0) { $0 + Double(list.tableView(list, heightOfRow: $1)) }
         frameView.height = height
     }

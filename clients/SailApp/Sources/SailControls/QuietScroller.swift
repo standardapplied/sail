@@ -100,4 +100,15 @@ public final class QuietScrollView: NSScrollView {
     required init?(coder: NSCoder) {
         nil
     }
+
+    /// Redraws what it scrolls (a change of look, new rows of the same list) where the person left
+    /// it: the scroll before `redraw`, restored after, as far as the new rows still reach.
+    public func keepingScroll(_ redraw: () -> Void) {
+        let kept = contentView.bounds.origin.y
+        redraw()
+        superview?.layoutSubtreeIfNeeded()
+        let room = max(Double(documentView?.frame.height ?? 0) - Double(contentSize.height), 0)
+        contentView.scroll(to: NSPoint(x: 0, y: min(Double(kept), room)))
+        reflectScrolledClipView(contentView)
+    }
 }
