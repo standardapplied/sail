@@ -27,7 +27,11 @@ package enum SymbolInk {
 
     static func image(_ name: String, points: Double, weight: NSFont.Weight, colour: Tint, accessibility: String) -> NSImage {
         let key = Key(name: name, points: points, weight: weight.rawValue, colour: colour, accessibility: accessibility)
-        if let image = made[key] { return image }
+        if let image = made[key] {
+            resolutions += 1
+            _ = NSImage(systemSymbolName: name, accessibilityDescription: accessibility)
+            return image
+        }
         resolutions += 1
         let symbol = NSImage(systemSymbolName: name, accessibilityDescription: accessibility) ?? NSImage()
         let configuration = NSImage.SymbolConfiguration(pointSize: points, weight: weight)

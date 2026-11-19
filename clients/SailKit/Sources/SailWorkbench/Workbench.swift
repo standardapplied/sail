@@ -138,10 +138,10 @@ public struct Workbench: Hashable, Sendable {
     }
 
     /// Focuses `pane` and selects its tab, as a click on it does; focusing another pane ends a zoom.
-    public mutating func focus(_ pane: PaneID) {
+    public mutating func focus(_ pane: PaneID, keepingZoom: Bool = false) {
         guard let index = index(holding: pane) else { return }
         selected = tabs[index].id
-        if tabs[index].focused != pane { tabs[index].zoomed = nil }
+        if tabs[index].focused != pane, !keepingZoom { tabs[index].zoomed = nil }
         focus(pane, at: index)
     }
 

@@ -128,7 +128,7 @@ public final class WorkbenchView: NSView {
     func apply() {
         if model.focusedPane?.id != shownFocus {
             shownFocus = model.focusedPane?.id
-            focusMoves += 1
+            focusMoves = shownFocus.map { $0.hashValue } ?? 0
         }
         endRenamesLeftBehind()
         for (id, view) in tabViews where !model.tabs.contains(where: { $0.id == id }) {
@@ -523,7 +523,7 @@ public final class WorkbenchView: NSView {
         order += tabs[(at + 1)...]
         let candidates = order.flatMap { $0.history.reversed() }
         guard let next = candidates.first(where: { panes[$0]?.isEnding == false }) else { return }
-        model.focus(next)
+        model.focus(next, keepingZoom: true)
     }
 
     /// What an end came to. An unconfirmed pane is shown, its tab selected and the pane focused,
@@ -670,6 +670,7 @@ public final class WorkbenchView: NSView {
         strip.look = look
         panes.values.forEach { $0.look = look }
         tabViews.values.forEach { $0.paint(look) }
+        model.tabs.forEach { tab in tabViews[tab.id].map { layout(tab, in: $0) } }
     }
 }
 
