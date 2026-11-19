@@ -225,8 +225,23 @@ public final class Tooltip: NSResponder {
         pending?.cancel()
         pending = nil
         if isShown { Self.lastHidden = CACurrentMediaTime() }
-        if let panel { panel.parent?.removeChildWindow(panel) }
+        if let panel {
+            panel.parent?.removeChildWindow(panel)
+            if Self.up === panel { Self.up = nil }
+        }
         panel?.orderOut(nil)
+    }
+
+    /// The one tooltip panel up, held here: its tooltip may go (its row drawn again) while it shows.
+    private static var up: NSPanel?
+
+    /// Whatever tooltip is up is put away: its anchor is being drawn again, in a look that may be
+    /// new, and a tooltip left up would outlive the view it names.
+    public static func putAway() {
+        guard let up else { return }
+        up.parent?.removeChildWindow(up)
+        up.orderOut(nil)
+        Self.up = nil
     }
 
     /// Placed by `TooltipPlacement` against the anchor's frame on its screen.
@@ -248,8 +263,10 @@ public final class Tooltip: NSResponder {
         panel.ignoresMouseEvents = true
         panel.contentView = chip
         panel.setFrame(place.frame.insetBy(dx: -room, dy: -room), display: true)
+        if Self.up !== panel { Self.putAway() }
         window.addChildWindow(panel, ordered: .above)
         panel.orderFront(nil)
         self.panel = panel
+        Self.up = panel
     }
 }

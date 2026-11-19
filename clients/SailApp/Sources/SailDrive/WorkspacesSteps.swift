@@ -20,6 +20,21 @@ actor GoldenDesk: Transport {
     /// The failing route cannot be reached at all, in place of the proxy's 502.
     private var unreached = false
     private(set) var asked: [HTTPRequest] = []
+    /// Each route as it is answered, after any hold: what the app has been told, in order.
+    private(set) var answered: [String] = []
+    private var holding: Set<String> = []
+    private var heldAnswers: [String: [CheckedContinuation<Void, Never>]] = [:]
+
+    /// From now on `route` is answered only once ``release(_:)`` names it.
+    func hold(_ route: String) {
+        holding.insert(route)
+    }
+
+    /// Gives `route`'s held answers now, and its later ones at once.
+    func release(_ route: String) {
+        holding.remove(route)
+        heldAnswers.removeValue(forKey: route)?.forEach { $0.resume() }
+    }
 
     init() {
         let first = ["passkey-login-start", "passkey-login-finish", "whoami", "projects", "workspaces", "workspace-create", "terminal-ticket-workspace"]
@@ -76,6 +91,33 @@ actor GoldenDesk: Transport {
         held["GET /v1/projects/harbor/workspaces"] = .zero
     }
 
+    /// From now on harbor's list is the one answered now with `name` stopped, or left out ("gone").
+    func relist(_ name: String, as change: String) throws {
+        let route = "GET /v1/projects/harbor/workspaces"
+        guard let answer = answers[route], var body = try JSONSerialization.jsonObject(with: answer.body) as? [String: Any], var rows = body["workspaces"] as? [[String: Any]] else { return }
+        if change == "gone" {
+            rows.removeAll { $0["name"] as? String == name }
+        } else {
+            rows = rows.map { row in
+                guard row["name"] as? String == name else { return row }
+                var changed = row
+                changed["state"] = change
+                return changed
+            }
+        }
+        body["workspaces"] = rows
+        answers[route] = HTTPResponse(status: answer.status, headers: answer.headers, body: try JSONSerialization.data(withJSONObject: body))
+    }
+
+    /// From now on a plain delete of `name` is refused as holding work, in the recorded sentence for
+    /// dock with its name replaced.
+    func refuseDelete(_ name: String) throws {
+        let refusal = try Exchange("refusal-workspace-holds-work")
+        let said = String(decoding: refusal.body, as: UTF8.self).replacingOccurrences(of: "dock", with: name)
+        answers["DELETE /v1/projects/harbor/workspaces/\(name)"] = HTTPResponse(status: refusal.status, headers: refusal.headers, body: Data(said.utf8))
+        held["DELETE /v1/projects/harbor/workspaces/\(name)"] = .zero
+    }
+
     /// From now on `project`'s workspaces are listed as none.
     func answerNoRows(_ project: String) throws {
         let exchange = try Exchange("workspaces-three")
@@ -93,6 +135,8 @@ actor GoldenDesk: Transport {
     func send(_ request: HTTPRequest) async throws(SailError) -> HTTPResponse {
         asked.append(request)
         if let after = held[request.route], after > .zero { try? await Task.sleep(for: after) }
+        if holding.contains(request.route) { await withCheckedContinuation { heldAnswers[request.route, default: []].append($0) } }
+        defer { answered.append(request.route) }
         guard request.route != failing else { throw unreached ? SailError.unreachable("Could not connect to the server.") : SailError.unexpected(route: request.route, status: 502) }
         guard let answer = answers[request.route] else { throw .unreachable("no golden answers \(request.route)") }
         guard request.route == "POST /v1/terminal/tickets", answer.status == 201, let door = Self.door,
@@ -181,6 +225,93 @@ extension Driver {
             } catch {
                 return (false, "the rows: \(error)")
             }
+        }
+        if let change = step.relistAs, change.count == 2 {
+            do {
+                try await GoldenDesk.shared.relist(change[0], as: change[1])
+                return (true, "")
+            } catch {
+                return (false, "the list could not be changed: \(error)")
+            }
+        }
+        if let route = step.holdAnswers {
+            await GoldenDesk.shared.hold(route)
+            return (true, "")
+        }
+        if let route = step.releaseAnswers {
+            await GoldenDesk.shared.release(route)
+            return (true, "")
+        }
+        if let pair = step.saysWithoutFirst, pair.count == 2 {
+            var first: String?
+            let said = await waitUntil(step.seconds ?? 10) {
+                if first == nil, pane.text.contains(pair[1]) { first = pane.text }
+                return first != nil || pane.text.contains(pair[0])
+            }
+            let shown = said && first == nil
+            return (shown, (first.map { "said '\(pair[1])' first: " + $0 } ?? "the pane says: " + pane.text).replacingOccurrences(of: "\n", with: " | "))
+        }
+        if let name = step.refuseDelete {
+            do {
+                try await GoldenDesk.shared.refuseDelete(name)
+                return (true, "")
+            } catch {
+                return (false, "the refusal: \(error)")
+            }
+        }
+        if let pair = step.answeredWhileSheetShows, pair.count == 2 {
+            let said = { Self.texts(self.shell.window.attachedSheet?.contentView).joined(separator: " ") }
+            let settled = await waitUntilAsync(step.seconds ?? 10) { await GoldenDesk.shared.answered.contains(pair[0]) || !said().contains(pair[1]) }
+            let answered = await GoldenDesk.shared.answered.contains(pair[0])
+            let shown = said().contains(pair[1])
+            guard settled, answered, shown else {
+                return (false, "not shown: \(answered ? "answered" : "not answered") \(pair[0]); the sheet says '\(said())'")
+            }
+            return (true, "\(pair[0]) answered while the sheet says '\(said())'")
+        }
+        if let wanted = step.deletesAsked {
+            let deletes = { await GoldenDesk.shared.asked.map(\.route).filter { $0.hasPrefix("DELETE ") } }
+            _ = await waitUntilAsync(step.seconds ?? 5) { await deletes().count >= wanted.count }
+            let asked = await deletes()
+            return (asked == wanted, "deletes asked: \(asked)")
+        }
+        if let count = step.questionsWaiting {
+            let waiting = await waitUntil(step.seconds ?? 10) { pane.questionsWaiting == count }
+            return (waiting, "\(pane.questionsWaiting) questions wait behind the sheet")
+        }
+        if let wanted = step.mayEndAProgram {
+            let said = await waitUntil(step.seconds ?? 10) { self.workbench.focused?.mayEndAProgram == wanted }
+            return (said, "the focused pane says ending it \(workbench.focused?.mayEndAProgram == true ? "may" : "may not") end a program")
+        }
+        if let pick = step.menuItem, pick.count == 2 {
+            let list = pane.project.list
+            guard await clickRow(pick[0], in: list), let row = Self.row(pick[0], in: list), let view = list.rowView(atRow: row, makeIfNecessary: false) else {
+                return (false, "no row \(pick[0]) to open")
+            }
+            view.layoutSubtreeIfNeeded()
+            guard let more = Self.views(in: view).compactMap({ $0 as? SailButton }).first(where: { $0.menu != nil && !$0.isHiddenOrHasHiddenAncestor }), let menu = more.menu,
+                  let index = menu.items.firstIndex(where: { $0.title == pick[1] })
+            else { return (false, "\(pick[0])'s ⋯ menu has no \(pick[1])") }
+            var opened = false
+            let choose = Timer(timeInterval: 0.3, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    opened = NSApp.windows.contains { $0.isVisible && $0.level.rawValue >= NSWindow.Level.popUpMenu.rawValue }
+                    menu.cancelTracking()
+                    menu.performActionForItem(at: index)
+                }
+            }
+            RunLoop.main.add(choose, forMode: .common)
+            guard await click(more, at: NSPoint(x: more.bounds.midX, y: more.bounds.midY)) else { return (false, "⋯ could not be clicked") }
+            return (opened, opened ? "chose \(pick[1]) from \(pick[0])'s menu" : "the click on ⋯ opened no menu")
+        }
+        if let title = step.sheetClick {
+            let asked = await waitUntil(step.seconds ?? 5) { self.shell.window.attachedSheet != nil }
+            guard asked, let sheet = shell.window.attachedSheet, let content = sheet.contentView,
+                  let button = Self.views(in: content).compactMap({ $0 as? NSButton }).first(where: { $0.title == title })
+            else { return (false, "no sheet asks with \(title)") }
+            guard await click(button, at: NSPoint(x: button.bounds.midX, y: button.bounds.midY)) else { return (false, "\(title) could not be clicked") }
+            let gone = await waitUntil(5) { self.shell.window.attachedSheet !== sheet }
+            return (gone, gone ? "clicked \(title); the sheet went" : "clicked \(title); the sheet stayed")
         }
         if let which = step.dragThumb {
             guard let view: QuietScrollView = which == "panel" ? pane.panel.scroll : pane.project.listScroll as? QuietScrollView, let window = view.window else {

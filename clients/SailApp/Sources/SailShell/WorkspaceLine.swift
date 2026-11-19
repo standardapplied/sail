@@ -72,6 +72,11 @@ final class WorkspaceLine: NSStackView {
     /// sends by its own word, and Unknown for one this app does not know.
     static func pill(_ line: WorkspacesModel.Line) -> PillState {
         guard !line.creating else { return .creating }
+        switch line.busy {
+        case .stop?: return .stopping
+        case .delete?: return .deleting
+        case nil: break
+        }
         return switch line.state {
         case .known(.running): .running
         case .known(.stopped): .stopped
