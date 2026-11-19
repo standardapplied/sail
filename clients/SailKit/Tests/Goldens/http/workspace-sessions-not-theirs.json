@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/projects/harbor/workspaces/dock/sessions"
+  },
+  "response": {
+    "body": {
+      "schema_version": 1,
+      "sessions": []
+    },
+    "status": 200
+  }
+}

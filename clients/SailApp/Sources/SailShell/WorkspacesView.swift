@@ -27,6 +27,7 @@ public final class WorkspacesView: NSView {
             } else {
                 model = WorkspacesModel(person: person)
                 era += 1
+                project.forgetList()
             }
         }
     }
@@ -39,11 +40,11 @@ public final class WorkspacesView: NSView {
     var look: Look {
         didSet {
             guard look != oldValue else { return }
-            if isHidden { lookOwed = true } else { relook() }
+            painter.lookChanged(hidden: isHidden)
         }
     }
 
-    private var lookOwed = false
+    private lazy var painter = PaintWhenShown { [unowned self] in self.relook() }
     /// How many times the section was painted for a change of look: none while it is hidden, once
     /// when it is next shown.
     package private(set) var lookPaints = 0
@@ -68,7 +69,11 @@ public final class WorkspacesView: NSView {
     private var door = Door.asking
     private var overlaid = false
     /// A person's action is under way; the drive waits on it.
-    package private(set) var busy = false
+    package var busy: Bool {
+        underWay > 0
+    }
+
+    private var underWay = 0
 
     private enum Door: Equatable {
         case asking, signedOut, unknown([String]), signedIn
@@ -108,11 +113,11 @@ public final class WorkspacesView: NSView {
     }
 
     private func relook() {
-        lookOwed = false
         lookPaints += 1
         let typing = project.fieldHasKeys
         panel.look = look
         panelShadow.look = look
+        question?.sheet.look = look
         project.look = look
         paint()
         render(typing: typing)
@@ -120,7 +125,8 @@ public final class WorkspacesView: NSView {
 
     override public func viewDidUnhide() {
         super.viewDidUnhide()
-        if lookOwed { relook() }
+        painter.shown()
+        showQuestion()
     }
 
     /// The section's ground, the card's canvas, as the approved frames draw it around the list.
@@ -244,14 +250,15 @@ public final class WorkspacesView: NSView {
         let request = model.choose(name)
         render()
         list(request)
+        showQuestion()
     }
 
     /// Runs a person's action: busy while it runs.
     private func byAPerson(_ work: @escaping @MainActor () async -> Void) {
-        busy = true
+        underWay += 1
         Task {
             await work()
-            busy = false
+            underWay -= 1
             render()
         }
     }
@@ -264,6 +271,8 @@ public final class WorkspacesView: NSView {
         }
         switch act {
         case let .open(name), let .startAndOpen(name): onOpen(projectName, name)
+        case let .stop(name): ask(.stop, name)
+        case let .delete(name): ask(.delete(force: false), name)
         case let .copyName(name):
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(name, forType: .string)
@@ -304,6 +313,106 @@ public final class WorkspacesView: NSView {
         }
     }
 
+    // MARK: Stop and delete
+
+    /// The sheet asking now, held while it shows.
+    private var question: (sheet: Sheet, asked: WorkspacesModel.Question)?
+
+    /// Asks before `action` on `name`. A stop counts the person's own terminals in it first, from
+    /// the runner's sessions, so its sheet says what ends; one of their own that ends none is sent
+    /// at once. One chosen while a question is open is not asked, and the page says so.
+    private func ask(_ action: WorkspacesModel.Action, _ name: String) {
+        guard let client, let project = model.chosen else { return }
+        let era = self.era
+        byAPerson { [weak self] in
+            guard let self else { return }
+            let terminals = action == .stop ? await terminals(in: name, project: project, client) : nil
+            guard era == self.era, model.chosen == project else { return }
+            switch model.ask(action, name, terminals: terminals) {
+            case let .send(project, name, action)?: send(action, name, project: project)
+            case .question?: showQuestion()
+            case nil: break
+            }
+        }
+    }
+
+    /// How many of the person's own terminals are live in `name`, as the runner says now; nil when
+    /// it does not answer.
+    private func terminals(in name: String, project: String, _ client: SailClient) async -> Int? {
+        let handle = model.person.handle
+        return (try? await client.send(.sessions(workspace: name, project: project))).map { $0.sessions.count { $0.live && $0.opener == handle } }
+    }
+
+    /// The question open, in the library's sheet on the window: the sheet holds that one question,
+    /// and confirming it sends exactly that, to its own project. A question waiting its turn is
+    /// shown once this one ends, and only over this section, never over This Mac's terminals.
+    private func showQuestion() {
+        guard let asked = model.asking, let window, question == nil, !isHiddenOrHasHiddenAncestor else { return }
+        if let detail = asked.detail { NSLog("Sail: %@", detail) }
+        let sheet = Sheet(title: asked.title, body: asked.body, confirm: asked.confirm, kind: asked.action == .stop ? .destructiveQuiet : .destructive, look: look, titleFont: titleFont)
+        question = (sheet, asked)
+        sheet.ask(on: window) { [weak self] confirmed in
+            guard let self else { return }
+            guard confirmed else {
+                question = nil
+                model.cancel(asked)
+                render()
+                showQuestion()
+                return
+            }
+            confirm(asked)
+        }
+    }
+
+    /// A confirmed question sent. A stop of the person's own workspace counts their terminals again
+    /// first: one opened while the sheet asked is asked about before it ends. The sheet's question
+    /// is held until then, so nothing shows it twice.
+    private func confirm(_ asked: WorkspacesModel.Question) {
+        guard let client, asked.action == .stop, let counted = asked.terminals else { return sendConfirmed(asked) }
+        let era = self.era
+        byAPerson { [weak self] in
+            guard let self else { return }
+            let now = await terminals(in: asked.name, project: asked.project, client)
+            question = nil
+            guard era == self.era else { return }
+            guard let now, now > counted, model.askAgain(asked, terminals: now) != nil else { return sendConfirmed(asked) }
+            showQuestion()
+        }
+    }
+
+    private func sendConfirmed(_ asked: WorkspacesModel.Question) {
+        question = nil
+        guard let sent = model.confirm(asked) else { return render() }
+        send(sent.action, sent.name, project: sent.project)
+        showQuestion()
+    }
+
+    /// Sends `action` on `name` in `project`, its row waiting; its answer lists the project again, asks
+    /// Delete Anyway in the server's words (after any question open), or says the refusal over its page.
+    private func send(_ action: WorkspacesModel.Action, _ name: String, project: String) {
+        guard let client else { return }
+        render()
+        let era = self.era
+        byAPerson { [weak self] in
+            guard let self else { return }
+            let answer = await Self.result { () async throws(SailError) in
+                switch action {
+                case .stop: try await client.send(.stopWorkspace(name, project: project))
+                case let .delete(force): try await client.send(.deleteWorkspace(name, project: project, force: force))
+                }
+            }
+            guard era == self.era else { return }
+            let request = model.changed(action, name, project: project, answer)
+            if let request { list(request) }
+            showQuestion()
+        }
+    }
+
+    /// Delete Anyway questions waiting behind the one open, for the drive.
+    package var questionsWaiting: Int {
+        model.questionsWaiting
+    }
+
     /// Where a person's action sends the keys: into the name field (New Workspace, a refusal), or
     /// to the list (a create done or cancelled, so ⏎ opens).
     private enum Keys {
@@ -324,11 +433,17 @@ public final class WorkspacesView: NSView {
     /// keys it held are given back to it. A `claim` is honoured then or never, and only while the
     /// project's page is shown in the key window.
     private func render(claim: Keys? = nil, typing: Bool? = nil) {
+        if let shown = question, model.asking != shown.asked {
+            question = nil
+            shown.sheet.withdraw()
+        }
         let typing = typing ?? project.fieldHasKeys
         draw()
         let naming = model.screen.createOpen, shown = window?.isKeyWindow == true && !project.isHiddenOrHasHiddenAncestor
         switch claim {
-        case .field? where shown && naming: project.focusField()
+        case .field? where shown && naming:
+            project.showCreateRow()
+            project.focusField()
         case .list? where shown: window?.makeFirstResponder(project.list)
         default: if typing, naming { project.focusField() }
         }
@@ -362,7 +477,7 @@ public final class WorkspacesView: NSView {
             }
         case (_, .loading?):
             card.isHidden = true
-            panel.renderLoading(who: model.who, controlPlane: model.person.controlPlane)
+            panel.renderLoading(who: model.who, handle: model.person.handle, controlPlane: model.person.controlPlane)
             setPanel(shown: true)
             project.isHidden = false
             project.renderLoading()

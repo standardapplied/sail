@@ -16,6 +16,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.FilePicker;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.TemplateBuildService;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.SpecStore;
 import com.sun.net.httpserver.HttpExchange;
@@ -277,6 +278,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             call ->
                 ApiResponse.from(
                     operations.startWorkspace(call.project(), call.param("workspace")))),
+        route(GET, PROJECT + "/workspaces/{workspace}/sessions", Gate.TERMINAL, this::sessions),
         route(
             POST,
             PROJECT + "/workspaces/{workspace}/stop",
@@ -733,13 +735,43 @@ public final class ApiRouter implements HttpHandler, RouteTable {
    * workspace that does not exist.
    */
   private ApiResponse terminalTicket(Call call) throws IOException {
-    var tickets =
-        terminal.orElseThrow(
-            () ->
-                new ApiException(
-                    ErrorCode.TERMINAL_NOT_OFFERED,
-                    "This runner offers no terminal over the network; ask an admin."));
-    return ApiResponse.created(tickets.issue(ApiAuth.credentialOf(call.exchange()), call.body()));
+    return ApiResponse.created(offered().issue(ApiAuth.credentialOf(call.exchange()), call.body()));
+  }
+
+  /**
+   * The caller's terminal sessions in a workspace, which an app reattaches to: those the terminal
+   * host would let the caller's own credential attach to, so a member lists nothing of another
+   * person's. The workspace is looked up first as its list reads it, so a project the caller may
+   * not read, or a workspace this runner does not hold, is not found; and a session made before the
+   * workspace's own instance was, in an earlier one of its name, is not listed. Refused as the
+   * ticket route is on a box that offers no terminal over the network.
+   */
+  private ApiResponse sessions(Call call) {
+    var tickets = offered();
+    var project = call.project();
+    var name = call.param("workspace");
+    var listed = operations.workspaces(project);
+    if (listed instanceof Result.Failure<WorkspaceListResponse> refused) {
+      return ApiResponse.error(refused);
+    }
+    var row =
+        ((Result.Success<WorkspaceListResponse>) listed)
+            .value().workspaces().stream()
+                .filter(workspace -> workspace.name().equals(name))
+                .findFirst()
+                .orElseThrow(
+                    () -> ApiException.of(ErrorCode.NOT_FOUND, Workspaces.absent(project, name)));
+    return ApiResponse.ok(
+        tickets.sessions(ApiAuth.credentialOf(call.exchange()), project, name, row.started()));
+  }
+
+  /** This runner's terminal door, refused on a runner that offers none over the network. */
+  private TerminalTickets offered() {
+    return terminal.orElseThrow(
+        () ->
+            new ApiException(
+                ErrorCode.TERMINAL_NOT_OFFERED,
+                "This runner offers no terminal over the network; ask an admin."));
   }
 
   private ApiResponse dispatch(Call call) throws IOException {

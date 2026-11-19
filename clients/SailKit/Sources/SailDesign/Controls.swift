@@ -180,9 +180,10 @@ public struct FieldPaint: Equatable, Sendable {
 }
 
 /// The state pills: a workspace's and a template's. The square dot carries the colour; only the
-/// error states colour the whole pill; starting, creating and building pulse; no template is dashed.
+/// error states colour the whole pill; starting, stopping, deleting, creating and building pulse; no
+/// template is dashed.
 public enum PillState: CaseIterable, Sendable {
-    case running, starting, creating, stopped, paused, incomplete, noTemplate, building, buildFailed
+    case running, starting, stopping, deleting, creating, stopped, paused, incomplete, noTemplate, building, buildFailed
     /// A workspace listed but never made: hollow, as stopped.
     case notCreated
     /// A workspace whose instance is in Incus's error state.
@@ -194,6 +195,8 @@ public enum PillState: CaseIterable, Sendable {
         switch self {
         case .running: "Running"
         case .starting: "Starting"
+        case .stopping: "Stopping"
+        case .deleting: "Deleting"
         case .creating: "Creating"
         case .stopped: "Stopped"
         case .paused: "Paused"
@@ -208,7 +211,7 @@ public enum PillState: CaseIterable, Sendable {
     }
 
     public var pulses: Bool {
-        [.starting, .creating, .building].contains(self)
+        [.starting, .stopping, .deleting, .creating, .building].contains(self)
     }
 }
 
@@ -250,7 +253,7 @@ public struct PillPaint: Equatable, Sendable {
         hollow = state == .stopped || state == .notCreated
         dot = switch state {
         case .running: Tint(look.success)
-        case .starting, .creating, .building: Tint(look.info)
+        case .starting, .stopping, .deleting, .creating, .building: Tint(look.info)
         case .paused, .noTemplate: Tint(look.warning)
         case .incomplete, .buildFailed, .error: Tint(look.error)
         case .stopped, .notCreated, .unknown: look.textTertiary
@@ -329,5 +332,18 @@ public enum TextLine {
     /// pixel at `scale` pixels a point.
     public static func snapped(_ baseline: Double, scale: Double) -> Double {
         (baseline * scale).rounded(.down) / scale
+    }
+}
+
+/// The quiet scroller, after Mast's terminal scrollbar (`components.css` `.term-scrollbar`): a
+/// 12 pt overlay track inset 4 pt top and bottom, drawing nothing of its own; a 6 pt thumb in
+/// 3 pt corners, 3 pt from the edge, in the look's text at 35 %, and 55 % hovered or dragged.
+public enum ScrollerStyle {
+    public static let track = 12.0, thumb = 6.0, radius = 3.0, edge = 3.0, inset = 4.0
+    public static let rest = 0.35, active = 0.55
+
+    /// The thumb's ink in `look`, hovered or dragged (`active`) or at rest.
+    public static func ink(_ look: Look, active: Bool) -> Tint {
+        Tint(look.text.rgb, alpha: active ? Self.active : rest)
     }
 }

@@ -108,8 +108,10 @@ import Testing
 
     @Test func aPagePlacingOtherThanItsSessionsIsMalformed() throws {
         var page = Array(try golden("Sessions").dropFirst(4))
-        let placed = page.count - 4 - (field("harbor") + field("dock") + field("uday")) - 3 * field("")
-        page.replaceSubrange(placed ..< placed + 4, with: [0, 0, 0, 3])
+        let loungePlace = field("harbor") + field("dock") + field("uday") + 8 + field("")
+        let shellPlace = 3 * field("") + 8 + field("")
+        let places = page.count - 4 - loungePlace - shellPlace
+        page.replaceSubrange(places ..< places + 4, with: [0, 0, 0, 3])
         #expect(throws: TerminalWireError.malformed("a page places 3 sessions but holds 2")) {
             try FrameCodec.decode(payload: page)
         }
@@ -172,7 +174,7 @@ import Testing
     @Test func theHandshakeIsTheHostsMagicAndAnyOtherIsAnotherProtocol() throws {
         #expect(Handshake.magic == (try Goldens.magic()))
         try Handshake.check(peer: Goldens.magic())
-        for other in ["SAILPTY3", "SAILPTY5", "SAIL"] {
+        for other in ["SAILPTY4", "SAILPTY6", "SAIL"] {
             #expect(throws: TerminalWireError.otherProtocol) { try Handshake.check(peer: Array(other.utf8)) }
         }
         #expect(throws: TerminalWireError.otherProtocol) { try Handshake.check(peer: Goldens.magic() + [0x33]) }
@@ -182,7 +184,7 @@ import Testing
 let lounge = SessionInfo(
     name: "lounge", instanceID: "inst-1", live: true, attached: 2, writerFDE: "uday",
     room: "harbor-design", command: ["claude", "--resume"], project: "harbor", workspace: "dock",
-    opener: "uday"
+    opener: "uday", createdAtMillis: 1_763_460_000_000
 )
 let shell = SessionInfo(
     name: "shell", instanceID: "inst-2", live: false, attached: 0, writerFDE: "", room: "", command: ["bash"]

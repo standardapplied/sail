@@ -351,12 +351,12 @@ class PtyWireTest {
 
     var v2 = Pipe.open();
     var v2Reply = Pipe.open();
-    v2.sink().write(ByteBuffer.wrap("SAILPTY3".getBytes(StandardCharsets.US_ASCII)));
+    v2.sink().write(ByteBuffer.wrap("SAILPTY4".getBytes(StandardCharsets.US_ASCII)));
     var skew =
         assertThrows(IOException.class, () -> PtyWire.handshake(v2.source(), v2Reply.sink()));
     assertTrue(
-        skew.getMessage().contains("v4"),
-        "a v3 peer predates uploads and is refused by name: " + skew.getMessage());
+        skew.getMessage().contains("v5"),
+        "a v4 peer lists no session's life and is refused by name: " + skew.getMessage());
   }
 
   @Test
@@ -425,19 +425,21 @@ class PtyWireTest {
     var info =
         (PtyMessage.SessionInfo)
             roundTrip(
-                new PtyMessage.SessionInfo(
-                    "s", "i", true, 1, "ada", "", List.of("bash"), "acme", "try", "ada"));
+                new PtyMessage.SessionInfo("s", "i", true, 1, "ada", "", List.of("bash"))
+                    .placed("acme", "try", "ada")
+                    .lived(1_763_460_000_000L, ""));
 
     assertEquals("try", create.workspace());
     assertEquals("try", ticket.workspace());
     assertEquals(
         List.of("acme", "try", "ada"), List.of(info.project(), info.workspace(), info.opener()));
+    assertEquals(1_763_460_000_000L, info.createdAtMillis());
     assertEquals(
         "", new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24, "main").workspace());
     assertEquals("", new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24).workspace());
   }
 
-  /** A session as written before its place: no workspace or opener after its command. */
+  /** A session's fields before its place, which a page writes after its cursor. */
   private static ByteBuffer unplacedSession(ByteBuffer out, String name) {
     put(out, name);
     put(out, "i");
@@ -467,16 +469,24 @@ class PtyWireTest {
         "Corrupt pty frame: a page places 2 sessions but holds 1.",
         assertThrows(IOException.class, () -> readPayload(misplaced)).getMessage());
     assertEquals(
-        List.of("acme", "try", "ada"),
+        List.of("acme", "try", "ada", "1763460000000", "exited(0)"),
         ((PtyMessage.Sessions)
                 roundTrip(
                     new PtyMessage.Sessions(
                         List.of(
-                            new PtyMessage.SessionInfo(
-                                "s", "i", true, 1, "", "", List.of(), "acme", "try", "ada")),
+                            new PtyMessage.SessionInfo("s", "i", false, 0, "", "", List.of())
+                                .placed("acme", "try", "ada")
+                                .lived(1_763_460_000_000L, "exited(0)")),
                         "")))
             .sessions().stream()
-                .flatMap(placed -> Stream.of(placed.project(), placed.workspace(), placed.opener()))
+                .flatMap(
+                    placed ->
+                        Stream.of(
+                            placed.project(),
+                            placed.workspace(),
+                            placed.opener(),
+                            String.valueOf(placed.createdAtMillis()),
+                            placed.endedReason()))
                 .toList());
   }
 }

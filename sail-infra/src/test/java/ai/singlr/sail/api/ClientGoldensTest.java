@@ -309,6 +309,13 @@ class ClientGoldensTest {
           "/v1/terminal/tickets",
           uday,
           Map.of("action", "open", "project", PROJECT, "workspace", "dock"));
+      box.record(
+          http,
+          "workspace-sessions",
+          "GET",
+          "/v1/projects/" + PROJECT + "/workspaces/dock/sessions",
+          uday,
+          null);
 
       box.record(http, "refusal-read-only-credential", "POST", messages(), vik, plain("hello"));
       box.record(http, "refusal-room-not-found", "GET", "/v1/rooms/nowhere", uday, null);
@@ -317,6 +324,13 @@ class ClientGoldensTest {
       box.record(http, "refusal-invalid-bearer-token", "GET", "/v1/whoami", "not-a-token", null);
       box.record(http, "refusal-bad-request", "POST", messages(), uday, plain(""));
       box.record(http, "refusal-out-of-scope", "POST", "/v1/specs", sam, unroomed());
+      box.record(
+          http,
+          "refusal-project-not-in-catalog-sessions",
+          "GET",
+          "/v1/projects/" + PROJECT + "/workspaces/dock/sessions",
+          sam,
+          null);
       box.record(http, "refusal-project-not-created", "POST", members(), uday, member());
       box.record(http, "refusal-not-found", "GET", "/v1/nowhere", uday, null);
       box.run("run-2", SPEC, "ada");
@@ -363,6 +377,14 @@ class ClientGoldensTest {
           dana,
           Map.of("name", "dock"));
       box.record(http, "refusal-forbidden-not-assignee", "POST", dock + "/start", ana, null);
+      box.record(http, "workspace-sessions-not-theirs", "GET", dock + "/sessions", ana, null);
+      box.record(
+          http,
+          "refusal-not-found-workspace",
+          "GET",
+          "/v1/projects/" + PROJECT + "/workspaces/gone/sessions",
+          ana,
+          null);
       box.record(
           http,
           "workspace-create",
@@ -582,16 +604,9 @@ class ClientGoldensTest {
   private static List<PtyMessage> everyPtyMessage() {
     var lounge =
         new PtyMessage.SessionInfo(
-            "lounge",
-            "inst-1",
-            true,
-            2,
-            "uday",
-            ROOM,
-            List.of("claude", "--resume"),
-            PROJECT,
-            "dock",
-            "uday");
+                "lounge", "inst-1", true, 2, "uday", ROOM, List.of("claude", "--resume"))
+            .placed(PROJECT, "dock", "uday")
+            .lived(1_763_460_000_000L, "");
     var shell = new PtyMessage.SessionInfo("shell", "inst-2", false, 0, "", "", List.of("bash"));
     return List.of(
         new PtyMessage.Hello("tok-uday"),
@@ -710,6 +725,13 @@ class ClientGoldensTest {
     private final SailOperations operations;
     private final ScriptedShellExecutor incus;
     private final HttpServer server;
+
+    /**
+     * Whom each credential made here stands for, as the terminal host resolves it: what the fake
+     * host lists a caller's sessions by.
+     */
+    private final Map<String, String> holders = new java.util.concurrent.ConcurrentHashMap<>();
+
     private final ManualClock streamClock;
     private final SessionAwareAuth auth;
     private final HttpServer unconfigured;
@@ -759,8 +781,52 @@ class ClientGoldensTest {
               new AgentLogStreamer(auth),
               Optional.of(
                   new TerminalTickets(
-                      (credential, action, target, workspace) ->
-                          new PtyMessage.Ticket("tkt_" + target),
+                      new TerminalTickets.Host() {
+                        @Override
+                        public PtyMessage ticket(
+                            String credential,
+                            PtyMessage.TicketAction action,
+                            String target,
+                            String workspace) {
+                          return new PtyMessage.Ticket("tkt_" + target);
+                        }
+
+                        @Override
+                        public PtyMessage sessions(String credential) {
+                          var who = holders.get(credential);
+                          if (who == null) {
+                            return new PtyMessage.TicketRefused(
+                                PtyMessage.TicketRefusal.FORBIDDEN,
+                                "This credential is bound to no FDE, so it may attach to nothing.");
+                          }
+                          return new PtyMessage.Sessions(
+                              Stream.of(
+                                      new PtyMessage.SessionInfo(
+                                              "app-5a6b7c8d", "i-2", false, 0, "", "", List.of())
+                                          .placed(PROJECT, "dock", "uday")
+                                          .lived(
+                                              1_763_456_400_000L,
+                                              "Workspace dock of harbor is being stopped by ana, which"
+                                                  + " ends this terminal."),
+                                      new PtyMessage.SessionInfo(
+                                              "app-1f2e3d4c",
+                                              "i-1",
+                                              true,
+                                              1,
+                                              "uday",
+                                              "",
+                                              List.of("claude"))
+                                          .placed(PROJECT, "dock", "uday")
+                                          .lived(1_763_460_000_000L, ""),
+                                      new PtyMessage.SessionInfo(
+                                              "app-9e0f1a2b", "i-3", true, 0, "", "", List.of())
+                                          .placed(PROJECT, "pier", "uday")
+                                          .lived(1_763_460_000_000L, ""))
+                                  .filter(info -> info.opener().equals(who))
+                                  .toList(),
+                              "");
+                        }
+                      },
                       new InetSocketAddress(InetAddress.ofLiteral("100.64.0.7"), 7072)))));
       server.createContext(
           "/v1/events/stream",
@@ -942,7 +1008,9 @@ class ClientGoldensTest {
 
     String session(String handle, String displayName, String email, Role role) {
       var fde = new FdeStore(db).add(handle, displayName, email, role.attribute());
-      return new AuthSessionStore(db).create(fde.id(), Duration.ofMinutes(30)).token();
+      var token = new AuthSessionStore(db).create(fde.id(), Duration.ofMinutes(30)).token();
+      holders.put(token, handle);
+      return token;
     }
 
     /** A member's token whose scope grants no project. */
@@ -1124,7 +1192,9 @@ class ClientGoldensTest {
 
     String token(String handle, Role role) {
       var fde = new FdeStore(db).add(handle, null, null, role.attribute());
-      return new TokenStore(db).create(handle, role.attribute(), fde.id(), null).token();
+      var token = new TokenStore(db).create(handle, role.attribute(), fde.id(), null).token();
+      holders.put(token, handle);
+      return token;
     }
 
     /**

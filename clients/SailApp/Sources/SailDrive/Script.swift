@@ -151,6 +151,52 @@ struct Step: Decodable {
     var kit: String?
     /// The projects listed from now on, each its name and its template's state ("missing").
     var projects: [[String]]?
+    /// harbor's workspaces listed from now on as this many made-up rows, half the person's and
+    /// half another's, through every state.
+    var rows: Int?
+    /// This project's workspaces listed from now on as none.
+    var noRows: String?
+    /// harbor's three workspaces listed from now on with one more, the person's, of this name.
+    var takenName: String?
+    /// A scroll-wheel turn over `["list" | "panel", fraction]`: the Workspaces list or the left
+    /// panel scrolled that fraction of the way down, as a person's trackpad does.
+    var scrollTo: [String]?
+    /// The Workspaces list's ("list") or the panel's ("panel") scroll thumb dragged down by a real
+    /// mouse-down, drag and mouse-up through the window; it passes when the thumb was drawn dragged
+    /// and the list moved.
+    var dragThumb: String?
+    /// `[row, item]`: the Workspaces row's ⋯ menu opened by a real click, and its item of this
+    /// title chosen while the menu is open (AppKit's own `performActionForItem`: a posted event does
+    /// not reach a menu while AppKit tracks it).
+    var menuItem: [String]?
+    /// The focused pane says ending it may end a program (true: the cursor has left the shell's
+    /// marked prompt, as a command it runs moves it), within `seconds` (10 by default): a close sent
+    /// before the shell has answered a command's Return finds the cursor still at the prompt.
+    var mayEndAProgram: Bool?
+    /// `[name, "stopped" | "gone"]`: harbor's list from now on as it is answered now, that row stopped
+    /// or left out, as the runner lists it after a stop or a delete.
+    var relistAs: [String]?
+    /// A plain delete of that harbor workspace refused as holding work, in the server's sentence
+    /// naming it.
+    var refuseDelete: String?
+    /// This route's answers are held, from now on, until `releaseAnswers` names it.
+    var holdAnswers: String?
+    /// The answers held for this route are given now, and its later ones at once.
+    var releaseAnswers: String?
+    /// `[words, never]`: the pane comes to say `words` within `seconds` (10 by default) and never says
+    /// `never` meanwhile, the pane read every 10 ms.
+    var saysWithoutFirst: [String]?
+    /// How many Delete Anyway questions wait behind the sheet open, within `seconds` (10 by default).
+    var questionsWaiting: Int?
+    /// `[route, words]`: the control plane has answered `route` while the sheet still says `words`,
+    /// within `seconds` (10 by default); not shown when the sheet changed first or the answer never came.
+    var answeredWhileSheetShows: [String]?
+    /// Every delete the control plane was asked, in order, is exactly these routes, within `seconds`
+    /// (5 by default) for the last of them to come.
+    var deletesAsked: [String]?
+    /// The button of this title on the sheet now asking, clicked with real mouse events through the
+    /// sheet's own window.
+    var sheetClick: String?
     /// ⌃⌘S pressed (View ▸ Show Sidebar), and whether the panel is then shown (over the content)
     /// or hidden again, within `seconds` (5 by default).
     var showSidebar: Bool?

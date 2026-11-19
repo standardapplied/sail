@@ -110,7 +110,7 @@ import Testing
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
     func eachPillIsTheSheets(_ name: String, _ look: Look) {
         let dots: [PillState: Tint] = [
-            .running: Tint(look.success), .starting: Tint(look.info), .creating: Tint(look.info), .stopped: look.textTertiary,
+            .running: Tint(look.success), .starting: Tint(look.info), .stopping: Tint(look.info), .deleting: Tint(look.info), .creating: Tint(look.info), .stopped: look.textTertiary,
             .paused: Tint(look.warning), .incomplete: Tint(look.error), .noTemplate: Tint(look.warning), .building: Tint(look.info),
             .buildFailed: Tint(look.error), .notCreated: look.textTertiary, .error: Tint(look.error), .unknown: look.textTertiary,
         ]
@@ -121,10 +121,10 @@ import Testing
             #expect(paint.text == (failed ? Tint(look.error) : look.textSecondary), "\(name) \(state)'s label")
             #expect(paint.edge == (failed ? Tint(look.error, alpha: 0.45) : look.separatorStrong), "\(name) \(state)'s edge")
             #expect(paint.dashed == (state == .noTemplate) && paint.hollow == (state == .stopped || state == .notCreated))
-            #expect(state.pulses == [.starting, .creating, .building].contains(state))
+            #expect(state.pulses == [.starting, .stopping, .deleting, .creating, .building].contains(state))
         }
         #expect(PillState.allCases.map(\.label) == [
-            "Running", "Starting", "Creating", "Stopped", "Paused", "Not whole", "No template", "Building", "Build failed", "Not created", "Error", "Unknown",
+            "Running", "Starting", "Stopping", "Deleting", "Creating", "Stopped", "Paused", "Not whole", "No template", "Building", "Build failed", "Not created", "Error", "Unknown",
         ])
         #expect([PillSize.regular.height, PillSize.regular.dot, PillSize.regular.text, PillSize.regular.tracking] == [20, 6, 10, 0.08])
         #expect([PillSize.small.height, PillSize.small.dot, PillSize.small.text, PillSize.small.tracking] == [18, 5, 9, 0.06])
@@ -198,5 +198,14 @@ import Testing
     @Test func anAgeIsSaidAsTheFramesWriteIt() {
         let ages: [Double] = [-5, 0.4, 1, 59.9, 60, 240, 3599, 3600, 7300, 86400, 200_000]
         #expect(ages.map(Ago.said) == ["just now", "just now", "1 s ago", "59 s ago", "1 min ago", "4 min ago", "59 min ago", "1 h ago", "2 h ago", "1 d ago", "2 d ago"])
+    }
+
+    /// The quiet scroller is Mast's terminal scrollbar in points: a 12 pt track inset 4 pt, a
+    /// 6 pt thumb in 3 pt corners 3 pt from the edge, the text ink at 35 %, 55 % hovered or dragged.
+    @Test(arguments: [Look.light, .dark])
+    func theScrollerIsMastsTerminalScrollbar(_ look: Look) {
+        #expect(ScrollerStyle.track == 12 && ScrollerStyle.inset == 4 && ScrollerStyle.thumb == 6 && ScrollerStyle.radius == 3 && ScrollerStyle.edge == 3)
+        #expect(ScrollerStyle.ink(look, active: false) == Tint(look.text.rgb, alpha: 0.35))
+        #expect(ScrollerStyle.ink(look, active: true) == Tint(look.text.rgb, alpha: 0.55))
     }
 }

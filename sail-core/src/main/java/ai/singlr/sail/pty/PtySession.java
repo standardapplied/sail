@@ -1020,6 +1020,10 @@ public final class PtySession implements AutoCloseable {
     return createdAt;
   }
 
+  public long createdAtMillis() {
+    return createdAtMillis;
+  }
+
   /**
    * Ends the session because something displaced it: every attached client first sees {@code
    * reason} as a terminal line in the stream, then the session ends and reports that reason — not

@@ -45,6 +45,7 @@ import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
 
 /**
  * The per-container session host: owns every {@link PtySession}, serves the {@link PtyWire}
@@ -852,6 +853,14 @@ public final class PtySessionHost implements AutoCloseable {
               }
               reply(channel, new PtyMessage.Ok());
             }
+            case PtyMessage.ListSessions m when !Strings.isBlank(m.credential()) ->
+                reply(
+                    channel,
+                    who instanceof PtyIdentity.Person
+                            && admission.credential() instanceof Credential.Hello(var token)
+                            && Strings.isBlank(token)
+                        ? listSessionsFor(m)
+                        : ASKED_ELSEWHERE);
             case PtyMessage.ListSessions m -> reply(channel, listSessions(who, m));
             case PtyMessage.Kill m -> reply(channel, kill(m.session(), who));
             case PtyMessage.Yield m ->
@@ -938,20 +947,9 @@ public final class PtySessionHost implements AutoCloseable {
    * the box's own person, a blank token, exists only on the unix socket.
    */
   private PtyMessage issueTicket(PtyMessage.IssueTicket request) {
-    if (door.isEmpty()) {
-      return new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.UNAVAILABLE, network.closed());
-    }
-    if (!door.get().listening()) {
-      return new PtyMessage.TicketRefused(
-          PtyMessage.TicketRefusal.UNAVAILABLE,
-          "The terminal's private address ('terminal-listen') is not listening yet; ask again"
-              + " once the private network is up.");
-    }
-    if (Strings.isBlank(request.credential())) {
-      return new PtyMessage.TicketRefused(
-          PtyMessage.TicketRefusal.FORBIDDEN,
-          "A ticket is issued for the credential that asks for it, and this request carries none:"
-              + " the box's own person exists only on the unix socket.");
+    var unoffered = doorRefusal(request.credential());
+    if (unoffered != null) {
+      return unoffered;
     }
     var target = request.target();
     try {
@@ -968,15 +966,9 @@ public final class PtySessionHost implements AutoCloseable {
       return new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.INVALID, PtyMessage.Err.of(bad));
     }
     var holder = Secrets.hash(request.credential());
-    PtyIdentity.Person who;
-    try {
-      who = network.holders().holder(holder);
-    } catch (IOException refused) {
-      return new PtyMessage.TicketRefused(
-          PtyMessage.TicketRefusal.FORBIDDEN, PtyMessage.Err.of(refused));
-    } catch (RuntimeException unavailable) {
-      log("holder-check-failed", "?", target, unavailable.toString());
-      return new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.UNAVAILABLE, UNSERVED);
+    var resolved = holderOf(holder, target);
+    if (!(resolved instanceof Holder.Of(var who))) {
+      return ((Holder.Refused) resolved).answer();
     }
     var refused =
         switch (request.action()) {
@@ -995,6 +987,74 @@ public final class PtySessionHost implements AutoCloseable {
       return new PtyMessage.TicketRefused(
           PtyMessage.TicketRefusal.LIMITED, PtyMessage.Err.of(full));
     }
+  }
+
+  /**
+   * Why a request the API carries for its caller cannot be served here at all: no TCP door, a door
+   * not yet listening, or no credential (the box's own person exists only on the unix socket).
+   */
+  private PtyMessage.TicketRefused doorRefusal(String credential) {
+    if (door.isEmpty()) {
+      return new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.UNAVAILABLE, network.closed());
+    }
+    if (!door.get().listening()) {
+      return new PtyMessage.TicketRefused(
+          PtyMessage.TicketRefusal.UNAVAILABLE,
+          "The terminal's private address ('terminal-listen') is not listening yet; ask again"
+              + " once the private network is up.");
+    }
+    if (Strings.isBlank(credential)) {
+      return new PtyMessage.TicketRefused(
+          PtyMessage.TicketRefusal.FORBIDDEN,
+          "A ticket is issued for the credential that asks for it, and this request carries none:"
+              + " the box's own person exists only on the unix socket.");
+    }
+    return null;
+  }
+
+  /** The person a credential's hash stands for, as the network door resolves a ticket's. */
+  private sealed interface Holder {
+    record Of(PtyIdentity.Person who) implements Holder {}
+
+    record Refused(PtyMessage.TicketRefused answer) implements Holder {}
+  }
+
+  private Holder holderOf(String hash, String target) {
+    try {
+      return new Holder.Of(network.holders().holder(hash));
+    } catch (IOException refused) {
+      return new Holder.Refused(
+          new PtyMessage.TicketRefused(
+              PtyMessage.TicketRefusal.FORBIDDEN, PtyMessage.Err.of(refused)));
+    } catch (RuntimeException unavailable) {
+      log("holder-check-failed", "?", target, unavailable.toString());
+      return new Holder.Refused(
+          new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.UNAVAILABLE, UNSERVED));
+    }
+  }
+
+  /**
+   * The sessions the holder of the credential {@code request} carries may attach to, live or ended:
+   * resolved as a ticket's holder is, refused in a ticket's words when it stands for no one, and
+   * kept by the attach's own rule ({@link #admitted}, then the project read as that person), so a
+   * listing shows nothing its caller could not attach to.
+   */
+  private PtyMessage listSessionsFor(PtyMessage.ListSessions request) {
+    var unoffered = doorRefusal(request.credential());
+    if (unoffered != null) {
+      return unoffered;
+    }
+    var resolved = holderOf(Secrets.hash(request.credential()), "-");
+    if (!(resolved instanceof Holder.Of(var who))) {
+      return ((Holder.Refused) resolved).answer();
+    }
+    var readable = new HashMap<String, Boolean>();
+    return listSessions(
+        who,
+        new PtyMessage.ListSessions(request.after(), request.limit()),
+        session ->
+            readable.computeIfAbsent(
+                session.origin().project(), project -> projectRefusal(project, who) == null));
   }
 
   /**
@@ -1175,7 +1235,7 @@ public final class PtySessionHost implements AutoCloseable {
       return SHUTTING_DOWN;
     }
     var existing = sessions.get(m.session());
-    if (existing != null && !admitted(who, existing)) {
+    if (existing != null && existing.live() && !admitted(who, existing)) {
       log("refused", who.fde(), m.session(), "not admitted");
       return new PtyMessage.Err("Session '" + m.session() + "' is not yours.");
     }
@@ -1183,13 +1243,12 @@ public final class PtySessionHost implements AutoCloseable {
       return new PtyMessage.Err(
           "Session '" + m.session() + "' is already running; attach or kill it.");
     }
-    var replacesOwn = existing != null && existing.ownerFde().equals(who.fde());
-    if (!replacesOwn && ownedBy(who.fde()) >= limits.sessionsPerFde()) {
+    if (live(session -> session.ownerFde().equals(who.fde())) >= limits.sessionsPerFde()) {
       log("refused", who.fde(), m.session(), "session cap " + limits.sessionsPerFde());
       return new PtyMessage.Err(
           "You are at your session cap of " + limits.sessionsPerFde() + "; kill one first.");
     }
-    if (existing == null && sessions.size() >= limits.sessions()) {
+    if (live(session -> true) >= limits.sessions()) {
       log("refused", who.fde(), m.session(), "host session cap " + limits.sessions());
       return new PtyMessage.Err(
           "The host is at its session cap of " + limits.sessions() + "; kill one first.");
@@ -1374,8 +1433,13 @@ public final class PtySessionHost implements AutoCloseable {
     }
   }
 
-  private long ownedBy(String fde) {
-    return sessions.values().stream().filter(s -> s.ownerFde().equals(fde)).count();
+  /**
+   * How many live sessions {@code which} admits: what a cap counts. An ended entry holds no
+   * process, pty or name, only the record of how it ended, so it counts toward no one's cap and
+   * anyone may create over it.
+   */
+  private long live(Predicate<PtySession> which) {
+    return sessions.values().stream().filter(PtySession::live).filter(which).count();
   }
 
   /**
@@ -1387,11 +1451,24 @@ public final class PtySessionHost implements AutoCloseable {
    * sessions the host holds.
    */
   private PtyMessage listSessions(PtyIdentity who, PtyMessage.ListSessions request) {
+    return listSessions(who, request, session -> true);
+  }
+
+  /**
+   * As {@link #listSessions(PtyIdentity, PtyMessage.ListSessions)}, kept to the sessions {@code
+   * also} admits; refused while a handoff clears the map, so no page is cut short.
+   */
+  private PtyMessage listSessions(
+      PtyIdentity who, PtyMessage.ListSessions request, Predicate<PtySession> also) {
+    if (closed) {
+      return SHUTTING_DOWN;
+    }
     var after = java.util.Objects.toString(request.after(), "");
     var limit = Math.clamp(request.limit(), 1, PtyMessage.PAGE_LIMIT);
     var mine =
         sessions.values().stream()
             .filter(session -> who instanceof PtyIdentity.Dispatch || admitted(who, session))
+            .filter(also)
             .filter(session -> session.name().compareTo(after) > 0)
             .sorted(java.util.Comparator.comparing(PtySession::name))
             .toList();
@@ -1402,16 +1479,17 @@ public final class PtySessionHost implements AutoCloseable {
 
   private static PtyMessage.SessionInfo infoOf(PtySession session) {
     return new PtyMessage.SessionInfo(
-        session.name(),
-        session.origin().instanceId(),
-        session.live(),
-        session.attachedCount(),
-        session.writerFde(),
-        session.origin().room(),
-        session.origin().command(),
-        session.origin().project(),
-        session.origin().workspace(),
-        session.ownerFde());
+            session.name(),
+            session.origin().instanceId(),
+            session.live(),
+            session.attachedCount(),
+            session.writerFde(),
+            session.origin().room(),
+            session.origin().command())
+        .placed(session.origin().project(), session.origin().workspace(), session.ownerFde())
+        .lived(
+            session.createdAtMillis(),
+            java.util.Objects.requireNonNullElse(session.endedReason(), ""));
   }
 
   private synchronized PtyMessage kill(String name, PtyIdentity who) {
@@ -1431,10 +1509,12 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   /**
-   * Ends a live session that a reservation displaced — the reason lands in the stream and on the
-   * ended event. Idempotent: a session that is not live has nothing to end, so the answer is {@code
-   * Ok}. Ownership is not consulted: the dispatch authority ends what the claim displaced,
-   * whichever FDE opened it. The ring goes with the session, as it does on a kill.
+   * Ends a live session that a reservation displaced or its workspace's stop ends — the reason
+   * lands in the stream and on the ended event. Idempotent: a session that is not live has nothing
+   * to end, so the answer is {@code Ok}. Ownership is not consulted: the dispatch authority ends
+   * what the claim displaced, whichever FDE opened it. Its ring and sidecar go at once, as on a
+   * kill, but the session is kept ended, as one whose program exited is, so its listing says why
+   * until {@link #CORPSE_RETENTION} passes.
    */
   private synchronized PtyMessage yieldSession(String name, String reason) {
     if (closed) {
@@ -1444,7 +1524,6 @@ public final class PtySessionHost implements AutoCloseable {
     if (session == null || !session.live()) {
       return new PtyMessage.Ok();
     }
-    sessions.remove(name, session);
     session.end(reason);
     deleteFiles(SessionFiles.in(sessionsDir, name), session.ownerFde(), name);
     return new PtyMessage.Ok();

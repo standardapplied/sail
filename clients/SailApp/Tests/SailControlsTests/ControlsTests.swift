@@ -97,6 +97,22 @@ import Testing
         }
     }
 
+    /// R2-8: a default that is not primary, a destructive sheet's Cancel, is drawn focused with no
+    /// keyboard focus, as Full Keyboard Access off leaves it: the halo shows which button Return
+    /// presses. A primary default is not, and neither is any button in a window not key.
+    @Test func aDefaultNotPrimaryIsDrawnFocused() {
+        for (kind, drawn) in [(ButtonKind.secondary, true), (.primary, false)] {
+            let button = Self.sized(SailButton("Cancel", kind: kind, look: .light, target: nil, action: nil))
+            let (window, _) = Self.window(holding: button, on: .white)
+            defer { window.orderOut(nil) }
+            #expect(!button.drawnState.focused, "\(kind) drawn focused before it was the default")
+            button.isDefault = true
+            #expect(button.drawnState.focused == drawn, "\(kind) as the default drawn focused: \(button.drawnState.focused)")
+            window.key = false
+            #expect(!button.drawnState.focused, "\(kind) drawn focused in a window not key")
+        }
+    }
+
     /// Focus: on a surface (so the canvas gap differs from what is under it), the gap on the box's
     /// first point out, the halo on the next three and nothing on the fifth; gone when the focus goes,
     /// and never in a window that is not key.

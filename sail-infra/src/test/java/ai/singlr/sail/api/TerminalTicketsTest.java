@@ -13,6 +13,9 @@ import ai.singlr.sail.pty.PtyMessage;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -105,5 +108,107 @@ class TerminalTicketsTest {
 
     assertEquals(List.of("acme/try", "acme/main", "acme/"), asked);
     assertTrue(refused.getMessage().startsWith("Invalid workspace name: 'Bad Name'."));
+  }
+
+  /**
+   * A workspace's sessions are the host's listing for the caller's own credential, which the host
+   * decides as it decides that caller's attach: kept to that project and workspace ({@code main}
+   * the project's own container), to sessions made since the workspace's instance was (none of an
+   * earlier one of its name), newest first (by name among equals). The host's refusal of a
+   * credential is said in its words and status, a host closing is the terminal's outage, and so is
+   * a host it cannot reach.
+   */
+  @Test
+  void aWorkspacesSessionsAreTheHostsListingForTheCallersOwnCredential() {
+    var asked = new ArrayList<String>();
+    var door =
+        new TerminalTickets(
+            new TerminalTickets.Host() {
+              @Override
+              public PtyMessage ticket(
+                  String credential,
+                  PtyMessage.TicketAction action,
+                  String target,
+                  String workspace) {
+                return new PtyMessage.Ticket("tkt");
+              }
+
+              @Override
+              public PtyMessage sessions(String credential) {
+                asked.add(credential);
+                return switch (credential) {
+                  case "machine" ->
+                      new PtyMessage.TicketRefused(
+                          PtyMessage.TicketRefusal.FORBIDDEN, "This token acts for no one.");
+                  case "closing" -> new PtyMessage.Err("The pty host is shutting down.");
+                  case "odd" -> new PtyMessage.Ok();
+                  default ->
+                      new PtyMessage.Sessions(
+                          List.of(
+                              info("app-a", "acme", "try", false, "ana", 2_000),
+                              info("app-b", "acme", "try", true, "ana", 3_000),
+                              info("app-c", "acme", "", true, "ana", 1_000),
+                              info("app-d", "other", "try", true, "ana", 1_000),
+                              info("app-f", "acme", "try", true, "ana", 3_000),
+                              info("app-old", "acme", "try", false, "ana", 500)),
+                          "");
+                };
+              }
+            },
+            TERMINAL);
+    var since = Instant.ofEpochMilli(1_000);
+
+    assertEquals(
+        List.of("app-b", "app-f", "app-a"), names(door.sessions("tok-ana", "acme", "try", since)));
+    assertEquals(List.of("tok-ana"), asked);
+    assertEquals(
+        Arrays.asList(null, null, "exited(0)"),
+        door.sessions("tok-ana", "acme", "try", since).sessions().stream()
+            .map(WorkspaceSessionsResponse.Session::endedReason)
+            .toList());
+    assertEquals(
+        Instant.ofEpochMilli(2_000),
+        door.sessions("tok-ana", "acme", "try", since).sessions().getLast().createdAt());
+    assertEquals(List.of("app-c"), names(door.sessions("tok-ana", "acme", "main", since)));
+    assertEquals(
+        List.of("app-b", "app-f", "app-a", "app-old"),
+        names(door.sessions("tok-ana", "acme", "try", null)),
+        "a workspace whose start is not known keeps every session of its name");
+    assertEquals(
+        "403 forbidden This token acts for no one.",
+        said(
+            assertThrows(
+                ApiException.class, () -> door.sessions("machine", "acme", "try", since))));
+    assertEquals(
+        "503 terminal_unavailable The pty host is shutting down.",
+        said(
+            assertThrows(
+                ApiException.class, () -> door.sessions("closing", "acme", "try", since))));
+    assertEquals(
+        "503 terminal_unavailable The terminal host listed no sessions.",
+        said(assertThrows(ApiException.class, () -> door.sessions("odd", "acme", "try", since))));
+    assertEquals(
+        "503 terminal_unavailable This terminal host lists no sessions here.",
+        said(
+            assertThrows(
+                ApiException.class,
+                () ->
+                    new TerminalTickets(
+                            (credential, action, target, workspace) -> new PtyMessage.Ticket("t"),
+                            TERMINAL)
+                        .sessions("tok-ana", "acme", "try", since))));
+    assertThrows(
+        IllegalArgumentException.class, () -> door.sessions("tok-ana", "acme", "Bad Name", since));
+  }
+
+  private static List<String> names(WorkspaceSessionsResponse listed) {
+    return listed.sessions().stream().map(s -> s.name()).toList();
+  }
+
+  private static PtyMessage.SessionInfo info(
+      String name, String project, String workspace, boolean live, String opener, long created) {
+    return new PtyMessage.SessionInfo(name, "i-" + name, live, 0, "", "", List.of())
+        .placed(project, workspace, opener)
+        .lived(created, live ? "" : "exited(0)");
   }
 }

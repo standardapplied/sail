@@ -322,6 +322,8 @@ final class Kit {
         case "tooltip": tooltips()
         case "banner": banners()
         case "empty": empties()
+        case "scroller": scrollers()
+        case "sheet": sheets()
         default: break
         }
     }
@@ -356,6 +358,7 @@ final class Kit {
             held("button-icon-list-again", SailButton(icon: .refresh, label: "List Again", look: look, target: presses, action: #selector(KitPresses.press(_:)))),
             held("button-icon-more", SailButton(icon: .more, label: "More", size: .small, look: look, target: presses, action: #selector(KitPresses.press(_:)))),
             held("button-hint-open", open), held("button-hint-check-again", check), held("button-hint-create", create),
+            held("button-link-show-dock", LinkButton("Show dock", look: look, target: presses, action: #selector(KitPresses.press(_:)))),
         ])
     }
 
@@ -400,6 +403,40 @@ final class Kit {
         row("Spinner · on accent", [held("spinner", Spinner(look: look)), busy])
         let frame = SkeletonFrame(look: look)
         row("Skeleton row", [held("skeleton-row", frame)])
+    }
+
+    /// The library's sheet as Stop, Delete and Delete Anyway ask it, each at its own size.
+    private func sheets() {
+        let asked: [(String, String, String, String, ButtonKind)] = [
+            ("stop", "Stop dock?", "Your 2 terminals in it end. Its files stay, and Start and Open brings it back.", "Stop", .destructiveQuiet),
+            ("delete", "Delete exp-ui?", "Its files on the runner go with it, and any terminal open in it ends. Commits you pushed are kept by the repo host.", "Delete Workspace", .destructive),
+            ("anyway", "Delete dock anyway?", "Workspace dock of harbor, uday's, holds work: app holds uncommitted changes.", "Delete Anyway", .destructive),
+        ]
+        row("Sheet · stop, delete, delete anyway", asked.map { name, title, body, confirm, kind in
+            let sheet = Sheet(title: title, body: body, confirm: confirm, kind: kind, look: look, titleFont: self.title)
+            let content = sheet.laidOut()
+            let size = content.frame.size
+            content.widthAnchor.constraint(equalToConstant: size.width).isActive = true
+            content.heightAnchor.constraint(equalToConstant: size.height).isActive = true
+            return held("sheet-\(name)", content)
+        })
+    }
+
+    /// The quiet scroller at rest, hovered and dragged, a third of the way down: each a scroller of
+    /// its own, which draws whatever AppKit's overlay fade would do in a scroll view.
+    private func scrollers() {
+        row("Quiet scroller · rest, hover, dragged", ["rest", "hover", "dragged"].map { state in
+            let scroller = QuietScroller(frame: NSRect(x: 0, y: 0, width: ScrollerStyle.track, height: 120))
+            scroller.look = look
+            scroller.isEnabled = true
+            scroller.knobProportion = 0.33
+            scroller.doubleValue = 0.3
+            scroller.hovered = state == "hover"
+            scroller.dragging = state == "dragged"
+            scroller.widthAnchor.constraint(equalToConstant: ScrollerStyle.track).isActive = true
+            scroller.heightAnchor.constraint(equalToConstant: 120).isActive = true
+            return held("scroller-\(state)", scroller)
+        })
     }
 
     /// The design's list specimen: a head, pier at rest and under the pointer, and dock chosen with
