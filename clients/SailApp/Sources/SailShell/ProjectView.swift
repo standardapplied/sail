@@ -49,8 +49,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     private let head = NSView()
     private let foot = NSView()
     private let frameView = ListFrame()
-    /// The head, the list and the foot span the column, whatever their content's width.
-    private lazy var spans = [head, foot, frameView].map { $0.widthAnchor.constraint(equalTo: column.widthAnchor) }
+    /// The head, the list, the foot and the loading bars span the column, whatever their content's width.
+    private lazy var spans = [head, foot, frameView, loadingWords, loadingList].map { $0.widthAnchor.constraint(equalTo: column.widthAnchor) }
     private var page: WorkspacesModel.Page?
     /// The empty state drawn alone, centred, when no project is open.
     private var centred: NSView?
@@ -173,7 +173,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     private func show(_ views: [NSView]) {
         column.setViews(views, in: .top)
         NSLayoutConstraint.activate(spans.filter { span in views.contains { $0 === span.firstItem } })
-        let transient = views.filter { view in view is ListFrame && view !== frameView }
+        let transient = views.filter { view in view is ListFrame && !spans.contains { $0.firstItem === view } }
         NSLayoutConstraint.activate(transient.map { $0.widthAnchor.constraint(equalTo: column.widthAnchor) })
     }
 

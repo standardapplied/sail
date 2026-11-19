@@ -20,7 +20,7 @@ package final class LeftPanel: NSView {
         didSet { relook() }
     }
 
-    let list: SailList
+    package let list: SailList
     let heading = NSTextField(labelWithString: "Workspaces")
     let who = NSTextField(labelWithString: "")
     let place = NSTextField(labelWithString: "")

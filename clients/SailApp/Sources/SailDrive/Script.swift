@@ -172,6 +172,9 @@ struct Step: Decodable {
     /// The Workspaces row of this name selected with the list holding the keys (its Open says ⏎),
     /// what its button then says told.
     var chooseRow: String?
+    /// The left panel's project of this name chosen, as a click on its row does; the pane then
+    /// names it, within `seconds` (10 by default).
+    var chooseProject: String?
     /// The Workspaces row chosen is the one of this name, within `seconds` (10 by default).
     var listChosen: String?
     /// A proxy answers this route ("GET /v1/projects/harbor/workspaces") with a 502 from now on;

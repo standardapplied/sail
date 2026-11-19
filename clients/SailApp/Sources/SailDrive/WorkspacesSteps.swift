@@ -153,6 +153,11 @@ extension Driver {
             shell.account.signOutHere(nil)
             return (true, "")
         }
+        if let wanted = step.chooseProject {
+            pane.panel.list.choose(wanted)
+            let named = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.hasPrefix("Workspaces\n\(wanted)\n") }
+            return (named, "chosen: \(pane.panel.list.chosen ?? "none"); the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
+        }
         if let wanted = step.chooseRow {
             shell.window.makeFirstResponder(pane.project.list)
             pane.project.list.choose(wanted)

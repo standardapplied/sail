@@ -301,15 +301,15 @@ public struct WorkspacesModel: Sendable {
         return .shown(panel, .project(page(project)))
     }
 
-    /// The card when no project could be listed: what is true, in Sail's words with the address,
-    /// and that this Mac's terminals are untouched.
+    /// The card when no project could be listed: what is true, in Sail's words with the address and
+    /// not again what its title says, and that this Mac's terminals are untouched.
     private func unreachable(_ error: SailError) -> Empty {
         var unreached = false
         if case .unreachable = error { unreached = true }
         let network = unreached ? " If it is on your private network, check that the network is connected." : ""
         return Empty(
             title: unreached ? "Sail can’t reach the control plane" : "Sail can’t list your projects",
-            body: error.said(at: person.controlPlane) + network
+            body: (unreached && !person.controlPlane.isEmpty ? "\(person.controlPlane) did not answer." : error.said(at: person.controlPlane)) + network
                 + " Your terminals on this Mac keep working; your workspaces come back when the control plane answers.",
             line: nil, action: .checkAgain, missing: false
         )

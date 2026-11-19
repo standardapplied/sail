@@ -47,7 +47,7 @@ import Testing
         model.projectsListed(.failure(.unreachable("The network connection was lost.")))
         guard case let .unreachable(card) = model.screen else { Issue.record("no card: \(model.screen)"); return }
         #expect(card.title == "Sail can’t reach the control plane" && card.action == .checkAgain)
-        #expect(card.body == "Sail cannot reach the control plane at main.acme.dev. If it is on your private network, check that the network is connected. "
+        #expect(card.body == "main.acme.dev did not answer. If it is on your private network, check that the network is connected. "
             + "Your terminals on this Mac keep working; your workspaces come back when the control plane answers.")
         #expect(!card.body.contains("network connection was lost"), "the transport's own text reached the person")
         model.projectsListed(.failure(.unexpected(route: "GET /v1/projects", status: 502)))

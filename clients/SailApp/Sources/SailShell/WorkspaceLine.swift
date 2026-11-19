@@ -39,6 +39,7 @@ final class WorkspaceLine: NSStackView {
         pill.setContentHuggingPriority(.required, for: .horizontal)
         let shown: [NSView] = narrow ? [words, pill] : [words, Self.column(pill, width: Self.pillColumn), whose].compactMap { $0 }
         distribution = .fill
+        setHuggingPriority(.defaultLow, for: .horizontal)
         for view in shown {
             addArrangedSubview(view)
         }

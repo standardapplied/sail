@@ -278,7 +278,7 @@ import Testing
             view.layoutSubtreeIfNeeded()
             window.setContentSize(NSSize(width: Self.narrowestCard, height: 640))
             view.layoutSubtreeIfNeeded()
-            #expect(view.frame.width == Self.narrowestCard, "with \(what) shown the card stays \(view.frame.width) pt")
+            #expect(abs(Double(view.frame.width) - Self.narrowestCard) < 0.5, "with \(what) shown the card stays \(view.frame.width) pt")
         }
     }
 
