@@ -361,6 +361,10 @@ final class Driver {
             let found = await waitUntil(step.seconds ?? 15) { self.pane?.status.says?.contains(banner) == true }
             return (found, "the banner says '\(pane?.status.says ?? "nothing")'")
         }
+        if let gone = step.bannerGone {
+            let went = await waitUntil(step.seconds ?? 15) { self.pane?.status.says?.contains(gone) != true }
+            return (went, "the banner says '\(pane?.status.says ?? "nothing")'")
+        }
         if step.still == true {
             let before = screenText
             let updates = terminal.latency.screenUpdates

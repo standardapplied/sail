@@ -44,7 +44,7 @@ import Testing
         let place = Place.thisMac(folder: "/")
         let id = bench.newTab(session: place.newSessionName, place: place)
         let pane = try TerminalPane(
-            try #require(bench.panes[id]), start: .open, host: host, runner: nil,
+            try #require(bench.panes[id]), start: .open, host: host, runner: nil, person: "",
             fonts: TerminalFonts(directory: LookTests.fonts), points: 15, look: .light
         )
         pane.begin()

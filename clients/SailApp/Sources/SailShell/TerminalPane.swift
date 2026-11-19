@@ -35,6 +35,8 @@ public final class TerminalPane: NSView {
     var onEvent: @MainActor (TerminalPane, SessionEvent) -> Void = { _, _ in }
     /// Asked to show the account, where a runner tab whose sign-in lapsed is signed in again.
     var onSignIn: @MainActor () -> Void = {}
+    /// Asked to close the pane, its session already over: Close on an ended or gone runner tab.
+    var onClose: @MainActor (TerminalPane) -> Void = { _ in }
     /// Whether the session was ever attached: a tab refused before then holds none.
     public private(set) var attachedOnce = false
     /// The end under way, nil once it answered.
@@ -52,21 +54,29 @@ public final class TerminalPane: NSView {
         didSet { scrim.isHidden = !isDimmed }
     }
 
-    private let start: Start
+    private var start: Start
     private let door: Door
+    /// The runner's tickets, which also list a workspace's sessions; nil on this Mac.
+    private let tickets: (any TicketSource)?
+    /// The person the pane's runner session is reached as, empty when no one is named.
+    let person: String
+    private var keyboard = Keyboard()
     private let banner: StatusBanner
     private let scrim = Scrim()
     private let latency = NSTextField(labelWithString: "")
     private var latencyTimer: Timer?
 
     init(
-        _ pane: Pane, start: Start, host: LocalHost, runner: (any TicketSource)?, fonts: TerminalFonts, points: Double, look: Look
+        _ pane: Pane, start: Start, host: LocalHost, runner: (any TicketSource)?, person: String, fonts: TerminalFonts, points: Double,
+        look: Look
     ) throws(ShellError) {
         id = pane.id
         name = pane.session
         place = pane.place
         self.start = start
         self.host = host
+        self.person = person
+        tickets = pane.place.onRunner ? runner : nil
         if pane.place.onRunner {
             guard let runner else { throw .host("Sign in to open a terminal in a workspace.") }
             door = .runner(runner)
@@ -144,15 +154,6 @@ public final class TerminalPane: NSView {
         return task
     }
 
-    /// Whether this pane holds a live session on the runner, which a quit or a sign-out ends: one
-    /// made, or one the runner is still making (a workspace starting), until it ends.
-    var holdsRunnerSession: Bool {
-        guard place.onRunner, let session else { return false }
-        if ending != nil || unended { return true }
-        if case .ended = session.state.phase { return false }
-        return session.atHost != .none
-    }
-
     /// Whether an end is under way.
     var isEnding: Bool {
         ending != nil
@@ -180,10 +181,11 @@ public final class TerminalPane: NSView {
     }
 
     /// A new session in the same workspace, on a new ticket, the ended one's screen let go: Open
-    /// Again on a runner tab.
+    /// Again on a runner tab, and Open a New One on one that came back ended.
     func openAgain() {
         session?.close()
         session = nil
+        start = .open
         begin()
     }
 
@@ -259,7 +261,10 @@ public final class TerminalPane: NSView {
         switch event {
         case .phase(.attached):
             attachedOnce = true
+            keyboard.attached()
             banner.hide()
+        case let .writerChanged(writer) where place.onRunner && !person.isEmpty:
+            showKeyboard(writer)
         case .phase(.reconnecting) where place.onRunner:
             banner.show("Reconnecting to \(place.label ?? "the runner")…", button: "Reconnect Now") { [weak self] in
                 MainActor.assumeIsolated { self?.session?.reconnectNow() }
@@ -295,14 +300,44 @@ public final class TerminalPane: NSView {
             banner.show("The runner restarted, which ends every session it held.", button: "Open Again", handler: again)
         case let .ended(reason):
             banner.show(Said.sentence(reason), button: "Open Again", handler: again)
-        case let .ticketRefused(refusal) where refusal.code == .known(.notFound) && attachedOnce:
-            banner.show("This terminal ended while Sail was away from the runner.", button: "Open Again", handler: again)
+        case let .ticketRefused(refusal) where refusal.code == .known(.notFound) && (start == .attach || attachedOnce):
+            Task { await showReturn(refused: end) }
         case .signIn:
             banner.show(end.said.joined(separator: " "), button: "Sign In", handler: signIn)
         case let .ticketRefused(refusal) where [.known(.missingBearerToken), .known(.invalidBearerToken)].contains(refusal.code):
             banner.show(end.said.joined(separator: " "), button: "Sign In", handler: signIn)
         default:
             banner.show(end.said.joined(separator: " "))
+        }
+    }
+
+    /// A runner session the runner would not attach, said from its workspace's listing: ended, in
+    /// the host's words, or no longer on the runner; offering Open a New One and Close. A listing
+    /// that cannot be had, or lists it live, leaves the refusal's own words.
+    private func showReturn(refused end: SessionEnd) async {
+        guard case let .workspace(project, workspace) = place else { return }
+        let listing = try? await tickets?.sessions(in: project, workspace: workspace)
+        let said = listing.flatMap { RunnerReturn.said(name, in: $0) } ?? end.said.joined(separator: " ")
+        banner.show(
+            said, button: "Open a New One", handler: { [weak self] in MainActor.assumeIsolated { self?.openAgain() } }, second: "Close",
+            secondHandler: { [weak self] in MainActor.assumeIsolated { self.map { $0.onClose($0) } } }
+        )
+    }
+
+    /// Who holds the keyboard now that the host said `writer` does: while it is with someone else
+    /// the pane says so and offers to take it back; once it is here again, the line goes.
+    private func showKeyboard(_ writer: String) {
+        let wasSaid = keyboard.said
+        keyboard.writerChanged(to: writer, me: person)
+        if let said = keyboard.said {
+            banner.show(said, button: "Take Keyboard") { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.keyboard.taking()
+                    self?.session?.takeWrite()
+                }
+            }
+        } else if let wasSaid, banner.shown == wasSaid {
+            banner.hide()
         }
     }
 

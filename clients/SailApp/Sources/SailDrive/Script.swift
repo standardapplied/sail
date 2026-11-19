@@ -50,6 +50,8 @@ struct Step: Decodable {
     var gridColumns: Bool?
     var text: String?
     var banner: String?
+    /// The focused pane's banner no longer says this, within `seconds` (15 by default).
+    var bannerGone: String?
     var seconds: Double?
     /// The visible text stays what it was when the step began while output reaches the screen,
     /// waited for at most `seconds`.
@@ -198,6 +200,12 @@ struct Step: Decodable {
     var doorHoldsWrite: Bool?
     /// Someone else lets go of it.
     var doorReleasesWrite: Bool?
+    /// The runner's door holds a session of this name, as one its person opened from another Mac.
+    var doorHolds: String?
+    /// The person's other Mac takes the focused terminal's keyboard at the runner's door.
+    var doorTakesKeyboard: Bool?
+    /// The runner's door ends every session it holds in these words, as a workspace's stop does.
+    var doorEnds: String?
     /// The focused terminal's banner button of this title pressed.
     var pressStatus: String?
     /// Sign Out pressed on the account, answered no further: what follows it asks.

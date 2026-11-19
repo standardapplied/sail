@@ -146,6 +146,13 @@ public struct WorkspacesModel: Sendable {
         public let why: String?
         /// Its ⋯ menu.
         public let menu: [Entry]
+        /// How many of the person's terminal sessions run in it, on their own running workspace.
+        public let sessions: Int
+
+        /// What the row says of its sessions beside its state: nothing for none.
+        public var sessionsSaid: String? {
+            sessions == 0 ? nil : sessions == 1 ? "1 session" : "\(sessions) sessions"
+        }
     }
 
     public enum Primary: Equatable, Sendable {
@@ -188,6 +195,8 @@ public struct WorkspacesModel: Sendable {
     private var listedAt: Date?
     private var listFailure: String?
     private var creates: [String: CreateLine] = [:]
+    /// The person's live sessions in each of their workspaces, by workspace, as last listed.
+    private var sessions: [String: Int] = [:]
     /// The workspace created in this project, chosen once a list shows it.
     private var choosingAfterList: [String: String] = [:]
 
@@ -239,6 +248,7 @@ public struct WorkspacesModel: Sendable {
     public mutating func choose(_ name: String) -> Int {
         chosen = name
         chosenRow = nil
+        sessions = [:]
         listFailure = nil
         listedAt = nil
         return listing.ask(name)
@@ -264,6 +274,13 @@ public struct WorkspacesModel: Sendable {
             guard listing.isLatest(request) else { return }
             listFailure = error.said(at: person.controlPlane)
         }
+    }
+
+    /// Takes how many live sessions of the person's own `listing` holds in workspace `workspace` of
+    /// the project shown, for its row; a listing for a project no longer shown is dropped.
+    public mutating func sessionsListed(_ listing: RunnerSessions, project: String, workspace: String) {
+        guard project == chosen else { return }
+        sessions[workspace] = listing.sessions.count { $0.live && $0.opener == person.handle }
     }
 
     public mutating func chooseRow(_ name: String?) {
@@ -448,7 +465,7 @@ public struct WorkspacesModel: Sendable {
         guard let create = creates[project], create.underWay else { return nil }
         return Line(
             name: create.name, instance: "\(project)-\(create.name)", state: .known(.notCreated), creating: true, mine: true, owner: nil, chosen: false,
-            primary: nil, why: "about 3 s", menu: []
+            primary: nil, why: "about 3 s", menu: [], sessions: 0
         )
     }
 
@@ -468,7 +485,8 @@ public struct WorkspacesModel: Sendable {
         }
         return Line(
             name: row.name, instance: row.instance, state: row.state, creating: false, mine: mine, owner: owner, chosen: row.name == chosenRow,
-            primary: primary, why: row.whyNotOpened(for: person.handle, admin: person.admin), menu: entry + [.copyName]
+            primary: primary, why: row.whyNotOpened(for: person.handle, admin: person.admin), menu: entry + [.copyName],
+            sessions: mine && row.state == .known(.running) ? sessions[row.name] ?? 0 : 0
         )
     }
 

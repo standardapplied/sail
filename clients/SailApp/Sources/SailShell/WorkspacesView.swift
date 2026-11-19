@@ -161,10 +161,12 @@ public final class WorkspacesView: NSView {
         }
     }
 
-    /// A row as a person reads it: its name, its state, and its owner when not theirs ("quay · running · ana").
+    /// A row as a person reads it: its name, its state, its owner when not theirs, and how many of
+    /// their sessions run in their own ("quay · running · ana", "dock · running · 1 session").
     private func said(_ line: WorkspacesModel.Line) -> String {
         var parts = [line.name, WorkspaceLine.pill(line).label.lowercased()]
         if let owner = line.owner { parts.append(WorkspaceLine.said(owner)) }
+        if let sessions = line.sessionsSaid { parts.append(sessions) }
         return parts.joined(separator: " · ")
     }
 
@@ -232,6 +234,20 @@ public final class WorkspacesView: NSView {
             guard era == self.era else { return }
             model.listed(answer, request: request, at: Date())
             render()
+            if case let .success(list) = answer { countSessions(in: list, by: client) }
+        }
+    }
+
+    /// Asks each of the person's running workspaces in `list` for its sessions, so its row says
+    /// how many of theirs run in it; a workspace that cannot be asked says nothing of them.
+    private func countSessions(in list: WorkspaceList, by client: SailClient) {
+        let era = self.era
+        for row in list.workspaces where row.owner == model.person.handle && row.state == .known(.running) {
+            Task {
+                guard let listing = try? await client.send(.sessions(workspace: row.name, project: list.project)), era == self.era else { return }
+                model.sessionsListed(listing, project: list.project, workspace: row.name)
+                render()
+            }
         }
     }
 

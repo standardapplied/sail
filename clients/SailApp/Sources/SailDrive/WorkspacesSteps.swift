@@ -9,11 +9,13 @@ import SailTerminal
 /// The control plane of the drive's workspaces run: every route answered as the server answered
 /// it in the goldens its `ClientGoldensTest` writes, a step choosing which golden answers a route
 /// from then on; a ticket answered so carries a ticket of the drive's ``FakeRunnerDoor`` and its
-/// address, so a runner tab attaches to a door that refuses what the real door refuses. A step can
-/// put a proxy's 502 in front of one route. No answer is written here.
+/// address, so a runner tab attaches to a door that refuses what the real door refuses, and an attach
+/// ticket for a session the door no longer holds is refused as the API refused one. A workspace's
+/// sessions are the door's own listing. A step can put a proxy's 502 in front of one route. No other
+/// answer is written here.
 actor GoldenDesk: Transport {
     static let shared = GoldenDesk()
-    static let door = try? FakeRunnerDoor()
+    static let door = try? FakeRunnerDoor(person: "uday")
     private var answers: [String: HTTPResponse] = [:]
     private var held: [String: Duration] = [:]
     private var failing: String?
@@ -57,13 +59,32 @@ actor GoldenDesk: Transport {
         asked.append(request)
         if let after = held[request.route], after > .zero { try? await Task.sleep(for: after) }
         guard request.route != failing else { throw unreached ? SailError.unreachable("Could not connect to the server.") : SailError.unexpected(route: request.route, status: 502) }
+        if request.method == .get, request.path.hasSuffix("/sessions"), let door = Self.door {
+            return HTTPResponse(status: 200, headers: [:], body: Self.encoded(door.listing))
+        }
         guard let answer = answers[request.route] else { throw .unreachable("no golden answers \(request.route)") }
         guard request.route == "POST /v1/terminal/tickets", answer.status == 201, let door = Self.door,
               var body = (try? JSONSerialization.jsonObject(with: answer.body)) as? [String: Any] else { return answer }
-        let ticket = door.issue(for: Self.ticketRequest(request))
+        let asked = Self.ticketRequest(request)
+        if case let .attach(session) = asked, !door.sessions.contains(session), let gone = try? Exchange("refusal-not-found-session") {
+            return HTTPResponse(status: gone.status, headers: gone.headers, body: gone.body)
+        }
+        let ticket = door.issue(for: asked)
         body["ticket"] = ticket.ticket
         body["address"] = ticket.address
         return HTTPResponse(status: answer.status, headers: answer.headers, body: (try? JSONSerialization.data(withJSONObject: body)) ?? answer.body)
+    }
+
+    /// `listing` as the API writes it: snake-case keys and instants with milliseconds.
+    static func encoded(_ listing: RunnerSessions) -> Data {
+        let encoder = JSONEncoder()
+        let instant = ISO8601DateFormatter()
+        instant.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        encoder.dateEncodingStrategy = .custom { date, to in
+            var value = to.singleValueContainer()
+            try value.encode(instant.string(from: date))
+        }
+        return (try? encoder.encode(listing)) ?? Data()
     }
 
     /// What a ticket request asks, read from its body as the API reads it: a door's ticket covers
@@ -137,6 +158,21 @@ extension Driver {
         if step.doorHoldsWrite == true || step.doorReleasesWrite == true {
             guard let door = GoldenDesk.door, let focused = workbench.focused else { return (false, "no door or no focused terminal") }
             if step.doorHoldsWrite == true { door.holdWrite(focused.name) } else { door.release(focused.name) }
+            return (true, "")
+        }
+        if let session = step.doorHolds {
+            guard let door = GoldenDesk.door else { return (false, "the drive's runner door did not listen") }
+            door.hold(session)
+            return (true, "")
+        }
+        if step.doorTakesKeyboard == true {
+            guard let door = GoldenDesk.door, let focused = workbench.focused else { return (false, "no door or no focused terminal") }
+            door.takeKeyboard(focused.name, by: "uday")
+            return (true, "")
+        }
+        if let reason = step.doorEnds {
+            guard let door = GoldenDesk.door else { return (false, "the drive's runner door did not listen") }
+            door.sessions.forEach { door.end($0, saying: reason) }
             return (true, "")
         }
         if let title = step.pressStatus {

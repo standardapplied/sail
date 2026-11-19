@@ -5,8 +5,9 @@ import SailLook
 
 /// A workspace row's words as the approved list sets them: the name in 14 medium over its instance
 /// in mono 11, in a column that takes what is left; the state's pill in a 112 pt column; and a 104 pt
-/// column with someone else's initial and handle, empty on the person's own. Narrow, as under a 720 pt
-/// card, it drops the owner's column and says whose the workspace is in place of its instance.
+/// column with someone else's initial and handle, or on the person's own how many of their sessions
+/// run in it ("2 sessions"). Narrow, as under a 720 pt card, it drops the owner's column, says whose
+/// the workspace is in place of its instance, and its sessions after it.
 @MainActor
 final class WorkspaceLine: NSStackView {
     static let pillColumn = 112.0, ownerColumn = 104.0
@@ -23,14 +24,16 @@ final class WorkspaceLine: NSStackView {
         title = NSTextField(labelWithAttributedString: NSAttributedString(string: line.name, attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.body.points, weight: .medium), .foregroundColor: NSColor(look.text),
         ]))
-        let below = narrow ? line.owner.map { Self.whose($0) } ?? line.instance : line.instance
+        let beneath = narrow ? line.owner.map { Self.whose($0) } ?? line.instance : line.instance
+        let below = narrow ? ([beneath] + [line.sessionsSaid].compactMap { $0 }).joined(separator: " · ") : beneath
         place = NSTextField(labelWithAttributedString: NSAttributedString(string: below, attributes: [
             .font: mono.font(Look.Step.micro.points, .regular) as NSFont, .foregroundColor: NSColor(look.textTertiary),
         ]))
         pill = Pill(Self.pill(line), look: look, mono: mono)
         let owned = narrow ? nil : line.owner.map { Self.owner($0, look: look) }
         ownerTip = owned?.tip
-        whose = narrow ? nil : Self.column(owned?.view, width: Self.ownerColumn)
+        let counted = narrow ? nil : line.sessionsSaid.map { Self.secondary($0, look: look) }
+        whose = narrow ? nil : Self.column(owned?.view ?? counted, width: Self.ownerColumn)
         super.init(frame: .zero)
         for label in [title, place] {
             label.lineBreakMode = .byTruncatingTail
@@ -103,6 +106,15 @@ final class WorkspaceLine: NSStackView {
             view.centerYAnchor.constraint(equalTo: column.centerYAnchor), column.heightAnchor.constraint(greaterThanOrEqualTo: view.heightAnchor),
         ])
         return column
+    }
+
+    /// Words in the owner's column, as a person's handle is set there.
+    private static func secondary(_ words: String, look: Look) -> NSTextField {
+        let label = NSTextField(labelWithAttributedString: NSAttributedString(string: words, attributes: [
+            .font: NSFont.systemFont(ofSize: Look.Step.callout.points), .foregroundColor: NSColor(look.textSecondary),
+        ]))
+        label.maximumNumberOfLines = 1
+        return label
     }
 
     /// The owner's column: a person's initial and handle, cut at its end in the column, in full on

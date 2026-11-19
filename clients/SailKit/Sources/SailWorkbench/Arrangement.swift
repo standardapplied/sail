@@ -2,18 +2,35 @@ import Foundation
 
 /// What a workbench keeps between launches: its arrangement, never its sessions. The tabs in
 /// order, each tab's tree with its ratios, every pane's session name and place, each tab's name and
-/// focused session, and the selected tab. Zoom, titles and folders are not kept.
+/// focused session, the selected tab, and the person whose runner panes these are. Zoom, titles
+/// and folders are not kept.
 public struct Arrangement: Codable, Equatable, Sendable {
     public static let currentVersion = 1
 
     public var version: Int
     public var tabs: [Tab]
     public var selected: Int?
+    /// Whose runner panes it holds: they come back for that person's sign-in alone.
+    public var runner: String?
 
-    public init(version: Int = currentVersion, tabs: [Tab], selected: Int?) {
+    public init(version: Int = currentVersion, tabs: [Tab], selected: Int?, runner: String? = nil) {
         self.version = version
         self.tabs = tabs
         self.selected = selected
+        self.runner = runner
+    }
+
+    /// Its tabs on the runner: a tab's panes are all on the runner or none are, as a split takes
+    /// its focused pane's place.
+    public var runnerTabs: [Tab] {
+        tabs.filter(\.layout.onRunner)
+    }
+
+    /// The sessions of its runner panes when they are `person`'s, which a restore keeps as live;
+    /// none for anyone else, or for no one.
+    public func runnerSessions(for person: String?) -> [String] {
+        guard let person, person == runner else { return [] }
+        return runnerTabs.flatMap(\.layout.sessions)
     }
 
     public struct Tab: Codable, Equatable, Sendable {
@@ -25,6 +42,21 @@ public struct Arrangement: Codable, Equatable, Sendable {
     public indirect enum Node: Codable, Equatable, Sendable {
         case pane(session: String, place: Place)
         case split(axis: Axis, ratio: Double, first: Node, second: Node)
+
+        /// Its panes' sessions, in order.
+        public var sessions: [String] {
+            switch self {
+            case let .pane(session, _): [session]
+            case let .split(_, _, first, second): first.sessions + second.sessions
+            }
+        }
+
+        var onRunner: Bool {
+            switch self {
+            case let .pane(_, place): place.onRunner
+            case let .split(_, _, first, _): first.onRunner
+            }
+        }
     }
 }
 
@@ -35,6 +67,30 @@ extension Workbench {
             tabs: tabs.map { .init(name: $0.name, focused: panes[$0.focused]?.session ?? "", layout: node($0.layout)) },
             selected: tabs.firstIndex { $0.id == selected }
         )
+    }
+
+    /// Its arrangement with `held`, the runner tabs kept aside while no one is signed in, after its
+    /// own, all of them `runner`'s.
+    public func arrangement(runner: String?, holding held: [Arrangement.Tab]) -> Arrangement {
+        var kept = arrangement
+        kept.tabs += held
+        kept.runner = runner
+        return kept
+    }
+
+    /// Adds the kept `tabs` after the open ones, every pane in them, and answers the panes made:
+    /// the runner tabs a sign-in brings back.
+    public mutating func adopt(_ tabs: [Arrangement.Tab]) -> [PaneID] {
+        var unheld = Set(tabs.flatMap(\.layout.sessions)).subtracting(panes.values.map(\.session))
+        var made: [PaneID] = []
+        for tab in tabs {
+            guard let layout = adopt(tab.layout, from: &unheld) else { continue }
+            let leaves = layout.leaves
+            let id = adoptTab(layout, focused: leaves.first { panes[$0]?.session == tab.focused } ?? leaves[0])
+            rename(id, to: tab.name ?? "")
+            made += leaves
+        }
+        return made
     }
 
     private func node(_ layout: Layout) -> Arrangement.Node {

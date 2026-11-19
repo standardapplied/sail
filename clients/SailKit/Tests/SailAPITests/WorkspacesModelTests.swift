@@ -40,6 +40,24 @@ import Testing
         return table
     }
 
+    /// R7: a person's own running workspace says how many of their live sessions run in it, beside
+    /// its state; an ended one, someone else's, or another workspace's count nothing.
+    @Test func aRunningWorkspaceOfTheirsSaysHowManyOfTheirSessionsRunInIt() {
+        func session(_ name: String, live: Bool = true, opener: String = "uday") -> RunnerSession {
+            RunnerSession(name: name, live: live, attached: 0, writer: "", opener: opener, command: [], createdAt: Self.at, endedReason: nil)
+        }
+        var model = Self.listed(Self.uday)
+        model.sessionsListed(RunnerSessions(sessions: [
+            session("app-a"), session("app-b"), session("app-c", live: false), session("app-d", opener: "ana"),
+        ]), project: "harbor", workspace: "dock")
+        model.sessionsListed(RunnerSessions(sessions: [session("app-e")]), project: "harbor", workspace: "pier")
+        model.sessionsListed(RunnerSessions(sessions: [session("app-f")]), project: "other", workspace: "quay")
+        let lines = (Self.table(model)?.yours ?? []) + (Self.table(model)?.others ?? [])
+        #expect(lines.map { "\($0.name) \($0.sessionsSaid ?? "-")" } == ["dock 2 sessions", "pier -", "quay -"])
+        _ = model.choose("harbor")
+        #expect(Self.table(model)?.yours.allSatisfy { $0.sessions == 0 } != false, "a new choice forgets the counts")
+    }
+
     /// Frame "Loading", then "The control plane cannot be reached": nothing listed yet, the card says why.
     @Test func beforeAnyProjectTheCardSaysWhatIsHappening() {
         var model = WorkspacesModel(person: Self.ana)

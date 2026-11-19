@@ -46,6 +46,10 @@ public final class WorkbenchView: NSView {
     private(set) var restored = false
     /// Workspaces asked to open before the first restore, opened once it has replaced the model.
     private var pendingWorkspaces: [Place] = []
+    /// Runner tabs kept aside while no one is signed in, and whose they are: still kept with the
+    /// arrangement, and brought back by that person's sign-in alone.
+    private var held: [Arrangement.Tab] = []
+    private var heldFor: String?
 
     convenience init(fonts directory: URL, helper: String?, look: Look) throws(ShellError) {
         let host: LocalHost
@@ -107,7 +111,12 @@ public final class WorkbenchView: NSView {
         }
         if banner.shown != told { banner.hide() }
         let kept = UserDefaults.standard.data(forKey: Self.arrangementKey).flatMap { try? JSONDecoder().decode(Arrangement.self, from: $0) }
-        model = Workbench.restore(kept, live: listed.filter(\.live).map(\.name), home: NSHomeDirectory())
+        let person = signedIn()?.handle
+        model = Workbench.restore(kept, live: listed.filter(\.live).map(\.name) + (kept?.runnerSessions(for: person) ?? []), home: NSHomeDirectory())
+        if person == nil, let kept {
+            held = kept.runnerTabs
+            heldFor = kept.runner
+        }
         restored = true
         for pane in model.panes.values.sorted(by: { $0.id < $1.id }) {
             if makeView(pane, start: .attach, points: FontLadder.standard) == nil { model.close(pane.id) }
@@ -115,8 +124,41 @@ public final class WorkbenchView: NSView {
         model.fit(in: room, minimum: minimum(of: Array(panes.values)), scale: scale)
         let waiting = pendingWorkspaces
         pendingWorkspaces = []
-        if model.tabs.isEmpty, waiting.isEmpty { openTab() } else { apply() }
-        waiting.forEach(openTab(in:))
+        if model.tabs.isEmpty, waiting.isEmpty, held.isEmpty { openTab() } else { apply() }
+        for case let .workspace(project, name) in waiting {
+            openWorkspace(project: project, name: name)
+        }
+    }
+
+    /// Who is signed in changed: signed out, the runner tabs leave the window and keep their
+    /// places for that person, their sessions running on; that person signed in again, they come
+    /// back attached; anyone else signed in, they are dropped.
+    func standingChanged() {
+        guard restored else { return }
+        let person = signedIn()?.handle
+        guard let person else {
+            let leaving = panes.values.filter(\.place.onRunner)
+            guard !leaving.isEmpty else { return }
+            if held.isEmpty { heldFor = Self.runnerPerson(of: leaving) }
+            held += model.arrangement.runnerTabs
+            leaving.forEach { $0.detach() }
+            leaving.forEach(remove)
+            return apply()
+        }
+        guard !held.isEmpty else { return }
+        let coming = heldFor == person ? model.adopt(held) : []
+        held = []
+        heldFor = nil
+        for id in coming {
+            if let pane = model.panes[id], makeView(pane, start: .attach, points: points) == nil { model.close(id) }
+        }
+        if model.selectedTab == nil, let tab = coming.lazy.compactMap(model.tab(holding:)).first { model.select(tab.id) }
+        apply()
+    }
+
+    /// The person the runner panes `views` were reached as.
+    private static func runnerPerson(of views: [TerminalPane]) -> String? {
+        views.map(\.person).first { !$0.isEmpty }
     }
 
     func detachAll() {
@@ -236,7 +278,8 @@ public final class WorkbenchView: NSView {
     private func keep() {
         pendingKeep?.cancel()
         pendingKeep = nil
-        guard restored, let data = try? JSONEncoder().encode(model.arrangement), data != kept else { return }
+        let arrangement = model.arrangement(runner: held.isEmpty ? signedIn()?.handle : heldFor, holding: held)
+        guard restored, let data = try? JSONEncoder().encode(arrangement), data != kept else { return }
         UserDefaults.standard.set(data, forKey: Self.arrangementKey)
         kept = data
     }
@@ -248,14 +291,21 @@ public final class WorkbenchView: NSView {
         guard let tab = model.tab(holding: pane.id) else { return nil }
         let view: TerminalPane
         do {
-            let tickets = pane.place.onRunner ? signedIn().map { SignedInTickets(for: $0.handle, current: signedIn) } : nil
-            view = try TerminalPane(pane, start: start, host: host, runner: tickets, fonts: fonts, points: points, look: look)
+            let reached = pane.place.onRunner ? signedIn() : nil
+            let tickets = reached.map { SignedInTickets(for: $0.handle, current: signedIn) }
+            view = try TerminalPane(
+                pane, start: start, host: host, runner: tickets, person: reached?.handle ?? "", fonts: fonts, points: points, look: look
+            )
         } catch {
             banner.show(Said.sentence(error.description))
             return nil
         }
         view.onEvent = { [weak self] view, event in self?.handle(event, from: view) }
         view.onSignIn = { [weak self] in self?.onSignIn() }
+        view.onClose = { [weak self] view in
+            self?.remove(view)
+            self?.apply()
+        }
         view.terminal.contextMenu = { [weak self] in self?.paneMenu() }
         view.terminal.onFocus = { [weak self, id = pane.id] in self?.focusClicked(id) }
         panes[pane.id] = view
@@ -263,8 +313,8 @@ public final class WorkbenchView: NSView {
         return view
     }
 
-    private func open(_ id: PaneID, points: Double) {
-        if let pane = model.panes[id], makeView(pane, start: .open, points: points) == nil {
+    private func open(_ id: PaneID, start: TerminalPane.Start = .open, points: Double) {
+        if let pane = model.panes[id], makeView(pane, start: start, points: points) == nil {
             model.close(id)
         }
         apply()
@@ -381,33 +431,29 @@ public final class WorkbenchView: NSView {
         openTab(in: newPlace())
     }
 
-    /// A tab with a terminal in workspace `name` of `project`, beside this Mac's own; before the
-    /// first restore, once it is done, as it replaces the model.
+    /// Workspace `name` of `project` beside this Mac's terminals: a tab attached to each of the
+    /// person's live sessions there that no tab holds, newest first, or a tab with a new one when
+    /// there are none (or they cannot be listed); before the first restore, once it is done.
     func openWorkspace(project: String, name: String) {
         let place = Place.workspace(project: project, name: name)
         guard restored else { return pendingWorkspaces.append(place) }
-        openTab(in: place)
+        guard let reached = signedIn() else { return openTab(in: place) }
+        Task { [weak self] in
+            let listed = try? await reached.tickets.sessions(in: project, workspace: name)
+            self?.open(place, attaching: listed, for: reached.handle)
+        }
+    }
+
+    private func open(_ place: Place, attaching listed: RunnerSessions?, for person: String) {
+        let held = Set(model.panes.values.map(\.session) + self.held.flatMap(\.layout.sessions))
+        let theirs = (listed?.sessions ?? []).filter { $0.live && $0.opener == person && !held.contains($0.name) }
+        guard !theirs.isEmpty else { return openTab(in: place) }
+        let size = points
+        theirs.forEach { open(model.newTab(session: $0.name, place: place), start: .attach, points: size) }
     }
 
     private func openTab(in place: Place) {
         open(model.newTab(session: place.newSessionName, place: place), points: points)
-    }
-
-    /// The panes whose sessions are on the runner, which do not outlive the app.
-    var runnerPanes: [TerminalPane] {
-        panes.values.filter(\.place.onRunner).sorted { $0.id < $1.id }
-    }
-
-    /// What a person calls `view`: its tab's title, never its session's name.
-    func title(of view: TerminalPane) -> String {
-        model.tab(holding: view.id).map { model.title(of: $0.id) } ?? view.place.label ?? "A terminal on the runner"
-    }
-
-    /// Takes every runner tab away, its session ended or left to the runner: what follows a
-    /// sign-out, so no tab outlives the sign-in it was opened under.
-    func removeRunnerPanes() {
-        runnerPanes.forEach(remove)
-        apply()
     }
 
     @objc public func newTab(_: Any?) {
@@ -480,8 +526,7 @@ public final class WorkbenchView: NSView {
     /// attached may.
     private func confirm(ending views: [TerminalPane], question: String, detail: String) {
         guard views.contains(where: \.mayEndAProgram), let window else { return end(views) }
-        let onThisMac = views.allSatisfy { !$0.place.onRunner }
-        Confirmation.ask(question, detail: detail + (onThisMac ? " Quitting Sail instead leaves every terminal running." : ""), action: "Close", on: window) { [weak self] close in
+        Confirmation.ask(question, detail: detail + " Quitting Sail instead leaves every terminal running.", action: "Close", on: window) { [weak self] close in
             if close { self?.end(views) }
         }
     }

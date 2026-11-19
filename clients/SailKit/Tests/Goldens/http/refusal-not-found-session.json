@@ -1,0 +1,21 @@
+{
+  "request": {
+    "body": {
+      "action": "attach",
+      "session": "app-gone"
+    },
+    "method": "POST",
+    "path": "/v1/terminal/tickets"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "not_found",
+        "field_errors": [],
+        "message": "There is no session 'app-gone' on this box that you may attach."
+      },
+      "schema_version": 1
+    },
+    "status": 404
+  }
+}

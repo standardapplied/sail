@@ -18,6 +18,11 @@ import Synchronization
 /// write token, and hold a `Create`'s answer while the host makes it. Its live sessions are its
 /// session list.
 ///
+/// Made for a `person`, it says who holds a session's keyboard as the real host does: the attach's
+/// own `WriterChanged` naming them when they took it, someone else's name when that person holds it,
+/// and a `WriterChanged` to everyone attached when ``takeKeyboard(_:by:)`` or a `TakeWrite` moves it.
+/// It lists what it holds and what it ended for that person, as the API does (``listing``).
+///
 /// Made `thisMac`, it plays this Mac's own host instead, as the real one admits its person: a
 /// blank token is welcomed, a connection does anything, a Kill ends the session it names or is
 /// refused as no session, and ListSessions lists the live ones. A test can have it refuse or
@@ -26,6 +31,7 @@ public final class FakeRunnerDoor: Sendable {
     public let port: UInt16
     private let listener: Int32
     private let thisMac: Bool
+    private let person: String?
     private let state = Mutex(State())
     private let creates = Mutex(Creates())
     private let killing = Mutex(Killing())
@@ -39,6 +45,11 @@ public final class FakeRunnerDoor: Sendable {
         var writers: [String: Int] = [:]
         var connections = 0
         var kills: [String] = []
+        /// Every session it made, oldest first, and the reasons of those it ended on its own.
+        var made: [String] = []
+        var ended: [String: String] = [:]
+        /// The connections attached to each session.
+        var attached: [String: [Int32]] = [:]
     }
 
     /// The `Create`s the door holds before it makes their sessions.
@@ -56,8 +67,9 @@ public final class FakeRunnerDoor: Sendable {
         var held: [DispatchSemaphore] = []
     }
 
-    public init(thisMac: Bool = false) throws {
+    public init(thisMac: Bool = false, person: String? = nil) throws {
         self.thisMac = thisMac
+        self.person = person
         let socket = Self.socket()
         guard socket >= 0 else { throw DoorError("no socket for the door") }
         var address = sockaddr_in()
@@ -165,6 +177,56 @@ public final class FakeRunnerDoor: Sendable {
         }
     }
 
+    /// The sessions the API lists for its person, newest first: every one it holds, and every one it
+    /// ended on its own, in that end's words.
+    public var listing: RunnerSessions {
+        state.withLock { state in
+            let sessions = state.made.enumerated().reversed().compactMap { index, name -> RunnerSession? in
+                let live = state.live.contains(name)
+                guard live || state.ended[name] != nil else { return nil }
+                return RunnerSession(
+                    name: name, live: live, attached: state.attached[name]?.count ?? 0, writer: "", opener: person ?? "",
+                    command: [], createdAt: Date(timeIntervalSince1970: Double(index)), endedReason: state.ended[name]
+                )
+            }
+            return RunnerSessions(sessions: sessions)
+        }
+    }
+
+    /// The runner holds `session` from now on, as one its person opened from another Mac.
+    public func hold(_ session: String) {
+        state.withLock { state in
+            state.live.append(session)
+            state.made.append(session)
+        }
+    }
+
+    /// The runner ends `session` saying `reason`, as a workspace's stop ends it: no longer live,
+    /// listed ended in those words.
+    public func end(_ session: String, saying reason: String) {
+        state.withLock { state in
+            state.live.removeAll { $0 == session }
+            state.writers[session] = nil
+            state.ended[session] = reason
+        }
+    }
+
+    /// `fde` takes `session`'s keyboard, as its person's other Mac or an admin does: every connection
+    /// attached to it hears so.
+    public func takeKeyboard(_ session: String, by fde: String) {
+        state.withLock { $0.writers[session] = 0 }
+        announce(session, writer: fde)
+    }
+
+    private func announce(_ session: String, writer: String) {
+        let connections = state.withLock { $0.attached[session] ?? [] }
+        connections.forEach { answer(.writerChanged(fde: writer), on: $0) }
+    }
+
+    private static func session(of ticket: TicketRequest) -> String? {
+        if case let .attach(session) = ticket { session } else { nil }
+    }
+
     /// The runner ends `session` on its own (its workspace stopped, say): no longer listed.
     public func forget(_ session: String) {
         state.withLock { state in
@@ -211,6 +273,9 @@ public final class FakeRunnerDoor: Sendable {
             state.withLock { state in
                 for (session, writer) in state.writers where writer == number {
                     state.writers[session] = nil
+                }
+                for session in state.attached.keys {
+                    state.attached[session]?.removeAll { $0 == connection }
                 }
             }
             close(connection)
@@ -262,9 +327,17 @@ public final class FakeRunnerDoor: Sendable {
                 let live = state.withLock { state in
                     guard state.live.contains(session) else { return false }
                     if write, state.writers[session] != 0 { state.writers[session] = number }
+                    state.attached[session, default: []].append(connection)
                     return true
                 }
                 answer(live ? .accepted : .refused(HostRefusal(message: "No live session '\(session)' to attach.", remedy: [])), on: connection)
+                if live, let person {
+                    answer(.writerChanged(fde: state.withLock { $0.writers[session] == 0 } ? "someone" : person), on: connection)
+                }
+            case .takeWrite:
+                guard let person, let session = opened ?? Self.session(of: ticket) else { continue }
+                state.withLock { $0.writers[session] = number }
+                announce(session, writer: person)
             case let .kill(session):
                 let ended = state.withLock { state in
                     state.kills.append(session)
@@ -334,7 +407,10 @@ public final class FakeRunnerDoor: Sendable {
             return held
         }
         held?.wait()
-        state.withLock { $0.live.append(session) }
+        state.withLock { state in
+            state.live.append(session)
+            state.made.append(session)
+        }
     }
 
     /// The real door's words for a frame its ticket does not cover, nil when it does.

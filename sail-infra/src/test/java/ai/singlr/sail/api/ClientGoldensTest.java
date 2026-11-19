@@ -311,6 +311,13 @@ class ClientGoldensTest {
           Map.of("action", "open", "project", PROJECT, "workspace", "dock"));
       box.record(
           http,
+          "refusal-not-found-session",
+          "POST",
+          "/v1/terminal/tickets",
+          uday,
+          Map.of("action", "attach", "session", "app-gone"));
+      box.record(
+          http,
           "workspace-sessions",
           "GET",
           "/v1/projects/" + PROJECT + "/workspaces/dock/sessions",
@@ -767,6 +774,11 @@ class ClientGoldensTest {
                             PtyMessage.TicketAction action,
                             String target,
                             String workspace) {
+                          if (target.equals("app-gone")) {
+                            return new PtyMessage.TicketRefused(
+                                PtyMessage.TicketRefusal.NOT_FOUND,
+                                "There is no session 'app-gone' on this box that you may attach.");
+                          }
                           return new PtyMessage.Ticket("tkt_" + target);
                         }
 

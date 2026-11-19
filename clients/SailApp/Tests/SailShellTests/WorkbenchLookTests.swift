@@ -432,7 +432,7 @@ import Testing
         var bench = Workbench()
         let id = bench.newTab(session: "mac-scrim", place: .thisMac(folder: "/"))
         let pane = try TerminalPane(
-            try #require(bench.panes[id]), start: .attach, host: shell.thisMac.host, runner: nil, fonts: TerminalFonts(directory: LookTests.fonts),
+            try #require(bench.panes[id]), start: .attach, host: shell.thisMac.host, runner: nil, person: "", fonts: TerminalFonts(directory: LookTests.fonts),
             points: 15, look: .dark
         )
         let scrim = try #require(pane.subviews.first { $0 is Scrim })
@@ -449,7 +449,7 @@ import Testing
         var bench = Workbench()
         let id = bench.newTab(session: "mac-look", place: .thisMac(folder: "/"))
         let pane = try TerminalPane(
-            try #require(bench.panes[id]), start: .attach, host: shell.thisMac.host, runner: nil, fonts: TerminalFonts(directory: LookTests.fonts),
+            try #require(bench.panes[id]), start: .attach, host: shell.thisMac.host, runner: nil, person: "", fonts: TerminalFonts(directory: LookTests.fonts),
             points: 15, look: .dark
         )
         let scrim = try #require(pane.subviews.first { $0 is Scrim })

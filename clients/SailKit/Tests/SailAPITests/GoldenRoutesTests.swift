@@ -38,6 +38,7 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "refusal-conflict-workspace-exists": { _ = try await $0.send(.createWorkspace("dock", project: "harbor")) },
     "refusal-forbidden-not-assignee": { _ = try await $0.send(.startWorkspace("dock", project: "harbor")) },
     "workspace-sessions": { _ = try await $0.send(.sessions(workspace: "dock", project: "harbor")) },
+    "refusal-not-found-session": { _ = try await $0.send(.terminalTicket(attach: "app-gone")) },
     "workspace-sessions-not-theirs": { _ = try await $0.send(.sessions(workspace: "dock", project: "harbor")) },
     "attention": { _ = try await $0.send(.attention(conversation: "harbor-docks")) },
     "changes": { _ = try await $0.send(.changes(since: "golden.0.0")) },

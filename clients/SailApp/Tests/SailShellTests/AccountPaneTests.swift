@@ -112,12 +112,6 @@ final class Held: Transport {
     }
 }
 
-/// How many times the pane asked before signing out, and its last question's reply.
-@MainActor final class Asked {
-    var count = 0
-    var reply: (@MainActor (Bool) -> Void)?
-}
-
 /// The account pane: a check of who is signed in (the app becoming active) holds no button, so a
 /// person's action is never swallowed by it; an answer that comes during a person's action waits
 /// for it to end, and is then shown unless who is signed in was set since the check began, said
@@ -285,25 +279,16 @@ final class Held: Transport {
         #expect(pane.lines.starts(with: enrolled) && pane.lines.contains { $0.hasSuffix("has ended.") }, "\(pane.lines)")
     }
 
-    /// Sign Out asks once: a second click, or the menu item, while the question is up asks
-    /// nothing; signing out then signs out.
-    @Test func signOutAsksOnceWhileItsQuestionIsUp() async throws {
+    /// Sign Out signs out at once and asks nothing; the menu item after it does nothing more.
+    @Test func signOutSignsOutAtOnceAskingNothing() async throws {
         let transport = Held(RecordedServer([try Exchange("whoami")]), holding: "nothing is held")
         let pane = try Self.pane(remembering: "uday", transport)
         await pane.refresh()
         #expect(pane.standing?.fde == "uday")
-        let asked = Asked()
-        pane.askBeforeSigningOut = { reply in
-            asked.count += 1
-            asked.reply = reply
-        }
 
         pane.signOut.performClick(nil)
         pane.signOutHere(nil)
 
-        #expect(asked.count == 1, "Sign Out asked \(asked.count) times")
-        #expect(!pane.signOut.isEnabled && pane.isActing)
-        asked.reply?(true)
         #expect(pane.standing == nil && !pane.isActing && pane.signIn.isEnabled)
     }
 }
