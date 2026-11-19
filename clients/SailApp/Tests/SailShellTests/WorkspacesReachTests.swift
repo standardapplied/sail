@@ -34,7 +34,7 @@ import Testing
     }
 
     @MainActor enum Scene: CaseIterable {
-        case rows, refused, stale, creating, loading, noProject, unreachable, unready, thirtyRows, overThePanel
+        case rows, refused, stale, creating, loading, noProject, unreachable, unready, thirtyRows, overThePanel, twentyProjects
 
         func faults(width: Double, panel: Double) async throws -> [String] {
             switch self {
@@ -111,6 +111,14 @@ import Testing
                 scroll.contentView.scroll(to: NSPoint(x: 0, y: max(room / 2, 0)))
                 scroll.reflectScrolledClipView(scroll.contentView)
                 return WorkspacesReachTests.outOfReach(in: view)
+            case .twentyProjects:
+                let names = (["harbor"] + (2 ... 20).map { "project-\($0)" }).map { #"{"name": "\#($0)", "container_status": "running", "template": "ready"}"# }
+                let projects = Exchange(method: "GET", path: "/v1/projects", status: 200, body: Data(#"{"projects": [\#(names.joined(separator: ", "))], "total": 20, "schema_version": 1}"#.utf8))
+                let (view, window) = try await WorkspacesReachTests.shown(RecordedServer([projects, try WorkspacesReachTests.longRows()]), width: width, panel: panel, saying: "dock")
+                defer { window.orderOut(nil) }
+                if width < WorkspacesView.narrow { view.toggleSidebar(nil) }
+                view.layoutSubtreeIfNeeded()
+                return WorkspacesReachTests.outOfReach(in: view.panel) + WorkspacesReachTests.thumbAndEdge(view.panel)
             case .overThePanel:
                 guard width < WorkspacesView.narrow else { return [] }
                 let (view, window) = try await WorkspacesReachTests.shown(RecordedServer([try Exchange("projects"), try WorkspacesReachTests.longRows()]), width: width, panel: panel, saying: "dock")
@@ -120,6 +128,33 @@ import Testing
                 return WorkspacesReachTests.outOfReach(in: view.panel)
             }
         }
+    }
+
+    /// The panel's scroll thumb and its drag edge share no pixel: a click anywhere on the thumb's
+    /// face reaches the scroller, and anywhere on the edge's 6 pt reaches the panel, which resizes.
+    static func thumbAndEdge(_ panel: LeftPanel) -> [String] {
+        guard let window = panel.window, let content = window.contentView, let frameView = content.superview else { return ["no window"] }
+        panel.scroll.flashScrollers()
+        let scroller = panel.scroll.scroller, thumb = scroller.thumb
+        guard thumb.height > 1 else { return ["the panel's scroller has no thumb: twenty projects do not scroll"] }
+        func reached(_ point: NSPoint, in view: NSView) -> NSView? {
+            content.hitTest(frameView.convert(view.convert(point, to: nil), from: nil))
+        }
+        var faults: [String] = []
+        for x in stride(from: Double(thumb.minX) + 0.5, through: Double(thumb.maxX) - 0.5, by: 1) {
+            for y in [Double(thumb.minY) + 1, Double(thumb.midY), Double(thumb.maxY) - 1] {
+                let hit = reached(NSPoint(x: x, y: y), in: scroller)
+                if hit !== scroller { faults.append("the thumb at \(x), \(y) reaches \(hit.map { String(describing: type(of: $0)) } ?? "nothing"), not the scroller") }
+            }
+        }
+        let rows = panel.scroll.frame
+        for x in stride(from: Double(panel.bounds.maxX) - LeftPanel.edge + 0.5, through: Double(panel.bounds.maxX) - 0.5, by: 1) {
+            for y in [Double(rows.minY) + 2, Double(rows.midY), Double(rows.maxY) - 2] {
+                let hit = reached(NSPoint(x: x, y: y), in: panel)
+                if hit !== panel { faults.append("the drag edge at \(x), \(y) reaches \(hit.map { String(describing: type(of: $0)) } ?? "nothing"), not the panel") }
+            }
+        }
+        return faults
     }
 
     /// harbor's rows with the longest name, the longest handle, an owner whose account is not

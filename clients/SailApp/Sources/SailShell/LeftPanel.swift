@@ -21,7 +21,8 @@ package final class LeftPanel: NSView {
     }
 
     package let list: SailList
-    /// The projects scroll here, between the header and the foot.
+    /// The projects scroll here, between the header and the foot; its scroller sits clear of the
+    /// drag edge, so a reach for the thumb never resizes the panel.
     package let scroll: QuietScrollView
     let heading = NSTextField(labelWithString: "Workspaces")
     let who = NSTextField(labelWithString: "")
@@ -76,6 +77,7 @@ package final class LeftPanel: NSView {
             addSubview(view)
         }
         scroll.documentView = list
+        scroll.scrollerInsets.right = Self.edge
         addSubview(scroll)
         let width = UserDefaults.standard.object(forKey: Self.remembered) as? Double ?? Self.width.standard
         widthConstraint = widthAnchor.constraint(equalToConstant: Self.clamped(width))
