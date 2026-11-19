@@ -1349,7 +1349,11 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     if (Strings.isBlank(credential)) {
       return Optional.empty();
     }
-    var hash = TokenStore.sha256(credential);
+    return findByCredentialHash(TokenStore.sha256(credential));
+  }
+
+  /** As {@link #findByCredential}, for a credential known only by its hash. */
+  public Optional<RunRow> findByCredentialHash(String hash) {
     var match =
         db.queryOne(
             "SELECT run_id, expires_at FROM run_credentials WHERE credential_hash = ?",

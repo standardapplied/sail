@@ -110,6 +110,9 @@ class PtySessionHostTest {
 
   private final Set<String> boxless = ConcurrentHashMap.newKeySet();
 
+  /** Projects whose read fails now, as a store that is down fails it. */
+  private final Set<String> unreadable = ConcurrentHashMap.newKeySet();
+
   /** Each instance an open asked about, in order, and the projects whose instance is not theirs. */
   private final List<String> instancesAsked = new CopyOnWriteArrayList<>();
 
@@ -127,7 +130,7 @@ class PtySessionHostTest {
 
         @Override
         public void project(String project, PtyIdentity.Person who) throws IOException {
-          if (project.equals("outage")) {
+          if (project.equals("outage") || unreadable.contains(project)) {
             throw new SqliteException("database is locked", 5);
           }
           if (unheld.contains(project + ":" + who.fde())) {
@@ -1779,6 +1782,46 @@ class PtySessionHostTest {
                 + " presented no token.",
             said(PtyWire.read(mady)),
             "only the box's own process carries a caller's credential");
+      }
+    }
+  }
+
+  /**
+   * A listing for a credential whose sessions' project cannot be read now is the host's outage,
+   * never a shorter list; and a listing asked on a connection still open while the host hands its
+   * sessions over is refused, never cut short.
+   */
+  @Test
+  @Timeout(value = 30, unit = TimeUnit.SECONDS)
+  void aListingIsTheHostsOutageWhenAProjectCannotBeReadAndRefusedDuringAHandoff() throws Exception {
+    network =
+        PtySessionHost.Network.listening(
+            new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), now::get, holders);
+    var shim =
+        new PtySessionHost.Handoff(
+            SdNotify.NONE,
+            Map.of(),
+            exit -> PtyChildShimTest.shim(exit, "sh", "-c", "read a", "--"));
+    try (var ignored = startHost(PtySessionHost.Limits.DEFAULTS, shim);
+        var uday = connect("tok-uday")) {
+      PtyWire.write(uday, new PtyMessage.Create("in-acme", List.of(), "/tmp", "acme", "", 80, 24));
+      assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(uday));
+      create(uday, "here", "");
+      unreadable.add("acme");
+      assertEquals(
+          "unavailable " + PtySessionHost.UNSERVED,
+          said(listFor("tok-uday")),
+          "not a list without in-acme");
+      unreadable.clear();
+      assertEquals(List.of("here live", "in-acme live"), listedFor("tok-uday"));
+
+      try (var box = connect("")) {
+        host.handoff();
+        PtyWire.write(box, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+        assertEquals(
+            "The pty host is shutting down; reconnect and try again.",
+            assertInstanceOf(PtyMessage.Err.class, PtyWire.read(box)).message(),
+            "a listing during a handoff is refused, not a short page");
       }
     }
   }
