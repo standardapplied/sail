@@ -597,7 +597,7 @@ public final class TerminalSession: Sendable {
             bootID = try connection.admit(token: token)
         } catch {
             connection.close()
-            return Self.outcome(of: error)
+            return Self.outcome(of: error, at: door)
         }
         let restarted = core.withLock { core in
             guard let known = core.state.hostBootID else {
@@ -637,7 +637,7 @@ public final class TerminalSession: Sendable {
             try connection.request(.attach(session: session, write: write))
         } catch {
             connection.close()
-            return Self.outcome(of: error)
+            return Self.outcome(of: error, at: door)
         }
         connection.stream()
         let standDown: Outcome? = core.withLock { core in
@@ -710,15 +710,22 @@ public final class TerminalSession: Sendable {
         waiters.forEach { $0.resume() }
     }
 
-    /// What an error before the attach means: the host's refusal, a skewed magic and a broken
-    /// protocol end the session; anything else is a failed attempt, to try again.
-    private static func outcome(of error: TerminalError) -> Outcome {
+    /// What an error before the attach means: the host's refusal, another protocol's magic and a
+    /// broken protocol end the session; anything else is a failed attempt, to try again.
+    private static func outcome(of error: TerminalError, at door: Door) -> Outcome {
         switch error {
         case let .refused(refusal): .finished(.refused(refusal))
-        case .skew: .finished(.refused(HostRefusal(message: error.description, remedy: [])))
+        case .otherProtocol: .finished(.refused(HostRefusal(message: otherVersion(at: door), remedy: [])))
         case let .protocolViolation(what): .finished(.protocolViolation(what))
         default: .failed(error)
         }
+    }
+
+    /// What a host whose magic is not this protocol's is said as: another version of Sail's, with
+    /// no guess at which side is older.
+    public static func otherVersion(at door: Door) -> String {
+        guard case .runner = door else { return Said.sentence(TerminalError.otherProtocol.description) }
+        return "This app and that runner are different versions of Sail, so they cannot talk. Bring both to the same version, then open it again."
     }
 
     private func read(_ connection: Connection, since attached: ContinuousClock.Instant) -> Outcome {
