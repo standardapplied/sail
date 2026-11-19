@@ -71,9 +71,18 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     public var look: Look {
         didSet {
             reloading = true
-            reloadData()
+            reloadKeepingHover()
             reloading = false
         }
+    }
+
+    /// Reloads the rows with the one under the pointer still drawn hovered, its actions shown: a
+    /// new row does not know the pointer is over it until the pointer moves.
+    private func reloadKeepingHover() {
+        let hovered = (0 ..< numberOfRows).first { (rowView(atRow: $0, makeIfNecessary: false) as? SailRowView)?.hovered == true }.flatMap { item(at: $0)?.id }
+        reloadData()
+        guard let hovered, let row = entries.indices.first(where: { item(at: $0)?.id == hovered }) else { return }
+        (rowView(atRow: row, makeIfNecessary: true) as? SailRowView)?.hovered = true
     }
 
     public let rowStyle: RowStyle
@@ -89,7 +98,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         willSet { kept = chosen }
         didSet {
             reloading = true
-            reloadData()
+            reloadKeepingHover()
             select(kept)
             reloading = false
             if chosen != kept { onChoose(chosen) }

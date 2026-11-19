@@ -241,6 +241,24 @@ import Testing
         }
     }
 
+    /// Rows drawn again (new entries of the same list, a change of look) keep the row under the
+    /// pointer hovered, its actions shown, though the pointer has not moved.
+    @Test func aRedrawKeepsTheHoveredRow() throws {
+        let motion = Motion.shared, was = motion.reduced
+        defer { motion.reduced = was }
+        motion.reduced = true
+        let list = try Self.list(.list, look: .light, counts: Counts())
+        let (window, _) = Self.shown(list)
+        defer { window.orderOut(nil) }
+        try Self.row(list, 1).hovered = true
+        for redraw in [{ list.entries = list.entries }, { list.look = .dark }] {
+            redraw()
+            let row = try Self.row(list, 1)
+            let cell = try #require(row.view(atColumn: 0) as? RowCell)
+            #expect(row.hovered && !cell.actions.isHidden, "a redraw dropped the hovered row's actions")
+        }
+    }
+
     static func key(_ code: UInt16, _ characters: String, _ flags: NSEvent.ModifierFlags = []) throws -> NSEvent {
         try #require(NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, characters: characters,

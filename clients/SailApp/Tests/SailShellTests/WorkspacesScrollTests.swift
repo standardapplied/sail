@@ -67,6 +67,19 @@ import Testing
         #expect(zip(before, after).allSatisfy { abs($0 - $1) < 0.5 }, "a change of look moved the scroll from \(before) to \(after) (the list's, the panel's)")
     }
 
+    /// The same rows drawn again (the app made active, a change of look) keep the chosen row and the
+    /// list's keys, the scroll view between them notwithstanding.
+    @Test func aRedrawKeepsTheChosenRowAndTheKeys() async throws {
+        let (view, window, _) = try await WorkspacesViewTests.listed()
+        defer { window.orderOut(nil) }
+        view.project.list.choose("pier")
+        #expect(window.makeFirstResponder(view.project.list))
+        await view.refresh()
+        #expect(view.project.list.chosen == "pier" && window.firstResponder === view.project.list, "a refresh lost the chosen row or the keys")
+        view.look = .dark
+        #expect(view.project.list.chosen == "pier" && window.firstResponder === view.project.list, "a change of look lost the chosen row or the keys")
+    }
+
     /// Twenty projects scroll between the panel's header and its foot, which stays put.
     @Test func twentyProjectsScrollAboveThePanelsFoot() throws {
         let panel = LeftPanel(look: .light, mono: try LabelFont(directory: LookTests.fonts))
