@@ -1,0 +1,33 @@
+name: Fleet image
+description: >
+  Holds the native fleet's Podman image (ci/images fleet-image), from a cache kept per week and per
+  its recipe, or baked here on a miss, with bounded tries, before any test, and kept in the cached
+  path, which the cache saves when the job succeeds: the only step of a lane that reaches a
+  registry or a package mirror for it.
+
+runs:
+  using: composite
+  steps:
+    - name: Name this week
+      id: week
+      shell: bash
+      run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the fleet's image
+      id: fleet-image
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ runner.temp }}/fleet-image
+        key: native-fleet-image-${{ hashFiles('ci/images', 'sail-infra/src/test/java/ai/singlr/sail/commands/NativeFleet.java') }}-${{ steps.week.outputs.week }}
+
+    - name: Load or bake the fleet's image
+      shell: bash
+      env:
+        HIT: ${{ steps.fleet-image.outputs.cache-hit }}
+      run: |
+        if [[ $HIT == true ]]; then
+          ci/images fleet-image import "$RUNNER_TEMP/fleet-image"
+        else
+          ci/images fleet-image bake
+          ci/images fleet-image export "$RUNNER_TEMP/fleet-image"
+        fi

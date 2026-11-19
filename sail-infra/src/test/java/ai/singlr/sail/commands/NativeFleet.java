@@ -48,14 +48,6 @@ import java.util.stream.Collectors;
 public final class NativeFleet implements AutoCloseable {
 
   private static final String IMAGE = "sail-native-fleet";
-  private static final String CONTAINERFILE =
-      """
-      FROM docker.io/library/ubuntu:24.04
-      RUN apt-get update -qq \\
-          && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \\
-              libsqlite3-0 sqlite3 openssh-server openssh-client ca-certificates curl \\
-          && mkdir -p /run/sshd
-      """;
   private static final String PROVISION_MAIN =
       """
       set -e
@@ -95,10 +87,9 @@ public final class NativeFleet implements AutoCloseable {
           "rooms", "SELECT id FROM rooms ORDER BY id",
           "fdes", "SELECT handle, role FROM fdes ORDER BY handle");
   private static final Duration COMMAND_DEADLINE = Duration.ofMinutes(3);
-  private static final Duration BUILD_DEADLINE = Duration.ofMinutes(10);
   private static final int FIRST_PORT = 7171;
 
-  private static boolean imageBuilt;
+  private static boolean imageReady;
 
   private final String pod;
   private final Path candidate;
@@ -123,7 +114,7 @@ public final class NativeFleet implements AutoCloseable {
   public static NativeFleet openOrSkip() throws Exception {
     var binaries = NativeBinaries.requireOrSkip("the native fleet");
     NativeBinaries.requireOrSkip("the native fleet", podmanUnavailable());
-    buildImage();
+    requireImage();
     var pod = "sail-fleet-" + UUID.randomUUID().toString().substring(0, 8);
     ok(run(COMMAND_DEADLINE, List.of("podman", "pod", "create", "--share", "net", "--name", pod)));
     return new NativeFleet(pod, binaries.candidate(), binaries.released());
@@ -399,14 +390,23 @@ public final class NativeFleet implements AutoCloseable {
     }
   }
 
-  private static synchronized void buildImage() throws Exception {
-    if (imageBuilt) {
+  /**
+   * The fleet's image, which {@code ci/images fleet-image bake} builds before any test (the CI lane
+   * restores it from a cache or bakes it on a miss): the build is the only step that reaches an
+   * external host for packages, and no test builds it, so a missing image fails every test at once,
+   * naming the bake, instead of each retrying a build until the job's own limit.
+   */
+  private static synchronized void requireImage() throws Exception {
+    if (imageReady) {
       return;
     }
-    var context = Files.createTempDirectory("sail-native-fleet-image");
-    Files.writeString(context.resolve("Containerfile"), CONTAINERFILE);
-    ok(run(BUILD_DEADLINE, List.of("podman", "build", "-q", "-t", IMAGE, context.toString())));
-    imageBuilt = true;
+    assertEquals(
+        0,
+        run(COMMAND_DEADLINE, List.of("podman", "image", "exists", IMAGE)).exit(),
+        "the fleet's image "
+            + IMAGE
+            + " is not on this machine: bake it with ci/images fleet-image bake");
+    imageReady = true;
   }
 
   private static Map<String, String> replicated(String... tableThenQuery) {

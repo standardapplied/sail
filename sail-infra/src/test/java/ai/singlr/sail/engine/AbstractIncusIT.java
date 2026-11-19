@@ -13,13 +13,11 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.stream.Stream;
 
 /**
  * Shared plumbing for integration tests that drive a real incus daemon — the boundary unit tests
@@ -85,45 +83,27 @@ public abstract class AbstractIncusIT {
   }
 
   private static final String PREPARED_ALIAS = "sail-it-prepared-v3";
-  private static final String BUILDER = "sail-it-image-builder";
-  private static final List<String> PREPARED_PACKAGES =
-      Stream.concat(
-              ProjectProvisioner.BASELINE_PACKAGES.stream(),
-              Stream.of("python3", "podman", "uidmap", "sqlite3"))
-          .distinct()
-          .toList();
-  private static final Duration INSTALL_BUDGET = Duration.ofMinutes(10);
   private static final Object PREPARE_LOCK = new Object();
   private static boolean preparedImageReady;
-  private static Throwable bakeFailure;
 
   /**
    * Launches {@code container} from the locally published prepared image — the base image plus
    * every package the incus suite needs, including sail's full provisioning baseline, with {@code
    * options} to incus launch. The alias is versioned: bump it whenever the package set changes so
-   * hosts holding an older bake rebuild instead of serving a stale image. The image is baked at
-   * most once per host: baking is the only step that touches the network (the public image server,
-   * container DNS, the apt archive), each stage is retried and fails naming itself with
-   * diagnostics, and every test launch afterwards is a local copy. Tests must never reach the
-   * internet from inside their own bodies — a bootstrap that depends on external infrastructure at
-   * test time is a defect of the test. A bake that fails fails every later test of the run at once,
-   * naming the stage, instead of being retried by each of them until the job's own limit cancels
-   * the run.
+   * hosts holding an older bake rebuild instead of serving a stale image. The image is baked before
+   * any test, by {@code ci/images prepared-image bake}, which the incus action runs on a cache
+   * miss: the bake is the only step of the lane that reaches an external host for packages, and a
+   * bake that fails stops the job there, once. A host without the image fails every test at once,
+   * naming the bake, instead of reaching the internet from a test's body.
    */
   protected void launchPrepared(String container, String... options) throws Exception {
     synchronized (PREPARE_LOCK) {
-      if (bakeFailure != null) {
-        throw new AssertionError("prepared image unavailable: " + bakeFailure.getMessage());
-      }
       if (!preparedImageReady) {
-        if (!shell.exec(List.of("incus", "image", "show", PREPARED_ALIAS)).ok()) {
-          try {
-            bakePreparedImage();
-          } catch (Exception | AssertionError e) {
-            bakeFailure = e;
-            throw e;
-          }
-        }
+        assertTrue(
+            shell.exec(List.of("incus", "image", "show", PREPARED_ALIAS)).ok(),
+            "the prepared image "
+                + PREPARED_ALIAS
+                + " is not on this host: bake it with ci/images prepared-image bake");
         preparedImageReady = true;
       }
     }
@@ -137,67 +117,6 @@ public abstract class AbstractIncusIT {
             + PREPARED_ALIAS
             + ": "
             + launched.stderr());
-  }
-
-  private void bakePreparedImage() throws Exception {
-    shell.exec(List.of("incus", "delete", "--force", BUILDER));
-    retryStage(
-        "launch builder container from " + IMAGE,
-        () -> shell.exec(List.of("incus", "launch", IMAGE, BUILDER)));
-    retryStage(
-        "container outbound DNS",
-        () ->
-            exec(
-                BUILDER,
-                List.of(
-                    "bash",
-                    "-c",
-                    "for i in $(seq 1 45); do"
-                        + " getent hosts archive.ubuntu.com >/dev/null 2>&1 && exit 0; sleep 2;"
-                        + " done; echo '--- resolv.conf ---'; cat /etc/resolv.conf;"
-                        + " echo '--- addresses ---'; ip -brief addr; exit 1")));
-    retryStage("apt-get update", () -> exec(BUILDER, List.of("apt-get", "update", "-qq")));
-    var install = new ArrayList<>(List.of("apt-get", "install", "-y", "-qq"));
-    install.addAll(PREPARED_PACKAGES);
-    retryStage(
-        "apt-get install " + String.join(" ", PREPARED_PACKAGES),
-        () ->
-            exec(
-                BUILDER,
-                List.of(
-                    "env",
-                    "DEBIAN_FRONTEND=noninteractive",
-                    "bash",
-                    "-c",
-                    String.join(" ", install)),
-                INSTALL_BUDGET));
-    retryStage("stop builder", () -> shell.exec(List.of("incus", "stop", BUILDER)));
-    retryStage(
-        "publish prepared image",
-        () -> shell.exec(List.of("incus", "publish", BUILDER, "--alias", PREPARED_ALIAS)));
-    deleteContainerQuietly(BUILDER);
-  }
-
-  private void retryStage(String stage, StageCommand command) throws Exception {
-    ShellExec.Result last = null;
-    for (var attempt = 1; attempt <= 3; attempt++) {
-      last = command.run();
-      if (last.ok()) {
-        return;
-      }
-    }
-    deleteContainerQuietly(BUILDER);
-    throw new AssertionError(
-        "prepared-image bake failed at stage '"
-            + stage
-            + "' after 3 attempts: "
-            + last.stderr()
-            + (last.stdout().isBlank() ? "" : "\nstdout: " + last.stdout()));
-  }
-
-  @FunctionalInterface
-  protected interface StageCommand {
-    ShellExec.Result run() throws Exception;
   }
 
   /** The ZFS pool a spec's workspaces are cloned on in this lane: a file, beside the dir pool. */
@@ -306,12 +225,6 @@ public abstract class AbstractIncusIT {
 
   protected ShellExec.Result exec(String container, List<String> argv) throws Exception {
     return shell.exec(execCommand(container, argv));
-  }
-
-  /** The bake's package install runs over a public mirror, so it gets its own time budget. */
-  private ShellExec.Result exec(String container, List<String> argv, Duration budget)
-      throws Exception {
-    return shell.exec(execCommand(container, argv), null, budget);
   }
 
   private static List<String> execCommand(String container, List<String> argv) {

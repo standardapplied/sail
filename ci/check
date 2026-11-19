@@ -6,8 +6,6 @@ cd "$(dirname "$0")/.."
 readonly MODULES="sail-core sail-harness sail-infra"
 readonly DEFAULT_IT_SECONDS=10
 readonly SPLIT_IT_SECONDS=360
-readonly PREPARED_SOURCE=sail-infra/src/test/java/ai/singlr/sail/engine/AbstractIncusIT.java
-
 usage() {
   cat >&2 <<'EOF'
 Usage:
@@ -22,8 +20,6 @@ Usage:
                                 run the IT classes of that shard under -Pintegration
   ci/check methods CLASS INDEX COUNT
                                 print CLASS#a+b+... : every COUNT-th of its @Test methods from INDEX
-  ci/check prepared-image import|export DIR
-                                load the incus suites' prepared image from DIR, or keep it there
   ci/check local-host BINARY    run BINARY's own terminal host as the app's agent does, in this
                                 account's home, which must hold none: it serves, a second exits 1
                                 naming it, and SIGTERM stops it leaving only its lock
@@ -201,43 +197,6 @@ methods() {
   echo "$class#$picked"
 }
 
-prepared_alias() {
-  local alias
-  alias=$(sed -n 's/.*PREPARED_ALIAS = "\([^"]*\)";.*/\1/p' "$PREPARED_SOURCE")
-  if [[ -z $alias ]]; then
-    echo "ci/check: $PREPARED_SOURCE names no PREPARED_ALIAS." >&2
-    exit 1
-  fi
-  echo "$alias"
-}
-
-prepared_image() {
-  local verb=${1:-} dir=${2:-}
-  [[ -n $dir ]] || usage
-  local alias
-  alias=$(prepared_alias)
-  case $verb in
-    import)
-      if [[ -f $dir/prepared.tar.gz ]]; then
-        incus image import "$dir/prepared.tar.gz" --alias "$alias"
-        echo "Imported $alias from $dir."
-      else
-        echo "No prepared image in $dir; the first suite bakes $alias."
-      fi
-      ;;
-    export)
-      if incus image show "$alias" > /dev/null 2>&1; then
-        mkdir -p "$dir"
-        incus image export "$alias" "$dir/prepared"
-        echo "Kept $alias in $dir."
-      else
-        echo "No $alias on this host; nothing to keep."
-      fi
-      ;;
-    *) usage ;;
-  esac
-}
-
 LOCAL_HOST_PID=""
 LOCAL_HOST_LEFT=()
 
@@ -359,7 +318,6 @@ case ${1:-} in
   shard) shift; shard "$@" ;;
   its) shift; its "$@" ;;
   methods) shift; methods "$@" ;;
-  prepared-image) shift; prepared_image "$@" ;;
   local-host) shift; local_host "$@" ;;
   min-macos) shift; min_macos "$@" ;;
   *) usage ;;

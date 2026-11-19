@@ -4965,10 +4965,15 @@ to end, which wait only for the one native build:
   class, one with no recorded time included, in exactly one shard, longest first onto the
   lightest, from the per-class seconds in `ci/it-seconds`. A class's line there is only a weight:
   refresh it from a run's failsafe times when the shards drift apart.
-- **Incus is set up by one action.** `.github/actions/incus` installs it, opens its containers'
-  egress, fetches the base image and restores the suites' prepared image (the base plus every
-  package they install, `AbstractIncusIT`'s bake) from a cache kept per week and per source that
-  defines it; a shard that baked it on a miss keeps it with `ci/check prepared-image export`.
+- **What CI installs is prepared once a week and kept in caches.** `ci/images` holds the
+  recipes, and nothing else, so a cache key that hashes it changes only with a recipe: the incus
+  suites' prepared image (the base plus every package the suites and a project's provisioning
+  install), the native fleet's Podman image, and the runner's own incus and ZFS tools as `.deb`
+  files. `.github/actions/incus` (which also installs Incus from those files, opens its
+  containers' egress and fetches the base image) and `.github/actions/fleet-image` restore them,
+  or on a miss bake them before any test from the runner's own Ubuntu mirror, each stage tried 3
+  times for at most 300 s; no test installs a package. They are kept per ISO week, the runner's
+  packages also per runner image, and `warm.yml` refills them on main early each week.
 - **Dependencies come from a cache.** Every job restores `~/.m2` through the `maven-cache`
   action, one cache per kind of job keyed on the poms, so each kind keeps what it alone resolves;
   this repository's own modules are never cached.

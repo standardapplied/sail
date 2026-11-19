@@ -1,26 +1,44 @@
 name: Incus
 description: >
   Installs and initializes incus on the runner, gives its containers outbound internet, fetches
-  the base image and restores the incus suites' prepared image from the cache into
-  $RUNNER_TEMP/prepared-image. On a miss the first suite bakes it, and the job keeps it for the
-  next run with `ci/check prepared-image export "$RUNNER_TEMP/prepared-image"` as its last step.
-
-outputs:
-  prepared-hit:
-    description: Whether the prepared image came from the cache.
-    value: ${{ steps.prepared.outputs.cache-hit }}
+  the base image and holds the incus suites' prepared image, every lane's from one recipe
+  (ci/images prepared-image). The runner's packages and the prepared image come from caches kept per
+  week; on a miss this action fetches or bakes them, with bounded tries, before any test, and the
+  cache keeps them when the job succeeds. No test reaches an external host for a package.
 
 runs:
   using: composite
   steps:
+    # Kept per week, so nothing cached is staler than a week; the runner's packages also per runner
+    # image, whose preinstalled packages their files were resolved against.
+    - name: Name this week and this runner image
+      id: week
+      shell: bash
+      run: |
+        echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+        echo "image=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
+
     # The Incus host init installs: Zabbly's stable repository, as on every box (HostPackages),
-    # unpinned, so CI tests Zabbly's current stable release, not the release a box that installed
-    # it earlier holds. Ubuntu 24.04's own incus 6.0.0, which a box keeps when it came with it and
-    # which cannot make a mirrored ZFS pool, is covered only by the unit tests of Sail's refusal of
-    # it (IncusStorageTest, HostProvisionerTest). The runner image also carries third-party apt
-    # sources (Chrome, Microsoft, ...) whose index fetches fail on their own schedule, and a plain
-    # update refreshes them all — so only Ubuntu's own sources and Zabbly's are refreshed here.
-    #
+    # unpinned, so CI tests Zabbly's stable release of the week, not the release a box that
+    # installed it earlier holds. Ubuntu 24.04's own incus 6.0.0, which a box keeps when it came
+    # with it and which cannot make a mirrored ZFS pool, is covered only by the unit tests of
+    # Sail's refusal of it (IncusStorageTest, HostProvisionerTest). Its files and the ZFS tools'
+    # are fetched once a week per runner image (`ci/images runner-packages fetch`, from Ubuntu's own
+    # sources and Zabbly's only, as the runner image's third-party sources fail on their own
+    # schedule) and installed from those files with no network, the same way after a fetch as
+    # after a restore.
+    - name: Restore the runner's packages
+      id: packages
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ runner.temp }}/runner-packages
+        key: incus-runner-packages-${{ steps.week.outputs.image }}-${{ hashFiles('ci/images') }}-${{ steps.week.outputs.week }}
+
+    - name: Fetch the runner's packages
+      if: steps.packages.outputs.cache-hit != 'true'
+      shell: bash
+      run: ci/images runner-packages fetch "$RUNNER_TEMP/runner-packages"
+
     # The runner's sudo keeps the runner's environment, HOME and XDG_CONFIG_HOME/XDG_CACHE_HOME
     # among it, and the incus client makes its config and cache directories there on its first
     # run (os.UserConfigDir, os.UserCacheDir): root's init is run as a box's sudo runs it, its own
@@ -29,13 +47,7 @@ runs:
     - name: Install and initialize incus
       shell: bash
       run: |
-        sudo find /etc/apt/sources.list.d -type f ! -name ubuntu.sources -delete
-        sudo curl -fsSL --create-dirs -o /etc/apt/keyrings/zabbly.asc https://pkgs.zabbly.com/key.asc
-        printf 'Enabled: yes\nTypes: deb\nURIs: https://pkgs.zabbly.com/incus/stable\nSuites: %s\nComponents: main\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/zabbly.asc\n' \
-          "$(. /etc/os-release && echo "$VERSION_CODENAME")" "$(dpkg --print-architecture)" \
-          | sudo tee /etc/apt/sources.list.d/zabbly-incus-stable.sources > /dev/null
-        sudo apt-get update
-        sudo apt-get install -y incus
+        ci/images runner-packages install "$RUNNER_TEMP/runner-packages" incus
         sudo -H env -u XDG_CONFIG_HOME -u XDG_CACHE_HOME incus admin init --minimal
         sudo chmod o+rw /var/lib/incus/unix.socket
         if [ -e "$HOME/.config/incus" ] || [ -e "$HOME/.cache/incus" ]; then
@@ -64,7 +76,7 @@ runs:
     # the tools without a restart.
     - name: Install the ZFS tools
       shell: bash
-      run: sudo apt-get install -y zfsutils-linux
+      run: ci/images runner-packages install "$RUNNER_TEMP/runner-packages" zfsutils-linux
 
     # Every suite launches this image; fetched once here, its download is no test class's time.
     - name: Fetch the base image
@@ -77,22 +89,26 @@ runs:
         done
         exit 1
 
-    # The prepared image is the base plus every package the suites install; baking it costs a
-    # shard over a minute. It is kept per week and per source that defines it, so it is never
-    # staler than a week nor older than its package list.
-    - name: Name this week
-      id: week
-      shell: bash
-      run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
-
+    # The prepared image is the base plus every package the suites and a project's provisioning
+    # install. It is kept per week and per source that defines it (the recipe in ci/images, the alias
+    # in AbstractIncusIT, the baseline in ProjectProvisioner), so it is never staler than a week nor
+    # older than its package list. On a miss it is baked here, before any test, and kept in the
+    # cached path at once.
     - name: Restore the prepared image
       id: prepared
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ${{ runner.temp }}/prepared-image
-        key: incus-prepared-${{ hashFiles('sail-infra/src/test/java/ai/singlr/sail/engine/AbstractIncusIT.java', 'sail-infra/src/main/java/ai/singlr/sail/engine/ProjectProvisioner.java') }}-${{ steps.week.outputs.week }}
+        key: incus-prepared-${{ hashFiles('ci/images', 'sail-infra/src/test/java/ai/singlr/sail/engine/AbstractIncusIT.java', 'sail-infra/src/main/java/ai/singlr/sail/engine/ProjectProvisioner.java') }}-${{ steps.week.outputs.week }}
 
     - name: Import the prepared image
       if: steps.prepared.outputs.cache-hit == 'true'
       shell: bash
-      run: ci/check prepared-image import "$RUNNER_TEMP/prepared-image"
+      run: ci/images prepared-image import "$RUNNER_TEMP/prepared-image"
+
+    - name: Bake the prepared image
+      if: steps.prepared.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        ci/images prepared-image bake
+        ci/images prepared-image export "$RUNNER_TEMP/prepared-image"
