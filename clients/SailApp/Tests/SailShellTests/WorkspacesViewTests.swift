@@ -533,6 +533,28 @@ import Testing
         }
     }
 
+    /// A failed refresh draws the panel's names in the secondary ink, as the stale frame does, and
+    /// leaves its tiles and its chosen row's bar as they are.
+    @Test func aStalePanelSaysItsNamesInTheSecondaryInk() throws {
+        var model = WorkspacesModel(person: Self.uday)
+        model.projectsListed(.success(ProjectList(projects: [ProjectSummary(name: "harbor", containerStatus: .known(.running), template: .known(.ready))], total: 1)))
+        let asked = model.askingProjects()
+        model.projectsListed(.failure(.unreachable("lost")), request: asked)
+        guard case let .shown(stale, _) = model.screen else { Issue.record("\(model.screen)"); return }
+        let panel = LeftPanel(look: .light, mono: try LabelFont(directory: LookTests.fonts))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: LeftPanel.width.standard, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.orderOut(nil) }
+        window.contentView = panel
+        panel.render(stale)
+        panel.layoutSubtreeIfNeeded()
+        let row = try #require(panel.list.rowView(atRow: 1, makeIfNecessary: true))
+        row.layoutSubtreeIfNeeded()
+        let cell = try #require(Self.found(SidebarRowCell.self, in: row).first)
+        let name = try #require(Self.found(NSTextField.self, in: cell).first)
+        #expect(name.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(Look.light.textSecondary))
+        #expect(panel.list.alphaValue == 1, "the panel is dimmed whole, its tiles and bar too")
+    }
+
     /// The panel's edge drags it between 200 and 360 pt.
     @Test func thePanelIsResizedWithinItsBounds() throws {
         let panel = LeftPanel(look: .light, mono: try LabelFont(directory: LookTests.fonts))

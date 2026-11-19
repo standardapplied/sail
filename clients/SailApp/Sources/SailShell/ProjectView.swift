@@ -191,7 +191,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     private var drawn: Drawn?
 
     /// The name field holds the keys now.
-    var fieldHasKeys: Bool {
+    package var fieldHasKeys: Bool {
         (window?.firstResponder as? NSTextView)?.delegate === field.field
     }
 

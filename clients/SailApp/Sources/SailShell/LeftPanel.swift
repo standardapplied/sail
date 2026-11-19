@@ -34,6 +34,8 @@ package final class LeftPanel: NSView {
     private lazy var placeTip = Tooltip("", look: look, mono: nil)
     private(set) var widthConstraint: NSLayoutConstraint!
     private var projects: [WorkspacesModel.Project] = []
+    /// The names are drawn in the secondary ink: what is shown failed to refresh.
+    private var stale = false
     /// What it last showed, drawn again in a new look.
     private var shown: WorkspacesModel.Panel?
 
@@ -114,20 +116,17 @@ package final class LeftPanel: NSView {
         emptyLine.attributedStringValue = NSAttributedString(string: panel.emptyLine ?? "", attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .foregroundColor: NSColor(look.textTertiary),
         ])
-        if panel.projects != projects {
+        if panel.projects != projects || panel.stale != stale {
             projects = panel.projects
+            stale = panel.stale
             list.entries = [.head("Projects", count: panel.projects.count)] + panel.projects.map { project in
                 .item(row(project))
             }
         }
         if list.chosen != panel.chosen { list.choose(panel.chosen) }
-        list.alphaValue = panel.stale ? Self.stale : 1
         foot(who: panel.who, controlPlane: panel.controlPlane)
         needsLayout = true
     }
-
-    /// What is shown when its refresh failed: dimmed, as the design's stale frame draws the panel.
-    static let stale = 0.55
 
     /// Skeleton rows in place of the projects; who is signed in is known already.
     func renderLoading(who: String, controlPlane: String) {
@@ -159,7 +158,9 @@ package final class LeftPanel: NSView {
     private func row(_ project: WorkspacesModel.Project) -> SailList.Item {
         let pill = Self.pill(project.mark)
         let voice = pill.map { "\(project.name), \($0.label.lowercased())" } ?? project.name
-        return SailList.Item(id: project.name, name: project.name, voice: voice, content: SidebarRowCell(project.name, template: pill, look: look, mono: mono))
+        let cell = SidebarRowCell(project.name, template: pill, look: look, mono: mono)
+        cell.stale = stale
+        return SailList.Item(id: project.name, name: project.name, voice: voice, content: cell)
     }
 
     static func pill(_ mark: WorkspacesModel.Mark?) -> PillState? {
