@@ -215,7 +215,7 @@ jobs:
     if: ${{ !cancelled() && (inputs.release || (needs.changes.outputs.clients == 'true' && needs.host.result == 'success')) }}
     runs-on: macos-15
     timeout-minutes: 45
-    # actions: read, to ask the artifact service for the app's zip by its id before downloading it.
+    # actions: read, to download the app's zip from the artifact service by its id.
     permissions:
       actions: read
       contents: read
@@ -516,35 +516,40 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-      # The artifact service can say it has no artifact it has just accepted: Clients run
-      # 44464696183 finalized the zip at 05:37:17.411 and the download, asking for it by id at
-      # 05:37:17.789, was told "No artifacts found for ID". So the download waits until the service
-      # answers for the id and lists it in this run, asked through the API the download then uses
-      # (its github-token), and the download checks the bytes against the digest the upload took.
-      - name: Wait until the artifact service serves the app's zip
+      # What a person downloads, asked of GitHub's artifact API by the zip's id, with no second
+      # listing to disagree with it: run 44464696183's download was told "No artifacts found for ID"
+      # 0.4 s after the upload, and #491's, after a wait that read this API, was told by
+      # download-artifact's own listing that the id was not there. The bytes must be the zip the
+      # job notarized: their SHA-256 is both the upload's digest and the shipped file's.
+      - name: The download, as the artifact service hands it out
         env:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT: ${{ steps.shipped.outputs.artifact-id }}
+          DIGEST: ${{ steps.shipped.outputs.artifact-digest }}
         run: |
+          shopt -s nullglob
+          shipped=("$RUNNER_TEMP"/shipped/Sail-*.zip)
+          (( ${#shipped[@]} == 1 )) || { echo "::error::the job shipped ${#shipped[@]} zips, not one"; exit 1; }
+          mkdir -p "$RUNNER_TEMP/download"
+          zip="$RUNNER_TEMP/download/$(basename "${shipped[0]}")"
           for attempt in 1 2 3 4 5 6; do
-            listed=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --paginate --jq '.artifacts[].id' 2> /dev/null || true)
-            if gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT" > /dev/null 2>&1 && grep -qx "$ARTIFACT" <<< "$listed"; then
-              (( attempt == 1 )) || echo "GitHub's artifact service served artifact $ARTIFACT after $(( (attempt - 1) * 5 )) s."
-              exit 0
+            if gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT/zip" > "$zip" 2> "$RUNNER_TEMP/download.err"; then
+              (( attempt == 1 )) || echo "GitHub's artifact service served artifact $ARTIFACT on try $attempt, after $(( (attempt - 1) * 5 )) s."
+              break
+            fi
+            if (( attempt == 6 )); then
+              echo "::error::GitHub's artifact service accepted artifact $ARTIFACT at its upload but did not serve it within 30 s ($(tr '\n' ' ' < "$RUNNER_TEMP/download.err")), so what a person downloads could not be checked."
+              exit 1
             fi
             sleep 5
           done
-          echo "::error::GitHub's artifact service accepted artifact $ARTIFACT at its upload but did not serve it within 30 s, so what a person downloads could not be checked."
-          exit 1
-
-      - name: The download, as the artifact service hands it out
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          artifact-ids: ${{ steps.shipped.outputs.artifact-id }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/download
-          skip-decompress: true
-          digest-mismatch: error
+          got=$(shasum -a 256 "$zip" | cut -d ' ' -f 1)
+          made=$(shasum -a 256 "${shipped[0]}" | cut -d ' ' -f 1)
+          if ! [[ $got == "${DIGEST#sha256:}" && $got == "$made" ]]; then
+            echo "::error::the download's SHA-256 is $got, the upload's digest ${DIGEST#sha256:} and the shipped zip's $made: what a person downloads is not the zip this job made."
+            exit 1
+          fi
+          echo "The download is the zip this job made: SHA-256 $got."
 
       # What a person gets: the downloaded file is one zip; unpacked as Finder's Archive Utility
       # does (ditto), with the quarantine a browser download carries, it is Sail.app alone, its
