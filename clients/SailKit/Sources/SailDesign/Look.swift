@@ -24,7 +24,8 @@ public struct Tint: Hashable, Sendable {
 /// focus, a link's underline, the chosen bar); choosing is ink; red (crimson) means wrong or
 /// destroys. Its light tint is only under selected text and in the focus halo.
 public struct Look: Equatable, Sendable {
-    public let palette: Palette
+    /// The terminal's colours, its selection and idle cursor taken from this look's tokens.
+    public private(set) var palette: Palette
     public let canvas: RGB
     public let surface: RGB
     public let surfacePop: RGB
@@ -43,6 +44,10 @@ public struct Look: Equatable, Sendable {
     public private(set) var fillSelectedQuiet: Tint
     public let fillHover: Tint
     public let fillPressed: Tint
+    /// The band under a list's group head ("YOURS 3").
+    public let groupHead: Tint
+    /// A project's letter well, the same for every project.
+    public let well: Tint
     public private(set) var focusHalo: Tint
     /// Under selected text, in fields and in the terminal: the accent's one tint besides the halo.
     public let textSelection: Tint
@@ -57,33 +62,36 @@ public struct Look: Equatable, Sendable {
     public let onInk: RGB
 
     public static let dark = Look(
-        palette: terminal(.dark, selection: 0.30, idle: Tint(0xF6F1E9, alpha: 0.55)), canvas: RGB(0x0A0E11), surface: RGB(0x12171B), surfacePop: RGB(0x161C21), chrome: RGB(0x251717), text: Tint(0xF6F1E9),
+        palette: .dark, canvas: RGB(0x0A0E11), surface: RGB(0x12171B), surfacePop: RGB(0x161C21), chrome: RGB(0x251717), text: Tint(0xF6F1E9),
         textSecondary: Tint(0xF6F1E9, alpha: 0.78), textTertiary: Tint(0xF6F1E9, alpha: 0.55), separator: Tint(0xF6F1E9, alpha: 0.14),
         separatorStrong: Tint(0xF6F1E9, alpha: 0.24), gridLine: Tint(0xF6F1E9, alpha: 0.07), accent: RGB(0xFC4926), accentHover: RGB(0xFF7350),
         accentPressed: RGB(0xE23E1D), onAccent: RGB(0x0A0E11), fillSelected: Tint(0xF6F1E9, alpha: 0.10),
         fillSelectedQuiet: Tint(0xF6F1E9, alpha: 0.06), fillHover: Tint(0xF6F1E9, alpha: 0.06), fillPressed: Tint(0xF6F1E9, alpha: 0.10),
-        focusHalo: Tint(0xFC4926, alpha: 0.55), textSelection: Tint(0xFC4926, alpha: 0.30), error: RGB(0xF2788D), errorHover: RGB(0xD06779),
+        groupHead: Tint(0xF6F1E9, alpha: 0.06), well: Tint(0xF6F1E9, alpha: 0.08), focusHalo: Tint(0xFC4926, alpha: 0.55), textSelection: Tint(0xFC4926, alpha: 0.30), error: RGB(0xF2788D), errorHover: RGB(0xD06779),
         errorPressed: RGB(0xB35968), onError: RGB(0x0A0E11),
         warning: RGB(0xD08FA6), success: RGB(0x86B89A), info: RGB(0x7FBFCA), ink: RGB(0xF6F1E9), onInk: RGB(0x0A0E11)
-    )
+    ).withTerminalInk()
 
     public static let light = Look(
-        palette: terminal(.light, selection: 0.20, idle: Tint(0x666B70)), canvas: RGB(0xF8FAFC), surface: RGB(0xFDFFFF), surfacePop: RGB(0xFFFFFF), chrome: RGB(0xF7EAE2), text: Tint(0x0E1217),
+        palette: .light, canvas: RGB(0xF8FAFC), surface: RGB(0xFDFFFF), surfacePop: RGB(0xFFFFFF), chrome: RGB(0xF7EAE2), text: Tint(0x0E1217),
         textSecondary: Tint(0x383E43), textTertiary: Tint(0x666B70), separator: Tint(0x0E1217, alpha: 0.12), separatorStrong: Tint(0x0E1217, alpha: 0.22),
         gridLine: Tint(0x0E1217, alpha: 0.06), accent: RGB(0xFC4926), accentHover: RGB(0xD73626), accentPressed: RGB(0xB92C1E),
         onAccent: RGB(0xFFFFFF), fillSelected: Tint(0x0E1217, alpha: 0.08), fillSelectedQuiet: Tint(0x0E1217, alpha: 0.05),
-        fillHover: Tint(0x0E1217, alpha: 0.05), fillPressed: Tint(0x0E1217, alpha: 0.09), focusHalo: Tint(0xFC4926, alpha: 0.42),
+        fillHover: Tint(0x0E1217, alpha: 0.05), fillPressed: Tint(0x0E1217, alpha: 0.09), groupHead: Tint(0x0E1217, alpha: 0.05),
+        well: Tint(0x0E1217, alpha: 0.06), focusHalo: Tint(0xFC4926, alpha: 0.42),
         textSelection: Tint(0xFC4926, alpha: 0.20), error: RGB(0xB91C3C), errorHover: RGB(0x9F1834), errorPressed: RGB(0x89152C), onError: RGB(0xFFFFFF), warning: RGB(0x9D4260), success: RGB(0x256E4A),
         info: RGB(0x17646F), ink: RGB(0x0E1217), onInk: RGB(0xF8FAFC)
-    )
+    ).withTerminalInk()
 
-    /// `base` with the look's selection, the accent at `selection` over its background under its own
-    /// foreground, and its idle cursor, `idle` over its background: both opaque, fixed colours.
-    private static func terminal(_ base: Palette, selection: Double, idle: Tint) -> Palette {
-        var palette = base
-        palette.selection = SelectionInk(foreground: base.foreground, background: base.background.blended(toward: base.cursor, by: selection))
-        palette.idleCursor = base.background.blended(toward: idle.rgb, by: idle.alpha)
-        return palette
+    /// This look with its terminal's selection, `textSelection` over the terminal's background under
+    /// its own foreground, and its idle cursor, `textTertiary` over that background: both opaque,
+    /// fixed colours, so a change of those tokens reaches the terminal too.
+    private func withTerminalInk() -> Look {
+        var look = self
+        let ground = palette.background
+        look.palette.selection = SelectionInk(foreground: palette.foreground, background: ground.blended(toward: textSelection.rgb, by: textSelection.alpha))
+        look.palette.idleCursor = ground.blended(toward: textTertiary.rgb, by: textTertiary.alpha)
+        return look
     }
 
     /// This look under Increase Contrast: edges and hairlines about twice as strong, tertiary text

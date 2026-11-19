@@ -21,7 +21,7 @@ import Testing
             "separator": said(look.separator), "separatorStrong": said(look.separatorStrong), "gridLine": said(look.gridLine),
             "accent": hex(look.accent), "accentHover": hex(look.accentHover), "accentPressed": hex(look.accentPressed),
             "onAccent": hex(look.onAccent), "fillSelected": said(look.fillSelected), "textSelection": said(look.textSelection),
-            "fillSelectedQuiet": said(look.fillSelectedQuiet), "fillHover": said(look.fillHover), "fillPressed": said(look.fillPressed),
+            "fillSelectedQuiet": said(look.fillSelectedQuiet), "fillHover": said(look.fillHover), "fillPressed": said(look.fillPressed), "groupHead": said(look.groupHead), "well": said(look.well),
             "focusHalo": said(look.focusHalo), "error": hex(look.error), "errorHover": hex(look.errorHover), "errorPressed": hex(look.errorPressed),
             "onError": hex(look.onError), "warning": hex(look.warning), "success": hex(look.success), "info": hex(look.info),
             "ink": hex(look.ink), "onInk": hex(look.onInk),
@@ -32,7 +32,7 @@ import Testing
         "canvas": "F8FAFC", "surface": "FDFFFF", "surfacePop": "FFFFFF", "chrome": "F7EAE2", "text": "0E1217", "textSecondary": "383E43",
         "textTertiary": "666B70", "separator": "0E1217@0.12", "separatorStrong": "0E1217@0.22", "gridLine": "0E1217@0.06", "accent": "FC4926",
         "accentHover": "D73626", "accentPressed": "B92C1E", "onAccent": "FFFFFF", "fillSelected": "0E1217@0.08", "textSelection": "FC4926@0.20",
-        "fillSelectedQuiet": "0E1217@0.05", "fillHover": "0E1217@0.05", "fillPressed": "0E1217@0.09", "focusHalo": "FC4926@0.42", "error": "B91C3C",
+        "fillSelectedQuiet": "0E1217@0.05", "fillHover": "0E1217@0.05", "fillPressed": "0E1217@0.09", "groupHead": "0E1217@0.05", "well": "0E1217@0.06", "focusHalo": "FC4926@0.42", "error": "B91C3C",
         "errorHover": "9F1834", "errorPressed": "89152C", "onError": "FFFFFF", "warning": "9D4260", "success": "256E4A", "info": "17646F",
         "ink": "0E1217", "onInk": "F8FAFC",
     ]
@@ -41,7 +41,7 @@ import Testing
         "canvas": "0A0E11", "surface": "12171B", "surfacePop": "161C21", "chrome": "251717", "text": "F6F1E9", "textSecondary": "F6F1E9@0.78",
         "textTertiary": "F6F1E9@0.55", "separator": "F6F1E9@0.14", "separatorStrong": "F6F1E9@0.24", "gridLine": "F6F1E9@0.07", "accent": "FC4926",
         "accentHover": "FF7350", "accentPressed": "E23E1D", "onAccent": "0A0E11", "fillSelected": "F6F1E9@0.10", "textSelection": "FC4926@0.30",
-        "fillSelectedQuiet": "F6F1E9@0.06", "fillHover": "F6F1E9@0.06", "fillPressed": "F6F1E9@0.10", "focusHalo": "FC4926@0.55", "error": "F2788D",
+        "fillSelectedQuiet": "F6F1E9@0.06", "fillHover": "F6F1E9@0.06", "fillPressed": "F6F1E9@0.10", "groupHead": "F6F1E9@0.06", "well": "F6F1E9@0.08", "focusHalo": "FC4926@0.55", "error": "F2788D",
         "errorHover": "D06779", "errorPressed": "B35968", "onError": "0A0E11", "warning": "D08FA6", "success": "86B89A", "info": "7FBFCA",
         "ink": "F6F1E9", "onInk": "0A0E11",
     ]
@@ -63,7 +63,11 @@ import Testing
     /// selected text; errors are crimson, at least 20 degrees of hue from the accent.
     @Test(arguments: [("light", Look.light), ("dark", Look.dark), ("light contrasted", Look.light.contrasted()), ("dark contrasted", Look.dark.contrasted())])
     func choosingIsInkAndRedIsApartFromTheAccent(_ name: String, _ look: Look) {
-        for (token, tint) in [("fillSelected", look.fillSelected), ("fillSelectedQuiet", look.fillSelectedQuiet), ("fillHover", look.fillHover), ("fillPressed", look.fillPressed)] {
+        let neutrals = [
+            ("fillSelected", look.fillSelected), ("fillSelectedQuiet", look.fillSelectedQuiet), ("fillHover", look.fillHover), ("fillPressed", look.fillPressed),
+            ("groupHead", look.groupHead), ("well", look.well),
+        ]
+        for (token, tint) in neutrals {
             #expect(tint.rgb == look.ink, "\(name) \(token) is \(Self.said(tint)), not ink")
         }
         let accentTints = [look.textSelection, look.focusHalo].filter { $0.rgb == look.accent }

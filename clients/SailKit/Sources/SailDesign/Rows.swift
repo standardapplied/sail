@@ -71,7 +71,7 @@ public struct RowPaint: Equatable, Sendable {
     public static let creating = Self(fill: nil, bar: false, actions: true, progress: true)
 }
 
-/// A project's tile, 20 pt square in 4 pt corners: the same quiet ink well for every project, a
+/// A project's tile, 20 pt square in 4 pt corners: the same `well` for every project, a
 /// hairline ring, and its lower-case initial in mono at 11 in the secondary ink. No project has a
 /// hue of its own: the owner found the hues diluted the panel (19 Nov 2026). `mark` flips every
 /// tile to the box icon instead of the initial.
@@ -89,7 +89,7 @@ public struct TilePaint: Equatable, Sendable {
 
     public init(look: Look) {
         ink = look.textSecondary
-        fill = Tint(look.ink, alpha: look.palette.isDark ? 0.08 : 0.06)
+        fill = look.well
         ring = look.separator
     }
 }

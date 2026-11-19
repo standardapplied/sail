@@ -46,7 +46,7 @@ import Testing
     func everyTileIsTheSameNeutralWell(_ name: String, _ look: Look) {
         let tile = TilePaint(look: look)
         #expect(tile.ink == look.textSecondary && tile.fill.rgb == look.ink && tile.ring == look.separator, "\(name)")
-        #expect(tile.fill.alpha == (look.palette.isDark ? 0.08 : 0.06) && tile.ink.rgb != look.accent && tile.fill.rgb != look.accent)
+        #expect(tile.fill == look.well && tile.ink.rgb != look.accent && tile.fill.rgb != look.accent)
         #expect(TilePaint.mark == .initial && [TilePaint.side, TilePaint.points, TilePaint.radius] == [20, 11, 4])
     }
 

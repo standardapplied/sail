@@ -393,7 +393,7 @@ final class SailRowView: NSTableRowView {
         }
         guard item != nil else {
             guard rowStyle != .sidebar else { return }
-            NSColor(look.fillHover).setFill()
+            NSColor(look.groupHead).setFill()
             return NSBezierPath(rect: content).fill()
         }
         let paint = self.paint, area = content.insetBy(dx: rowStyle.margin, dy: 0)
