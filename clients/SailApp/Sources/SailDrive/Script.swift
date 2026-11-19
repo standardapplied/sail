@@ -188,6 +188,9 @@ struct Step: Decodable {
     var fieldHolds: String?
     /// The list holds the keys (true) or does not (false), within `seconds` (5 by default).
     var keysInList: Bool?
+    /// The Workspaces section says this while a person's action is under way, within `seconds` (5
+    /// by default).
+    var whileBusy: String?
     /// The Workspaces row chosen is the one of this name, within `seconds` (10 by default).
     var listChosen: String?
     /// A proxy answers this route ("GET /v1/projects/harbor/workspaces") with a 502 from now on;

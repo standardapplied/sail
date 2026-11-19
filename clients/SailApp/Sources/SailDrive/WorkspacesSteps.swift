@@ -163,6 +163,10 @@ extension Driver {
             }
             return (held, "the field \(pane.project.fieldHasKeys ? "holds" : "does not hold") the keys and the name \(pane.project.field.field.stringValue); first responder \(String(describing: shell.window.firstResponder.map { type(of: $0) }))")
         }
+        if let said = step.whileBusy {
+            let seen = await waitUntil(step.seconds ?? 5) { pane.busy && pane.text.contains(said) }
+            return (seen, "\(pane.busy ? "under way" : "nothing under way"); the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
+        }
         if let held = step.keysInList {
             let list = await waitUntil(step.seconds ?? 5) { (shell.window.firstResponder === pane.project.list) == held }
             return (list, "first responder \(String(describing: shell.window.firstResponder.map { type(of: $0) }))")

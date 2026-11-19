@@ -8,6 +8,8 @@ import SailLook
 @MainActor
 public final class EmptyState: NSView {
     static let column = 400.0, gap = 10.0, tileGap = 6.0, actionsGap = 8.0, iconSide = 24.0
+    /// Each label runs this far past the column on each side: a text field's own inset.
+    static let labelPadding = 2.0
 
     public var look: Look {
         didSet { repaint() }
@@ -78,8 +80,12 @@ public final class EmptyState: NSView {
     /// row of actions; the last value is the whole height.
     func frames(width: Double) -> (tile: NSRect, title: NSRect, body: NSRect, actions: NSRect, line: NSRect?, height: Double) {
         let column = min(width, Self.column), left = (width - column) / 2
+        /// The label's own measure at the width it is given (the column and its padding), so its
+        /// height holds every line it wraps to; the text's bounding box at the column wrapped one
+        /// line fewer than the label draws (an admin's longer line lost its last word).
         func measured(_ label: NSTextField) -> Double {
-            Double(ceil(label.attributedStringValue.boundingRect(with: NSSize(width: column, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin]).height))
+            let bounds = NSRect(x: 0, y: 0, width: column + 2 * Self.labelPadding, height: .greatestFiniteMagnitude)
+            return Double(ceil(label.cell?.cellSize(forBounds: bounds).height ?? 0))
         }
         let tileRect = NSRect(x: (width - EmptyTilePaint.size) / 2, y: 0, width: EmptyTilePaint.size, height: EmptyTilePaint.size)
         let titleTop = EmptyTilePaint.size + Self.tileGap + Self.gap
@@ -116,7 +122,7 @@ public final class EmptyState: NSView {
     override public func layout() {
         super.layout()
         let placed = frames(width: Double(bounds.width))
-        let padding = 2.0
+        let padding = Self.labelPadding
         title.frame = placed.title.insetBy(dx: -padding, dy: 0)
         body.frame = placed.body.insetBy(dx: -padding, dy: 0)
         if let line, let at = placed.line { line.frame = at.insetBy(dx: -padding, dy: 0) }

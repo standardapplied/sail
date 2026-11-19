@@ -387,4 +387,22 @@ import Testing
         #expect((empty.title.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)?.familyName == TitleFont.family)
         #expect(EmptyTilePaint(missing: true, look: look).dashed)
     }
+
+    /// A body that wraps keeps every line: each label's frame is as tall as the label draws its
+    /// words at the frame's width (an admin's three-line body once lost its last word).
+    @Test func anEmptyStateKeepsEveryLineOfItsWords() throws {
+        let empty = EmptyState(
+            icon: .box, title: "No project is open to you yet",
+            body: "Add a project on 127.0.0.1, or add yourself to one. It then appears on the left, and you can create your own workspaces in it.", actions: [],
+            line: "signed in as uday · admin · 127.0.0.1", lineFirst: true, look: .light, titleFont: try TitleFont(directory: ControlsTests.fonts), mono: try ControlsTests.mono()
+        )
+        for width in [440.0, 404.0, 320.0] {
+            empty.frame = NSRect(x: 0, y: 0, width: width, height: 400)
+            empty.layoutSubtreeIfNeeded()
+            for label in [empty.title, empty.body] {
+                let drawn = try #require(label.cell).cellSize(forBounds: NSRect(x: 0, y: 0, width: label.frame.width, height: 10000)).height
+                #expect(label.frame.height >= drawn - 0.5, "\(width) pt: \(label.stringValue.prefix(16))… is \(label.frame.height) pt, its words \(drawn)")
+            }
+        }
+    }
 }
