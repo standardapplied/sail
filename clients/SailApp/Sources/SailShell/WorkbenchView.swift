@@ -126,6 +126,10 @@ public final class WorkbenchView: NSView {
 
     /// Draws the model, by frames and `isHidden` only (W2), and keeps it soon after.
     func apply() {
+        if model.focusedPane?.id != shownFocus {
+            shownFocus = model.focusedPane?.id
+            focusMoves += 1
+        }
         endRenamesLeftBehind()
         for (id, view) in tabViews where !model.tabs.contains(where: { $0.id == id }) {
             view.removeFromSuperview()
@@ -159,7 +163,13 @@ public final class WorkbenchView: NSView {
     }
 
     private func showTitles() {
-        strip.show(model.tabs.map { TabStrip.Item(id: $0.id, title: model.title(of: $0.id), zoomed: $0.zoomed != nil) }, selected: model.selected)
+        let items = model.tabs.map { tab in
+            TabStrip.Item(
+                id: tab.id, title: model.title(of: tab.id), zoomed: tab.zoomed != nil,
+                unended: tab.layout.leaves.contains { panes[$0]?.unended == true }
+            )
+        }
+        strip.show(items, selected: model.selected)
         onTitle(model.selectedTab.map { model.title(of: $0.id) } ?? ShellApp.title)
     }
 
@@ -175,7 +185,16 @@ public final class WorkbenchView: NSView {
         model.tabs.forEach { tab in tabViews[tab.id].map { layout(tab, in: $0) } }
     }
 
+    /// The focused pane as last drawn, and how many times the focus moved since the workbench was
+    /// made: what tells a late end whether the person moved since it began.
+    private var shownFocus: PaneID?
+    private var focusMoves = 0
+
+    /// How many times a tab's panes were laid out: what a change of look leaves alone.
+    package private(set) var tabLayouts = 0
+
     private func layout(_ tab: Tab, in view: TabView) {
+        tabLayouts += 1
         let frames = model.frames(of: tab.id, in: view.bounds.size, scale: scale)
         for id in tab.layout.leaves {
             guard let pane = panes[id] else { continue }
@@ -468,28 +487,33 @@ public final class WorkbenchView: NSView {
     }
 
     /// Ends `views`' sessions. A pane stays until its host says its session ended (or had
-    /// already), the focus moving on at once; when the host does not confirm, the pane is shown,
-    /// saying so and offering to end it again or to close it anyway, never vanishing as if it had
-    /// ended.
+    /// already), the focus moving on at once; when the host does not confirm, the pane says so and
+    /// offers to end it again or to close it anyway, never vanishing as if it had ended.
     private func end(_ views: [TerminalPane]) {
+        var ending: [(TerminalPane, Task<EndOutcome, Never>)] = []
         for view in views where panes[view.id] === view {
-            guard let ending = view.end() else {
+            guard let task = view.end() else {
                 remove(view)
                 continue
             }
             view.showEnding()
-            Task { [weak self] in
-                let outcome = await ending.value
-                self?.settle(view, outcome)
-            }
+            ending.append((view, task))
         }
         focusPastEnding()
         apply()
+        let moves = focusMoves
+        for (view, task) in ending {
+            Task { [weak self] in
+                let outcome = await task.value
+                self?.settle(view, outcome, focusMovesAtEnd: moves)
+            }
+        }
     }
 
     /// Moves the focus off a pane being ended to where its close will put it: the tab's most
     /// recently focused other pane, else the tab before's, else the one after's. A second ⌘W while
-    /// the host answers closes the next pane, never the same one again.
+    /// the host answers closes the next pane, never the same one again. Moving it ends a zoom, so
+    /// the pane the keys go to is one the person sees.
     private func focusPastEnding() {
         guard let focused = model.focusedPane, panes[focused.id]?.isEnding == true,
               let at = model.tabs.firstIndex(where: { $0.id == model.selected }) else { return }
@@ -502,13 +526,17 @@ public final class WorkbenchView: NSView {
         model.focus(next)
     }
 
-    private func settle(_ view: TerminalPane, _ outcome: EndOutcome) {
+    /// What an end came to. An unconfirmed pane is shown, its tab selected and the pane focused,
+    /// only when the focus has not moved since the end left it (`focusMovesAtEnd`, so moving away
+    /// and back counts as moving); once the person has moved, the pane says so where it is and its
+    /// tab is marked, the keys staying where the person is.
+    private func settle(_ view: TerminalPane, _ outcome: EndOutcome, focusMovesAtEnd moves: Int) {
         guard panes[view.id] === view else { return }
         guard !outcome.closesTab, case let .unconfirmed(why) = outcome else {
             remove(view)
             return apply()
         }
-        model.focus(view.id)
+        if focusMoves == moves { model.focus(view.id) }
         apply()
         view.showUnended(why, endAgain: { [weak self] in self?.end([view]) }, closeAnyway: { [weak self] in
             guard let self, panes[view.id] === view else { return }

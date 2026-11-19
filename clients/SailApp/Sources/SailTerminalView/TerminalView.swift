@@ -139,6 +139,15 @@ public final class TerminalView: NSView {
         marks.figures
     }
 
+    /// The drawable asks that overlap `span`, one still out included: what a late first frame is
+    /// read against.
+    public func drawableAsks(in span: Span) -> [Span] {
+        marks.asks(in: span)
+    }
+
+    /// How many drawables came back at a size the layer no longer had, and were asked for again.
+    public private(set) var drawablesThrownForSize = 0
+
     /// Where drawing stands, in words: frames presented and committed, the display link, its
     /// refreshes, and whether a drawable is awaited. For a step whose frames did not come.
     public var drawingState: String {
@@ -404,6 +413,7 @@ public final class TerminalView: NSView {
         guard let drawable, let metalLayer,
               drawable.texture.width == Int(metalLayer.drawableSize.width), drawable.texture.height == Int(metalLayer.drawableSize.height)
         else {
+            if drawable != nil { drawablesThrownForSize += 1 }
             if owed, !isHiddenOrHasHiddenAncestor { fetchDrawable() }
             return
         }

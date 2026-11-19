@@ -357,13 +357,13 @@ actor Proxied: Transport {
         button.frame = NSRect(x: 0, y: 0, width: 120, height: 34)
         let backdrop = Backdrop(NSColor(look.canvas), holding: button)
         #expect(Self.colour(of: backdrop, at: NSPoint(x: 4, y: 17)).near(Self.channels(look.accent)), "\(name): enabled is the accent")
-        #expect(button.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(look.onAccent))
+        #expect(button.ink == NSColor(look.onAccent))
         button.isEnabled = false
         let grey = Self.colour(of: Swatch(NSColor(look.separatorStrong), over: NSColor(look.canvas)), at: NSPoint(x: 5, y: 5))
         let drawn = Self.colour(of: backdrop, at: NSPoint(x: 4, y: 17))
         #expect(drawn.near(grey), "\(name): disabled is \(drawn), not \(grey)")
         #expect(drawn.count == 3 && (drawn.max() ?? 0) - (drawn.min() ?? 0) <= 16, "\(name): disabled is not a grey: \(drawn)")
-        #expect(button.attributedTitle.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(look.textSecondary))
+        #expect(button.ink == NSColor(look.textSecondary))
     }
 
     /// Look, a row's state: a running workspace's dot is the accent, a stopped one's the secondary

@@ -132,6 +132,7 @@ public final class TerminalPane: NSView {
             detach()
             return nil
         }
+        if unended { banner.hide() }
         let task = Task { [weak self] () -> EndOutcome in
             let outcome = await session.end(within: limit)
             self?.detach()

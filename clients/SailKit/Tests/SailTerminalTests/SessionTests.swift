@@ -487,6 +487,25 @@ import Testing
         try await watch.phase(.ended(.refused(HostRefusal(message: said, remedy: []))))
     }
 
+    /// A peer that wrote another protocol's magic and left before this client's magic arrived is
+    /// still said as another version: what it wrote is read though the send failed, never taken as
+    /// nothing having answered. The client's socket is made before the peer leaves, as the app's
+    /// are: on Darwin, `SO_NOSIGPIPE` set on a socket whose peer has gone does not take.
+    @Test func aPeerThatWroteAnotherMagicAndLeftIsAnotherProtocol() throws {
+        var ends: [Int32] = [0, 0]
+        #if canImport(Glibc)
+        let made = socketpair(AF_UNIX, Int32(SOCK_STREAM.rawValue), 0, &ends)
+        #else
+        let made = socketpair(AF_UNIX, SOCK_STREAM, 0, &ends)
+        #endif
+        try #require(made == 0)
+        let connection = Connection(socket: Socket(descriptor: ends[0]))
+        let wrote = Array("SAILPTY3".utf8).withUnsafeBytes { write(ends[1], $0.baseAddress, $0.count) }
+        try #require(wrote == 8)
+        close(ends[1])
+        #expect(throws: TerminalError.otherProtocol) { try connection.admit(token: "") }
+    }
+
     /// A runner whose host speaks another protocol is said as that runner being another version of
     /// Sail, at once: no wait, no retry.
     @Test func aRunnerOfAnotherProtocolEndsTheSessionAsAnotherVersion() async throws {

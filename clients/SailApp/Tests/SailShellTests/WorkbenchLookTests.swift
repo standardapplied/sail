@@ -58,7 +58,9 @@ import Testing
         for button in [selected.close, other.close, strip.add] {
             #expect(!button.isBordered, "\(name): \(button.toolTip ?? "") draws the system's bezel")
             #expect(button.focusRingType == .none, "\(name): \(button.toolTip ?? "") draws the system's focus ring")
-            #expect(button.contentTintColor == NSColor(look.textSecondary), "\(name): \(button.toolTip ?? "") is not textSecondary")
+            #expect(button.contentTintColor == nil && button.image?.isTemplate == false, "\(name): \(button.toolTip ?? "") is a tinted template")
+            let symbol = button === strip.add ? "plus" : "xmark"
+            #expect(button.image === TabButton.symbol(symbol, accessibility: button.toolTip ?? "", colour: look.textSecondary), "\(name): \(button.toolTip ?? "") is not textSecondary")
             #expect(button.keyEquivalent.isEmpty)
             #expect(button.layer?.borderWidth == 0, "\(name): \(button.toolTip ?? "") is ringed unfocused")
             #expect(button.becomeFirstResponder())

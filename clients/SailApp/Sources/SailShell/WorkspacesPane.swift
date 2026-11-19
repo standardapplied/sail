@@ -63,7 +63,18 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     /// Asked to learn again who is signed in, when the control plane could not be asked.
     var onAskWhoIsSignedIn: @MainActor () -> Void = {}
     var look: Look {
-        didSet { paint() }
+        didSet { painter.lookChanged(hidden: isHidden) }
+    }
+
+    private lazy var painter = PaintWhenShown { [unowned self] in self.paint() }
+
+    /// How many times the pane was painted, wherever from: none while it is hidden at a change of
+    /// look.
+    package private(set) var lookPaints = 0
+
+    override public func viewDidUnhide() {
+        super.viewDidUnhide()
+        painter.shown()
     }
 
     private let heading = NSTextField(labelWithString: "Workspaces")
@@ -353,6 +364,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     }
 
     private func paint() {
+        lookPaints += 1
         layer?.backgroundColor = NSColor(look.canvas).cgColor
         heading.textColor = NSColor(look.text)
         for group in [projectGroup, newGroup] {
@@ -360,7 +372,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         }
         list.backgroundColor = NSColor(look.canvas)
         whyNot.textColor = NSColor(look.textSecondary)
-        refreshButton.contentTintColor = NSColor(look.textSecondary)
+        refreshButton.image = SymbolInk.image("arrow.clockwise", points: Look.Step.body.points, weight: .regular, colour: look.textSecondary, accessibility: "List again")
         open.look = look
         nameFrame.look = look
         say(lines)
@@ -379,7 +391,6 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
         create.setContentHuggingPriority(.required, for: .horizontal)
         let chooser = NSStackView(views: [projects, refreshButton])
         chooser.spacing = Look.Space.s
-        refreshButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "List again")
         refreshButton.isBordered = false
         refreshButton.toolTip = "List again (⌘R)"
         refreshButton.keyEquivalent = "r"
@@ -544,9 +555,9 @@ final class WorkspaceCell: NSView {
         owner.spacing = 4
         owner.isHidden = row.owner(apartFrom: handle) == nil
         if let who = row.owner(apartFrom: handle) {
-            let symbol = NSImageView(image: NSImage(systemSymbolName: "person.fill", accessibilityDescription: "owner") ?? NSImage())
-            symbol.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: Look.Step.micro.points, weight: .regular)
-            symbol.contentTintColor = NSColor(look.textSecondary)
+            let symbol = NSImageView(
+                image: SymbolInk.image("person.fill", points: Look.Step.micro.points, weight: .regular, colour: look.textSecondary, accessibility: "owner")
+            )
             let label = NSTextField(labelWithString: who)
             label.font = .systemFont(ofSize: Look.Step.callout.points)
             label.textColor = NSColor(look.textSecondary)
