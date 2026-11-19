@@ -205,7 +205,6 @@ public final class TerminalView: NSView {
     /// screen refuses leaves the old colours, said in the system log.
     public func recolour(_ palette: Palette) {
         ink = (palette.selection, palette.idleCursor)
-        needFrame()
         guard let link else { return }
         input.async {
             do {

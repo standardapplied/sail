@@ -165,7 +165,6 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             button.isEnabled = page.canCreate
             button.why = page.createWhy
         }
-        newWorkspace.kind = Self.isEmptyList(page.body) ? .primary : .secondary
         centred?.removeFromSuperview()
         var views: [NSView] = [head, spacer(Self.listGap)]
         if let notice = page.banner { views += [banner(notice), spacer(12)] }
@@ -321,11 +320,6 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             content.topAnchor.constraint(equalTo: frame.topAnchor, constant: 52), content.bottomAnchor.constraint(equalTo: frame.bottomAnchor, constant: -52),
         ])
         return frame
-    }
-
-    private static func isEmptyList(_ body: WorkspacesModel.Body) -> Bool {
-        if case let .empty(empty) = body { return empty.action == .newWorkspace }
-        return false
     }
 
     /// How often "listed … ago" is said again while the list is stale.

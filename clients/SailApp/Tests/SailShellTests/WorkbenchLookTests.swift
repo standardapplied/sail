@@ -206,7 +206,7 @@ import Testing
         #expect(tab.layer?.borderWidth == 2, "\(name): the tab is not ringed")
         #expect(tab.layer?.borderColor == NSColor(look.accent).cgColor, "\(name): the ring is not the accent")
         #expect(tab.layer?.backgroundColor == NSColor(look.surface).cgColor, "\(name): the pill is not the surface")
-        #expect(editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(look.fillSelected))
+        #expect(editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(look.textSelection))
         #expect(editor.insertionPointColor == NSColor(look.accent))
     }
 

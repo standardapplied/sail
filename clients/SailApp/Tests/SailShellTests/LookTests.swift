@@ -167,7 +167,7 @@ import Testing
             let frame = try #require(field.superview as? FieldFrame, "\(name): the field is not in the shared field style")
             #expect(frame.ring.width == 2, "\(name): the field is not ringed")
             #expect(frame.ring.colour == NSColor(look.accent), "\(name): the ring is not the accent")
-            #expect(editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(look.fillSelected))
+            #expect(editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(look.textSelection))
             #expect(editor.insertionPointColor == NSColor(look.accent))
             #expect(field.action == action, "\(name): Return in the field does not send \(action)")
             #expect(field.target === pane)

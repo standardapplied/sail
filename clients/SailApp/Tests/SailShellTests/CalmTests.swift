@@ -82,6 +82,7 @@ import Testing
     @Test(arguments: [Look.light, .dark])
     func aTerminalPageWithASplitHasThreeMarks(_ look: Look) throws {
         let shell = try WorkbenchLookTests.shell(look)
+        shell.select(.thisMac)
         let strip = shell.thisMac.strip
         strip.showsTabs = true
         strip.show(WorkbenchLookTests.items() + [TabStrip.Item(id: TabID(3), title: "web", zoomed: false)], selected: TabID(1))
@@ -92,9 +93,9 @@ import Testing
         window.contentView = split
         window.orderFront(nil)
         defer { window.orderOut(nil) }
-        window.makeFirstResponder(typing)
-        let page = Count(marks(in: shell.rail)) + Count(marks(in: strip)) + Count(marks(in: window))
-        #expect(page == Count([.accentLine, .accentLine, .accentLine]), "the terminal page draws \(page)")
+        #expect(window.makeFirstResponder(typing) && typing.holdsTheKeys, "the typing pane holds no keys")
+        let rail = Count(marks(in: shell.rail)), tabs = Count(marks(in: strip)), panes = Count(marks(in: window))
+        #expect(rail == Count([.accentLine]) && tabs == Count([.accentLine]) && panes == Count([.accentLine]), "the rail draws \(rail), the tabs \(tabs), the panes \(panes)")
         typing.inert = true
         let banner = StatusBanner(look: look)
         banner.show("This terminal ended while you were away.", button: "Open a New One")
