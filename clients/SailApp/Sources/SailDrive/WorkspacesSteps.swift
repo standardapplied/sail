@@ -182,6 +182,36 @@ extension Driver {
                 return (false, "the rows: \(error)")
             }
         }
+        if let pick = step.menuItem, pick.count == 2 {
+            let list = pane.project.list
+            guard await clickRow(pick[0], in: list), let row = Self.row(pick[0], in: list), let view = list.rowView(atRow: row, makeIfNecessary: false) else {
+                return (false, "no row \(pick[0]) to open")
+            }
+            view.layoutSubtreeIfNeeded()
+            guard let more = Self.views(in: view).compactMap({ $0 as? SailButton }).first(where: { $0.menu != nil && !$0.isHiddenOrHasHiddenAncestor }), let menu = more.menu,
+                  let index = menu.items.firstIndex(where: { $0.title == pick[1] })
+            else { return (false, "\(pick[0])'s ⋯ menu has no \(pick[1])") }
+            var opened = false
+            let choose = Timer(timeInterval: 0.3, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    opened = NSApp.windows.contains { $0.isVisible && $0.level.rawValue >= NSWindow.Level.popUpMenu.rawValue }
+                    menu.cancelTracking()
+                    menu.performActionForItem(at: index)
+                }
+            }
+            RunLoop.main.add(choose, forMode: .common)
+            guard await click(more, at: NSPoint(x: more.bounds.midX, y: more.bounds.midY)) else { return (false, "⋯ could not be clicked") }
+            return (opened, opened ? "chose \(pick[1]) from \(pick[0])'s menu" : "the click on ⋯ opened no menu")
+        }
+        if let title = step.sheetClick {
+            let asked = await waitUntil(step.seconds ?? 5) { self.shell.window.attachedSheet != nil }
+            guard asked, let sheet = shell.window.attachedSheet, let content = sheet.contentView,
+                  let button = Self.views(in: content).compactMap({ $0 as? NSButton }).first(where: { $0.title == title })
+            else { return (false, "no sheet asks with \(title)") }
+            guard await click(button, at: NSPoint(x: button.bounds.midX, y: button.bounds.midY)) else { return (false, "\(title) could not be clicked") }
+            let gone = await waitUntil(5) { self.shell.window.attachedSheet !== sheet }
+            return (gone, gone ? "clicked \(title); the sheet went" : "clicked \(title); the sheet stayed")
+        }
         if let which = step.dragThumb {
             guard let view: QuietScrollView = which == "panel" ? pane.panel.scroll : pane.project.listScroll as? QuietScrollView, let window = view.window else {
                 return (false, "no \(which) to drag")

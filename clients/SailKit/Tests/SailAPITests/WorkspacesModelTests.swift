@@ -82,7 +82,7 @@ import Testing
         let table = try #require(Self.table(model))
         #expect(table.yours.map(\.name) == ["dock", "pier"] && table.count == table.yours.count + table.others.count)
         #expect(table.yours[0].primary == .open && table.yours[1].primary == .startAndOpen)
-        #expect(table.yours[0].menu == [.open, .copyName] && table.yours[1].menu == [.startAndOpen, .copyName])
+        #expect(table.yours[0].menu == [.open, .copyName, .stop, .delete] && table.yours[1].menu == [.startAndOpen, .copyName, .delete])
         #expect(!table.others.contains { $0.name == "main" }, "the project's own container is no workspace")
         #expect(table.yours.allSatisfy { $0.mine && $0.owner == nil } && table.others.allSatisfy { !$0.mine && $0.owner != nil }, "an owner is said only on someone else's row")
         let member = try #require(Self.table(Self.listed(Self.ana)))
@@ -566,5 +566,90 @@ extension WorkspacesModelTests {
         let said = try #require(Self.page(empty))
         guard case let .empty(state) = said.body else { Issue.record("\(said.body)"); return }
         #expect(said.banner?.title == "Couldn’t list harbor’s workspaces" && state.title == "harbor’s template is being built" && state.action == .checkAgain)
+    }
+}
+
+/// 1c: Stop and Delete ask what they end, from the person's terminals counted as they choose it;
+/// a delete refused for the work a workspace holds asks again in the server's words; each answer
+/// lands on its own project, and its row waits while it runs.
+extension WorkspacesModelTests {
+    static func said(_ question: WorkspacesModel.Question?) -> [String] {
+        question.map { [$0.name, $0.title, $0.body, $0.confirm] } ?? []
+    }
+
+    static func row(_ model: WorkspacesModel, _ name: String) -> WorkspacesModel.Line? {
+        table(model).flatMap { ($0.yours + $0.others).first { $0.name == name } }
+    }
+
+    @Test func whoeverOpensARowMayStopOrDeleteIt() throws {
+        let admin = Self.listed(Self.uday), member = Self.listed(Self.ana)
+        #expect(Self.row(admin, "dock")?.menu == [.open, .copyName, .stop, .delete])
+        #expect(Self.row(admin, "pier")?.menu == [.startAndOpen, .copyName, .delete], "a stopped row offers a stop")
+        #expect(Self.row(admin, "quay")?.menu == [.open, .copyName, .stop, .delete], "an admin may stop or delete anyone's")
+        #expect(Self.row(member, "dock")?.menu == [.copyName], "a member may stop or delete another's")
+    }
+
+    @Test func aStopThatEndsNothingActsAtOnceAndItsRowWaits() throws {
+        var model = Self.listed(Self.uday)
+        #expect(model.ask(.stop, "dock", terminals: 0) == .stop && model.asking == nil)
+        let busy = try #require(Self.row(model, "dock"))
+        #expect(busy.busy == .stop && busy.primary == nil && busy.menu == [.copyName])
+        #expect(model.ask(.delete(force: false), "dock", terminals: 0) == nil && model.asking == nil, "a second action was asked on a row under way")
+        let again = model.changed(.stop, "dock", project: "harbor", Self.answer(try Endpoint.stopWorkspace("dock", project: "harbor"), "workspace-stop"))
+        #expect(again != nil && Self.row(model, "dock")?.busy == nil, "a stop's answer neither listed again nor freed its row")
+    }
+
+    @Test(arguments: [
+        (Int?.some(1), "Your terminal in it ends. Its files stay, and Start and Open brings it back."),
+        (2, "Your 2 terminals in it end. Its files stay, and Start and Open brings it back."),
+        (nil, "Any terminal open in it ends. Its files stay, and Start and Open brings it back."),
+    ])
+    func aStopThatEndsTerminalsSaysSo(_ terminals: Int?, _ body: String) throws {
+        var model = Self.listed(Self.uday)
+        #expect(model.ask(.stop, "dock", terminals: terminals) == nil)
+        #expect(Self.said(model.asking) == ["dock", "Stop dock?", body, "Stop"] && model.asking?.action == .stop)
+        let confirmed = model.confirm()
+        let sent = try #require(confirmed)
+        #expect(sent.action == .stop && sent.name == "dock" && model.asking == nil && Self.row(model, "dock")?.busy == .stop)
+    }
+
+    @Test(arguments: [
+        (Int?.some(0), "Its files on the runner go with it. Commits you pushed are kept by the repo host."),
+        (2, "Its files on the runner go with it, and your 2 terminals in it end. Commits you pushed are kept by the repo host."),
+        (nil, "Its files on the runner go with it, and any terminal open in it ends. Commits you pushed are kept by the repo host."),
+    ])
+    func aDeleteAlwaysAsks(_ terminals: Int?, _ body: String) {
+        var model = Self.listed(Self.uday)
+        #expect(model.ask(.delete(force: false), "dock", terminals: terminals) == nil)
+        #expect(Self.said(model.asking) == ["dock", "Delete dock?", body, "Delete Workspace"] && model.asking?.action == .delete(force: false))
+        model.cancelQuestion()
+        #expect(model.asking == nil && Self.row(model, "dock")?.busy == nil)
+    }
+
+    @Test func aDeleteRefusedForTheWorkItHoldsAsksAgainInTheServersWords() throws {
+        var model = Self.listed(Self.uday)
+        _ = model.ask(.delete(force: false), "dock", terminals: 0)
+        let sent = model.confirm()
+        _ = try #require(sent)
+        let refused = model.changed(.delete(force: false), "dock", project: "harbor", Self.answer(try Endpoint.deleteWorkspace("dock", project: "harbor"), "refusal-workspace-holds-work"))
+        #expect(refused == nil && Self.page(model)?.banner == nil)
+        #expect(Self.said(model.asking) == ["dock", "Delete dock anyway?", "Workspace dock of harbor, uday's, holds work: app holds uncommitted changes.", "Delete Anyway"])
+        #expect(model.asking?.action == .delete(force: true))
+        let confirmed = model.confirm()
+        let anyway = try #require(confirmed)
+        #expect(anyway.action == .delete(force: true) && Self.row(model, "dock")?.busy == .delete(force: true))
+    }
+
+    @Test func aRefusalIsSaidOverItsOwnProjectOnly() throws {
+        var model = Self.two()
+        _ = model.ask(.stop, "dock", terminals: 0)
+        let demo = model.choose("demo")
+        model.listed(.success(WorkspaceList(project: "demo", workspaces: [])), request: demo, at: Self.at)
+        let stopped = model.changed(.stop, "dock", project: "harbor", .failure(.unreachable("lost")))
+        #expect(stopped == nil && Self.page(model)?.banner == nil, "harbor's refusal was said over demo")
+        let harbor = model.choose("harbor")
+        model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-three"), request: harbor, at: Self.at)
+        #expect(Self.page(model)?.banner?.tryAgain == false && Self.page(model)?.banner?.title.isEmpty == false, "harbor's refusal was not said over harbor")
+        #expect(Self.row(model, "dock")?.busy == nil)
     }
 }

@@ -148,6 +148,24 @@ public struct WorkspacesModel: Sendable {
         public let why: String?
         /// Its ⋯ menu.
         public let menu: [Entry]
+        /// What is under way on it, its pill said so and its actions waiting.
+        public let busy: Action?
+    }
+
+    /// What a person does to a workspace that asks first and waits for the runner.
+    public enum Action: Equatable, Sendable {
+        case stop
+        case delete(force: Bool)
+    }
+
+    /// The question asked before a stop or a delete, in a sheet: what it ends, said from the person's
+    /// terminals counted as it was asked; and, for a workspace that holds work, the server's own words.
+    public struct Question: Equatable, Sendable {
+        public let name: String
+        public let action: Action
+        public let title: String
+        public let body: String
+        public let confirm: String
     }
 
     public enum Primary: Equatable, Sendable {
@@ -155,7 +173,7 @@ public struct WorkspacesModel: Sendable {
     }
 
     public enum Entry: Equatable, Sendable {
-        case open, startAndOpen, copyName
+        case open, startAndOpen, copyName, stop, delete
     }
 
     /// The server's rule for a workspace's name, said under the name field.
@@ -309,6 +327,77 @@ public struct WorkspacesModel: Sendable {
         }
     }
 
+    // MARK: Stop and delete
+
+    /// The question a stop or a delete asks now; nil when none is open.
+    public private(set) var asking: Question?
+    /// Each project's actions under way, by workspace: an answer lands on its own project.
+    private var busy: [String: [String: Action]] = [:]
+    /// A stop's or a delete's refusal, said over its project's page.
+    private var refused: [String: Notice] = [:]
+
+    /// Asks before `action` on `name` in the project shown, `terminals` being how many of the
+    /// person's terminals run in it (nil: not known): a stop that ends none acts at once, its action
+    /// returned to send; otherwise the question is asked and nil returned.
+    public mutating func ask(_ action: Action, _ name: String, terminals: Int?) -> Action? {
+        guard let project = chosen, busy[project]?[name] == nil else { return nil }
+        let ends: String? = switch terminals {
+        case 0?: nil
+        case 1?: "your terminal in it ends"
+        case let count?: "your \(count) terminals in it end"
+        case nil: "any terminal open in it ends"
+        }
+        switch action {
+        case .stop:
+            guard let ends else { return send(.stop, name) ? .stop : nil }
+            let said = ends.prefix(1).uppercased() + ends.dropFirst()
+            asking = Question(name: name, action: .stop, title: "Stop \(name)?", body: "\(said). Its files stay, and Start and Open brings it back.", confirm: "Stop")
+        case .delete:
+            let files = ends.map { "Its files on the runner go with it, and \($0)." } ?? "Its files on the runner go with it."
+            asking = Question(name: name, action: .delete(force: false), title: "Delete \(name)?", body: "\(files) Commits you pushed are kept by the repo host.", confirm: "Delete Workspace")
+        }
+        return nil
+    }
+
+    /// The question confirmed: its action, now under way, to send; nil when none is asked.
+    public mutating func confirm() -> (action: Action, name: String)? {
+        guard let question = asking else { return nil }
+        asking = nil
+        return send(question.action, question.name) ? (question.action, question.name) : nil
+    }
+
+    public mutating func cancelQuestion() {
+        asking = nil
+    }
+
+    private mutating func send(_ action: Action, _ name: String) -> Bool {
+        guard let project = chosen, busy[project]?[name] == nil else { return false }
+        busy[project, default: [:]][name] = action
+        refused[project] = nil
+        return true
+    }
+
+    /// Takes the answer to `action` on `name` in `project`, wherever the person is now: the request
+    /// to list that project again when it is shown; a delete refused because the workspace holds
+    /// work asks again in the server's words; any other refusal is said over the project's page.
+    public mutating func changed(_ action: Action, _ name: String, project: String, _ result: Result<WorkspaceChanged, SailError>) -> Int? {
+        guard busy[project]?[name] == action else { return nil }
+        busy[project]?[name] = nil
+        switch result {
+        case .success:
+            return project == chosen ? listAgain() : nil
+        case let .failure(.refused(refusal)) where refusal.code == .known(.workspaceHoldsWork) && action == .delete(force: false):
+            if project == chosen {
+                asking = Question(name: name, action: .delete(force: true), title: "Delete \(name) anyway?", body: refusal.message, confirm: "Delete Anyway")
+            }
+            return nil
+        case let .failure(error):
+            let said = lines(error)
+            refused[project] = Notice(tone: .error, title: said.first ?? "", line: said.dropFirst().joined(separator: " "), tryAgain: false)
+            return nil
+        }
+    }
+
     public mutating func cancelCreate() {
         guard create?.underWay != true else { return }
         create = nil
@@ -409,7 +498,7 @@ public struct WorkspacesModel: Sendable {
     /// says why it waits; only a project with none listed says what is missing in its place.
     private func page(_ project: ProjectSummary) -> Page {
         let name = project.name, listed = listing.listed == name, unready = Self.unready(project)
-        let banner = listFailure.map { Notice(tone: .error, title: "Couldn’t list \(name)’s workspaces", line: $0, tryAgain: true) } ?? projectsBanner
+        let banner = refused[name] ?? listFailure.map { Notice(tone: .error, title: "Couldn’t list \(name)’s workspaces", line: $0, tryAgain: true) } ?? projectsBanner
         let rows = listed ? WorkspaceList(project: name, workspaces: listing.rows).rows(for: person.handle) : []
         if let unready, rows.isEmpty, listed, listFailure == nil {
             return Page(
@@ -452,7 +541,7 @@ public struct WorkspacesModel: Sendable {
         guard let create = creates[project], create.underWay else { return nil }
         return Line(
             name: create.name, instance: "\(project)-\(create.name)", state: .known(.notCreated), creating: true, mine: true, owner: nil, chosen: false,
-            primary: nil, why: "about 3 s", menu: []
+            primary: nil, why: "about 3 s", menu: [], busy: nil
         )
     }
 
@@ -463,7 +552,9 @@ public struct WorkspacesModel: Sendable {
         case .known(.stopped), .known(.frozen): opens ? .startAndOpen : nil
         default: nil
         }
+        let underWay = chosen.flatMap { busy[$0]?[row.name] }
         let entry: [Entry] = primary.map { [$0 == .open ? .open : .startAndOpen] } ?? []
+        let acts: [Entry] = opens ? (row.state == .known(.running) ? [.stop, .delete] : [.delete]) : []
         let owner: Owner? = switch row.owner {
         case _ where mine: nil
         case nil: .nobody
@@ -472,7 +563,8 @@ public struct WorkspacesModel: Sendable {
         }
         return Line(
             name: row.name, instance: row.instance, state: row.state, creating: false, mine: mine, owner: owner, chosen: row.name == chosenRow,
-            primary: primary, why: row.whyNotOpened(for: person.handle, admin: person.admin), menu: entry + [.copyName]
+            primary: underWay == nil ? primary : nil, why: row.whyNotOpened(for: person.handle, admin: person.admin),
+            menu: underWay == nil ? entry + [.copyName] + acts : [.copyName], busy: underWay
         )
     }
 

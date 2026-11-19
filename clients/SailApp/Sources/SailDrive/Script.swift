@@ -165,6 +165,13 @@ struct Step: Decodable {
     /// mouse-down, drag and mouse-up through the window; it passes when the thumb was drawn dragged
     /// and the list moved.
     var dragThumb: String?
+    /// `[row, item]`: the Workspaces row's ⋯ menu opened by a real click, and its item of this
+    /// title chosen while the menu is open (AppKit's own `performActionForItem`: a posted event does
+    /// not reach a menu while AppKit tracks it).
+    var menuItem: [String]?
+    /// The button of this title on the sheet now asking, clicked with real mouse events through the
+    /// sheet's own window.
+    var sheetClick: String?
     /// ⌃⌘S pressed (View ▸ Show Sidebar), and whether the panel is then shown (over the content)
     /// or hidden again, within `seconds` (5 by default).
     var showSidebar: Bool?

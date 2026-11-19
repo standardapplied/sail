@@ -264,6 +264,8 @@ public final class WorkspacesView: NSView {
         }
         switch act {
         case let .open(name), let .startAndOpen(name): onOpen(projectName, name)
+        case let .stop(name): ask(.stop, name)
+        case let .delete(name): ask(.delete(force: false), name)
         case let .copyName(name):
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(name, forType: .string)
@@ -301,6 +303,67 @@ public final class WorkspacesView: NSView {
             render()
         case .listAgain, .checkAgain:
             askProjects()
+        }
+    }
+
+    // MARK: Stop and delete
+
+    /// The sheet asking now, held while it shows.
+    private var question: Sheet?
+
+    /// Asks before `action` on `name`: the person's terminals in it counted first, from the runner's
+    /// sessions, so the sheet says what ends; a stop that ends none is sent at once.
+    private func ask(_ action: WorkspacesModel.Action, _ name: String) {
+        guard let client, let project = model.chosen else { return }
+        let era = self.era, handle = model.person.handle
+        byAPerson { [weak self] in
+            guard let self else { return }
+            let listing = try? await client.send(.sessions(workspace: name, project: project))
+            guard era == self.era, model.chosen == project else { return }
+            let terminals = listing.map { $0.sessions.count { $0.live && $0.opener == handle } }
+            if let now = model.ask(action, name, terminals: terminals) {
+                send(now, name, project: project)
+            } else {
+                showQuestion()
+            }
+        }
+    }
+
+    /// The model's question in the library's sheet on the window: confirmed, its action is sent.
+    private func showQuestion() {
+        guard let asked = model.asking, let window, question == nil else { return }
+        let sheet = Sheet(title: asked.title, body: asked.body, confirm: asked.confirm, kind: asked.action == .stop ? .destructiveQuiet : .destructive, look: look, titleFont: titleFont)
+        question = sheet
+        sheet.ask(on: window) { [weak self] confirmed in
+            guard let self else { return }
+            question = nil
+            if confirmed, let project = model.chosen, let sent = model.confirm() {
+                send(sent.action, sent.name, project: project)
+            } else {
+                model.cancelQuestion()
+                render()
+            }
+        }
+    }
+
+    /// Sends `action` on `name` in `project`, its row waiting; its answer lists the project again, asks
+    /// Delete Anyway in the server's words, or says the refusal over its page.
+    private func send(_ action: WorkspacesModel.Action, _ name: String, project: String) {
+        guard let client else { return }
+        render()
+        let era = self.era
+        byAPerson { [weak self] in
+            guard let self else { return }
+            let answer = await Self.result { () async throws(SailError) in
+                switch action {
+                case .stop: try await client.send(.stopWorkspace(name, project: project))
+                case let .delete(force): try await client.send(.deleteWorkspace(name, project: project, force: force))
+                }
+            }
+            guard era == self.era else { return }
+            let request = model.changed(action, name, project: project, answer)
+            if model.asking != nil { showQuestion() }
+            if let request { list(request) }
         }
     }
 

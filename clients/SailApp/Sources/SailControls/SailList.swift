@@ -14,13 +14,22 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         public let key: String
         public let modifiers: NSEvent.ModifierFlags
         public let onRow: Bool
+        /// It starts a group of its own in the menu, under a separator (Stop after Copy Name).
+        public let startsGroup: Bool
+        /// It destroys something: its menu item is drawn in the error ink (Delete).
+        public let destructive: Bool
         public let run: @MainActor () -> Void
 
-        public init(_ title: String, key: String = "", modifiers: NSEvent.ModifierFlags = [], onRow: Bool = true, run: @escaping @MainActor () -> Void) {
+        public init(
+            _ title: String, key: String = "", modifiers: NSEvent.ModifierFlags = [], onRow: Bool = true, startsGroup: Bool = false, destructive: Bool = false,
+            run: @escaping @MainActor () -> Void
+        ) {
             self.title = title
             self.key = key
             self.modifiers = modifiers
             self.onRow = onRow
+            self.startsGroup = startsGroup
+            self.destructive = destructive
             self.run = run
         }
     }
@@ -225,7 +234,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             primary.run()
             return true
         default:
-            let pressed = event.charactersIgnoringModifiers?.lowercased() ?? ""
+            let typed = event.charactersIgnoringModifiers?.lowercased() ?? ""
+            let pressed = typed == "\u{7f}" ? "\u{8}" : typed
             let held = event.modifierFlags.intersection([.command, .option, .control, .shift])
             guard !pressed.isEmpty, let action = item(at: selectedRow)?.actions.first(where: { $0.key == pressed && $0.modifiers == held }) else { return false }
             action.run()
@@ -590,11 +600,15 @@ final class RowCell: NSView {
     static func menu(_ actions: [SailList.Action]) -> NSMenu {
         let menu = NSMenu()
         for action in actions {
+            if action.startsGroup, !menu.items.isEmpty { menu.addItem(.separator()) }
             let run = Run(action)
             let entry = NSMenuItem(title: action.title, action: #selector(Run.go(_:)), keyEquivalent: action.key)
             entry.keyEquivalentModifierMask = action.modifiers
             entry.target = run
             entry.representedObject = run
+            if action.destructive {
+                entry.attributedTitle = NSAttributedString(string: action.title, attributes: [.font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.systemRed])
+            }
             menu.addItem(entry)
         }
         return menu
