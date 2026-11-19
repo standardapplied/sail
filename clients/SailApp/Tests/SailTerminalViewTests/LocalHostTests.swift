@@ -233,7 +233,11 @@ import Testing
                 guard client >= 0 else { return }
                 var one: Int32 = 1
                 setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
-                _ = Array("SAILPTY3".utf8).withUnsafeBytes { send(client, $0.baseAddress, $0.count, 0) }
+                var theirs = [UInt8](repeating: 0, count: 8)
+                let read = theirs.withUnsafeMutableBytes { recv(client, $0.baseAddress, $0.count, MSG_WAITALL) }
+                if read == 8 {
+                    _ = Array("SAILPTY3".utf8).withUnsafeBytes { send(client, $0.baseAddress, $0.count, 0) }
+                }
                 close(client)
             }
         }.start()

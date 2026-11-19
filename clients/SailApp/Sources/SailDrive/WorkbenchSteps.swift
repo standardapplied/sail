@@ -745,6 +745,11 @@ extension Driver {
         workbench.panes.values.filter { $0.window != nil && !$0.isHiddenOrHasHiddenAncestor }
     }
 
+    /// The most a switch after the first may hold the main thread, counted as ours and clipped to
+    /// the switch: half the 100 ms within which a change reads as instant, the other half the panes'
+    /// frames'. The first switch the four panes' views see is AppKit's first measuring of their
+    /// text in the other look, so it is reported, not judged.
+    static let lookSwitchHold = 50.0
     /// How long no pane's screen may change before the switches, so they measure the looks alone,
     /// not a prompt or a flood's tail still arriving.
     static let quietBeforeSwitching = 0.3
@@ -755,10 +760,10 @@ extension Driver {
     /// whatever the machine: the panes quiet before the switches; every pane drew every look by
     /// the step's end; no symbol resolved by switches 2 to 4, between looks already shown
     /// (``SymbolInk/resolutions``); no layout of the workbench's tabs during any switch
-    /// (``WorkbenchView/tabLayouts``); no pane waited over 100 ms to show a change, net of the
-    /// machine's share (``flood(_:)``). Reported and not judged here: each switch's main-thread
-    /// hold, counted as ours and clipped to the switch, the main thread's CPU time in it, and the
-    /// hold less an empty window's own second switch. Nothing of the drive's runs on the main
+    /// (``WorkbenchView/tabLayouts``); each switch after the first held the main thread at most
+    /// ``lookSwitchHold``, counted as ours and clipped to it; no pane waited over 100 ms to show a
+    /// change, net of the machine's share (``flood(_:)``). Reported and not judged: the first
+    /// switch's hold, every switch's main-thread CPU time, and an empty window's own switches. Nothing of the drive's runs on the main
     /// thread inside a switch: the stacks are described, and every line printed, after the last.
     private func switchLooks(_ grid: [TerminalPane], times: Int) async -> [(String, Bool)] {
         let empty = await emptyWindowSwitches()
@@ -789,7 +794,7 @@ extension Driver {
         for (index, done) in switches.enumerated() {
             let cpu = cpus[index].map { String(format: "%.1f ms", $0) } ?? "not covered by the looks"
             print(String(format: "look switch %d at %.3f: setting the appearance took %.1f ms on the main thread; the last pane drew it %.1f ms after the switch; ", index + 1, done.at, done.setting, done.took)
-                + "the main thread's longest hold in it, ours, \(Self.ms(holds[index].ours)) ms, its CPU time in it \(cpu) (reported, not judged here)")
+                + "the main thread's longest hold in it, ours, \(Self.ms(holds[index].ours)) ms, its CPU time in it \(cpu)")
             if let gap = holds[index].gap {
                 print(String(format: "look switch %d: the main thread's longest hold %.3f–%.3f (%.1f ms)", index + 1, gap.start, gap.end, gap.length * 1000))
                 mainStacks.told(gap, frames: MainStacks.depth).forEach { print("look switch \(index + 1): main thread held: \($0)") }
@@ -801,9 +806,13 @@ extension Driver {
         let draws = grid.map { $0.terminal.latency.refresh.max }.reduce(0, +)
         _ = await setLook(nil)
         let longest = holds.map(\.ours).max() ?? 0
+        let later = holds.dropFirst().map(\.ours).max() ?? 0
         let beyond = holds.map { $0.ours - empty.second }
         panes4["look switched, ours, the worst pane ms"] = worst?.ours ?? 0
-        panes4["look switched, the main thread's longest hold, ours ms (reported, not judged here)"] = longest
+        panes4["look switched, the main thread's longest hold, ours ms"] = longest
+        panes4["look switched first, the main thread's hold, ours ms (reported, not judged)"] = holds.first?.ours ?? 0
+        panes4["look switched first, the main thread's CPU time ms"] = (cpus.first ?? nil) ?? -1
+        panes4["look switched after the first, the main thread's longest hold, ours ms"] = later
         panes4["look switched, the main thread's CPU time in a switch, the most ms"] = cpus.compactMap(\.self).max() ?? -1
         panes4["look switched, the longest hold less an empty window's second switch ms"] = beyond.max() ?? 0
         panes4["look switched, an empty window's first switch, ours ms"] = empty.first
@@ -811,19 +820,24 @@ extension Driver {
         panes4["look switched, the four panes' longest draws summed ms"] = draws
         let perSwitch = holds.map { Self.ms($0.ours) }.joined(separator: ", ")
         let cpuSaid = cpus.map { $0.map { Self.ms($0) } ?? "?" }.joined(separator: ", ")
-        print("look switch: reported, not judged here: the main thread's longest hold a switch, ours and clipped to it, \(perSwitch) ms; its CPU time a switch \(cpuSaid) ms; "
+        print("look switch: the main thread's longest hold a switch, ours and clipped to it (after the first, judged at \(Self.ms(Self.lookSwitchHold)) ms), \(perSwitch) ms; its CPU time a switch \(cpuSaid) ms; "
             + "an empty window's own first switch \(Self.ms(empty.first)) ms and second \(Self.ms(empty.second)) ms")
         let changed = changes.map { "\($0)" }.joined(separator: ", ")
         let quietSaid = "no screen changed for \(Self.ms(Self.quietBeforeSwitching * 1000)) ms before them"
         let reached = switches.map { "\(Self.ms($0.took)) ms" }.joined(separator: ", ")
         let drewSaid = "drawn \(drawn) of \(times), screen changes a pane \(changed), the last pane drawing each (polled every 10 ms) \(reached) after it"
+        let laterHolds = holds.dropFirst().map { Self.ms($0.ours) }.joined(separator: ", ")
+        let firstHold = Self.ms(holds.first?.ours ?? 0)
+        let firstCPU = (cpus.first ?? nil).map { Self.ms($0) } ?? "?"
+        let laterSaid = "ours, clipped to each: \(laterHolds) ms; the first, reported: \(firstHold) ms, its CPU time \(firstCPU) ms"
         let waitSaid = "the worst pane, ours \(Self.ms(worst?.ours ?? 0)) ms: \(worst?.said ?? "none"); the four panes' longest draws summed \(Self.ms(draws)) ms"
         return [
             ("1: the four panes quiet before the switches (\(quiet ? quietSaid : "a screen still changing after 5 s"))", quiet),
             ("2: every pane drew every look (\(drewSaid))", drawn == times && changes.allSatisfy { $0 >= times }),
             ("3: no symbol resolved by switches 2 to \(times), between looks already shown (\(resolvedLater) resolved)", resolvedLater == 0),
             ("4: no layout of the workbench's tabs during the switches (\(layouts) laid out)", layouts == 0),
-            ("5: no pane waited over 100 ms to show a change (\(waitSaid))", (worst?.ours ?? 0) <= 100),
+            ("5: each switch after the first held the main thread at most \(Self.ms(Self.lookSwitchHold)) ms (\(laterSaid))", later <= Self.lookSwitchHold),
+            ("6: no pane waited over 100 ms to show a change (\(waitSaid))", (worst?.ours ?? 0) <= 100),
         ]
     }
 
