@@ -2,12 +2,8 @@
 public enum Handshake {
     public static let magic: [UInt8] = Array("SAILPTY4".utf8)
 
-    private static let older: [[UInt8]] = [Array("SAILPTY1".utf8), Array("SAILPTY2".utf8), Array("SAILPTY3".utf8)]
-
-    /// Passes when `peer` is this protocol's magic, and otherwise names which side is behind: an
-    /// older magic is a host that predates this client, anything else one that has moved past it.
+    /// Passes when `peer` is this protocol's magic; any other is a peer this build cannot talk to.
     public static func check(peer: [UInt8]) throws(TerminalWireError) {
-        guard peer != magic else { return }
-        throw .skew(older.contains(peer) ? .hostOlder : .clientOlder)
+        guard peer == magic else { throw .otherProtocol }
     }
 }

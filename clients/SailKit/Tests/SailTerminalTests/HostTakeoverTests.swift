@@ -9,9 +9,9 @@ import Testing
         SessionInfo(name: "s", instanceID: "i", live: true, attached: attached, writerFDE: "", room: "", command: [])
     }
 
-    /// Ours (the same file however it is spelled), a CLI install's, or one whose sessions could not
-    /// be listed: kept. Another copy's under the copies folder or inside an app bundle: ended when
-    /// nobody is attached, refused when a client is.
+    /// Ours (the same file however it is spelled), a CLI install's, one run from inside an app
+    /// bundle, or one whose sessions could not be listed: kept. Another copy's under the copies
+    /// folder: ended when nobody is attached, refused when a client is.
     @Test func onlyAnotherCopysHostThatNobodyHoldsIsEnded() throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "takeover-\(UUID().uuidString.prefix(8))")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -32,9 +32,8 @@ import Testing
         #expect(decide(spelled, idle) == .keep, "the same file by another path is this build's")
         #expect(decide(cli, idle) == .keep, "a CLI install's host is never ended")
         #expect(decide(older, idle) == .end)
-        #expect(decide(bundled, []) == .end)
+        #expect(decide(bundled, []) == .keep, "a host run from inside an app bundle is no copy a Sail app made")
         #expect(decide(older, held) == .refuse)
-        #expect(decide(bundled, held) == .refuse)
         #expect(decide(older, nil) == .keep, "with no listing nothing is known, so nothing is ended")
         #expect(!HostTakeover.sameFile(copy, older))
     }
