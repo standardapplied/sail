@@ -277,6 +277,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             call ->
                 ApiResponse.from(
                     operations.startWorkspace(call.project(), call.param("workspace")))),
+        route(GET, PROJECT + "/workspaces/{workspace}/sessions", Gate.TERMINAL, this::sessions),
         route(
             POST,
             PROJECT + "/workspaces/{workspace}/stop",
@@ -733,13 +734,26 @@ public final class ApiRouter implements HttpHandler, RouteTable {
    * workspace that does not exist.
    */
   private ApiResponse terminalTicket(Call call) throws IOException {
-    var tickets =
-        terminal.orElseThrow(
-            () ->
-                new ApiException(
-                    ErrorCode.TERMINAL_NOT_OFFERED,
-                    "This runner offers no terminal over the network; ask an admin."));
-    return ApiResponse.created(tickets.issue(ApiAuth.credentialOf(call.exchange()), call.body()));
+    return ApiResponse.created(offered().issue(ApiAuth.credentialOf(call.exchange()), call.body()));
+  }
+
+  /**
+   * The caller's terminal sessions in a workspace, which an app reattaches to: those the caller may
+   * attach to, so a member lists nothing of another person's; refused as the ticket route is on a
+   * box that offers no terminal over the network.
+   */
+  private ApiResponse sessions(Call call) {
+    return ApiResponse.ok(
+        offered().sessions(Actor.current(), call.project(), call.param("workspace")));
+  }
+
+  /** This runner's terminal door, refused on a runner that offers none over the network. */
+  private TerminalTickets offered() {
+    return terminal.orElseThrow(
+        () ->
+            new ApiException(
+                ErrorCode.TERMINAL_NOT_OFFERED,
+                "This runner offers no terminal over the network; ask an admin."));
   }
 
   private ApiResponse dispatch(Call call) throws IOException {

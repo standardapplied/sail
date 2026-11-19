@@ -37,6 +37,8 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "refusal-read-only-credential-workspace": { _ = try await $0.send(.createWorkspace("new", project: "harbor")) },
     "refusal-conflict-workspace-exists": { _ = try await $0.send(.createWorkspace("dock", project: "harbor")) },
     "refusal-forbidden-not-assignee": { _ = try await $0.send(.startWorkspace("dock", project: "harbor")) },
+    "workspace-sessions": { _ = try await $0.send(.sessions(workspace: "dock", project: "harbor")) },
+    "workspace-sessions-not-theirs": { _ = try await $0.send(.sessions(workspace: "dock", project: "harbor")) },
     "attention": { _ = try await $0.send(.attention(conversation: "harbor-docks")) },
     "changes": { _ = try await $0.send(.changes(since: "golden.0.0")) },
     "board-specs": { _ = try await $0.send(.specs(SpecFilter(project: "harbor"))) },
@@ -119,6 +121,26 @@ func answer<Response>(
             WorkspaceRow(name: "main", instance: "harbor", state: .known(.notCreated), owner: nil),
             WorkspaceRow(name: "dock", instance: "harbor-dock", state: .known(.running), owner: "uday"),
         ]))
+    }
+
+    /// A workspace's terminal sessions as the runner's host lists them for the caller, newest first:
+    /// one live with its keyboard held, one its workspace's stop ended, in the stop's words; another
+    /// person lists nothing of the owner's.
+    @Test func aWorkspacesSessionsAreReadAsListed() throws {
+        let sessions = Endpoint.sessions(workspace: "dock", project: "harbor")
+        let listed = try sessions.decode(response(try Exchange("workspace-sessions")))
+        #expect(listed == RunnerSessions(sessions: [
+            RunnerSession(
+                name: "app-1f2e3d4c", live: true, attached: 1, writer: "uday", opener: "uday", command: ["claude"],
+                createdAt: Date(timeIntervalSince1970: 1_763_460_000), endedReason: nil
+            ),
+            RunnerSession(
+                name: "app-5a6b7c8d", live: false, attached: 0, writer: "", opener: "uday", command: [],
+                createdAt: Date(timeIntervalSince1970: 1_763_456_400),
+                endedReason: "Workspace dock of harbor is being stopped by ana, which ends this terminal."
+            ),
+        ]))
+        #expect(try sessions.decode(response(try Exchange("workspace-sessions-not-theirs"))) == RunnerSessions(sessions: []))
     }
 
     /// A running workspace, a stopped one and another person's, as the server lists them and as

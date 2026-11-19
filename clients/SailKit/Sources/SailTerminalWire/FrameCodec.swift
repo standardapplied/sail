@@ -1,6 +1,6 @@
 import SailAPI
 
-/// The `SAILPTY4` framing, byte for byte as the host's `PtyWire` writes it: a big-endian `Int32`
+/// The `SAILPTY5` framing, byte for byte as the host's `PtyWire` writes it: a big-endian `Int32`
 /// length, then the payload, a type byte and its fields. Integers are big-endian; strings and byte
 /// blobs are an `Int32` length and the bytes; a list is an `Int32` count and its entries.
 public enum FrameCodec {
@@ -164,10 +164,10 @@ private extension SessionInfo {
         ]
     }
 
-    /// Where it runs and who opened it, written after every other field of the frame, a page's after
-    /// its cursor: the macOS lanes run the app against a pinned released host, which writes none.
+    /// Where it runs, who opened it and when, and why it ended, written after every other field of
+    /// the frame, a page's after its cursor.
     var place: [Field] {
-        [.string(project), .string(workspace), .string(opener)]
+        [.string(project), .string(workspace), .string(opener), .int64(createdAtMillis), .string(endedReason)]
     }
 }
 
@@ -277,6 +277,8 @@ private struct Cursor {
         placed.project = try string()
         placed.workspace = try string()
         placed.opener = try string()
+        placed.createdAtMillis = try int64()
+        placed.endedReason = try string()
         return placed
     }
 
@@ -284,14 +286,12 @@ private struct Cursor {
     private mutating func page() throws(TerminalWireError) -> SessionPage {
         var sessions = try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.session() }
         let next = try string()
-        let placed = try int32()
-        guard placed == sessions.count else {
-            throw .malformed("a page places \(placed) sessions but holds \(sessions.count)")
+        let places = try int32()
+        guard places == sessions.count else {
+            throw .malformed("a page places \(places) sessions but holds \(sessions.count)")
         }
         for index in sessions.indices {
-            sessions[index].project = try string()
-            sessions[index].workspace = try string()
-            sessions[index].opener = try string()
+            sessions[index] = try placed(sessions[index])
         }
         return SessionPage(sessions: sessions, next: next)
     }

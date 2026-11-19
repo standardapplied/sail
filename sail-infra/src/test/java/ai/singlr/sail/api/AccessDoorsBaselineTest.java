@@ -30,6 +30,7 @@ import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyChildShim;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.pty.SdNotify;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -41,6 +42,7 @@ import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -341,8 +343,26 @@ class AccessDoorsBaselineTest {
       }
       var door =
           new TerminalTickets(
-              (credential, action, target, workspace) ->
-                  SessionClient.ticket(socket, credential, action, target, workspace),
+              new TerminalTickets.Host() {
+                @Override
+                public PtyMessage ticket(
+                    String credential,
+                    PtyMessage.TicketAction action,
+                    String target,
+                    String workspace)
+                    throws IOException {
+                  return SessionClient.ticket(socket, credential, action, target, workspace);
+                }
+
+                @Override
+                public List<PtyMessage.SessionInfo> sessions() throws IOException {
+                  var dispatch =
+                      Files.readString(PtySessionHost.dispatchCredentialOf(socket)).strip();
+                  try (var client = SessionClient.connect(socket, dispatch)) {
+                    return client.list();
+                  }
+                }
+              },
               host.tcpAddress().orElseThrow());
       var askers = new LinkedHashMap<String, String>();
       for (var fde :
@@ -381,6 +401,15 @@ class AccessDoorsBaselineTest {
                               asker.getValue(),
                               Map.of("action", "open", "project", "acme", "workspace", workspace))),
                   null));
+        }
+        if (asker.getKey().startsWith("fde ")) {
+          var who = pty.identity(asker.getValue()).actor();
+          for (var workspace : List.of("main", "try")) {
+            var label =
+                asker.getKey() + " lists the sessions in workspace " + workspace + " of acme";
+            corpus.put(
+                label, answer(new Door(label, ops -> door.sessions(who, "acme", workspace)), null));
+          }
         }
         for (var session : List.of("lounge", "ghost")) {
           var label = asker.getKey() + " asks a ticket to attach to " + session;

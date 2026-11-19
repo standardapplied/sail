@@ -2708,6 +2708,8 @@ fde ada asks a ticket to open a terminal in workspace ghost of acme	denied NOT_F
 fde ada asks a ticket to open a terminal in workspace loose of acme	ok TicketResponse
 fde ada asks a ticket to open a terminal in workspace spare of acme	ok TicketResponse
 fde ada asks a ticket to open a terminal in workspace try of acme	ok TicketResponse
+fde ada lists the sessions in workspace main of acme	ok WorkspaceSessionsResponse lounge
+fde ada lists the sessions in workspace try of acme	ok WorkspaceSessionsResponse
 fde ada pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde ada pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde ada pins a terminal to b-room on a node as cli admin root all	ok admitted
@@ -2732,6 +2734,8 @@ fde bob asks a ticket to open a terminal in workspace ghost of acme	denied NOT_F
 fde bob asks a ticket to open a terminal in workspace loose of acme	denied FORBIDDEN 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
 fde bob asks a ticket to open a terminal in workspace spare of acme	ok TicketResponse
 fde bob asks a ticket to open a terminal in workspace try of acme	denied FORBIDDEN 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
+fde bob lists the sessions in workspace main of acme	ok WorkspaceSessionsResponse
+fde bob lists the sessions in workspace try of acme	ok WorkspaceSessionsResponse
 fde bob pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde bob pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde bob pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -2754,6 +2758,8 @@ fde root asks a ticket to open a terminal in workspace ghost of acme	denied NOT_
 fde root asks a ticket to open a terminal in workspace loose of acme	ok TicketResponse
 fde root asks a ticket to open a terminal in workspace spare of acme	ok TicketResponse
 fde root asks a ticket to open a terminal in workspace try of acme	ok TicketResponse
+fde root lists the sessions in workspace main of acme	ok WorkspaceSessionsResponse lounge
+fde root lists the sessions in workspace try of acme	ok WorkspaceSessionsResponse
 fde root pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde root pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde root pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -2776,6 +2782,8 @@ fde sam asks a ticket to open a terminal in workspace ghost of acme	denied NOT_F
 fde sam asks a ticket to open a terminal in workspace loose of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
 fde sam asks a ticket to open a terminal in workspace spare of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
 fde sam asks a ticket to open a terminal in workspace try of acme	denied NOT_FOUND 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+fde sam lists the sessions in workspace main of acme	ok WorkspaceSessionsResponse
+fde sam lists the sessions in workspace try of acme	ok WorkspaceSessionsResponse
 fde sam pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde sam pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde sam pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
@@ -2798,6 +2806,8 @@ fde vic asks a ticket to open a terminal in workspace ghost of acme	denied NOT_F
 fde vic asks a ticket to open a terminal in workspace loose of acme	denied FORBIDDEN 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
 fde vic asks a ticket to open a terminal in workspace spare of acme	denied FORBIDDEN 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
 fde vic asks a ticket to open a terminal in workspace try of acme	denied FORBIDDEN 403 Your credential is read-only and cannot enter workspaces. | Ask an admin for a member or admin credential.
+fde vic lists the sessions in workspace main of acme	ok WorkspaceSessionsResponse
+fde vic lists the sessions in workspace try of acme	ok WorkspaceSessionsResponse
 fde vic pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde vic pins a terminal to attic on main as cli admin root all	denied IOException Room 'attic' was not found. | 
 fde vic pins a terminal to b-room on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.

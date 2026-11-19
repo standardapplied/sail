@@ -242,6 +242,17 @@ class PtySessionHostTest {
     return Files.readString(PtySessionHost.dispatchCredentialOf(dir.resolve("host.sock")));
   }
 
+  /** The ended reasons of every session the host lists, as the dispatch authority sees them. */
+  private List<String> endedReasons() throws IOException {
+    try (var dispatch = connect(dispatchCredential())) {
+      PtyWire.write(dispatch, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+      return assertInstanceOf(PtyMessage.Sessions.class, PtyWire.read(dispatch)).sessions().stream()
+          .filter(info -> !info.live())
+          .map(PtyMessage.SessionInfo::endedReason)
+          .toList();
+    }
+  }
+
   private SocketChannel connect(String token) throws IOException {
     var channel = SocketChannel.open(StandardProtocolFamily.UNIX);
     channel.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
@@ -457,7 +468,10 @@ class PtySessionHostTest {
             "yielded to dispatch 2",
             ((PtyMessage.SessionEnded) message).reason(),
             "the ending carries the displacing reason, not the child's exit status");
-        assertEquals(0, host.sessionCount(), "a yielded session is gone, like a killed one");
+        assertEquals(
+            List.of("yielded to dispatch 2"),
+            endedReasons(),
+            "a yielded session is kept ended, its reason listed, until its retention passes");
         assertTrue(events.contains("ended:resume-1"), events.toString());
       }
     }
@@ -1433,7 +1447,7 @@ class PtySessionHostTest {
   }
 
   @Test
-  void aYieldedSessionsRingIsDeletedLikeAKilledOnes() throws Exception {
+  void aYieldedSessionsRingIsDeletedLikeAKilledOnesAndItsEndListed() throws Exception {
     var ring = dir.resolve("sessions").resolve("resume-y.ring");
     try (var ignored = startHost();
         var owner = connect()) {
@@ -1448,7 +1462,9 @@ class PtySessionHostTest {
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(dispatch));
       }
       assertFalse(Files.exists(ring), "a yield leaves no ring behind, exactly like a kill");
-      assertEquals(0, host.sessionCount());
+      assertEquals(List.of("yielded to dispatch 2"), endedReasons());
+      host.sweep(System.nanoTime() + PtySessionHost.CORPSE_RETENTION.toNanos() + 1);
+      assertEquals(0, host.sessionCount(), "the ended session goes once its retention passes");
     }
   }
 

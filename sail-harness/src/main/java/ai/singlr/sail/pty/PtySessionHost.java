@@ -16,6 +16,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.identity.Actor;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.StandardProtocolFamily;
@@ -1054,9 +1055,17 @@ public final class PtySessionHost implements AutoCloseable {
    * person who opened it, which that person and an admin may.
    */
   private static boolean admitted(PtyIdentity who, PtySession session) {
-    return who instanceof PtyIdentity.Person(var actor)
-        && Access.decide(actor, Action.OPERATE_BOX, Resources.box(session.ownerFde()))
-            instanceof Decision.Allowed;
+    return who instanceof PtyIdentity.Person(var actor) && mayAttach(actor, session.ownerFde());
+  }
+
+  /**
+   * Whether {@code actor} may attach to a session {@code opener} opened: operating that person's
+   * box, which they and an admin may. The one rule for an attach, and for whose sessions a listing
+   * shows.
+   */
+  public static boolean mayAttach(Actor actor, String opener) {
+    return Access.decide(actor, Action.OPERATE_BOX, Resources.box(opener))
+        instanceof Decision.Allowed;
   }
 
   /**
@@ -1402,16 +1411,17 @@ public final class PtySessionHost implements AutoCloseable {
 
   private static PtyMessage.SessionInfo infoOf(PtySession session) {
     return new PtyMessage.SessionInfo(
-        session.name(),
-        session.origin().instanceId(),
-        session.live(),
-        session.attachedCount(),
-        session.writerFde(),
-        session.origin().room(),
-        session.origin().command(),
-        session.origin().project(),
-        session.origin().workspace(),
-        session.ownerFde());
+            session.name(),
+            session.origin().instanceId(),
+            session.live(),
+            session.attachedCount(),
+            session.writerFde(),
+            session.origin().room(),
+            session.origin().command())
+        .placed(session.origin().project(), session.origin().workspace(), session.ownerFde())
+        .lived(
+            session.createdAtMillis(),
+            java.util.Objects.requireNonNullElse(session.endedReason(), ""));
   }
 
   private synchronized PtyMessage kill(String name, PtyIdentity who) {
@@ -1431,10 +1441,12 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   /**
-   * Ends a live session that a reservation displaced — the reason lands in the stream and on the
-   * ended event. Idempotent: a session that is not live has nothing to end, so the answer is {@code
-   * Ok}. Ownership is not consulted: the dispatch authority ends what the claim displaced,
-   * whichever FDE opened it. The ring goes with the session, as it does on a kill.
+   * Ends a live session that a reservation displaced or its workspace's stop ends — the reason
+   * lands in the stream and on the ended event. Idempotent: a session that is not live has nothing
+   * to end, so the answer is {@code Ok}. Ownership is not consulted: the dispatch authority ends
+   * what the claim displaced, whichever FDE opened it. Its ring and sidecar go at once, as on a
+   * kill, but the session is kept ended, as one whose program exited is, so its listing says why
+   * until {@link #CORPSE_RETENTION} passes.
    */
   private synchronized PtyMessage yieldSession(String name, String reason) {
     if (closed) {
@@ -1444,7 +1456,6 @@ public final class PtySessionHost implements AutoCloseable {
     if (session == null || !session.live()) {
       return new PtyMessage.Ok();
     }
-    sessions.remove(name, session);
     session.end(reason);
     deleteFiles(SessionFiles.in(sessionsDir, name), session.ownerFde(), name);
     return new PtyMessage.Ok();

@@ -9,10 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyMessage;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.time.Instant;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -105,5 +109,82 @@ class TerminalTicketsTest {
 
     assertEquals(List.of("acme/try", "acme/main", "acme/"), asked);
     assertTrue(refused.getMessage().startsWith("Invalid workspace name: 'Bad Name'."));
+  }
+
+  /**
+   * A workspace's sessions are the host's listing kept to that project and workspace ({@code main}
+   * the project's own container), newest first (by name among equals), and to the sessions the
+   * caller may attach to by the host's own rule: their own, every one for an admin. A host it
+   * cannot reach is the terminal's outage.
+   */
+  @Test
+  void aWorkspacesSessionsAreThoseOfItTheCallerMayAttachTo() {
+    var door =
+        new TerminalTickets(
+            new TerminalTickets.Host() {
+              @Override
+              public PtyMessage ticket(
+                  String credential,
+                  PtyMessage.TicketAction action,
+                  String target,
+                  String workspace) {
+                return new PtyMessage.Ticket("tkt");
+              }
+
+              @Override
+              public List<PtyMessage.SessionInfo> sessions() {
+                return List.of(
+                    info("app-a", "acme", "try", false, "ana", 2_000),
+                    info("app-b", "acme", "try", true, "ana", 3_000),
+                    info("app-c", "acme", "", true, "ana", 1_000),
+                    info("app-d", "other", "try", true, "ana", 1_000),
+                    info("app-e", "acme", "try", true, "ben", 1_000),
+                    info("app-f", "acme", "try", true, "ana", 3_000));
+              }
+            },
+            TERMINAL);
+    var ana = new Actor("ana", Role.MEMBER, Actor.Lane.API);
+    var admin = new Actor("uday", Role.ADMIN, Actor.Lane.API);
+
+    assertEquals(List.of("app-b", "app-f", "app-a"), names(door.sessions(ana, "acme", "try")));
+    assertEquals(
+        Arrays.asList(null, null, "exited(0)"),
+        door.sessions(ana, "acme", "try").sessions().stream()
+            .map(WorkspaceSessionsResponse.Session::endedReason)
+            .toList());
+    assertEquals(
+        Instant.ofEpochMilli(2_000),
+        door.sessions(ana, "acme", "try").sessions().getLast().createdAt());
+    assertEquals(List.of("app-c"), names(door.sessions(ana, "acme", "main")));
+    assertEquals(
+        List.of("app-b", "app-f", "app-a", "app-e"), names(door.sessions(admin, "acme", "try")));
+    assertEquals(
+        List.of("app-e"),
+        names(door.sessions(new Actor("ben", Role.MEMBER, Actor.Lane.API), "acme", "try")));
+    assertEquals(
+        List.of(),
+        names(door.sessions(new Actor("cy", Role.MEMBER, Actor.Lane.API), "acme", "try")));
+    assertEquals(
+        "503 terminal_unavailable This terminal host lists no sessions here.",
+        said(
+            assertThrows(
+                ApiException.class,
+                () ->
+                    new TerminalTickets(
+                            (credential, action, target, workspace) -> new PtyMessage.Ticket("t"),
+                            TERMINAL)
+                        .sessions(ana, "acme", "try"))));
+    assertThrows(IllegalArgumentException.class, () -> door.sessions(ana, "acme", "Bad Name"));
+  }
+
+  private static List<String> names(WorkspaceSessionsResponse listed) {
+    return listed.sessions().stream().map(s -> s.name()).toList();
+  }
+
+  private static PtyMessage.SessionInfo info(
+      String name, String project, String workspace, boolean live, String opener, long created) {
+    return new PtyMessage.SessionInfo(name, "i-" + name, live, 0, "", "", List.of())
+        .placed(project, workspace, opener)
+        .lived(created, live ? "" : "exited(0)");
   }
 }

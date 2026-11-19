@@ -8,9 +8,13 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.pty.PtyMessage;
+import ai.singlr.sail.pty.PtySessionHost;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -37,6 +41,15 @@ public final class TerminalTickets {
     PtyMessage ticket(
         String credential, PtyMessage.TicketAction action, String target, String workspace)
         throws IOException;
+
+    /**
+     * Every session the host holds, live or ended within its keeping, as it lists them for its
+     * dispatch credential. A host that lists none here says so by throwing, which is the terminal's
+     * outage.
+     */
+    default List<PtyMessage.SessionInfo> sessions() throws IOException {
+      throw new IOException("This terminal host lists no sessions here.");
+    }
   }
 
   private final Host host;
@@ -91,6 +104,34 @@ public final class TerminalTickets {
           throw new ApiException(
               ErrorCode.TERMINAL_UNAVAILABLE, "The terminal host answered no ticket.");
     };
+  }
+
+  /**
+   * The sessions in {@code workspace} of {@code project} ({@code main} for the project's own
+   * container) that {@code actor} may attach to, live or ended within the host's keeping, newest
+   * first: by the host's own rule for an attach, those whose opener's box {@code actor} operates
+   * (their own, or every one for an admin).
+   */
+  WorkspaceSessionsResponse sessions(Actor actor, String project, String workspace) {
+    NameValidator.requireValidProjectName(project);
+    NameValidator.requireValidWorkspaceName(workspace);
+    var place = workspace.equals("main") ? "" : workspace;
+    List<PtyMessage.SessionInfo> listed;
+    try {
+      listed = host.sessions();
+    } catch (IOException unreachable) {
+      throw ApiException.of(ErrorCode.TERMINAL_UNAVAILABLE, unreachable);
+    }
+    return new WorkspaceSessionsResponse(
+        listed.stream()
+            .filter(info -> info.project().equals(project) && info.workspace().equals(place))
+            .filter(info -> PtySessionHost.mayAttach(actor, info.opener()))
+            .sorted(
+                Comparator.comparingLong(PtyMessage.SessionInfo::createdAtMillis)
+                    .reversed()
+                    .thenComparing(PtyMessage.SessionInfo::name))
+            .map(WorkspaceSessionsResponse.Session::of)
+            .toList());
   }
 
   private static ErrorCode code(PtyMessage.TicketRefusal kind) {

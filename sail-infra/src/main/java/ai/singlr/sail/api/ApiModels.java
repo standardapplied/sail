@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.TemplateBuildService;
 import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.MessageStore;
@@ -59,6 +60,60 @@ record TicketResponse(String ticket, String address, String expiresAt) implement
     m.put("ticket", ticket);
     m.put("address", address);
     m.put("expires_at", expiresAt);
+    return m;
+  }
+}
+
+/**
+ * The terminal sessions in one workspace that the caller may attach to: what an app lists so a
+ * person comes back to what runs there. {@code writer} is who holds the keyboard, blank for no one.
+ */
+record WorkspaceSessionsResponse(List<Session> sessions) implements Mappable {
+  /**
+   * One session: {@code writer} holds its keyboard (blank for no one), {@code command} is blank for
+   * the login shell, and {@code endedReason} is the host's words for its end, null while it lives.
+   */
+  record Session(
+      String name,
+      boolean live,
+      int attached,
+      String writer,
+      String opener,
+      List<String> command,
+      Instant createdAt,
+      String endedReason)
+      implements Mappable {
+    static Session of(PtyMessage.SessionInfo info) {
+      return new Session(
+          info.name(),
+          info.live(),
+          info.attached(),
+          info.writerFde(),
+          info.opener(),
+          info.command(),
+          DateTimeUtils.ofMillis(info.createdAtMillis()),
+          Strings.isBlank(info.endedReason()) ? null : info.endedReason());
+    }
+
+    @Override
+    public Map<String, Object> toMap() {
+      var m = new LinkedHashMap<String, Object>();
+      m.put("name", name);
+      m.put("live", live);
+      m.put("attached", attached);
+      m.put("writer", writer);
+      m.put("opener", opener);
+      m.put("command", command);
+      m.put("created_at", DateTimeUtils.format(createdAt));
+      if (endedReason != null) m.put("ended_reason", endedReason);
+      return m;
+    }
+  }
+
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("sessions", sessions.stream().map(Session::toMap).toList());
     return m;
   }
 }

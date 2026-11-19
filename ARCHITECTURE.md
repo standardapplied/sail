@@ -3936,7 +3936,7 @@ tick, never once each. An accept that fails while the listener stays bound (out 
 passed over after 100 ms and never ends the door. A presented ticket's credential is resolved
 again against the roster. The connection then keeps `TCP_NODELAY` and TCP keepalive (a vanished peer
 found dead within about a minute, its slot, attachment and write token released), speaks the unix
-socket's `SAILPTY4` frames for its ticket's one action on its one target alone (an open ticket
+socket's `SAILPTY5` frames for its ticket's one action on its one target alone (an open ticket
 creates one session in its project and attaches to it), and may end that one session only while it
 holds its write token, so an observer never ends one (`PtyTickets.Ticket#refusal`, the host's
 ownership check still deciding the kill), each frame decided again as on the unix
@@ -3945,6 +3945,17 @@ issued for no credential, for the host's own token (the box's person exists only
 socket) or for a machine token. `sail _pty-selftest`, the release smoke test, opens a loopback
 door, issues a ticket, presents it and hears one echo (`tcp-selftest: ok`), so the native binary
 runs the door and its keepalive options.
+
+A client finds its sessions again with `GET /v1/projects/{p}/workspaces/{w}/sessions` (`main` the
+project's container), which the terminal host's rule decides, as a ticket's: the API lists the
+host's sessions with its dispatch credential and keeps that workspace's ones the caller may attach
+to, by the host's one attach rule (`PtySessionHost.mayAttach`): their own, or every one for an
+admin, so a member asking another person's workspace lists nothing of theirs. Each says whether it
+lives, its clients, its keyboard's holder, its opener, its command, when it was opened
+(`created_at`) and, once ended, the host's words for why (`ended_reason`), newest first. An ended
+one is listed for `CORPSE_RETENTION` (10 min), a workspace's stop included: the yield that ends it
+deletes its ring and keeps it ended, so a client back later says why it ended rather than that it
+is gone. Attaching to one is the ticket above.
 
 **Files pasted into a session (`PtyUploads`).** A client uploads a file on the terminal connection
 it already holds, in frames 12-15 (`PutBegin`, `PutChunk`, `PutEnd`, `PutCancel`) answered by
