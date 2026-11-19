@@ -750,6 +750,9 @@ extension Driver {
     /// frames'. The first switch the four panes' views see is AppKit's first measuring of their
     /// text in the other look, so it is reported, not judged.
     static let lookSwitchHold = 50.0
+    /// The most the first switch may hold the main thread, counted as ours: about two and a half
+    /// times the 54–58 ms seen, so a cost of ours that lands only there cannot pass unseen.
+    static let firstSwitchHold = 150.0
     /// How long no pane's screen may change before the switches, so they measure the looks alone,
     /// not a prompt or a flood's tail still arriving.
     static let quietBeforeSwitching = 0.3
@@ -774,6 +777,8 @@ extension Driver {
         var switches: [(at: Double, setting: Double, took: Double, span: Span)] = []
         var drawn = 0
         var resolvedLater = 0
+        var resolvedFirst = 0
+        let keptBefore = SymbolInk.kept
         let laidOut = workbench.tabLayouts
         for index in 0 ..< times {
             let other: NSAppearance.Name = shell.look == .dark ? .aqua : .darkAqua
@@ -785,7 +790,7 @@ extension Driver {
             if await lookDrawn() { drawn += 1 }
             await drawnAndCommitted()
             let span = Span(at, CACurrentMediaTime())
-            if index > 0 { resolvedLater += SymbolInk.resolutions - resolved }
+            if index > 0 { resolvedLater += SymbolInk.resolutions - resolved } else { resolvedFirst = SymbolInk.resolutions - resolved }
             switches.append((at, setting, (ContinuousClock.now - began) / .milliseconds(1), span))
         }
         let layouts = workbench.tabLayouts - laidOut
@@ -829,6 +834,7 @@ extension Driver {
         let laterHolds = holds.dropFirst().map { Self.ms($0.ours) }.joined(separator: ", ")
         let firstHold = Self.ms(holds.first?.ours ?? 0)
         let firstCPU = (cpus.first ?? nil).map { Self.ms($0) } ?? "?"
+        let firstSaid = "ours \(firstHold) ms, its CPU time \(firstCPU) ms; \(resolvedFirst) symbol images resolved, \(keptBefore) kept before it"
         let laterSaid = "ours, clipped to each: \(laterHolds) ms; the first, reported: \(firstHold) ms, its CPU time \(firstCPU) ms"
         let waitSaid = "the worst pane, ours \(Self.ms(worst?.ours ?? 0)) ms: \(worst?.said ?? "none"); the four panes' longest draws summed \(Self.ms(draws)) ms"
         return [
@@ -836,8 +842,10 @@ extension Driver {
             ("2: every pane drew every look (\(drewSaid))", drawn == times && changes.allSatisfy { $0 >= times }),
             ("3: no symbol resolved by switches 2 to \(times), between looks already shown (\(resolvedLater) resolved)", resolvedLater == 0),
             ("4: no layout of the workbench's tabs during the switches (\(layouts) laid out)", layouts == 0),
-            ("5: each switch after the first held the main thread at most \(Self.ms(Self.lookSwitchHold)) ms (\(laterSaid))", later <= Self.lookSwitchHold),
-            ("6: no pane waited over 100 ms to show a change (\(waitSaid))", (worst?.ours ?? 0) <= 100),
+            ("5: the first switch held the main thread at most \(Self.ms(Self.firstSwitchHold)) ms and resolved at most one symbol image per one kept (\(firstSaid))",
+             (holds.first?.ours ?? 0) <= Self.firstSwitchHold && resolvedFirst <= keptBefore),
+            ("6: each switch after the first held the main thread at most \(Self.ms(Self.lookSwitchHold)) ms (\(laterSaid))", later <= Self.lookSwitchHold),
+            ("7: no pane waited over 100 ms to show a change (\(waitSaid))", (worst?.ours ?? 0) <= 100),
         ]
     }
 

@@ -68,10 +68,9 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
 
     private lazy var painter = PaintWhenShown { [unowned self] in self.paint() }
 
-    /// How many times a change of look painted the pane: none while it is hidden.
-    package var lookPaints: Int {
-        painter.paints
-    }
+    /// How many times the pane was painted, wherever from: none while it is hidden at a change of
+    /// look.
+    package private(set) var lookPaints = 0
 
     override public func viewDidUnhide() {
         super.viewDidUnhide()
@@ -365,6 +364,7 @@ public final class WorkspacesPane: NSView, NSTableViewDataSource, NSTableViewDel
     }
 
     private func paint() {
+        lookPaints += 1
         layer?.backgroundColor = NSColor(look.canvas).cgColor
         heading.textColor = NSColor(look.text)
         for group in [projectGroup, newGroup] {

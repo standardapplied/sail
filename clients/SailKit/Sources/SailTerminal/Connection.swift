@@ -14,7 +14,7 @@ final class Connection: Sendable {
     private let writes = Mutex(())
     private let reading = Mutex(Reading())
 
-    private init(socket: Socket) {
+    init(socket: Socket) {
         self.socket = socket
     }
 
@@ -27,15 +27,27 @@ final class Connection: Sendable {
     }
 
     /// Is admitted with `token`: the boot id of the run of the host that welcomed it. Refused in
-    /// the host's words, or as another protocol when the magic differs.
+    /// the host's words, or as another protocol when the magic differs, a peer that wrote its
+    /// magic and left before this one's arrived included: what it wrote is read either way.
     func admit(token: String) throws(TerminalError) -> String {
-        try socket.send(Handshake.magic)
-        let peer = try reading.withLock { (reading: inout Reading) throws(TerminalError) in try reading.magic(from: socket) }
+        var unsent: TerminalError?
+        do throws(TerminalError) {
+            try socket.send(Handshake.magic)
+        } catch {
+            unsent = error
+        }
+        let peer: [UInt8]
+        do throws(TerminalError) {
+            peer = try reading.withLock { (reading: inout Reading) throws(TerminalError) in try reading.magic(from: socket) }
+        } catch {
+            throw unsent ?? error
+        }
         do throws(TerminalWireError) {
             try Handshake.check(peer: peer)
         } catch {
             throw Self.violation(error)
         }
+        if let unsent { throw unsent }
         try send(.hello(token: token))
         switch try next() {
         case let .welcome(hostBootID): return hostBootID

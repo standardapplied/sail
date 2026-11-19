@@ -200,10 +200,10 @@ import Testing
         #expect(try FileManager.default.contentsOfDirectory(atPath: URL(filePath: newer).deletingLastPathComponent().path) == ["sail"], "a staged file is removed")
     }
 
-    /// What answers at the person's socket with another protocol's magic (here a listener in this
-    /// test writing `SAILPTY3`) is said once as another version's host, with the command that ends
-    /// it, and no host of this build is started beside it to lose the socket's lock.
-    @Test func anotherVersionsHostIsSaidWithItsRemedyAndNothingIsStarted() async throws {
+    /// A stand-in at the person's socket, played by a listener in this test, and a host of this
+    /// build that would say if it were started: whatever the stand-in does, `ensureServing`'s
+    /// error and whether this build's host ran are answered.
+    static func standIn(_ answer: @escaping @Sendable (Int32) -> Void) async throws -> (said: String, started: Bool, took: Duration) {
         let folder = FileManager.default.temporaryDirectory.appending(path: "sail-other-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
@@ -212,10 +212,7 @@ import Testing
         try "#!/bin/sh\ntouch '\(started.path)'\nexit 3\n".write(to: binary, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: binary.path)
         let address = try HostAddress.local(home: folder.path)
-        guard case let .unix(path) = address else {
-            Issue.record("the local address is not a socket")
-            return
-        }
+        guard case let .unix(path) = address else { throw CancellationError() }
         try FileManager.default.createDirectory(atPath: URL(filePath: path).deletingLastPathComponent().path, withIntermediateDirectories: true)
         let listener = socket(AF_UNIX, SOCK_STREAM, 0)
         defer {
@@ -233,24 +230,57 @@ import Testing
                 guard client >= 0 else { return }
                 var one: Int32 = 1
                 setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
-                var theirs = [UInt8](repeating: 0, count: 8)
-                let read = theirs.withUnsafeMutableBytes { recv(client, $0.baseAddress, $0.count, MSG_WAITALL) }
-                if read == 8 {
-                    _ = Array("SAILPTY3".utf8).withUnsafeBytes { send(client, $0.baseAddress, $0.count, 0) }
-                }
-                close(client)
+                answer(client)
             }
         }.start()
         let host = LocalHost(binary: binary.path, address: address, log: folder.appending(path: "host.log").path, copies: folder.appending(path: "copies"))
         let asked = ContinuousClock.now
+        var said = "nothing: it was taken as serving"
         do {
             try await host.ensureServing()
-            Issue.record("another version's host was taken as serving")
         } catch {
-            #expect(error.description == LocalHost.otherVersion(pid: getpid()), "\(error)")
+            said = error.description
         }
-        #expect(ContinuousClock.now - asked < .seconds(5), "said at once")
-        #expect(host.startedPID == nil && !FileManager.default.fileExists(atPath: started.path), "no host of this build was started beside it")
+        return (said, host.startedPID != nil || FileManager.default.fileExists(atPath: started.path), ContinuousClock.now - asked)
+    }
+
+    /// What answers at the person's socket with another protocol's magic, read from the client
+    /// first as Sail's host reads it, is said once as another version's host, with the command
+    /// that ends it, and no host of this build is started beside it to lose the socket's lock.
+    @Test func anotherVersionsHostIsSaidWithItsRemedyAndNothingIsStarted() async throws {
+        let found = try await Self.standIn { client in
+            var theirs = [UInt8](repeating: 0, count: 8)
+            if theirs.withUnsafeMutableBytes({ recv(client, $0.baseAddress, $0.count, MSG_WAITALL) }) == 8 {
+                _ = Array("SAILPTY3".utf8).withUnsafeBytes { send(client, $0.baseAddress, $0.count, 0) }
+            }
+            close(client)
+        }
+        #expect(found.said == LocalHost.otherVersion(pid: getpid()))
+        #expect(found.took < .seconds(5) && !found.started, "said at once, and no host of this build was started beside it")
+    }
+
+    /// A peer that writes another magic and hangs up before the client's own arrives is still said
+    /// as another version, never as nothing having answered.
+    @Test func anotherVersionsHostThatHangsUpAtOnceIsStillSaid() async throws {
+        let first = Mutex(true)
+        let found = try await Self.standIn { client in
+            if first.withLock({ was in defer { was = false }; return was }) {
+                _ = Array("SAILPTY3".utf8).withUnsafeBytes { send(client, $0.baseAddress, $0.count, 0) }
+            }
+            close(client)
+        }
+        #expect(found.said == LocalHost.otherVersion(pid: getpid()))
+        #expect(!found.started)
+    }
+
+    /// What takes the connection and says nothing is said as a host not answering, with how to end
+    /// it; no host of this build is started to lose the lock to it.
+    @Test func aHostThatTakesTheConnectionAndSaysNothingIsSaidNotRaced() async throws {
+        let held = Mutex<[Int32]>([])
+        let found = try await Self.standIn { client in held.withLock { $0.append(client) } }
+        held.withLock { $0.forEach { close($0) } }
+        #expect(found.said == LocalHost.notAnswering(pid: getpid()))
+        #expect(found.took < .seconds(5) && !found.started, "said within the probe's second, and nothing started")
     }
 
     /// The process serving at a socket is found by its pid and its executable: here, this test's own.

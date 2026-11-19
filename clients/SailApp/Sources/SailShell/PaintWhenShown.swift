@@ -1,10 +1,9 @@
 /// A pane's paint for a change of look, put off while the pane is hidden: no one sees it, and
 /// painting it says its lines again and lays it out, at the switch, for nothing. A shown pane is
-/// painted at once; a hidden one once, when it is next shown. ``paints`` counts the paints done.
+/// painted at once; a hidden one once, when it is next shown.
 @MainActor
 final class PaintWhenShown {
     private var owed = false
-    private(set) var paints = 0
     private let paint: @MainActor () -> Void
 
     init(_ paint: @escaping @MainActor () -> Void) {
@@ -28,7 +27,6 @@ final class PaintWhenShown {
     }
 
     private func done() {
-        paints += 1
         paint()
     }
 }

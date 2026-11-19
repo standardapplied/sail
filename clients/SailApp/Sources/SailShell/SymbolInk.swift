@@ -20,6 +20,11 @@ package enum SymbolInk {
     /// colour, which a change of look between looks already shown never needs.
     package private(set) static var resolutions = 0
 
+    /// How many distinct symbol images are kept: what one switch to a look not yet shown may make.
+    package static var kept: Int {
+        made.count
+    }
+
     static func image(_ name: String, points: Double, weight: NSFont.Weight, colour: Tint, accessibility: String) -> NSImage {
         let key = Key(name: name, points: points, weight: weight.rawValue, colour: colour, accessibility: accessibility)
         if let image = made[key] { return image }
