@@ -338,7 +338,10 @@ class PtyUploadsTest {
   /**
    * Major 1 of round 2: a copy the workspace stops taking never blocks the connection, which still
    * answers; the upload is given up once a chunk is not written within its deadline, its copy ended
-   * and its temporary removed.
+   * and its temporary removed. The clock moves until a deadline runs: the first 64 KiB chunk fits
+   * the unread pipe, so the clock once moved after its deadline was cancelled and before the
+   * stalled chunk's was set, which was then set past the moved clock and never ran, and the test
+   * waited for a refusal that never came.
    */
   @Test
   void aStalledCopyNeverBlocksTheConnectionAndIsGivenUpAtItsDeadline() throws Exception {

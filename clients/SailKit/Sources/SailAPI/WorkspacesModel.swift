@@ -321,7 +321,7 @@ public struct WorkspacesModel: Sendable {
     /// the project shown, for its row; a listing for a project no longer shown is dropped.
     public mutating func sessionsListed(_ listing: RunnerSessions, project: String, workspace: String) {
         guard project == chosen else { return }
-        sessions[workspace] = listing.sessions.count { $0.live && $0.opener == person.handle }
+        sessions[workspace] = listing.live(for: person.handle).count
     }
 
     public mutating func chooseRow(_ name: String?) {

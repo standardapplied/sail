@@ -356,7 +356,7 @@ public final class WorkspacesView: NSView {
     /// it does not answer.
     private func terminals(in name: String, project: String, _ client: SailClient) async -> Int? {
         let handle = model.person.handle
-        return (try? await client.send(.sessions(workspace: name, project: project))).map { $0.sessions.count { $0.live && $0.opener == handle } }
+        return (try? await client.send(.sessions(workspace: name, project: project))).map { $0.live(for: handle).count }
     }
 
     /// The question open, in the library's sheet on the window: the sheet holds that one question,

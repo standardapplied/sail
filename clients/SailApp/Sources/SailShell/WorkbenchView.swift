@@ -447,7 +447,7 @@ public final class WorkbenchView: NSView {
 
     private func open(_ place: Place, attaching listed: RunnerSessions?, for person: String) {
         let held = Set(model.panes.values.map(\.session) + self.held.flatMap(\.layout.sessions))
-        let theirs = (listed?.sessions ?? []).filter { $0.live && $0.opener == person && !held.contains($0.name) }
+        let theirs = (listed?.live(for: person) ?? []).filter { !held.contains($0.name) }
         guard !theirs.isEmpty else { return openTab(in: place) }
         let size = points
         theirs.forEach { open(model.newTab(session: $0.name, place: place), start: .attach, points: size) }

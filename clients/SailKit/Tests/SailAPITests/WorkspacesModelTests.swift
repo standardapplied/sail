@@ -58,6 +58,18 @@ import Testing
         #expect(Self.table(model)?.yours.allSatisfy { $0.sessions == 0 } != false, "a new choice forgets the counts")
     }
 
+    /// A person's terminals in a listing are its live sessions they opened, newest first as listed:
+    /// not an ended one, not someone else's.
+    @Test func aPersonsTerminalsAreTheLiveSessionsTheyOpened() {
+        func session(_ name: String, live: Bool = true, opener: String = "uday") -> RunnerSession {
+            RunnerSession(name: name, live: live, attached: 0, writer: "", opener: opener, command: [], createdAt: Self.at, endedReason: nil)
+        }
+        let listing = RunnerSessions(sessions: [session("app-b"), session("app-c", live: false), session("app-d", opener: "ana"), session("app-a")])
+        #expect(listing.live(for: "uday").map(\.name) == ["app-b", "app-a"])
+        #expect(listing.live(for: "ana").map(\.name) == ["app-d"])
+        #expect(listing.live(for: "bo").isEmpty)
+    }
+
     /// Frame "Loading", then "The control plane cannot be reached": nothing listed yet, the card says why.
     @Test func beforeAnyProjectTheCardSaysWhatIsHappening() {
         var model = WorkspacesModel(person: Self.ana)
