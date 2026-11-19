@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SailAPI
+import SailControls
 import SailKitTestSupport
 import SailShell
 import SailTerminal
@@ -16,6 +17,8 @@ actor GoldenDesk: Transport {
     private var answers: [String: HTTPResponse] = [:]
     private var held: [String: Duration] = [:]
     private var failing: String?
+    /// The failing route cannot be reached at all, in place of the proxy's 502.
+    private var unreached = false
     private(set) var asked: [HTTPRequest] = []
 
     init() {
@@ -33,15 +36,27 @@ actor GoldenDesk: Transport {
         held[route] = after
     }
 
+    /// From now on the projects are listed as the golden `projects` lists them, but these: each a
+    /// name and its template's state.
+    func answerProjects(_ projects: [[String]]) throws {
+        let exchange = try Exchange("projects")
+        guard var body = try JSONSerialization.jsonObject(with: exchange.body) as? [String: Any] else { return }
+        body["projects"] = projects.map { ["name": $0.first ?? "", "container_status": "running", "template": $0.dropFirst().first ?? "ready"] }
+        body["total"] = projects.count
+        answers["GET /v1/projects"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: try JSONSerialization.data(withJSONObject: body))
+        held["GET /v1/projects"] = .zero
+    }
+
     /// From now on a proxy answers `route` with a 502 of its own; nil, nothing.
-    func fail(_ route: String?) {
+    func fail(_ route: String?, unreached: Bool = false) {
         failing = route
+        self.unreached = unreached
     }
 
     func send(_ request: HTTPRequest) async throws(SailError) -> HTTPResponse {
         asked.append(request)
         if let after = held[request.route], after > .zero { try? await Task.sleep(for: after) }
-        guard request.route != failing else { throw .unexpected(route: request.route, status: 502) }
+        guard request.route != failing else { throw unreached ? SailError.unreachable("Could not connect to the server.") : SailError.unexpected(route: request.route, status: 502) }
         guard let answer = answers[request.route] else { throw .unreachable("no golden answers \(request.route)") }
         guard request.route == "POST /v1/terminal/tickets", answer.status == 201, let door = Self.door,
               var body = (try? JSONSerialization.jsonObject(with: answer.body)) as? [String: Any] else { return answer }
@@ -66,13 +81,13 @@ actor GoldenDesk: Transport {
     }
 }
 
-/// The drive's steps on the Workspaces pane and the runner's tabs, against ``GoldenDesk``.
+/// The drive's steps on the Workspaces section and the runner's tabs, against ``GoldenDesk``.
 extension Driver {
-    /// Types `name` into the pane's name field as a person does: the field changes and says so,
-    /// which is what enables Create.
-    private func typeName(_ name: String, into pane: WorkspacesPane) {
-        pane.name.stringValue = name
-        pane.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: pane.name))
+    /// Opens the create row and types `name` into its field as a person does: the field changes
+    /// and says so.
+    private static func found<Found: NSView>(_ kind: Found.Type, in view: NSView) -> [Found] {
+        if let view = view as? Found { return [view] }
+        return view.subviews.flatMap { found(kind, in: $0) }
     }
 
     func performWorkspaces(_ step: Step) async -> (Bool, String)? {
@@ -90,14 +105,25 @@ extension Driver {
         }
         if let text = step.workspaces {
             let found = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.contains(text) }
-            let chosen = pane.rows.indices.contains(pane.list.selectedRow) ? pane.rows[pane.list.selectedRow].name : "none"
-            let focused = pane.window?.firstResponder === pane.list
+            let focused = pane.window?.firstResponder === pane.project.list
             return (found, "the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | ")
-                + "; selected \(chosen)\(focused ? ", the list focused" : ""), Open \(pane.open.isEnabled ? "enabled" : "disabled")")
+                + "; selected \(pane.project.list.chosen ?? "none")\(focused ? ", the list focused" : ""), New Workspace \(pane.project.newWorkspace.isEnabled ? "enabled" : "disabled")")
         }
         if let wanted = step.listChosen {
-            let found = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.rows.indices.contains(pane.list.selectedRow) && pane.rows[pane.list.selectedRow].name == wanted }
+            let found = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.project.list.chosen == wanted }
             return (found, "the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
+        }
+        if let projects = step.projects {
+            do {
+                try await GoldenDesk.shared.answerProjects(projects)
+                return (true, "")
+            } catch {
+                return (false, "the projects golden: \(error)")
+            }
+        }
+        if let route = step.unreachable {
+            await GoldenDesk.shared.fail(route, unreached: true)
+            return (true, "")
         }
         if let route = step.proxyFails {
             await GoldenDesk.shared.fail(route.isEmpty ? nil : route)
@@ -121,29 +147,70 @@ extension Driver {
             shell.account.signOutHere(nil)
             return (true, "")
         }
+        if let open = step.createRowOpen {
+            let shown = await waitUntil(step.seconds ?? 5) { (pane.project.field.window != nil) == open }
+            return (shown, "the create row \(pane.project.field.window != nil ? "open" : "gone")")
+        }
+        if let keys = step.keysInField {
+            let held = await waitUntil(step.seconds ?? 5) {
+                pane.project.fieldHasKeys == keys && step.fieldHolds.map { pane.project.field.field.stringValue == $0 } != false
+            }
+            return (held, "the field \(pane.project.fieldHasKeys ? "holds" : "does not hold") the keys and the name \(pane.project.field.field.stringValue); first responder \(String(describing: shell.window.firstResponder.map { type(of: $0) }))")
+        }
+        if let said = step.whileBusy {
+            let seen = await waitUntil(step.seconds ?? 5) { pane.busy && pane.text.contains(said) }
+            return (seen, "\(pane.busy ? "under way" : "nothing under way"); the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
+        }
+        if let held = step.keysInList {
+            let list = await waitUntil(step.seconds ?? 5) { (shell.window.firstResponder === pane.project.list) == held }
+            return (list, "first responder \(String(describing: shell.window.firstResponder.map { type(of: $0) }))")
+        }
+        if let size = step.window, size.count == 2 {
+            let frame = shell.window.frame
+            shell.window.setFrame(NSRect(x: frame.minX, y: frame.maxY - size[1], width: size[0], height: size[1]), display: true)
+            pane.layoutSubtreeIfNeeded()
+            let now = shell.window.frame.size, reached = abs(Double(now.width) - size[0]) < 0.5 && abs(Double(now.height) - size[1]) < 0.5
+            let sections: [(String, NSView)] = [("the rail", shell.rail as NSView), ("This Mac", shell.thisMac as NSView), ("Workspaces", pane as NSView), ("Account", shell.account as NSView)]
+            let least = sections.map { "\($0.0) \($0.1.fittingSize.width) × \($0.1.fittingSize.height)" }.joined(separator: ", ")
+            return (reached, "the window is \(now.width) × \(now.height)" + (reached ? "" : "; the least each section asks: " + least))
+        }
+        if let gone = step.notSaid {
+            let went = await waitUntil(step.seconds ?? 10) { !pane.busy && !pane.text.contains(gone) }
+            return (went, "the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
+        }
+        if let title = step.clickButton {
+            return await clickButton(title, in: pane)
+        }
+        if let wanted = step.chooseProject {
+            let listed = await waitUntil(step.seconds ?? 10) { Self.row(wanted, in: pane.panel.list) != nil }
+            guard listed else { return (false, "the panel never listed \(wanted): chosen \(pane.panel.list.chosen ?? "none")") }
+            guard await clickRow(wanted, in: pane.panel.list) else { return (false, "the panel's \(wanted) row could not be clicked") }
+            let named = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.hasPrefix("Workspaces\n\(wanted)\n") }
+            return (named, "chosen: \(pane.panel.list.chosen ?? "none"); the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
+        }
         if let wanted = step.chooseRow {
-            guard let index = pane.rows.firstIndex(where: { $0.name == wanted }) else { return (false, "no row \(wanted)") }
-            pane.list.selectRowIndexes([index], byExtendingSelection: false)
-            return (pane.list.selectedRow == index, "the button says \(pane.open.title), \(pane.open.isEnabled ? "enabled" : "disabled")")
-        }
-        if let wanted = step.createStarts {
-            typeName(wanted, into: pane)
-            pane.create.performClick(nil)
-            return (pane.busy && !pane.create.isEnabled, "while creating: Create says \(pane.create.title); \(pane.text.replacingOccurrences(of: "\n", with: " | "))")
-        }
-        if let wanted = step.create {
-            let before = pane.ended
-            typeName(wanted, into: pane)
-            pane.create.performClick(nil)
-            let said = pane.text
-            let done = await waitUntil(step.seconds ?? 10) { pane.ended > before }
-            return (done, "while creating: \(said.replacingOccurrences(of: "\n", with: " | "))")
+            guard await clickRow(wanted, in: pane.project.list) else { return (false, "no row \(wanted) to click") }
+            let chosen = await waitUntil(step.seconds ?? 5) { pane.project.list.chosen == wanted }
+            return (chosen, "chosen: \(pane.project.list.chosen ?? "none")")
         }
         if let name = step.open {
-            guard let index = pane.rows.firstIndex(where: { $0.name == name }) else { return (false, "no row \(name)") }
-            pane.list.selectRowIndexes([index], byExtendingSelection: false)
-            pane.open.performClick(nil)
+            pane.project.list.choose(name)
+            guard pane.project.list.chosen == name, let enter = Keys.named("enter", modifiers: []) else { return (false, "no row \(name)") }
+            shell.window.makeFirstResponder(pane.project.list)
+            send(enter)
             return (shell.rail.selected == .thisMac, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing"); \(arrangementSaid)")
+        }
+        if let shown = step.skeletons {
+            let visible = { Self.found(Skeleton.self, in: pane).filter { !$0.isHiddenOrHasHiddenAncestor } }
+            let found = await waitUntil(step.seconds ?? 5) { shown ? !visible().isEmpty && visible().allSatisfy { $0.alphaValue == 1 } : visible().isEmpty }
+            let bars = visible()
+            return (found, "\(bars.filter { $0.alphaValue == 1 }.count) of \(bars.count) skeleton bars shown; the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
+        }
+        if let shown = step.showSidebar {
+            guard let key = Keys.named("s", modifiers: ["control", "command"]) else { return (false, "no ⌃⌘S") }
+            send(key)
+            let done = await waitUntil(step.seconds ?? 5) { pane.panel.isHidden != shown }
+            return (done, "the panel \(pane.panel.isHidden ? "hidden" : "shown") after ⌃⌘S")
         }
         if let wanted = step.ticketAsked {
             let found = await waitUntilAsync(step.seconds ?? 15) { await Self.tickets().contains { asked in wanted.allSatisfy { asked[$0.key] == $0.value } } }
@@ -171,8 +238,50 @@ extension Driver {
     }
 
     /// Waits, at most `seconds`, until `condition` holds, asking it again every 50 ms.
+    /// Clicks the shown button titled `title` in `pane` as a person does.
+    private func clickButton(_ title: String, in pane: WorkspacesView) async -> (Bool, String) {
+        pane.layoutSubtreeIfNeeded()
+        guard let button = Self.views(in: pane).compactMap({ $0 as? NSButton }).first(where: { $0.title == title && !$0.isHiddenOrHasHiddenAncestor }),
+              await click(button, at: NSPoint(x: button.bounds.midX, y: button.bounds.midY))
+        else { return (false, "no \(title) shown") }
+        return (true, "clicked \(title)")
+    }
+
+    /// Clicks the row of `id` in `list` near its leading edge, clear of the actions at its end.
+    private func clickRow(_ id: String, in list: SailList) async -> Bool {
+        list.layoutSubtreeIfNeeded()
+        guard let row = Self.row(id, in: list) else { return false }
+        let rect = list.rect(ofRow: row)
+        return await click(list, at: NSPoint(x: rect.minX + 24, y: rect.minY + min(rect.height, 52) / 2))
+    }
+
+    private static func row(_ id: String, in list: SailList) -> Int? {
+        list.entries.firstIndex { entry in
+            guard case let .item(item) = entry else { return false }
+            return item.id == id
+        }
+    }
+
+    /// A click at `point` in `view` as a person makes it: a mouse-down sent through the window with
+    /// its mouse-up queued behind it, so the view's own tracking takes both.
+    private func click(_ view: NSView, at point: NSPoint) async -> Bool {
+        guard let window = view.window else { return false }
+        let location = view.convert(point, to: nil)
+        func event(_ type: NSEvent.EventType) -> NSEvent? {
+            NSEvent.mouseEvent(
+                with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0
+            )
+        }
+        guard let down = event(.leftMouseDown), let up = event(.leftMouseUp) else { return false }
+        NSApp.postEvent(up, atStart: false)
+        window.sendEvent(down)
+        await Task.yield()
+        return true
+    }
+
     private func waitUntilAsync(_ seconds: Double, _ condition: () async -> Bool) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(seconds)
+        let deadline = ContinuousClock.now + .seconds(failedSoFar ? min(seconds, Self.afterAFailure) : seconds)
         while !(await condition()) {
             guard ContinuousClock.now < deadline else { return false }
             try? await Task.sleep(for: .milliseconds(50))

@@ -148,7 +148,9 @@ func answer<Response>(
     /// its own lists only its container.
     @Test func threeWorkspacesAndNoneAreReadAsListed() throws {
         let three = try Endpoint.workspaces(project: "harbor").decode(response(try Exchange("workspaces-three")))
-        #expect(three.rows(for: "uday").map { $0.reading(for: "uday") } == ["dock · running", "pier · stopped", "quay · running · ana"])
+        let rows = three.rows(for: "uday")
+        #expect(rows.map(\.name) == ["dock", "pier", "quay"] && rows.map(\.owner) == ["uday", "uday", "ana"])
+        #expect(rows.map(\.state) == [.known(.running), .known(.stopped), .known(.running)])
         let none = try Endpoint.workspaces(project: "harbor").decode(response(try Exchange("workspaces-none")))
         #expect(none.workspaces.map(\.name) == ["main"] && none.rows(for: "uday").isEmpty)
     }

@@ -29,7 +29,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public let window: NSWindow
     public let rail: Rail
     public let account: AccountPane
-    public let workspaces: WorkspacesPane
+    public let workspaces: WorkspacesView
     public let thisMac: WorkbenchView
     public private(set) var look: Look
 
@@ -71,9 +71,11 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         self.window = window
         let title: TitleFont
         let mono: TerminalFonts
+        let labels: LabelFont
         do {
             title = try TitleFont(directory: fonts)
             mono = try TerminalFonts(directory: fonts)
+            labels = try LabelFont(directory: fonts)
         } catch {
             throw .resources("the app's fonts cannot be read: \(error)")
         }
@@ -82,7 +84,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             account: Account(authenticator: passkeys { [weak window] in window }, vault: KeychainVault(), connect: connect), look: look, title: title,
             mono: mono
         )
-        workspaces = WorkspacesPane(look: look, title: title, mono: mono)
+        workspaces = WorkspacesView(look: look, title: title, mono: labels)
         rail = Rail(look: look)
         super.init()
         compose()
@@ -108,7 +110,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         askWhoIsSignedIn()
     }
 
-    /// Asks the control plane who is signed in, then tells the Workspaces pane what it learnt when
+    /// Asks the control plane who is signed in, then tells the Workspaces section what it learnt when
     /// no one is: signed out, or the control plane could not be asked, in its words.
     private func askWhoIsSignedIn() {
         Task {
@@ -177,7 +179,10 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func standing(_ signedIn: SignedIn?) {
         let whoami = signedIn.flatMap { try? $0.whoami.get() }
         workspaces.client = account.client()
-        workspaces.person = (whoami?.fde ?? signedIn?.fde ?? "", whoami?.role == .known(.admin))
+        workspaces.person = WorkspacesModel.Person(
+            handle: whoami?.fde ?? signedIn?.fde ?? "", admin: whoami?.role == .known(.admin), confirmed: whoami != nil,
+            controlPlane: signedIn?.controlPlane.url.host() ?? ""
+        )
         rail.offer(.workspaces, signedIn != nil || rail.selected == .workspaces)
         if signedIn == nil {
             workspaces.signedOut()
@@ -315,7 +320,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func compose() {
         window.title = Self.title
-        window.contentMinSize = NSSize(width: 480, height: 600)
+        window.minSize = NSSize(width: 480, height: 600)
         window.delegate = self
         window.isReleasedWhenClosed = false
         apply(look)
@@ -429,7 +434,8 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             item("Smaller", #selector(TerminalView.decreaseFontSize(_:)), "-"),
             item("Actual Size", #selector(TerminalView.resetFontSize(_:)), "0"), .separator(),
             Command.renameTab.item(target: terminals),
-            item("Show Latency", #selector(WorkbenchView.toggleLatency(_:)), "l", [.command, .option], target: terminals),
+            item("Show Latency", #selector(WorkbenchView.toggleLatency(_:)), "l", [.command, .option], target: terminals), .separator(),
+            item("Show Sidebar", #selector(WorkspacesView.toggleSidebar(_:)), "s", [.command, .control], target: workspaces),
         ]
         func directed(_ title: String, _ action: Selector, _ direction: Direction, _ modifiers: NSEvent.ModifierFlags) -> NSMenuItem {
             let keys: [Direction: Int] = [.left: NSLeftArrowFunctionKey, .right: NSRightArrowFunctionKey, .up: NSUpArrowFunctionKey, .down: NSDownArrowFunctionKey]

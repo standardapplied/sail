@@ -93,7 +93,7 @@ import Testing
             capabilities: [.known(.read), .known(.write), .known(.admin)]
         ))
         #expect(try Endpoint.projects.decode(response(try Exchange("projects"))) == ProjectList(
-            projects: [ProjectSummary(name: "harbor", containerStatus: .known(.notCreated))], total: 1
+            projects: [ProjectSummary(name: "harbor", containerStatus: .known(.notCreated), template: .known(.ready))], total: 1
         ))
     }
 

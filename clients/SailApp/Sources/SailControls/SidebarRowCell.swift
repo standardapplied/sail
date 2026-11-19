@@ -42,12 +42,18 @@ public final class Tile: NSView {
 }
 
 /// A sidebar row's content, as the left panel draws a project: the disclosure's 12 pt slot, the
-/// tile, the name in medium ink and, when the template is not ready, its small pill at the
+/// tile, the name in medium ink (the secondary ink while what the panel shows is stale, as the
+/// design's stale frame draws it) and, when the template is not ready, its small pill at the
 /// trailing edge, 7 pt apart.
 @MainActor
 public final class SidebarRowCell: NSView {
     public var look: Look {
         didSet { repaint() }
+    }
+
+    /// The name in the secondary ink: what the panel shows failed to refresh.
+    public var stale = false {
+        didSet { if stale != oldValue { repaint() } }
     }
 
     let tile: Tile
@@ -91,7 +97,7 @@ public final class SidebarRowCell: NSView {
     }
 
     private func repaint() {
-        label.attributedStringValue = Draw.text(name, .systemFont(ofSize: Look.Step.callout.points, weight: .medium), look.text)
+        label.attributedStringValue = Draw.text(name, .systemFont(ofSize: Look.Step.callout.points, weight: .medium), stale ? look.textSecondary : look.text)
         tile.look = look
         pill?.look = look
     }

@@ -17,8 +17,24 @@ public final class SailButton: NSButton {
         }
     }
 
-    /// An icon-only button's tooltip, saying its label.
+    /// An icon-only button's tooltip, saying its label; any button's, saying ``why``.
     public private(set) var tooltip: Tooltip?
+
+    /// Why it is off, said by its tooltip on hover and to VoiceOver, so a disabled button is never
+    /// mute; an icon-only button says it in place of its label, without its shortcut. Nil: as before.
+    public var why: String? {
+        didSet {
+            guard why != oldValue else { return }
+            if tooltip == nil, let why {
+                let tooltip = Tooltip(why, look: look, mono: nil)
+                tooltip.attach(to: self, saying: why)
+                self.tooltip = tooltip
+            }
+            tooltip?.text = why ?? (iconOnly ? title : "")
+            tooltip?.chip.showsHint = why == nil
+            tooltip?.isOn = iconOnly || why != nil
+        }
+    }
 
     /// Its kind; a row's first action turns primary while the row is chosen.
     public var kind: ButtonKind {
@@ -94,8 +110,21 @@ public final class SailButton: NSButton {
         needsDisplay = true
     }
 
-    /// The shortcut's words, from the key equivalent; nil when it shows none.
+    /// The key that presses it shown after the label, where the key reaches it another way than its
+    /// key equivalent (Create ⏎, pressed by Return in the name field it sits beside).
+    public func hint(_ key: String, mono: LabelFont) {
+        hintKey = key
+        self.mono = mono
+        invalidateIntrinsicContentSize()
+        needsDisplay = true
+    }
+
+    /// The key shown by ``hint(_:mono:)``.
+    private var hintKey: String?
+
+    /// The shortcut's words, from the key equivalent or the hint; nil when it shows none.
     var shortcutWords: String? {
+        if let hintKey { return Shortcut.said(hintKey) }
         guard showsShortcut, !keyEquivalent.isEmpty else { return nil }
         let held = keyEquivalentModifierMask
         return Shortcut.said(keyEquivalent, control: held.contains(.control), option: held.contains(.option), shift: held.contains(.shift), command: held.contains(.command))

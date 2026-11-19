@@ -71,9 +71,15 @@ jobs:
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # The native build's cache, which CI's native lane (Linux) and Clients' darwin sail (macOS)
+      # keep on main from the same `mvn -Pnative` package, so its plugins are all there: this
+      # commit's when main has saved it, else main's newest. A tag restores main's caches, never
+      # another tag's, so a kind of its own fell back to whichever kind main saved last and fetched
+      # the native plugin afresh at every release (0.72.1, run 44431809650: two attempts failed on
+      # it).
       - uses: ./.github/actions/maven-cache
         with:
-          kind: release
+          kind: native
 
       - name: Build native image
         run: mvn package -Pnative -DskipTests -Djacoco.skip=true -Dspotless.check.skip=true
@@ -120,6 +126,9 @@ jobs:
   # signature first, so the app and the release ship one binary.
   app:
     needs: [ci-passed, build]
+    permissions:
+      actions: read
+      contents: write
     uses: ./.github/workflows/clients.yml
     with:
       release: true

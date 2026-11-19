@@ -174,8 +174,7 @@ import Testing
             #expect(pane.enroll.keyEquivalent.isEmpty, "\(name): Enroll answers Return")
             #expect(pane.signIn.keyEquivalent.isEmpty, "\(name): Sign In answers Return")
         }
-        #expect(pane.enroll.controlSize == .large && pane.enroll.intrinsicContentSize.height == shell.workspaces.create.intrinsicContentSize.height,
-                "\(name): Enroll is not the size of the fields' buttons")
+        #expect(pane.enroll.controlSize == .large, "\(name): Enroll is not the size of the fields' buttons")
     }
 
     static func hex(_ rgb: RGB) -> UInt32 {

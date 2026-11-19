@@ -15,7 +15,15 @@ public final class TooltipChip: NSView {
     var side: TooltipPlacement.Side = .below
     /// Along the arrow's edge, from the chip's left or bottom.
     var arrowAt: Double?
-    private let text: String
+    var text: String {
+        didSet { if text != oldValue { fit() } }
+    }
+
+    /// The shortcut is said; off while the key does nothing (a disabled button saying why).
+    var showsHint = true {
+        didSet { if showsHint != oldValue { fit() } }
+    }
+
     private var shortcut: String?
     private var mono: LabelFont?
 
@@ -55,7 +63,7 @@ public final class TooltipChip: NSView {
     }
 
     private var hintText: NSAttributedString? {
-        guard let shortcut, let mono else { return nil }
+        guard showsHint, let shortcut, let mono else { return nil }
         return Draw.text(shortcut, mono.font(Look.Step.caption.points) as NSFont, Tint(look.onInk, alpha: TooltipStyle.keycapText))
     }
 
@@ -164,6 +172,33 @@ public final class Tooltip: NSResponder {
         panel?.isVisible == true
     }
 
+    /// What it says, to the eye and, as the anchor's help, to VoiceOver.
+    public var text: String {
+        get { chip.text }
+        set {
+            chip.text = newValue
+            anchor?.setAccessibilityHelp(newValue)
+        }
+    }
+
+    /// It shows on hover only while on.
+    public var isOn = true {
+        didSet { if !isOn { hide() } }
+    }
+
+    /// It shows only while its label is cut short: words already shown in full are not said twice.
+    public var onlyWhenCut = false
+
+    /// Whether a hover now would show it.
+    public var shows: Bool {
+        isOn && (!onlyWhenCut || anchorIsCut)
+    }
+
+    private var anchorIsCut: Bool {
+        guard let anchor else { return false }
+        return Double(anchor.intrinsicContentSize.width) > Double(anchor.alignmentRect(forFrame: anchor.frame).width) + 0.5
+    }
+
     /// Shows on `view`'s hover from now on.
     public func attach(to view: NSView, saying text: String) {
         anchor = view
@@ -173,6 +208,7 @@ public final class Tooltip: NSResponder {
 
     override public func mouseEntered(with _: NSEvent) {
         pending?.cancel()
+        guard shows else { return }
         if let last = Self.lastHidden, CACurrentMediaTime() - last < TooltipStyle.warm { return show() }
         let show = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated { self?.show() }

@@ -183,6 +183,12 @@ public struct FieldPaint: Equatable, Sendable {
 /// error states colour the whole pill; starting, creating and building pulse; no template is dashed.
 public enum PillState: CaseIterable, Sendable {
     case running, starting, creating, stopped, paused, incomplete, noTemplate, building, buildFailed
+    /// A workspace listed but never made: hollow, as stopped.
+    case notCreated
+    /// A workspace whose instance is in Incus's error state.
+    case error
+    /// A state this app does not know.
+    case unknown
 
     public var label: String {
         switch self {
@@ -195,6 +201,9 @@ public enum PillState: CaseIterable, Sendable {
         case .noTemplate: "No template"
         case .building: "Building"
         case .buildFailed: "Build failed"
+        case .notCreated: "Not created"
+        case .error: "Error"
+        case .unknown: "Unknown"
         }
     }
 
@@ -234,17 +243,17 @@ public struct PillPaint: Equatable, Sendable {
     public let hollow: Bool
 
     public init(_ state: PillState, look: Look) {
-        let failed = state == .incomplete || state == .buildFailed
+        let failed = state == .incomplete || state == .buildFailed || state == .error
         text = failed ? Tint(look.error) : look.textSecondary
         edge = failed ? Tint(look.error, alpha: 0.45) : look.separatorStrong
         dashed = state == .noTemplate
-        hollow = state == .stopped
+        hollow = state == .stopped || state == .notCreated
         dot = switch state {
         case .running: Tint(look.success)
         case .starting, .creating, .building: Tint(look.info)
         case .paused, .noTemplate: Tint(look.warning)
-        case .incomplete, .buildFailed: Tint(look.error)
-        case .stopped: look.textTertiary
+        case .incomplete, .buildFailed, .error: Tint(look.error)
+        case .stopped, .notCreated, .unknown: look.textTertiary
         }
     }
 }
@@ -270,6 +279,22 @@ public enum Shortcut {
         if (0xF704 ... 0xF726).contains(scalar.value) { return modifiers + "F\(scalar.value - 0xF703)" }
         guard !(0xE000 ... 0xF8FF).contains(scalar.value), scalar.properties.generalCategory != .control else { return nil }
         return modifiers + key.uppercased()
+    }
+}
+
+/// How long ago something was, as the app says it everywhere ("listed 4 min ago"): seconds under a
+/// minute, then minutes, hours and days, whole and rounded down; "just now" under a second, and for
+/// a time a clock put ahead.
+public enum Ago {
+    public static func said(_ seconds: Double) -> String {
+        let whole = Int(seconds.rounded(.down))
+        switch whole {
+        case ..<1: return "just now"
+        case ..<60: return "\(whole) s ago"
+        case ..<3600: return "\(whole / 60) min ago"
+        case ..<86400: return "\(whole / 3600) h ago"
+        default: return "\(whole / 86400) d ago"
+        }
     }
 }
 

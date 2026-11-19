@@ -1,3 +1,4 @@
+import Foundation
 import SailDesign
 import Testing
 
@@ -27,6 +28,27 @@ import Testing
         #expect(LineIcon.refresh.strokes.last == .lines([.init(20.5, 4), .init(20.5, 8.5), .init(16, 8.5)], closed: false))
         #expect(LineIcon.more.strokes == [.dot(.init(5.5, 12), radius: 1.2), .dot(.init(12, 12), radius: 1.2), .dot(.init(18.5, 12), radius: 1.2)])
         #expect(LineIcon.width == 1.75 && LineIcon.side == 24)
+    }
+
+    /// The cloud's outline (`M7 18.5h10.2a4.3 4.3 0 0 0 .7-8.5 6 6 0 0 0-11.5 1.3A3.6 3.6 0 0 0 7 18.5z`)
+    /// drawn as its arcs, clockwise from the bottom left, each meeting the next where the path does.
+    @Test func theCloudIsOneOutline() {
+        var ends: [(LineIcon.Point, LineIcon.Point)] = []
+        for stroke in LineIcon.cloudOff.strokes {
+            switch stroke {
+            case let .arc(centre, radius, from, to):
+                let at = { (angle: Double) in LineIcon.Point(centre.x + radius * cos(angle * .pi / 180), centre.y + radius * sin(angle * .pi / 180)) }
+                ends.append((at(from), at(to)))
+            case let .lines(points, _): ends.append((points[0], points[points.count - 1]))
+            default: Issue.record("the cloud draws \(stroke)")
+            }
+        }
+        let path = [(7.0, 18.5), (6.4, 11.3), (17.9, 10.0), (17.2, 18.5), (7.0, 18.5)]
+        for (index, (start, end)) in ends.prefix(4).enumerated() {
+            #expect(abs(start.x - path[index].0) < 0.05 && abs(start.y - path[index].1) < 0.05, "stroke \(index) starts at \(start)")
+            #expect(abs(end.x - path[index + 1].0) < 0.05 && abs(end.y - path[index + 1].1) < 0.05, "stroke \(index) ends at \(end)")
+        }
+        #expect(LineIcon.cloudOff.strokes.last == .lines([.init(4, 4), .init(20, 20)], closed: false))
     }
 
     static func line(_ points: (Double, Double)..., closed: Bool = false) -> LineIcon.Stroke {

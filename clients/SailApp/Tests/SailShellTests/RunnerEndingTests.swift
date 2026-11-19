@@ -273,7 +273,7 @@ import Testing
         #expect(shell.rail.button(.workspaces)?.isHidden == false && shell.rail.selected == .workspaces)
         #expect(shell.workspaces.text == "Workspaces\nAsking the control plane who is signed in…", "\(shell.workspaces.text)")
         shell.account.onStanding(nil)
-        #expect(shell.workspaces.text == "Workspaces\nYou are signed out of the control plane.\nSign in to see your workspaces on the runner.")
+        #expect(shell.workspaces.text == "Workspaces\nSign in to see your workspaces\nYou are signed out of the control plane.", "\(shell.workspaces.text)")
         #expect(shell.workspaces.tryAgain.title == "Sign In" && !shell.workspaces.tryAgain.isHidden)
         shell.workspaces.tryAgain.performClick(nil)
         #expect(shell.rail.selected == .account)

@@ -26,6 +26,15 @@ final class Driver {
     var tokens: Set<String> = []
     var askedAtStart = 0
     private let steps: [Step]
+    private let goesOn: Bool
+    /// A script that goes on past a failed step waits at most this long at each later wait, so a
+    /// run that failed early prints its summary before the drive's alarm.
+    static let afterAFailure = 3.0
+
+    /// A step has failed and the script goes on.
+    var failedSoFar: Bool {
+        goesOn && results.contains { !$0.ok }
+    }
     let out: URL
     var results: [Result] = []
     var measures: [Measure] = []
@@ -99,6 +108,7 @@ final class Driver {
         self.passkey = passkey
         self.signed = signed
         steps = script.steps
+        goesOn = script.goesOn == true
         self.out = out
         askedAtStart = passkey.asked
     }
@@ -159,8 +169,10 @@ final class Driver {
             results.append(Result(index: index, name: name, ok: ok, skipped: skipped, seconds: seconds, detail: detail))
             save(index: index, name: name)
             Self.say("drive \(index) \(name): \(skipped ? "skipped" : ok ? "ok" : "FAILED") in \(String(format: "%.2f", seconds)) s \(detail)")
-            if !ok { break }
+            if !ok, !goesOn { break }
         }
+        let failed = results.filter { !$0.ok }.map { "\($0.index) \($0.name)" }
+        if !failed.isEmpty { Self.say("drive: \(failed.count) step\(failed.count == 1 ? "" : "s") FAILED: " + failed.joined(separator: ", ")) }
         let withinClaim = madeStacks.map { $0.watcherShare <= MainStacks.claim } ?? true
         let lookCheap = madeStacks.map { $0.averageLook <= MainStacks.computation } ?? true
         let stayedRealTime = madeStacks.map { !$0.demoted } ?? true
@@ -762,7 +774,7 @@ final class Driver {
     }
 
     func waitUntil(_ seconds: Double, _ condition: @MainActor () -> Bool) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(seconds)
+        let deadline = ContinuousClock.now + .seconds(failedSoFar ? min(seconds, Self.afterAFailure) : seconds)
         while !condition() {
             guard ContinuousClock.now < deadline else { return false }
             try? await Task.sleep(for: .milliseconds(10))

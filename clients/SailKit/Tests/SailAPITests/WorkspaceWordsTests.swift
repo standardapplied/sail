@@ -78,7 +78,7 @@ import Testing
     }
 
     /// A1: yours first, running before the rest, each by name; the project's own container left out;
-    /// another person's named as theirs; each state in words.
+    /// why Open is not offered: whose it is, no one's, or a former member's.
     @Test func theListIsYoursFirstInWords() {
         let list = WorkspaceList(project: "acme", workspaces: [
             WorkspaceRow(name: "main", instance: "acme", state: .known(.running), owner: nil),
@@ -90,19 +90,12 @@ import Testing
         ])
         let rows = list.rows(for: "ana")
         #expect(rows.map(\.name) == ["try", "fix", "half", "dock", "old"])
-        #expect(rows.map { $0.reading(for: "ana") } == [
-            "try · running", "fix · stopped", "half · not whole, create it again", "dock · running · uday", "old · paused",
-        ])
-        #expect(rows.map { $0.notOpened(for: "ana", admin: false) } == [
-            nil, nil, nil, "dock is uday's: only uday or an admin can open it.", "No one owns old: only an admin can open it.",
-        ])
-        #expect(rows.allSatisfy { $0.notOpened(for: "ana", admin: true) == nil })
-        #expect(rows.map(\.said) == ["running", "stopped", "not whole, create it again", "running", "paused"])
+        #expect(rows.map { $0.whyNotOpened(for: "ana", admin: false) } == [nil, nil, nil, "Only uday or an admin opens it", "No one owns it: only an admin opens it"])
+        #expect(rows.allSatisfy { $0.whyNotOpened(for: "ana", admin: true) == nil })
         #expect(rows.map { $0.opens(for: "ana", admin: false) } == [true, true, true, false, false])
         #expect(rows.allSatisfy { $0.opens(for: "uday", admin: true) })
-        #expect(rows.map { $0.owner(apartFrom: "ana") } == [nil, nil, nil, "uday", nil])
-        #expect(rows.map(\.startsWhenOpened) == [false, true, false, false, false], "only a stopped one: opening starts it")
-        #expect(rows.map(\.isUp) == [true, false, false, true, false])
+        let left = WorkspaceRow(name: "x", instance: "acme-x", state: .known(.stopped), owner: WorkspaceRow.removedOwner)
+        #expect(left.whyNotOpened(for: "ana", admin: false) == "Its owner’s account is not active: only an admin opens it", "the server's marker read as a handle")
     }
 
     /// A call that ended in anything but an answer is said in words by its kind, never as the enum's
@@ -125,6 +118,20 @@ import Testing
             "Sail could not reach the control plane: The network connection was lost.",
         ])
         #expect(!said.joined().contains("/v1/"))
+    }
+
+    /// Where the control plane's address is known, a failure names it in Sail's words in place of the
+    /// transport's text; a refusal stays the server's sentence; with no address, the words above.
+    @Test func aFailureNamesTheControlPlanesAddress() {
+        let failures = [
+            SailError.unreachable("The network connection was lost."), .unexpected(route: "GET /v1/projects", status: 502),
+            .undecodable(Undecodable(route: "GET /v1/projects", field: "projects", reason: "not a list")), .refused(Self.refusal("Workspace 'try' exists already.")),
+        ]
+        #expect(failures.map { $0.said(at: "main.acme.dev") } == [
+            "Sail cannot reach the control plane at main.acme.dev.", "The control plane at main.acme.dev answered with an error (502).",
+            "The control plane at main.acme.dev sent an answer this app cannot read.", "Workspace 'try' exists already.",
+        ])
+        #expect(failures.map { $0.said(at: "") } == failures.map(\.description))
     }
 
     /// M9: the latest request wins: an answer for a project no longer chosen, or overtaken by a later

@@ -3,10 +3,13 @@ import SailLook
 
 /// What an empty place says, centred in its frame (`EmptyTilePaint`): a 56 pt tile with an 8 pt grid
 /// and a line icon, a Newsreader title, a body at most 400 pt wide, its actions, and an optional mono
-/// line. Its words are labels, so VoiceOver reads the title, the body, then the action.
+/// line, after the actions (when it was last tried) or before them (who is asking). Its words are
+/// labels, so VoiceOver reads the title, the body, then the action.
 @MainActor
 public final class EmptyState: NSView {
     static let column = 400.0, gap = 10.0, tileGap = 6.0, actionsGap = 8.0, iconSide = 24.0
+    /// Each label runs this far past the column on each side: a text field's own inset.
+    static let labelPadding = 2.0
 
     public var look: Look {
         didSet { repaint() }
@@ -15,6 +18,7 @@ public final class EmptyState: NSView {
     public let actions: [SailButton]
     private let icon: LineIcon
     private let missing: Bool
+    private let lineFirst: Bool
     private let titleFont: TitleFont
     private let mono: LabelFont
     let title: NSTextField
@@ -22,11 +26,12 @@ public final class EmptyState: NSView {
     let line: NSTextField?
 
     public init(
-        icon: LineIcon, title: String, body: String, actions: [SailButton], line: String? = nil, missing: Bool = false, look: Look, titleFont: TitleFont,
-        mono: LabelFont
+        icon: LineIcon, title: String, body: String, actions: [SailButton], line: String? = nil, lineFirst: Bool = false, missing: Bool = false, look: Look,
+        titleFont: TitleFont, mono: LabelFont
     ) {
         self.icon = icon
         self.missing = missing
+        self.lineFirst = lineFirst
         self.actions = actions
         self.look = look
         self.titleFont = titleFont
@@ -75,8 +80,12 @@ public final class EmptyState: NSView {
     /// row of actions; the last value is the whole height.
     func frames(width: Double) -> (tile: NSRect, title: NSRect, body: NSRect, actions: NSRect, line: NSRect?, height: Double) {
         let column = min(width, Self.column), left = (width - column) / 2
+        /// The label's own measure at the width it is given (the column and its padding), so its
+        /// height holds every line it wraps to; the text's bounding box at the column wrapped one
+        /// line fewer than the label draws (an admin's longer line lost its last word).
         func measured(_ label: NSTextField) -> Double {
-            Double(ceil(label.attributedStringValue.boundingRect(with: NSSize(width: column, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin]).height))
+            let bounds = NSRect(x: 0, y: 0, width: column + 2 * Self.labelPadding, height: .greatestFiniteMagnitude)
+            return Double(ceil(label.cell?.cellSize(forBounds: bounds).height ?? 0))
         }
         let tileRect = NSRect(x: (width - EmptyTilePaint.size) / 2, y: 0, width: EmptyTilePaint.size, height: EmptyTilePaint.size)
         let titleTop = EmptyTilePaint.size + Self.tileGap + Self.gap
@@ -85,10 +94,18 @@ public final class EmptyState: NSView {
         let sizes = actions.map { $0.intrinsicContentSize }
         let row = sizes.reduce(0) { $0 + Double($1.width) } + Self.actionsGap * Double(max(sizes.count - 1, 0))
         let tallest = sizes.map { Double($0.height) }.max() ?? 0
-        let actionsRect = NSRect(x: (width - row) / 2, y: Double(bodyRect.maxY) + Self.gap + Self.actionsGap, width: row, height: tallest)
-        guard let line else { return (tileRect, titleRect, bodyRect, actionsRect, nil, Double(actionsRect.maxY)) }
-        let lineRect = NSRect(x: left, y: Double(actionsRect.maxY) + Self.gap, width: column, height: measured(line))
-        return (tileRect, titleRect, bodyRect, actionsRect, lineRect, Double(lineRect.maxY))
+        guard let line else {
+            let actionsRect = NSRect(x: (width - row) / 2, y: Double(bodyRect.maxY) + Self.gap + Self.actionsGap, width: row, height: tallest)
+            return (tileRect, titleRect, bodyRect, actionsRect, nil, Double(actionsRect.maxY))
+        }
+        guard lineFirst else {
+            let actionsRect = NSRect(x: (width - row) / 2, y: Double(bodyRect.maxY) + Self.gap + Self.actionsGap, width: row, height: tallest)
+            let lineRect = NSRect(x: left, y: Double(actionsRect.maxY) + Self.gap, width: column, height: measured(line))
+            return (tileRect, titleRect, bodyRect, actionsRect, lineRect, Double(lineRect.maxY))
+        }
+        let lineRect = NSRect(x: left, y: Double(bodyRect.maxY) + Self.gap, width: column, height: measured(line))
+        let actionsRect = NSRect(x: (width - row) / 2, y: Double(lineRect.maxY) + Self.gap + Self.actionsGap, width: row, height: tallest)
+        return (tileRect, titleRect, bodyRect, actionsRect, lineRect, Double(actionsRect.maxY))
     }
 
     override public var intrinsicContentSize: NSSize {
@@ -105,7 +122,7 @@ public final class EmptyState: NSView {
     override public func layout() {
         super.layout()
         let placed = frames(width: Double(bounds.width))
-        let padding = 2.0
+        let padding = Self.labelPadding
         title.frame = placed.title.insetBy(dx: -padding, dy: 0)
         body.frame = placed.body.insetBy(dx: -padding, dy: 0)
         if let line, let at = placed.line { line.frame = at.insetBy(dx: -padding, dy: 0) }
