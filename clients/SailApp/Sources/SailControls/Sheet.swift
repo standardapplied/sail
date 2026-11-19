@@ -41,7 +41,7 @@ public final class Sheet: NSObject {
         self.confirm.target = self
         self.confirm.action = #selector(confirmed(_:))
         self.confirm.isDefault = !destructive
-        window.contentView = SheetContent(sheet: self, look: look)
+        window.contentView = SheetContent(title: self.title, body: self.body, cancel: cancel, confirm: self.confirm, look: look)
         window.initialFirstResponder = destructive ? cancel : self.confirm
     }
 
@@ -76,19 +76,23 @@ public final class Sheet: NSObject {
     }
 }
 
-/// The sheet's content: the words, then the footer under its hairline.
+/// The sheet's content: the words, then the footer under its hairline. It holds the views it lays
+/// out, not the sheet: shown in a gallery, it outlives the sheet that made it.
 @MainActor
 final class SheetContent: NSView {
     static let padding = (top: 22.0, sides: 24.0, bottom: 18.0), gap = 14.0, footer = (vertical: 14.0, sides: 16.0), buttonGap = 8.0
 
     private let look: Look
-    private unowned let sheet: Sheet
+    private let title: NSTextField, body: NSTextField, cancel: SailButton, confirm: SailButton
 
-    init(sheet: Sheet, look: Look) {
-        self.sheet = sheet
+    init(title: NSTextField, body: NSTextField, cancel: SailButton, confirm: SailButton, look: Look) {
+        self.title = title
+        self.body = body
+        self.cancel = cancel
+        self.confirm = confirm
         self.look = look
         super.init(frame: NSRect(x: 0, y: 0, width: Sheet.width, height: 160))
-        for view in [sheet.title, sheet.body, sheet.cancel, sheet.confirm] as [NSView] { addSubview(view) }
+        for view in [title, body, cancel, confirm] as [NSView] { addSubview(view) }
     }
 
     @available(*, unavailable)
@@ -103,10 +107,10 @@ final class SheetContent: NSView {
     /// The words' column wide, the window as tall as its content.
     func fit() {
         let column = Sheet.width - 2 * Self.padding.sides
-        let titleHeight = Self.height(sheet.title, column), bodyHeight = Self.height(sheet.body, column)
+        let titleHeight = Self.height(title, column), bodyHeight = Self.height(body, column)
         let footerTop = Self.padding.top + titleHeight + Self.gap + bodyHeight + Self.padding.bottom
-        let button = Double(sheet.confirm.intrinsicContentSize.height)
-        sheet.window.setContentSize(NSSize(width: Sheet.width, height: footerTop + 2 * Self.footer.vertical + button))
+        let button = Double(confirm.intrinsicContentSize.height)
+        window?.setContentSize(NSSize(width: Sheet.width, height: footerTop + 2 * Self.footer.vertical + button))
         needsLayout = true
     }
 
@@ -120,12 +124,12 @@ final class SheetContent: NSView {
     override func layout() {
         super.layout()
         let column = Sheet.width - 2 * Self.padding.sides, inset = 2.0
-        let titleHeight = Self.height(sheet.title, column), bodyHeight = Self.height(sheet.body, column)
-        sheet.title.frame = NSRect(x: Self.padding.sides - inset, y: Self.padding.top, width: column + 2 * inset, height: titleHeight)
-        sheet.body.frame = NSRect(x: Self.padding.sides - inset, y: Self.padding.top + titleHeight + Self.gap, width: column + 2 * inset, height: bodyHeight)
+        let titleHeight = Self.height(title, column), bodyHeight = Self.height(body, column)
+        title.frame = NSRect(x: Self.padding.sides - inset, y: Self.padding.top, width: column + 2 * inset, height: titleHeight)
+        body.frame = NSRect(x: Self.padding.sides - inset, y: Self.padding.top + titleHeight + Self.gap, width: column + 2 * inset, height: bodyHeight)
         let footerTop = Self.padding.top + titleHeight + Self.gap + bodyHeight + Self.padding.bottom
         var trailing = Double(bounds.width) - Self.footer.sides
-        for button in [sheet.confirm, sheet.cancel] {
+        for button in [confirm, cancel] {
             let size = button.intrinsicContentSize
             let box = NSRect(x: trailing - Double(size.width), y: footerTop + Self.footer.vertical, width: Double(size.width), height: Double(size.height))
             button.frame = button.frame(forAlignmentRect: box)
@@ -136,7 +140,7 @@ final class SheetContent: NSView {
     override func draw(_: NSRect) {
         NSColor(Tint(look.surfacePop)).setFill()
         bounds.fill()
-        let footerTop = Double(sheet.confirm.alignmentRect(forFrame: sheet.confirm.frame).minY) - Self.footer.vertical
+        let footerTop = Double(confirm.alignmentRect(forFrame: confirm.frame).minY) - Self.footer.vertical
         NSColor(look.separator).setFill()
         NSRect(x: 0, y: footerTop, width: Double(bounds.width), height: Look.hairline).fill()
     }
