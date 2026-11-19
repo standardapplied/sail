@@ -1,9 +1,27 @@
+/// Selected text's fixed colours, as a theme's selection background and foreground are in Ghostty:
+/// the same whatever colours a program set on the cells, so a selection stays readable on any of
+/// them.
+public struct SelectionInk: Equatable, Sendable {
+    public let foreground: RGB
+    public let background: RGB
+
+    public init(foreground: RGB, background: RGB) {
+        self.foreground = foreground
+        self.background = background
+    }
+}
+
 /// The terminal's colours: Mast's, dark and light, verbatim (`design-language.md` section 1.2.4,
 /// from Mast's `ansi.ts`). Slots 16 through 255 are libghostty-vt's standard ones.
 public struct Palette: Equatable, Sendable {
     public var foreground: RGB
     public var background: RGB
     public var cursor: RGB
+    /// Selected text's colours; nil draws a selection inverted, each cell's colours swapped.
+    public var selection: SelectionInk? = nil
+    /// The cursor's colour where it marks no keys (a view without them, or a terminal that ended);
+    /// nil keeps `cursor`.
+    public var idleCursor: RGB? = nil
     /// Black, red, green, yellow, blue, magenta, cyan and white, then their bright variants.
     public var ansi: [RGB]
     public var isDark: Bool

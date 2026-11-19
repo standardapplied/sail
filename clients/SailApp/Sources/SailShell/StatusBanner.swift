@@ -1,4 +1,5 @@
 import AppKit
+import SailControls
 import SailLook
 import SailTerminalView
 
@@ -8,7 +9,7 @@ import SailTerminalView
 @MainActor
 final class StatusBanner: NSView {
     private let message = NSTextField(wrappingLabelWithString: "")
-    private let action: AccentButton
+    private let action: SailButton
     private let other = NSButton(title: "", target: nil, action: nil)
     private var handler: () -> Void = {}
     private var otherHandler: () -> Void = {}
@@ -19,7 +20,7 @@ final class StatusBanner: NSView {
 
     init(look: Look) {
         self.look = look
-        action = AccentButton("", look: look, target: nil, action: #selector(StatusBanner.act))
+        action = SailButton("", kind: .primary, look: look, target: nil, action: #selector(StatusBanner.act))
         super.init(frame: .zero)
         wantsLayer = true
         layer?.borderWidth = 1
@@ -65,7 +66,7 @@ final class StatusBanner: NSView {
         self.handler = handler
         otherHandler = secondHandler
         action.isHidden = button == nil
-        action.setTitle(button ?? "")
+        action.title = button ?? ""
         other.isHidden = second == nil
         other.title = second ?? ""
         isHidden = false

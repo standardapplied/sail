@@ -1,5 +1,6 @@
 import AppKit
 import SailAPI
+import SailControls
 import SailLook
 import SailTerminalView
 
@@ -17,7 +18,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
 
     public let address = NSTextField()
     public let ticket = NSSecureTextField()
-    public let signIn: AccentButton
+    public let signIn: SailButton
     public let enroll = NSButton(title: "Enroll with a Ticket", target: nil, action: nil)
     public let signOut = NSButton(title: "Sign Out", target: nil, action: nil)
     public let said = NSTextField(wrappingLabelWithString: "")
@@ -83,7 +84,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         self.defaults = defaults
         self.look = look
         self.mono = mono
-        signIn = AccentButton("Sign In with Passkey", look: look, target: nil, action: #selector(AccountPane.signInWithPasskey(_:)))
+        signIn = SailButton("Sign In with Passkey", kind: .primary, look: look, target: nil, action: #selector(AccountPane.signInWithPasskey(_:)))
         super.init(frame: .zero)
         signIn.target = self
         heading.font = title.font(.title2) as NSFont

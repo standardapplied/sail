@@ -82,25 +82,6 @@ import Testing
         #expect(marks.allSatisfy { $0.contentTintColor == nil && $0.image?.isTemplate == false })
     }
 
-    /// The prominent button draws what the system's would: its fill, pressed and not, and a label
-    /// too long for it cut short with an ellipsis inside its edges, not run past them.
-    @Test func theProminentButtonDrawsItsPressedFillAndCutsALongLabel() throws {
-        let button = AccentButton("Open", look: .dark, target: nil, action: #selector(NSResponder.cancelOperation(_:)))
-        button.frame = NSRect(x: 0, y: 0, width: 120, height: 32)
-        let corner = NSPoint(x: 10, y: 6)
-        func near(_ found: [Double], _ wanted: RGB) -> Bool {
-            found.count == 3 && zip(found, RunnerTabTests.channels(wanted)).allSatisfy { abs($0 - $1) <= 3 }
-        }
-        #expect(near(RunnerTabTests.colour(of: button, at: corner), Look.dark.accent), "at rest, the accent")
-        button.isHighlighted = true
-        #expect(near(RunnerTabTests.colour(of: button, at: corner), Look.dark.accentPressed), "pressed, the accent's pressed shade")
-        button.isHighlighted = false
-        button.setTitle(String(repeating: "Open the workspace ", count: 6))
-        button.frame = NSRect(x: 0, y: 0, width: 120, height: 32)
-        let ink = try #require(WorkbenchLookTests.ink(button, darkerThan: 300, except: Look.dark.accent), "the label is drawn")
-        #expect(ink.minX >= Look.Space.s - 1 && ink.maxX <= 120 - Look.Space.s + 1, "a long label is cut short inside the button: \(ink)")
-    }
-
     /// M3: a pane hidden at a change of look does no work for it, however many changes come; shown
     /// again, it paints once, in the look now.
     @Test func aHiddenPanePaintsNothingAtASwitchAndOnceWhenShownInTheLookNow() throws {

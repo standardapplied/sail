@@ -100,10 +100,10 @@ public final class Rail: NSView {
         selected = item
         layer?.backgroundColor = NSColor.clear.cgColor
         for (each, button) in buttons {
-            bars[each]?.layer?.backgroundColor = NSColor(look.accentText).cgColor
+            bars[each]?.layer?.backgroundColor = NSColor(chosenInk.bar).cgColor
             let chosen = each == item
-            button.layer?.backgroundColor = chosen ? NSColor(look.fillSelected).cgColor : NSColor.clear.cgColor
-            button.image = Self.image(each, colour: chosen ? Tint(look.accentText) : look.textSecondary)
+            button.layer?.backgroundColor = chosen ? NSColor(chosenInk.fill).cgColor : NSColor.clear.cgColor
+            button.image = Self.image(each, colour: chosen ? chosenInk.icon : look.textSecondary)
             bars[each]?.isHidden = !chosen
         }
     }
@@ -120,5 +120,18 @@ public final class Rail: NSView {
     /// `item`'s symbol in `colour`, made once (``SymbolInk``).
     private static func image(_ item: Item, colour: Tint) -> NSImage {
         SymbolInk.image(item.symbol, points: 20, weight: .regular, colour: colour, accessibility: item.title)
+    }
+}
+
+extension Rail: Marked {
+    /// The chosen item: its ink fill and icon, and the accent bar that says which.
+    var chosenInk: (fill: Tint, icon: Tint, bar: Tint) {
+        (look.fillSelected, look.text, Tint(look.accent))
+    }
+
+    package var drawnMarks: [Mark] {
+        guard selected != nil else { return [] }
+        let ink = chosenInk
+        return look.marks(fill: ink.fill) + look.marks(line: ink.icon) + look.marks(line: ink.bar)
     }
 }

@@ -2,6 +2,7 @@ import CryptoKit
 import Foundation
 import AppKit
 import CoreText
+import SailControls
 import SailLook
 @testable import SailShell
 import SailTestPasskey
@@ -29,9 +30,9 @@ import Testing
     @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
     func everyTextOnEverySurfaceIsFourAndAHalfToOne(_ name: String, _ look: Look) {
         let surfaces = [("canvas", look.canvas), ("surface", look.surface), ("selection over canvas", look.fillSelected.over(look.canvas))]
-        let texts: [(String, Tint)] = [("text", look.text), ("textSecondary", look.textSecondary), ("accentText", Tint(Self.hex(look.accentText)))]
+        let texts: [(String, Tint)] = [("text", look.text), ("textSecondary", look.textSecondary)]
         for (surfaceName, surface) in surfaces {
-            for (textName, text) in texts where !(textName == "accentText" && surfaceName.hasPrefix("selection")) {
+            for (textName, text) in texts {
                 let ratio = Self.contrast(text.over(surface), surface)
                 #expect(ratio >= 4.5, "\(name) \(textName) on \(surfaceName) is \(String(format: "%.2f", ratio)):1")
             }
@@ -39,7 +40,7 @@ import Testing
     }
 
     /// White on terracotta is 3.43:1, so the one pair under 4.5:1 is held to the large-text bound by
-    /// name, and the only text drawn on an accent fill, `AccentButton`'s label, is bold (HIG
+    /// name, and the only text drawn on an accent fill, the primary button's label, is bold (HIG
     /// Accessibility: bold text at any size, 3:1).
     @MainActor @Test func textOnTheAccentIsLargeTextAtThreeToOne() throws {
         #expect(Look.dark.accent == RGB(0xFC4926) && Look.light.accent == RGB(0xFC4926))
@@ -48,11 +49,9 @@ import Testing
         #expect(dark >= 4.5, "dark onAccent on accent is \(dark)")
         #expect(light >= 3 && light < 3.5, "light onAccent on accent is \(light)")
         for look in [Look.dark, Look.light] {
-            let button = AccentButton("Sign In with Passkey", look: look, target: nil, action: #selector(NSApplication.terminate(_:)))
-            let font = try #require(button.attributedTitle.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
-            let ink = button.ink
-            #expect(NSFontManager.shared.traits(of: font).contains(.boldFontMask) || font.pointSize >= 18, "the accent label is not large text")
-            #expect(ink == NSColor(look.onAccent))
+            let paint = ButtonPaint(.primary, ButtonState(), look: look)
+            #expect(paint.bold, "the accent label is not large text")
+            #expect(paint.fill == Tint(look.accent) && paint.label == Tint(look.onAccent))
         }
     }
 
@@ -103,7 +102,7 @@ import Testing
         for pane in [shell.account, shell.thisMac, shell.thisMac.strip] as [NSView] {
             for button in buttons(pane) {
                 walked += 1
-                #expect(button.keyEquivalent != "\r" || button is AccentButton, "\(name): \(button.title) is the system-drawn default")
+                #expect(button.keyEquivalent != "\r" || button is SailButton, "\(name): \(button.title) is the system-drawn default")
             }
         }
         #expect(walked >= 4)
@@ -132,7 +131,8 @@ import Testing
         #expect(shell.rail.layer?.backgroundColor == NSColor.clear.cgColor, "\(name): the rail hides the chrome")
         shell.select(.thisMac)
         let chosen = try #require(shell.rail.bar(.thisMac))
-        #expect(!chosen.isHidden && chosen.layer?.backgroundColor == NSColor(look.accentText).cgColor, "\(name): the rail's chosen item has no accentText bar, as a tab's")
+        #expect(!chosen.isHidden && chosen.layer?.backgroundColor == NSColor(look.accent).cgColor, "\(name): the rail's chosen item has no accent bar, as a tab's")
+        #expect(shell.rail.drawnMarks == [.accentLine], "\(name): the rail's chosen item draws \(shell.rail.drawnMarks), not one accent bar on ink")
         for item in [Rail.Item.account, .thisMac] {
             shell.select(item)
             #expect(content.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name) \(item): the band under the title bar is not the chrome")

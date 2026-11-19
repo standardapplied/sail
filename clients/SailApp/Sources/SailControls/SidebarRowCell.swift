@@ -33,8 +33,11 @@ public final class Tile: NSView {
     }
 
     override public func draw(_: NSRect) {
-        let paint = TilePaint(name, look: look), points = TilePaint.points
+        let paint = TilePaint(look: look), points = TilePaint.points
         Draw.box(bounds, radius: TilePaint.radius, fill: paint.fill, edge: paint.ring)
+        if case let .icon(icon) = TilePaint.mark {
+            return Draw.icon(icon, in: bounds.insetBy(dx: 3, dy: 3), ink: paint.ink)
+        }
         let initial = Draw.text(String(name.prefix(1)).lowercased(), mono.font(points, .semibold) as NSFont, paint.ink)
         let top = (TilePaint.side - points) / 2
         Draw.line(initial, x: (TilePaint.side - Double(initial.size().width)) / 2, baseline: TextLine.baseline(top: top, points: points, lineHeight: points))
@@ -101,5 +104,12 @@ public final class SidebarRowCell: NSView {
         label.attributedStringValue = Draw.text(name, .systemFont(ofSize: Look.Step.callout.points, weight: .medium), stale ? look.textSecondary : look.text).cut(.byTruncatingTail)
         tile.look = look
         pill?.look = look
+    }
+}
+
+extension Tile: Marked {
+    package var drawnMarks: [Mark] {
+        let paint = TilePaint(look: look)
+        return look.marks(fill: paint.fill) + look.marks(line: paint.ink) + look.marks(line: paint.ring)
     }
 }

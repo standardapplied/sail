@@ -20,7 +20,7 @@ import Testing
             "text": said(look.text), "textSecondary": said(look.textSecondary), "textTertiary": said(look.textTertiary),
             "separator": said(look.separator), "separatorStrong": said(look.separatorStrong), "gridLine": said(look.gridLine),
             "accent": hex(look.accent), "accentHover": hex(look.accentHover), "accentPressed": hex(look.accentPressed),
-            "accentText": hex(look.accentText), "onAccent": hex(look.onAccent), "fillSelected": said(look.fillSelected),
+            "onAccent": hex(look.onAccent), "fillSelected": said(look.fillSelected), "textSelection": said(look.textSelection),
             "fillSelectedQuiet": said(look.fillSelectedQuiet), "fillHover": said(look.fillHover), "fillPressed": said(look.fillPressed),
             "focusHalo": said(look.focusHalo), "error": hex(look.error), "errorHover": hex(look.errorHover), "errorPressed": hex(look.errorPressed),
             "onError": hex(look.onError), "warning": hex(look.warning), "success": hex(look.success), "info": hex(look.info),
@@ -31,18 +31,18 @@ import Testing
     static let light: [String: String] = [
         "canvas": "F8FAFC", "surface": "FDFFFF", "surfacePop": "FFFFFF", "chrome": "F7EAE2", "text": "0E1217", "textSecondary": "383E43",
         "textTertiary": "666B70", "separator": "0E1217@0.12", "separatorStrong": "0E1217@0.22", "gridLine": "0E1217@0.06", "accent": "FC4926",
-        "accentHover": "D73626", "accentPressed": "B92C1E", "accentText": "C8321F", "onAccent": "FFFFFF", "fillSelected": "FC4926@0.12",
-        "fillSelectedQuiet": "FC4926@0.06", "fillHover": "0E1217@0.05", "fillPressed": "0E1217@0.09", "focusHalo": "FC4926@0.42", "error": "B42318",
-        "errorHover": "9B1E15", "errorPressed": "851A12", "onError": "FFFFFF", "warning": "9D4260", "success": "256E4A", "info": "17646F",
+        "accentHover": "D73626", "accentPressed": "B92C1E", "onAccent": "FFFFFF", "fillSelected": "0E1217@0.08", "textSelection": "FC4926@0.20",
+        "fillSelectedQuiet": "0E1217@0.05", "fillHover": "0E1217@0.05", "fillPressed": "0E1217@0.09", "focusHalo": "FC4926@0.42", "error": "B91C3C",
+        "errorHover": "9F1834", "errorPressed": "89152C", "onError": "FFFFFF", "warning": "9D4260", "success": "256E4A", "info": "17646F",
         "ink": "0E1217", "onInk": "F8FAFC",
     ]
 
     static let dark: [String: String] = [
         "canvas": "0A0E11", "surface": "12171B", "surfacePop": "161C21", "chrome": "251717", "text": "F6F1E9", "textSecondary": "F6F1E9@0.78",
         "textTertiary": "F6F1E9@0.55", "separator": "F6F1E9@0.14", "separatorStrong": "F6F1E9@0.24", "gridLine": "F6F1E9@0.07", "accent": "FC4926",
-        "accentHover": "FF7350", "accentPressed": "E23E1D", "accentText": "FF7350", "onAccent": "0A0E11", "fillSelected": "FC4926@0.16",
-        "fillSelectedQuiet": "FC4926@0.08", "fillHover": "F6F1E9@0.06", "fillPressed": "F6F1E9@0.10", "focusHalo": "FC4926@0.55", "error": "E07B6F",
-        "errorHover": "C16A5F", "errorPressed": "A65B52", "onError": "0A0E11", "warning": "D08FA6", "success": "86B89A", "info": "7FBFCA",
+        "accentHover": "FF7350", "accentPressed": "E23E1D", "onAccent": "0A0E11", "fillSelected": "F6F1E9@0.10", "textSelection": "FC4926@0.30",
+        "fillSelectedQuiet": "F6F1E9@0.06", "fillHover": "F6F1E9@0.06", "fillPressed": "F6F1E9@0.10", "focusHalo": "FC4926@0.55", "error": "F2788D",
+        "errorHover": "D06779", "errorPressed": "B35968", "onError": "0A0E11", "warning": "D08FA6", "success": "86B89A", "info": "7FBFCA",
         "ink": "F6F1E9", "onInk": "0A0E11",
     ]
 
@@ -53,7 +53,41 @@ import Testing
         for (token, value) in wanted {
             #expect(found[token] == value, "\(name) \(token) is \(found[token] ?? "missing"), not \(value)")
         }
-        #expect(look.palette == (name == "dark" ? Palette.dark : Palette.light))
+        var mast = look.palette
+        mast.selection = nil
+        mast.idleCursor = nil
+        #expect(mast == (name == "dark" ? Palette.dark : Palette.light), "\(name): the terminal's colours are Mast's")
+    }
+
+    /// The calm rule in the tokens: choosing is ink; the accent's only tints are the focus halo and
+    /// selected text; errors are crimson, at least 20 degrees of hue from the accent.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark), ("light contrasted", Look.light.contrasted()), ("dark contrasted", Look.dark.contrasted())])
+    func choosingIsInkAndRedIsApartFromTheAccent(_ name: String, _ look: Look) {
+        for (token, tint) in [("fillSelected", look.fillSelected), ("fillSelectedQuiet", look.fillSelectedQuiet), ("fillHover", look.fillHover), ("fillPressed", look.fillPressed)] {
+            #expect(tint.rgb == look.ink, "\(name) \(token) is \(Self.said(tint)), not ink")
+        }
+        let accentTints = [look.textSelection, look.focusHalo].filter { $0.rgb == look.accent }
+        #expect(accentTints.count == 2 && look.textSelection.alpha < 1)
+        let apart = abs(Self.hue(look.error) - Self.hue(look.accent))
+        #expect(min(apart, 360 - apart) >= 20, "\(name) error is \(String(format: "%.1f", min(apart, 360 - apart)))° from the accent")
+    }
+
+    /// The terminal's selection and idle cursor are fixed, opaque colours from the look: selected
+    /// text keeps 4.5:1 on any program's colours, as it is drawn in its own.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func theTerminalsSelectionIsFixedAndReadable(_ name: String, _ look: Look) throws {
+        let selection = try #require(look.palette.selection)
+        #expect(selection.background == Self.over(look.textSelection, look.palette.background) && selection.foreground == look.palette.foreground)
+        #expect(Self.contrast(selection.foreground, selection.background) >= 4.5, "\(name) selected text is \(Self.contrast(selection.foreground, selection.background)):1")
+        #expect(look.palette.idleCursor == Self.over(look.textTertiary, look.palette.background))
+    }
+
+    static func hue(_ rgb: RGB) -> Double {
+        let (r, g, b) = (Double(rgb.red) / 255, Double(rgb.green) / 255, Double(rgb.blue) / 255)
+        let high = max(r, g, b), low = min(r, g, b), span = high - low
+        guard span > 0 else { return 0 }
+        let sector = high == r ? (g - b) / span : high == g ? (b - r) / span + 2 : (r - g) / span + 4
+        return (sector * 60 + 360).truncatingRemainder(dividingBy: 360)
     }
 
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
@@ -98,8 +132,7 @@ import Testing
             ("a quiet chosen row", Self.over(look.fillSelectedQuiet, look.surface)),
         ]
         let texts: [(String, Tint)] = [
-            ("text", look.text), ("textSecondary", look.textSecondary), ("textTertiary", look.textTertiary), ("accentText", Tint(look.accentText)),
-            ("error", Tint(look.error)),
+            ("text", look.text), ("textSecondary", look.textSecondary), ("textTertiary", look.textTertiary), ("error", Tint(look.error)),
         ]
         for (groundName, ground) in grounds {
             for (textName, text) in texts {
@@ -107,6 +140,8 @@ import Testing
                 #expect(ratio >= 4.5, "\(name) \(textName) on \(groundName) is \(String(format: "%.2f", ratio)):1")
             }
         }
+        let selected = Self.over(look.textSelection, look.surface)
+        #expect(Self.contrast(Self.over(look.text, selected), selected) >= 4.5, "\(name) selected text, drawn in the text ink")
         let pressed = Self.over(look.fillPressed, look.canvas)
         #expect(Self.contrast(Self.over(look.text, pressed), pressed) >= 4.5, "\(name) a pressed button's label")
     }

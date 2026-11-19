@@ -113,6 +113,7 @@ public final class TerminalPane: NSView {
         session = next
         banner.show(place.label.map { "Connecting to \($0) on the runner" } ?? "Connecting to this Mac's terminal host")
         terminal.onEvent = { [weak self] event in self?.handle(event) }
+        terminal.recolour(look.palette)
         terminal.attach(next)
         next.start()
     }
@@ -256,6 +257,7 @@ public final class TerminalPane: NSView {
     }
 
     private func handle(_ event: SessionEvent) {
+        if case .phase(.ended) = event { terminal.inert = true } else if case .phase(.attached) = event { terminal.inert = false }
         switch event {
         case .phase(.attached):
             attachedOnce = true

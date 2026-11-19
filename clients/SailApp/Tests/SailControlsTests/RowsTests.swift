@@ -349,12 +349,18 @@ import Testing
         #expect(!scroller.grabsThumb(at: NSPoint(x: thumb.midX, y: away)), "the track away from the thumb grabbed it")
     }
 
-    /// A link given new words paints them as a link's, in the accent's text ink.
-    @Test func aLinkPaintsNewWords() {
-        let link = LinkButton("Show dock", look: .light, target: nil, action: nil)
+    /// A link given new words paints them as a link's: the words in ink, the underline in the
+    /// accent under the words alone, 1 pt thick, below their baseline.
+    @Test(arguments: [Look.light, .dark])
+    func aLinkPaintsNewWordsInInkOverAnAccentUnderline(_ look: Look) {
+        let link = LinkButton("Show dock", look: look, target: nil, action: nil)
         link.title = "Show pier"
+        link.frame = NSRect(origin: .zero, size: link.intrinsicContentSize)
         let words = link.attributedTitle
-        #expect(words.string == "Show pier" && (words.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor) == NSColor(Tint(Look.light.accentText)), "\(words)")
+        #expect(words.string == "Show pier" && (words.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor) == NSColor(look.text), "\(words)")
+        let under = link.underline, title = link.cell?.titleRect(forBounds: link.bounds) ?? .zero
+        #expect(near(under.height, 1) && under.width > 20 && under.width <= title.width + 0.5, "the underline is \(under) under \(title)")
+        #expect(link.underlineInk == Tint(look.accent) && link.drawnMarks == [.accentLine])
     }
 
     static func key(_ code: UInt16, _ characters: String, _ flags: NSEvent.ModifierFlags = []) throws -> NSEvent {

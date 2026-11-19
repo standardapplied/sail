@@ -342,6 +342,11 @@ final class SailRowView: NSTableRowView {
         item?.paint ?? RowPaint(RowState(chosen: isSelected, emphasized: isEmphasized, hovered: hovered), look: look)
     }
 
+    /// The chosen row's bar, which says which row is chosen.
+    var barInk: Tint {
+        Tint(look.accent)
+    }
+
     /// The table sets a row's state on every layout pass; only a change touches the row, or each
     /// pass would ask for another.
     override var isSelected: Bool {
@@ -397,7 +402,7 @@ final class SailRowView: NSTableRowView {
             NSBezierPath(roundedRect: area, xRadius: rowStyle.radius, yRadius: rowStyle.radius).fill()
         }
         guard paint.bar else { return }
-        NSColor(Tint(look.accent)).setFill()
+        NSColor(barInk).setFill()
         let rightToLeft = userInterfaceLayoutDirection == .rightToLeft, half = RowStyle.barWidth / 2
         let top = Double(content.minY) + (min(Double(content.height), rowStyle.height) - rowStyle.bar) / 2
         let bar = NSRect(x: rightToLeft ? Double(bounds.width) - RowStyle.barWidth : 0, y: top, width: RowStyle.barWidth, height: rowStyle.bar)
@@ -684,16 +689,25 @@ final class MenuOpener: NSObject {
 /// the design's `prog` is (cubic-bezier .2 .6 .3 1): a create under way, the server's median long.
 /// Held at 94 % while motion is reduced.
 @MainActor
-final class ProgressLine: NSView {
+final class ProgressLine: NSView, Marked {
     static let height = 2.0, reach = 0.94, seconds = 3.0
 
     let bar = CALayer()
+    /// Teal, as the Creating pill: something under way, not an action.
+    let ink: Tint
+    private let look: Look
+
+    package var drawnMarks: [Mark] {
+        look.marks(line: ink)
+    }
     private var laidWidth = 0.0
 
     init(look: Look) {
+        self.look = look
+        ink = Tint(look.info)
         super.init(frame: .zero)
         wantsLayer = true
-        bar.backgroundColor = NSColor(Tint(look.accent)).cgColor
+        bar.backgroundColor = NSColor(ink).cgColor
         bar.anchorPoint = CGPoint(x: 0, y: 0.5)
         layer?.addSublayer(bar)
         setAccessibilityElement(false)
@@ -740,3 +754,9 @@ final class ProgressLine: NSView {
     }
 }
 
+extension SailRowView: Marked {
+    package var drawnMarks: [Mark] {
+        let paint = paint
+        return look.marks(fill: paint.fill) + (paint.bar ? look.marks(line: barInk) : [])
+    }
+}

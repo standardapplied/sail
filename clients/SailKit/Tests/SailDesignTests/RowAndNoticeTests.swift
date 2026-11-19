@@ -18,7 +18,18 @@ import Testing
         #expect(focused.fill == look.fillSelected && focused.bar && focused.actions, "\(name): the chosen row of the list with the keys")
         let quiet = RowPaint(RowState(chosen: true), look: look)
         #expect(quiet.fill == look.fillSelectedQuiet && quiet.bar && quiet.actions, "\(name): the chosen row of a list without the keys")
-        #expect(look.fillSelectedQuiet.alpha == look.fillSelected.alpha / 2 && look.fillSelectedQuiet.rgb == look.fillSelected.rgb)
+        #expect(look.fillSelectedQuiet.alpha < look.fillSelected.alpha && look.fillSelectedQuiet.rgb == look.fillSelected.rgb)
+    }
+
+    /// Calm: no row is filled with the accent at any strength; a row being created has no fill and
+    /// its line is teal (`info`, in the view); a refused one has no fill and no bar.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func noRowIsFilledWithTheAccent(_ name: String, _ look: Look) {
+        let states = [RowState(), RowState(hovered: true), RowState(chosen: true), RowState(chosen: true, emphasized: true, hovered: true)]
+        let paints = states.map { RowPaint($0, look: look) } + [.naming(look), .refused, .creating]
+        #expect(paints.allSatisfy { $0.fill?.rgb != look.accent }, "\(name): a row is filled with the accent")
+        #expect(RowPaint.refused.fill == nil && !RowPaint.refused.bar && RowPaint.creating.fill == nil && RowPaint.creating.progress)
+        #expect(RowPaint.naming(look).fill == look.fillSelectedQuiet && RowPaint.naming(look).bar)
     }
 
     @Test func theTwoRowStylesAreTheSheets() {
@@ -29,31 +40,14 @@ import Testing
         #expect(list.hairline && !sidebar.hairline && RowStyle.groupHeight == 30 && RowStyle.barWidth == 2)
     }
 
-    /// Every name the design shows takes the design's hue, from its first letter.
-    @Test(arguments: [Look.light, .dark])
-    func aTileTakesTheDesignsHue(_ look: Look) {
-        let designs: [(String, Tint)] = [
-            ("harbor", Tint(look.accentText)), ("demo", Tint(look.warning)), ("lighthouse", Tint(look.info)), ("marina", Tint(look.success)),
-            ("atlas", look.textSecondary), ("keel", Tint(look.info)), ("quarry", Tint(look.warning)), ("beacon", Tint(look.success)),
-            ("tidewater", Tint(look.accentText)), ("Harbor", Tint(look.accentText)),
-        ]
-        for (name, hue) in designs {
-            let tile = TilePaint(name, look: look)
-            #expect(tile.ink == hue && tile.fill == Tint(hue.rgb, alpha: hue.alpha * 0.14) && tile.ring == Tint(hue.rgb, alpha: hue.alpha * 0.22), "\(name)")
-        }
-    }
-
-    /// A letter the design does not show takes a hue by its place in the alphabet, always the same;
-    /// anything but a Latin letter, or no name, is secondary.
-    @Test func otherLettersTakeAHueByTheirPlace() {
-        let look = Look.light, four = [look.accentText, look.warning, look.info, look.success]
-        #expect(TilePaint("cove", look: look).ink == Tint(four[2]) && TilePaint("eddy", look: look).ink == Tint(four[0]))
-        #expect(TilePaint("fjord", look: look).ink == Tint(four[1]) && TilePaint("gull", look: look).ink == Tint(four[2]))
-        #expect(TilePaint("zephyr", look: look).ink == Tint(four[1]) && TilePaint("cove", look: look) == TilePaint("Cove", look: look))
-        for name in ["7seas", "", "éclat"] {
-            #expect(TilePaint(name, look: look).ink == look.textSecondary, "\(name)")
-        }
-        #expect([TilePaint.side, TilePaint.points, TilePaint.radius] == [20, 11, 4])
+    /// Every project's tile is the same neutral well (the owner, 19 Nov 2026): the secondary ink on
+    /// a quiet ink fill with a hairline ring, and no accent; the initial is drawn, not an icon.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func everyTileIsTheSameNeutralWell(_ name: String, _ look: Look) {
+        let tile = TilePaint(look: look)
+        #expect(tile.ink == look.textSecondary && tile.fill.rgb == look.ink && tile.ring == look.separator, "\(name)")
+        #expect(tile.fill.alpha == (look.palette.isDark ? 0.08 : 0.06) && tile.ink.rgb != look.accent && tile.fill.rgb != look.accent)
+        #expect(TilePaint.mark == .initial && [TilePaint.side, TilePaint.points, TilePaint.radius] == [20, 11, 4])
     }
 
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])

@@ -34,14 +34,14 @@ public struct RowState: Equatable, Sendable {
     }
 }
 
-/// How a row is drawn: chosen, the selected fill at full strength while its list has the keys and
-/// at half otherwise, with the accent bar; else the hover fill under the pointer. Its actions show
-/// while it is hovered or chosen.
+/// How a row is drawn: chosen, the selected ink fill at full strength while its list has the keys
+/// and quieter otherwise, with the accent bar saying which; else the hover fill under the pointer.
+/// Its actions show while it is hovered or chosen.
 public struct RowPaint: Equatable, Sendable {
     public let fill: Tint?
     public let bar: Bool
     public let actions: Bool
-    /// A 2 pt accent line runs along its foot: something under way, about as long as it takes.
+    /// A 2 pt `info` line runs along its foot: something under way, about as long as it takes.
     public let progress: Bool
 
     public init(_ state: RowState, look: Look) {
@@ -63,44 +63,33 @@ public struct RowPaint: Equatable, Sendable {
         Self(fill: look.fillSelectedQuiet, bar: true, actions: false, progress: false)
     }
 
-    /// A create row refused: the error's tint (the design's 5 %), no bar.
-    public static func refused(_ look: Look) -> Self {
-        Self(fill: Tint(look.error, alpha: 0.05), bar: false, actions: false, progress: false)
-    }
+    /// A create row refused: no fill and no bar; its field's edge, mark and sentence say it.
+    public static let refused = Self(fill: nil, bar: false, actions: false, progress: false)
 
-    /// A row being created: the quiet chosen fill, its actions (how long, a spinner) shown, the
-    /// progress line along its foot.
-    public static func creating(_ look: Look) -> Self {
-        Self(fill: look.fillSelectedQuiet, bar: false, actions: true, progress: true)
-    }
+    /// A row being created: no fill, its actions (how long, a spinner) shown, the progress line
+    /// along its foot.
+    public static let creating = Self(fill: nil, bar: false, actions: true, progress: true)
 }
 
-/// A project's tile: its lower-case initial in mono at 11 in its hue, on the hue at 14% with a 22% ring
-/// (of the hue's own strength, as CSS mixes a translucent colour with transparent), in 4 pt
-/// corners, 20 pt square. The hue comes from the first letter, as the design's table gives it for
-/// its nine letters; any other Latin letter takes one of the four hues by its place in the
-/// alphabet, and anything else is secondary, so a project keeps its colour everywhere.
+/// A project's tile, 20 pt square in 4 pt corners: the same quiet ink well for every project, a
+/// hairline ring, and its lower-case initial in mono at 11 in the secondary ink. No project has a
+/// hue of its own: the owner found the hues diluted the panel (19 Nov 2026). `mark` flips every
+/// tile to the box icon instead of the initial.
 public struct TilePaint: Equatable, Sendable {
+    public enum Mark: Equatable, Sendable {
+        case initial, icon(LineIcon)
+    }
+
     public static let side = 20.0, points = 11.0, radius = Look.innerRadius
+    public static let mark = Mark.initial
 
     public let ink: Tint
     public let fill: Tint
     public let ring: Tint
 
-    public init(_ name: String, look: Look) {
-        ink = Self.hue(of: name, look: look)
-        fill = Tint(ink.rgb, alpha: ink.alpha * 0.14)
-        ring = Tint(ink.rgb, alpha: ink.alpha * 0.22)
-    }
-
-    static func hue(of name: String, look: Look) -> Tint {
-        let designs: [Character: Tint] = [
-            "a": look.textSecondary, "b": Tint(look.success), "d": Tint(look.warning), "h": Tint(look.accentText), "k": Tint(look.info),
-            "l": Tint(look.info), "m": Tint(look.success), "q": Tint(look.warning), "t": Tint(look.accentText),
-        ]
-        guard let first = name.lowercased().first else { return look.textSecondary }
-        if let hue = designs[first] { return hue }
-        guard let letter = first.asciiValue, (97 ... 122).contains(letter) else { return look.textSecondary }
-        return Tint([look.accentText, look.warning, look.info, look.success][Int(letter - 97) % 4])
+    public init(look: Look) {
+        ink = look.textSecondary
+        fill = Tint(look.ink, alpha: look.palette.isDark ? 0.08 : 0.06)
+        ring = look.separator
     }
 }

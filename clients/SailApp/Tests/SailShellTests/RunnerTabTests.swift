@@ -204,23 +204,6 @@ actor Proxied: Transport {
         #expect(frame.ring.width == 1 && frame.ring.colour == NSColor(look.separatorStrong))
     }
 
-    /// Look, the prominent button: enabled, the accent with its label `onAccent` in bold; disabled,
-    /// a grey (the strong separator over the canvas), its label secondary, never the accent dimmed.
-    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
-    func aDisabledProminentButtonIsGrey(_ name: String, _ look: Look) {
-        let button = AccentButton("Open", look: look, target: nil, action: #selector(NSApplication.terminate(_:)))
-        button.frame = NSRect(x: 0, y: 0, width: 120, height: 34)
-        let backdrop = Backdrop(NSColor(look.canvas), holding: button)
-        #expect(Self.colour(of: backdrop, at: NSPoint(x: 4, y: 17)).near(Self.channels(look.accent)), "\(name): enabled is the accent")
-        #expect(button.ink == NSColor(look.onAccent))
-        button.isEnabled = false
-        let grey = Self.colour(of: Swatch(NSColor(look.separatorStrong), over: NSColor(look.canvas)), at: NSPoint(x: 5, y: 5))
-        let drawn = Self.colour(of: backdrop, at: NSPoint(x: 4, y: 17))
-        #expect(drawn.near(grey), "\(name): disabled is \(drawn), not \(grey)")
-        #expect(drawn.count == 3 && (drawn.max() ?? 0) - (drawn.min() ?? 0) <= 16, "\(name): disabled is not a grey: \(drawn)")
-        #expect(button.ink == NSColor(look.textSecondary))
-    }
-
     /// The text field reading `text`, wherever it is in `view`.
     static func label(_ text: String, in view: NSView) -> NSTextField? {
         if let field = view as? NSTextField, field.stringValue == text { return field }

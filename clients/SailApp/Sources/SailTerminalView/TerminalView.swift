@@ -204,6 +204,8 @@ public final class TerminalView: NSView {
     /// cursor kept; the link tells a program that subscribed of a changed scheme. A palette the
     /// screen refuses leaves the old colours, said in the system log.
     public func recolour(_ palette: Palette) {
+        ink = (palette.selection, palette.idleCursor)
+        needFrame()
         guard let link else { return }
         input.async {
             do {
@@ -368,7 +370,20 @@ public final class TerminalView: NSView {
     }
 
     var overlay: Overlay {
-        Overlay(focused: focused, cursorOn: cursorOn, marked: composition.marked)
+        Overlay(focused: holdsTheKeys, cursorOn: cursorOn, marked: composition.marked, selection: ink.selection, idleCursor: ink.idleCursor)
+    }
+
+    /// The palette's selection and idle cursor, the look's fixed colours.
+    private var ink: (selection: SelectionInk?, idleCursor: RGB?) = (nil, nil)
+
+    /// Whether its cursor marks where the keys go: focused, and its session not ended.
+    public var holdsTheKeys: Bool {
+        focused && !inert
+    }
+
+    /// Takes no keys any more (its session ended): the cursor is drawn as without focus.
+    public var inert = false {
+        didSet { if inert != oldValue { needFrame() } }
     }
 
     /// Something the view shows changed: draw at the next refresh.
@@ -741,4 +756,11 @@ private final class DrawableFetch: @unchecked Sendable {
 /// How a display refresh ended: what an idle view's wakeups are made of.
 public enum RefreshOutcome: Int, CaseIterable, Sendable {
     case noSession, hidden, askedForDrawable, noFrame, nothingChanged, drew, buffersInFlight, couldNotEncode
+}
+
+extension TerminalView: Marked {
+    /// The cursor, in the accent only where the keys go; elsewhere it is hollow ink.
+    package var drawnMarks: [Mark] {
+        holdsTheKeys ? [.accentLine] : []
+    }
 }

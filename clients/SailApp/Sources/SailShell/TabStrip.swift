@@ -168,7 +168,7 @@ public final class TabButton: NSView, NSTextFieldDelegate {
     package var showsUnended: Bool {
         !unendedMark.isHidden
     }
-    /// The selected tab's mark: a 2 pt bar along its bottom edge in `accentText`, as the rail's
+    /// The selected tab's mark: a 2 pt bar along its bottom edge in `accent`, as the rail's
     /// bar marks its chosen item and Mast underlines its active tab.
     let bar = NSView()
     private var hovering = false
@@ -333,7 +333,7 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         addSubview(field)
         window?.makeFirstResponder(field)
         if let editor = field.currentEditor() as? NSTextView {
-            editor.selectedTextAttributes = [.backgroundColor: NSColor(look.fillSelected), .foregroundColor: NSColor(look.text)]
+            editor.selectedTextAttributes = [.backgroundColor: NSColor(look.textSelection), .foregroundColor: NSColor(look.text)]
             editor.insertionPointColor = NSColor(look.accent)
             editor.selectAll(nil)
         }
@@ -385,11 +385,11 @@ public final class TabButton: NSView, NSTextFieldDelegate {
 
     private func paint() {
         let renaming = field != nil
-        let fill = renaming ? NSColor(look.surface) : isSelected ? NSColor(look.fillSelected) : hovering ? NSColor(look.fillHover) : .clear
-        layer?.backgroundColor = fill.cgColor
+        let ink = drawnInk
+        layer?.backgroundColor = ink.fill.map { NSColor($0).cgColor } ?? NSColor.clear.cgColor
         layer?.borderWidth = renaming ? 2 : 0
-        layer?.borderColor = NSColor(look.accent).cgColor
-        bar.layer?.backgroundColor = NSColor(look.accentText).cgColor
+        layer?.borderColor = NSColor(ink.edge).cgColor
+        bar.layer?.backgroundColor = NSColor(ink.bar).cgColor
         bar.isHidden = !isSelected || renaming
         label.textColor = NSColor(isSelected ? look.text : look.textSecondary)
         let font = NSFont.systemFont(ofSize: Look.Step.callout.points, weight: isSelected ? .medium : .regular)
@@ -441,5 +441,27 @@ public final class RingedButton: NSButton {
         let resigned = super.resignFirstResponder()
         if resigned { layer?.borderWidth = 0 }
         return resigned
+    }
+}
+
+extension TabButton: Marked {
+    /// What the tab draws now: the surface while renamed, the ink pill when chosen, the hover fill
+    /// under the pointer; the rename's ring and the chosen bar in the accent.
+    var drawnInk: (fill: Tint?, edge: Tint, bar: Tint) {
+        let renaming = field != nil
+        let fill = renaming ? Tint(look.surface) : isSelected ? look.fillSelected : hovering ? look.fillHover : nil
+        return (fill, Tint(look.accent), Tint(look.accent))
+    }
+
+    package var drawnMarks: [Mark] {
+        let ink = drawnInk, renaming = field != nil
+        return look.marks(fill: ink.fill) + (renaming ? look.marks(line: ink.edge) : []) + (isSelected && !renaming ? look.marks(line: ink.bar) : [])
+    }
+}
+
+extension RingedButton: Marked {
+    /// Its 2 pt accent ring while it holds the keys.
+    package var drawnMarks: [Mark] {
+        layer?.borderWidth == 2 ? [.accentLine] : []
     }
 }

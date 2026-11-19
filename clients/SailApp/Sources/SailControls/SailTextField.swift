@@ -197,7 +197,7 @@ public final class SailTextField: NSView {
             .font: NSFont.systemFont(ofSize: size.text), .foregroundColor: NSColor(look.textTertiary), .paragraphStyle: style,
         ])
         if let editor = field.currentEditor() as? NSTextView {
-            editor.selectedTextAttributes = [.backgroundColor: NSColor(look.fillSelected), .foregroundColor: NSColor(look.text)]
+            editor.selectedTextAttributes = [.backgroundColor: NSColor(look.textSelection), .foregroundColor: NSColor(look.text)]
             editor.insertionPointColor = NSColor(Tint(look.accent))
         }
         needsDisplay = true
@@ -239,5 +239,13 @@ public final class SailTextField: NSView {
     override public func mouseExited(with _: NSEvent) {
         hovered = false
         needsDisplay = true
+    }
+}
+
+extension SailTextField: Marked {
+    /// Its focus ring and caret while it holds the keys; its error edge and sentence when refused.
+    package var drawnMarks: [Mark] {
+        let paint = paint, caret = state.editing && state.enabled ? look.marks(line: Tint(look.accent)) : []
+        return look.marks(line: paint.edge) + caret + (error == nil ? [] : [.errorInk])
     }
 }
