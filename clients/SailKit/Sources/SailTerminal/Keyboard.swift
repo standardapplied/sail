@@ -6,6 +6,11 @@ public struct Keyboard: Equatable, Sendable {
     public private(set) var elsewhere: String?
     /// The person this client is, as the last change was read for.
     private var me = ""
+    /// No one holds the keyboard, and it is not here.
+    private var free = false
+    /// The session's opener, once known: a free keyboard is said only to someone else, since the
+    /// opener's typing takes it.
+    public var opener: String?
 
     public init() {}
 
@@ -14,13 +19,26 @@ public struct Keyboard: Equatable, Sendable {
     public mutating func writerChanged(to writer: String, yours: Bool, me: String) {
         self.me = me
         elsewhere = yours || writer.isEmpty ? nil : writer
+        free = !yours && writer.isEmpty
+    }
+
+    /// Who opened the session could not be learned (its listing refused, or not naming it): a free
+    /// keyboard is said anyway, since silence is the worse answer, and if this client is the opener
+    /// after all its first key takes the keyboard and the words go.
+    public mutating func openerNotLearned() {
+        opener = ""
+    }
+
+    /// The keyboard is free and who opened the session is not known yet: ask it.
+    public var needsOpener: Bool {
+        free && opener == nil
     }
 
     /// What the pane says while the keyboard is elsewhere: where it went when this person took it
     /// (the host tells only that it is them, not which window or Mac), and who has it when someone
     /// else did.
     public var said: String? {
-        guard let elsewhere else { return nil }
+        guard let elsewhere else { return free && opener.map { $0 != me } == true ? "No one holds the keyboard." : nil }
         guard elsewhere != me else { return "Typing here is paused: you took the keyboard in another window or on another Mac." }
         return "Typing here is paused: the keyboard is with \(elsewhere) now."
     }

@@ -45,6 +45,8 @@ public final class FakeRunnerDoor: Sendable {
         var writers: [String: Int] = [:]
         /// Who the client not this door's is, while it holds a session's keyboard.
         var holders: [String: String] = [:]
+        /// A key typed on a free keyboard takes it, as the opener's does; false models someone else.
+        var typingTakes = true
         var connections = 0
         var kills: [String] = []
         /// Every session it made, oldest first, and the reasons of those it ended on its own.
@@ -226,6 +228,13 @@ public final class FakeRunnerDoor: Sendable {
         announce(session, writer: fde, holder: nil)
     }
 
+    /// Whether a key typed on a free keyboard takes it, as the session's opener's does; false for
+    /// someone else (an admin), whose keys stay refused until they take it.
+    public var typingTakesAFreeKeyboard: Bool {
+        get { state.withLock { $0.typingTakes } }
+        set { state.withLock { $0.typingTakes = newValue } }
+    }
+
     /// The client not this door's that holds `session`'s keyboard leaves it, as its person quitting
     /// Sail there does: every connection attached hears no one holds it.
     public func leaveKeyboard(_ session: String) {
@@ -376,7 +385,7 @@ public final class FakeRunnerDoor: Sendable {
                 guard let session = opened ?? Self.session(of: ticket) else { continue }
                 let took = state.withLock { state -> Bool? in
                     if state.writers[session] == number { return false }
-                    guard state.writers[session] == nil else { return nil }
+                    guard state.writers[session] == nil, state.typingTakes else { return nil }
                     state.writers[session] = number
                     return true
                 }
