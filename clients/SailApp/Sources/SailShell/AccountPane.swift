@@ -45,9 +45,6 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     private var heldAnswer: (@MainActor () -> Void)?
     /// Who is signed in now, nil for no one: said each time the pane learns it.
     var onStanding: @MainActor (SignedIn?) -> Void = { _ in }
-    /// Asked before signing out, answering whether to go on: what the sign-in holds open is ended
-    /// first (``RunnerEnds``).
-    var askBeforeSigningOut: @MainActor (@escaping @MainActor (Bool) -> Void) -> Void = { $0(true) }
 
     private let account: Account
     private let defaults: UserDefaults
@@ -166,15 +163,13 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         }
     }
 
-    /// Asks before signing out; a second click or the menu item meanwhile asks nothing.
+    /// Signs out at once, asking nothing: what the sign-in opened on the runner lives on there,
+    /// for the same person's next sign-in.
     @objc public func signOutHere(_: Any?) {
         guard standing != nil, acting == 0 else { return }
         begin(clearing: false)
-        askBeforeSigningOut { [weak self] go in
-            guard let self else { return }
-            if go { signOutNow() }
-            end()
-        }
+        signOutNow()
+        end()
     }
 
     private func signOutNow() {

@@ -380,6 +380,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         }
         var said = [line.name, WorkspaceLine.pill(line).label.lowercased()]
         if let owner = line.owner { said.append(WorkspaceLine.said(owner)) }
+        if let sessions = line.sessionsSaid { said.append(sessions) }
         if let why = line.why { said.append(why) }
         return SailList.Item(
             id: line.name, name: line.name, voice: said.joined(separator: ", "), content: WorkspaceLine(line, narrow: narrow, look: look, mono: mono), actions: actions, note: line.why

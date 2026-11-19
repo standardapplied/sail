@@ -1,5 +1,6 @@
 import AppKit
 import SailAPI
+import SailControls
 import SailLook
 import SailSurface
 import SailTerminal
@@ -13,9 +14,13 @@ import SailWorkbench
 /// The terminal takes the look's palette as the look changes, while it runs.
 @MainActor
 public final class TerminalPane: NSView {
+    /// How the pane comes to its session: opening a new one, attaching as the person asked now
+    /// (taking the keyboard from their other client), or resuming one without being asked (a
+    /// restore, a sign-in coming back), which never takes it from their other live client.
     public enum Start: Equatable, Sendable {
         case open
         case attach
+        case resume
     }
 
     /// How much of the terminal background lies over a pane that is not focused (Ghostty's
@@ -35,6 +40,8 @@ public final class TerminalPane: NSView {
     var onEvent: @MainActor (TerminalPane, SessionEvent) -> Void = { _, _ in }
     /// Asked to show the account, where a runner tab whose sign-in lapsed is signed in again.
     var onSignIn: @MainActor () -> Void = {}
+    /// Asked to close the pane, its session already over: Close on an ended or gone runner tab.
+    var onClose: @MainActor (TerminalPane) -> Void = { _ in }
     /// Whether the session was ever attached: a tab refused before then holds none.
     public private(set) var attachedOnce = false
     /// The end under way, nil once it answered.
@@ -52,21 +59,43 @@ public final class TerminalPane: NSView {
         didSet { scrim.isHidden = !isDimmed }
     }
 
-    private let start: Start
+    private var start: Start
     private let door: Door
-    private let banner: StatusBanner
+    /// The runner's tickets, which also list a workspace's sessions; nil on this Mac.
+    private let tickets: (any TicketSource)?
+    /// The person the pane's runner session is reached as, empty when no one is named.
+    let person: String
+    private var keyboard = Keyboard()
+    /// A key typed while the keyboard is elsewhere was refused, and said: once until it moves again.
+    private var refusedSaid = false
+    /// Says a refused key: the system's alert sound, as a Mac says a key that goes nowhere.
+    package var beep: @MainActor () -> Void = { NSSound.beep() }
+    /// Whether the keyboard is with another client, so closing this tab only detaches it.
+    package var keyboardElsewhere: Bool {
+        keyboard.elsewhere != nil
+    }
+
+    /// Where the session of this tab, named `tab`, goes on while the keyboard is elsewhere: nil while
+    /// it is here or no one holds it.
+    package func stillRunning(_ tab: String) -> String? {
+        keyboard.stillRunning(tab)
+    }
+    private let banner: Card
     private let scrim = Scrim()
     private let latency = NSTextField(labelWithString: "")
     private var latencyTimer: Timer?
 
     init(
-        _ pane: Pane, start: Start, host: LocalHost, runner: (any TicketSource)?, fonts: TerminalFonts, points: Double, look: Look
+        _ pane: Pane, start: Start, host: LocalHost, runner: (any TicketSource)?, person: String, fonts: TerminalFonts, points: Double,
+        look: Look
     ) throws(ShellError) {
         id = pane.id
         name = pane.session
         place = pane.place
         self.start = start
         self.host = host
+        self.person = person
+        tickets = pane.place.onRunner ? runner : nil
         if pane.place.onRunner {
             guard let runner else { throw .host("Sign in to open a terminal in a workspace.") }
             door = .runner(runner)
@@ -79,7 +108,7 @@ public final class TerminalPane: NSView {
         } catch {
             throw .resources("the terminal cannot start: \(error)")
         }
-        banner = StatusBanner(look: look)
+        banner = Card(look: look)
         super.init(frame: NSRect(x: 0, y: 0, width: 640, height: 400))
         compose()
     }
@@ -100,7 +129,7 @@ public final class TerminalPane: NSView {
         do {
             screen = try Screen(size: grid, scrollbackBytes: 10 << 20, palette: look.palette)
         } catch {
-            banner.show(Said.sentence("the terminal screen could not be made: \(error)"))
+            banner.show(Said.sentence("the terminal screen could not be made: \(error)"), tone: .error)
             return
         }
         let size = TerminalSize(columns: Int32(grid.columns), rows: Int32(grid.rows))
@@ -109,6 +138,8 @@ public final class TerminalPane: NSView {
             TerminalSession(open: place.sessionCreate(session: name, size: size), door: door, screen: screen)
         case .attach:
             TerminalSession(attach: name, write: true, door: door, screen: screen)
+        case .resume:
+            TerminalSession(attach: name, write: true, takes: false, door: door, screen: screen)
         }
         session = next
         banner.show(place.label.map { "Connecting to \($0) on the runner" } ?? "Connecting to this Mac's terminal host")
@@ -144,15 +175,6 @@ public final class TerminalPane: NSView {
         return task
     }
 
-    /// Whether this pane holds a live session on the runner, which a quit or a sign-out ends: one
-    /// made, or one the runner is still making (a workspace starting), until it ends.
-    var holdsRunnerSession: Bool {
-        guard place.onRunner, let session else { return false }
-        if ending != nil || unended { return true }
-        if case .ended = session.state.phase { return false }
-        return session.atHost != .none
-    }
-
     /// Whether an end is under way.
     var isEnding: Bool {
         ending != nil
@@ -173,17 +195,18 @@ public final class TerminalPane: NSView {
     /// close it anyway, which leaves the session to run on.
     func showUnended(_ why: [String], endAgain: @escaping @MainActor () -> Void, closeAnyway: @escaping @MainActor () -> Void) {
         banner.show(
-            EndOutcome.mayStillRun("This terminal", why, onThisMac: !place.onRunner) + " Close Anyway leaves it there.",
+            EndOutcome.mayStillRun("This terminal", why, onThisMac: !place.onRunner) + " Close Anyway leaves it there.", tone: .warning,
             button: "End Again", handler: { MainActor.assumeIsolated { endAgain() } }, second: "Close Anyway",
             secondHandler: { MainActor.assumeIsolated { closeAnyway() } }
         )
     }
 
     /// A new session in the same workspace, on a new ticket, the ended one's screen let go: Open
-    /// Again on a runner tab.
+    /// Again on a runner tab, and Open a New One on one that came back ended.
     func openAgain() {
         session?.close()
         session = nil
+        start = .open
         begin()
     }
 
@@ -225,6 +248,11 @@ public final class TerminalPane: NSView {
         (banner.shown, banner.offers)
     }
 
+    /// Whether the banner's first button answers Return now.
+    package var statusReturns: Bool {
+        banner.returns
+    }
+
     /// Presses the banner's button titled `title`, as a click does; false when none is so titled.
     public func press(_ title: String) -> Bool {
         banner.press(title)
@@ -244,7 +272,7 @@ public final class TerminalPane: NSView {
         do {
             try await host.ensureServing { [weak self] sentence in await self?.say(sentence) }
         } catch {
-            return banner.show(Said.sentence("\(error)"), button: "Try Again") { [weak self] in
+            return banner.show(Said.sentence("\(error)"), tone: .error, button: "Try Again") { [weak self] in
                 Task { await self?.tryAgain() }
             }
         }
@@ -260,6 +288,11 @@ public final class TerminalPane: NSView {
         case .phase(.attached):
             attachedOnce = true
             banner.hide()
+        case let .writerChanged(writer, yours) where place.onRunner && !person.isEmpty:
+            showKeyboard(writer, yours: yours)
+        case .refused where keyboard.said != nil && !refusedSaid:
+            refusedSaid = true
+            beep()
         case .phase(.reconnecting) where place.onRunner:
             banner.show("Reconnecting to \(place.label ?? "the runner")…", button: "Reconnect Now") { [weak self] in
                 MainActor.assumeIsolated { self?.session?.reconnectNow() }
@@ -267,15 +300,15 @@ public final class TerminalPane: NSView {
         case .phase(.reconnecting):
             banner.show("Reconnecting to this Mac's terminal host")
         case let .phase(.parked(reason)) where place.onRunner:
-            banner.show(Said.sentence(reason), button: "Reconnect Now") { [weak self] in MainActor.assumeIsolated { self?.session?.reconnectNow() } }
+            banner.show(Said.sentence(reason), tone: .warning, button: "Reconnect Now") { [weak self] in MainActor.assumeIsolated { self?.session?.reconnectNow() } }
         case let .phase(.parked(reason)):
-            banner.show(host.endedBy ?? Said.sentence("this Mac's terminal host does not answer: \(reason)"), button: "Try Again") { [weak self] in
+            banner.show(host.endedBy ?? Said.sentence("this Mac's terminal host does not answer: \(reason)"), tone: .warning, button: "Try Again") { [weak self] in
                 Task { await self?.tryAgain() }
             }
         case let .phase(.ended(end)) where place.onRunner:
             showEnded(end)
         case let .phase(.ended(end)) where end != .closed:
-            banner.show(end.said.joined(separator: " "))
+            banner.show(end.said.joined(separator: " "), tone: .warning)
         default:
             break
         }
@@ -292,18 +325,74 @@ public final class TerminalPane: NSView {
         case .closed:
             return
         case .hostRestarted:
-            banner.show("The runner restarted, which ends every session it held.", button: "Open Again", handler: again)
+            banner.show("The runner restarted, which ends every session it held.", tone: .warning, button: "Open Again", handler: again)
         case let .ended(reason):
-            banner.show(Said.sentence(reason), button: "Open Again", handler: again)
-        case let .ticketRefused(refusal) where refusal.code == .known(.notFound) && attachedOnce:
-            banner.show("This terminal ended while Sail was away from the runner.", button: "Open Again", handler: again)
+            banner.show(Said.sentence(reason), tone: .warning, button: "Open Again", handler: again)
+        case let .ticketRefused(refusal) where refusal.code == .known(.notFound) && (start != .open || attachedOnce):
+            Task { await showReturn(refused: end) }
         case .signIn:
-            banner.show(end.said.joined(separator: " "), button: "Sign In", handler: signIn)
+            banner.show(end.said.joined(separator: " "), tone: .warning, button: "Sign In", handler: signIn)
         case let .ticketRefused(refusal) where [.known(.missingBearerToken), .known(.invalidBearerToken)].contains(refusal.code):
-            banner.show(end.said.joined(separator: " "), button: "Sign In", handler: signIn)
+            banner.show(end.said.joined(separator: " "), tone: .warning, button: "Sign In", handler: signIn)
         default:
-            banner.show(end.said.joined(separator: " "))
+            banner.show(end.said.joined(separator: " "), tone: .warning)
         }
+    }
+
+    /// A runner session the runner would not attach, said from its workspace's listing
+    /// (``RunnerReturn``): ended in the host's words, or no longer on the runner, offering Open a
+    /// New One; its workspace not on this runner, offering Close alone; the terminal host not
+    /// answering, offering Try Again. A listing that cannot be had otherwise, or lists it live,
+    /// leaves the refusal's own words. Close is always there.
+    private func showReturn(refused end: SessionEnd) async {
+        guard case let .workspace(project, workspace) = place, let tickets else { return }
+        let listing: Result<RunnerSessions, SailError>
+        do {
+            listing = .success(try await tickets.sessions(in: project, workspace: workspace))
+        } catch {
+            listing = .failure(error)
+        }
+        let close: () -> Void = { [weak self] in MainActor.assumeIsolated { self.map { $0.onClose($0) } } }
+        guard let said = RunnerReturn.of(name, listing) else {
+            return banner.show(end.said.joined(separator: " "), tone: .warning, button: "Close", handler: close)
+        }
+        switch said.offer {
+        case .openANewOne:
+            banner.show(said.said, tone: .warning, button: "Open a New One", handler: { [weak self] in MainActor.assumeIsolated { self?.openAgain() } }, second: "Close", secondHandler: close)
+        case .tryAgain:
+            banner.show(said.said, tone: .warning, button: "Try Again", handler: { [weak self] in MainActor.assumeIsolated { self?.attachAgain() } }, second: "Close", secondHandler: close)
+        case .close:
+            banner.show(said.said, tone: .warning, button: "Close", handler: close)
+        }
+    }
+
+    /// The same session attached again, on a new ticket: Try Again once the runner answers.
+    func attachAgain() {
+        session?.close()
+        session = nil
+        begin()
+    }
+
+    /// Who holds the keyboard now that the host said `writer` does, `yours` when this client: while
+    /// it is elsewhere the pane says so and offers to take it back, Return staying with the terminal;
+    /// once it is here again, the line goes.
+    private func showKeyboard(_ writer: String, yours: Bool) {
+        let wasSaid = keyboard.said
+        keyboard.writerChanged(to: writer, yours: yours, me: person)
+        refusedSaid = false
+        if let said = keyboard.said {
+            banner.show(said, button: "Take Keyboard", returns: false) { [weak self] in
+                MainActor.assumeIsolated { self?.takeKeyboard() }
+            }
+        } else if let wasSaid, banner.shown == wasSaid {
+            banner.hide()
+        }
+    }
+
+    /// Take Keyboard: asked of the host, or, with no connection attached, said why it cannot be yet.
+    private func takeKeyboard() {
+        guard session?.takeWrite() != true else { return }
+        banner.show("This terminal is not connected, so the keyboard cannot be taken yet; it reconnects on its own.", tone: .warning)
     }
 
     private func compose() {

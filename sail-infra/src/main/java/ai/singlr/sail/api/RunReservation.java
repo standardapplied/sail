@@ -424,7 +424,8 @@ public final class RunReservation {
       return;
     }
     try {
-      sessionYield.end(displaced, yieldReason(runId, specId));
+      sessionYield.end(
+          displaced, new SessionYield.Ending(yieldReason(runId, specId), takenOver(runId, specId)));
     } catch (IOException e) {
       System.err.println(
           "  [api] Warning: could not yield terminal sessions "
@@ -432,6 +433,14 @@ public final class RunReservation {
               + ": "
               + e.getMessage());
     }
+  }
+
+  /** What happened to a terminal on a conversation run {@code runId}'s claim ended, said once. */
+  static String takenOver(String runId, String specId) {
+    return "Run "
+        + runId
+        + (Strings.isBlank(specId) ? "" : " of spec " + specId)
+        + " took over its conversation.";
   }
 
   /** Why a terminal on a conversation ended for run {@code runId}'s claim, in its own words. */

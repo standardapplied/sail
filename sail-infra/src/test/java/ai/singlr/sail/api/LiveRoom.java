@@ -265,8 +265,8 @@ final class LiveRoom implements AutoCloseable {
     }
 
     @Override
-    public void end(List<String> sessions, String reason) throws IOException {
-      terminals.end(sessions, reason);
+    public void end(List<String> sessions, Ending ending) throws IOException {
+      terminals.end(sessions, ending);
     }
 
     @Override

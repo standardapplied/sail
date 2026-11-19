@@ -20,6 +20,7 @@ import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.RoomStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
@@ -72,6 +73,11 @@ public record HostAccess(Sqlite db, RoleRule roles) {
     if (session.isPresent()) {
       return new PtyIdentity.Person(
           session.get().principal().orElseThrow(() -> disabled(session.get().fde().handle())));
+    }
+    if (new RunStore(db).findByCredentialHash(credentialHash).isPresent()) {
+      throw new IOException(
+          "This credential is a run's or a room agent's, which acts for no person, so it has no"
+              + " terminals.");
     }
     var minted =
         new TokenStore(db)

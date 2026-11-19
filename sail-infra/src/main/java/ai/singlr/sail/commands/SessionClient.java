@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtyWire;
@@ -104,7 +105,14 @@ public final class SessionClient implements AutoCloseable {
 
   /** Ends a live session with {@code reason} in its stream and on its ending event. */
   public void yieldSession(String name, String reason) throws IOException {
-    PtyWire.write(channel, new PtyMessage.Yield(name, reason));
+    yieldSession(name, new SessionYield.Ending(reason, ""));
+  }
+
+  /**
+   * Ends {@code name} as {@code ending} says: its terminal's last line and its listing's record.
+   */
+  public void yieldSession(String name, SessionYield.Ending ending) throws IOException {
+    PtyWire.write(channel, new PtyMessage.Yield(name, ending.line(), ending.record()));
     expectOk("yield");
   }
 

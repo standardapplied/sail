@@ -99,7 +99,8 @@ public enum SessionEvent: Equatable, Sendable {
     case phase(SessionPhase)
     /// The host's geometry for the session changed; the screen took it in order.
     case resized(TerminalSize)
-    case writerChanged(String)
+    /// `fde` holds the keyboard now; `yours` when it is this client.
+    case writerChanged(String, yours: Bool)
     case paused
     case continued
     /// A replay of the session's history began; `safe` is false when it starts inside an escape
