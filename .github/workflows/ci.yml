@@ -278,7 +278,7 @@ jobs:
           sudo install -m 755 "$RUNNER_TEMP/native/sail" /usr/local/bin/sail
           sudo -H sail init --as-main --handle ada --name 'Ada E2E' --email ada@e2e.example
           sudo -H sail host init --storage zfs --pool-file-size 10GiB --pool tank --yes
-          printf '{"name":"term","image":"%s","resources":{"cpu":2,"memory":"2GB","disk":"10GB"}}' "$(../../ci/check prepared-image alias)" \
+          printf '{"name":"term","image":"%s","resources":{"cpu":2,"memory":"2GB","disk":"10GB"}}' "$(../../ci/images prepared-image alias)" \
             | sudo -H sail project create term --definition -
           sudo -H sail host config set api-listen 127.0.0.1:7071
           sudo -H sail host config set terminal-listen 127.0.0.1:7072
@@ -376,28 +376,8 @@ jobs:
           name: native-binaries
           path: ${{ runner.temp }}/native
 
-      # The boxes' image, kept per week and per its recipe (ci/check fleet-image), and baked here on
-      # a miss, with bounded tries, before any test: the only step of this lane that reaches a
-      # registry or a package mirror.
-      - name: Name this week
-        id: week
-        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore the fleet's image
-        id: fleet-image
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ${{ runner.temp }}/fleet-image
-          key: native-fleet-image-${{ hashFiles('ci/check', 'sail-infra/src/test/java/ai/singlr/sail/commands/NativeFleet.java') }}-${{ steps.week.outputs.week }}
-
-      - name: Load or bake the fleet's image
-        run: |
-          if [[ '${{ steps.fleet-image.outputs.cache-hit }}' == true ]]; then
-            ci/check fleet-image import "$RUNNER_TEMP/fleet-image"
-          else
-            ci/check fleet-image bake
-            ci/check fleet-image export "$RUNNER_TEMP/fleet-image"
-          fi
+      - name: The fleet's image
+        uses: ./.github/actions/fleet-image
 
       # Sync end to end on the native binaries: Podman boxes, a real sshd and the gateway's forced
       # command. Only this suite runs here; requireNative turns a missing binary or an unreachable

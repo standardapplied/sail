@@ -91,10 +91,10 @@ public abstract class AbstractIncusIT {
    * every package the incus suite needs, including sail's full provisioning baseline, with {@code
    * options} to incus launch. The alias is versioned: bump it whenever the package set changes so
    * hosts holding an older bake rebuild instead of serving a stale image. The image is baked before
-   * any test, by {@code ci/check prepared-image bake}, which the incus action runs on a cache miss:
-   * the bake is the only step of the lane that reaches an external host for packages, and a bake
-   * that fails stops the job there, once. A host without the image fails every test at once, naming
-   * the bake, instead of reaching the internet from a test's body.
+   * any test, by {@code ci/images prepared-image bake}, which the incus action runs on a cache
+   * miss: the bake is the only step of the lane that reaches an external host for packages, and a
+   * bake that fails stops the job there, once. A host without the image fails every test at once,
+   * naming the bake, instead of reaching the internet from a test's body.
    */
   protected void launchPrepared(String container, String... options) throws Exception {
     synchronized (PREPARE_LOCK) {
@@ -103,7 +103,7 @@ public abstract class AbstractIncusIT {
             shell.exec(List.of("incus", "image", "show", PREPARED_ALIAS)).ok(),
             "the prepared image "
                 + PREPARED_ALIAS
-                + " is not on this host: bake it with ci/check prepared-image bake");
+                + " is not on this host: bake it with ci/images prepared-image bake");
         preparedImageReady = true;
       }
     }
