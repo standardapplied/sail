@@ -53,8 +53,9 @@ public final class SessionLogin {
   /**
    * What a session running {@code harness} in {@code mode} runs in its workspace, as {@code bash
    * -lc} takes it: with {@code stored}, its login's file at {@code file} read into the environment
-   * and removed with its directory, and the harness's own sign-in from it; without, nothing of a
-   * login. A harness its workspace does not hold says so and ends 127.
+   * and removed with its directory, and the login given to the harness as it takes one ({@link
+   * Harness#interactiveLogin}); without, nothing of a login. A harness its workspace does not hold
+   * says so and ends 127.
    *
    * @throws IllegalArgumentException when the harness takes no {@code mode}
    */
@@ -73,11 +74,14 @@ public final class SessionLogin {
             + harness.displayName()
             + " is not installed in this workspace: its template was built before the project"
             + " installed it.\"; exit 127; }");
-    stored
-        .map(login -> harness.interactiveSignIn(login.kind()))
-        .filter(signIn -> !signIn.isEmpty())
-        .ifPresent(steps::add);
-    steps.add("exec " + harness.interactive(mode));
+    var login =
+        stored
+            .map(given -> harness.interactiveLogin(given.kind()))
+            .orElse(Harness.InteractiveLogin.READS_ITS_VARIABLE);
+    if (!login.step().isEmpty()) {
+      steps.add(login.step());
+    }
+    steps.add("exec " + harness.interactive(mode) + login.args());
     return List.of("bash", "-lc", String.join("; ", steps));
   }
 

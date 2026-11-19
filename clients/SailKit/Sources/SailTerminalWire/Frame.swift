@@ -198,10 +198,14 @@ public struct SessionPage: Equatable, Sendable {
 public struct HostRefusal: Equatable, Sendable {
     public var message: String
     public var remedy: [RemedyPart]
+    /// Its kind as the API's error codes name it (`login_not_stored`), empty for none: what a client
+    /// acts on, never the words.
+    public var code: String
 
-    public init(message: String, remedy: [RemedyPart]) {
+    public init(message: String, remedy: [RemedyPart], code: String = "") {
         self.message = message
         self.remedy = remedy
+        self.code = code
     }
 
     /// What a person reads of it, as every refusal is said (``Said/lines(_:remedy:otherwise:)``).

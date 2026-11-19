@@ -108,9 +108,11 @@ final class PtyHostAccess implements PtyIdentity.Resolver, PtyIdentity.Holders, 
   }
 
   @Override
-  public void handOver(String instance, String file, String lines) throws IOException {
+  public void handOver(
+      String project, String workspace, String file, String lines, PtyIdentity.Person who)
+      throws IOException {
     try (var opened = operations.get()) {
-      opened.pty().handOver(instance, file, lines);
+      opened.pty().handOver(project, workspace, file, lines, who);
     }
   }
 

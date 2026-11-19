@@ -4052,37 +4052,43 @@ opens a workspace on a real host with the app's own `Create`.
 (`agent: {harness, mode, inside}`) instead of a command, which must then be empty: the host
 composes the command from the harness (`Harness.interactive(mode)`, its modes `Harness.modes()`:
 Claude Code's own default and `full`, Codex's `full` alone) and never runs a client's line as an
-agent. Only in a workspace, and only as its owner: before the workspace is entered or started,
-`PtyAdmission.agent` (`HostLanes.Pty.admitAgent`) refuses an asker who is not the person the
-workspace is labelled for, an admin who may enter it included ("dock is ana's workspace, so an agent
-starts in it only as ana, with ana's login."; they open a shell there), a harness the project's
-`agent.install` does not list, and an owner with no default stored login for it (`RunLogins.stored`,
-the runs' own lookup and words, with the typed remedy `agent login <harness>` or `agent login use
-<harness> <name>` an app turns into its own sheet). The login is the owner's, looked up by the FDE id
-the workspace is labelled for, as its git tokens are; never the box's or another person's. After
-the workspace is entered, the host hands the login over (`PtyAdmission.handOver`): one `incus exec`
-as the dev user runs `SessionLogin.HAND` with the login's lines (`LaunchEnv.loginLines`: its kind's
-variable, every other credential variable and cloud switch of the harness empty) on its stdin, into
-`/home/dev/.sail/sessions/<instanceId>/login.env`, `0600` in a `0700` directory made for it,
-its directory made fresh by `mkdir` without `-p`, which refuses a name already there, a link
-included, and first removing
-any session directory there older than a minute, what an exec killed before its read left. The
-session then runs `bash -lc` with `LaunchEnv.read` of that file (exported line by line with
-tracing off, the file removed), its directory removed, a check that the workspace holds the
-harness's binary (else "Claude Code is not installed in this workspace: …", exit 127), the
-harness's own sign-in (`Harness.interactiveSignIn`) and `exec` of the harness. Claude Code reads
-its login from its environment in an interactive session too. Codex's interactive session reads a
-key only from its own store, so its sign-in pipes the key to `codex login --with-api-key` with
-`printf`, a builtin, and unsets the variable: Codex's key rests in the workspace's
-`~/.codex/auth.json` until the next start replaces it or the workspace is deleted. A session that
-did not start after its hand-over has the file withdrawn (`PtyAdmission.withdraw`). `inside`
-starts the harness with nothing handed over, for a person who signs in with the harness's own login
-there; Sail never holds that one. The listing, the sidecar and every event carry the harness's own
-command (`["claude", "--dangerously-skip-permissions"]`) and `agent`, never the line that started
-it; no argv on the runner or in the workspace holds a login. Every process in a workspace is the
-dev user, so any session there, and an admin's shell in it, can read a running harness's
-environment and Codex's store, as they can the owner's git token. Sail adds no permission rule and
-no settings to an interactive session: what the agent may do is the project's to set in its own
+agent. Only in a workspace, and only as its owner: the host's own refusals (`refusal`: closing, a
+live session of the name, either cap, the command's size, the room) and then `PtyAdmission.agent`
+(`HostLanes.Pty.admitAgent`) are asked before the workspace is entered or started. The admission
+refuses an asker who is not the person the workspace is labelled for, an admin who may enter it
+included ("dock is ana's workspace, so an agent starts in it only as ana, with ana's login."; they
+open a shell there), a harness the project's `agent.install` does not list, and an owner with no
+default stored login for it (`RunLogins.stored`, the runs' own lookup and words, with the typed
+remedy `agent login <harness>` or `agent login use <harness> <name>`, and the code
+`login_not_stored` on the pty `Err`, so an app acts on data). The login is the owner's, looked up by
+the FDE id the workspace is labelled for, as its git tokens are; never the box's or another
+person's. After the workspace is entered, `PtyAdmission.handOver` takes the workspace's lock
+(`Workspaces.underLock`), reads its instance again, and refuses unless its person is still the
+asker; then one `incus exec` as the dev user runs `SessionLogin.HAND` with the login's lines
+(`LaunchEnv.loginLines`) on its stdin, into `/home/dev/.sail/sessions/<instanceId>/login.env`,
+`0600` in a `0700` directory made fresh by `mkdir` without `-p`, which refuses a name already there,
+a link included, and first removing any session directory there older than a minute. The session
+runs `bash -lc` with `LaunchEnv.read` of that file (exported line by line with tracing off, the
+file removed), its directory removed, a check that the workspace holds the harness's binary (else
+exit 127 with a sentence), and `exec` of the harness with what `Harness.interactiveLogin` gives so
+the harness keeps nothing of the login: Claude Code's token from its variable; its API key moved to
+`SAIL_ANTHROPIC_API_KEY` and printed by the session's own `apiKeyHelper` (`--settings`), since a key
+in `ANTHROPIC_API_KEY` is asked about, shown as `sk-ant-…` and its last 20 characters, and those 20
+kept in `~/.claude.json`; Codex's key read from `CODEX_API_KEY` by a provider of its own config
+(`-c model_provider=sail -c model_providers.sail={…, env_key="CODEX_API_KEY", …}`), since its
+built-in provider takes an interactive key only from `auth.json`. The file is withdrawn
+(`PtyAdmission.withdraw`, idempotent) when the hand-over fails, when the session is then refused,
+and when an agent session ends whatever happened (`ended`, beside the uploads' cleanup); every give
+removes `~/.sail/sessions`. `inside` starts the harness with nothing handed over, for a person who
+signs in with the harness's own login there; Sail never holds that one, and what each harness keeps
+of it (`Harness.storedLogins`: `~/.claude/.credentials.json`, `~/.claude.json`,
+`~/.codex/auth.json`) stays across the person's own starts and goes with every strip, so a re-own
+(which strips before it gives), a disown and a template build take it. The listing, the sidecar and
+every event carry the harness's own command (`["claude", "--dangerously-skip-permissions"]`) and
+`agent`, never the line that started it; no argv on the runner or in the workspace holds a login.
+Every process in a workspace is the dev user, so any session there, and an admin's shell in it, can
+read a running harness's environment, as they can the owner's git token. Sail adds no permission
+rule to an interactive session: what the agent may do is the project's to set in its own
 `.claude/settings.json` or `config.toml` (deny rules, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`, Codex's
 `shell_environment_policy`), with the mode the person chooses.
 

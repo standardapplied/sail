@@ -123,21 +123,26 @@ final class Codex implements Harness {
   }
 
   /**
-   * Codex's interactive session reads an API key only from its own store, never from {@code
-   * CODEX_API_KEY}, so the key is piped to {@code codex login --with-api-key} by {@code printf}, a
-   * builtin, and the variable unset: the key rests in Codex's own store in the workspace.
+   * Codex's built-in provider takes an API key in an interactive session only from its own store
+   * ({@code auth.json}), where it would rest after the session. A provider of its own config,
+   * declared on the command line ({@code model_providers}), reads the key from the environment
+   * instead ({@code env_key}), so nothing of it is stored: the OpenAI API under the id {@code
+   * sail}, which Codex does not reserve.
    */
   @Override
-  public String interactiveSignIn(LoginKind kind) {
-    var variable = kind.variable();
-    return "printf '%s\\n' \"$"
-        + variable
-        + "\" | "
-        + BINARY
-        + " login --with-api-key > /dev/null 2>&1 || { echo \""
-        + displayName()
-        + " did not take this login.\"; exit 1; }; unset "
-        + variable;
+  public InteractiveLogin interactiveLogin(LoginKind kind) {
+    return new InteractiveLogin(
+        "",
+        " -c model_provider=sail -c 'model_providers.sail={name=\"OpenAI\","
+            + " base_url=\"https://api.openai.com/v1\", env_key=\""
+            + kind.variable()
+            + "\", wire_api=\"responses\"}'");
+  }
+
+  /** Its own store, where {@code codex login} keeps a ChatGPT sign-in or a key. */
+  @Override
+  public List<String> storedLogins() {
+    return List.of(".codex/auth.json");
   }
 
   @Override

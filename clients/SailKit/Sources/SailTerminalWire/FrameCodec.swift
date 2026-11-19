@@ -144,7 +144,7 @@ private extension Frame {
             [.count(page.sessions.count)] + page.sessions.flatMap(\.fields) + [.string(page.next)]
                 + [.count(page.sessions.count)] + page.sessions.flatMap(\.place)
         case let .refused(refusal):
-            [.string(refusal.message), .count(refusal.remedy.count)] + refusal.remedy.flatMap(\.fields)
+            [.string(refusal.message), .count(refusal.remedy.count)] + refusal.remedy.flatMap(\.fields) + [.string(refusal.code)]
         case .takeWrite, .detach, .replayEnd, .paused, .continued, .accepted: []
         }
     }
@@ -317,7 +317,10 @@ private struct Cursor {
     }
 
     private mutating func refusal() throws(TerminalWireError) -> HostRefusal {
-        HostRefusal(message: try string(), remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() })
+        HostRefusal(
+            message: try string(), remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() },
+            code: try string()
+        )
     }
 
     private mutating func part() throws(TerminalWireError) -> RemedyPart {

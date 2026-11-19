@@ -83,11 +83,15 @@ public interface PtyAdmission {
   }
 
   /**
-   * Hands {@code lines}, a login's, to the dev user of {@code instance} as the file {@code file},
-   * {@code 0600} in a directory of its own made for it, written by the dev user from its input:
-   * never on a command line. Throws, with the reason, when it cannot.
+   * Hands {@code lines}, {@code who}'s login, to the dev user of workspace {@code workspace} of
+   * {@code project} as the file {@code file}, {@code 0600} in a directory of its own made for it,
+   * written by the dev user from its input: never on a command line. The workspace is read again
+   * under its lock first, and refused unless it is still {@code who}'s. Throws, with the reason,
+   * when it cannot; what a hand-over that failed may have left is the caller's to withdraw.
    */
-  default void handOver(String instance, String file, String lines) throws IOException {
+  default void handOver(
+      String project, String workspace, String file, String lines, PtyIdentity.Person who)
+      throws IOException {
     throw new IOException("This terminal host hands no logins over.");
   }
 

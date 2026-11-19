@@ -66,13 +66,10 @@ class PtyAgentIT extends AbstractIncusIT {
       """
       #!/bin/sh
       fp() { printf %s "$1" | sha256sum | cut -c1-8; }
-      if [ "$1" = login ]; then
-        mkdir -p "$HOME/.codex" && (umask 077; cat > "$HOME/.codex/auth.json"); exit 0
-      fi
-      if [ -e "$HOME/.codex/auth.json" ]; then given=$(cat "$HOME/.codex/auth.json")
-      else given=$CLAUDE_CODE_OAUTH_TOKEN; fi
+      if [ "$1" = login ]; then echo "the harness's own login ran" > /tmp/report; exit 1; fi
+      given=${CLAUDE_CODE_OAUTH_TOKEN:-$CODEX_API_KEY}
       set=$(env | sed -n 's/^\\(CODEX_API_KEY\\|CODEX_ACCESS_TOKEN\\|ANTHROPIC_[A-Z_]*\\|CLAUDE_CODE_OAUTH_TOKEN\\)=..*/\\1/p' | sort | tr '\\n' ' ')
-      printf '%s\\n%s\\nset:%s\\n' "$(basename "$0") $*" "$(fp "$given")" "$set" > /tmp/report.part
+      printf '%s\\n%s\\nset:%s\\n' "$(basename "$0") $1" "$(fp "$given")" "$set" > /tmp/report.part
       mv /tmp/report.part /tmp/report
       exec cat
       """;
@@ -127,8 +124,10 @@ class PtyAgentIT extends AbstractIncusIT {
           }
 
           @Override
-          public void handOver(String instance, String file, String lines) throws IOException {
-            lane.handOver(instance, file, lines);
+          public void handOver(
+              String project, String workspace, String file, String lines, PtyIdentity.Person who)
+              throws IOException {
+            lane.handOver(project, workspace, file, lines, who);
           }
 
           @Override
@@ -249,9 +248,9 @@ class PtyAgentIT extends AbstractIncusIT {
 
   /**
    * Scenarios 1, 2, 3, 9 and 13 on a real instance: Claude Code and Codex start signed in with
-   * their owner's own logins, the login file gone before either starts and Codex's key in its own
-   * store, an admin is refused, a leftover from a killed hand-over is removed, and neither value is
-   * on any process's arguments, in the session's records or in the listing.
+   * their owner's own logins, the login file gone before either starts and nothing of either kept
+   * in its harness's own state, an admin is refused, a leftover from a killed hand-over is removed,
+   * and neither value is on any process's arguments, in the session's records or in the listing.
    */
   @Test
   void anAgentStartsInItsOwnersWorkspaceSignedInAsThemWithTheLoginOnNoLineOrRecord()
@@ -299,9 +298,19 @@ class PtyAgentIT extends AbstractIncusIT {
               ada.ask(create("a2", new PtyMessage.Agent("codex", "full", false))));
           assertEquals(
               List.of(
-                  "codex --dangerously-bypass-approvals-and-sandbox", fingerprint(codex), "set:"),
+                  "codex --dangerously-bypass-approvals-and-sandbox",
+                  fingerprint(codex),
+                  "set:CODEX_API_KEY"),
               report());
-          assertEquals("600 1000", inInstance("stat -c '%a %u' /home/dev/.codex/auth.json"));
+          assertEquals(
+              "0",
+              inInstance(
+                  "grep -r -l -F -f /root/pattern /home/dev/.claude.json /home/dev/.claude"
+                      + " /home/dev/.codex 2>/dev/null | wc -l"),
+              "no harness keeps anything of either login in its own state");
+          assertEquals(
+              "absent",
+              inInstance("test -e /home/dev/.codex/auth.json && echo there || echo absent"));
 
           assertEquals(0, inInstanceArguments(), "neither login is on a line in the workspace");
           assertEquals(0, hereArguments(), "neither login is on a line here");

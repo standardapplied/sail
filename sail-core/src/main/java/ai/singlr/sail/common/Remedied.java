@@ -22,6 +22,14 @@ public interface Remedied {
   /** What to do about it; {@link Remedy#NONE} when there is nothing to name. */
   Remedy remedy();
 
+  /**
+   * What kind of refusal it is, as the API's error codes name one ({@code login_not_stored}), so a
+   * client tells refusals apart by data, never by their words; blank for none.
+   */
+  default String code() {
+    return "";
+  }
+
   /** The reason and the remedy as one line, each command written by {@code command}. */
   default String render(Function<Remedy.Command, String> command) {
     return joined(reason(), remedy().render(command));
@@ -70,7 +78,12 @@ public interface Remedied {
 
   /** An {@link IOException} that says what failed and what to do about it. */
   static IOException io(String reason, Remedy remedy) {
-    return new Io(reason, remedy);
+    return new Io(reason, remedy, "");
+  }
+
+  /** As {@link #io(String, Remedy)}, of the kind {@code code} names ({@link #code}). */
+  static IOException io(String reason, Remedy remedy, String code) {
+    return new Io(reason, remedy, code);
   }
 
   /** {@code first} and {@code second} with one space between, whichever of them are not blank. */
@@ -112,11 +125,18 @@ public interface Remedied {
   final class Io extends IOException implements Remedied {
     private final String reason;
     private final transient Remedy remedy;
+    private final String code;
 
-    private Io(String reason, Remedy remedy) {
+    private Io(String reason, Remedy remedy, String code) {
       super(message(reason, remedy));
       this.reason = reason;
       this.remedy = remedy;
+      this.code = Objects.requireNonNull(code, "code");
+    }
+
+    @Override
+    public String code() {
+      return code;
     }
 
     @Override

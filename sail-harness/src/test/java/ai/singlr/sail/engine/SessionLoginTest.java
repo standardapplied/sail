@@ -174,16 +174,19 @@ class SessionLoginTest {
         SessionLogin.shown(Harnesses.of("claude-code"), "full"));
   }
 
+  /**
+   * Codex takes its key from its environment through a provider of its own config, never through
+   * its store: its login is never run, so nothing of the key is kept in its home.
+   */
   @Test
-  void codexIsSignedInFromItsOwnStoreAndItsKeyIsNotLeftInItsEnvironment() throws Exception {
+  void codexReadsItsKeyFromItsEnvironmentAndKeepsNothingOfIt() throws Exception {
     stub(
         "codex",
         FINGERPRINT
-            + "if [ \"$1\" = login ]; then mkdir -p \"$CODEX_HOME\"; cat > \"$CODEX_HOME/auth.json\";"
-            + " echo said-nothing-of-it; exit 0; fi\n"
-            + "echo \"args: $*\"\n"
-            + "echo \"stored: $(fp \"$(cat \"$CODEX_HOME/auth.json\")\")\"\n"
-            + "echo \"variable: ${CODEX_API_KEY-unset}\"\n");
+            + "if [ \"$1\" = login ]; then echo logged-in; exit 0; fi\n"
+            + "printf 'args:'; for a in \"$@\"; do printf ' [%s]' \"$a\"; done; echo\n"
+            + "echo \"key: $(fp \"$CODEX_API_KEY\")\"\n"
+            + "ls -A \"$HOME\"\n");
     var file = file("i-x");
     var stored = login("codex", "api-key", KEY);
     assertEquals(0, hand(file, LaunchEnv.loginLines(stored)).status());
@@ -193,24 +196,45 @@ class SessionLoginTest {
 
     assertEquals(0, ran.status(), ran.output());
     assertEquals(
-        "args: --dangerously-bypass-approvals-and-sandbox\nstored: "
+        "args: [--dangerously-bypass-approvals-and-sandbox] [-c] [model_provider=sail] [-c]"
+            + " [model_providers.sail={name=\"OpenAI\", base_url=\"https://api.openai.com/v1\","
+            + " env_key=\"CODEX_API_KEY\", wire_api=\"responses\"}]\nkey: "
             + fingerprint(KEY)
-            + "\nvariable: unset\n",
+            + "\n",
         ran.output(),
-        "the key went to Codex's own login, which says nothing of it, and the variable is gone");
+        "the provider reads the key from the environment; its home holds nothing");
   }
 
+  /**
+   * Claude Code's API key is printed by the session's own {@code apiKeyHelper} from a variable of
+   * Sail's, so the key is never in {@code ANTHROPIC_API_KEY}, which would have it ask and keep a
+   * part of the key.
+   */
   @Test
-  void aHarnessThatRefusesTheLoginEndsTheSessionSayingSo() throws Exception {
-    stub("codex", "[ \"$1\" = login ] && exit 1\necho started\n");
-    var file = file("i-r");
-    var stored = login("codex", "api-key", KEY);
+  void claudeCodesApiKeyComesFromItsHelperNeverFromTheVariableItAsksAbout() throws Exception {
+    stub(
+        "claude",
+        FINGERPRINT
+            + "helper=$(printf %s \"$3\" | sed -n 's/.*\"apiKeyHelper\": \"\\(.*\\)\"}/\\1/p')\n"
+            + "echo \"args: $1 $2\"\n"
+            + "echo \"helper prints: $(fp \"$(sh -c \"$helper\")\")\"\n"
+            + "echo \"api key: [${ANTHROPIC_API_KEY-unset}]\"\n");
+    var file = file("i-k");
+    var stored = login("claude-code", "api-key", KEY);
     assertEquals(0, hand(file, LaunchEnv.loginLines(stored)).status());
 
     var ran =
-        run(SessionLogin.command(Harnesses.of("codex"), "full", Optional.of(stored), file), "");
+        run(
+            SessionLogin.command(Harnesses.of("claude-code"), "full", Optional.of(stored), file),
+            "");
 
-    assertEquals(new Ran(1, "Codex CLI did not take this login.\n"), ran);
+    assertEquals(
+        new Ran(
+            0,
+            "args: --dangerously-skip-permissions --settings\nhelper prints: "
+                + fingerprint(KEY)
+                + "\napi key: [unset]\n"),
+        ran);
   }
 
   @Test

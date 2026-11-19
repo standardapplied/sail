@@ -322,18 +322,30 @@ class HarnessGoldenTest {
   }
 
   /**
-   * Claude Code reads its login from its environment in an interactive session too; Codex's reads
-   * one only from its own store, so its key is piped to its own login by a builtin and unset.
+   * How an interactive session takes each kind, so the harness keeps nothing of it: Claude Code's
+   * token from its variable; its API key through a helper of the session's own settings, so it is
+   * neither asked about nor kept; Codex's key through a provider of its own config reading the
+   * variable, never its store.
    */
   @Test
-  void anInteractiveSessionSignsInAsItsHarnessTakesALogin() {
-    for (var kind : CLAUDE_CODE.loginKinds()) {
-      assertEquals("", CLAUDE_CODE.interactiveSignIn(kind));
-    }
+  void anInteractiveSessionTakesEachLoginWithoutTheHarnessKeepingIt() {
     assertEquals(
-        "printf '%s\\n' \"$CODEX_API_KEY\" | codex login --with-api-key > /dev/null 2>&1 || { echo"
-            + " \"Codex CLI did not take this login.\"; exit 1; }; unset CODEX_API_KEY",
-        CODEX.interactiveSignIn(CODEX.loginKinds().getFirst()));
+        Harness.InteractiveLogin.READS_ITS_VARIABLE,
+        CLAUDE_CODE.interactiveLogin(CLAUDE_CODE.loginKind("token")));
+    assertEquals(
+        new Harness.InteractiveLogin(
+            "export SAIL_ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\"; unset ANTHROPIC_API_KEY",
+            " --settings '{\"apiKeyHelper\": \"printenv SAIL_ANTHROPIC_API_KEY\"}'"),
+        CLAUDE_CODE.interactiveLogin(CLAUDE_CODE.loginKind("api-key")));
+    assertEquals(
+        new Harness.InteractiveLogin(
+            "",
+            " -c model_provider=sail -c 'model_providers.sail={name=\"OpenAI\","
+                + " base_url=\"https://api.openai.com/v1\", env_key=\"CODEX_API_KEY\","
+                + " wire_api=\"responses\"}'"),
+        CODEX.interactiveLogin(CODEX.loginKind("api-key")));
+    assertEquals(List.of(".claude/.credentials.json", ".claude.json"), CLAUDE_CODE.storedLogins());
+    assertEquals(List.of(".codex/auth.json"), CODEX.storedLogins());
   }
 
   @Test

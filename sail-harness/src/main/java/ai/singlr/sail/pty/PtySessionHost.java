@@ -364,7 +364,7 @@ public final class PtySessionHost implements AutoCloseable {
     this.journalCapacity = journalCapacity;
     this.identity = identity;
     this.admission = admission;
-    this.events = new EndingEvents(events, uploads::ended);
+    this.events = new EndingEvents(events, this::ended);
     this.version = version;
     this.limits = limits;
     this.handoff = handoff;
@@ -1205,6 +1205,10 @@ public final class PtySessionHost implements AutoCloseable {
       log("refused", who.fde(), m.session(), "not opened");
       return unopened.err();
     }
+    var busy = refusal(m, who);
+    if (busy != null) {
+      return busy;
+    }
     Optional<LoginStore.Login> login = Optional.empty();
     if (!m.agent().none()) {
       try {
@@ -1256,16 +1260,22 @@ public final class PtySessionHost implements AutoCloseable {
     var file = SessionLogin.file(instanceId);
     if (login.isPresent()) {
       try {
-        admission.handOver(instance, file, LaunchEnv.loginLines(login.get()));
+        admission.handOver(
+            m.project(), m.workspace(), file, LaunchEnv.loginLines(login.get()), who);
       } catch (IOException | RuntimeException failed) {
         log("login-not-handed", who.fde(), m.session(), failed.toString());
-        return new PtyMessage.Err(
-            "Could not start session '"
-                + m.session()
-                + "': its login could not be handed to workspace "
-                + m.workspace()
-                + ".",
-            PtyAdmission.Unavailable.REMEDY);
+        withdraw(instance, file);
+        return failed instanceof Remedied
+            ? new PtyMessage.Err(
+                "Could not start session '" + m.session() + "': " + Remedied.reasonOf(failed),
+                Remedied.remedyOf(failed))
+            : new PtyMessage.Err(
+                "Could not start session '"
+                    + m.session()
+                    + "': its login could not be handed to workspace "
+                    + m.workspace()
+                    + ".",
+                PtyAdmission.Unavailable.REMEDY);
       }
     }
     var start =
@@ -1275,9 +1285,26 @@ public final class PtySessionHost implements AutoCloseable {
             SessionLogin.command(harness, m.agent().mode(), login, file));
     var answer = create(m, who, cwd, start);
     if (login.isPresent() && !(answer instanceof PtyMessage.Ok)) {
-      Thread.ofVirtual().name("pty-login-withdraw").start(() -> admission.withdraw(instance, file));
+      withdraw(instance, file);
     }
     return answer;
+  }
+
+  /** Removes a login file from {@code instance} on a thread of its own: idempotent. */
+  private void withdraw(String instance, String file) {
+    Thread.ofVirtual().name("pty-login-withdraw").start(() -> admission.withdraw(instance, file));
+  }
+
+  /**
+   * What the host does as a session ends: its uploads leave its container, and an agent's login
+   * file, should its wrapper never have read it (a profile that never returned, a kill, a stop in
+   * that window), is withdrawn.
+   */
+  private void ended(PtySession.Origin origin) {
+    uploads.ended(origin);
+    if (!origin.agent().none() && !origin.agent().inside()) {
+      withdraw(origin.instance(), SessionLogin.file(origin.instanceId()));
+    }
   }
 
   /**
@@ -1310,8 +1337,14 @@ public final class PtySessionHost implements AutoCloseable {
    * has begun — a handoff has snapshotted the sessions, and a create landing after it would replace
    * a handed-off session's ring and sidecar under the successor's feet.
    */
-  private synchronized PtyMessage create(
-      PtyMessage.Create m, PtyIdentity.Person who, Path cwd, Started started) {
+  /**
+   * Why {@code m} cannot start for {@code who} whatever its workspace holds, or null: the host
+   * closing, a live session of its name, either session cap, a command over the cap, a room the
+   * caller may not pin it to. Each reads only the host's own state and the room's door, so a create
+   * asks it before it enters a workspace or hands a login over, and again under the host's lock,
+   * where the session it admits is registered.
+   */
+  private PtyMessage refusal(PtyMessage.Create m, PtyIdentity.Person who) {
     if (closed) {
       return SHUTTING_DOWN;
     }
@@ -1356,6 +1389,17 @@ public final class PtySessionHost implements AutoCloseable {
             Remedied.remedyOf(refused));
       }
     }
+    return null;
+  }
+
+  private synchronized PtyMessage create(
+      PtyMessage.Create m, PtyIdentity.Person who, Path cwd, Started started) {
+    var busy = refusal(m, who);
+    if (busy != null) {
+      return busy;
+    }
+    var existing = sessions.get(m.session());
+    var room = java.util.Objects.toString(m.room(), "");
     PtyAdmission.Folder folder;
     try {
       folder = folderOf(m.project(), cwd, who);

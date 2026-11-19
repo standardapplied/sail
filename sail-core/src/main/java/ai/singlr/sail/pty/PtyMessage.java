@@ -449,15 +449,28 @@ public sealed interface PtyMessage {
   /**
    * A refusal: what happened, naming no command, and what to do about it, each command kept as data
    * so the client that prints it renders it for its own reader; never one flattened into the other.
+   * {@code code} is its kind as the API's error codes name it ({@code login_not_stored}), blank for
+   * a refusal no client acts on by kind.
    */
-  record Err(String reason, Remedy remedy) implements PtyMessage {
+  record Err(String reason, Remedy remedy, String code) implements PtyMessage {
+    public Err {
+      code = Objects.toString(code, "");
+    }
+
+    public Err(String reason, Remedy remedy) {
+      this(reason, remedy, "");
+    }
+
     public Err(String reason) {
       this(reason, Remedy.NONE);
     }
 
-    /** The refusal {@code failure} is: its reason and its remedy as they are. */
+    /** The refusal {@code failure} is: its reason, its remedy and its kind as they are. */
     public static Err of(Throwable failure) {
-      return new Err(Remedied.reasonOf(failure), Remedied.remedyOf(failure));
+      return new Err(
+          Remedied.reasonOf(failure),
+          Remedied.remedyOf(failure),
+          failure instanceof Remedied remedied ? remedied.code() : "");
     }
 
     /** The refusal as an account whose own plain {@code sail} runs reads it. */

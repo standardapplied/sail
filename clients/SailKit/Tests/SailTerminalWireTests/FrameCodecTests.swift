@@ -56,7 +56,8 @@ import Testing
                 .words("Run "),
                 .command(run: .known(.sail), verb: "session", args: ["take", "lounge"]),
                 .words(" to take it."),
-            ]
+            ],
+            code: "login_not_stored"
         )))
     }
 
@@ -79,7 +80,8 @@ import Testing
                 .words("Run "),
                 .command(run: .unknown("TUGS"), verb: "session", args: ["take", "lounge"]),
                 .words(" to take it."),
-            ]
+            ],
+            code: "login_not_stored"
         )))
         #expect(try FrameCodec.encode(frame) == grown)
     }

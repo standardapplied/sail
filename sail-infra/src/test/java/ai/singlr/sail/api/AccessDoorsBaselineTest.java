@@ -341,8 +341,14 @@ class AccessDoorsBaselineTest {
               }
 
               @Override
-              public void handOver(String instance, String file, String lines) throws IOException {
-                pty.handOver(instance, file, lines);
+              public void handOver(
+                  String project,
+                  String workspace,
+                  String file,
+                  String lines,
+                  PtyIdentity.Person who)
+                  throws IOException {
+                pty.handOver(project, workspace, file, lines, who);
               }
             },
             PtyEvents.NONE,

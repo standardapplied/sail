@@ -45,7 +45,8 @@ public interface HostPty {
       throws IOException;
 
   /** {@link PtyAdmission#handOver}. */
-  void handOver(String instance, String file, String lines) throws IOException;
+  void handOver(String project, String workspace, String file, String lines, PtyIdentity.Person who)
+      throws IOException;
 
   /** {@link PtyAdmission#withdraw}. */
   void withdraw(String instance, String file);

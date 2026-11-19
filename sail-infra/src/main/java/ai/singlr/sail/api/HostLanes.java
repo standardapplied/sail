@@ -423,8 +423,7 @@ final class HostLanes {
     public Optional<LoginStore.Login> admitAgent(
         String project, String workspace, PtyMessage.Agent agent, PtyIdentity.Person who)
         throws IOException {
-      var instance = found(project, workspace);
-      var owner = Workspaces.ownerOf(instance, owners).or(() -> roles.nodeFde()).orElse(null);
+      var owner = personOf(found(project, workspace));
       if (owner == null || !owner.equals(who.actor().handle())) {
         throw Remedied.io(
             owner == null
@@ -476,23 +475,43 @@ final class HostLanes {
                 "a " + harness.displayName() + " session cannot start in " + workspace,
                 ""));
       } catch (ApiException refused) {
-        throw Remedied.io(refused.reason(), refused.remedy());
+        throw Remedied.io(refused.reason(), refused.remedy(), refused.code());
       }
     }
 
+    /**
+     * Whose workspace {@code instance} is, as every workspace door decides it: its labelled person
+     * by handle and id, or on a node the node's own person for one nobody owns; null for nobody.
+     */
+    private String personOf(BoxInstances.Instance instance) {
+      return Workspaces.ownerOf(instance, owners).or(() -> roles.nodeFde()).orElse(null);
+    }
+
+    /**
+     * Writes the login under the workspace's lock, once its person is read again there and is still
+     * {@code who}: a re-own while the workspace was entered refuses it.
+     */
     @Override
-    public void handOver(String instance, String file, String lines) throws IOException {
-      ShellExec.Result ran;
+    public void handOver(
+        String project, String workspace, String file, String lines, PtyIdentity.Person who)
+        throws IOException {
       try {
-        ran = shell.execWithInput(asDev(instance, SessionLogin.HAND, file), lines, HAND_OVER);
+        workspaces.underLock(
+            project,
+            workspace,
+            instance -> who.actor().handle().equals(personOf(instance)),
+            instance -> {
+              var ran =
+                  shell.execWithInput(asDev(instance, SessionLogin.HAND, file), lines, HAND_OVER);
+              if (!ran.ok()) {
+                throw new IOException("the hand-over ended " + ran.exitCode());
+              }
+            });
       } catch (TimeoutException late) {
         throw new IOException("the hand-over did not end within " + HAND_OVER.toSeconds() + " s");
       } catch (InterruptedException interrupted) {
         Thread.currentThread().interrupt();
         throw new IOException("the hand-over was interrupted");
-      }
-      if (!ran.ok()) {
-        throw new IOException("the hand-over ended " + ran.exitCode());
       }
     }
 

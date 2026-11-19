@@ -666,7 +666,8 @@ class ClientGoldensTest {
                 List.of(
                     new Remedy.Words("Run "),
                     new Remedy.Command(Remedy.Runs.SAIL, "session", List.of("take", "lounge")),
-                    new Remedy.Words(" to take it.")))));
+                    new Remedy.Words(" to take it."))),
+            ErrorCode.LOGIN_NOT_STORED.code()));
   }
 
   /** The largest chunk an upload carries, every byte value in turn. */

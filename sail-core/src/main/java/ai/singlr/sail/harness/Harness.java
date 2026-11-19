@@ -196,13 +196,27 @@ public interface Harness {
   }
 
   /**
-   * The shell text that, with a login of {@code kind} exported as its variable, signs this harness
-   * in from it before an interactive session starts, for a harness whose interactive session reads
-   * its credential only from its own store; empty for one that reads the variable itself. What it
-   * prints names nothing of the login, and no process it starts holds the value in its arguments.
+   * How an interactive session takes a login of {@code kind}, exported as the kind's variable:
+   * {@code step}, shell text run before the harness starts, and {@code args}, appended to its
+   * command, each naming no value. Neither may leave the login, or any part of it, anywhere the
+   * harness keeps state: what an interactive session holds of its login ends with it.
    */
-  default String interactiveSignIn(LoginKind kind) {
-    return "";
+  record InteractiveLogin(String step, String args) {
+    /** The harness reads the kind's variable itself and keeps nothing of it. */
+    public static final InteractiveLogin READS_ITS_VARIABLE = new InteractiveLogin("", "");
+  }
+
+  /** {@link InteractiveLogin} for a login of {@code kind}. */
+  default InteractiveLogin interactiveLogin(LoginKind kind) {
+    return InteractiveLogin.READS_ITS_VARIABLE;
+  }
+
+  /**
+   * Where, under the dev user's home, this harness keeps a login, or a part of one, that a person
+   * made in its session: the files a workspace loses when it leaves its person.
+   */
+  default List<String> storedLogins() {
+    return List.of();
   }
 
   /**

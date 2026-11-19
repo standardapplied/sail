@@ -54,7 +54,7 @@ public final class SessionClient implements AutoCloseable {
 
   private String expectWelcome() throws IOException {
     var reply = PtyWire.read(channel);
-    if (reply instanceof PtyMessage.Err(var reason, var remedy)) {
+    if (reply instanceof PtyMessage.Err(var reason, var remedy, _)) {
       throw Remedied.io(reason, remedy);
     }
     if (!(reply instanceof PtyMessage.Welcome(var bootId))) {
@@ -178,7 +178,7 @@ public final class SessionClient implements AutoCloseable {
 
   private void expectOk(String verb) throws IOException {
     var reply = PtyWire.read(channel);
-    if (reply instanceof PtyMessage.Err(var reason, var remedy)) {
+    if (reply instanceof PtyMessage.Err(var reason, var remedy, _)) {
       throw Remedied.io(reason, remedy);
     }
     if (!(reply instanceof PtyMessage.Ok)) {

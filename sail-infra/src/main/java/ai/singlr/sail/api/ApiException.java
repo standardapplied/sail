@@ -74,4 +74,9 @@ public final class ApiException extends RuntimeException implements Remedied {
   public Remedy remedy() {
     return failure.remedy();
   }
+
+  @Override
+  public String code() {
+    return failure.errorCode().code();
+  }
 }

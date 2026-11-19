@@ -200,6 +200,7 @@ class HostPtyAgentTest {
     assertEquals(
         List.of(new Remedy.Command(Remedy.Runs.SAIL, "agent login", List.of("codex"))),
         none.remedy().commands());
+    assertEquals("login_not_stored", none.code(), "the app tells it apart by its code");
 
     var noDefault =
         assertThrows(Remedied.Io.class, () -> lane.admitAgent("acme", "dock", CODEX, ada));
@@ -232,7 +233,7 @@ class HostPtyAgentTest {
     var file = SessionLogin.file("i-1");
     var lines = "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-ada-work\n";
 
-    lane.handOver("acme-dock", file, lines);
+    lane.handOver("acme", "dock", file, lines, ada);
     lane.withdraw("acme-dock", file);
 
     assertEquals(
@@ -247,9 +248,26 @@ class HostPtyAgentTest {
                 "/",
                 Map.of(),
                 List.of("sh", "-c", SessionLogin.REMOVE, "sail-login", file))),
-        box.arguments());
+        box.arguments().stream().filter(argv -> argv.get(1).equals("exec")).toList());
     assertEquals(List.of(lines), box.inputs());
     assertFalse(box.invocations().stream().anyMatch(line -> line.contains("sk-ant")));
+  }
+
+  /**
+   * Minor 3: the hand-over reads the workspace again under its lock and writes only while it is
+   * still the asker's: one that changed hands after the admission (here, asked as another person)
+   * is refused, and nothing reaches it.
+   */
+  @Test
+  void aHandOverToAWorkspaceThatChangedHandsIsRefusedAndWritesNothing() {
+    var refused =
+        assertThrows(
+            Remedied.Io.class,
+            () -> lane.handOver("acme", "dock", SessionLogin.file("i-4"), "A=1\n", bob));
+
+    assertEquals("workspace dock of acme changed hands while it was entered.", refused.reason());
+    assertTrue(box.inputs().isEmpty(), "nothing was written");
+    assertTrue(box.invocations().stream().noneMatch(line -> line.startsWith("incus exec")));
   }
 
   /** A hand-over the workspace refuses is a failure the host says in its own words. */
@@ -261,7 +279,7 @@ class HostPtyAgentTest {
         "the hand-over ended 1",
         assertThrows(
                 IOException.class,
-                () -> lane.handOver("acme-dock", SessionLogin.file("i-2"), "A=1\n"))
+                () -> lane.handOver("acme", "dock", SessionLogin.file("i-2"), "A=1\n", ada))
             .getMessage());
   }
 
@@ -325,7 +343,7 @@ class HostPtyAgentTest {
                 IOException.class,
                 () ->
                     laneOver(failing(new java.util.concurrent.TimeoutException()))
-                        .handOver("acme-dock", file, "A=1\n"))
+                        .handOver("acme", "dock", file, "A=1\n", ada))
             .getMessage());
     assertEquals(
         "the hand-over was interrupted",
@@ -333,7 +351,7 @@ class HostPtyAgentTest {
                 IOException.class,
                 () ->
                     laneOver(failing(new InterruptedException()))
-                        .handOver("acme-dock", file, "A=1\n"))
+                        .handOver("acme", "dock", file, "A=1\n", ada))
             .getMessage());
     assertTrue(Thread.interrupted(), "the interrupt is kept");
 

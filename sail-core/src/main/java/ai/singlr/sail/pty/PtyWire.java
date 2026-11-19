@@ -173,7 +173,10 @@ public final class PtyWire {
         }
       }
       case PtyMessage.Ok m -> out.type(30);
-      case PtyMessage.Err m -> encodeRemedy(out.type(31).string(m.reason()), m.remedy());
+      case PtyMessage.Err m -> {
+        encodeRemedy(out.type(31).string(m.reason()), m.remedy());
+        out.string(m.code());
+      }
       case PtyMessage.Welcome m -> out.type(32).string(m.hostBootId());
     }
     return out.finish();
@@ -212,7 +215,7 @@ public final class PtyWire {
   }
 
   private static PtyMessage.Err decodeErr(ByteBuffer in) throws IOException {
-    return new PtyMessage.Err(string(in), remedy(in));
+    return new PtyMessage.Err(string(in), remedy(in), string(in));
   }
 
   /** A refusal's remedy as {@link #encodeRemedy} writes it: its parts, each words or a command. */

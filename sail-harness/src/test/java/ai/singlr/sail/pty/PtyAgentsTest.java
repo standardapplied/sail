@@ -29,8 +29,9 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
@@ -61,11 +62,11 @@ class PtyAgentsTest {
 
   private final List<String> calls = new CopyOnWriteArrayList<>();
   private final List<List<String>> handed = new CopyOnWriteArrayList<>();
-  private final List<List<String>> withdrawn = new CopyOnWriteArrayList<>();
-  private final CountDownLatch withdrew = new CountDownLatch(1);
+  private final BlockingQueue<List<String>> withdrawn = new LinkedBlockingQueue<>();
   private volatile Optional<LoginStore.Login> login = Optional.of(LOGIN);
   private volatile IOException refusal;
   private volatile IOException handOverFails;
+  private volatile Runnable duringHandOver = () -> {};
 
   private final PtyAdmission admission =
       new PtyAdmission() {
@@ -98,9 +99,12 @@ class PtyAgentsTest {
         }
 
         @Override
-        public void handOver(String instance, String file, String lines) throws IOException {
+        public void handOver(
+            String project, String workspace, String file, String lines, PtyIdentity.Person who)
+            throws IOException {
           calls.add("hand over");
-          handed.add(List.of(instance, file, lines));
+          handed.add(List.of(project + "-" + workspace, file, lines, who.fde()));
+          duringHandOver.run();
           if (handOverFails != null) {
             throw handOverFails;
           }
@@ -109,7 +113,6 @@ class PtyAgentsTest {
         @Override
         public void withdraw(String instance, String file) {
           withdrawn.add(List.of(instance, file));
-          withdrew.countDown();
         }
       };
 
@@ -118,6 +121,10 @@ class PtyAgentsTest {
   }
 
   private PtySessionHost startHost() throws IOException {
+    return startHost(new PtySessionHost.Limits(32, 16, 256, 256));
+  }
+
+  private PtySessionHost startHost(PtySessionHost.Limits limits) throws IOException {
     var host =
         new PtySessionHost(
             dir.resolve("host.sock"),
@@ -127,6 +134,7 @@ class PtyAgentsTest {
             admission,
             PtyEvents.NONE,
             "0.0.0-test",
+            limits,
             new PtySessionHost.Handoff(
                 ai.singlr.sail.pty.SdNotify.NONE,
                 java.util.Map.of(),
@@ -205,13 +213,15 @@ class PtyAgentsTest {
     refusal =
         Remedied.io(
             "No Codex CLI login stored for uday, so a Codex CLI session cannot start in dock.",
-            remedy);
+            remedy,
+            "login_not_stored");
     try (var ignored = startHost();
         var channel = connect()) {
       assertEquals(
           new PtyMessage.Err(
               "No Codex CLI login stored for uday, so a Codex CLI session cannot start in dock.",
-              remedy),
+              remedy,
+              "login_not_stored"),
           ask(
               channel,
               agent("s", List.of(), "dock", new PtyMessage.Agent("codex", "full", false))));
@@ -236,7 +246,8 @@ class PtyAgentsTest {
       assertEquals(List.of("agent claude-code for uday", "enter acme dock", "hand over"), calls);
       var info = listed(channel).getFirst();
       var file = SessionLogin.file(info.instanceId());
-      assertEquals(List.of("acme-dock", file, LaunchEnv.loginLines(LOGIN)), handed.getFirst());
+      assertEquals(
+          List.of("acme-dock", file, LaunchEnv.loginLines(LOGIN), "uday"), handed.getFirst());
       assertEquals(List.of("claude", "--dangerously-skip-permissions"), info.command());
       assertEquals(full, info.agent());
       var run = awaitArgv();
@@ -272,9 +283,12 @@ class PtyAgentsTest {
     }
   }
 
-  /** A login that cannot be handed over starts no session, said in a person's words. */
+  /**
+   * A login that cannot be handed over starts no session, said in a person's words, and what the
+   * hand-over may have left is withdrawn (Minor 1).
+   */
   @Test
-  void aLoginThatCannotBeHandedOverStartsNoSession() throws Exception {
+  void aLoginThatCannotBeHandedOverStartsNoSessionAndIsWithdrawn() throws Exception {
     handOverFails = new IOException("the hand-over ended 1");
     try (var ignored = startHost();
         var channel = connect()) {
@@ -286,17 +300,73 @@ class PtyAgentsTest {
               channel,
               agent("s", List.of(), "dock", new PtyMessage.Agent("claude-code", "full", false))));
       assertEquals(List.of(), listed(channel));
+      assertEquals(handed.getFirst().subList(0, 2), withdrawn.poll(30, TimeUnit.SECONDS));
     }
   }
 
-  /** L5: a login handed over for a session that then did not start is withdrawn. */
+  /** Minor 3: a workspace that changed hands while it was entered is said so, in its words. */
   @Test
-  void aLoginHandedOverForASessionThatDidNotStartIsWithdrawn() throws Exception {
+  void aWorkspaceThatChangedHandsRefusesTheHandOverInItsWords() throws Exception {
+    handOverFails =
+        Remedied.io(
+            "workspace dock of acme changed hands while it was entered.",
+            Remedy.of("Start it again in a workspace of your own."));
     try (var ignored = startHost();
+        var channel = connect()) {
+      assertEquals(
+          new PtyMessage.Err(
+              "Could not start session 's': workspace dock of acme changed hands while it was"
+                  + " entered.",
+              Remedy.of("Start it again in a workspace of your own.")),
+          ask(
+              channel,
+              agent("s", List.of(), "dock", new PtyMessage.Agent("claude-code", "full", false))));
+      assertEquals(handed.getFirst().subList(0, 2), withdrawn.poll(30, TimeUnit.SECONDS));
+    }
+  }
+
+  /**
+   * Minor 2: what refuses a create whatever its workspace holds refuses it before the workspace is
+   * entered or a login handed over: a live session of its name, the person's session cap.
+   */
+  @Test
+  void aCreateTheHostWouldRefuseEntersNothingAndHandsNothingOver() throws Exception {
+    try (var ignored = startHost(new PtySessionHost.Limits(1, 16, 256, 256));
         var channel = connect()) {
       assertInstanceOf(
           PtyMessage.Ok.class,
           ask(channel, new PtyMessage.Create("s", List.of(), "/tmp", "", "", 80, 24)));
+      var full = new PtyMessage.Agent("claude-code", "full", false);
+
+      assertEquals(
+          new PtyMessage.Err("Session 's' is already running; attach or kill it."),
+          ask(channel, agent("s", List.of(), "dock", full)));
+      assertEquals(
+          new PtyMessage.Err("You are at your session cap of 1; kill one first."),
+          ask(channel, agent("t", List.of(), "dock", full)));
+      assertEquals(List.of(), calls, "nothing was asked, entered or handed over");
+    }
+  }
+
+  /**
+   * L5: a login handed over for a session the host then refused, here one of its name made while
+   * the login was handed over, is withdrawn.
+   */
+  @Test
+  void aLoginHandedOverForASessionThatDidNotStartIsWithdrawn() throws Exception {
+    try (var ignored = startHost();
+        var channel = connect();
+        var other = connect()) {
+      duringHandOver =
+          () -> {
+            try {
+              assertInstanceOf(
+                  PtyMessage.Ok.class,
+                  ask(other, new PtyMessage.Create("s", List.of(), "/tmp", "", "", 80, 24)));
+            } catch (IOException e) {
+              throw new java.io.UncheckedIOException(e);
+            }
+          };
 
       var answer =
           ask(
@@ -305,8 +375,38 @@ class PtyAgentsTest {
 
       assertEquals(
           new PtyMessage.Err("Session 's' is already running; attach or kill it."), answer);
-      assertTrue(withdrew.await(30, TimeUnit.SECONDS));
-      assertEquals(List.of(handed.getFirst().subList(0, 2)), withdrawn);
+      assertEquals(handed.getFirst().subList(0, 2), withdrawn.poll(30, TimeUnit.SECONDS));
+    }
+  }
+
+  /**
+   * Minor 1: an agent session's login file is withdrawn when the session ends, whether or not its
+   * wrapper read it; a session that signed in inside, ended first, has none to withdraw.
+   */
+  @Test
+  void anAgentSessionsLoginIsWithdrawnWhenItEnds() throws Exception {
+    try (var ignored = startHost();
+        var channel = connect()) {
+      assertInstanceOf(
+          PtyMessage.Ok.class,
+          ask(
+              channel,
+              agent("s", List.of(), "dock", new PtyMessage.Agent("claude-code", "full", false))));
+      assertInstanceOf(
+          PtyMessage.Ok.class,
+          ask(
+              channel,
+              agent("t", List.of(), "dock", new PtyMessage.Agent("claude-code", "full", true))));
+      var file = SessionLogin.file(listed(channel).getFirst().instanceId());
+      assertEquals(file, handed.getFirst().get(1));
+
+      assertInstanceOf(PtyMessage.Ok.class, ask(channel, new PtyMessage.Kill("t")));
+      assertInstanceOf(PtyMessage.Ok.class, ask(channel, new PtyMessage.Kill("s")));
+
+      assertEquals(
+          List.of("acme-dock", file),
+          withdrawn.poll(30, TimeUnit.SECONDS),
+          "the inside session, ended first, had none to withdraw");
     }
   }
 
