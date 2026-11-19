@@ -182,6 +182,28 @@ extension Driver {
                 return (false, "the rows: \(error)")
             }
         }
+        if let which = step.dragThumb {
+            guard let view: QuietScrollView = which == "panel" ? pane.panel.scroll : pane.project.listScroll as? QuietScrollView, let window = view.window else {
+                return (false, "no \(which) to drag")
+            }
+            view.flashScrollers()
+            let scroller = view.scroller, thumb = scroller.thumb, drags = scroller.drags, before = view.contentView.bounds.minY
+            guard thumb.height > 1 else { return (false, "the \(which)'s thumb is \(thumb): nothing to drag") }
+            let from = scroller.convert(NSPoint(x: thumb.midX, y: thumb.midY), to: nil), to = NSPoint(x: Double(from.x), y: Double(from.y) - 30)
+            func mouse(_ type: NSEvent.EventType, at point: NSPoint) -> NSEvent? {
+                NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                    eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1
+                )
+            }
+            guard let down = mouse(.leftMouseDown, at: from), let drag = mouse(.leftMouseDragged, at: to), let up = mouse(.leftMouseUp, at: to) else { return (false, "AppKit gave no mouse events") }
+            NSApp.postEvent(drag, atStart: false)
+            NSApp.postEvent(up, atStart: false)
+            window.sendEvent(down)
+            await Task.yield()
+            let moved = view.contentView.bounds.minY != before
+            return (scroller.drags == drags + 1 && !scroller.dragging && moved, "drags \(scroller.drags - drags), the thumb \(scroller.dragging ? "still" : "no longer") drawn dragged, the list \(moved ? "moved" : "did not move") from \(before) to \(view.contentView.bounds.minY)")
+        }
         if let scroll = step.scrollTo, scroll.count == 2, let fraction = Double(scroll[1]) {
             guard let view: NSScrollView = scroll[0] == "panel" ? pane.panel.scroll : pane.project.listScroll else { return (false, "no list to scroll") }
             let scrollable = await waitUntil(step.seconds ?? 10) {

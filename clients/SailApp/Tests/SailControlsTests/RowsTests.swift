@@ -289,27 +289,17 @@ import Testing
         #expect(list.chosen == "ws-30")
     }
 
-    /// A drag that starts on the thumb draws it in its dragged ink, as AppKit tracks it; a click on
-    /// the track away from the thumb is no drag.
-    @Test func aDragOnTheThumbIsDrawnDragged() throws {
+    /// A mouse-down grabs the thumb across the track's width beside it, and nowhere above or below it
+    /// on the track; the drag itself is driven in the app (`dragThumb`), since AppKit's own tracking
+    /// loop cannot be run inside a test process.
+    @Test func aMouseDownGrabsTheThumbOnlyBesideIt() throws {
         let (_, scroll, window) = try Self.scrolling(30, height: 200)
         defer { window.orderOut(nil) }
-        scroll.flashScrollers()
         let scroller = scroll.scroller, thumb = scroller.thumb
-        try #require(thumb.height > 1, "nothing to drag: the thumb is \(thumb)")
-        func click(_ point: NSPoint) throws {
-            let at = scroller.convert(point, to: nil)
-            func event(_ type: NSEvent.EventType) throws -> NSEvent {
-                try #require(NSEvent.mouseEvent(with: type, location: at, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0))
-            }
-            NSApp.postEvent(try event(.leftMouseUp), atStart: false)
-            scroller.mouseDown(with: try event(.leftMouseDown))
-        }
-        try click(NSPoint(x: thumb.midX, y: thumb.midY))
-        #expect(scroller.drags == 1 && !scroller.dragging, "a drag on the thumb was not drawn dragged, or stayed so: \(scroller.drags)")
-        let below = thumb.maxY + 20 < scroller.bounds.maxY ? thumb.maxY + 20 : thumb.minY - 20
-        try click(NSPoint(x: thumb.midX, y: below))
-        #expect(scroller.drags == 1, "a click on the track counted as a drag")
+        try #require(thumb.height > 1, "nothing to grab: the thumb is \(thumb)")
+        #expect(scroller.grabsThumb(at: NSPoint(x: thumb.midX, y: thumb.midY)) && scroller.grabsThumb(at: NSPoint(x: scroller.bounds.minX + 1, y: thumb.midY)))
+        let away = thumb.maxY + 20 < scroller.bounds.maxY ? thumb.maxY + 20 : thumb.minY - 20
+        #expect(!scroller.grabsThumb(at: NSPoint(x: thumb.midX, y: away)), "the track away from the thumb grabbed it")
     }
 
     /// A link given new words paints them as a link's, in the accent's text ink.

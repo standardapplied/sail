@@ -89,6 +89,7 @@
   {"name": "w20-listed", "workspaces": "ws-30"},
   {"name": "w20-scrolled-part-way", "scrollTo": ["list", "0.5"]},
   {"name": "w20-thirty-rows-scrolled", "shot": "w20-thirty-rows-scrolled"},
+  {"name": "w20-the-thumb-dragged", "dragThumb": "list"},
   {"name": "w21-twenty-listed", "projects": [["harbor", "ready"], ["demo", "missing"], ["lighthouse", "ready"], ["marina", "ready"], ["atlas", "ready"], ["keel", "ready"], ["quarry", "missing"], ["beacon", "ready"], ["tidewater", "ready"], ["cove", "ready"], ["jetty", "ready"], ["wharf", "ready"], ["anchor", "ready"], ["buoy", "ready"], ["compass", "ready"], ["dune", "ready"], ["estuary", "ready"], ["fjord", "ready"], ["gale", "ready"], ["zephyr", "ready"]]},
   {"name": "w21-asked-again", "select": "workspaces"},
   {"name": "w21-the-panel-scrolled-part-way", "scrollTo": ["panel", "0.5"]},

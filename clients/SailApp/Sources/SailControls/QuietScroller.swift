@@ -52,8 +52,14 @@ public final class QuietScroller: NSScroller {
     /// `mouseDown`, not always through `trackKnob`.
     package private(set) var drags = 0
 
+    /// A mouse-down at `point` (in its own coordinates) grabs the thumb: anywhere across the track's
+    /// width beside it, not only on its 6 pt.
+    package func grabsThumb(at point: NSPoint) -> Bool {
+        thumb.insetBy(dx: -(ScrollerStyle.track - ScrollerStyle.thumb) / 2, dy: 0).contains(point)
+    }
+
     override public func mouseDown(with event: NSEvent) {
-        guard thumb.insetBy(dx: -(ScrollerStyle.track - ScrollerStyle.thumb) / 2, dy: 0).contains(convert(event.locationInWindow, from: nil)) else {
+        guard grabsThumb(at: convert(event.locationInWindow, from: nil)) else {
             return super.mouseDown(with: event)
         }
         drags += 1
