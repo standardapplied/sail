@@ -673,6 +673,99 @@ class PtySessionTest {
     }
   }
 
+  /**
+   * Round 4 m1: after a handoff the keyboard's holder has no connection and no client name; the
+   * same person's automatic reconnect, from any client of theirs, takes it back, and another
+   * person's watches.
+   */
+  @Test
+  void afterAHandoffThePersonsAutomaticReconnectTakesTheirKeyboardBackAndAnotherWatches()
+      throws Exception {
+    var session = resumed("read a", false);
+    try {
+      var other = new Collector();
+      session.attach(other, true, "mady", "mady-mac", false);
+      other.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals("uday", session.writerFde(), "another person watches");
+      assertEquals(new PtyMessage.WriterChanged("uday", false), lastWriter(other));
+
+      var back = new Collector();
+      var backId = session.attach(back, true, "uday", "another-mac", false);
+      back.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(backId, session.writerId(), "the person's reconnect takes their keyboard back");
+      assertEquals(new PtyMessage.WriterChanged("uday", true), lastWriter(back));
+    } finally {
+      session.close();
+    }
+  }
+
+  /**
+   * Round 2 R2-1: when the keyboard's holder leaves, every client still attached hears that no one
+   * holds it; the session's opener, attached to write, takes it by typing, and another person
+   * attached to write does not.
+   */
+  @Test
+  void whenTheHolderLeavesEveryoneHearsTheKeyboardIsFreeAndTheOpenerTypingTakesIt()
+      throws Exception {
+    try (var session = session("read a; echo got:$a; read b")) {
+      var holder = new Collector();
+      var holderId = session.attach(holder, true, "uday", "mac-b", true);
+      var watcher = new Collector();
+      var watcherId = session.attach(watcher, true, "uday", "mac-a", false);
+      var admin = new Collector();
+      var adminId = session.attach(admin, true, "mady", "admin-mac", false);
+      admin.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(holderId, session.writerId());
+
+      session.detach(holderId);
+      watcher.awaitMessage(new PtyMessage.WriterChanged("", false));
+      admin.awaitMessage(new PtyMessage.WriterChanged("", false));
+      assertEquals(
+          PtySession.WriteOutcome.NOT_WRITER,
+          session.input(adminId, 1, "x\n".getBytes(StandardCharsets.UTF_8)),
+          "another person's typing never takes it");
+      assertEquals(
+          PtySession.WriteOutcome.ACCEPTED,
+          session.input(watcherId, 2, "hi\n".getBytes(StandardCharsets.UTF_8)),
+          "the opener's typing takes the free keyboard");
+      watcher.awaitOutput("got:hi");
+      assertEquals(watcherId, session.writerId());
+      watcher.awaitMessage(new PtyMessage.WriterChanged("uday", true));
+    }
+  }
+
+  /**
+   * Item 3: without an explicit take, only the session's opener takes a free keyboard; an admin
+   * restoring a tab watches until they take it, and taking it now takes it.
+   */
+  @Test
+  void aFreeKeyboardGoesWithoutATakeOnlyToTheOpener() throws Exception {
+    try (var session = session("read a")) {
+      var admin = new Collector();
+      session.attach(admin, true, "mady", "admin-mac", false);
+      admin.awaitFrame(PtyMessage.WriterChanged.class);
+      assertTrue(session.writerId() < 0, "an admin's restore watches a free keyboard");
+      assertEquals(new PtyMessage.WriterChanged("", false), lastWriter(admin));
+
+      var opener = new Collector();
+      var openerId = session.attach(opener, true, "uday", "mac-a", false);
+      opener.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(openerId, session.writerId(), "the opener's restore takes it");
+
+      var asked = new Collector();
+      var askedId = session.attach(asked, true, "mady", "admin-mac", true);
+      asked.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(
+          openerId, session.writerId(), "an admin asking now still never takes the opener's");
+      session.detach(openerId);
+      var again = new Collector();
+      var againId = session.attach(again, true, "mady", "admin-mac-2", true);
+      again.awaitFrame(PtyMessage.WriterChanged.class);
+      assertEquals(againId, session.writerId(), "an admin asking now takes a free keyboard");
+      session.detach(askedId);
+    }
+  }
+
   @Test
   void aHandoffStopsReadingWithoutHangingTheChildUpAndTheSidecarSaysWhatItWas() throws Exception {
     var files = SessionFiles.in(dir, "h");

@@ -71,7 +71,13 @@ public final class PtySession implements AutoCloseable {
     BACKLOG
   }
 
-  private record Subscriber(long id, Client client, SubscriberQueue queue, String asker) {}
+  private record Subscriber(
+      long id,
+      Client client,
+      SubscriberQueue queue,
+      String asker,
+      String fde,
+      boolean wantsWrite) {}
 
   private record Keystroke(long seq, byte[] bytes) {}
 
@@ -822,15 +828,21 @@ public final class PtySession implements AutoCloseable {
 
   /**
    * Attaches a client. Its queue is seeded, in order, with the pty's live geometry, the replay, and
-   * the write token's holder, then the live stream follows. A write request takes the token when it
-   * is free, or when its holder is this same FDE and either asked for it now ({@code takes}), or
-   * the holder is this same {@code asker}'s own earlier connection (a laptop that slept left a
-   * ghost attachment parked on the box holding the keyboard), or the holder's connection is gone
-   * (the host was handed over). Without {@code takes}, an automatic reconnect never takes the
-   * keyboard from the person's other live client: it watches, and hears so. The displaced
-   * connection hears {@code WriterChanged} and its next input is refused. A different FDE's token
-   * is never taken here — that is {@link #takeWrite}, an explicit act — so the newcomer learns it
-   * is an observer.
+   * the write token's holder, then the live stream follows. A write request takes the token:
+   *
+   * <ul>
+   *   <li>when no one holds it, if the person asked for it now ({@code takes}), or is the session's
+   *       opener; anyone else (an admin's app restoring a tab) watches until it takes it;
+   *   <li>when this same FDE holds it, if the person asked for it now, or the holder is this same
+   *       {@code asker}'s own earlier connection (a laptop that slept left a ghost attachment
+   *       holding the keyboard), or the holder's connection is gone (the host was handed over, and
+   *       the holder's client name is not kept across it).
+   * </ul>
+   *
+   * Without {@code takes}, an automatic reconnect never takes the keyboard from the person's other
+   * live client: it watches, and hears so. The displaced connection hears {@code WriterChanged} and
+   * its next input is refused. A different FDE's held token is never taken here — that is {@link
+   * #takeWrite}, an explicit act — so the newcomer learns it is an observer.
    */
   public long attach(Client client, boolean wantsWrite, String fde, String asker, boolean takes)
       throws IOException {
@@ -841,7 +853,12 @@ public final class PtySession implements AutoCloseable {
     everAttached = true;
     var subscriber =
         new Subscriber(
-            subscriberIds.incrementAndGet(), client, new SubscriberQueue(queueCapacity), asker);
+            subscriberIds.incrementAndGet(),
+            client,
+            new SubscriberQueue(queueCapacity),
+            asker,
+            fde,
+            wantsWrite);
     synchronized (fanout) {
       subscriber.queue().force(new PtyMessage.Resized(cols, rows));
       replayMessages(replayMax).forEach(subscriber.queue()::force);
@@ -907,7 +924,7 @@ public final class PtySession implements AutoCloseable {
    * drained by the writer thread; the sequence rides future output.
    */
   public WriteOutcome input(long subscriberId, long seq, byte[] bytes) {
-    if (subscriberId != writerId) {
+    if (subscriberId != writerId && !takesTheFreeKeyboard(subscriberId)) {
       return WriteOutcome.NOT_WRITER;
     }
     if (!inputBudget.tryAcquire(bytes.length)) {
@@ -934,11 +951,29 @@ public final class PtySession implements AutoCloseable {
   }
 
   private boolean mayTake(String fde, String asker, boolean takes) {
-    return writerId < 0
-        || writerFde.equals(fde)
-            && (takes
-                || !subscribers.containsKey(writerId)
-                || !asker.isEmpty() && asker.equals(writerClient));
+    if (writerId < 0) {
+      return takes || fde.equals(origin.ownerFde());
+    }
+    return writerFde.equals(fde)
+        && (takes
+            || !subscribers.containsKey(writerId)
+            || !asker.isEmpty() && asker.equals(writerClient));
+  }
+
+  /**
+   * A keyboard no one holds goes to the opener's client that asked to write as it types, as its
+   * restore would have taken it; anyone else's keys stay refused until it takes the keyboard.
+   */
+  private synchronized boolean takesTheFreeKeyboard(long subscriberId) {
+    var subscriber = subscribers.get(subscriberId);
+    if (writerId >= 0
+        || subscriber == null
+        || !subscriber.wantsWrite()
+        || !subscriber.fde().equals(origin.ownerFde())) {
+      return false;
+    }
+    grant(subscriberId, subscriber.fde(), subscriber.asker());
+    return true;
   }
 
   /**
@@ -995,6 +1030,8 @@ public final class PtySession implements AutoCloseable {
       writerFde = "";
       writerClient = "";
       persistMeta();
+      var free = new PtyMessage.WriterChanged("", false);
+      subscribers.values().forEach(left -> left.queue().force(free));
     }
   }
 

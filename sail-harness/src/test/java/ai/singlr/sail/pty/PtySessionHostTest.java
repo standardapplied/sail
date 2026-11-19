@@ -822,6 +822,48 @@ class PtySessionHostTest {
     }
   }
 
+  /**
+   * Round 2 R2-1: when the keyboard's holder's connection ends, its serve loop detaches it, and a
+   * client of the same person still attached hears that no one holds the keyboard.
+   */
+  @Test
+  @Timeout(30)
+  void whenTheHoldersConnectionEndsTheOthersHearTheKeyboardIsFree() throws Exception {
+    try (var ignored = startHost()) {
+      try (var watcher = connect("tok-uday")) {
+        PtyWire.write(
+            watcher,
+            new PtyMessage.Create("held", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(watcher));
+        try (var holder = connect("tok-uday")) {
+          PtyWire.write(holder, new PtyMessage.Attach("held", true, "mac-b", true));
+          assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(holder));
+          assertEquals(new PtyMessage.WriterChanged("uday", true), writerChange(holder));
+          PtyWire.write(watcher, new PtyMessage.Attach("held", true, "mac-a", false));
+          assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(watcher));
+          assertEquals(
+              new PtyMessage.WriterChanged("uday", false),
+              writerChange(watcher),
+              "the automatic attach watches the person's other client");
+        }
+        assertEquals(
+            new PtyMessage.WriterChanged("", false),
+            writerChange(watcher),
+            "the holder gone, the watcher hears no one holds the keyboard");
+      }
+    }
+  }
+
+  /** The next writer change on {@code channel}, past the attach's other frames. */
+  private static PtyMessage writerChange(SocketChannel channel) throws IOException {
+    while (true) {
+      var message = PtyWire.read(channel);
+      if (message instanceof PtyMessage.WriterChanged) {
+        return message;
+      }
+    }
+  }
+
   @Test
   void attachAnswersWithTheGeometryTheReplayAndTheWriterOnTheWire() throws Exception {
     try (var ignored = startHost()) {

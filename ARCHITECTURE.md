@@ -3967,10 +3967,14 @@ refused, never a short page. Attaching to one is the ticket above.
 
 **Whose keyboard (`PtySession#attach`, `SAILPTY6`).** An `Attach` that asks to write names its
 client, which keeps its name across its own reconnects, and says whether the person asked now
-(`takes`: an open, an explicit attach). It takes the keyboard when no client holds it, when its
-holder's connection is gone, from its own client's lost connection, or, asked now, from the same
-person's other client; an automatic reconnect or a restore never takes it from the person's other
-live client, and watches. Another person's keyboard is taken only by `TakeWrite`. Every
+(`takes`: an open, an explicit attach). A keyboard no client holds goes to one asked now, or to the
+session's opener; anyone else (an admin's restore) watches until it takes it. A keyboard the same
+person holds goes to one asked now, to the client's own lost connection's successor, or past a
+holder whose connection is gone (a handoff keeps no client name); an automatic reconnect or a
+restore never takes it from the person's other live client, and watches. Another person's
+keyboard is taken only by `TakeWrite`. When the holder detaches, every client still attached hears
+`WriterChanged("", false)`, and the opener's client that asked to write takes the free keyboard as
+it types. Every
 `WriterChanged` says whether the keyboard is the receiving connection's (`yours`), so two clients
 of one person pressing Take Keyboard at once each know which of them types.
 
