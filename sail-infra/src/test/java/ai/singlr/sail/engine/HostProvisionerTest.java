@@ -107,7 +107,7 @@ class HostProvisionerTest {
             "bridge: incusbr0",
             "would create devpool (zfs on /dev/sdb, one device: no redundancy)",
             "singlr-base (already exists): containers on devpool (zfs)",
-            "already cached"),
+            "would cache Ubuntu 24.04"),
         doneDetails);
   }
 
@@ -328,10 +328,7 @@ class HostProvisionerTest {
 
   @Test
   void writesHostYamlToFileSystem() throws Exception {
-    var shell =
-        box(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onOk("incus version", "6.3"),
-            "zfs");
+    var shell = box(succeeding().onOk("incus version", "6.3"), "zfs");
 
     var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
     var hostYamlPath = tempDir.resolve("etc/sail/host.yaml");
@@ -352,7 +349,7 @@ class HostProvisionerTest {
   void aPoolIncusCannotCreateFailsWithIncussReason() {
     var shell =
         fresh(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onFail("incus storage create", "Error: cannot open '/dev/sdb': no such device"),
             "zfs");
     var steps = new ArrayList<String>();
@@ -370,7 +367,7 @@ class HostProvisionerTest {
   void aDeviceZpoolRefusesIsReportedWithoutZpoolsAdviceToForceIt() {
     var shell =
         fresh(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onFail(
                     "incus storage create",
                     "Error: Failed to run: zpool create -m none -O compression=on devpool /dev/sdb:"
@@ -423,10 +420,41 @@ class HostProvisionerTest {
   }
 
   @Test
-  void incusInitAlreadyExistsIsNotAnError() throws Exception {
+  void aBoxHoldingTheVirtualMachineImageUnderTheAliasIsHealedAndSaysSo() throws Exception {
     var shell =
         box(
             new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+                .onOk("incus version", "6.3")
+                .onceOnOk(
+                    "incus image list local:",
+                    "[{\"fingerprint\":\"9cbfd6cffda6\",\"type\":\"virtual-machine\","
+                        + "\"aliases\":[{\"name\":\"ubuntu-24.04\"}]}]")
+                .onOk("local: --format=json", CACHED)
+                .onOk(
+                    "incus image list images:",
+                    "[{\"fingerprint\":\"990054afd627\",\"type\":\"container\","
+                        + "\"aliases\":[{\"name\":\"ubuntu/24.04\"}]}]"),
+            "dir");
+    var steps = new ArrayList<String>();
+
+    provision(shell, DIR, new RecordingListener(steps));
+
+    assertTrue(
+        steps.contains(
+            "done:7/8:replaced the virtual-machine image 9cbfd6cffda6 with the container image"),
+        steps.toString());
+    assertTrue(shell.invocations().contains("incus image delete 9cbfd6cffda6"));
+    assertTrue(
+        shell
+            .invocations()
+            .contains("incus image copy images:990054afd627 local: --alias ubuntu-24.04"));
+  }
+
+  @Test
+  void incusInitAlreadyExistsIsNotAnError() throws Exception {
+    var shell =
+        box(
+            succeeding()
                 .on("incus admin init", new ShellExec.Result(1, "", "network already exists"))
                 .onOk("incus version", "6.3"),
             "zfs");
@@ -449,9 +477,13 @@ class HostProvisionerTest {
   void cacheImageFailureThrowsIOException() {
     var shell =
         box(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding() /*KEEP*/
                 .onOk("incus version", "6.3")
-                .onFail("incus image list", "")
+                .onOk("incus image list local:", "[]")
+                .onOk(
+                    "incus image list images:",
+                    "[{\"fingerprint\":\"990054afd627\",\"type\":\"container\","
+                        + "\"aliases\":[{\"name\":\"ubuntu/24.04\"}]}]")
                 .onFail("incus image copy", "network unreachable"),
             "zfs");
 
@@ -469,16 +501,15 @@ class HostProvisionerTest {
                     MEMORY_MB,
                     tempDir.resolve("h.yaml"),
                     tempDir.resolve("sail.db")));
-    assertTrue(ex.getMessage().contains("Failed to cache image"));
+    assertEquals(
+        "incus image copy images:990054afd627 local: --alias ubuntu-24.04 failed: network"
+            + " unreachable",
+        ex.getMessage());
   }
 
   @Test
   void incusVersionFailureReportsUnknown() throws Exception {
-    var shell =
-        box(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-                .onFail("incus version", "command not found"),
-            "zfs");
+    var shell = box(succeeding().onFail("incus version", "command not found"), "zfs");
 
     var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
     var result =
@@ -520,7 +551,7 @@ class HostProvisionerTest {
 
   @Test
   void dirBackendCreatesIncusStoragePool() throws Exception {
-    var shell = fresh(new ScriptedShellExecutor(new ShellExec.Result(0, "", "")), "dir");
+    var shell = fresh(succeeding(), "dir");
     var steps = new ArrayList<String>();
 
     provision(shell, DIR, new RecordingListener(steps));
@@ -533,12 +564,7 @@ class HostProvisionerTest {
 
   @Test
   void dirBackendStoragePoolAlreadyExistsIsIdempotent() throws Exception {
-    var shell =
-        box(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-                .onOk("incus version", "6.3")
-                .onOk("incus storage show"),
-            "dir");
+    var shell = box(succeeding().onOk("incus version", "6.3").onOk("incus storage show"), "dir");
 
     var steps = new ArrayList<String>();
     var provisioner =
@@ -561,11 +587,7 @@ class HostProvisionerTest {
 
   @Test
   void dirBackendStoragePoolCreationFailureThrows() {
-    var shell =
-        fresh(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-                .onFail("incus storage create", "permission denied"),
-            "dir");
+    var shell = fresh(succeeding().onFail("incus storage create", "permission denied"), "dir");
 
     var ex = assertThrows(IOException.class, () -> provision(shell, DIR, null));
 
@@ -615,7 +637,7 @@ class HostProvisionerTest {
   void ufwActiveAddsAllBridgeRules() throws Exception {
     var shell =
         box(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onOk("incus version", "6.3")
                 .on("ufw status", new ShellExec.Result(0, "Status: active\n", ""))
                 .onOk("ufw allow")
@@ -648,7 +670,7 @@ class HostProvisionerTest {
   void ufwNotInstalledSkipsFirewallStepInsteadOfCrashing() {
     var shell =
         box(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onOk("incus version", "6.3")
                 .onThrow(
                     "ufw",
@@ -680,7 +702,7 @@ class HostProvisionerTest {
   void ufwInactiveSkipsFirewallStep() throws Exception {
     var shell =
         box(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onOk("incus version", "6.3")
                 .on("ufw status", new ShellExec.Result(0, "Status: inactive\n", "")),
             "dir");
@@ -705,7 +727,7 @@ class HostProvisionerTest {
   void ufwRuleFailureReportsWarning() throws Exception {
     var shell =
         box(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onOk("incus version", "6.3")
                 .on("ufw status", new ShellExec.Result(0, "Status: active\n", ""))
                 .onOk("ufw allow")
@@ -802,7 +824,7 @@ class HostProvisionerTest {
     var path = tempDir.resolve("host.yaml");
     Files.writeString(path, "limits:\n  file_max: -1\n");
     var steps = new ArrayList<String>();
-    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var shell = succeeding();
 
     var refused =
         assertThrows(
@@ -879,7 +901,7 @@ class HostProvisionerTest {
   private static HostYaml reProvision(Path path, ProvisionListener listener) throws Exception {
     var shell =
         box(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onOk("incus version", "6.3")
                 .on("ufw status", new ShellExec.Result(0, "Status: inactive\n", "")),
             "dir");
@@ -896,12 +918,7 @@ class HostProvisionerTest {
 
   @Test
   void provisioningWritesTheNeedrestartPolicyFirstAndNeverUpgradesTheOs() throws Exception {
-    var shell =
-        box(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-                .onFail("which incus", "")
-                .onFail("which zpool", ""),
-            "zfs");
+    var shell = box(succeeding().onFail("which incus", "").onFail("which zpool", ""), "zfs");
 
     provision(shell, SDB, null);
 
@@ -919,9 +936,7 @@ class HostProvisionerTest {
 
   @Test
   void aPolicyThatCannotBeWrittenStopsProvisioningBeforeAnyPackage() {
-    var shell =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onFail("needrestart", "read-only file system");
+    var shell = succeeding().onFail("needrestart", "read-only file system");
 
     var error =
         assertThrows(
@@ -974,11 +989,7 @@ class HostProvisionerTest {
 
   @Test
   void aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt() throws Exception {
-    var shell =
-        fresh(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-                .onOk("incus profile device list", ""),
-            "zfs");
+    var shell = fresh(succeeding().onOk("incus profile device list", ""), "zfs");
     var steps = new ArrayList<String>();
 
     var hostYaml = provision(shell, SDB, new RecordingListener(steps));
@@ -1036,7 +1047,7 @@ class HostProvisionerTest {
   void aZfsPoolOnAPartitionIsMadeTheSameWay() throws Exception {
     var partition = "/dev/sdd3";
     var shell =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+        succeeding()
             .onceOnOk("incus storage list --format json", "[]")
             .onOk(
                 "incus storage list",
@@ -1067,7 +1078,7 @@ class HostProvisionerTest {
   @Test
   void aFileBackedPoolIsSizedAndSaysOnceThatItIsForTrials() throws Exception {
     var shell =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+        succeeding()
             .onceOnOk("incus storage list --format json", "[]")
             .onOk("incus storage list", pools("devpool", "zfs", "/var/lib/incus/disks/devpool.img"))
             .onOk("incus profile device list", "root\neth0\n")
@@ -1094,11 +1105,7 @@ class HostProvisionerTest {
 
   @Test
   void aDeviceThatTookASignatureSinceItWasNamedIsRefusedAndUntouched() {
-    var shell =
-        fresh(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-                .onOk("wipefs -- /dev/sdb", EXT4),
-            "zfs");
+    var shell = fresh(succeeding().onOk("wipefs -- /dev/sdb", EXT4), "zfs");
 
     var refused = assertThrows(IllegalArgumentException.class, () -> provision(shell, SDB, null));
 
@@ -1111,7 +1118,7 @@ class HostProvisionerTest {
 
   @Test
   void aPoolIncusLostSinceTheRunBeganIsNeverMadeFromItsZpool() {
-    var shell = fresh(new ScriptedShellExecutor(new ShellExec.Result(0, "", "")), "zfs");
+    var shell = fresh(succeeding(), "zfs");
 
     var refused =
         assertThrows(
@@ -1129,7 +1136,7 @@ class HostProvisionerTest {
   void aDeviceThatJoinedAPoolSinceItWasNamedIsRefusedAndUntouched() {
     var shell =
         fresh(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onOk("zpool list -H -o name", "sail-raw\n")
                 .onOk(
                     "zpool list -vHP sail-raw",
@@ -1149,7 +1156,7 @@ class HostProvisionerTest {
 
   @Test
   void aNameThatNowNamesAnotherDiskIsRefusedAndUntouched() {
-    var shell = fresh(new ScriptedShellExecutor(new ShellExec.Result(0, "", "")), "zfs");
+    var shell = fresh(succeeding(), "zfs");
 
     var refused =
         assertThrows(
@@ -1169,7 +1176,7 @@ class HostProvisionerTest {
   void aDeviceMountedSinceItWasNamedIsRefusedAndUntouched() {
     var shell =
         fresh(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onOk(
                     "lsblk --json --tree",
                     DeviceFixtures.sparesWithMount("/dev/sdb", "/mnt/scratch")),
@@ -1193,7 +1200,7 @@ class HostProvisionerTest {
         "{\"name\": \"tank\", \"driver\": \"zfs\", \"config\": {\"source\":"
             + " \"/var/lib/incus/disks/tank.img\"}}";
     var shell =
-        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+        succeeding()
             .onceOnOk("incus storage list --format json", "[" + dirPool + "]")
             .onOk("incus storage list", "[" + dirPool + ", " + tank + "]")
             .onOk("incus profile device list", "root\neth0\n")
@@ -1304,7 +1311,7 @@ class HostProvisionerTest {
 
   @Test
   void aZfsPoolCannotTakeTheNameOfTheDirPoolTheBoxHas() {
-    var shell = box(new ScriptedShellExecutor(new ShellExec.Result(0, "", "")), "dir");
+    var shell = box(succeeding(), "dir");
 
     var refused =
         assertThrows(
@@ -1334,7 +1341,7 @@ class HostProvisionerTest {
 
   @Test
   void aDirBoxWritesNoZfsCacheCap() throws Exception {
-    var shell = box(new ScriptedShellExecutor(new ShellExec.Result(0, "", "")), "dir");
+    var shell = box(succeeding(), "dir");
 
     provision(shell, DIR, null);
 
@@ -1347,7 +1354,7 @@ class HostProvisionerTest {
   void anIncusThatCannotSeeZfsOnABoxWithContainersIsLeftRunningAndTheOperatorToldHow() {
     var shell =
         fresh(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onFail("incus storage create", "Error: Required tool 'zpool' is missing")
                 .onOk("incus list", "[{\"name\": \"acme\", \"status\": \"Running\"}]"),
             "zfs");
@@ -1368,7 +1375,7 @@ class HostProvisionerTest {
   void anIncusThatCannotSeeZfsOnABoxWithNoContainersIsRestartedSayingSo() throws Exception {
     var shell =
         fresh(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onceOnFail("incus storage create", "Error: Required tool 'zpool' is missing")
                 .onOk("incus list", "[]"),
             "zfs");
@@ -1396,7 +1403,7 @@ class HostProvisionerTest {
   void aDeviceThatChangedWhileIncusRestartedIsRefusedBeforeTheSecondCreate() {
     var shell =
         fresh(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onceOnFail("incus storage create", "Error: Required tool 'zpool' is missing")
                 .onOk("incus list", "[]")
                 .onceOnOk("lsblk --json --tree", DeviceFixtures.read(DeviceFixtures.SPARES))
@@ -1419,14 +1426,14 @@ class HostProvisionerTest {
   void aRestartThatFailsOrACreateThatStillFailsSaysSo() {
     var unrestarted =
         fresh(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onFail("incus storage create", "Error: Required tool 'zpool' is missing")
                 .onOk("incus list", "[]")
                 .onFail("systemctl restart incus", "Job for incus.service failed"),
             "zfs");
     var unseen =
         fresh(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onFail("incus storage create", "Error: Required tool 'zpool' is missing")
                 .onOk("incus list", "[]"),
             "zfs");
@@ -1441,11 +1448,7 @@ class HostProvisionerTest {
 
   @Test
   void aProfileLeftWithoutDevicesGetsItsRootDiskAndNic() throws Exception {
-    var shell =
-        box(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-                .onOk("incus profile device list", ""),
-            "dir");
+    var shell = box(succeeding().onOk("incus profile device list", ""), "dir");
 
     provision(shell, DIR, null);
 
@@ -1487,11 +1490,7 @@ class HostProvisionerTest {
 
   @Test
   void aProfileThatNamesAPoolIncusLacksIsRefused() {
-    var shell =
-        box(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-                .onOk("incus profile device get", "oldpool\n"),
-            "dir");
+    var shell = box(succeeding().onOk("incus profile device get", "oldpool\n"), "dir");
 
     var refused = assertThrows(IllegalStateException.class, () -> provision(shell, DIR, null));
 
@@ -1505,13 +1504,13 @@ class HostProvisionerTest {
   void aProfileAndDeviceThatCannotBeMadeFail() {
     var uncreated =
         fresh(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onFail("incus profile show", "not found")
                 .onFail("incus profile create", "permission denied"),
             "dir");
     var unadded =
         box(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onOk("incus profile device list", "root\n")
                 .onFail("incus profile device add", "network not found"),
             "dir");
@@ -1595,6 +1594,17 @@ class HostProvisionerTest {
         .onOk("/proc/[0-9]*");
   }
 
+  /** A shell every command succeeds on, on a box that holds the container image. */
+  private static ScriptedShellExecutor succeeding() {
+    return new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+        .onOk("incus image list local:", CACHED);
+  }
+
+  /** What {@code incus image list local:} answers on a box that holds the container image. */
+  private static final String CACHED =
+      "[{\"fingerprint\":\"990054afd627\",\"type\":\"container\","
+          + "\"aliases\":[{\"name\":\"ubuntu-24.04\"}]}]";
+
   /** {@code shell}, on a box whose Incus holds no pool until one is created. */
   private static ScriptedShellExecutor fresh(ScriptedShellExecutor shell, String driver) {
     return box(shell.onceOnOk("incus storage list --format json", "[]"), driver);
@@ -1611,7 +1621,7 @@ class HostProvisionerTest {
         .onOk("apt-get")
         .onOk("incus admin init")
         .onOk("incus profile show")
-        .onOk("incus image list");
+        .onOk("incus image list local:", CACHED);
   }
 
   private static final PoolSource.Mirror SDB_SDC =
@@ -1645,7 +1655,7 @@ class HostProvisionerTest {
   void aMirrorIsOneIncusCreateOfBothDevicesEachProbedLastAndNeverForced() throws Exception {
     var shell =
         mirrorBox(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onceOnOk("incus storage list --format json", "[]")
                 .onOk("incus profile device list", ""),
             VDEVS);
@@ -1692,7 +1702,7 @@ class HostProvisionerTest {
   void aSecondDeviceThatTookASignatureRefusesTheMirrorAndNoPoolOfOneDeviceIsMade() {
     var shell =
         mirrorBox(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onceOnOk("incus storage list --format json", "[]")
                 .onOk("wipefs -- /dev/sdc", EXT4),
             VDEVS);
@@ -1711,8 +1721,7 @@ class HostProvisionerTest {
   void anIncusThatCannotMirrorIsRefusedBeforeTheDevicesAreClearedAgain() {
     var shell =
         mirrorBox(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-                .onceOnOk("incus storage list --format json", "[]"),
+            succeeding().onceOnOk("incus storage list --format json", "[]"),
             "{\"api_extensions\": [\"storage_zfs\"]}");
 
     var refused = assertThrows(IllegalStateException.class, () -> provision(shell, SDB_SDC, null));
@@ -1728,7 +1737,7 @@ class HostProvisionerTest {
   void aMirrorZpoolRefusesIsReportedOnceAndNeverRetriedOnOneDevice() {
     var shell =
         mirrorBox(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            succeeding()
                 .onceOnOk("incus storage list --format json", "[]")
                 .onFail(
                     "incus storage create",
@@ -1754,7 +1763,7 @@ class HostProvisionerTest {
   void aPoolIncusLeftUnfinishedIsNeverTakenAsMadeNorMadeOver() {
     for (var source : List.<PoolSource>of(SDB, SDB_SDC)) {
       var shell =
-          new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+          succeeding()
               .onOk(
                   "incus storage list",
                   "[{\"name\": \"devpool\", \"driver\": \"zfs\", \"status\": \"Errored\","
@@ -1778,11 +1787,7 @@ class HostProvisionerTest {
 
   @Test
   void aMirrorWhoseSecondNameNowNamesAnotherDiskIsRefusedAndUntouched() {
-    var shell =
-        mirrorBox(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-                .onceOnOk("incus storage list --format json", "[]"),
-            VDEVS);
+    var shell = mirrorBox(succeeding().onceOnOk("incus storage list --format json", "[]"), VDEVS);
     var first =
         new PoolSource.Mirror(
             SDB_SDC.one(),
@@ -1801,7 +1806,7 @@ class HostProvisionerTest {
 
   /** A box whose Incus holds devpool, of {@code driver} and {@code source}, in {@code status}. */
   private static ScriptedShellExecutor held(String driver, String status, String source) {
-    return new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+    return succeeding()
         .onOk(
             "incus storage list",
             "[{\"name\": \"devpool\", \"driver\": \""
@@ -1917,7 +1922,7 @@ class HostProvisionerTest {
     for (var source : List.<PoolSource>of(SDB, SDB_SDC)) {
       var shell =
           mirrorBox(
-              new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+              succeeding()
                   .onceOnOk("incus storage list --format json", "[]")
                   .onOk("zpool list -H -o name", "rpool\ndevpool\n"),
               VDEVS);

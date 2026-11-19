@@ -45,7 +45,6 @@ public final class HostProvisioner {
 
   private static final int TOTAL_STEPS = 8;
   private static final Duration INIT_TIMEOUT = Duration.ofMinutes(5);
-  private static final Duration IMAGE_TIMEOUT = Duration.ofMinutes(5);
 
   private final ShellExec shell;
   private final ShellExec reads;
@@ -503,36 +502,28 @@ public final class HostProvisioner {
         pool, source.driver(), IncusStorage.sourceOf(source), null, null, Optional.empty());
   }
 
+  /**
+   * Holds the container image of the box's image under its alias ({@link BaseImage}), replacing one
+   * of another type; a dry run says what a real run would do, from what the box holds.
+   */
   private void cacheImage() throws IOException, InterruptedException, TimeoutException {
     step(7, "Caching Ubuntu 24.04 image...");
-
-    var check =
-        read(List.of("bash", "-c", "incus image list --format=json | grep -q ubuntu-24.04"));
-    if (check.ok()) {
-      stepDone(7, "already cached");
-      return;
-    }
     if (shell.isDryRun()) {
-      stepDone(7, "would cache Ubuntu 24.04");
+      stepDone(7, heldContainer() ? "already cached" : "would cache Ubuntu 24.04");
       return;
     }
+    stepDone(7, new BaseImage(shell, HostYaml.DEFAULT_IMAGE).ensure());
+  }
 
-    var result =
-        shell.exec(
-            List.of(
-                "incus",
-                "image",
-                "copy",
-                "images:" + HostYaml.DEFAULT_IMAGE,
-                "local:",
-                "--alias",
-                "ubuntu-24.04"),
-            null,
-            IMAGE_TIMEOUT);
-    if (!result.ok()) {
-      throw new IOException("Failed to cache image: " + result.stderr());
+  private boolean heldContainer() throws InterruptedException, TimeoutException {
+    try {
+      return new BaseImage(reads, HostYaml.DEFAULT_IMAGE)
+          .held()
+          .filter(BaseImage.Held::container)
+          .isPresent();
+    } catch (IOException e) {
+      return false;
     }
-    stepDone(7, "cached");
   }
 
   private void configureFirewall(String bridge)

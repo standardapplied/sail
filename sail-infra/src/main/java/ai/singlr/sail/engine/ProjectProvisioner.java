@@ -388,9 +388,12 @@ public final class ProjectProvisioner {
       return;
     }
 
-    var image = image(config, host).replace('/', '-');
+    var named = image(config, host);
+    var image = new BaseImage(shell, named);
+    image.requireContainer(healing(named, host));
     var launch =
-        new ArrayList<>(List.of("incus", "launch", image, name, "--profile", host.baseProfile()));
+        new ArrayList<>(
+            List.of("incus", "launch", image.alias(), name, "--profile", host.baseProfile()));
     into.pool().ifPresent(pool -> launch.addAll(List.of("--storage", pool)));
     new TreeMap<>(into.keys())
         .forEach((key, value) -> launch.addAll(List.of("-c", key + "=" + value)));
@@ -715,6 +718,19 @@ public final class ProjectProvisioner {
 
   private static String image(ProjectDefinition config, HostYaml host) {
     return Objects.requireNonNullElse(config.image(), host.image());
+  }
+
+  /**
+   * What gives a launch from {@code image} a container image: host init caches the box's own again
+   * (a re-run keeps the pool); a project's own image is the project's to change.
+   */
+  static Remedy healing(String image, HostYaml host) {
+    return HostYaml.DEFAULT_IMAGE.equals(image)
+        ? Remedy.of(
+            "Cache the container image in its place: ",
+            Remedy.sail(
+                "host init", "--storage", host.storageBackend(), "--pool", host.pool(), "--yes"))
+        : Remedy.of("Give the project a container image.");
   }
 
   private void installPodman(String name) throws Exception {
