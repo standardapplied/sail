@@ -30,7 +30,13 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         public let id: String
         public let name: String
         public let voice: String
-        public let content: NSView
+        /// What it shows, made when its row is: the table makes rows only for what is on screen,
+        /// so a long list drawn again builds a screenful, not every row.
+        @MainActor public var content: NSView {
+            make()
+        }
+
+        private let make: @MainActor () -> NSView
         public let actions: [Action]
         /// Words before its actions, shown with them (who may open it).
         public let note: String?
@@ -45,13 +51,13 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         public let accessory: NSView?
 
         public init(
-            id: String, name: String, voice: String, content: NSView, actions: [Action] = [], note: String? = nil, height: Double? = nil,
+            id: String, name: String, voice: String, content: @autoclosure @escaping @MainActor () -> NSView, actions: [Action] = [], note: String? = nil, height: Double? = nil,
             paint: RowPaint? = nil, full: Bool = false, accessory: NSView? = nil
         ) {
             self.id = id
             self.name = name
             self.voice = voice
-            self.content = content
+            make = content
             self.actions = actions
             self.note = note
             self.height = height

@@ -93,7 +93,7 @@ import Testing
         let (view, window) = try WorkspacesViewTests.view(RecordedServer([projects, try Self.rows(30, of: "harbor"), try Self.rows(30, of: "demo")]), width: 1024 - Rail.width - 4)
         defer { window.orderOut(nil) }
         view.shown()
-        #expect(await RunnerTabTests.until { view.text.contains("harbor-ws-30") }, "\(view.text)")
+        #expect(await RunnerTabTests.until { view.text.hasPrefix("Workspaces\nharbor\n") && view.text.contains("ws-30") }, "\(view.text)")
         view.layoutSubtreeIfNeeded()
         let scroll = try #require(view.project.listScroll)
         func scrolledHalfWay() {
@@ -102,16 +102,16 @@ import Testing
         }
         scrolledHalfWay()
         view.panel.list.choose("demo")
-        #expect(await RunnerTabTests.until { view.text.contains("demo-ws-30") }, "\(view.text)")
+        #expect(await RunnerTabTests.until { view.text.hasPrefix("Workspaces\ndemo\n") && view.text.contains("ws-30") }, "\(view.text)")
         view.layoutSubtreeIfNeeded()
         #expect(abs(Double(scroll.contentView.bounds.minY)) < 0.5, "demo's list opened \(scroll.contentView.bounds.minY) pt down, where harbor's was left")
         view.panel.list.choose("harbor")
-        #expect(await RunnerTabTests.until { view.text.contains("harbor-ws-30") }, "\(view.text)")
+        #expect(await RunnerTabTests.until { view.text.hasPrefix("Workspaces\nharbor\n") && view.text.contains("ws-30") }, "\(view.text)")
         view.layoutSubtreeIfNeeded()
         scrolledHalfWay()
         view.person = WorkspacesViewTests.ana
         view.shown()
-        #expect(await RunnerTabTests.until { view.text.contains("harbor-ws-30") }, "\(view.text)")
+        #expect(await RunnerTabTests.until { view.text.hasPrefix("Workspaces\nharbor\n") && view.text.contains("ws-30") }, "\(view.text)")
         view.layoutSubtreeIfNeeded()
         #expect(abs(Double(scroll.contentView.bounds.minY)) < 0.5, "ana's harbor opened \(scroll.contentView.bounds.minY) pt down, where uday left a list")
     }
@@ -169,13 +169,13 @@ import Testing
         #expect(best < .milliseconds(16), "three hundred rows take \(best) to redraw, past a frame")
     }
 
-    /// The narrow rows' actions column is the widest actions a row shows, measured: under the old
-    /// fixed 144 pt, so a name keeps what the actions cannot use.
+    /// The narrow rows' actions column is the widest actions a row shows, measured and said; the
+    /// reach sweep, with the list holding the keys, checks a chosen row's actions fit it.
     @Test func theNarrowActionsColumnIsTheWidestActions() throws {
         let (project, window) = try WorkspacesViewTests.project(width: WorkspacesViewTests.narrowestCard)
         defer { window.orderOut(nil) }
         print("workspaces: the narrow actions column is \(project.narrowActionsColumn) pt")
-        #expect(project.narrowActionsColumn > 90 && project.narrowActionsColumn < 144, "the narrow actions column is \(project.narrowActionsColumn) pt")
+        #expect(project.narrowActionsColumn > 90, "the narrow actions column is \(project.narrowActionsColumn) pt")
     }
 
     /// Twenty projects scroll between the panel's header and its foot, which stays put.

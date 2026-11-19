@@ -42,6 +42,7 @@ import Testing
                 let (view, window) = try await WorkspacesReachTests.shown(RecordedServer([try Exchange("projects"), try WorkspacesReachTests.longRows()]), width: width, panel: panel, saying: "dock")
                 defer { window.orderOut(nil) }
                 var faults: [String] = []
+                window.makeFirstResponder(view.project.list)
                 for id in WorkspacesReachTests.ids(view.project.list) {
                     view.project.list.choose(id)
                     faults += WorkspacesReachTests.outOfReach(in: view).map { "\(id.prefix(12)) chosen: \($0)" }

@@ -365,7 +365,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     }
 
     private func item(_ line: WorkspacesModel.Line) -> SailList.Item {
-        let content = WorkspaceLine(line, narrow: narrow, look: look, mono: mono)
+        let narrow = narrow, look = look, mono = mono
         let actions: [SailList.Action] = line.menu.map { entry in
             switch entry {
             case .open: SailList.Action("Open") { [weak self] in self?.on(.open(line.name)) }
@@ -376,7 +376,9 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         var said = [line.name, WorkspaceLine.pill(line).label.lowercased()]
         if let owner = line.owner { said.append(WorkspaceLine.said(owner)) }
         if let why = line.why { said.append(why) }
-        return SailList.Item(id: line.name, name: line.name, voice: said.joined(separator: ", "), content: content, actions: actions, note: line.why)
+        return SailList.Item(
+            id: line.name, name: line.name, voice: said.joined(separator: ", "), content: WorkspaceLine(line, narrow: narrow, look: look, mono: mono), actions: actions, note: line.why
+        )
     }
 
     /// The create under way as the row it will be, in the quiet chosen fill: its name and instance,
