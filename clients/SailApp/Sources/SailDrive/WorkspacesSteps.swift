@@ -20,6 +20,8 @@ actor GoldenDesk: Transport {
     /// The failing route cannot be reached at all, in place of the proxy's 502.
     private var unreached = false
     private(set) var asked: [HTTPRequest] = []
+    /// Each route as it is answered, after any hold: what the app has been told, in order.
+    private(set) var answered: [String] = []
 
     init() {
         let first = ["passkey-login-start", "passkey-login-finish", "whoami", "projects", "workspaces", "workspace-create", "terminal-ticket-workspace"]
@@ -120,6 +122,7 @@ actor GoldenDesk: Transport {
     func send(_ request: HTTPRequest) async throws(SailError) -> HTTPResponse {
         asked.append(request)
         if let after = held[request.route], after > .zero { try? await Task.sleep(for: after) }
+        defer { answered.append(request.route) }
         guard request.route != failing else { throw unreached ? SailError.unreachable("Could not connect to the server.") : SailError.unexpected(route: request.route, status: 502) }
         guard let answer = answers[request.route] else { throw .unreachable("no golden answers \(request.route)") }
         guard request.route == "POST /v1/terminal/tickets", answer.status == 201, let door = Self.door,
@@ -225,18 +228,25 @@ extension Driver {
                 return (false, "the refusal: \(error)")
             }
         }
+        if let pair = step.answeredWhileSheetShows, pair.count == 2 {
+            let said = { Self.texts(self.shell.window.attachedSheet?.contentView).joined(separator: " ") }
+            let settled = await waitUntilAsync(step.seconds ?? 10) { await GoldenDesk.shared.answered.contains(pair[0]) || !said().contains(pair[1]) }
+            let answered = await GoldenDesk.shared.answered.contains(pair[0])
+            let shown = said().contains(pair[1])
+            guard settled, answered, shown else {
+                return (false, "not shown: \(answered ? "answered" : "not answered") \(pair[0]); the sheet says '\(said())'")
+            }
+            return (true, "\(pair[0]) answered while the sheet says '\(said())'")
+        }
+        if let wanted = step.deletesAsked {
+            let deletes = { await GoldenDesk.shared.asked.map(\.route).filter { $0.hasPrefix("DELETE ") } }
+            _ = await waitUntilAsync(step.seconds ?? 5) { await deletes().count >= wanted.count }
+            let asked = await deletes()
+            return (asked == wanted, "deletes asked: \(asked)")
+        }
         if let count = step.questionsWaiting {
             let waiting = await waitUntil(step.seconds ?? 10) { pane.questionsWaiting == count }
             return (waiting, "\(pane.questionsWaiting) questions wait behind the sheet")
-        }
-        if let route = step.wasAsked {
-            let found = await waitUntilAsync(step.seconds ?? 5) { await GoldenDesk.shared.asked.contains { $0.route == route } }
-            let routes = await GoldenDesk.shared.asked.map(\.route)
-            return (found, "asked: \(routes.filter { $0.hasPrefix("DELETE") || $0.hasSuffix("/stop") })")
-        }
-        if let route = step.neverAsked {
-            let routes = await GoldenDesk.shared.asked.map(\.route)
-            return (!routes.contains(route), "asked: \(routes.filter { $0.hasPrefix("DELETE") || $0.hasSuffix("/stop") })")
         }
         if let wanted = step.mayEndAProgram {
             let said = await waitUntil(step.seconds ?? 10) { self.workbench.focused?.mayEndAProgram == wanted }

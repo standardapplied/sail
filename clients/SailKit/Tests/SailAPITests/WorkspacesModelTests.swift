@@ -639,6 +639,19 @@ extension WorkspacesModelTests {
         #expect(sent.action == .stop && sent.name == "dock" && sent.project == "harbor" && model.asking == nil && Self.row(model, "dock")?.busy == .stop)
     }
 
+    /// Minor 6: a stop whose terminals grew while it was asked is asked again in its new words; an
+    /// old question is never asked again.
+    @Test func aStopAsksAgainWhenItsTerminalsGrew() throws {
+        var model = Self.listed(Self.uday)
+        let asked = try Self.asks(&model, .stop, "dock", terminals: 1)
+        let grew = model.askAgain(asked, terminals: 2)
+        let again = try #require(grew)
+        #expect(again.body.hasPrefix("Your 2 terminals in it end.") && model.asking == again)
+        let stale = model.askAgain(asked, terminals: 3)
+        let old = model.confirm(asked)
+        #expect(stale == nil && old == nil && model.asking == again, "the old question was asked or confirmed again")
+    }
+
     /// M1: an admin's Stop on another person's workspace always asks, saying whose terminals end:
     /// the runner tells the admin only of their own, so a count of none says nothing of ana's.
     @Test func aStopOfSomeoneElsesAlwaysAsks() throws {

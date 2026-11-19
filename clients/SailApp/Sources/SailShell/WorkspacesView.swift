@@ -69,7 +69,11 @@ public final class WorkspacesView: NSView {
     private var door = Door.asking
     private var overlaid = false
     /// A person's action is under way; the drive waits on it.
-    package private(set) var busy = false
+    package var busy: Bool {
+        underWay > 0
+    }
+
+    private var underWay = 0
 
     private enum Door: Equatable {
         case asking, signedOut, unknown([String]), signedIn
@@ -250,10 +254,10 @@ public final class WorkspacesView: NSView {
 
     /// Runs a person's action: busy while it runs.
     private func byAPerson(_ work: @escaping @MainActor () async -> Void) {
-        busy = true
+        underWay += 1
         Task {
             await work()
-            busy = false
+            underWay -= 1
             render()
         }
     }
@@ -348,8 +352,8 @@ public final class WorkspacesView: NSView {
         question = sheet
         sheet.ask(on: window) { [weak self] confirmed in
             guard let self else { return }
-            question = nil
             guard confirmed else {
+                question = nil
                 model.cancel(asked)
                 render()
                 showQuestion()
@@ -360,7 +364,8 @@ public final class WorkspacesView: NSView {
     }
 
     /// A confirmed question sent. A stop of the person's own workspace counts their terminals again
-    /// first: one opened while the sheet asked is asked about before it ends.
+    /// first: one opened while the sheet asked is asked about before it ends. The sheet's question
+    /// is held until then, so nothing shows it twice.
     private func confirm(_ asked: WorkspacesModel.Question) {
         guard let client, asked.action == .stop, let counted = asked.terminals else { return sendConfirmed(asked) }
         let era = self.era
@@ -368,13 +373,14 @@ public final class WorkspacesView: NSView {
             guard let self else { return }
             let now = await terminals(in: asked.name, project: asked.project, client)
             guard era == self.era else { return }
-            guard let now, now > counted, model.chosen == asked.project else { return sendConfirmed(asked) }
-            model.cancel(asked)
-            if case .question? = model.ask(.stop, asked.name, terminals: now) { showQuestion() }
+            guard let now, now > counted, model.askAgain(asked, terminals: now) != nil else { return sendConfirmed(asked) }
+            question = nil
+            showQuestion()
         }
     }
 
     private func sendConfirmed(_ asked: WorkspacesModel.Question) {
+        question = nil
         guard let sent = model.confirm(asked) else { return render() }
         send(sent.action, sent.name, project: sent.project)
         showQuestion()

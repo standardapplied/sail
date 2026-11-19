@@ -181,10 +181,12 @@ struct Step: Decodable {
     var refuseDelete: [String]?
     /// How many Delete Anyway questions wait behind the sheet open, within `seconds` (10 by default).
     var questionsWaiting: Int?
-    /// The control plane was asked this route (`"DELETE /v1/…/dock"`), within `seconds` (5 by default).
-    var wasAsked: String?
-    /// The control plane was never asked this route.
-    var neverAsked: String?
+    /// `[route, words]`: the control plane has answered `route` while the sheet still says `words`,
+    /// within `seconds` (10 by default); not shown when the sheet changed first or the answer never came.
+    var answeredWhileSheetShows: [String]?
+    /// Every delete the control plane was asked, in order, is exactly these routes, within `seconds`
+    /// (5 by default) for the last of them to come.
+    var deletesAsked: [String]?
     /// The button of this title on the sheet now asking, clicked with real mouse events through the
     /// sheet's own window.
     var sheetClick: String?

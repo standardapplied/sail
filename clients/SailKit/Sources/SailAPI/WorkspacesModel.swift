@@ -419,6 +419,15 @@ public struct WorkspacesModel: Sendable {
         return send(question.action, question.name, project: question.project) ? (question.project, question.name, question.action) : nil
     }
 
+    /// `question`, an open stop, asked again in its new words: the person's terminals in it grew to
+    /// `terminals` while it was asked. Nil, and nothing changed, when it is not the question open.
+    public mutating func askAgain(_ question: Question, terminals: Int) -> Question? {
+        guard asking == question, question.action == .stop, question.project == chosen else { return nil }
+        asking = nil
+        guard case let .question(again)? = ask(.stop, question.name, terminals: terminals) else { return nil }
+        return again
+    }
+
     /// `question` cancelled (or answered): the next waiting in the project shown, if any, is asked.
     public mutating func cancel(_ question: Question) {
         guard asking == question else { return }
