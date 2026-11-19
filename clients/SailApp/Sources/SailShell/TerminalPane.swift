@@ -380,6 +380,11 @@ public final class TerminalPane: NSView {
         let wasSaid = keyboard.said
         keyboard.writerChanged(to: writer, yours: yours, me: person)
         refusedSaid = false
+        sayKeyboard(wasSaid)
+        if keyboard.needsOpener { Task { await learnOpener() } }
+    }
+
+    private func sayKeyboard(_ wasSaid: String?) {
         if let said = keyboard.said {
             banner.show(said, button: "Take Keyboard", returns: false) { [weak self] in
                 MainActor.assumeIsolated { self?.takeKeyboard() }
@@ -387,6 +392,18 @@ public final class TerminalPane: NSView {
         } else if let wasSaid, banner.shown == wasSaid {
             banner.hide()
         }
+    }
+
+    /// Who opened this session, from its workspace's listing, so a keyboard no one holds is said to
+    /// anyone else, whose typing does not take it.
+    private func learnOpener() async {
+        guard case let .workspace(project, workspace) = place, let tickets,
+              let listing = try? await tickets.sessions(in: project, workspace: workspace),
+              let opener = listing.sessions.first(where: { $0.name == name })?.opener
+        else { return }
+        let wasSaid = keyboard.said
+        keyboard.opener = opener
+        sayKeyboard(wasSaid)
     }
 
     /// Take Keyboard: asked of the host, or, with no connection attached, said why it cannot be yet.

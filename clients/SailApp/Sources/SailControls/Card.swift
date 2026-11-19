@@ -10,6 +10,31 @@ import SailLook
 @MainActor
 public final class Card: NSView {
     static let width = 420.0
+
+    /// The width a card's words take at its widest.
+    static var wordsWidth: Double {
+        width - Banner.padding.leading - Banner.mark - Banner.gap - Banner.padding.trailing
+    }
+
+    /// `words(name)`, `name` cut in its middle as little as it takes for the words to keep to
+    /// `lines` lines of a card at its widest.
+    public static func fitting(_ name: String, lines: Int = 2, in words: (String) -> String) -> String {
+        let font = NSFont.systemFont(ofSize: Look.Step.callout.points)
+        func height(_ text: String) -> Double {
+            Double(NSAttributedString(string: text, attributes: [.font: font]).boundingRect(
+                with: NSSize(width: wordsWidth - 4, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading]
+            ).height)
+        }
+        let most = height(String(repeating: "X\n", count: lines - 1) + "X") + 0.5
+        var kept = Array(name)
+        var said = words(name)
+        while height(said) > most, kept.count > 2 {
+            kept.remove(at: kept.count / 2)
+            let half = kept.count / 2
+            said = words(String(kept[..<half]) + "…" + String(kept[half...]))
+        }
+        return said
+    }
     private let message = NSTextField(wrappingLabelWithString: "")
     private let primary: SailButton
     private let secondary: SailButton

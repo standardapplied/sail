@@ -526,9 +526,8 @@ public final class WorkbenchView: NSView {
     /// Keyboard. Answers the rest, whose sessions closing ends.
     private func leaving(elsewhere views: [TerminalPane]) -> [TerminalPane] {
         let elsewhere = views.filter(\.keyboardElsewhere)
-        guard let first = elsewhere.first, let said = first.stillRunning(model.tab(holding: first.id).map { model.title(of: $0.id) } ?? "This terminal") else {
-            return views
-        }
+        guard let first = elsewhere.first else { return views }
+        let said = Card.fitting(model.tab(holding: first.id).map { model.title(of: $0.id) } ?? "This terminal") { first.stillRunning($0) ?? $0 }
         for view in elsewhere {
             view.detach()
             remove(view)

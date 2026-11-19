@@ -2,6 +2,7 @@
 
 ## 0.74.0
 
+- **A runner terminal's keyboard, said to everyone watching it.** Someone other than the session's opener (an admin) left watching a keyboard no one holds is told "No one holds the keyboard." with Take Keyboard, and a key typed there sounds the alert once; the opener is told nothing, since their typing takes it. A long tab name in "… is still running: the keyboard is with …" is cut in its middle, so the sentence keeps to two lines.
 - **The app comes back to a person's sessions on the runner.**
   - **Quitting and signing out end nothing there.** Quitting detaches every terminal and asks nothing. Signing out takes the runner tabs from the window and keeps their places for the same person's next sign-in, which brings them back attached; another person's sign-in drops them. The quit's and sign-out's runner questions (`RunnerEnds`) are gone.
   - **At launch, once signed in,** each runner tab the arrangement kept for that person is attached again through a new ticket, showing what its program printed meanwhile. The arrangement records whose runner tabs it holds. A restore, a sign-in coming back and a reconnect (a Mac waking, the network back) never take the keyboard from the person's other Mac while it types there: the tab watches and says so; only an Open or Take Keyboard takes it.

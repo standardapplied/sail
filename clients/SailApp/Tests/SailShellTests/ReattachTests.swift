@@ -244,6 +244,71 @@ import Testing
         #expect(beeps == 1)
     }
 
+    /// A long tab name in "is still running" is cut in its middle, so the sentence takes two lines at
+    /// most (60 pt): a workspace of the longest name the server allows, and a long rename.
+    @Test(arguments: [nil, String(repeating: "a renamed tab that goes on and on ", count: 4)])
+    func aLongTabNameIsCutSoTheSentenceKeepsToTwoLines(_ rename: String?) async throws {
+        let (local, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
+        defer { local.stop(); runner.stop() }
+        let bench = try await Self.workbench(local: local, runner: runner, who: Who("uday"))
+        let longest = String(repeating: "n", count: 63)
+        bench.openWorkspace(project: "harbor", name: longest)
+        #expect(await RunnerTabTests.until(10) { Self.runnerSessions(bench).count == 1 })
+        #expect(await Self.attached(bench))
+        let pane = try #require(bench.panes.values.first { $0.place.onRunner })
+        if let rename, let tab = bench.model.tab(holding: pane.id) { bench.model.rename(tab.id, to: rename) }
+        let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: 960, height: 630), styleMask: [.titled], backing: .buffered, defer: false)
+        bench.frame = NSRect(x: 0, y: 0, width: 960, height: 630)
+        window.contentView = bench
+        window.orderFront(nil)
+        runner.takeKeyboard(pane.name, by: "uday")
+        #expect(await RunnerTabTests.until(10) { pane.keyboardElsewhere })
+        bench.model.focus(pane.id)
+        bench.closePane(nil)
+        bench.layoutSubtreeIfNeeded()
+        let said = try #require(bench.bannerSays)
+        #expect(said.contains("…") && said.hasSuffix("is still running: the keyboard is with your other window or Mac."), "\(said)")
+        let sentence = try #require(bench.subviews.compactMap { $0 as? Card }.first { !$0.isHidden })
+        #expect(Double(sentence.frame.height) <= 60, "the sentence is \(sentence.frame.height) pt: \(said)")
+    }
+
+    /// Someone other than the opener (an admin) left watching a keyboard no one holds is told so,
+    /// with Take Keyboard, every action reached; a key typed there sounds once; the opener is told
+    /// nothing, since typing takes it.
+    @Test(arguments: ["ana", "uday"])
+    func aFreeKeyboardIsSaidToAnAdminWatchingAndNotToTheOpener(_ person: String) async throws {
+        let runner = try FakeRunnerDoor(person: "uday")
+        defer { runner.stop() }
+        runner.hold("app-k")
+        runner.typingTakesAFreeKeyboard = person == "uday"
+        let pane = try RunnerTabTests.pane(Self.dock, runner: DoorTickets(runner), start: .attach, session: "app-k", person: person)
+        let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 360), styleMask: [.titled], backing: .buffered, defer: false)
+        let room = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 360))
+        pane.frame = room.bounds
+        room.addSubview(pane)
+        window.contentView = room
+        window.orderFront(nil)
+        pane.begin()
+        #expect(await RunnerTabTests.until(10) { pane.attachedOnce })
+        runner.takeKeyboard("app-k", by: "uday")
+        #expect(await RunnerTabTests.until(10) { pane.keyboardElsewhere })
+        runner.leaveKeyboard("app-k")
+        guard person == "ana" else {
+            #expect(await RunnerTabTests.until(10) { !pane.keyboardElsewhere && pane.status.says == nil }, "the opener is told nothing: \(pane.status)")
+            return
+        }
+        #expect(await RunnerTabTests.until(10) { pane.status.says == "No one holds the keyboard." }, "\(pane.status)")
+        #expect(pane.status.offers == ["Take Keyboard"] && !pane.statusReturns)
+        #expect(WorkspacesReachTests.outOfReach(in: room).isEmpty, "\(WorkspacesReachTests.outOfReach(in: room))")
+        var beeps = 0
+        pane.beep = { beeps += 1 }
+        pane.session?.send(KeyInput(key: .a, text: "a"))
+        pane.session?.send(KeyInput(key: .b, text: "b"))
+        #expect(await RunnerTabTests.until(10) { beeps == 1 }, "a key that goes nowhere is said, once")
+        #expect(pane.press("Take Keyboard"))
+        #expect(await RunnerTabTests.until(10) { pane.status.says == nil }, "\(pane.status)")
+    }
+
     /// M1: closing a tab whose keyboard is on the person's other Mac only detaches it, at a prompt
     /// or with a program running: the session goes on there, said once, and nothing is ended.
     @Test(arguments: [true, false])
