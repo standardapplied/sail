@@ -242,7 +242,7 @@ public final class TabButton: NSView, NSTextFieldDelegate {
         unendedMark.isHidden = !item.unended
         zoomMark.isHidden = !item.zoomed || item.unended
         isSelected = selected
-        setAccessibilityLabel(item.title)
+        setAccessibilityLabel(item.unended ? "\(item.title), a terminal in it may still be running" : item.title)
         setAccessibilityValue(selected)
         self.look = look
     }

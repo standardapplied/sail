@@ -163,21 +163,6 @@ import Testing
         #expect(answer8 != nil)
     }
 
-    /// A zoomed pane being closed keeps its zoom while the focus moves on, and loses it only as it
-    /// goes: one layout, not two.
-    @Test func aZoomKeptAsTheFocusMovesOnEndsOnlyWithTheClose() throws {
-        let (start, a, b, _, _) = try Self.grid()
-        var bench = start
-        bench.focus(a)
-        bench.toggleZoom()
-        let zoomed = bench.frames(in: Self.room, scale: 2)
-        bench.focus(b, keepingZoom: true)
-        #expect(bench.focusedPane?.id == b && bench.selectedTab?.zoomed == a)
-        #expect(bench.frames(in: Self.room, scale: 2) == zoomed, "nothing laid out again yet")
-        bench.close(a)
-        #expect(bench.selectedTab?.zoomed == nil && bench.focusedPane?.id == b)
-    }
-
     @Test func scenario7AZoomEndsWhenToggledOrOnASplitACloseOrADirectionalMove() throws {
         let (start, a, b, _, _) = try Self.grid()
         var bench = start

@@ -419,6 +419,14 @@ final class MainStacks: @unchecked Sendable {
         lock.withLock { dense }
     }
 
+    /// The main thread's CPU time, in ms, used inside `span`: from the last look at or before its
+    /// start to the first at or after its end; nil when the looks do not cover it.
+    func cpu(in span: Span) -> Double? {
+        let all = looks
+        guard let from = all.last(where: { $0.time <= span.start }), let to = all.first(where: { $0.time >= span.end }) else { return nil }
+        return (to.cpu - from.cpu) * 1000
+    }
+
     /// The samples taken in `span`, each as its run state, the main thread's CPU time since the
     /// first of them, and its innermost symbols.
     /// The summary of `span` and three of its samples: the first, the middle and the last.

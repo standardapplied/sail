@@ -219,6 +219,19 @@ import Testing
         #expect(LatencyMarks().figures.longestToTold == nil)
     }
 
+    /// The drawable asks a span holds are those overlapping it; an ask still out counts up to now.
+    @Test func theDrawableAsksInASpanAreThoseOverlappingItAnOpenOneUpToNow() {
+        var marks = LatencyMarks()
+        marks.fetchStarted(at: 1.000)
+        marks.fetchEnded(at: 1.010)
+        marks.fetchStarted(at: 2.000)
+        marks.fetchEnded(at: 2.500)
+        marks.fetchStarted(at: 3.000)
+        #expect(marks.asks(in: Span(1.900, 2.100), now: 3.200) == [Span(2.000, 2.500)], "asks outside the span are left out")
+        #expect(marks.asks(in: Span(2.900, 3.100), now: 3.200) == [Span(3.000, 3.200)], "an ask still out counts up to now")
+        #expect(marks.asks(in: Span(0.000, 0.500), now: 3.200).isEmpty)
+    }
+
     @Test func aKeysEchoIsTheFirstOutputAfterItsBytesAndShowsWhenItsFrameIsPresented() {
         var marks = LatencyMarks()
         marks.keyWritten(event: 1.000, sent: 1.0005, written: 1.001)

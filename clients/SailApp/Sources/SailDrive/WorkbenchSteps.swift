@@ -757,18 +757,16 @@ extension Driver {
     /// (``SymbolInk/resolutions``); no layout of the workbench's tabs during any switch
     /// (``WorkbenchView/tabLayouts``); no pane waited over 100 ms to show a change, net of the
     /// machine's share (``flood(_:)``). Reported and not judged here: each switch's main-thread
-    /// hold, counted as ours, beside an empty window's own first and second switch. On this
-    /// runner a 50 ms bound on it is decided by the machine about one run in three, on main as
-    /// well (the empty window's own switch moves 0 to 27 ms between runs); it is judged on a real
-    /// Mac. Each switch's longest hold is printed with its stacks.
+    /// hold, counted as ours and clipped to the switch, the main thread's CPU time in it, and the
+    /// hold less an empty window's own second switch. Nothing of the drive's runs on the main
+    /// thread inside a switch: the stacks are described, and every line printed, after the last.
     private func switchLooks(_ grid: [TerminalPane], times: Int) async -> [(String, Bool)] {
         let empty = await emptyWindowSwitches()
         let quiet = await settled(grid)
         grid.forEach { $0.terminal.resetLatency() }
         mainThread.reset()
         ownThread.reset()
-        var reached: [String] = []
-        var holds: [(ours: Double, said: String)] = []
+        var switches: [(at: Double, setting: Double, took: Double, span: Span)] = []
         var drawn = 0
         var resolvedLater = 0
         let laidOut = workbench.tabLayouts
@@ -781,39 +779,44 @@ extension Driver {
             let setting = (CACurrentMediaTime() - at) * 1000
             if await lookDrawn() { drawn += 1 }
             await drawnAndCommitted()
-            if index > 0 { resolvedLater += SymbolInk.resolutions - resolved }
             let span = Span(at, CACurrentMediaTime())
-            let took = (ContinuousClock.now - began) / .milliseconds(1)
-            reached.append("\(Self.ms(took)) ms")
-            holds.append(mainHeld(in: span))
-            print(String(format: "look switch %d at %.3f: setting the appearance took %.1f ms on the main thread; the last pane drew it %.1f ms after the switch; the main thread's longest hold, ours, %.1f ms (reported, not judged here)",
-                         index + 1, at, setting, took, holds[index].ours))
-            if let gap = mainThread.stalls.longest(in: span) {
-                print(String(format: "look switch %d: the main thread's longest hold %.3f–%.3f (%.1f ms), the drive's own thread %.1f ms of it", index + 1, gap.start, gap.end,
-                             gap.length * 1000, ownThread.stalls.shared(with: gap) * 1000))
+            if index > 0 { resolvedLater += SymbolInk.resolutions - resolved }
+            switches.append((at, setting, (ContinuousClock.now - began) / .milliseconds(1), span))
+        }
+        let layouts = workbench.tabLayouts - laidOut
+        let holds = switches.map { heldWithin($0.span) }
+        let cpus = switches.map { mainStacks.cpu(in: $0.span) }
+        for (index, done) in switches.enumerated() {
+            let cpu = cpus[index].map { String(format: "%.1f ms", $0) } ?? "not covered by the looks"
+            print(String(format: "look switch %d at %.3f: setting the appearance took %.1f ms on the main thread; the last pane drew it %.1f ms after the switch; ", index + 1, done.at, done.setting, done.took)
+                + "the main thread's longest hold in it, ours, \(Self.ms(holds[index].ours)) ms, its CPU time in it \(cpu) (reported, not judged here)")
+            if let gap = holds[index].gap {
+                print(String(format: "look switch %d: the main thread's longest hold %.3f–%.3f (%.1f ms)", index + 1, gap.start, gap.end, gap.length * 1000))
                 mainStacks.told(gap, frames: MainStacks.depth).forEach { print("look switch \(index + 1): main thread held: \($0)") }
             }
         }
-        let layouts = workbench.tabLayouts - laidOut
         let judged = grid.map { flood($0.terminal.latency) }
         let worst = judged.max { $0.ours < $1.ours }
         let changes = grid.map { $0.terminal.latency.changes }
         let draws = grid.map { $0.terminal.latency.refresh.max }.reduce(0, +)
         _ = await setLook(nil)
-        let longest = holds.max { $0.ours < $1.ours } ?? (ours: 0, said: "none")
+        let longest = holds.map(\.ours).max() ?? 0
+        let beyond = holds.map { $0.ours - empty.second }
         panes4["look switched, ours, the worst pane ms"] = worst?.ours ?? 0
-        panes4["look switched, the main thread's longest hold, ours ms (reported, not judged here)"] = longest.ours
-        panes4["look switched first, the main thread's longest hold, ours ms"] = holds.first?.ours ?? 0
-        panes4["look switched later, the main thread's longest hold, ours ms"] = holds.dropFirst().map(\.ours).max() ?? 0
+        panes4["look switched, the main thread's longest hold, ours ms (reported, not judged here)"] = longest
+        panes4["look switched, the main thread's CPU time in a switch, the most ms"] = cpus.compactMap(\.self).max() ?? -1
+        panes4["look switched, the longest hold less an empty window's second switch ms"] = beyond.max() ?? 0
         panes4["look switched, an empty window's first switch, ours ms"] = empty.first
         panes4["look switched, an empty window's second switch, ours ms"] = empty.second
         panes4["look switched, the four panes' longest draws summed ms"] = draws
         let perSwitch = holds.map { Self.ms($0.ours) }.joined(separator: ", ")
-        print("look switch: reported, not judged here: the main thread's longest hold a switch, ours, \(perSwitch) ms; an empty window's own first switch \(Self.ms(empty.first)) ms and second "
-            + "\(Self.ms(empty.second)) ms. This runner's spread decides a 50 ms bound on it about one run in three, on main as well, so it is judged on a real Mac. The longest: \(longest.said)")
+        let cpuSaid = cpus.map { $0.map { Self.ms($0) } ?? "?" }.joined(separator: ", ")
+        print("look switch: reported, not judged here: the main thread's longest hold a switch, ours and clipped to it, \(perSwitch) ms; its CPU time a switch \(cpuSaid) ms; "
+            + "an empty window's own first switch \(Self.ms(empty.first)) ms and second \(Self.ms(empty.second)) ms")
         let changed = changes.map { "\($0)" }.joined(separator: ", ")
         let quietSaid = "no screen changed for \(Self.ms(Self.quietBeforeSwitching * 1000)) ms before them"
-        let drewSaid = "drawn \(drawn) of \(times), screen changes a pane \(changed), the last pane drawing each (polled every 10 ms) \(reached.joined(separator: ", ")) after it"
+        let reached = switches.map { "\(Self.ms($0.took)) ms" }.joined(separator: ", ")
+        let drewSaid = "drawn \(drawn) of \(times), screen changes a pane \(changed), the last pane drawing each (polled every 10 ms) \(reached) after it"
         let waitSaid = "the worst pane, ours \(Self.ms(worst?.ours ?? 0)) ms: \(worst?.said ?? "none"); the four panes' longest draws summed \(Self.ms(draws)) ms"
         return [
             ("1: the four panes quiet before the switches (\(quiet ? quietSaid : "a screen still changing after 5 s"))", quiet),
@@ -822,6 +825,17 @@ extension Driver {
             ("4: no layout of the workbench's tabs during the switches (\(layouts) laid out)", layouts == 0),
             ("5: no pane waited over 100 ms to show a change (\(waitSaid))", (worst?.ours ?? 0) <= 100),
         ]
+    }
+
+    /// The main thread's longest hold inside `span`, each of its stalls clipped to the span, so one
+    /// that began before it (the drive's own work between switches) counts only from its start.
+    private func heldWithin(_ span: Span) -> (ours: Double, said: String, gap: Span?) {
+        let clipped = mainThread.stalls.gaps.compactMap { gap -> Span? in
+            let part = Span(max(gap.start, span.start), min(gap.end, span.end))
+            return part.length > 0 ? part : nil
+        }.max { $0.length < $1.length }
+        let held = ours(clipped, less: Heartbeat.interval)
+        return (held.ours, held.said, clipped)
     }
 
     /// AppKit's own change of look for a window with nothing of ours in it, at the shell window's
@@ -841,7 +855,7 @@ extension Driver {
             let at = CACurrentMediaTime()
             window.appearance = NSAppearance(named: dark ? .aqua : .darkAqua)
             await drawnAndCommitted(window)
-            held.append(mainHeld(in: Span(at, CACurrentMediaTime())).ours)
+            held.append(heldWithin(Span(at, CACurrentMediaTime())).ours)
         }
         window.orderOut(nil)
         shell.window.makeKeyAndOrderFront(nil)
@@ -1094,13 +1108,13 @@ extension Driver {
                 try? await Task.sleep(for: .milliseconds(1))
             }
             let wait = Span(began, CACurrentMediaTime())
-            if wait.length > 0.1, let view = made?.terminal {
-                print(splitMarks(of: view, in: wait, number: totals.count + 1, visibleAtKey: visibleAtKey))
-            }
             totals.append(wait.length * 1000)
             held.append(mainThread.longest)
             ownHeld.append(ownThread.stalls.shared(with: wait) * 1000)
             ours.append(self.ours(wait).ours)
+            if wait.length > 0.1, let view = made?.terminal {
+                print(splitMarks(of: view, in: wait, number: totals.count, visibleAtKey: visibleAtKey))
+            }
             samples.append(String(format: "handled %.1f, first frame %.1f, own thread %.1f, ours %.1f", handled.last ?? 0, totals.last ?? 0, ownHeld.last ?? 0, ours.last ?? 0))
             _ = await waitUntil(5) { made?.session?.state.phase == .attached }
             press("w", ["command", "option"])
@@ -1121,9 +1135,11 @@ extension Driver {
         let asks = view.drawableAsks(in: wait)
         let asked = asks.reduce(0) { $0 + $1.overlap(wait) } * 1000
         let longest = (asks.map { $0.overlap(wait) }.max() ?? 0) * 1000
+        let offsets = asks.map { String(format: "+%.1f ms for %.1f ms", ($0.start - wait.start) * 1000, $0.length * 1000) }.joined(separator: ", ")
         let outcomes = zip(RefreshOutcome.allCases, view.refreshOutcomes).map { "\($0) \($1)" }.joined(separator: ", ")
         let visibleNow = shell.window.occlusionState.contains(.visible)
-        return String(format: "split %d: %.1f ms to its first frame; drawable asks in it %d, %.1f ms in all, the longest %.1f ms; ", number, wait.length * 1000, asks.count, asked, longest)
+        return String(format: "split %d: %.1f ms to its first frame; drawable asks in it %d, %.1f ms in all, the longest %.1f ms", number, wait.length * 1000, asks.count, asked, longest)
+            + (asks.isEmpty ? "; " : " (each from ⌘D: \(offsets)); ")
             + "refreshes by outcome: \(outcomes); drawables thrown for their size \(view.drawablesThrownForSize); "
             + "the window visible at ⌘D \(visibleAtKey ? "yes" : "no"), at the end \(visibleNow ? "yes" : "no")"
     }
