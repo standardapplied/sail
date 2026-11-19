@@ -461,7 +461,8 @@ public final class WorkbenchView: NSView {
 
     /// Opens `place` for `person`, still the one signed in: a tab attached to each of their live
     /// sessions there that no tab holds, newest first; when every one is in a tab already, the
-    /// newest's tab is chosen and nothing starts (a new one is New Terminal's); with none, a new one.
+    /// newest's tab is chosen and nothing starts (a split of one of its panes starts one); with none,
+    /// a new one.
     func open(_ place: Place, attaching listed: RunnerSessions?, for person: String) {
         guard signedIn()?.handle == person else { return }
         let held = Set(model.panes.values.map(\.session) + self.held.flatMap(\.layout.sessions))

@@ -97,7 +97,7 @@ import Testing
     }
 
     /// R7: Open on a workspace attaches a tab to each of the person's live sessions no tab holds,
-    /// newest first; with none left, it opens a new one.
+    /// newest first; with all in tabs, it chooses the newest's tab and starts nothing (minor 8).
     @Test func openingAWorkspaceReattachesItsLiveSessionsNewestFirst() async throws {
         let (local, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
         defer { local.stop(); runner.stop() }
@@ -112,9 +112,11 @@ import Testing
         #expect(await Self.attached(bench))
         #expect(runner.createsReceived == 0)
 
+        let newest = try #require(bench.panes.values.first { $0.name == "app-new" })
+        bench.model.focus(try #require(bench.panes.values.first { $0.name == "app-old" }).id)
         bench.openWorkspace(project: "harbor", name: "dock")
-        #expect(await RunnerTabTests.until(10) { Self.runnerSessions(bench).count == 3 })
-        #expect(await RunnerTabTests.until(10) { runner.createsReceived == 1 }, "a new one is opened")
+        #expect(await RunnerTabTests.until(10) { bench.model.focusedPane?.id == newest.id }, "the newest's tab is chosen")
+        #expect(Self.runnerSessions(bench).count == 2 && runner.createsReceived == 0, "nothing started")
     }
 
     /// R8, R9: a reattach the runner refuses says, from the workspace's listing, that the terminal
@@ -260,24 +262,6 @@ import Testing
         #expect(bench.panes[pane.id] == nil, "the tab went")
         #expect(runner.sessions == [pane.name] && runner.kills.isEmpty, "nothing was ended")
         #expect(bench.bannerSays == "Still running: the keyboard is with your other window or Mac.")
-    }
-
-    /// Minor 8: Open on a workspace whose live sessions are all in tabs chooses the newest's tab
-    /// and starts nothing.
-    @Test func openingAWorkspaceWhoseSessionsAreAllInTabsChoosesTheNewest() async throws {
-        let (local, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
-        defer { local.stop(); runner.stop() }
-        runner.hold("app-old")
-        runner.hold("app-new")
-        let bench = try await Self.workbench(local: local, runner: runner, who: Who("uday"))
-        bench.openWorkspace(project: "harbor", name: "dock")
-        #expect(await RunnerTabTests.until(10) { Set(Self.runnerSessions(bench)) == ["app-old", "app-new"] })
-        #expect(await Self.attached(bench))
-        let newest = try #require(bench.panes.values.first { $0.name == "app-new" })
-        bench.model.focus(try #require(bench.panes.values.first { $0.name == "app-old" }).id)
-        bench.openWorkspace(project: "harbor", name: "dock")
-        #expect(await RunnerTabTests.until(10) { bench.model.focusedPane?.id == newest.id }, "the newest's tab is chosen")
-        #expect(Self.runnerSessions(bench).count == 2 && runner.sessions.count == 2, "nothing started")
     }
 
     /// Minor 3: a listing answered after its person signed out, someone else signing in meanwhile,

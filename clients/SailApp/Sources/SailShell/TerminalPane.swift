@@ -323,7 +323,7 @@ public final class TerminalPane: NSView {
             banner.show("The runner restarted, which ends every session it held.", button: "Open Again", handler: again)
         case let .ended(reason):
             banner.show(Said.sentence(reason), button: "Open Again", handler: again)
-        case let .ticketRefused(refusal) where refusal.code == .known(.notFound) && (start == .attach || attachedOnce):
+        case let .ticketRefused(refusal) where refusal.code == .known(.notFound) && (start != .open || attachedOnce):
             Task { await showReturn(refused: end) }
         case .signIn:
             banner.show(end.said.joined(separator: " "), button: "Sign In", handler: signIn)
