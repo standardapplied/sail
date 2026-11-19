@@ -38,6 +38,16 @@ import Testing
         }
     }
 
+    /// A sheet asking while the look changes takes the new look: its ground, words and buttons.
+    @Test func aSheetTakesALookChangedWhileItAsks() throws {
+        let sheet = Sheet(title: "Delete dock?", body: "Its files on the runner go with it.", confirm: "Delete Workspace", kind: .destructive, look: .light, titleFont: try TitleFont(directory: LookTests.fonts))
+        _ = sheet.laidOut()
+        sheet.look = .dark
+        let ink = { (label: NSTextField) in label.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor }
+        #expect(ink(sheet.title) == NSColor(Look.dark.text) && ink(sheet.body) == NSColor(Look.dark.textSecondary), "the sheet's words kept the light look")
+        #expect(sheet.cancel.look == .dark && sheet.confirm.look == .dark, "the sheet's buttons kept the light look")
+    }
+
     /// Delete asks with the person's one live terminal in dock counted; confirmed and refused for the
     /// work dock holds, it asks Delete Anyway in the server's own words.
     @Test func deleteAsksThenAsksAnywayInTheServersWords() async throws {

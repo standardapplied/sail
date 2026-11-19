@@ -113,6 +113,7 @@ public final class WorkspacesView: NSView {
         let typing = project.fieldHasKeys
         panel.look = look
         panelShadow.look = look
+        question?.look = look
         project.look = look
         paint()
         render(typing: typing)

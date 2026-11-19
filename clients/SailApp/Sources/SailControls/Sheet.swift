@@ -16,6 +16,31 @@ public final class Sheet: NSObject {
     public let cancel: SailButton
     public let confirm: SailButton
     private var answer: (@MainActor (Bool) -> Void)?
+    private let titleFont: TitleFont
+
+    /// Its look: a new one, as the app's appearance changes while it asks, paints it again.
+    public var look: Look {
+        didSet {
+            guard look != oldValue else { return }
+            paint(title: title.stringValue, body: body.stringValue)
+            cancel.look = look
+            confirm.look = look
+            (window.contentView as? SheetContent)?.look = look
+        }
+    }
+
+    private func paint(title words: String, body said: String) {
+        let lines = NSMutableParagraphStyle()
+        lines.minimumLineHeight = (Look.Step.title3.points * 1.2).rounded()
+        lines.maximumLineHeight = lines.minimumLineHeight
+        title.attributedStringValue = NSAttributedString(string: words, attributes: [
+            .font: titleFont.font(.title3) as NSFont, .foregroundColor: NSColor(look.text), .paragraphStyle: lines,
+            .kern: -0.012 * Look.Step.title3.points,
+        ])
+        body.attributedStringValue = NSAttributedString(string: said, attributes: [
+            .font: NSFont.systemFont(ofSize: Look.Step.callout.points), .foregroundColor: NSColor(look.textSecondary),
+        ])
+    }
 
     public init(title: String, body: String, confirm: String, kind: ButtonKind, look: Look, titleFont: TitleFont) {
         let destructive = kind == .destructive || kind == .destructiveQuiet
@@ -24,17 +49,10 @@ public final class Sheet: NSObject {
         cancel = SailButton("Cancel", kind: .secondary, look: look, target: nil, action: nil)
         self.confirm = SailButton(confirm, kind: kind, look: look, target: nil, action: nil)
         window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 160), styleMask: [.titled], backing: .buffered, defer: true)
+        self.titleFont = titleFont
+        self.look = look
         super.init()
-        let lines = NSMutableParagraphStyle()
-        lines.minimumLineHeight = (Look.Step.title3.points * 1.2).rounded()
-        lines.maximumLineHeight = lines.minimumLineHeight
-        self.title.attributedStringValue = NSAttributedString(string: title, attributes: [
-            .font: titleFont.font(.title3) as NSFont, .foregroundColor: NSColor(look.text), .paragraphStyle: lines,
-            .kern: -0.012 * Look.Step.title3.points,
-        ])
-        self.body.attributedStringValue = NSAttributedString(string: body, attributes: [
-            .font: NSFont.systemFont(ofSize: Look.Step.callout.points), .foregroundColor: NSColor(look.textSecondary),
-        ])
+        paint(title: title, body: body)
         cancel.target = self
         cancel.action = #selector(cancelled(_:))
         cancel.keyEquivalent = "\u{1b}"
@@ -82,7 +100,10 @@ public final class Sheet: NSObject {
 final class SheetContent: NSView {
     static let padding = (top: 22.0, sides: 24.0, bottom: 18.0), gap = 14.0, footer = (vertical: 14.0, sides: 16.0), buttonGap = 8.0
 
-    private let look: Look
+    var look: Look {
+        didSet { needsDisplay = true }
+    }
+
     private let title: NSTextField, body: NSTextField, cancel: SailButton, confirm: SailButton
 
     init(title: NSTextField, body: NSTextField, cancel: SailButton, confirm: SailButton, look: Look) {
