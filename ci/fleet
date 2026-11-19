@@ -242,12 +242,24 @@ suffix_of() {
   [[ $n == 1 ]] || echo "-a$n"
 }
 
+# A check's log file name: its name made safe and cut to 160 bytes, then 8 hex digits of the whole
+# name's hash, so a long name is still a legal file name and two long names never share one.
+log_name() {
+  local safe
+  safe=$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')
+  printf '%s-%s.log' "${safe:0:160}" "$(printf '%s' "$1" | sha256sum | cut -c1-8)"
+}
+
 check() {
   local run=$1 name=$2
   shift 2
   local dir log
   dir=$(log_dir "$run")
-  log="$dir/$(echo "$name" | tr -c 'A-Za-z0-9._-' '_').log"
+  log="$dir/$(log_name "$name")"
+  if ! { : > "$log"; } 2> /dev/null; then
+    echo "FAIL $name (its log $log could not be opened, so it did not run)" | tee -a "$dir/report.txt"
+    return 1
+  fi
   if "$@" > "$log" 2>&1; then
     echo "PASS $name" | tee -a "$dir/report.txt"
   else
