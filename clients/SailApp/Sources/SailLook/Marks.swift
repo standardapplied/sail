@@ -24,9 +24,11 @@ package extension Look {
     /// What a fill of `area` points draws: the accent, the error, or a neutral grey (ink at any
     /// strength short of turned over, or an opaque tone that is neither a ground nor a colour).
     func marks(fill: Tint?, area: Double) -> [Mark] {
-        guard let fill, fill.alpha > 0, area > 0 else { return [] }
+        guard let fill, fill.alpha > 0 else { return [] }
         if fill.rgb == accent { return [fill.alpha >= 1 ? .accentFill : .accentTint] }
-        if fill.rgb == error { return fill.alpha >= 1 ? [.errorFill] : [.neutralFill(area)] }
+        if fill.rgb == error, fill.alpha >= 1 { return [.errorFill] }
+        guard area > 0 else { return [] }
+        if fill.rgb == error { return [.neutralFill(area)] }
         if fill.rgb == ink || fill.rgb == text.rgb { return fill.alpha < 0.95 ? [.neutralFill(area)] : [] }
         let grounds = [canvas, surface, surfacePop, chrome, palette.background]
         let colours = [accentHover, accentPressed, errorHover, errorPressed, warning, success, info, onAccent, onError, onInk]

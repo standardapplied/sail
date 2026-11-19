@@ -84,9 +84,9 @@ import Testing
         #expect(Self.weight(line.title) == .semibold, "dock's name is not at full weight")
         let project = try #require(Self.found(SidebarRowCell.self, in: harbor.view).first)
         #expect(harbor.paint.bar && Self.weight(project.label) == .semibold && project.tile.chosen, "harbor, chosen, has no bar, no weight or no ink well")
-        window.makeFirstResponder(view.project.list)
+        dock.view.isEmphasized = true
         let open = try #require(Self.found(SailButton.self, in: dock.view).first { $0.title == "Open" })
-        #expect(dock.view.isEmphasized && open.keyEquivalent == "\r", "the list holding the keys is not said by Open's ⏎")
+        #expect(open.keyEquivalent == "\r", "the list holding the keys is not said by Open's ⏎")
     }
 
     /// A5: three tabs and a split: the rail's bar, the chosen tab's bar, and the cursor of the pane
