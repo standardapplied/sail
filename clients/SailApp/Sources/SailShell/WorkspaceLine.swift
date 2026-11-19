@@ -11,6 +11,8 @@ import SailLook
 @MainActor
 final class WorkspaceLine: NSStackView {
     static let pillColumn = 112.0, ownerColumn = 104.0
+    /// Rows' words made, ever: a redraw makes them only for the rows it makes, never for every row.
+    private(set) static var made = 0
 
     let title: NSTextField
     let place: NSTextField
@@ -24,6 +26,7 @@ final class WorkspaceLine: NSStackView {
     let placeTip: Tooltip
 
     init(_ line: WorkspacesModel.Line, narrow: Bool, look: Look, mono: LabelFont) {
+        Self.made += 1
         title = NSTextField(labelWithAttributedString: NSAttributedString(string: line.name, attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.body.points, weight: .medium), .foregroundColor: NSColor(look.text),
         ]).cut(.byTruncatingTail))
