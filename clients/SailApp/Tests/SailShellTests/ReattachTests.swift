@@ -304,7 +304,7 @@ import Testing
 
     /// The workbench's own sentence sits 32 pt below the terminals' top, or a small gap below the first
     /// row of the tallest font shown (the band and its tab strip are above the terminals, so it never
-    /// reaches them), one card line tall, and never over a pane's card at the foot: in one pane, side by side and stacked,
+    /// reaches them), two card lines tall at most (a tab's name and where its keyboard is), and never over a pane's card at the foot: in one pane, side by side and stacked,
     /// with the sentence showing, every action of every card is reached (the drive once clicked
     /// Close through "Still running").
     @Test(arguments: [nil, Axis.sideBySide, Axis.stacked])
@@ -331,7 +331,7 @@ import Testing
         let sentence = try #require(bench.subviews.compactMap { $0 as? Card }.first { !$0.isHidden })
         let place = sentence.frame
         let rows = panes.map { Double($0.terminal.metrics.padding.height + $0.terminal.metrics.height) / $0.terminal.metrics.scale }
-        #expect(abs(Double(place.minY) - max(32, (rows.max() ?? 0) + Look.Space.s)) < 0.5 && Double(place.height) <= 40, "the sentence is at \(place), the first rows end at \(rows)")
+        #expect(abs(Double(place.minY) - max(32, (rows.max() ?? 0) + Look.Space.s)) < 0.5 && Double(place.height) <= 60, "the sentence is at \(place) (two lines at most), the first rows end at \(rows)")
         for pane in panes {
             let metrics = pane.terminal.metrics
             let paneFrame = bench.convert(pane.bounds, from: pane)
