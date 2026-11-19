@@ -77,6 +77,7 @@ public final class WorkspacesView: NSView {
         self.mono = mono
         panel = LeftPanel(look: look, mono: mono)
         panelShadow = PopShadowView(look: look)
+        panelShadow.isHidden = true
         project = ProjectView(look: look, mono: mono, titleFont: title)
         tryAgain = SailButton("Try Again", kind: .primary, look: look, target: nil, action: nil)
         super.init(frame: .zero)
@@ -280,7 +281,7 @@ public final class WorkspacesView: NSView {
                 guard era == self.era else { return }
                 let request = model.created(answer, project: projectName)
                 let claim: Keys? = switch answer {
-                case _ where model.chosen != projectName: nil
+                case _ where model.chosen != projectName || !holdsTheKeys: nil
                 case .failure: .field
                 case .success: .list
                 }
@@ -316,21 +317,21 @@ public final class WorkspacesView: NSView {
     // MARK: Drawing
 
     /// Draws what the model says. A redraw takes the shared name field out of the window, so the
-    /// keys it held are given back to it. A `claim` is honoured then or never: only while the
-    /// section is shown in the key window and holds the keys itself, so an answer that comes while
-    /// the person types elsewhere (a create can wait 60 s) takes nothing from them.
+    /// keys it held are given back to it. A `claim` is honoured then or never, and only while the
+    /// project's page is shown in the key window.
     private func render(claim: Keys? = nil, typing: Bool? = nil) {
-        let typing = typing ?? project.fieldHasKeys, ours = holdsTheKeys
+        let typing = typing ?? project.fieldHasKeys
         draw()
-        let naming = model.screen.createOpen
+        let naming = model.screen.createOpen, shown = window?.isKeyWindow == true && !project.isHiddenOrHasHiddenAncestor
         switch claim {
-        case .field? where ours && naming: project.focusField()
-        case .list? where ours: window?.makeFirstResponder(project.list)
+        case .field? where shown && naming: project.focusField()
+        case .list? where shown: window?.makeFirstResponder(project.list)
         default: if typing, naming { project.focusField() }
         }
     }
 
-    /// The project's page shown in the key window, with the keys in the section or in no view.
+    /// The project's page shown in the key window with the keys in the section or in no view: an
+    /// answer that comes while the person is elsewhere (a create can wait 60 s) claims nothing.
     private var holdsTheKeys: Bool {
         guard let window, window.isKeyWindow, !project.isHiddenOrHasHiddenAncestor else { return false }
         return switch window.firstResponder {

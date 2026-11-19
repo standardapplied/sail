@@ -145,7 +145,8 @@ import Testing
     }
 
     /// N1: a create answered while the person is elsewhere (another section shown, or typing in a
-    /// terminal beside it) takes nothing from them: a create can wait up to 60 s for another.
+    /// terminal beside it) takes nothing from them: a create can wait up to 60 s for another. The
+    /// person's own New Workspace still gives the field the keys from wherever they were.
     @Test(arguments: [true, false])
     func aCreateAnsweredWhileThePersonIsElsewhereMovesNoKeys(_ hidden: Bool) async throws {
         let exchanges = [try Exchange("projects"), try Exchange("workspaces-three"), try Exchange("workspace-create"), try Exchange("workspaces-made")]
@@ -160,6 +161,9 @@ import Testing
         transport.release()
         #expect(await RunnerTabTests.until { !view.busy && !view.text.contains("creating") }, "\(view.text)")
         #expect(window.firstResponder === terminal, "the create's answer took the keys from the terminal (section hidden: \(hidden))")
+        guard !hidden else { return }
+        view.project.on(.newWorkspace)
+        #expect(view.project.fieldHasKeys, "New Workspace, the person's own action, left the field without the keys")
     }
 
     /// N1: a refusal for a project the person has left keeps no claim on the keys: the person
