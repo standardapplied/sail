@@ -124,7 +124,7 @@ public final class TerminalPane: NSView {
         do {
             screen = try Screen(size: grid, scrollbackBytes: 10 << 20, palette: look.palette)
         } catch {
-            banner.show(Said.sentence("the terminal screen could not be made: \(error)"))
+            banner.show(Said.sentence("the terminal screen could not be made: \(error)"), tone: .error)
             return
         }
         let size = TerminalSize(columns: Int32(grid.columns), rows: Int32(grid.rows))
@@ -190,7 +190,7 @@ public final class TerminalPane: NSView {
     /// close it anyway, which leaves the session to run on.
     func showUnended(_ why: [String], endAgain: @escaping @MainActor () -> Void, closeAnyway: @escaping @MainActor () -> Void) {
         banner.show(
-            EndOutcome.mayStillRun("This terminal", why, onThisMac: !place.onRunner) + " Close Anyway leaves it there.",
+            EndOutcome.mayStillRun("This terminal", why, onThisMac: !place.onRunner) + " Close Anyway leaves it there.", tone: .warning,
             button: "End Again", handler: { MainActor.assumeIsolated { endAgain() } }, second: "Close Anyway",
             secondHandler: { MainActor.assumeIsolated { closeAnyway() } }
         )
@@ -267,7 +267,7 @@ public final class TerminalPane: NSView {
         do {
             try await host.ensureServing { [weak self] sentence in await self?.say(sentence) }
         } catch {
-            return banner.show(Said.sentence("\(error)"), button: "Try Again") { [weak self] in
+            return banner.show(Said.sentence("\(error)"), tone: .error, button: "Try Again") { [weak self] in
                 Task { await self?.tryAgain() }
             }
         }
@@ -295,15 +295,15 @@ public final class TerminalPane: NSView {
         case .phase(.reconnecting):
             banner.show("Reconnecting to this Mac's terminal host")
         case let .phase(.parked(reason)) where place.onRunner:
-            banner.show(Said.sentence(reason), button: "Reconnect Now") { [weak self] in MainActor.assumeIsolated { self?.session?.reconnectNow() } }
+            banner.show(Said.sentence(reason), tone: .warning, button: "Reconnect Now") { [weak self] in MainActor.assumeIsolated { self?.session?.reconnectNow() } }
         case let .phase(.parked(reason)):
-            banner.show(host.endedBy ?? Said.sentence("this Mac's terminal host does not answer: \(reason)"), button: "Try Again") { [weak self] in
+            banner.show(host.endedBy ?? Said.sentence("this Mac's terminal host does not answer: \(reason)"), tone: .warning, button: "Try Again") { [weak self] in
                 Task { await self?.tryAgain() }
             }
         case let .phase(.ended(end)) where place.onRunner:
             showEnded(end)
         case let .phase(.ended(end)) where end != .closed:
-            banner.show(end.said.joined(separator: " "))
+            banner.show(end.said.joined(separator: " "), tone: .warning)
         default:
             break
         }
@@ -320,17 +320,17 @@ public final class TerminalPane: NSView {
         case .closed:
             return
         case .hostRestarted:
-            banner.show("The runner restarted, which ends every session it held.", button: "Open Again", handler: again)
+            banner.show("The runner restarted, which ends every session it held.", tone: .warning, button: "Open Again", handler: again)
         case let .ended(reason):
-            banner.show(Said.sentence(reason), button: "Open Again", handler: again)
+            banner.show(Said.sentence(reason), tone: .warning, button: "Open Again", handler: again)
         case let .ticketRefused(refusal) where refusal.code == .known(.notFound) && (start != .open || attachedOnce):
             Task { await showReturn(refused: end) }
         case .signIn:
-            banner.show(end.said.joined(separator: " "), button: "Sign In", handler: signIn)
+            banner.show(end.said.joined(separator: " "), tone: .warning, button: "Sign In", handler: signIn)
         case let .ticketRefused(refusal) where [.known(.missingBearerToken), .known(.invalidBearerToken)].contains(refusal.code):
-            banner.show(end.said.joined(separator: " "), button: "Sign In", handler: signIn)
+            banner.show(end.said.joined(separator: " "), tone: .warning, button: "Sign In", handler: signIn)
         default:
-            banner.show(end.said.joined(separator: " "))
+            banner.show(end.said.joined(separator: " "), tone: .warning)
         }
     }
 
@@ -349,7 +349,7 @@ public final class TerminalPane: NSView {
         }
         let close: () -> Void = { [weak self] in MainActor.assumeIsolated { self.map { $0.onClose($0) } } }
         guard let said = RunnerReturn.of(name, listing) else {
-            return banner.show(end.said.joined(separator: " "), button: "Close", handler: close)
+            return banner.show(end.said.joined(separator: " "), tone: .warning, button: "Close", handler: close)
         }
         switch said.offer {
         case .openANewOne:

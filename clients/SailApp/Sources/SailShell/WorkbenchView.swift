@@ -111,7 +111,7 @@ public final class WorkbenchView: NSView {
             try await host.ensureServing { [weak self] sentence in await self?.tell(sentence) }
             listed = try await SessionListing.sessions(at: host.address)
         } catch {
-            banner.show(Said.sentence("\(error)"), button: "Try Again") { [weak self] in
+            banner.show(Said.sentence("\(error)"), tone: .error, button: "Try Again") { [weak self] in
                 Task { await self?.restore() }
             }
             return
@@ -304,7 +304,7 @@ public final class WorkbenchView: NSView {
                 pane, start: start, host: host, runner: tickets, person: reached?.handle ?? "", fonts: fonts, points: points, look: look
             )
         } catch {
-            banner.show(Said.sentence(error.description))
+            banner.show(Said.sentence(error.description), tone: .error)
             return nil
         }
         view.onEvent = { [weak self] view, event in self?.handle(event, from: view) }
