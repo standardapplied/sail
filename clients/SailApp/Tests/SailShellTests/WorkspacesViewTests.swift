@@ -207,7 +207,8 @@ import Testing
 
     /// What in `root` a person could see but not reach: a shown view lying outside its parent (a
     /// row shorter than its lines, a label run past its stack), which AppKit draws and never hits;
-    /// and a shown button that a click at its middle or 2 pt inside any edge does not reach.
+    /// and a shown button that a click at its middle or 2 pt inside any edge does not reach. A text
+    /// field's own insides (the field editor's clip and viewport) are AppKit's, and overhang by design.
     static func outOfReach(in root: NSView) -> [String] {
         root.layoutSubtreeIfNeeded()
         guard let window = root.window, let content = window.contentView, let frameView = content.superview else { return ["no window"] }
@@ -228,7 +229,7 @@ import Testing
                         }
                     }
                 }
-                walk(child)
+                if !(child is NSTextField) { walk(child) }
             }
         }
         walk(root)

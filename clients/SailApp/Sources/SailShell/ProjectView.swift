@@ -630,10 +630,25 @@ final class CreateRow: NSView {
     /// 12 pt, then the field with its lines, at least the design's 76 pt; the list draws the row
     /// 1 pt taller, its hairline, as the design's 89 pt row is.
     func height(room: Double) -> Double {
-        let width = max(min(Self.column, room - Self.gap - Double(buttons.fittingSize.width)), 1)
+        let beside = room - Self.gap - Double(buttons.fittingSize.width), width = max(min(Self.column, beside), 1)
         fieldWidth?.constant = width
         field.setFrameSize(NSSize(width: width + 2 * Look.haloRoom, height: Double(field.frame.height)))
+        lineHeight = showLine.map { Self.height(of: $0, room: beside) }
         return (Self.padding + max(Self.least, words)).rounded(.up)
+    }
+
+    /// The show line's height as it is drawn: its words wrap where it is narrower than they are,
+    /// so they are measured at the room beside the buttons and held to that width.
+    private var lineHeight: Double?
+
+    private static func height(of line: NSStackView, room: Double) -> Double {
+        guard let show = line.arrangedSubviews.first, let rest = line.arrangedSubviews.last as? NSTextField, let cell = rest.cell else {
+            return Double(line.fittingSize.height)
+        }
+        let width = max(room - Double(show.fittingSize.width) - Double(line.spacing), 1)
+        rest.preferredMaxLayoutWidth = width
+        let words = cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: .greatestFiniteMagnitude)).height
+        return max(Double(show.fittingSize.height), Double(ceil(words)))
     }
 
     /// The whole row under its hairline, its 12 pt above the field included, so every line it draws
@@ -644,7 +659,7 @@ final class CreateRow: NSView {
 
     /// The field with the line under its box, and the show line under that.
     private var words: Double {
-        Double(field.intrinsicContentSize.height) + (showLine.map { Self.below + Double($0.fittingSize.height) } ?? 0)
+        Double(field.intrinsicContentSize.height) + (showLine.map { Self.below + (lineHeight ?? Double($0.fittingSize.height)) } ?? 0)
     }
 
     private static func showLine(_ name: String, look: Look, target: Runs) -> NSStackView {
