@@ -123,7 +123,7 @@ import Testing
         #expect(page.createWhy == "demo has no template yet", "New Workspace is off without a reason beside it")
         let again = model.listAgain()
         model.listed(.failure(.unreachable("lost")), request: again, at: Self.at)
-        #expect(Self.page(model)?.banner == nil, "a project with no template says its list failed, a list it cannot have")
+        #expect(Self.page(model)?.banner?.title == "Couldn’t list demo’s workspaces", "a failed list is said over a project with no template too (r3-1)")
         guard case let .empty(empty) = page.body else { Issue.record("no empty state: \(page.body)"); return }
         #expect(empty.title == "demo isn’t ready yet" && empty.missing && empty.action == .checkAgain)
         #expect(empty.body == "demo has no template yet. An admin builds demo’s template on the runner first; then you can create workspaces here.")
@@ -538,5 +538,33 @@ extension WorkspacesModelTests {
         _ = model.created(Self.answer(try Endpoint.createWorkspace("dock", project: "harbor"), "refusal-conflict-workspace-exists"), project: "harbor")
         let late = model.created(Self.answer(try Endpoint.createWorkspace("new", project: "harbor"), "workspace-create"), project: "harbor")
         #expect(late == nil && Self.table(model)?.create?.refusal.isEmpty == false && Self.table(model)?.create?.name == "dock")
+    }
+}
+
+extension WorkspacesModelTests {
+    /// r3-1: a project whose template is not current says when its list fails, over the rows it
+    /// had or none, as any project does; it never hides the failure behind its template's words.
+    @Test func aFailedListIsSaidOverAProjectWhoseTemplateIsNotCurrent() throws {
+        let building = ProjectList(projects: [ProjectSummary(name: "harbor", containerStatus: .known(.running), template: .known(.building))], total: 1)
+        var never = WorkspacesModel(person: Self.uday)
+        let first = never.projectsListed(.success(building))
+        never.listed(.failure(.unexpected(route: "GET /v1/projects/harbor/workspaces", status: 502)), request: try #require(first), at: Self.at)
+        let unlisted = try #require(Self.page(never))
+        #expect(unlisted.banner?.title == "Couldn’t list harbor’s workspaces" && unlisted.body == .unlisted, "\(unlisted.body)")
+        var listed = Self.listed(Self.uday)
+        let again = listed.projectsListed(.success(building))
+        listed.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-three"), request: try #require(again), at: Self.at)
+        let failed = listed.listAgain()
+        listed.listed(.failure(.unexpected(route: "GET /v1/projects/harbor/workspaces", status: 502)), request: failed, at: Self.at)
+        let kept = try #require(Self.page(listed))
+        #expect(kept.banner?.title == "Couldn’t list harbor’s workspaces" && kept.stale && Self.table(listed)?.count == 3, "the rows it had went: \(kept.body)")
+        var empty = WorkspacesModel(person: Self.uday)
+        let none = empty.projectsListed(.success(building))
+        empty.listed(.success(WorkspaceList(project: "harbor", workspaces: [])), request: try #require(none), at: Self.at)
+        let retry = empty.listAgain()
+        empty.listed(.failure(.unexpected(route: "GET /v1/projects/harbor/workspaces", status: 502)), request: retry, at: Self.at)
+        let said = try #require(Self.page(empty))
+        guard case let .empty(state) = said.body else { Issue.record("\(said.body)"); return }
+        #expect(said.banner?.title == "Couldn’t list harbor’s workspaces" && state.title == "harbor’s template is being built" && state.action == .checkAgain)
     }
 }

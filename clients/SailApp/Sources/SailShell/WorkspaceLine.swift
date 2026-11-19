@@ -18,24 +18,30 @@ final class WorkspaceLine: NSStackView {
     let whose: NSView?
     /// The owner's handle in full, on hover (a tracking area does not keep its owner).
     let ownerTip: Tooltip?
+    /// The name and the line under it in full, on hover, while cut.
+    let titleTip: Tooltip
+    let placeTip: Tooltip
 
     init(_ line: WorkspacesModel.Line, narrow: Bool, look: Look, mono: LabelFont) {
         title = NSTextField(labelWithAttributedString: NSAttributedString(string: line.name, attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.body.points, weight: .medium), .foregroundColor: NSColor(look.text),
-        ]))
-        let below = narrow ? line.owner.map { Self.whose($0) } ?? line.instance : line.instance
-        place = NSTextField(labelWithAttributedString: NSAttributedString(string: below, attributes: [
+        ]).cut(.byTruncatingTail))
+        let theirs = narrow ? line.owner.map { Self.whose($0) } : nil
+        place = NSTextField(labelWithAttributedString: NSAttributedString(string: theirs ?? line.instance, attributes: [
             .font: mono.font(Look.Step.micro.points, .regular) as NSFont, .foregroundColor: NSColor(look.textTertiary),
-        ]))
+        ]).cut(theirs == nil ? .byTruncatingMiddle : .byTruncatingTail))
+        titleTip = Self.tip(line.name, look: look)
+        placeTip = Self.tip(theirs ?? line.instance, look: look)
         pill = Pill(Self.pill(line), look: look, mono: mono)
         let owned = narrow ? nil : line.owner.map { Self.owner($0, look: look) }
         ownerTip = owned?.tip
         whose = narrow ? nil : Self.column(owned?.view, width: Self.ownerColumn)
         super.init(frame: .zero)
-        for label in [title, place] {
+        for (label, tip) in [(title, titleTip), (place, placeTip)] {
             label.lineBreakMode = .byTruncatingTail
             label.maximumNumberOfLines = 1
             label.setContentCompressionResistancePriority(Self.cutShort, for: .horizontal)
+            tip.attach(to: label, saying: label.stringValue)
         }
         let words = NSStackView(views: [title, place])
         words.orientation = .vertical
@@ -77,18 +83,30 @@ final class WorkspaceLine: NSStackView {
         }
     }
 
-    /// Whose a row is, said in words ("ana", "an inactive account", "no one").
+    /// Whose a row is in its owner's 104 pt column ("ana", "inactive", "no one"): an owner whose
+    /// account is not active is said in a word that fits it.
     nonisolated static func said(_ owner: WorkspacesModel.Owner) -> String {
         switch owner {
         case let .person(handle): handle
-        case .inactive: "an inactive account"
+        case .inactive: "inactive"
         case .nobody: "no one"
         }
     }
 
-    /// Whose a row is under its name when narrow ("ana's", "an inactive account's", "no one's").
+    /// Whose a row is under its name when narrow, where there is room ("ana's", "an inactive
+    /// account's", "no one's").
     nonisolated static func whose(_ owner: WorkspacesModel.Owner) -> String {
-        said(owner) + "'s"
+        switch owner {
+        case let .person(handle): handle + "'s"
+        case .inactive: "an inactive account's"
+        case .nobody: "no one's"
+        }
+    }
+
+    private static func tip(_ words: String, look: Look) -> Tooltip {
+        let tip = Tooltip(words, look: look, mono: nil)
+        tip.onlyWhenCut = true
+        return tip
     }
 
     /// A column `width` wide holding `view` at its start, never past its end.
@@ -114,7 +132,7 @@ final class WorkspaceLine: NSStackView {
         }
         let name = NSTextField(labelWithAttributedString: NSAttributedString(string: said(owner), attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.callout.points), .foregroundColor: NSColor(person == nil ? look.textTertiary : look.textSecondary),
-        ]))
+        ]).cut(.byTruncatingTail))
         name.lineBreakMode = .byTruncatingTail
         name.maximumNumberOfLines = 1
         name.setContentCompressionResistancePriority(cutShort, for: .horizontal)

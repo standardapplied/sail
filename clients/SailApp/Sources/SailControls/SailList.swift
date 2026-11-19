@@ -30,7 +30,13 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         public let id: String
         public let name: String
         public let voice: String
-        public let content: NSView
+        /// What it shows, made when its row is: the table makes rows only for what is on screen,
+        /// so a long list drawn again builds a screenful, not every row.
+        @MainActor public var content: NSView {
+            make()
+        }
+
+        private let make: @MainActor () -> NSView
         public let actions: [Action]
         /// Words before its actions, shown with them (who may open it).
         public let note: String?
@@ -45,13 +51,13 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         public let accessory: NSView?
 
         public init(
-            id: String, name: String, voice: String, content: NSView, actions: [Action] = [], note: String? = nil, height: Double? = nil,
+            id: String, name: String, voice: String, content: @autoclosure @escaping @MainActor () -> NSView, actions: [Action] = [], note: String? = nil, height: Double? = nil,
             paint: RowPaint? = nil, full: Bool = false, accessory: NSView? = nil
         ) {
             self.id = id
             self.name = name
             self.voice = voice
-            self.content = content
+            make = content
             self.actions = actions
             self.note = note
             self.height = height
@@ -62,7 +68,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     }
 
     public enum Entry {
-        case head(String, count: Int)
+        /// A group head with its count; with none, its title alone (a list still loading).
+        case head(String, count: Int?)
         case item(Item)
     }
 
@@ -70,15 +77,50 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     public var look: Look {
         didSet {
             reloading = true
-            reloadData()
+            reloadKeepingHover()
             reloading = false
         }
+    }
+
+    /// Where the pointer is in the window while the app is active and its window key; nil, not
+    /// known. Tests place it (`pointer`).
+    private var pointerNow: NSPoint? {
+        if let pointer { return pointer() }
+        guard let window, NSApplication.shared.isActive, window.isKeyWindow else { return nil }
+        return window.mouseLocationOutsideOfEventStream
+    }
+
+    package var pointer: (@MainActor () -> NSPoint?)?
+
+    /// Rows made, each a cell for a row on screen: a redraw makes a screenful, not every row.
+    package private(set) var rowsMade = 0
+
+    /// Reloads the rows with the one under the pointer drawn hovered, its actions shown: a new row
+    /// does not know the pointer is over it until the pointer moves. While the app is active the
+    /// row is found where the pointer is; otherwise the row hovered before is hovered again.
+    private func reloadKeepingHover() {
+        let hovered = (0 ..< numberOfRows).first { (rowView(atRow: $0, makeIfNecessary: false) as? SailRowView)?.hovered == true }.flatMap { item(at: $0)?.id }
+        reloadData()
+        let row: Int?
+        if let point = pointerNow {
+            let inList = convert(point, from: nil), content = window?.contentView
+            let hit = content.flatMap { $0.hitTest($0.superview?.convert(point, from: nil) ?? point) }
+            let under = visibleRect.contains(inList) && hit?.isDescendant(of: self) == true ? self.row(at: inList) : -1
+            row = under >= 0 ? under : nil
+        } else {
+            row = hovered.flatMap { id in entries.indices.first { item(at: $0)?.id == id } }
+        }
+        guard let row, item(at: row) != nil else { return }
+        (rowView(atRow: row, makeIfNecessary: true) as? SailRowView)?.hovered = true
     }
 
     public let rowStyle: RowStyle
     /// A width kept for every row's actions, so the rows' content lines up in columns whatever
     /// actions each shows; nil, the content runs to its row's actions.
     public var actionsColumn: Double?
+    /// The chosen row's first action shows ⏎ while the list holds the keys; off, it shows none,
+    /// and Return still presses it (a narrow row's actions column has no room for the keycap).
+    public var returnKeyShown = true
     public var onChoose: @MainActor (String?) -> Void = { _ in }
     private let mono: LabelFont
 
@@ -88,7 +130,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         willSet { kept = chosen }
         didSet {
             reloading = true
-            reloadData()
+            reloadKeepingHover()
             select(kept)
             reloading = false
             if chosen != kept { onChoose(chosen) }
@@ -176,7 +218,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         case 115, 119:
             guard let row = event.keyCode == 115 ? items.first : items.last else { return false }
             selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-            scrollRowToVisible(row)
+            scrollRowToVisible(row == items.first ? 0 : row)
             return true
         case 36, 76:
             guard let primary = item(at: selectedRow)?.actions.first(where: { $0.onRow }) else { return false }
@@ -225,7 +267,9 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         case let .head(title, count):
             let leading = rowStyle == .sidebar ? rowStyle.margin + rowStyle.leading + RowStyle.disclosure + RowStyle.gap : RowStyle.list.leading
             return HeadCell(title, count: count, leading: leading, look: look, mono: mono, hairline: rowStyle.hairline && row > 0)
-        case let .item(item): return RowCell(item, rowStyle: rowStyle, actionsColumn: actionsColumn, look: look, mono: mono)
+        case let .item(item):
+            rowsMade += 1
+            return RowCell(item, rowStyle: rowStyle, actionsColumn: actionsColumn, returnKey: returnKeyShown, look: look, mono: mono)
         }
     }
 
@@ -386,16 +430,16 @@ final class HeadCell: NSView {
     /// Where its words start: a list's leading inset, or a sidebar's tiles.
     private let leading: Double
 
-    init(_ title: String, count: Int, leading: Double, look: Look, mono: LabelFont, hairline: Bool) {
+    init(_ title: String, count: Int?, leading: Double, look: Look, mono: LabelFont, hairline: Bool) {
         self.leading = leading
         let font = mono.font(Look.Step.caption.points) as NSFont
         self.title = Draw.text(title, font, look.textTertiary, tracking: Look.Tracking.eyebrow, upper: true)
-        self.count = Draw.text("\(count)", font, Tint(look.textTertiary.rgb, alpha: look.textTertiary.alpha * 0.8), tracking: Look.Tracking.eyebrow)
+        self.count = Draw.text(count.map { "\($0)" } ?? "", font, Tint(look.textTertiary.rgb, alpha: look.textTertiary.alpha * 0.8), tracking: Look.Tracking.eyebrow)
         self.hairline = hairline
         super.init(frame: .zero)
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
-        setAccessibilityLabel("\(title), \(count)")
+        setAccessibilityLabel(count.map { "\(title), \($0)" } ?? title)
     }
 
     @available(*, unavailable)
@@ -431,13 +475,16 @@ final class HeadCell: NSView {
 final class RowCell: NSView {
     let content: NSView
     let actions = NSStackView()
+    /// Its first action shows ⏎ while chosen with the list's keys.
+    private let returnKey: Bool
     private let first: SailButton?
     private let runs: [Run]
     private var shown = false
     /// The note in full on hover while it is cut short (a tracking area does not keep its owner).
     let noteTip: Tooltip?
 
-    init(_ item: SailList.Item, rowStyle: RowStyle, actionsColumn: Double?, look: Look, mono: LabelFont) {
+    init(_ item: SailList.Item, rowStyle: RowStyle, actionsColumn: Double?, returnKey: Bool = true, look: Look, mono: LabelFont) {
+        self.returnKey = returnKey
         content = item.content
         let runs = item.actions.map { Run($0) }
         self.runs = runs
@@ -445,7 +492,7 @@ final class RowCell: NSView {
         let onRow = runs.filter { $0.action.onRow }
         if let primary = onRow.first {
             let first = SailButton(primary.action.title, kind: .secondary, size: .small, look: look, target: primary, action: #selector(Run.go(_:)))
-            first.shortcut("\r", mono: mono)
+            if returnKey { first.shortcut("\r", mono: mono) }
             first.keyEquivalent = ""
             self.first = first
             buttons.append(first)
@@ -464,7 +511,7 @@ final class RowCell: NSView {
             more.menu = moreMenu
         }
         let note = item.note.map { words -> NSTextField in
-            let label = NSTextField(labelWithAttributedString: Draw.text(words, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary))
+            let label = NSTextField(labelWithAttributedString: Draw.text(words, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary).cut(.byTruncatingTail))
             label.lineBreakMode = .byTruncatingTail
             label.maximumNumberOfLines = 1
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -515,7 +562,7 @@ final class RowCell: NSView {
     /// while the row is chosen, and Return its key (shown as ⏎) only while the list holds the keys.
     func show(_ shown: Bool, chosen: Bool, keys: Bool) {
         if let first {
-            let kind: ButtonKind = chosen ? .primary : .secondary, key = chosen && keys ? "\r" : ""
+            let kind: ButtonKind = chosen ? .primary : .secondary, key = chosen && keys && returnKey ? "\r" : ""
             if first.kind != kind { first.kind = kind }
             if first.keyEquivalent != key { first.keyEquivalent = key }
         }

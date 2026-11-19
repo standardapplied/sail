@@ -9,5 +9,6 @@
   {"name": "kit-sidebar-rows-and-tiles", "kit": "sidebar"},
   {"name": "kit-tooltip-chips", "kit": "tooltip"},
   {"name": "kit-banners", "kit": "banner"},
-  {"name": "kit-empty-states", "kit": "empty"}
+  {"name": "kit-empty-states", "kit": "empty"},
+  {"name": "kit-quiet-scroller", "kit": "scroller"}
 ]}

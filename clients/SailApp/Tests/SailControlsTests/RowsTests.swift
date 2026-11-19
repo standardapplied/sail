@@ -241,6 +241,105 @@ import Testing
         }
     }
 
+    /// Rows drawn again (new entries of the same list, a change of look) keep the row under the
+    /// pointer hovered, its actions shown, though the pointer has not moved.
+    @Test func aRedrawKeepsTheHoveredRow() throws {
+        let motion = Motion.shared, was = motion.reduced
+        defer { motion.reduced = was }
+        motion.reduced = true
+        let list = try Self.list(.list, look: .light, counts: Counts())
+        let (window, _) = Self.shown(list)
+        defer { window.orderOut(nil) }
+        try Self.row(list, 1).hovered = true
+        for redraw in [{ list.entries = list.entries }, { list.look = .dark }] {
+            redraw()
+            let row = try Self.row(list, 1)
+            let cell = try #require(row.view(atColumn: 0) as? RowCell)
+            #expect(row.hovered && !cell.actions.isHidden, "a redraw dropped the hovered row's actions")
+        }
+    }
+
+    /// A list of `count` rows under a head in a quiet scroll view `height` tall, in a window.
+    static func scrolling(_ count: Int, height: Double) throws -> (SailList, QuietScrollView, NSWindow) {
+        let list = SailList(rowStyle: .list, look: .light, mono: try ControlsTests.mono())
+        list.entries = [.head("Yours", count: count)] + (1 ... count).map { index in
+            .item(SailList.Item(id: "ws-\(index)", name: "ws-\(index)", voice: "ws-\(index)", content: NSTextField(labelWithString: "ws-\(index)")))
+        }
+        let scroll = QuietScrollView(look: .light)
+        scroll.documentView = list
+        scroll.frame = NSRect(x: 0, y: 0, width: 400, height: height)
+        let rows = Double(list.rect(ofRow: list.numberOfRows - 1).maxY)
+        list.frame = NSRect(x: 0, y: 0, width: 400, height: rows)
+        let window = TestWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: height), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = scroll
+        window.orderFront(nil)
+        scroll.tile()
+        return (list, scroll, window)
+    }
+
+    /// R2-2: a redraw lights the row under the pointer only where the pointer really is over it:
+    /// over a row on screen, yes; over a foot below the scrolled list (a row scrolled out lies
+    /// under it) or over a view laid over the list (the panel slid over the content), no.
+    @Test func aRedrawLightsOnlyARowThePointerIsReallyOver() throws {
+        let list = SailList(rowStyle: .list, look: .light, mono: try ControlsTests.mono())
+        list.entries = (1 ... 30).map { .item(SailList.Item(id: "ws-\($0)", name: "ws-\($0)", voice: "ws-\($0)", content: NSTextField(labelWithString: "ws-\($0)"))) }
+        let scroll = QuietScrollView(look: .light)
+        scroll.documentView = list
+        scroll.frame = NSRect(x: 0, y: 60, width: 400, height: 200)
+        list.frame = NSRect(x: 0, y: 0, width: 400, height: Double(list.rect(ofRow: list.numberOfRows - 1).maxY))
+        let foot = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 60)), over = NSView(frame: NSRect(x: 0, y: 160, width: 200, height: 100))
+        let page = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 260))
+        for view in [scroll, foot, over] {
+            page.addSubview(view)
+        }
+        let window = TestWindow(contentRect: page.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.orderOut(nil) }
+        window.contentView = page
+        window.orderFront(nil)
+        func lit(at point: NSPoint) -> [Int] {
+            list.pointer = { point }
+            let same = list.entries
+            list.entries = same
+            return (0 ..< list.numberOfRows).filter { (list.rowView(atRow: $0, makeIfNecessary: false) as? SailRowView)?.hovered == true }
+        }
+        #expect(lit(at: NSPoint(x: 300, y: 200)).count == 1, "the row under the pointer was not lit")
+        #expect(lit(at: NSPoint(x: 300, y: 30)) == [], "a row scrolled out under the foot was lit")
+        #expect(lit(at: NSPoint(x: 100, y: 200)) == [], "a row under a view laid over the list was lit")
+    }
+
+    /// Home chooses the first item and shows the head above it, as AppKit's lists scroll to their
+    /// very top; End chooses the last.
+    @Test func homeShowsTheHeadAboveTheFirstItem() throws {
+        let (list, scroll, window) = try Self.scrolling(30, height: 200)
+        defer { window.orderOut(nil) }
+        list.scrollRowToVisible(list.numberOfRows - 1)
+        #expect(list.act(on: try Self.key(115, "\u{F729}")))
+        #expect(list.chosen == "ws-1" && abs(Double(scroll.contentView.bounds.minY)) < 0.5, "Home left the list \(scroll.contentView.bounds.minY) pt down")
+        #expect(list.act(on: try Self.key(119, "\u{F72B}")))
+        #expect(list.chosen == "ws-30")
+    }
+
+    /// A mouse-down grabs the thumb across the track's width beside it, and nowhere above or below it
+    /// on the track; the drag itself is driven in the app (`dragThumb`), since AppKit's own tracking
+    /// loop cannot be run inside a test process.
+    @Test func aMouseDownGrabsTheThumbOnlyBesideIt() throws {
+        let (_, scroll, window) = try Self.scrolling(30, height: 200)
+        defer { window.orderOut(nil) }
+        let scroller = scroll.scroller, thumb = scroller.thumb
+        try #require(thumb.height > 1, "nothing to grab: the thumb is \(thumb)")
+        #expect(scroller.grabsThumb(at: NSPoint(x: thumb.midX, y: thumb.midY)) && scroller.grabsThumb(at: NSPoint(x: scroller.bounds.minX + 1, y: thumb.midY)))
+        let away = thumb.maxY + 20 < scroller.bounds.maxY ? thumb.maxY + 20 : thumb.minY - 20
+        #expect(!scroller.grabsThumb(at: NSPoint(x: thumb.midX, y: away)), "the track away from the thumb grabbed it")
+    }
+
+    /// A link given new words paints them as a link's, in the accent's text ink.
+    @Test func aLinkPaintsNewWords() {
+        let link = LinkButton("Show dock", look: .light, target: nil, action: nil)
+        link.title = "Show pier"
+        let words = link.attributedTitle
+        #expect(words.string == "Show pier" && (words.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor) == NSColor(Tint(Look.light.accentText)), "\(words)")
+    }
+
     static func key(_ code: UInt16, _ characters: String, _ flags: NSEvent.ModifierFlags = []) throws -> NSEvent {
         try #require(NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, characters: characters,

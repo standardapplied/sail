@@ -47,6 +47,43 @@ actor GoldenDesk: Transport {
         held["GET /v1/projects"] = .zero
     }
 
+    /// From now on harbor's workspaces are `count` made-up rows: alternately the person's (uday's)
+    /// and ana's, running, stopped, paused and not created in turn.
+    func answerRows(_ count: Int) throws {
+        let exchange = try Exchange("workspaces-three")
+        let states = ["running", "stopped", "frozen", "not_created"]
+        let rows = (1 ... max(count, 1)).map { index in
+            let name = String(format: "ws-%02d", index)
+            return ["name": name, "instance": "harbor-\(name)", "state": states[index % states.count], "owner": index.isMultiple(of: 2) ? "ana" : "uday"]
+        }
+        let body: [String: Any] = ["project": "harbor", "schema_version": 1, "workspaces": rows]
+        answers["GET /v1/projects/harbor/workspaces"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: try JSONSerialization.data(withJSONObject: body))
+        held["GET /v1/projects/harbor/workspaces"] = .zero
+    }
+
+    /// From now on harbor's workspaces are the three of the golden and one more of `name`, the
+    /// person's; and a create is refused as the server refuses a name taken, naming `name`: the
+    /// recorded refusal for dock, its name replaced.
+    func answerTaken(_ name: String) throws {
+        let refusal = try Exchange("refusal-conflict-workspace-exists")
+        let said = String(decoding: refusal.body, as: UTF8.self).replacingOccurrences(of: "dock", with: name)
+        answers["POST /v1/projects/harbor/workspaces"] = HTTPResponse(status: refusal.status, headers: refusal.headers, body: Data(said.utf8))
+        held["POST /v1/projects/harbor/workspaces"] = .zero
+        let exchange = try Exchange("workspaces-three")
+        guard var body = try JSONSerialization.jsonObject(with: exchange.body) as? [String: Any], let rows = body["workspaces"] as? [[String: Any]] else { return }
+        body["workspaces"] = rows + [["name": name, "instance": "harbor-\(name)", "state": "running", "owner": "uday"]]
+        answers["GET /v1/projects/harbor/workspaces"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: try JSONSerialization.data(withJSONObject: body))
+        held["GET /v1/projects/harbor/workspaces"] = .zero
+    }
+
+    /// From now on `project`'s workspaces are listed as none.
+    func answerNoRows(_ project: String) throws {
+        let exchange = try Exchange("workspaces-three")
+        let body: [String: Any] = ["project": project, "schema_version": 1, "workspaces": [[String: String]]()]
+        answers["GET /v1/projects/\(project)/workspaces"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: try JSONSerialization.data(withJSONObject: body))
+        held["GET /v1/projects/\(project)/workspaces"] = .zero
+    }
+
     /// From now on a proxy answers `route` with a 502 of its own; nil, nothing.
     func fail(_ route: String?, unreached: Bool = false) {
         failing = route
@@ -120,6 +157,75 @@ extension Driver {
             } catch {
                 return (false, "the projects golden: \(error)")
             }
+        }
+        if let name = step.takenName {
+            do {
+                try await GoldenDesk.shared.answerTaken(name)
+                return (true, "")
+            } catch {
+                return (false, "the taken name: \(error)")
+            }
+        }
+        if let project = step.noRows {
+            do {
+                try await GoldenDesk.shared.answerNoRows(project)
+                return (true, "")
+            } catch {
+                return (false, "no rows: \(error)")
+            }
+        }
+        if let count = step.rows {
+            do {
+                try await GoldenDesk.shared.answerRows(count)
+                return (true, "")
+            } catch {
+                return (false, "the rows: \(error)")
+            }
+        }
+        if let which = step.dragThumb {
+            guard let view: QuietScrollView = which == "panel" ? pane.panel.scroll : pane.project.listScroll as? QuietScrollView, let window = view.window else {
+                return (false, "no \(which) to drag")
+            }
+            view.flashScrollers()
+            let scroller = view.scroller, thumb = scroller.thumb, drags = scroller.drags, before = view.contentView.bounds.minY
+            guard thumb.height > 1 else { return (false, "the \(which)'s thumb is \(thumb): nothing to drag") }
+            let from = scroller.convert(NSPoint(x: thumb.midX, y: thumb.midY), to: nil), to = NSPoint(x: Double(from.x), y: Double(from.y) - 30)
+            func mouse(_ type: NSEvent.EventType, at point: NSPoint) -> NSEvent? {
+                NSEvent.mouseEvent(
+                    with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                    eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1
+                )
+            }
+            guard let down = mouse(.leftMouseDown, at: from), let drag = mouse(.leftMouseDragged, at: to), let up = mouse(.leftMouseUp, at: to) else { return (false, "AppKit gave no mouse events") }
+            // AppKit's tracking loop runs the common modes' timers: one samples the thumb while the
+            // drag is held, one lets go of it.
+            var sampled = 0, drawnDragged = 0
+            let sampler = Timer(timeInterval: 0.005, repeats: true) { _ in
+                MainActor.assumeIsolated {
+                    sampled += 1
+                    if scroller.dragging { drawnDragged += 1 }
+                }
+            }
+            let letGo = Timer(timeInterval: 0.08, repeats: false) { _ in
+                MainActor.assumeIsolated { NSApp.postEvent(up, atStart: false) }
+            }
+            RunLoop.main.add(sampler, forMode: .common)
+            RunLoop.main.add(letGo, forMode: .common)
+            NSApp.postEvent(drag, atStart: false)
+            window.sendEvent(down)
+            sampler.invalidate()
+            await Task.yield()
+            let moved = view.contentView.bounds.minY != before
+            let held = drawnDragged > 0, released = !scroller.dragging
+            return (scroller.drags == drags + 1 && held && released && moved, "the thumb drawn dragged in \(drawnDragged) of \(sampled) samples while held, \(released ? "released" : "still dragged") after; the list \(moved ? "moved" : "did not move") from \(before) to \(view.contentView.bounds.minY)")
+        }
+        if let scroll = step.scrollTo, scroll.count == 2, let fraction = Double(scroll[1]) {
+            guard let view: NSScrollView = scroll[0] == "panel" ? pane.panel.scroll : pane.project.listScroll else { return (false, "no list to scroll") }
+            let scrollable = await waitUntil(step.seconds ?? 10) {
+                Double(view.documentView?.frame.height ?? 0) > Double(view.contentSize.height) + 1
+            }
+            guard scrollable else { return (false, "nothing to scroll: \(view.documentView?.frame.height ?? 0) pt of rows in \(view.contentSize.height) pt") }
+            return await turnWheel(over: view, to: fraction)
         }
         if let route = step.unreachable {
             await GoldenDesk.shared.fail(route, unreached: true)
@@ -238,6 +344,40 @@ extension Driver {
     }
 
     /// Waits, at most `seconds`, until `condition` holds, asking it again every 50 ms.
+    /// Scrolls `view` to `fraction` of the way down with real scroll-wheel events in pixel steps, as
+    /// a trackpad's are, sent through the window at the view's middle as a person's are, so the
+    /// window's hit-testing routes them. Where AppKit gives the event no window (one made from a
+    /// `CGEvent` may carry none), it is handed to the scroll view, and the result says so.
+    private func turnWheel(over view: NSScrollView, to fraction: Double) async -> (Bool, String) {
+        guard let window = view.window, let document = view.documentView else { return (false, "the scroll view is not in a window") }
+        let room = Double(document.frame.height) - Double(view.contentSize.height)
+        guard room > 0 else { return (false, "nothing to scroll: the rows are \(document.frame.height) pt in \(view.contentSize.height) pt") }
+        let wanted = room * min(max(fraction, 0), 1)
+        let middle = window.convertPoint(toScreen: view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil))
+        let top = Double(NSScreen.screens.first?.frame.maxY ?? 0)
+        var routed = true
+        while abs(Double(view.contentView.bounds.minY) - wanted) > 0.5 {
+            let left = wanted - Double(view.contentView.bounds.minY)
+            let step = Int32((left > 0 ? -min(40, left) : min(40, -left)).rounded(left > 0 ? .down : .up))
+            guard let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: step, wheel2: 0, wheel3: 0) else { return (false, "no scroll-wheel event") }
+            wheel.location = CGPoint(x: Double(middle.x), y: top - Double(middle.y))
+            wheel.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window.windowNumber))
+            wheel.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window.windowNumber))
+            guard let event = NSEvent(cgEvent: wheel) else { return (false, "AppKit took no scroll-wheel event") }
+            let before = view.contentView.bounds.minY
+            if event.window === window {
+                window.sendEvent(event)
+            } else {
+                routed = false
+                view.scrollWheel(with: event)
+            }
+            await Task.yield()
+            guard view.contentView.bounds.minY != before else { return (false, "the wheel moved nothing at \(before) of \(room) pt\(routed ? " through the window" : "")") }
+        }
+        view.flashScrollers()
+        return (true, "scrolled \(view.contentView.bounds.minY) of \(room) pt, \(routed ? "through the window" : "handed to the scroll view: AppKit gave the wheel no window")")
+    }
+
     /// Clicks the shown button titled `title` in `pane` as a person does.
     private func clickButton(_ title: String, in pane: WorkspacesView) async -> (Bool, String) {
         pane.layoutSubtreeIfNeeded()
