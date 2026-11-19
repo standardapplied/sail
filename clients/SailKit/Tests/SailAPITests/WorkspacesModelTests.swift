@@ -123,7 +123,7 @@ import Testing
         #expect(page.createWhy == "demo has no template yet", "New Workspace is off without a reason beside it")
         let again = model.listAgain()
         model.listed(.failure(.unreachable("lost")), request: again, at: Self.at)
-        #expect(Self.page(model)?.banner == nil, "a project with no template says its list failed, a list it cannot have")
+        #expect(Self.page(model)?.banner?.title == "Couldn’t list demo’s workspaces", "a failed list is said over a project with no template too (r3-1)")
         guard case let .empty(empty) = page.body else { Issue.record("no empty state: \(page.body)"); return }
         #expect(empty.title == "demo isn’t ready yet" && empty.missing && empty.action == .checkAgain)
         #expect(empty.body == "demo has no template yet. An admin builds demo’s template on the runner first; then you can create workspaces here.")

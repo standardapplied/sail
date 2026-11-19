@@ -30,7 +30,7 @@ import Testing
         for scene in Scene.allCases {
             faults += try await scene.faults(width: width, panel: panel).map { "\(scene) at \(width) pt beside a \(panel) pt panel: \($0)" }
         }
-        #expect(faults == [], "\(faults.joined(separator: "\n"))")
+        #expect(faults.isEmpty, "\(faults.count) faults, the first: \(faults.prefix(60).joined(separator: "\n"))")
     }
 
     @MainActor enum Scene: CaseIterable {
@@ -169,16 +169,27 @@ import Testing
         guard let window = root.window, let content = window.contentView, let frameView = content.superview else { return ["no window"] }
         var faults: [String] = []
         var leaves: [(view: NSView, rect: NSRect)] = []
+        /// Where `view` shows in `root`: its alignment rect, cut by every scroll view's clip above it.
+        func shown(_ view: NSView) -> NSRect {
+            guard let parent = view.superview else { return .zero }
+            var rect = root.convert(view.alignmentRect(forFrame: view.frame), from: parent)
+            var above: NSView? = parent
+            while let ancestor = above, ancestor !== root {
+                if ancestor is NSClipView { rect = rect.intersection(root.convert(ancestor.bounds, from: ancestor)) }
+                above = ancestor.superview
+            }
+            return rect
+        }
         func named(_ view: NSView) -> String {
             let words = (view as? NSTextField)?.stringValue ?? (view as? NSButton)?.title ?? ""
             return words.isEmpty ? String(describing: type(of: view)) : "\"\(words.prefix(24))\""
         }
         func walk(_ view: NSView) {
             for child in view.subviews where !child.isHidden {
-                let shown = child.visibleRect
+                let place = shown(child)
                 let words = (child as? NSTextField)?.stringValue ?? (child as? NSButton)?.title ?? ""
                 if child.frame.width < 1 || child.frame.height < 1 {
-                    if !words.isEmpty, view.visibleRect.width > 0 { faults.append("\(named(child)) squeezed to nothing") }
+                    if !words.isEmpty { faults.append("\(named(child)) squeezed to nothing") }
                     continue
                 }
                 // A label's cell draws its words 2 pt inside its frame, which may hang 2 pt out to keep them.
@@ -192,12 +203,12 @@ import Testing
                 {
                     faults.append("\(named(label)) clipped: its words need more than its \(label.frame.height) pt")
                 }
-                if !shown.isEmpty, child is NSButton || child is Pill || (child is NSTextField && !words.isEmpty) {
-                    leaves.append((child, child.convert(shown, to: root)))
+                if !place.isEmpty, child is NSButton || child is Pill || (child is NSTextField && !words.isEmpty) {
+                    leaves.append((child, place))
                 }
-                if let button = child as? NSButton, !shown.isEmpty {
+                if let button = child as? NSButton, !place.isEmpty {
                     let face = button.alignmentRect(forFrame: button.bounds).insetBy(dx: 2, dy: 2)
-                    if shown.contains(face) {
+                    if place.insetBy(dx: -0.5, dy: -0.5).contains(root.convert(face, from: button)) {
                         for point in [NSPoint(x: face.midX, y: face.midY), NSPoint(x: face.minX, y: face.midY), NSPoint(x: face.maxX, y: face.midY), NSPoint(x: face.midX, y: face.minY), NSPoint(x: face.midX, y: face.maxY)] {
                             let hit = content.hitTest(frameView.convert(button.convert(point, to: nil), from: nil))
                             if hit !== button, hit?.isDescendant(of: button) != true {

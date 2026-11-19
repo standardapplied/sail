@@ -89,6 +89,7 @@
   {"name": "w07-said", "workspaces": "No workspaces in harbor yet"},
   {"name": "w07-one-project-no-workspaces", "shot": "w07-one-project-no-workspaces"},
   {"name": "w08-demo-first", "projects": [["demo", "missing"], ["harbor", "ready"]]},
+  {"name": "w08-demo-has-none", "noRows": "demo"},
   {"name": "w08-asked-again", "select": "workspaces"},
   {"name": "w08-demo-chosen", "chooseProject": "demo"},
   {"name": "w08-said", "workspaces": "demo isn’t ready yet"},

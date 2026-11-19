@@ -154,6 +154,8 @@ struct Step: Decodable {
     /// harbor's workspaces listed from now on as this many made-up rows, half the person's and
     /// half another's, through every state.
     var rows: Int?
+    /// This project's workspaces listed from now on as none.
+    var noRows: String?
     /// A scroll-wheel turn over `["list" | "panel", fraction]`: the Workspaces list or the left
     /// panel scrolled that fraction of the way down, as a person's trackpad does.
     var scrollTo: [String]?

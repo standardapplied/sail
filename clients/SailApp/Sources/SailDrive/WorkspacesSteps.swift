@@ -61,6 +61,14 @@ actor GoldenDesk: Transport {
         held["GET /v1/projects/harbor/workspaces"] = .zero
     }
 
+    /// From now on `project`'s workspaces are listed as none.
+    func answerNoRows(_ project: String) throws {
+        let exchange = try Exchange("workspaces-three")
+        let body: [String: Any] = ["project": project, "schema_version": 1, "workspaces": [[String: String]]()]
+        answers["GET /v1/projects/\(project)/workspaces"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: try JSONSerialization.data(withJSONObject: body))
+        held["GET /v1/projects/\(project)/workspaces"] = .zero
+    }
+
     /// From now on a proxy answers `route` with a 502 of its own; nil, nothing.
     func fail(_ route: String?, unreached: Bool = false) {
         failing = route
@@ -133,6 +141,14 @@ extension Driver {
                 return (true, "")
             } catch {
                 return (false, "the projects golden: \(error)")
+            }
+        }
+        if let project = step.noRows {
+            do {
+                try await GoldenDesk.shared.answerNoRows(project)
+                return (true, "")
+            } catch {
+                return (false, "no rows: \(error)")
             }
         }
         if let count = step.rows {
