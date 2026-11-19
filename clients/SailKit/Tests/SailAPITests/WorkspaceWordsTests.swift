@@ -95,7 +95,7 @@ import Testing
         #expect(rows.map { $0.opens(for: "ana", admin: false) } == [true, true, true, false, false])
         #expect(rows.allSatisfy { $0.opens(for: "uday", admin: true) })
         let left = WorkspaceRow(name: "x", instance: "acme-x", state: .known(.stopped), owner: WorkspaceRow.removedOwner)
-        #expect(left.whyNotOpened(for: "ana", admin: false) == "Its owner is no longer a member: only an admin opens it", "the server's marker read as a handle")
+        #expect(left.whyNotOpened(for: "ana", admin: false) == "Its owner’s account is not active: only an admin opens it", "the server's marker read as a handle")
     }
 
     /// A call that ended in anything but an answer is said in words by its kind, never as the enum's

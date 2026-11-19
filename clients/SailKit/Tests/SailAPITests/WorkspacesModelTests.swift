@@ -93,21 +93,31 @@ import Testing
     }
 
     /// The panel lists every project with its mark: no template, building, build failed, or none.
-    @Test func thePanelMarksAProjectWhoseTemplateIsNotReady() {
+    /// Only `ready` names a current version, so a project whose template the server does not say,
+    /// or says in a word this app does not know, is marked as having none, as its page says.
+    @Test func thePanelMarksAProjectWhoseTemplateIsNotReady() throws {
         var model = WorkspacesModel(person: Self.ana)
-        let projects = ["ready", "missing", "building", "failed"].enumerated().map { index, state in
+        var projects = ["ready", "missing", "building", "failed", "rebuilding"].enumerated().map { index, state in
             ProjectSummary(name: "p\(index)", containerStatus: .known(.running), template: .init(rawValue: state))
         }
-        model.projectsListed(.success(ProjectList(projects: projects, total: 4)))
+        projects.append(ProjectSummary(name: "p5", containerStatus: .known(.running)))
+        model.projectsListed(.success(ProjectList(projects: projects, total: 6)))
         guard case let .shown(panel, _) = model.screen else { Issue.record("no panel"); return }
-        #expect(panel.projects.map(\.mark) == [nil, .noTemplate, .building, .buildFailed])
+        #expect(panel.projects.map(\.mark) == [nil, .noTemplate, .building, .buildFailed, .noTemplate, .noTemplate])
         #expect(panel.chosen == "p0", "the first project is chosen when none was")
+        for name in ["p4", "p5"] {
+            let request = model.choose(name)
+            model.listed(.success(WorkspaceList(project: name, workspaces: [])), request: request, at: Self.at)
+            let page = try #require(Self.page(model))
+            #expect(!page.canCreate && page.createWhy == "\(name) has no template yet", "\(name)'s page and its pill disagree")
+        }
     }
 
     /// Frame "No template yet": the reason in the header, Create unavailable, and who acts next.
     @Test func aProjectWithNoTemplateSaysWhoBuildsIt() throws {
         var model = WorkspacesModel(person: Self.uday)
-        model.projectsListed(.success(ProjectList(projects: [ProjectSummary(name: "demo", containerStatus: .known(.notCreated), template: .known(.missing))], total: 1)))
+        let first = model.projectsListed(.success(ProjectList(projects: [ProjectSummary(name: "demo", containerStatus: .known(.notCreated), template: .known(.missing))], total: 1)))
+        model.listed(.success(WorkspaceList(project: "demo", workspaces: [])), request: try #require(first), at: Self.at)
         let page = try #require(Self.page(model))
         #expect(!page.canCreate && page.lede == "demo has no template yet, so no workspace can be created in it.")
         #expect(page.createWhy == "demo has no template yet", "New Workspace is off without a reason beside it")
@@ -353,7 +363,8 @@ import Testing
     ])
     func onlyACurrentTemplateOffersCreate(_ state: TemplateState, _ title: String, _ why: String) throws {
         var model = WorkspacesModel(person: Self.uday)
-        model.projectsListed(.success(ProjectList(projects: [ProjectSummary(name: "demo", containerStatus: .known(.running), template: .known(state))], total: 1)))
+        let first = model.projectsListed(.success(ProjectList(projects: [ProjectSummary(name: "demo", containerStatus: .known(.running), template: .known(state))], total: 1)))
+        model.listed(.success(WorkspaceList(project: "demo", workspaces: [])), request: try #require(first), at: Self.at)
         let page = try #require(Self.page(model))
         guard case let .empty(empty) = page.body else { Issue.record("\(page.body)"); return }
         #expect(!page.canCreate && page.createWhy == why && empty.title == title && empty.action == .checkAgain)
@@ -362,8 +373,8 @@ import Testing
         #expect(model.sendCreate() == nil)
     }
 
-    /// M5: rows say what is true of the server's owners: no one's, a former member's, never
-    /// "removed" as a handle.
+    /// M5, N3: rows say only what the server's owners mean: no one's, or an account that is not
+    /// active (removed or disabled, which the server does not tell apart), never "removed" as a handle.
     @Test func ownersAreSaidAsTheyAre() throws {
         var model = WorkspacesModel(person: Self.ana)
         model.projectsListed(Self.answer(.projects, "projects"))
@@ -376,7 +387,7 @@ import Testing
         let others = try #require(Self.table(model)).others
         let byName = Dictionary(uniqueKeysWithValues: others.map { ($0.name, $0) })
         #expect(byName["orphan"]?.owner == .nobody && byName["orphan"]?.why == "No one owns it: only an admin opens it")
-        #expect(byName["left"]?.owner == .formerMember && byName["left"]?.why == "Its owner is no longer a member: only an admin opens it")
+        #expect(byName["left"]?.owner == .inactive && byName["left"]?.why == "Its owner’s account is not active: only an admin opens it")
         #expect(byName["left"]?.state == .known(.error))
         #expect(byName["made"]?.creating == false, "a listed not-created row was drawn as being created here")
     }
@@ -419,5 +430,99 @@ import Testing
         model.chooseRow("paused")
         _ = model.created(Self.answer(try Endpoint.createWorkspace("new", project: "harbor"), "workspace-create"), project: "harbor")
         #expect(Self.table(model)?.yours.first(where: \.chosen)?.name == "paused", "the created row was chosen before a list showed it")
+    }
+}
+
+extension WorkspacesModelTests {
+    /// N2: a template being built again keeps the project's workspaces listed, each with Open or
+    /// Start and Open as before; only New Workspace waits, saying why. With none listed, the page
+    /// says what is missing in their place.
+    @Test(arguments: [
+        (TemplateState.building, "harbor’s template is being rebuilt; new workspaces wait for it.", "harbor’s template is being built"),
+        (.failed, "harbor’s template could not be built, so no new workspace can be created in it.", "harbor’s template could not be built"),
+    ])
+    func aTemplateNotCurrentKeepsTheWorkspacesListed(_ state: TemplateState, _ lede: String, _ why: String) throws {
+        var model = Self.listed(Self.uday)
+        let ready = model.projectsListed(.success(ProjectList(projects: [ProjectSummary(name: "harbor", containerStatus: .known(.running), template: .known(state))], total: 1)))
+        model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-three"), request: try #require(ready), at: Self.at)
+        let page = try #require(Self.page(model))
+        let table = try #require(Self.table(model), "the workspaces went while the template is \(state): \(page.body)")
+        #expect(table.count == 3 && (table.yours + table.others).allSatisfy { $0.primary != nil }, "Open went from the rows")
+        #expect(!page.canCreate && page.createWhy == why && page.lede == lede)
+        model.beginCreate()
+        model.type("new")
+        #expect(model.sendCreate() == nil, "a create was sent while the template is \(state)")
+    }
+
+    /// n8: a create's row is chosen once a list shows it; a list from before that does not show it
+    /// keeps the row the person chose meanwhile.
+    @Test func aCreatedRowIsChosenOnlyOnceListed() throws {
+        var model = Self.listed(Self.uday)
+        Self.send("new", &model)
+        model.chooseRow("pier")
+        let made = model.created(Self.answer(try Endpoint.createWorkspace("new", project: "harbor"), "workspace-create"), project: "harbor")
+        model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-three"), request: try #require(made), at: Self.at)
+        #expect(Self.table(model)?.yours.first(where: \.chosen)?.name == "pier", "a list without the new row dropped the row chosen")
+        let again = model.listAgain()
+        model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-made"), request: again, at: Self.at)
+        #expect(Self.table(model)?.yours.first(where: \.chosen)?.name == "new")
+    }
+
+    /// n1: two projects creating at once: each created row is chosen in its own project's list.
+    @Test func twoCreatesAtOnceEachChooseTheirOwnRow() throws {
+        var model = Self.two()
+        Self.send("new", &model)
+        let demo = model.choose("demo")
+        model.listed(.success(WorkspaceList(project: "demo", workspaces: [])), request: demo, at: Self.at)
+        Self.send("lab", &model)
+        let timings = WorkspaceTimings(cloneMs: 0, startMs: 0, readyMs: 0, totalMs: 0, readySteps: [:])
+        let lab = WorkspaceCreated(project: "demo", workspace: "lab", instance: "demo-lab", owner: "uday", template: "v1", stale: false, timings: timings)
+        #expect(model.created(Self.answer(try Endpoint.createWorkspace("new", project: "harbor"), "workspace-create"), project: "harbor") == nil)
+        let demoAgain = model.created(.success(lab), project: "demo")
+        model.listed(.success(WorkspaceList(project: "demo", workspaces: [
+            WorkspaceRow(name: "lab", instance: "demo-lab", state: .known(.running), owner: "uday"),
+        ])), request: try #require(demoAgain), at: Self.at)
+        #expect(Self.table(model)?.yours.first(where: \.chosen)?.name == "lab", "demo's created row was not chosen")
+        let harbor = model.choose("harbor")
+        model.listed(Self.answer(.workspaces(project: "harbor"), "workspaces-made"), request: harbor, at: Self.at)
+        #expect(Self.table(model)?.yours.first(where: \.chosen)?.name == "new", "harbor's created row was not chosen after demo's")
+    }
+
+    /// n8: a list that fails dims the panel too, as a projects failure does.
+    @Test func aFailedListDimsThePanel() {
+        var model = Self.listed(Self.ana)
+        let again = model.listAgain()
+        model.listed(.failure(.unreachable("lost")), request: again, at: Self.at)
+        guard case let .shown(panel, _) = model.screen else { Issue.record("no panel"); return }
+        #expect(panel.stale, "the panel stayed bright over a list that failed")
+    }
+
+    /// n8: a projects refresh that fails is said over a project not ready too.
+    @Test func aFailedProjectsRefreshIsSaidOverAnUnreadyProject() throws {
+        var model = WorkspacesModel(person: Self.ana)
+        let first = model.projectsListed(.success(ProjectList(projects: [ProjectSummary(name: "demo", containerStatus: .known(.running), template: .known(.missing))], total: 1)))
+        model.listed(.success(WorkspaceList(project: "demo", workspaces: [])), request: try #require(first), at: Self.at)
+        let again = model.askingProjects()
+        model.projectsListed(.failure(.unreachable("lost")), request: again)
+        #expect(Self.page(model)?.banner?.title == "Couldn’t list your projects")
+    }
+
+    /// n8: "Show <name>" is offered only for a name the server refused as taken, not for one
+    /// typed that is also listed.
+    @Test func showIsOfferedOnlyForARefusedName() {
+        var model = Self.listed(Self.uday)
+        model.beginCreate()
+        model.type("dock")
+        #expect(Self.table(model)?.create?.existing == nil, "Show dock offered before any refusal")
+    }
+
+    /// n8: once a create is answered, a second answer to it changes nothing: the refusal and its
+    /// name stay, and nothing is listed again.
+    @Test func aSecondAnswerToACreateIsDropped() throws {
+        var model = Self.listed(Self.uday)
+        Self.send("dock", &model)
+        _ = model.created(Self.answer(try Endpoint.createWorkspace("dock", project: "harbor"), "refusal-conflict-workspace-exists"), project: "harbor")
+        let late = model.created(Self.answer(try Endpoint.createWorkspace("new", project: "harbor"), "workspace-create"), project: "harbor")
+        #expect(late == nil && Self.table(model)?.create?.refusal.isEmpty == false && Self.table(model)?.create?.name == "dock")
     }
 }

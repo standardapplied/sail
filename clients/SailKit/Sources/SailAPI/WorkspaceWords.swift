@@ -52,8 +52,8 @@ extension WorkspaceList {
 }
 
 extension WorkspaceRow {
-    /// The owner the server names when the workspace's owner is no longer a member of the team
-    /// (`Workspaces.REMOVED_OWNER`): never a handle.
+    /// The owner the server names when the workspace's owner's account is not active, removed or
+    /// disabled alike (`Workspaces.REMOVED_OWNER`): never a handle.
     public static let removedOwner = "removed"
 
     /// Whether the app offers Open on it: a person's own, or any to an admin. The server decides
@@ -67,7 +67,7 @@ extension WorkspaceRow {
         guard !opens(for: handle, admin: admin) else { return nil }
         switch owner {
         case nil: return "No one owns it: only an admin opens it"
-        case Self.removedOwner?: return "Its owner is no longer a member: only an admin opens it"
+        case Self.removedOwner?: return "Its owner’s account is not active: only an admin opens it"
         case let owner?: return "Only \(owner) or an admin opens it"
         }
     }

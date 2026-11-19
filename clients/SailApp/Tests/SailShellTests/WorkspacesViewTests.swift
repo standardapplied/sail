@@ -10,18 +10,19 @@ import Testing
 /// list, what a refresh holds (nothing), and the panel hidden under a narrow card.
 @MainActor @Suite struct WorkspacesViewTests {
     static let uday = WorkspacesModel.Person(handle: "uday", admin: true, confirmed: true, controlPlane: "127.0.0.1")
+    static let ana = WorkspacesModel.Person(handle: "ana", admin: false, confirmed: true, controlPlane: "127.0.0.1")
 
-    static func view(_ transport: any Transport, width: Double = 1000) throws -> (WorkspacesView, NSWindow) {
+    static func view(_ transport: any Transport, width: Double = 1000) throws -> (WorkspacesView, KeyWindow) {
         let view = WorkspacesView(look: .light, title: try TitleFont(directory: LookTests.fonts), mono: try LabelFont(directory: LookTests.fonts))
         view.person = Self.uday
         view.client = SailClient(transport: transport, token: "tok")
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
+        let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = view
         window.orderFront(nil)
         return (view, window)
     }
 
-    static func listed(_ golden: String = "workspaces-three") async throws -> (WorkspacesView, NSWindow, RecordedServer) {
+    static func listed(_ golden: String = "workspaces-three") async throws -> (WorkspacesView, KeyWindow, RecordedServer) {
         let server = RecordedServer([try Exchange("projects"), try Exchange(golden)])
         let (view, window) = try Self.view(server)
         view.shown()
@@ -41,9 +42,9 @@ import Testing
         return (project, window)
     }
 
-    /// The page `rows` make of harbor, listed for uday.
-    static func page(_ rows: [WorkspaceRow], template: TemplateState = .ready) -> WorkspacesModel.Page? {
-        var model = WorkspacesModel(person: Self.uday)
+    /// The page `rows` make of harbor, listed for `person` (uday, an admin).
+    static func page(_ rows: [WorkspaceRow], template: TemplateState = .ready, for person: WorkspacesModel.Person = Self.uday) -> WorkspacesModel.Page? {
+        var model = WorkspacesModel(person: person)
         let harbor = ProjectSummary(name: "harbor", containerStatus: .known(.running), template: .known(template))
         let request = model.projectsListed(.success(ProjectList(projects: [harbor], total: 1))) ?? 0
         model.listed(.success(WorkspaceList(project: "harbor", workspaces: rows)), request: request, at: Date())
@@ -88,20 +89,133 @@ import Testing
         #expect(view.project.newWorkspace.isEnabled)
     }
 
-    /// Under a 720 pt card the panel hides and the content takes the width; ⌃⌘S slides it over.
+    /// Under a 720 pt card the panel hides and the content takes the width; ⌃⌘S slides it over,
+    /// casting the design system's pop shadow in either look (floating layers are shadowed); beside
+    /// the content it casts none.
     @Test func aNarrowCardHidesThePanelAndShowSidebarSlidesItOver() async throws {
         let (view, window, _) = try await Self.listed()
-        #expect(!view.panel.isHidden)
+        #expect(!view.panel.isHidden && view.panelShadow.isHidden, "the panel beside the content casts a shadow")
         window.setContentSize(NSSize(width: 700, height: 640))
         view.layoutSubtreeIfNeeded()
         #expect(view.panel.isHidden && near(view.project.frame.minX, 0))
         view.toggleSidebar(nil)
         view.layoutSubtreeIfNeeded()
         #expect(!view.panel.isHidden && near(view.project.frame.minX, 0), "the panel slides over the content")
+        #expect(!view.panelShadow.isHidden && near(view.panelShadow.frame, view.panel.frame), "the panel over the content casts no shadow: \(view.panelShadow.frame)")
+        #expect(view.subviews.firstIndex(of: view.panelShadow) ?? 0 < view.subviews.firstIndex(of: view.panel) ?? 0, "the shadow is drawn over the panel")
+        for look in [Look.light, .dark] {
+            view.look = look
+            view.layoutSubtreeIfNeeded()
+            let cast = view.panelShadow.cast.map { Shadowed(y: -Double($0.shadowOffset.height), blur: 2 * Double($0.shadowRadius), alpha: Double($0.shadowOpacity)) }
+            let wanted = PopShadow.layers(look).map { Shadowed(y: $0.y, blur: $0.blur, alpha: $0.color.alpha) }
+            #expect(cast.count == wanted.count && zip(cast, wanted).allSatisfy { near($0.y, $1.y) && near($0.blur, $1.blur) && near($0.alpha, $1.alpha) }, "\(look.palette): \(cast)")
+        }
         view.toggleSidebar(nil)
         window.setContentSize(NSSize(width: 1000, height: 640))
         view.layoutSubtreeIfNeeded()
-        #expect(!view.panel.isHidden && near(view.project.frame.minX, view.panel.frame.maxX))
+        #expect(!view.panel.isHidden && near(view.project.frame.minX, view.panel.frame.maxX) && view.panelShadow.isHidden)
+    }
+
+    /// The section shown in `window` beside a terminal of another section, as the shell holds both.
+    static func besideATerminal(_ view: WorkspacesView, in window: NSWindow) -> NSTextView {
+        let frame = window.contentLayoutRect
+        let shell = NSView(frame: frame), terminal = NSTextView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
+        window.contentView = shell
+        view.frame = shell.bounds
+        shell.addSubview(view)
+        shell.addSubview(terminal)
+        return terminal
+    }
+
+    /// Two projects, harbor and demo, each with a template, and demo with no workspace.
+    static let twoProjects = [
+        Exchange(method: "GET", path: "/v1/projects", status: 200, body: Data("""
+        {"projects": [{"name": "harbor", "container_status": "running", "template": "ready"}, {"name": "demo", "container_status": "running", "template": "ready"}], "total": 2, "schema_version": 1}
+        """.utf8)),
+        Exchange(method: "GET", path: "/v1/projects/demo/workspaces", status: 200, body: Data(#"{"project": "demo", "workspaces": [], "schema_version": 1}"#.utf8)),
+    ]
+
+    /// Opens harbor's create row, types `name` and presses Create; the create held by `transport`.
+    static func create(_ name: String, in view: WorkspacesView, _ transport: Held) async {
+        view.project.on(.newWorkspace)
+        view.project.field.field.stringValue = name
+        view.project.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
+        view.project.on(.create)
+        #expect(await RunnerTabTests.until { transport.routes.contains { $0.hasPrefix("POST") } }, "the create was never asked")
+    }
+
+    /// N1: a create answered while the person is elsewhere (another section shown, or typing in a
+    /// terminal beside it) takes nothing from them: a create can wait up to 60 s for another.
+    @Test(arguments: [true, false])
+    func aCreateAnsweredWhileThePersonIsElsewhereMovesNoKeys(_ hidden: Bool) async throws {
+        let exchanges = [try Exchange("projects"), try Exchange("workspaces-three"), try Exchange("workspace-create"), try Exchange("workspaces-made")]
+        let transport = Held(RecordedServer(exchanges), holding: "POST")
+        let (view, window) = try Self.view(transport)
+        let terminal = Self.besideATerminal(view, in: window)
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("dock") }, "\(view.text)")
+        await Self.create("new", in: view, transport)
+        view.isHidden = hidden
+        #expect(window.makeFirstResponder(terminal))
+        transport.release()
+        #expect(await RunnerTabTests.until { !view.busy && !view.text.contains("creating") }, "\(view.text)")
+        #expect(window.firstResponder === terminal, "the create's answer took the keys from the terminal (section hidden: \(hidden))")
+    }
+
+    /// N1: a refusal for a project the person has left keeps no claim on the keys: the person
+    /// arrowing in the panel keeps them there, then and on coming back to the refused project.
+    @Test func aRefusalInAProjectLeftKeepsNoClaimOnTheKeys() async throws {
+        let exchanges = Self.twoProjects + [try Exchange("workspaces-three"), try Exchange("refusal-conflict-workspace-exists")]
+        let transport = Held(RecordedServer(exchanges), holding: "POST")
+        let (view, window) = try Self.view(transport)
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("dock") }, "\(view.text)")
+        await Self.create("dock", in: view, transport)
+        view.panel.list.choose("demo")
+        #expect(await RunnerTabTests.until { view.text.hasPrefix("Workspaces\ndemo\n") }, "\(view.text)")
+        #expect(window.makeFirstResponder(view.panel.list))
+        transport.release()
+        #expect(await RunnerTabTests.until { !view.busy }, "the create never ended")
+        #expect(window.firstResponder === view.panel.list, "harbor's refusal took the keys from the panel while demo is shown")
+        view.panel.list.choose("harbor")
+        #expect(await RunnerTabTests.until { view.text.contains("exists already") }, "\(view.text)")
+        #expect(window.firstResponder === view.panel.list, "coming back to harbor, its old refusal pulled the keys out of the panel")
+    }
+
+    /// N1, n9: a create sent by someone signed in before is dropped when its answer comes, though
+    /// the new person is shown the same project: it claims no keys and lists nothing for them.
+    @Test func aCreateFromBeforeASignInAsSomeoneElseIsDropped() async throws {
+        let exchanges = [try Exchange("projects"), try Exchange("workspaces-three"), try Exchange("workspace-create"), try Exchange("workspaces-made")]
+        let transport = Held(RecordedServer(exchanges), holding: "POST")
+        let (view, window) = try Self.view(transport)
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("dock") }, "\(view.text)")
+        await Self.create("new", in: view, transport)
+        view.person = Self.ana
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("dock") }, "harbor never listed for ana: \(view.text)")
+        let lists = transport.routes.filter { $0.hasPrefix("GET /v1/projects/harbor") }.count
+        transport.release()
+        #expect(await RunnerTabTests.until { !view.busy }, "the create never ended")
+        #expect(window.firstResponder !== view.project.list, "the earlier person's create gave the list the keys")
+        #expect(transport.routes.filter { $0.hasPrefix("GET /v1/projects/harbor") }.count == lists, "the earlier person's create listed harbor again")
+    }
+
+    /// n4: a narrow row keeps who may open it, as the note at its end cut short, never dropped.
+    @Test func aNarrowRowKeepsWhoMayOpenIt() throws {
+        let page = try #require(Self.page([WorkspaceRow(name: "dock", instance: "harbor-dock", state: .known(.running), owner: "uday")], for: Self.ana))
+        let (project, window) = try Self.project(width: Self.narrowestCard)
+        defer { window.orderOut(nil) }
+        project.render(page)
+        let notes = project.list.entries.compactMap { entry -> String? in
+            guard case let .item(item) = entry else { return nil }
+            return item.note
+        }
+        #expect(notes == ["Only uday or an admin opens it"], "\(notes)")
+    }
+
+    private struct Shadowed {
+        let y: Double, blur: Double, alpha: Double
     }
 
     /// Someone else's row names its owner; the person's own rows leave that column empty, at its
@@ -116,6 +230,7 @@ import Testing
             let words = Self.found(NSTextField.self, in: whose).map(\.stringValue)
             #expect(abs(Double(whose.frame.width) - WorkspaceLine.ownerColumn) < 0.5, "\(line.title.stringValue): the owner's column is \(whose.frame.width) pt")
             #expect(words == (line.title.stringValue == "quay" ? ["ana"] : []), "\(line.title.stringValue)'s owner cell says \(words)")
+            #expect(line.ownerTip?.shows != true, "\(line.title.stringValue): a handle shown in full says itself again on hover")
         }
     }
 
@@ -333,7 +448,7 @@ import Testing
             let label = try #require(Self.found(NSTextField.self, in: whose).first)
             let end = whose.convert(label.alignmentRect(forFrame: label.frame), from: label.superview).maxX
             #expect(end <= whose.bounds.maxX + 0.5 && label.frame.height < 2 * 16, "\(width) pt: the handle ends at \(end) in a \(whose.bounds.width) pt column")
-            #expect(line.ownerTip?.text == handle)
+            #expect(line.ownerTip?.text == handle && line.ownerTip?.shows == true, "\(width) pt: the cut handle is not said in full on hover")
         }
         let panel = LeftPanel(look: .light, mono: try LabelFont(directory: LookTests.fonts))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: LeftPanel.width.standard, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
@@ -345,6 +460,10 @@ import Testing
             let frame = panel.convert(label.alignmentRect(forFrame: label.frame), from: label.superview)
             #expect(frame.maxX <= panel.bounds.width - 14 + 0.5 && frame.height < 2 * 16, "the foot's \(label.stringValue.prefix(12))… runs to \(frame.maxX) of \(panel.bounds.width)")
         }
+        #expect(panel.whoTip.shows && panel.placeTip.shows, "a cut foot is not said in full on hover")
+        panel.renderLoading(who: "ana · member", controlPlane: "main.acme.dev")
+        panel.layoutSubtreeIfNeeded()
+        #expect(!panel.whoTip.shows && !panel.placeTip.shows, "a foot shown in full says itself again on hover")
     }
 
     /// New Workspace off in a project with no template says why, through the library's tooltip.
@@ -579,4 +698,12 @@ func near(_ a: NSPoint, _ b: NSPoint) -> Bool {
 
 func near(_ a: NSRect, _ b: NSRect) -> Bool {
     near(a.origin, b.origin) && near(a.width, b.width) && near(a.height, b.height)
+}
+
+/// A window that says it is key, as the person's front window is; a test process's own windows
+/// cannot be made key.
+final class KeyWindow: NSWindow {
+    override var isKeyWindow: Bool {
+        true
+    }
 }

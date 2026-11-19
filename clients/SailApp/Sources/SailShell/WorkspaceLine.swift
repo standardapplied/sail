@@ -77,16 +77,16 @@ final class WorkspaceLine: NSStackView {
         }
     }
 
-    /// Whose a row is, said in words ("ana", "a former member", "no one").
+    /// Whose a row is, said in words ("ana", "an inactive account", "no one").
     nonisolated static func said(_ owner: WorkspacesModel.Owner) -> String {
         switch owner {
         case let .person(handle): handle
-        case .formerMember: "a former member"
+        case .inactive: "an inactive account"
         case .nobody: "no one"
         }
     }
 
-    /// Whose a row is under its name when narrow ("ana's", "a former member's", "no one's").
+    /// Whose a row is under its name when narrow ("ana's", "an inactive account's", "no one's").
     nonisolated static func whose(_ owner: WorkspacesModel.Owner) -> String {
         said(owner) + "'s"
     }
@@ -106,11 +106,11 @@ final class WorkspaceLine: NSStackView {
     }
 
     /// The owner's column: a person's initial and handle, cut at its end in the column, in full on
-    /// hover; a former member or no one in the tertiary ink, with no initial.
+    /// hover; an inactive account or no one in the tertiary ink, with no initial.
     private static func owner(_ owner: WorkspacesModel.Owner, look: Look) -> (view: NSView, tip: Tooltip) {
         let person: String? = switch owner {
         case let .person(handle): handle
-        case .formerMember, .nobody: nil
+        case .inactive, .nobody: nil
         }
         let name = NSTextField(labelWithAttributedString: NSAttributedString(string: said(owner), attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.callout.points), .foregroundColor: NSColor(person == nil ? look.textTertiary : look.textSecondary),
@@ -119,6 +119,7 @@ final class WorkspaceLine: NSStackView {
         name.maximumNumberOfLines = 1
         name.setContentCompressionResistancePriority(cutShort, for: .horizontal)
         let tooltip = Tooltip(said(owner), look: look, mono: nil)
+        tooltip.onlyWhenCut = true
         tooltip.attach(to: name, saying: said(owner))
         var views: [NSView] = person.map { [Initial($0, look: look)] } ?? []
         views.append(name)

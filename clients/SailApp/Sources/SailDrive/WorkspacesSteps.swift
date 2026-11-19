@@ -85,12 +85,6 @@ actor GoldenDesk: Transport {
 extension Driver {
     /// Opens the create row and types `name` into its field as a person does: the field changes
     /// and says so.
-    private func typeName(_ name: String, into pane: WorkspacesView) {
-        pane.project.on(.newWorkspace)
-        pane.project.field.field.stringValue = name
-        pane.project.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: pane.project.field.field))
-    }
-
     private static func found<Found: NSView>(_ kind: Found.Type, in view: NSView) -> [Found] {
         if let view = view as? Found { return [view] }
         return view.subviews.flatMap { found(kind, in: $0) }
@@ -188,26 +182,16 @@ extension Driver {
             return await clickButton(title, in: pane)
         }
         if let wanted = step.chooseProject {
-            let listed = await waitUntil(step.seconds ?? 10) {
-                pane.panel.list.choose(wanted)
-                return pane.panel.list.chosen == wanted
-            }
+            let listed = await waitUntil(step.seconds ?? 10) { Self.row(wanted, in: pane.panel.list) != nil }
             guard listed else { return (false, "the panel never listed \(wanted): chosen \(pane.panel.list.chosen ?? "none")") }
+            guard await clickRow(wanted, in: pane.panel.list) else { return (false, "the panel's \(wanted) row could not be clicked") }
             let named = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.hasPrefix("Workspaces\n\(wanted)\n") }
             return (named, "chosen: \(pane.panel.list.chosen ?? "none"); the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
         }
         if let wanted = step.chooseRow {
-            shell.window.makeFirstResponder(pane.project.list)
-            pane.project.list.choose(wanted)
-            return (pane.project.list.chosen == wanted, "chosen: \(pane.project.list.chosen ?? "none")")
-        }
-        if let wanted = step.create {
-            let before = pane.ended
-            typeName(wanted, into: pane)
-            pane.project.on(.create)
-            let said = pane.text
-            let done = await waitUntil(step.seconds ?? 10) { pane.ended > before }
-            return (done, "while creating: \(said.replacingOccurrences(of: "\n", with: " | "))")
+            guard await clickRow(wanted, in: pane.project.list) else { return (false, "no row \(wanted) to click") }
+            let chosen = await waitUntil(step.seconds ?? 5) { pane.project.list.chosen == wanted }
+            return (chosen, "chosen: \(pane.project.list.chosen ?? "none")")
         }
         if let name = step.open {
             pane.project.list.choose(name)
@@ -216,37 +200,6 @@ extension Driver {
             send(enter)
             return (shell.rail.selected == .thisMac, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing"); \(arrangementSaid)")
         }
-        if let act = step.act, let what = act.first {
-            let name = act.dropFirst().first ?? ""
-            if what == "tryAgain" {
-                pane.askAgain(nil)
-                return (true, "")
-            }
-            if what == "type" {
-                typeName(name, into: pane)
-                return (pane.project.field.field.stringValue == name, "the name field holds \(pane.project.field.field.stringValue)")
-            }
-            let done: ProjectView.Act? = switch what {
-            case "startAndOpen": .startAndOpen(name)
-            case "newWorkspace": .newWorkspace
-            case "cancelCreate": .cancelCreate
-            case "show": .show(name)
-            case "listAgain": .listAgain
-            default: nil
-            }
-            guard let done else { return (false, "no act \(what)") }
-            pane.project.on(done)
-            let open = { pane.project.field.window != nil }
-            let shown = await waitUntil(step.seconds ?? 5) {
-                switch done {
-                case .newWorkspace: open()
-                case .cancelCreate: !open()
-                case let .show(name): pane.project.list.chosen == name
-                default: true
-                }
-            }
-            return (shown, "the create row \(open() ? "open" : "closed"); chosen \(pane.project.list.chosen ?? "none")")
-        }
         if let shown = step.skeletons {
             let visible = { Self.found(Skeleton.self, in: pane).filter { !$0.isHiddenOrHasHiddenAncestor } }
             let found = await waitUntil(step.seconds ?? 5) { shown ? !visible().isEmpty && visible().allSatisfy { $0.alphaValue == 1 } : visible().isEmpty }
@@ -254,9 +207,10 @@ extension Driver {
             return (found, "\(bars.filter { $0.alphaValue == 1 }.count) of \(bars.count) skeleton bars shown; the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
         }
         if let shown = step.showSidebar {
-            pane.toggleSidebar(nil)
-            pane.layoutSubtreeIfNeeded()
-            return (pane.panel.isHidden != shown, "the panel \(pane.panel.isHidden ? "hidden" : "shown")")
+            guard let key = Keys.named("s", modifiers: ["control", "command"]) else { return (false, "no ⌃⌘S") }
+            send(key)
+            let done = await waitUntil(step.seconds ?? 5) { pane.panel.isHidden != shown }
+            return (done, "the panel \(pane.panel.isHidden ? "hidden" : "shown") after ⌃⌘S")
         }
         if let wanted = step.ticketAsked {
             let found = await waitUntilAsync(step.seconds ?? 15) { await Self.tickets().contains { asked in wanted.allSatisfy { asked[$0.key] == $0.value } } }
@@ -284,25 +238,46 @@ extension Driver {
     }
 
     /// Waits, at most `seconds`, until `condition` holds, asking it again every 50 ms.
-    /// Clicks the shown button titled `title` in `pane` as a person does: a mouse-down sent through
-    /// the window with its mouse-up queued behind it, so the button's own tracking takes both.
+    /// Clicks the shown button titled `title` in `pane` as a person does.
     private func clickButton(_ title: String, in pane: WorkspacesView) async -> (Bool, String) {
         pane.layoutSubtreeIfNeeded()
-        guard let button = Self.views(in: pane).compactMap({ $0 as? SailButton }).first(where: { $0.title == title && !$0.isHiddenOrHasHiddenAncestor }),
-              let window = button.window
+        guard let button = Self.views(in: pane).compactMap({ $0 as? NSButton }).first(where: { $0.title == title && !$0.isHiddenOrHasHiddenAncestor }),
+              await click(button, at: NSPoint(x: button.bounds.midX, y: button.bounds.midY))
         else { return (false, "no \(title) shown") }
-        let middle = button.convert(NSPoint(x: button.bounds.midX, y: button.bounds.midY), to: nil)
+        return (true, "clicked \(title)")
+    }
+
+    /// Clicks the row of `id` in `list` near its leading edge, clear of the actions at its end.
+    private func clickRow(_ id: String, in list: SailList) async -> Bool {
+        list.layoutSubtreeIfNeeded()
+        guard let row = Self.row(id, in: list) else { return false }
+        let rect = list.rect(ofRow: row)
+        return await click(list, at: NSPoint(x: rect.minX + 24, y: rect.minY + min(rect.height, 52) / 2))
+    }
+
+    private static func row(_ id: String, in list: SailList) -> Int? {
+        list.entries.firstIndex { entry in
+            guard case let .item(item) = entry else { return false }
+            return item.id == id
+        }
+    }
+
+    /// A click at `point` in `view` as a person makes it: a mouse-down sent through the window with
+    /// its mouse-up queued behind it, so the view's own tracking takes both.
+    private func click(_ view: NSView, at point: NSPoint) async -> Bool {
+        guard let window = view.window else { return false }
+        let location = view.convert(point, to: nil)
         func event(_ type: NSEvent.EventType) -> NSEvent? {
             NSEvent.mouseEvent(
-                with: type, location: middle, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
                 eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0
             )
         }
-        guard let down = event(.leftMouseDown), let up = event(.leftMouseUp) else { return (false, "AppKit gave no mouse events for the click") }
+        guard let down = event(.leftMouseDown), let up = event(.leftMouseUp) else { return false }
         NSApp.postEvent(up, atStart: false)
         window.sendEvent(down)
         await Task.yield()
-        return (true, "clicked \(title)")
+        return true
     }
 
     private func waitUntilAsync(_ seconds: Double, _ condition: () async -> Bool) async -> Bool {

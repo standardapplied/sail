@@ -12,7 +12,7 @@ import SailLook
 /// goes, New Workspace is an icon, and rows drop the owner's column.
 @MainActor
 package final class ProjectView: NSView, NSTextFieldDelegate {
-    package enum Act: Equatable {
+    enum Act: Equatable {
         case open(String), startAndOpen(String), copyName(String)
         case newWorkspace, listAgain, checkAgain, typed(String), create, cancelCreate, chose(String?), show(String)
     }
@@ -31,7 +31,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     static let wide = 2 * padding.sides + 2 + RowStyle.list.leading + RowStyle.list.trailing + WorkspaceLine.pillColumn + WorkspaceLine.ownerColumn
         + actionsColumn + 150
 
-    package var on: @MainActor (Act) -> Void = { _ in }
+    var on: @MainActor (Act) -> Void = { _ in }
     /// Its look; a change repaints what it holds, and the next render draws its words in it.
     var look: Look {
         didSet { relook() }
@@ -347,7 +347,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         var said = [line.name, WorkspaceLine.pill(line).label.lowercased()]
         if let owner = line.owner { said.append(WorkspaceLine.said(owner)) }
         if let why = line.why { said.append(why) }
-        return SailList.Item(id: line.name, name: line.name, voice: said.joined(separator: ", "), content: content, actions: actions, note: narrow ? nil : line.why)
+        return SailList.Item(id: line.name, name: line.name, voice: said.joined(separator: ", "), content: content, actions: actions, note: line.why)
     }
 
     /// The create under way as the row it will be, in the quiet chosen fill: its name and instance,

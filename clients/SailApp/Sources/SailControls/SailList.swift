@@ -434,6 +434,8 @@ final class RowCell: NSView {
     private let first: SailButton?
     private let runs: [Run]
     private var shown = false
+    /// The note in full on hover while it is cut short (a tracking area does not keep its owner).
+    let noteTip: Tooltip?
 
     init(_ item: SailList.Item, rowStyle: RowStyle, actionsColumn: Double?, look: Look, mono: LabelFont) {
         content = item.content
@@ -461,12 +463,22 @@ final class RowCell: NSView {
             more.action = #selector(MenuOpener.open(_:))
             more.menu = moreMenu
         }
-        super.init(frame: .zero)
         let note = item.note.map { words -> NSTextField in
             let label = NSTextField(labelWithAttributedString: Draw.text(words, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary))
             label.lineBreakMode = .byTruncatingTail
+            label.maximumNumberOfLines = 1
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             return label
         }
+        if let note, let words = item.note {
+            let tip = Tooltip(words, look: look, mono: nil)
+            tip.onlyWhenCut = true
+            tip.attach(to: note, saying: words)
+            noteTip = tip
+        } else {
+            noteTip = nil
+        }
+        super.init(frame: .zero)
         actions.setViews(([note, item.accessory].compactMap { $0 } as [NSView]) + buttons, in: .trailing)
         if let note { actions.setCustomSpacing(6 + 4, after: note) }
         actions.spacing = 6

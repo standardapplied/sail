@@ -186,6 +186,19 @@ public final class Tooltip: NSResponder {
         didSet { if !isOn { hide() } }
     }
 
+    /// It shows only while its label is cut short: words already shown in full are not said twice.
+    public var onlyWhenCut = false
+
+    /// Whether a hover now would show it.
+    public var shows: Bool {
+        isOn && (!onlyWhenCut || anchorIsCut)
+    }
+
+    private var anchorIsCut: Bool {
+        guard let anchor else { return false }
+        return Double(anchor.intrinsicContentSize.width) > Double(anchor.alignmentRect(forFrame: anchor.frame).width) + 0.5
+    }
+
     /// Shows on `view`'s hover from now on.
     public func attach(to view: NSView, saying text: String) {
         anchor = view
@@ -195,7 +208,7 @@ public final class Tooltip: NSResponder {
 
     override public func mouseEntered(with _: NSEvent) {
         pending?.cancel()
-        guard isOn else { return }
+        guard shows else { return }
         if let last = Self.lastHidden, CACurrentMediaTime() - last < TooltipStyle.warm { return show() }
         let show = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated { self?.show() }

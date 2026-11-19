@@ -213,6 +213,34 @@ import Testing
         #expect(chosen == ["primary Open", "quiet More"], "the chosen row's actions are \(chosen)")
     }
 
+    /// A note among a row's actions is cut short at its end where the actions column is narrow,
+    /// never dropped and never past the row, and said in full on hover only while it is cut.
+    @Test func aNoteIsCutShortAndSaidInFullOnlyWhenCut() throws {
+        let motion = Motion.shared, was = motion.reduced
+        defer { motion.reduced = was }
+        motion.reduced = true
+        let note = "Only uday or an admin opens it"
+        for (column, cut) in [(144.0, true), (Double?.none, false)] {
+            let list = SailList(rowStyle: .list, look: .light, mono: try ControlsTests.mono())
+            list.actionsColumn = column
+            list.entries = [.item(SailList.Item(id: "dock", name: "dock", voice: "dock", content: NSTextField(labelWithString: "dock"), actions: [
+                SailList.Action("Copy Name", key: "c", modifiers: .command, onRow: false) {},
+            ], note: note))]
+            list.frame = NSRect(x: 0, y: 0, width: 440, height: 60)
+            let (window, _) = Self.shown(list)
+            defer { window.orderOut(nil) }
+            list.choose("dock")
+            let row = try Self.row(list, 0)
+            let cell = try #require(row.view(atColumn: 0) as? RowCell)
+            cell.layoutSubtreeIfNeeded()
+            let label = try #require(cell.actions.views.compactMap { $0 as? NSTextField }.first { $0.stringValue == note }, "the note was dropped")
+            let frame = cell.convert(label.alignmentRect(forFrame: label.frame), from: label.superview)
+            #expect(!label.isHiddenOrHasHiddenAncestor && frame.width > 0 && frame.maxX <= cell.bounds.maxX + 0.5, "the note is at \(frame)")
+            #expect(frame.height < 2 * Look.Step.footnote.points, "the note wraps to \(frame.height) pt")
+            #expect(cell.noteTip?.text == note && cell.noteTip?.shows == cut, "\(column.map { "\($0) pt" } ?? "a free column"): the tip shows \(cell.noteTip?.shows == true)")
+        }
+    }
+
     static func key(_ code: UInt16, _ characters: String, _ flags: NSEvent.ModifierFlags = []) throws -> NSEvent {
         try #require(NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, characters: characters,

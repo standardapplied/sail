@@ -146,31 +146,23 @@ struct Step: Decodable {
     var golden: [String]?
     /// The Workspaces section says this, within `seconds` (10 by default), no call under way.
     var workspaces: String?
-    /// This name typed into the Workspaces section's create row and Create pressed; the call waited for.
-    var create: String?
     /// The controls' gallery sheet of this name ("button", "field", "pill", "spinner") shot in
     /// every state and look, cut into `<control>-<state>-<look>.png`.
     var kit: String?
-    /// A person's action on the Workspaces view: its kind ("startAndOpen",
-    /// "newWorkspace", "cancelCreate", "show", "listAgain", "tryAgain" on the card, or "type" a name
-    /// into the create row)
-    /// and the workspace or name it is on; it passes when what it does shows (the create row open
-    /// or gone, the row shown chosen).
-    var act: [String]?
     /// The projects listed from now on, each its name and its template's state ("missing").
     var projects: [[String]]?
-    /// View ▸ Show Sidebar (⌃⌘S) chosen, and whether the panel is then shown (over the
-    /// content) or hidden again.
+    /// ⌃⌘S pressed (View ▸ Show Sidebar), and whether the panel is then shown (over the content)
+    /// or hidden again, within `seconds` (5 by default).
     var showSidebar: Bool?
     /// The Workspaces section shows its skeleton bars (true) or none (false), within `seconds` (5 by
     /// default).
     var skeletons: Bool?
     /// The Workspaces row of this name selected and Open pressed: a tab on the runner.
     var open: String?
-    /// The Workspaces row of this name selected with the list holding the keys (its Open says ⏎),
-    /// what its button then says told.
+    /// The Workspaces row of this name clicked: chosen, with the list holding the keys (its Open
+    /// says ⏎), within `seconds` (5 by default).
     var chooseRow: String?
-    /// The left panel's project of this name chosen, as a click on its row does; the section then
+    /// The left panel's project of this name clicked once the panel lists it; the section then
     /// names it, within `seconds` (10 by default).
     var chooseProject: String?
     /// The window's frame made `[width, height]`, its top left kept: each frame shot at the

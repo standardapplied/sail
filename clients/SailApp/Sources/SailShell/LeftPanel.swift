@@ -30,8 +30,8 @@ package final class LeftPanel: NSView {
     private let skeletons: [(tile: Skeleton, name: Skeleton)]
     private let mono: LabelFont
     /// The foot's lines in full, on hover, when cut short.
-    private lazy var whoTip = Tooltip("", look: look, mono: nil)
-    private lazy var placeTip = Tooltip("", look: look, mono: nil)
+    lazy var whoTip = Tooltip("", look: look, mono: nil)
+    lazy var placeTip = Tooltip("", look: look, mono: nil)
     private(set) var widthConstraint: NSLayoutConstraint!
     private var projects: [WorkspacesModel.Project] = []
     /// The names are drawn in the secondary ink: what is shown failed to refresh.
@@ -58,6 +58,7 @@ package final class LeftPanel: NSView {
             label.lineBreakMode = cut
             label.maximumNumberOfLines = 1
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            tip.onlyWhenCut = true
             tip.attach(to: label, saying: "")
         }
         heading.textColor = NSColor(look.text)

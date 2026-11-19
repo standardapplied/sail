@@ -56,8 +56,9 @@ public struct WorkspacesModel: Sendable {
     /// Whose a row is, as its owner column says it.
     public enum Owner: Equatable, Sendable {
         case person(String)
-        /// The server names no one: the workspace's owner is no longer a member.
-        case formerMember
+        /// The server names no one: the owner's account is not active (removed or disabled, which
+        /// the server does not tell apart).
+        case inactive
         /// No one owns it.
         case nobody
     }
@@ -188,7 +189,7 @@ public struct WorkspacesModel: Sendable {
     private var listFailure: String?
     private var creates: [String: CreateLine] = [:]
     /// The workspace created in this project, chosen once a list shows it.
-    private var choosingAfterList: (project: String, name: String)?
+    private var choosingAfterList: [String: String] = [:]
 
     /// The chosen project's create row.
     private var create: CreateLine? {
@@ -255,9 +256,9 @@ public struct WorkspacesModel: Sendable {
             guard listing.take(list.workspaces, request: request) else { return }
             listedAt = at
             listFailure = nil
-            if let wanted = choosingAfterList, wanted.project == listing.listed, listing.rows.contains(where: { $0.name == wanted.name }) {
-                chosenRow = wanted.name
-                choosingAfterList = nil
+            if let project = listing.listed, let wanted = choosingAfterList[project], listing.rows.contains(where: { $0.name == wanted }) {
+                chosenRow = wanted
+                choosingAfterList[project] = nil
             }
         case let .failure(error):
             guard listing.isLatest(request) else { return }
@@ -298,7 +299,7 @@ public struct WorkspacesModel: Sendable {
         switch result {
         case let .success(created):
             creates[project] = nil
-            choosingAfterList = (project, created.workspace)
+            choosingAfterList[project] = created.workspace
             return project == chosen ? listAgain() : nil
         case let .failure(error):
             creates[project] = CreateLine(name: sent.name, underWay: false, refusal: lines(error), existing: nil)
@@ -369,32 +370,46 @@ public struct WorkspacesModel: Sendable {
 
     /// What a project with no current template says, by its template's state: only `ready` names a
     /// current version, so any other state, or none, offers no create.
-    private static func unready(_ project: ProjectSummary) -> (lede: String, why: String, title: String, body: String)? {
+    private static func unready(_ project: ProjectSummary) -> Unready? {
         let name = project.name
-        switch project.template {
-        case .known(.ready): return nil
-        case .known(.building):
-            return (
-                "\(name)’s template is being built; workspaces come after it.", "\(name)’s template is being built", "\(name)’s template is being built",
-                "You can create workspaces in \(name) once it is built."
+        switch mark(project.template) {
+        case nil: return nil
+        case .building?:
+            return Unready(
+                lede: "\(name)’s template is being built; workspaces come after it.", why: "\(name)’s template is being built",
+                title: "\(name)’s template is being built", body: "You can create workspaces in \(name) once it is built.",
+                withRows: "\(name)’s template is being rebuilt; new workspaces wait for it."
             )
-        case .known(.failed):
-            return (
-                "\(name) has no template yet, so no workspace can be created in it.", "\(name)’s template could not be built",
-                "\(name)’s template could not be built", "Its last build failed, so no version of it is current. An admin builds it again on the runner; then you can create workspaces here."
+        case .buildFailed?:
+            return Unready(
+                lede: "\(name) has no template yet, so no workspace can be created in it.", why: "\(name)’s template could not be built",
+                title: "\(name)’s template could not be built",
+                body: "Its last build failed, so no version of it is current. An admin builds it again on the runner; then you can create workspaces here.",
+                withRows: "\(name)’s template could not be built, so no new workspace can be created in it."
             )
-        default:
-            return (
-                "\(name) has no template yet, so no workspace can be created in it.", "\(name) has no template yet", "\(name) isn’t ready yet",
-                "\(name) has no template yet. An admin builds \(name)’s template on the runner first; then you can create workspaces here."
+        case .noTemplate?:
+            return Unready(
+                lede: "\(name) has no template yet, so no workspace can be created in it.", why: "\(name) has no template yet", title: "\(name) isn’t ready yet",
+                body: "\(name) has no template yet. An admin builds \(name)’s template on the runner first; then you can create workspaces here.",
+                withRows: "\(name) has no template now, so no new workspace can be created in it."
             )
         }
     }
 
+    /// What a project whose template is not current says: its line and New Workspace's reason, the
+    /// empty state with no workspace listed, and its line over the workspaces it has.
+    private struct Unready {
+        let lede: String, why: String, title: String, body: String, withRows: String
+    }
+
+    /// A project's page. A template not current offers no create, but never hides the workspaces
+    /// the project already has: during a rebuild they stay listed, with Open, and New Workspace
+    /// says why it waits; only a project with none listed says what is missing in its place.
     private func page(_ project: ProjectSummary) -> Page {
-        let name = project.name, listed = listing.listed == name
+        let name = project.name, listed = listing.listed == name, unready = Self.unready(project)
         let banner = listFailure.map { Notice(tone: .error, title: "Couldn’t list \(name)’s workspaces", line: $0, tryAgain: true) } ?? projectsBanner
-        if let unready = Self.unready(project) {
+        let rows = listed ? WorkspaceList(project: name, workspaces: listing.rows).rows(for: person.handle) : []
+        if let unready, rows.isEmpty, listed || listFailure != nil {
             return Page(
                 name: name, lede: unready.lede, canCreate: false, createWhy: unready.why, banner: projectsBanner,
                 body: .empty(Empty(title: unready.title, body: unready.body, line: nil, action: .checkAgain, missing: true)), stale: false, listedAt: nil
@@ -405,7 +420,6 @@ public struct WorkspacesModel: Sendable {
         if !listed {
             body = listFailure == nil ? .loading : .unlisted
         } else {
-            let rows = WorkspaceList(project: name, workspaces: listing.rows).rows(for: person.handle)
             if rows.isEmpty, create == nil {
                 body = .empty(Empty(
                     title: "No workspaces in \(name) yet",
@@ -423,7 +437,7 @@ public struct WorkspacesModel: Sendable {
             }
         }
         return Page(
-            name: name, lede: "Your own copies of \(name) on the runner. Each one opens as a terminal tab.", canCreate: canCreate,
+            name: name, lede: unready.map { rows.isEmpty ? $0.lede : $0.withRows } ?? "Your own copies of \(name) on the runner. Each one opens as a terminal tab.", canCreate: canCreate,
             createWhy: createWhy(project), banner: banner,
             body: body, stale: listed && listFailure != nil, listedAt: listedAt
         )
@@ -449,7 +463,7 @@ public struct WorkspacesModel: Sendable {
         let owner: Owner? = switch row.owner {
         case _ where mine: nil
         case nil: .nobody
-        case WorkspaceRow.removedOwner?: .formerMember
+        case WorkspaceRow.removedOwner?: .inactive
         case let handle?: .person(handle)
         }
         return Line(
@@ -469,12 +483,14 @@ public struct WorkspacesModel: Sendable {
         return said
     }
 
+    /// A project's template as both its pill and its page say it: only `ready` names a current
+    /// version, so no field, or a word this app does not know, is no template.
     static func mark(_ template: Open<TemplateState>?) -> Mark? {
         switch template {
-        case .known(.missing): .noTemplate
+        case .known(.ready): nil
         case .known(.building): .building
         case .known(.failed): .buildFailed
-        default: nil
+        default: .noTemplate
         }
     }
 }
