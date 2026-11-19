@@ -135,10 +135,12 @@ import Testing
         #expect(!chosen.isHidden && chosen.layer?.backgroundColor == NSColor(look.accent).cgColor, "\(name): the rail's chosen item has no accent bar, as a tab's")
         #expect(shell.rail.drawnMarks == [.accentLine], "\(name): the rail's chosen item draws \(shell.rail.drawnMarks), not one accent bar on ink")
         shell.window.contentView?.layoutSubtreeIfNeeded()
-        let edge = shell.cardEdge
-        #expect(!edge.isHidden && edge.layer?.contents == nil && edge.layer?.sublayers?.count == 3, "\(name): the card's edge is not three small layers under an empty host")
-        let lines = (edge.layer?.sublayers ?? []).compactMap { $0 as? CAShapeLayer == nil ? $0 : nil }
-        #expect(lines.count == 2 && lines.allSatisfy { min($0.bounds.width, $0.bounds.height) == 1 && $0.backgroundColor == look.cardEdge.map { NSColor($0).cgColor } }, "\(name): the card's edge lines are \(lines.map(\.frame))")
+        let edge = shell.cardEdge, parts = edge.layer?.sublayers ?? []
+        #expect(edge.isHidden == (look.cardEdge == nil), "\(name): the card's outline shows \(!edge.isHidden) with \(String(describing: look.cardEdge))")
+        #expect(edge.layer?.contents == nil && parts.count == 8, "\(name): the card's outline is not eight small layers under an empty host")
+        let lines = parts.filter { !($0 is CAShapeLayer) }
+        #expect(lines.count == 4 && lines.allSatisfy { min($0.bounds.width, $0.bounds.height) == 1 }, "\(name): the outline's lines are \(lines.map(\.frame))")
+        #expect(parts.allSatisfy { max($0.bounds.width, $0.bounds.height) < 8 || min($0.bounds.width, $0.bounds.height) <= 1 }, "\(name): a part of the outline is a large layer over the card")
         for item in [Rail.Item.account, .thisMac] {
             shell.select(item)
             #expect(content.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name) \(item): the band under the title bar is not the chrome")

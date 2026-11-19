@@ -16,7 +16,7 @@ import Testing
 
     static func table(_ look: Look) -> [String: String] {
         [
-            "canvas": hex(look.canvas), "surface": hex(look.surface), "surfacePop": hex(look.surfacePop), "chrome": hex(look.chrome),
+            "canvas": hex(look.canvas), "surface": hex(look.surface), "surfacePop": hex(look.surfacePop), "chrome": hex(look.chrome), "chromeWash": hex(look.chromeWash),
             "text": said(look.text), "textSecondary": said(look.textSecondary), "textTertiary": said(look.textTertiary),
             "separator": said(look.separator), "separatorStrong": said(look.separatorStrong), "gridLine": said(look.gridLine),
             "accent": hex(look.accent), "accentHover": hex(look.accentHover), "accentPressed": hex(look.accentPressed),
@@ -29,7 +29,7 @@ import Testing
     }
 
     static let light: [String: String] = [
-        "canvas": "F8FAFC", "surface": "FDFFFF", "surfacePop": "FFFFFF", "chrome": "F8FAFC", "text": "0E1217", "textSecondary": "383E43",
+        "canvas": "F8FAFC", "surface": "FDFFFF", "surfacePop": "FFFFFF", "chrome": "F2EBE7", "chromeWash": "E6E0DB", "text": "0E1217", "textSecondary": "383E43",
         "textTertiary": "6D7277", "separator": "0E1217@0.12", "separatorStrong": "0E1217@0.22", "gridLine": "0E1217@0.06", "accent": "FC4926",
         "accentHover": "D73626", "accentPressed": "B92C1E", "onAccent": "FFFFFF", "textSelection": "FC4926@0.20",
         "fillPressed": "0E1217@0.09", "skeleton": "0E1217@0.05", "focusHalo": "FC4926@0.42", "error": "B91C3C",
@@ -38,7 +38,7 @@ import Testing
     ]
 
     static let dark: [String: String] = [
-        "canvas": "0A0E11", "surface": "12171B", "surfacePop": "161C21", "chrome": "0A0E11", "text": "F6F1E9", "textSecondary": "F6F1E9@0.78",
+        "canvas": "0A0E11", "surface": "12171B", "surfacePop": "161C21", "chrome": "201919", "chromeWash": "2B2423", "text": "F6F1E9", "textSecondary": "F6F1E9@0.78",
         "textTertiary": "F6F1E9@0.55", "separator": "F6F1E9@0.14", "separatorStrong": "F6F1E9@0.24", "gridLine": "F6F1E9@0.07", "accent": "FC4926",
         "accentHover": "FF7350", "accentPressed": "E23E1D", "onAccent": "0A0E11", "textSelection": "FC4926@0.30",
         "fillPressed": "F6F1E9@0.10", "skeleton": "F6F1E9@0.06", "focusHalo": "FC4926@0.55", "error": "F2788D",
@@ -59,18 +59,21 @@ import Testing
         #expect(mast == (name == "dark" ? Palette.dark : Palette.light), "\(name): the terminal's colours are Mast's")
     }
 
-    /// Paper and ink in the tokens: the chrome is the paper; the only neutral fills are the pressed
-    /// one and the loading placeholders; the marks (the rail's chosen item, the wells, a person's
-    /// initial) are outlines and ink, never filled; the accent's only tints are the focus halo and
-    /// selected text; errors are crimson, at least 20 degrees of hue from the accent.
+    /// Paper and ink in the tokens, on a warm chrome: the chrome's text reads at 15:1 and more; the
+    /// only neutral fills are the pressed one and the loading placeholders; the wells and a person's
+    /// initial are outlines and ink, never filled, and the rail's chosen item stands on the chrome's
+    /// wash alone; the card has an outline only in dark; the accent's only tints are the focus halo
+    /// and selected text; errors are crimson, at least 20 degrees of hue from the accent.
     @Test(arguments: [("light", Look.light), ("dark", Look.dark), ("light contrasted", Look.light.contrasted()), ("dark contrasted", Look.dark.contrasted())])
     func paperAndInkFillNothingAtRest(_ name: String, _ look: Look) {
-        #expect(look.chrome == look.canvas, "\(name): the chrome is not the paper")
+        #expect(Self.contrast(look.text.rgb, look.chrome) >= 15, "\(name): text on the chrome is \(Self.contrast(look.text.rgb, look.chrome)):1")
+        #expect(look.railChosen.fill == Tint(look.chromeWash) && look.chrome != look.canvas, "\(name): the rail's chosen item is not on the chrome's wash")
+        #expect(look.cardEdge == (look.palette.isDark ? look.separator : nil), "\(name): the card's outline is \(String(describing: look.cardEdge))")
         for (token, tint) in [("fillPressed", look.fillPressed), ("skeleton", look.skeleton)] {
             #expect(tint.rgb == look.ink && tint.alpha < 0.12, "\(name) \(token) is \(Self.said(tint))")
         }
         for (role, mark) in [("railChosen", look.railChosen), ("well", look.well), ("wellChosen", look.wellChosen), ("avatar", look.avatar)] {
-            #expect(mark.fill == nil, "\(name): \(role) is filled")
+            #expect(mark.fill == nil || role == "railChosen", "\(name): \(role) is filled")
             let ink = Self.over(mark.ink, look.surface)
             #expect(Self.contrast(ink, look.surface) >= 4.5, "\(name): \(role)'s ink is \(Self.contrast(ink, look.surface)):1")
         }

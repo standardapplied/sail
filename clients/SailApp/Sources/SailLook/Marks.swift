@@ -31,7 +31,7 @@ package extension Look {
         guard area > 0 else { return [] }
         if fill.rgb == error { return [.neutralFill(area)] }
         if fill.rgb == ink || fill.rgb == text.rgb { return fill.alpha < 0.95 ? [.neutralFill(area)] : [] }
-        let grounds = [canvas, surface, surfacePop, chrome, palette.background] + BannerTone.allCases.map { BannerPaint($0, look: self).fill }
+        let grounds = [canvas, surface, surfacePop, chrome, chromeWash, palette.background] + BannerTone.allCases.map { BannerPaint($0, look: self).fill }
         let colours = [accentHover, accentPressed, errorHover, errorPressed, warning, success, info, onAccent, onError, onInk]
         return grounds.contains(fill.rgb) || colours.contains(fill.rgb) ? [] : [.neutralFill(area)]
     }

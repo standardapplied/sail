@@ -29,7 +29,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public let window: NSWindow
     public let rail: Rail
     public let account: AccountPane
-    /// The card's hairline on the chrome, over the card's edge, taking no clicks.
+    /// The card's outline on the chrome, over its edge, taking no clicks; none in light.
     let cardEdge: CardEdge
     public let workspaces: WorkspacesView
     public let thisMac: WorkbenchView
@@ -273,8 +273,8 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         strip.setFrameSize(NSSize(width: max(0, Double(window.frame.width) - start), height: strip.frame.height))
     }
 
-    /// The band, the rail and the card's margin are one chrome surface: the paper, as the website's,
-    /// the card told apart by the hairline along its leading and top edges.
+    /// The band, the rail and the card's margin are one chrome surface: the warm ground the paper card
+    /// stands on, outlined in dark.
     private func paintChrome() {
         root.layer?.backgroundColor = NSColor(look.chrome).cgColor
     }
@@ -319,7 +319,6 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.titlebarSeparatorStyle = .none
         content.wantsLayer = true
         content.layer?.cornerRadius = Look.contentRadius
-        content.layer?.maskedCorners = root.userInterfaceLayoutDirection == .rightToLeft ? [.layerMaxXMaxYCorner] : [.layerMinXMaxYCorner]
         content.layer?.masksToBounds = true
         root.wantsLayer = true
         paintChrome()

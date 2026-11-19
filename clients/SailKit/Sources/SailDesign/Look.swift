@@ -34,8 +34,9 @@ public struct Tint: Hashable, Sendable {
 /// table). The accent is terracotta always, never the system's. Text on it is `onAccent`: dark ink
 /// in the dark appearance, white in the light (the owner's choice), which is 3.43:1 on terracotta,
 /// so text on an accent fill is always large text (bold) and counts against 3:1. Status colours are
-/// Mast's; terracotta never means a status or an error. The look is paper and ink, as the
-/// website's: nothing is filled at rest but the one primary action; structure is hairlines and mono
+/// Mast's; terracotta never means a status or an error. Inside the card the look is paper and
+/// ink, as the website's, on a warm chrome at half the original peach's strength: nothing is filled
+/// at rest but the one primary action; structure is hairlines and mono
 /// eyebrows; a chosen thing is full-weight ink with the terracotta bar. Terracotta marks only where a
 /// person acts (the caret, the cursor with the keys, focus, a link's underline, the chosen bar), and
 /// red (crimson) means wrong or destroys. The accent's tint is only under selected text and in the
@@ -46,7 +47,11 @@ public struct Look: Equatable, Sendable {
     public let canvas: RGB
     public let surface: RGB
     public let surfacePop: RGB
+    /// The window's ground around the card (the title band and the rail): the original peach at half
+    /// its chroma, the one tinted ground.
     public let chrome: RGB
+    /// The chrome one step deeper, under the rail's chosen item alone.
+    public let chromeWash: RGB
     public let text: Tint
     public let textSecondary: Tint
     public private(set) var textTertiary: Tint
@@ -75,7 +80,7 @@ public struct Look: Equatable, Sendable {
     public let onInk: RGB
 
     public static let dark = Look(
-        palette: .dark, canvas: RGB(0x0A0E11), surface: RGB(0x12171B), surfacePop: RGB(0x161C21), chrome: RGB(0x0A0E11), text: Tint(0xF6F1E9),
+        palette: .dark, canvas: RGB(0x0A0E11), surface: RGB(0x12171B), surfacePop: RGB(0x161C21), chrome: RGB(0x201919), chromeWash: RGB(0x2B2423), text: Tint(0xF6F1E9),
         textSecondary: Tint(0xF6F1E9, alpha: 0.78), textTertiary: Tint(0xF6F1E9, alpha: 0.55), separator: Tint(0xF6F1E9, alpha: 0.14),
         separatorStrong: Tint(0xF6F1E9, alpha: 0.24), gridLine: Tint(0xF6F1E9, alpha: 0.07), accent: RGB(0xFC4926), accentHover: RGB(0xFF7350),
         accentPressed: RGB(0xE23E1D), onAccent: RGB(0x0A0E11),
@@ -85,7 +90,7 @@ public struct Look: Equatable, Sendable {
     ).withTerminalInk()
 
     public static let light = Look(
-        palette: .light, canvas: RGB(0xF8FAFC), surface: RGB(0xFDFFFF), surfacePop: RGB(0xFFFFFF), chrome: RGB(0xF8FAFC), text: Tint(0x0E1217),
+        palette: .light, canvas: RGB(0xF8FAFC), surface: RGB(0xFDFFFF), surfacePop: RGB(0xFFFFFF), chrome: RGB(0xF2EBE7), chromeWash: RGB(0xE6E0DB), text: Tint(0x0E1217),
         textSecondary: Tint(0x383E43), textTertiary: Tint(0x6D7277), separator: Tint(0x0E1217, alpha: 0.12), separatorStrong: Tint(0x0E1217, alpha: 0.22),
         gridLine: Tint(0x0E1217, alpha: 0.06), accent: RGB(0xFC4926), accentHover: RGB(0xD73626), accentPressed: RGB(0xB92C1E),
         onAccent: RGB(0xFFFFFF),
@@ -94,9 +99,10 @@ public struct Look: Equatable, Sendable {
         info: RGB(0x17646F), ink: RGB(0x0E1217), onInk: RGB(0xF8FAFC)
     ).withTerminalInk()
 
-    /// The rail's chosen item: full ink, no fill; the bar beside it says which.
+    /// The rail's chosen item: the chrome's wash under its icon in full ink; the bar beside it says
+    /// which.
     public var railChosen: InkMark {
-        InkMark(fill: nil, ink: text, edge: nil)
+        InkMark(fill: Tint(chromeWash), ink: text, edge: nil)
     }
 
     /// A project's letter well: an outline in the strong hairline, its letter quiet.
@@ -104,10 +110,11 @@ public struct Look: Equatable, Sendable {
         InkMark(fill: nil, ink: textSecondary, edge: separatorStrong)
     }
 
-    /// The content card's edge where it meets the chrome: a hairline along its leading and top
-    /// edges; nil draws none, and nothing lies over the card.
+    /// The content card's outline on the chrome: none in light, where the ground sets the card off;
+    /// a hairline in dark, where the card's panel and the chrome are 1.04:1. Nil draws none, and
+    /// nothing lies over the card.
     public var cardEdge: Tint? {
-        separator
+        palette.isDark ? separator : nil
     }
 
     /// The chosen project's letter well: outlined, and lettered, in full ink.
