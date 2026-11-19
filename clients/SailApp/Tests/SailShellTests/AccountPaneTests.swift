@@ -70,7 +70,10 @@ struct Signs: PasskeyAuthenticator {
 
 /// The recorded server, but the request whose route holds `holding`, after `skipped` such, is held
 /// until released, then answered by the server, or by `answer` when given; every route asked, in
-/// order.
+/// order. A row's sessions listing, asked beside each list of workspaces, is never the one held or
+/// counted: what a test holds is a person's action or a list, and a listing that matched took the
+/// place of the request a test meant, silently: one test held nothing it meant to and failed, and
+/// another passed while holding nothing at all.
 final class Held: Transport {
     private let server: RecordedServer
     private let holding: String
@@ -93,7 +96,7 @@ final class Held: Transport {
     func send(_ request: HTTPRequest) async throws(SailError) -> HTTPResponse {
         let held = state.withLock { state -> Bool in
             state.routes.append(request.route)
-            guard request.route.contains(holding) else { return false }
+            guard request.route.contains(holding), !request.route.hasSuffix("/sessions") else { return false }
             state.seen += 1
             return state.seen == skipped + 1
         }
