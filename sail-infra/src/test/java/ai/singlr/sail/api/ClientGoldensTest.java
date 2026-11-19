@@ -604,15 +604,30 @@ class ClientGoldensTest {
   private static List<PtyMessage> everyPtyMessage() {
     var lounge =
         new PtyMessage.SessionInfo(
-                "lounge", "inst-1", true, 2, "uday", ROOM, List.of("claude", "--resume"))
+                "lounge",
+                "inst-1",
+                true,
+                2,
+                "uday",
+                ROOM,
+                List.of("claude", "--dangerously-skip-permissions"))
             .placed(PROJECT, "dock", "uday")
-            .lived(1_763_460_000_000L, "");
+            .lived(1_763_460_000_000L, "")
+            .running(new PtyMessage.Agent("claude-code", "full", false));
     var shell = new PtyMessage.SessionInfo("shell", "inst-2", false, 0, "", "", List.of("bash"));
     return List.of(
         new PtyMessage.Hello("tok-uday"),
         new PtyMessage.Welcome("boot-7"),
         new PtyMessage.Create(
-            "lounge", List.of("bash", "-l"), "/home/dev", PROJECT, ROOM, 132, 43, "dock"),
+            "lounge",
+            List.of(),
+            "/home/dev",
+            PROJECT,
+            ROOM,
+            132,
+            43,
+            "dock",
+            new PtyMessage.Agent("codex", "full", true)),
         new PtyMessage.Attach("lounge", true),
         new PtyMessage.Input(42, "ls -la\r".getBytes(StandardCharsets.UTF_8)),
         new PtyMessage.Resize(100, 30),
@@ -817,7 +832,10 @@ class ClientGoldensTest {
                                               "",
                                               List.of("claude"))
                                           .placed(PROJECT, "dock", "uday")
-                                          .lived(1_763_460_000_000L, ""),
+                                          .lived(1_763_460_000_000L, "")
+                                          .running(
+                                              new PtyMessage.Agent(
+                                                  "claude-code", "default", false)),
                                       new PtyMessage.SessionInfo(
                                               "app-9e0f1a2b", "i-3", true, 0, "", "", List.of())
                                           .placed(PROJECT, "pier", "uday")

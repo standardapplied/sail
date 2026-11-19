@@ -147,6 +147,29 @@ class PtyWireTest {
         java.nio.channels.Channels.newChannel(new java.io.ByteArrayInputStream(frame)));
   }
 
+  /**
+   * A create names the harness the host starts, its mode and whether it signs in inside; a listed
+   * session the harness it runs, alone and in a page; a shell's is none.
+   */
+  @Test
+  void theHarnessASessionRunsSurvivesTheWire() throws Exception {
+    var agent = new PtyMessage.Agent("claude-code", "full", true);
+    var create = new PtyMessage.Create("s", List.of(), "/", "acme", "", 80, 24, "dock", agent);
+    assertEquals(create, roundTrip(create));
+    var shell = new PtyMessage.Create("s", List.of("bash"), "/", "acme", "", 80, 24, "dock");
+    assertEquals(PtyMessage.Agent.NONE, ((PtyMessage.Create) roundTrip(shell)).agent());
+    var info =
+        new PtyMessage.SessionInfo("s", "i", true, 1, "uday", "", List.of("claude"))
+            .placed("acme", "dock", "uday")
+            .lived(7, "")
+            .running(new PtyMessage.Agent("codex", "full", false));
+    var plain = new PtyMessage.SessionInfo("t", "j", false, 0, "", "", List.of("bash", "-l"));
+    assertEquals(info, roundTrip(info));
+    assertEquals(
+        new PtyMessage.Sessions(List.of(info, plain), ""),
+        roundTrip(new PtyMessage.Sessions(List.of(info, plain), "")));
+  }
+
   @Test
   void everyMessageShapeSurvivesTheWire() throws Exception {
     var create =

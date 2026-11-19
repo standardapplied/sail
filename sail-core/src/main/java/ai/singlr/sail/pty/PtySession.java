@@ -219,10 +219,12 @@ public final class PtySession implements AutoCloseable {
   /**
    * What a session was born as: its name, the id of this incarnation of that name, the FDE who
    * created it, the project whose container it runs in (blank for the node itself), the room it is
-   * pinned to (blank for none), and the child as requested — the facts every listing and every
-   * emitted event carry. Names are reusable (a corpse's name may be created again); {@code
-   * instanceId} is minted once per create and never reused, so a client that only ever saw two
-   * corpses of one name can still tell which life each belonged to.
+   * pinned to (blank for none), the child as requested, and the harness it runs ({@link
+   * PtyMessage.Agent#NONE} for a command), whose {@code command} is the harness's own and never the
+   * line that started it — the facts every listing and every emitted event carry. Names are
+   * reusable (a corpse's name may be created again); {@code instanceId} is minted once per create
+   * and never reused, so a client that only ever saw two corpses of one name can still tell which
+   * life each belonged to.
    */
   public record Origin(
       String name,
@@ -231,13 +233,27 @@ public final class PtySession implements AutoCloseable {
       String project,
       String room,
       List<String> command,
-      String workspace) {
+      String workspace,
+      PtyMessage.Agent agent) {
     public Origin {
       if (instanceId == null || instanceId.isBlank()) {
         throw new IllegalArgumentException("A session incarnation needs a non-blank instance id.");
       }
       command = List.copyOf(command);
       workspace = Objects.toString(workspace, "");
+      agent = Objects.requireNonNullElse(agent, PtyMessage.Agent.NONE);
+    }
+
+    /** A session that runs {@code command} in {@code workspace}. */
+    public Origin(
+        String name,
+        String instanceId,
+        String ownerFde,
+        String project,
+        String room,
+        List<String> command,
+        String workspace) {
+      this(name, instanceId, ownerFde, project, room, command, workspace, PtyMessage.Agent.NONE);
     }
 
     /** A session in the project's own container, or on the host when it names no project. */

@@ -1,6 +1,6 @@
 import SailAPI
 
-/// The `SAILPTY5` framing, byte for byte as the host's `PtyWire` writes it: a big-endian `Int32`
+/// The `SAILPTY6` framing, byte for byte as the host's `PtyWire` writes it: a big-endian `Int32`
 /// length, then the payload, a type byte and its fields. Integers are big-endian; strings and byte
 /// blobs are an `Int32` length and the bytes; a list is an `Int32` count and its entries.
 public enum FrameCodec {
@@ -116,7 +116,7 @@ private extension Frame {
             [
                 .string(create.session), .strings(create.command), .string(create.workingDirectory),
                 .string(create.project), .string(create.room),
-            ] + create.size.fields + [.string(create.workspace)]
+            ] + create.size.fields + [.string(create.workspace)] + create.agent.fields
         case let .attach(session, write): [.string(session), .bool(write)]
         case let .input(sequence, bytes): [.int64(sequence), .blob(bytes)]
         case let .resize(size), let .resized(size): size.fields
@@ -168,6 +168,13 @@ private extension SessionInfo {
     /// the frame, a page's after its cursor.
     var place: [Field] {
         [.string(project), .string(workspace), .string(opener), .int64(createdAtMillis), .string(endedReason)]
+            + agent.fields
+    }
+}
+
+private extension SessionAgent {
+    var fields: [Field] {
+        [.string(harness), .string(mode), .bool(inside)]
     }
 }
 
@@ -259,8 +266,12 @@ private struct Cursor {
     private mutating func create() throws(TerminalWireError) -> SessionCreate {
         SessionCreate(
             session: try string(), command: try strings(), workingDirectory: try string(), project: try string(),
-            room: try string(), size: try size(), workspace: try string()
+            room: try string(), size: try size(), workspace: try string(), agent: try agent()
         )
+    }
+
+    private mutating func agent() throws(TerminalWireError) -> SessionAgent {
+        SessionAgent(harness: try string(), mode: try string(), inside: try bool())
     }
 
 
@@ -287,6 +298,7 @@ private struct Cursor {
         placed.opener = try string()
         placed.createdAtMillis = try int64()
         placed.endedReason = try string()
+        placed.agent = try agent()
         return placed
     }
 

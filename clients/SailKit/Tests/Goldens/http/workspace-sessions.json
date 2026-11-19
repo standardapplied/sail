@@ -8,6 +8,11 @@
       "schema_version": 1,
       "sessions": [
         {
+          "agent": {
+            "harness": "claude-code",
+            "login": "stored",
+            "mode": "default"
+          },
           "attached": 1,
           "command": [
             "claude"

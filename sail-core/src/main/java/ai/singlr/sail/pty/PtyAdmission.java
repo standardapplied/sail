@@ -7,11 +7,13 @@ package ai.singlr.sail.pty;
 
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.store.LoginStore;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Where the host lets a person open a terminal: on this box, when it is theirs to operate ({@link
@@ -63,6 +65,37 @@ public interface PtyAdmission {
   default void enter(String project, String workspace, PtyIdentity.Person who) throws IOException {
     workspace(project, workspace, who);
   }
+
+  /**
+   * The stored login {@code agent} starts with in workspace {@code workspace} of {@code project}
+   * for {@code who}, empty when it signs in inside; or throws, with the reason and a remedy, when
+   * it may not start there: the workspace is not {@code who}'s own (an admin who may enter it opens
+   * a shell there, never an agent), the project does not install the harness, or {@code who} has no
+   * default login for it. Asked after the open decision and before the workspace is entered, and
+   * changes nothing. A host with no workspaces starts no agent.
+   */
+  default Optional<LoginStore.Login> agent(
+      String project, String workspace, PtyMessage.Agent agent, PtyIdentity.Person who)
+      throws IOException {
+    throw Remedied.io(
+        "This terminal host starts no agents: an agent runs in a workspace on a runner.",
+        Remedy.NONE);
+  }
+
+  /**
+   * Hands {@code lines}, a login's, to the dev user of {@code instance} as the file {@code file},
+   * {@code 0600} in a directory of its own made for it, written by the dev user from its input:
+   * never on a command line. Throws, with the reason, when it cannot.
+   */
+  default void handOver(String instance, String file, String lines) throws IOException {
+    throw new IOException("This terminal host hands no logins over.");
+  }
+
+  /**
+   * Removes what {@link #handOver} wrote as {@code file} in {@code instance}, for a session that
+   * did not start; nothing when it is gone.
+   */
+  default void withdraw(String instance, String file) {}
 
   /**
    * A workspace the project does not have here: not found, never refused; its reason and remedy

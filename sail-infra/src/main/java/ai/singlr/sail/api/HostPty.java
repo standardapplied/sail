@@ -6,8 +6,11 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.LoginStore;
 import java.io.IOException;
+import java.util.Optional;
 
 /**
  * What the pty host asks of the control plane: who a session is, who a ticket's credential is,
@@ -33,6 +36,19 @@ public interface HostPty {
 
   /** As {@link #admitWorkspace}, then readies it: started when stopped, given its owner's. */
   void enterWorkspace(String project, String workspace, PtyIdentity.Person who) throws IOException;
+
+  /**
+   * {@link PtyAdmission#agent}: the stored login an agent starts with in {@code who}'s workspace.
+   */
+  Optional<LoginStore.Login> admitAgent(
+      String project, String workspace, PtyMessage.Agent agent, PtyIdentity.Person who)
+      throws IOException;
+
+  /** {@link PtyAdmission#handOver}. */
+  void handOver(String instance, String file, String lines) throws IOException;
+
+  /** {@link PtyAdmission#withdraw}. */
+  void withdraw(String instance, String file);
 
   void admitRoom(String room, String project, PtyIdentity.Person who) throws IOException;
 

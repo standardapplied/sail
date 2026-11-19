@@ -3936,7 +3936,7 @@ tick, never once each. An accept that fails while the listener stays bound (out 
 passed over after 100 ms and never ends the door. A presented ticket's credential is resolved
 again against the roster. The connection then keeps `TCP_NODELAY` and TCP keepalive (a vanished peer
 found dead within about a minute, its slot, attachment and write token released), speaks the unix
-socket's `SAILPTY5` frames for its ticket's one action on its one target alone (an open ticket
+socket's `SAILPTY6` frames for its ticket's one action on its one target alone (an open ticket
 creates one session in its project and attaches to it), and may end that one session only while it
 holds its write token, so an observer never ends one (`PtyTickets.Ticket#refusal`, the host's
 ownership check still deciding the kill), each frame decided again as on the unix
@@ -4047,6 +4047,44 @@ host's own home when none is named; one that is no folder here is refused naming
 ("Could not start session '<name>' on this box."), and what the process launcher said goes to the
 host's log, never to the person. `RealRunnerTests.theAppsOwnCreateForAWorkspaceTabOpensInTheWorkspaceAndEchoes`
 opens a workspace on a real host with the app's own `Create`.
+
+**An agent started in a person's workspace (`PtyMessage.Agent`).** A `Create` may name a harness
+(`agent: {harness, mode, inside}`) instead of a command, which must then be empty: the host
+composes the command from the harness (`Harness.interactive(mode)`, its modes `Harness.modes()`:
+Claude Code's own default and `full`, Codex's `full` alone) and never runs a client's line as an
+agent. Only in a workspace, and only as its owner: before the workspace is entered or started,
+`PtyAdmission.agent` (`HostLanes.Pty.admitAgent`) refuses an asker who is not the person the
+workspace is labelled for, an admin who may enter it included ("dock is ana's workspace, so an agent
+starts in it only as ana, with ana's login."; they open a shell there), a harness the project's
+`agent.install` does not list, and an owner with no default stored login for it (`RunLogins.stored`,
+the runs' own lookup and words, with the typed remedy `agent login <harness>` or `agent login use
+<harness> <name>` an app turns into its own sheet). The login is the owner's, looked up by the FDE id
+the workspace is labelled for, as its git tokens are; never the box's or another person's. After
+the workspace is entered, the host hands the login over (`PtyAdmission.handOver`): one `incus exec`
+as the dev user runs `SessionLogin.HAND` with the login's lines (`LaunchEnv.loginLines`: its kind's
+variable, every other credential variable and cloud switch of the harness empty) on its stdin, into
+`/home/dev/.sail/sessions/<instanceId>/login.env`, `0600` in a `0700` directory made for it,
+its directory made fresh by `mkdir` without `-p`, which refuses a name already there, a link
+included, and first removing
+any session directory there older than a minute, what an exec killed before its read left. The
+session then runs `bash -lc` with `LaunchEnv.read` of that file (exported line by line with
+tracing off, the file removed), its directory removed, a check that the workspace holds the
+harness's binary (else "Claude Code is not installed in this workspace: …", exit 127), the
+harness's own sign-in (`Harness.interactiveSignIn`) and `exec` of the harness. Claude Code reads
+its login from its environment in an interactive session too. Codex's interactive session reads a
+key only from its own store, so its sign-in pipes the key to `codex login --with-api-key` with
+`printf`, a builtin, and unsets the variable: Codex's key rests in the workspace's
+`~/.codex/auth.json` until the next start replaces it or the workspace is deleted. A session that
+did not start after its hand-over has the file withdrawn (`PtyAdmission.withdraw`). `inside`
+starts the harness with nothing handed over, for a person who signs in with the harness's own login
+there; Sail never holds that one. The listing, the sidecar and every event carry the harness's own
+command (`["claude", "--dangerously-skip-permissions"]`) and `agent`, never the line that started
+it; no argv on the runner or in the workspace holds a login. Every process in a workspace is the
+dev user, so any session there, and an admin's shell in it, can read a running harness's
+environment and Codex's store, as they can the owner's git token. Sail adds no permission rule and
+no settings to an interactive session: what the agent may do is the project's to set in its own
+`.claude/settings.json` or `config.toml` (deny rules, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`, Codex's
+`shell_environment_policy`), with the mode the person chooses.
 
 **The terminal host on a person's own machine.** `sail _pty-host --local` (`LocalPtyHost`) is the
 same host wired for the account it runs as, with no server: the native app's launchd agent runs

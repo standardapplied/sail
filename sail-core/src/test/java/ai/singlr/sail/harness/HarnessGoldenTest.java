@@ -305,6 +305,38 @@ class HarnessGoldenTest {
   }
 
   @Test
+  void anInteractiveSessionStartsOnlyInAModeItsHarnessTakesInAWorkspace() {
+    assertEquals(List.of("default", "full"), CLAUDE_CODE.modes());
+    assertEquals("claude", CLAUDE_CODE.interactive("default"));
+    assertEquals("claude --dangerously-skip-permissions", CLAUDE_CODE.interactive("full"));
+    assertEquals(List.of("full"), CODEX.modes());
+    assertEquals("codex --dangerously-bypass-approvals-and-sandbox", CODEX.interactive("full"));
+    assertEquals(
+        "Codex CLI takes no mode 'default' in a workspace; it takes full.",
+        assertThrows(IllegalArgumentException.class, () -> CODEX.interactive("default"))
+            .getMessage());
+    assertEquals(
+        "Claude Code takes no mode 'plan' in a workspace; it takes default, full.",
+        assertThrows(IllegalArgumentException.class, () -> CLAUDE_CODE.interactive("plan"))
+            .getMessage());
+  }
+
+  /**
+   * Claude Code reads its login from its environment in an interactive session too; Codex's reads
+   * one only from its own store, so its key is piped to its own login by a builtin and unset.
+   */
+  @Test
+  void anInteractiveSessionSignsInAsItsHarnessTakesALogin() {
+    for (var kind : CLAUDE_CODE.loginKinds()) {
+      assertEquals("", CLAUDE_CODE.interactiveSignIn(kind));
+    }
+    assertEquals(
+        "printf '%s\\n' \"$CODEX_API_KEY\" | codex login --with-api-key > /dev/null 2>&1 || { echo"
+            + " \"Codex CLI did not take this login.\"; exit 1; }; unset CODEX_API_KEY",
+        CODEX.interactiveSignIn(CODEX.loginKinds().getFirst()));
+  }
+
+  @Test
   void interactive() {
     assertEquals("claude", CLAUDE_CODE.interactive(false));
     assertEquals("claude --dangerously-skip-permissions", CLAUDE_CODE.interactive(true));

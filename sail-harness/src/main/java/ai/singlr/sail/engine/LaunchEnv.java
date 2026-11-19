@@ -55,11 +55,16 @@ public record LaunchEnv(String runCredential, LoginStore.Login stored) {
    * the login it records.
    */
   public String lines() {
-    var lines =
-        new StringBuilder(RUN_CREDENTIAL + "=" + Objects.toString(runCredential, "") + "\n");
-    if (stored == null) {
-      return lines.toString();
-    }
+    var lines = RUN_CREDENTIAL + "=" + Objects.toString(runCredential, "") + "\n";
+    return stored == null ? lines : lines + loginLines(stored);
+  }
+
+  /**
+   * The lines of {@code stored} alone: every other variable its harness takes a credential from and
+   * every switch that sends it to a cloud provider's account set empty, then its own kind's.
+   */
+  public static String loginLines(LoginStore.Login stored) {
+    var lines = new StringBuilder();
     var own = stored.kind().variable();
     var harness = Harnesses.of(stored.row().harness());
     for (var variable : harness.loginVariables()) {

@@ -116,6 +116,30 @@ final class Codex implements Harness {
             + " reservation guards that lane.");
   }
 
+  /** Only full: its sandbox needs user namespaces, which Incus containers block. */
+  @Override
+  public List<String> modes() {
+    return List.of(FULL_MODE);
+  }
+
+  /**
+   * Codex's interactive session reads an API key only from its own store, never from {@code
+   * CODEX_API_KEY}, so the key is piped to {@code codex login --with-api-key} by {@code printf}, a
+   * builtin, and the variable unset: the key rests in Codex's own store in the workspace.
+   */
+  @Override
+  public String interactiveSignIn(LoginKind kind) {
+    var variable = kind.variable();
+    return "printf '%s\\n' \"$"
+        + variable
+        + "\" | "
+        + BINARY
+        + " login --with-api-key > /dev/null 2>&1 || { echo \""
+        + displayName()
+        + " did not take this login.\"; exit 1; }; unset "
+        + variable;
+  }
+
   @Override
   public String interactive(boolean fullPermissions) {
     return fullPermissions ? BINARY + " --dangerously-bypass-approvals-and-sandbox" : BINARY;

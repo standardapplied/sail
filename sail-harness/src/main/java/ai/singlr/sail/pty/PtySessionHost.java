@@ -15,7 +15,11 @@ import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.LaunchEnv;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.SessionLogin;
+import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.store.LoginStore;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.StandardProtocolFamily;
@@ -1191,6 +1195,7 @@ public final class PtySessionHost implements AutoCloseable {
       }
       requireValidGeometry(m.cols(), m.rows());
       cwd = requireValidCwd(m.cwd());
+      requireValidAgent(m);
     } catch (IllegalArgumentException bad) {
       log("refused", who.fde(), m.session(), bad.getMessage());
       return PtyMessage.Err.of(bad);
@@ -1199,6 +1204,18 @@ public final class PtySessionHost implements AutoCloseable {
     if (unopened != null) {
       log("refused", who.fde(), m.session(), "not opened");
       return unopened.err();
+    }
+    Optional<LoginStore.Login> login = Optional.empty();
+    if (!m.agent().none()) {
+      try {
+        login = admission.agent(m.project(), m.workspace(), m.agent(), who);
+      } catch (IOException refused) {
+        log("refused", who.fde(), m.session(), "agent not started");
+        return told(refused, PtyMessage.TicketRefusal.FORBIDDEN, who, m.session()).err();
+      } catch (RuntimeException unavailable) {
+        log("agent-check-failed", who.fde(), m.project(), unavailable.toString());
+        return new PtyMessage.Err(UNSERVED);
+      }
     }
     if (!m.workspace().isBlank()) {
       try {
@@ -1221,7 +1238,70 @@ public final class PtySessionHost implements AutoCloseable {
         return new PtyMessage.Err(UNSERVED);
       }
     }
-    return create(m, who, cwd);
+    if (m.agent().none()) {
+      return create(m, who, cwd, null);
+    }
+    return startAgent(m, who, cwd, login);
+  }
+
+  /**
+   * A session that runs {@code m}'s harness, its command the host's own: its login, when it has
+   * one, handed over to the workspace before the session starts, and withdrawn when it does not.
+   */
+  private PtyMessage startAgent(
+      PtyMessage.Create m, PtyIdentity.Person who, Path cwd, Optional<LoginStore.Login> login) {
+    var harness = Harnesses.of(m.agent().harness());
+    var instanceId = Ids.newId().toString();
+    var instance = m.project() + "-" + m.workspace();
+    var file = SessionLogin.file(instanceId);
+    if (login.isPresent()) {
+      try {
+        admission.handOver(instance, file, LaunchEnv.loginLines(login.get()));
+      } catch (IOException | RuntimeException failed) {
+        log("login-not-handed", who.fde(), m.session(), failed.toString());
+        return new PtyMessage.Err(
+            "Could not start session '"
+                + m.session()
+                + "': its login could not be handed to workspace "
+                + m.workspace()
+                + ".",
+            PtyAdmission.Unavailable.REMEDY);
+      }
+    }
+    var start =
+        new Started(
+            instanceId,
+            SessionLogin.shown(harness, m.agent().mode()),
+            SessionLogin.command(harness, m.agent().mode(), login, file));
+    var answer = create(m, who, cwd, start);
+    if (login.isPresent() && !(answer instanceof PtyMessage.Ok)) {
+      Thread.ofVirtual().name("pty-login-withdraw").start(() -> admission.withdraw(instance, file));
+    }
+    return answer;
+  }
+
+  /**
+   * An agent session as the host composed it: its incarnation's id, the command it shows, and what
+   * its workspace runs.
+   */
+  private record Started(String instanceId, List<String> shown, List<String> run) {}
+
+  /**
+   * Refuses an agent {@code m} names that cannot start as asked: with a command beside it, outside
+   * a workspace, of a harness Sail does not know, or in a mode the harness does not take.
+   */
+  private static void requireValidAgent(PtyMessage.Create m) {
+    if (m.agent().none()) {
+      return;
+    }
+    if (!m.command().isEmpty()) {
+      throw new IllegalArgumentException("A session runs a harness or a command, not both.");
+    }
+    if (m.workspace().isBlank()) {
+      throw new IllegalArgumentException(
+          "An agent starts in a workspace of your own; name the workspace to start it in.");
+    }
+    Harnesses.of(m.agent().harness()).interactive(m.agent().mode());
   }
 
   /**
@@ -1230,7 +1310,8 @@ public final class PtySessionHost implements AutoCloseable {
    * has begun — a handoff has snapshotted the sessions, and a create landing after it would replace
    * a handed-off session's ring and sidecar under the successor's feet.
    */
-  private synchronized PtyMessage create(PtyMessage.Create m, PtyIdentity.Person who, Path cwd) {
+  private synchronized PtyMessage create(
+      PtyMessage.Create m, PtyIdentity.Person who, Path cwd, Started started) {
     if (closed) {
       return SHUTTING_DOWN;
     }
@@ -1293,12 +1374,13 @@ public final class PtySessionHost implements AutoCloseable {
       var origin =
           new PtySession.Origin(
               m.session(),
-              Ids.newId().toString(),
+              started == null ? Ids.newId().toString() : started.instanceId(),
               who.fde(),
               m.project(),
               room,
-              folder.command(m.command()),
-              m.workspace());
+              started == null ? folder.command(m.command()) : started.shown(),
+              m.workspace(),
+              m.agent());
       uploads.sweep(
           origin,
           () ->
@@ -1309,7 +1391,11 @@ public final class PtySessionHost implements AutoCloseable {
       var env = childEnv(room, version);
       env.putAll(folder.env());
       var argv = new ArrayList<>(handoff.shim().apply(files.exit()));
-      argv.addAll(childCommand(origin, env));
+      argv.addAll(
+          started == null
+              ? childCommand(origin, env)
+              : ai.singlr.sail.engine.ContainerExec.asDevUserTty(
+                  origin.instance(), env, started.run()));
       var session =
           PtySession.start(
               origin,
@@ -1489,7 +1575,8 @@ public final class PtySessionHost implements AutoCloseable {
         .placed(session.origin().project(), session.origin().workspace(), session.ownerFde())
         .lived(
             session.createdAtMillis(),
-            java.util.Objects.requireNonNullElse(session.endedReason(), ""));
+            java.util.Objects.requireNonNullElse(session.endedReason(), ""))
+        .running(session.origin().agent());
   }
 
   private synchronized PtyMessage kill(String name, PtyIdentity who) {

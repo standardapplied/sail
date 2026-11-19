@@ -274,26 +274,35 @@ class AccessDoorsBaselineTest {
   /**
    * A ticket asked at the ticket door by each FDE of the roster, by a machine token and by the
    * host's own token, on main, where ada operates the box: to open a terminal in each project, and
-   * to attach to ada's session and to one that does not exist. The terminal host behind the door is
-   * the real one, over loopback TCP, deciding each as it decides that open or attach; its sessions
-   * in a project run {@code cat}, for want of an Incus. Asked after every other door and outside a
-   * rehearsal: the host answers from its own threads, and each ask mints a credential.
+   * to attach to ada's session and to one that does not exist; then, each over a ticket to open the
+   * workspace, to start Claude Code there on a stored login and signed in inside, asked last so no
+   * agent it starts is listed by an earlier row. The terminal host behind the door is the real one,
+   * over loopback TCP, deciding each as it decides that open or attach; its sessions in a project
+   * run {@code cat}, for want of an Incus. Asked after every other door and outside a rehearsal:
+   * the host answers from its own threads, and each ask mints a credential.
    */
   private void tickets(World world, Corpus corpus) throws IOException {
     var roles =
         new RoleRule(
             () -> new SyncConfig(SyncConfig.ROLE_MAIN, null, Cast.OWNER), new FdeStore(world.db));
+    var incus = workspacesOfAcme(world, new ScriptedShellExecutor());
     var pty =
         new HostLanes.Pty(
             world.db,
             roles,
             new EventStore(world.db),
             new BoxInstances(new ScriptedShellExecutor()),
-            TestWorkspaces.over(workspacesOfAcme(world, new ScriptedShellExecutor())),
-            project -> java.util.Optional.empty(),
+            TestWorkspaces.over(incus),
+            project ->
+                java.util.Optional.of(
+                    TestDefinitions.yaml(
+                        "name: "
+                            + project
+                            + "\nagent:\n  type: claude-code\n  install: [claude-code]\n")),
             handle ->
                 WorkspaceOwner.of(
-                    new FdeStore(world.db), handle, Cast.OWNER, java.util.Optional.empty()));
+                    new FdeStore(world.db), handle, Cast.OWNER, java.util.Optional.empty()),
+            incus);
     var socket = tempDir.resolve("pty.sock");
     try (var host =
         new PtySessionHost(
@@ -322,6 +331,18 @@ class AccessDoorsBaselineTest {
               public void workspace(String project, String workspace, PtyIdentity.Person who)
                   throws IOException {
                 pty.admitWorkspace(project, workspace, who);
+              }
+
+              @Override
+              public java.util.Optional<ai.singlr.sail.store.LoginStore.Login> agent(
+                  String project, String workspace, PtyMessage.Agent agent, PtyIdentity.Person who)
+                  throws IOException {
+                return pty.admitAgent(project, workspace, agent, who);
+              }
+
+              @Override
+              public void handOver(String instance, String file, String lines) throws IOException {
+                pty.handOver(instance, file, lines);
               }
             },
             PtyEvents.NONE,
@@ -422,6 +443,71 @@ class AccessDoorsBaselineTest {
                   null));
         }
       }
+      for (var asker : askers.entrySet()) {
+        for (var workspace : List.of("try", "spare", "loose")) {
+          for (var agent :
+              List.of(
+                  new PtyMessage.Agent("claude-code", "full", false),
+                  new PtyMessage.Agent("claude-code", "default", true))) {
+            var label =
+                asker.getKey()
+                    + " starts Claude Code "
+                    + (agent.inside() ? "signed in inside" : "on a stored login")
+                    + " in workspace "
+                    + workspace
+                    + " of acme";
+            var session = "agent-" + (++started);
+            corpus.put(
+                label,
+                answer(
+                    new Door(
+                        label,
+                        ops ->
+                            startAgent(
+                                door,
+                                host.tcpAddress().orElseThrow(),
+                                asker.getValue(),
+                                workspace,
+                                agent,
+                                session)),
+                    null));
+          }
+        }
+      }
+    }
+  }
+
+  private int started;
+
+  /**
+   * An agent asked of the terminal host over a ticket to open a terminal in {@code workspace} of
+   * acme, as an app asks it: started, or refused by the host in its own words.
+   */
+  private static String startAgent(
+      TerminalTickets door,
+      InetSocketAddress host,
+      String credential,
+      String workspace,
+      PtyMessage.Agent agent,
+      String session)
+      throws IOException {
+    var ticket =
+        door.issue(credential, Map.of("action", "open", "project", "acme", "workspace", workspace))
+            .ticket();
+    try (var channel = java.nio.channels.SocketChannel.open(host)) {
+      ai.singlr.sail.pty.PtyWire.handshake(channel, channel);
+      ai.singlr.sail.pty.PtyWire.write(channel, new PtyMessage.Hello(ticket));
+      if (!(ai.singlr.sail.pty.PtyWire.read(channel) instanceof PtyMessage.Welcome)) {
+        throw new IOException("the ticket was not welcomed");
+      }
+      ai.singlr.sail.pty.PtyWire.write(
+          channel,
+          new PtyMessage.Create(session, List.of(), "/", "acme", "", 80, 24, workspace, agent));
+      return switch (ai.singlr.sail.pty.PtyWire.read(channel)) {
+        case PtyMessage.Ok ok -> "started";
+        case PtyMessage.Err err -> throw Remedied.io(err.reason(), err.remedy());
+        case PtyMessage other -> throw new IOException("the host answered " + other);
+      };
     }
   }
 

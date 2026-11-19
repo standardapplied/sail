@@ -26,16 +26,17 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
 /**
- * {@code sail agent login <harness>}: stores a harness login every run of a spec of yours starts
- * with, read from stdin, never from the command line, and echoed nowhere. On the host it is root's
- * and acts as the box's person; anyone else reaches the same door through the gateway. Its
- * subcommands list, choose the default of and remove logins. No answer ever holds a value.
+ * {@code sail agent login <harness>}: stores a harness login every run of a spec of yours, and
+ * every agent you start in a workspace of yours, starts with, read from stdin, never from the
+ * command line, and echoed nowhere. On the host it is root's and acts as the box's person; anyone
+ * else reaches the same door through the gateway. Its subcommands list, choose the default of and
+ * remove logins. No answer ever holds a value.
  */
 @Command(
     name = "login",
     description =
-        "Store a harness login your spec runs start with, read from stdin; list, use or remove"
-            + " logins.",
+        "Store a harness login your spec runs and your agents in your workspaces start with, read"
+            + " from stdin; list, use or remove logins.",
     mixinStandardHelpOptions = true,
     subcommands = {
       AgentLoginCommand.ListLogins.class,

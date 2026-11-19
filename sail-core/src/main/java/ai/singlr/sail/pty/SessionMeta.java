@@ -47,6 +47,9 @@ public record SessionMeta(
     map.put("room", Objects.toString(origin.room(), ""));
     map.put("workspace", origin.workspace());
     map.put("command", origin.command());
+    map.put("agent_harness", origin.agent().harness());
+    map.put("agent_mode", origin.agent().mode());
+    map.put("agent_inside", origin.agent().inside());
     map.put("cwd", cwd);
     map.put("cols", cols);
     map.put("rows", rows);
@@ -85,7 +88,8 @@ public record SessionMeta(
               string(map, "project"),
               string(map, "room"),
               strings(map.get("command")),
-              string(map, "workspace"));
+              string(map, "workspace"),
+              agent(map));
       return new SessionMeta(
           origin,
           string(map, "cwd"),
@@ -102,6 +106,17 @@ public record SessionMeta(
     } catch (RuntimeException e) {
       throw new IOException("Session sidecar " + path + " is unreadable: " + e, e);
     }
+  }
+
+  /**
+   * The harness the session runs: none in a sidecar a host before agents wrote, so the sessions it
+   * hands over at an upgrade are kept.
+   */
+  private static PtyMessage.Agent agent(Map<String, Object> map) {
+    return new PtyMessage.Agent(
+        map.get("agent_harness") instanceof String harness ? harness : "",
+        map.get("agent_mode") instanceof String mode ? mode : "",
+        Boolean.TRUE.equals(map.get("agent_inside")));
   }
 
   private static String string(Map<String, Object> map, String key) throws IOException {

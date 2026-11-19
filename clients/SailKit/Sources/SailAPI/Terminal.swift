@@ -47,8 +47,9 @@ public struct RunnerSessions: Codable, Equatable, Sendable {
 }
 
 /// One terminal session on the runner: whether it lives, how many clients it has, who holds its
-/// keyboard (empty for no one), who opened it and when, what it runs (empty for the login shell),
-/// and the host's words for why it ended, nil while it lives.
+/// keyboard (empty for no one), who opened it and when, what it runs (`["bash", "-l"]` for the login
+/// shell, the harness's own command for an agent), the harness it runs (nil for a command), and the
+/// host's words for why it ended, nil while it lives.
 public struct RunnerSession: Codable, Equatable, Sendable {
     public let name: String
     public let live: Bool
@@ -56,12 +57,13 @@ public struct RunnerSession: Codable, Equatable, Sendable {
     public let writer: String
     public let opener: String
     public let command: [String]
+    public let agent: RunnerAgent?
     public let createdAt: Date
     public let endedReason: String?
 
     public init(
-        name: String, live: Bool, attached: Int, writer: String, opener: String, command: [String], createdAt: Date,
-        endedReason: String?
+        name: String, live: Bool, attached: Int, writer: String, opener: String, command: [String],
+        agent: RunnerAgent? = nil, createdAt: Date, endedReason: String?
     ) {
         self.name = name
         self.live = live
@@ -69,14 +71,29 @@ public struct RunnerSession: Codable, Equatable, Sendable {
         self.writer = writer
         self.opener = opener
         self.command = command
+        self.agent = agent
         self.createdAt = createdAt
         self.endedReason = endedReason
     }
 
     private enum CodingKeys: String, CodingKey {
-        case name, live, attached, writer, opener, command
+        case name, live, attached, writer, opener, command, agent
         case createdAt = "created_at"
         case endedReason = "ended_reason"
+    }
+}
+
+/// The harness a runner session runs, by the host's name for it, in one of its own modes, and
+/// whether it was signed in with its person's stored login (`stored`) or signs in inside (`inside`).
+public struct RunnerAgent: Codable, Equatable, Sendable {
+    public let harness: String
+    public let mode: String
+    public let login: String
+
+    public init(harness: String, mode: String, login: String) {
+        self.harness = harness
+        self.mode = mode
+        self.login = login
     }
 }
 

@@ -163,6 +163,48 @@ public interface Harness {
   /** The command for an interactive (TTY) session. */
   String interactive(boolean fullPermissions);
 
+  /** The harness's own default mode: it asks before it acts, as it does when run bare. */
+  String DEFAULT_MODE = "default";
+
+  /** The mode that approves every action without asking: {@link #interactive interactive(true)}. */
+  String FULL_MODE = "full";
+
+  /**
+   * The modes a person starts an interactive session of this harness in: its own default and {@link
+   * #FULL_MODE}.
+   */
+  default List<String> modes() {
+    return List.of(DEFAULT_MODE, FULL_MODE);
+  }
+
+  /**
+   * The interactive command in {@code mode}, one of {@link #modes}.
+   *
+   * @throws IllegalArgumentException naming the modes it takes, for any other
+   */
+  default String interactive(String mode) {
+    if (!modes().contains(mode)) {
+      throw new IllegalArgumentException(
+          displayName()
+              + " takes no mode '"
+              + mode
+              + "' in a workspace; it takes "
+              + String.join(", ", modes())
+              + ".");
+    }
+    return interactive(FULL_MODE.equals(mode));
+  }
+
+  /**
+   * The shell text that, with a login of {@code kind} exported as its variable, signs this harness
+   * in from it before an interactive session starts, for a harness whose interactive session reads
+   * its credential only from its own store; empty for one that reads the variable itself. What it
+   * prints names nothing of the login, and no process it starts holds the value in its arguments.
+   */
+  default String interactiveSignIn(LoginKind kind) {
+    return "";
+  }
+
   /**
    * The interactive command resuming the recorded session {@code sessionId} exactly by id, or a
    * fresh conversation when it is {@code null}: never an interactive picker.

@@ -23,7 +23,7 @@ import java.util.List;
  */
 public final class PtyWire {
 
-  static final byte[] MAGIC = "SAILPTY5".getBytes(StandardCharsets.US_ASCII);
+  static final byte[] MAGIC = "SAILPTY6".getBytes(StandardCharsets.US_ASCII);
   static final int MAX_FRAME = 1 << 20;
 
   private PtyWire() {}
@@ -95,7 +95,7 @@ public final class PtyWire {
             .string(m.project())
             .string(m.room());
         out.i32(m.cols()).i32(m.rows());
-        out.string(m.workspace());
+        encodeAgent(out.string(m.workspace()), m.agent());
       }
       case PtyMessage.Attach m -> {
         out.type(2).string(m.session());
@@ -252,11 +252,21 @@ public final class PtyWire {
 
   /**
    * Where a session runs, who opened it and when, and why it ended: its project, its workspace, its
-   * opener, its creation in epoch milliseconds and its ended reason, blank while it lives.
+   * opener, its creation in epoch milliseconds, its ended reason, blank while it lives, and the
+   * harness it runs.
    */
   private static Writer encodePlace(Writer out, PtyMessage.SessionInfo info) {
     out.string(info.project()).string(info.workspace()).string(info.opener());
-    return out.i64(info.createdAtMillis()).string(info.endedReason());
+    return encodeAgent(out.i64(info.createdAtMillis()).string(info.endedReason()), info.agent());
+  }
+
+  /** The harness a session runs, its mode and whether it signs in inside: blank for a command. */
+  private static Writer encodeAgent(Writer out, PtyMessage.Agent agent) {
+    return out.string(agent.harness()).string(agent.mode()).bool(agent.inside());
+  }
+
+  private static PtyMessage.Agent agent(ByteBuffer in) throws IOException {
+    return new PtyMessage.Agent(string(in), string(in), in.get() == 1);
   }
 
   private static PtyMessage decode(ByteBuffer in) throws IOException {
@@ -272,7 +282,8 @@ public final class PtyWire {
               string(in),
               in.getInt(),
               in.getInt(),
-              string(in));
+              string(in),
+              agent(in));
       case 2 -> new PtyMessage.Attach(string(in), in.get() == 1);
       case 3 -> new PtyMessage.Input(in.getLong(), bytes(in));
       case 4 -> new PtyMessage.Resize(in.getInt(), in.getInt());
@@ -333,7 +344,9 @@ public final class PtyWire {
   /** {@code info} with what {@link #encodePlace} wrote for it. */
   private static PtyMessage.SessionInfo placed(PtyMessage.SessionInfo info, ByteBuffer in)
       throws IOException {
-    return info.placed(string(in), string(in), string(in)).lived(in.getLong(), string(in));
+    return info.placed(string(in), string(in), string(in))
+        .lived(in.getLong(), string(in))
+        .running(agent(in));
   }
 
   private static PtyMessage.SessionInfo decodeInfo(ByteBuffer in) throws IOException {
