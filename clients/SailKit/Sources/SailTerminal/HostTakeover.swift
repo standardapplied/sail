@@ -8,7 +8,7 @@ import SailTerminalWire
 
 /// What an app does with the host serving at the person's socket, on three positive facts: it is
 /// not this build's copy (the same file, by device and inode), a Sail app made it (a copy under the
-/// app's copies folder, or the helper inside an app bundle, never a CLI install's), and no client
+/// app's copies folder, never a CLI install's), and no client
 /// holds any of its sessions. With a client, nothing is ended.
 public enum HostTakeover: Equatable, Sendable {
     /// Use it as it is: this build's, not a Sail app's, or its sessions could not be listed.
@@ -30,12 +30,11 @@ public enum HostTakeover: Equatable, Sendable {
         return first.st_dev == second.st_dev && first.st_ino == second.st_ino
     }
 
-    /// A host a Sail app made: a copy under `copies`, or the helper inside an app bundle (the shape
-    /// builds before copies ran theirs from).
+    /// A host a Sail app made: a copy under `copies`.
     public static func sailMade(_ executable: String, copies: String) -> Bool {
         let path = URL(filePath: executable).resolvingSymlinksInPath().path
         let folder = URL(filePath: copies).resolvingSymlinksInPath().path
-        return path.hasPrefix(folder + "/") || path.hasSuffix(".app/Contents/Helpers/sail")
+        return path.hasPrefix(folder + "/")
     }
 }
 

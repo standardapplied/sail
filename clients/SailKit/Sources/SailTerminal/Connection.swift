@@ -27,7 +27,7 @@ final class Connection: Sendable {
     }
 
     /// Is admitted with `token`: the boot id of the run of the host that welcomed it. Refused in
-    /// the host's words, or naming which side is older when the magic differs.
+    /// the host's words, or as another protocol when the magic differs.
     func admit(token: String) throws(TerminalError) -> String {
         try socket.send(Handshake.magic)
         let peer = try reading.withLock { (reading: inout Reading) throws(TerminalError) in try reading.magic(from: socket) }
@@ -100,7 +100,7 @@ final class Connection: Sendable {
     }
 
     fileprivate static func violation(_ error: TerminalWireError) -> TerminalError {
-        if case let .skew(skew) = error { return .skew(skew) }
+        if case .otherProtocol = error { return .otherProtocol }
         return .protocolViolation("\(error)")
     }
 }

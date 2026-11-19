@@ -169,15 +169,13 @@ import Testing
         }
     }
 
-    @Test func theHandshakeIsTheHostsMagicAndNamesWhichSideIsBehind() throws {
+    @Test func theHandshakeIsTheHostsMagicAndAnyOtherIsAnotherProtocol() throws {
         #expect(Handshake.magic == (try Goldens.magic()))
         try Handshake.check(peer: Goldens.magic())
-        #expect(throws: TerminalWireError.skew(.hostOlder)) { try Handshake.check(peer: Array("SAILPTY3".utf8)) }
-        #expect(throws: TerminalWireError.skew(.hostOlder)) { try Handshake.check(peer: Array("SAILPTY2".utf8)) }
-        #expect(throws: TerminalWireError.skew(.hostOlder)) { try Handshake.check(peer: Array("SAILPTY1".utf8)) }
-        #expect(throws: TerminalWireError.skew(.clientOlder)) { try Handshake.check(peer: Array("SAILPTY5".utf8)) }
-        #expect(throws: TerminalWireError.skew(.clientOlder)) { try Handshake.check(peer: Array("SAIL".utf8)) }
-        #expect(throws: TerminalWireError.skew(.clientOlder)) { try Handshake.check(peer: Goldens.magic() + [0x33]) }
+        for other in ["SAILPTY3", "SAILPTY5", "SAIL"] {
+            #expect(throws: TerminalWireError.otherProtocol) { try Handshake.check(peer: Array(other.utf8)) }
+        }
+        #expect(throws: TerminalWireError.otherProtocol) { try Handshake.check(peer: Goldens.magic() + [0x33]) }
     }
 }
 

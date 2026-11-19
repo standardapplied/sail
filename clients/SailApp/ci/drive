@@ -217,7 +217,7 @@ for run in first second third shots workspaces kit kit-rtl; do
     echo "ci/drive: another copy's host, and a client on it"
     pkill -f '_pty-host --local' || true
     perl -e 'alarm shift; exec @ARGV' 30 bash -c 'while pgrep -f "_pty-host --local" > /dev/null; do :; done'
-    other=$out/other-build/Sail.app/Contents/Helpers
+    other="$HOME/Library/Application Support/Sail/Host/other-build"
     socket=$HOME/.sail/local/pty.sock
     mkdir -p "$other" && cp "$sail" "$other/sail"
     ("$other/sail" _pty-host --local > "$out/other-host.log" 2>&1 &)

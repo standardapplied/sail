@@ -186,14 +186,6 @@ public enum TerminalWireError: Error, Equatable, Sendable {
     case truncated
     case unknownType(UInt8)
     case malformed(String)
-    /// The peer speaks another version of the protocol.
-    case skew(Skew)
-}
-
-/// Which side of a handshake is behind.
-public enum Skew: Equatable, Sendable {
-    /// The host speaks an older protocol than this client.
-    case hostOlder
-    /// The host no longer speaks this client's protocol.
-    case clientOlder
+    /// The peer's magic is not this protocol's: another version of Sail, or not Sail.
+    case otherProtocol
 }

@@ -200,6 +200,55 @@ import Testing
         #expect(try FileManager.default.contentsOfDirectory(atPath: URL(filePath: newer).deletingLastPathComponent().path) == ["sail"], "a staged file is removed")
     }
 
+    /// What answers at the person's socket with another protocol's magic (here a listener in this
+    /// test writing `SAILPTY3`) is said once as another version's host, with the command that ends
+    /// it, and no host of this build is started beside it to lose the socket's lock.
+    @Test func anotherVersionsHostIsSaidWithItsRemedyAndNothingIsStarted() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "sail-other-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let started = folder.appending(path: "started")
+        let binary = folder.appending(path: "sail")
+        try "#!/bin/sh\ntouch '\(started.path)'\nexit 3\n".write(to: binary, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: binary.path)
+        let address = try HostAddress.local(home: folder.path)
+        guard case let .unix(path) = address else {
+            Issue.record("the local address is not a socket")
+            return
+        }
+        try FileManager.default.createDirectory(atPath: URL(filePath: path).deletingLastPathComponent().path, withIntermediateDirectories: true)
+        let listener = socket(AF_UNIX, SOCK_STREAM, 0)
+        defer {
+            shutdown(listener, SHUT_RDWR)
+            close(listener)
+        }
+        var name = sockaddr_un()
+        name.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutableBytes(of: &name.sun_path) { $0.copyBytes(from: path.utf8) }
+        let bound = withUnsafePointer(to: &name) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(listener, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
+        try #require(bound == 0 && listen(listener, 8) == 0)
+        Thread {
+            while true {
+                let client = accept(listener, nil, nil)
+                guard client >= 0 else { return }
+                var one: Int32 = 1
+                setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+                _ = Array("SAILPTY3".utf8).withUnsafeBytes { send(client, $0.baseAddress, $0.count, 0) }
+                close(client)
+            }
+        }.start()
+        let host = LocalHost(binary: binary.path, address: address, log: folder.appending(path: "host.log").path, copies: folder.appending(path: "copies"))
+        let asked = ContinuousClock.now
+        do {
+            try await host.ensureServing()
+            Issue.record("another version's host was taken as serving")
+        } catch {
+            #expect(error.description == LocalHost.otherVersion(pid: getpid()), "\(error)")
+        }
+        #expect(ContinuousClock.now - asked < .seconds(5), "said at once")
+        #expect(host.startedPID == nil && !FileManager.default.fileExists(atPath: started.path), "no host of this build was started beside it")
+    }
+
     /// The process serving at a socket is found by its pid and its executable: here, this test's own.
     @Test func theProcessServingAtASocketIsFound() throws {
         let path = FileManager.default.temporaryDirectory.appending(path: "sail-peer-\(UUID().uuidString.prefix(8)).sock").path

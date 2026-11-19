@@ -7,8 +7,8 @@ public enum TerminalError: Error, Equatable, Sendable, CustomStringConvertible {
     case badAddress(String)
     /// The host could not be reached, or the connection to it broke: why.
     case unreachable(String)
-    /// The host speaks another version of the terminal protocol; which side is older.
-    case skew(Skew)
+    /// The host's magic is not this protocol's: another version of Sail's.
+    case otherProtocol
     /// The host refused, in its own words.
     case refused(HostRefusal)
     /// The API refused the ticket the connection needed.
@@ -31,8 +31,7 @@ public enum TerminalError: Error, Equatable, Sendable, CustomStringConvertible {
         switch self {
         case let .badAddress(reason): reason
         case let .unreachable(reason): "the terminal host could not be reached: \(reason)"
-        case .skew(.hostOlder): "the terminal host is older than this app: upgrade sail on it"
-        case .skew(.clientOlder): "this app is older than the terminal host: update the app"
+        case .otherProtocol: "this app and the terminal host are different versions of Sail, so they cannot talk"
         case let .refused(refusal): refusal.message
         case let .ticketRefused(refusal): refusal.message
         case let .controlPlane(error): error.description
