@@ -707,6 +707,62 @@ class WorkspaceDoorsTest {
   }
 
   /**
+   * #500's M1 and nit 1: a refusal tells the truth about the pass. Once a strip of the workspace
+   * has failed, it says so, why (the strip's own last error, as its label stores it), and when the
+   * pass tries next, never that the next pass leaves it nobody's; a label with no id names the
+   * person the box does know as missing the id that says which, not as a person it does not know.
+   */
+  @Test
+  void aRefusalSaysWhyThePassHasNotReachedItAndWhenItTriesNextAndALabelWithNoIdSaysSo()
+      throws Exception {
+    Function<String, WorkspaceOwner> roster =
+        handle -> {
+          if (handle.equals("zed")) {
+            throw new IllegalStateException("zed is not on this box's roster.");
+          }
+          return TestOwners.of(handle);
+        };
+    var client = new Actor("client", Role.MEMBER, Actor.Lane.API);
+    var failing =
+        ", \"user.sail.unreached\": \"2026-11-20T21:00:00.000Z Error: Failed to start device"
+            + " \\\"eth0\\\": Device does not exist\"";
+    var reused =
+        workspace(
+            "Stopped",
+            ", \"user.sail.owner\": \"client\", \"user.sail.owner_id\": \"fde_old_client\""
+                + failing);
+    var gone =
+        workspace(
+            "Stopped",
+            ", \"user.sail.owner\": \"zed\", \"user.sail.owner_id\": \"fde_zed\"" + failing);
+    var noId = workspace("Stopped", ", \"user.sail.owner\": \"client\"");
+
+    var said = new ArrayList<String>();
+    for (var label : List.of(reused, gone, noId)) {
+      var box = box(label);
+      var refused =
+          refused(client, () -> doors(box, roster, "client").stop("acme", "try", spec -> false));
+      said.add(refused.code() + ": " + refused.reason());
+      assertEquals(List.of(), changes(box));
+    }
+
+    var notYet =
+        "; the box's pass has not been able to leave it nobody's (Error: Failed to start device"
+            + " \"eth0\": Device does not exist) and tries again at 2026-11-20T21:00:00.000Z.";
+    assertEquals(
+        List.of(
+            "not_your_workspace: try is labelled for a person this box does not know as client,"
+                + " so it is not stopped"
+                + notYet,
+            "owner_gone: try is zed's workspace, and zed is no longer active here, so it is not"
+                + " stopped"
+                + notYet,
+            "not_your_workspace: try is labelled for client without the id that says which"
+                + " client, so it is not stopped; the next pass leaves it nobody's."),
+        said);
+  }
+
+  /**
    * A template is built by an admin; on a node, by its own person alone, and every other person is
    * told the templates of their workspaces are built on main.
    */

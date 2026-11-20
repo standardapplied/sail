@@ -1544,11 +1544,24 @@ Each row with the tests that prove it:
   act on there, its own person included, until the box's disown pass strips it and clears its
   label. One labelled for a person gone is refused `owner_gone` ("gone is zed's workspace, and zed
   is no longer active here, so it is not stopped; the next pass leaves it nobody's."), one for
-  another person of the handle, or with no id, `not_your_workspace` ("old is labelled for a person
-  this box does not know as ada, so no terminal opens in it; …"), each before Incus is asked to
-  change it. A node offers no delete of it: the box's root acts as the node's person, and the pass
-  is the only way such a workspace leaves its label (`MissedStopReconciler`, every minute; an admin
-  on main brings it about by removing the person). On main an admin still stops and deletes it
+  another person of the handle `not_your_workspace` ("old is labelled for a person this box does
+  not know as ada, so no terminal opens in it; …"), and one with no id `not_your_workspace` too
+  ("old is labelled for ada without the id that says which ada, …"), each before Incus is asked
+  to change it; `sail agent attach` of a spec's workspace asks the same before it starts or enters
+  it. A node offers no delete of it: the box's root acts as the node's person, and the pass is the
+  only way such a workspace leaves its label (`MissedStopReconciler`, which lists Incus for it once
+  at start, when the roster loses a person or gives a handle to someone new, and when a failed
+  strip is due again; an admin on main brings it about by removing the person, and a label edited
+  by hand waits for one of those). The pass never gives up on it: a strip that fails is tried again
+  an idle period later, then at twice the wait each time, at most an hour apart, until it is
+  reached, and each failure writes on the workspace why and when it tries next
+  (`user.sail.unreached`, cleared by every write of its label), so meanwhile its doors say "the
+  box's pass has not been able to leave it nobody's (Error: …) and tries again at …" instead of
+  promising the next pass. A label's handle and id are always written together. N1 refuses new
+  entries only: a session opened in the workspace before its label stopped resolving runs on, and
+  its opener may attach to it again, after the host's handover too, until it ends; the pass strips
+  the workspace's files under it, and what a running process already read stays with it until it
+  exits. On main an admin still stops and deletes it
   (`owner_gone` there names the forced delete) and a start or terminal in a gone person's
   workspace is refused, so its person's credentials stay unread. The
   routes are `POST /v1/projects/{p}/workspaces` (`{"name"}`, from the current template, which the
@@ -1909,8 +1922,9 @@ Each row with the tests that prove it:
   holds its owner's id on this box beside the handle (`user.sail.owner_id`), so the pass judges it
   by that stored id, at every pass and after a restart, and a handle main gave to someone new
   never makes the old holder's workspace theirs. A workspace the pass cannot strip (it will not
-  start, or its strip fails) is tried three times an idle period apart, then left as it is and
-  said once with its cause; its next start, by anyone, strips it first, then makes it nobody's
+  start, or its strip fails) is said once with its cause and tried again at a doubling wait, an
+  idle period first and at most an hour apart, until it is reached (W9); on main its next start,
+  by anyone allowed one, strips it first, then makes it nobody's
   when its handle is now another person's (never giving it to them), or refuses as before when
   its person is not active here. Every start passes through one place (`Workspaces.giveOrStop`:
   `project workspace start`, an attach, a run's entry), and one that cannot give the owner's

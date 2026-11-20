@@ -10,6 +10,7 @@ import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resources;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
@@ -300,7 +301,7 @@ public final class WorkspaceDoors {
 
   static final String STOPPED = "it is not stopped";
   static final String DELETED = "it is not deleted";
-  static final String TERMINAL = "no terminal opens in it";
+  public static final String TERMINAL = "no terminal opens in it";
   static final String AGENT = "no agent starts in it";
 
   /**
@@ -326,7 +327,7 @@ public final class WorkspaceDoors {
     Workspaces.goneOwner(found, owners)
         .ifPresent(
             gone -> {
-              throw goneOwner(project, name, gone, STARTED, keeper != null);
+              throw goneOwner(project, name, found, gone, STARTED, keeper != null);
             });
   }
 
@@ -338,7 +339,7 @@ public final class WorkspaceDoors {
    * one. Only the box's pass makes such a workspace nobody's; on a node ({@code onNode}) no door is
    * offered for it, and on main an admin may delete it.
    */
-  static Optional<ApiException> labelledForAnother(
+  public static Optional<ApiException> labelledForAnother(
       String project,
       String name,
       BoxInstances.Instance found,
@@ -351,27 +352,48 @@ public final class WorkspaceDoors {
     }
     var gone = Workspaces.goneOwner(found, owners);
     if (gone.isPresent()) {
-      return Optional.of(goneOwner(project, name, gone.get(), act, onNode));
+      return Optional.of(goneOwner(project, name, found, gone.get(), act, onNode));
     }
+    var labelled =
+        found.key(BoxInstances.OWNER_ID_KEY).isEmpty()
+            ? "labelled for " + handle.get() + " without the id that says which " + handle.get()
+            : "labelled for a person this box does not know as " + handle.get();
     return Optional.of(
         new ApiException(
             ErrorCode.NOT_YOUR_WORKSPACE,
-            name
-                + " is labelled for a person this box does not know as "
-                + handle.get()
-                + ", so "
-                + act
-                + "; the next pass leaves it nobody's.",
+            name + " is " + labelled + ", so " + act + "; " + thePass(found),
             Remedy.NONE));
   }
 
   /**
-   * Why {@code act} is not done in workspace {@code name} of {@code project}, labelled for {@code
-   * gone}, no longer active here, and on main ({@code onNode} false) how an admin is rid of it
-   * meanwhile.
+   * What the box's pass does of workspace {@code found}, labelled for a person it does not hold:
+   * leaves it nobody's at its next try, or, once a strip of it has failed, has not been able to,
+   * for the reason the strip gave, and tries again when its label says.
+   */
+  private static String thePass(BoxInstances.Instance found) {
+    return Workspaces.Unreached.of(found)
+        .map(
+            unreached ->
+                "the box's pass has not been able to leave it nobody's ("
+                    + unreached.reason()
+                    + ") and tries again at "
+                    + DateTimeUtils.format(unreached.retry())
+                    + ".")
+        .orElse("the next pass leaves it nobody's.");
+  }
+
+  /**
+   * Why {@code act} is not done in workspace {@code name} of {@code project}, {@code found},
+   * labelled for {@code gone}, no longer active here, and on main ({@code onNode} false) how an
+   * admin is rid of it meanwhile.
    */
   static ApiException goneOwner(
-      String project, String name, String gone, String act, boolean onNode) {
+      String project,
+      String name,
+      BoxInstances.Instance found,
+      String gone,
+      String act,
+      boolean onNode) {
     return new ApiException(
         ErrorCode.OWNER_GONE,
         name
@@ -381,7 +403,8 @@ public final class WorkspaceDoors {
             + gone
             + " is no longer active here, so "
             + act
-            + "; the next pass leaves it nobody's.",
+            + "; "
+            + thePass(found),
         onNode
             ? Remedy.NONE
             : Remedy.of(

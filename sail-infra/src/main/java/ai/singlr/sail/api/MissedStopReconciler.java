@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
@@ -41,6 +42,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiPredicate;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -147,7 +149,8 @@ public final class MissedStopReconciler implements AutoCloseable {
     }
 
     /** None, by default ({@link Workspaces#disown}). */
-    default List<String> disown(BiPredicate<String, String> held, Predicate<String> due)
+    default List<String> disown(
+        BiPredicate<String, String> held, Predicate<String> due, Function<String, Instant> retry)
         throws Exception {
       return List.of();
     }
@@ -293,9 +296,10 @@ public final class MissedStopReconciler implements AutoCloseable {
       }
 
       @Override
-      public List<String> disown(BiPredicate<String, String> held, Predicate<String> due)
+      public List<String> disown(
+          BiPredicate<String, String> held, Predicate<String> due, Function<String, Instant> retry)
           throws Exception {
-        return Workspaces.onThisBox(shell).disown(held, due);
+        return Workspaces.onThisBox(shell).disown(held, due, retry);
       }
     };
   }
@@ -413,15 +417,23 @@ public final class MissedStopReconciler implements AutoCloseable {
     disownRemoved();
   }
 
-  /**
-   * How many times a removed person's workspace is tried, an idle period apart, before it is left.
-   */
-  static final int STRIP_TRIES = 3;
+  /** The longest wait between two tries of a workspace a removal did not reach. */
+  static final Duration STRIP_BACKOFF_CAP = Duration.ofHours(1);
 
-  /** The tries a workspace a removal did not reach has had, and when it last had one. */
+  /**
+   * The wait after the {@code failures}th failed try of a workspace a removal did not reach: an
+   * idle period, as the spec workspaces' sweep waits, doubled at each failure after the first, and
+   * never longer than {@link #STRIP_BACKOFF_CAP}.
+   */
+  static Duration backoff(int failures) {
+    var wait = SpecWorkspaces.IDLE.multipliedBy(1L << Math.min(failures - 1, 16));
+    return wait.compareTo(STRIP_BACKOFF_CAP) < 0 ? wait : STRIP_BACKOFF_CAP;
+  }
+
+  /** The failed tries a workspace a removal did not reach has had, and when it last had one. */
   private record Tries(int count, Instant at) {
     boolean due(Instant now) {
-      return count < STRIP_TRIES && !now.isBefore(at.plus(SpecWorkspaces.IDLE));
+      return !now.isBefore(at.plus(backoff(count)));
     }
   }
 
@@ -429,9 +441,10 @@ public final class MissedStopReconciler implements AutoCloseable {
    * A person not active here, missing from the roster or disabled as one main never described,
    * holds nothing usable here; a handle whose id changed is another person. Incus is listed only at
    * start, when someone stopped being active (or a handle changed hands), or when a workspace not
-   * reached is due again: {@link #STRIP_TRIES} tries an idle period apart, as the spec workspaces'
-   * sweep tries its own, then it is left as it is and said once; its next start strips it ({@link
-   * Workspaces#start}).
+   * reached is due again. One not reached is never left while its label does not resolve, since no
+   * door acts on it meanwhile: it is tried again at a {@linkplain #backoff doubling wait} until it
+   * is reached, said when first left and once when reached, and each try writes on it when the next
+   * one is ({@link Workspaces.Unreached}).
    */
   private void disownRemoved() {
     var roster = new HashMap<String, String>();
@@ -461,7 +474,8 @@ public final class MissedStopReconciler implements AutoCloseable {
               instance -> {
                 var tries = stripTries.get(instance);
                 return tries == null || tries.due(now);
-              });
+              },
+              instance -> now.plus(backoff(failuresOf(instance) + 1)));
       var left = new HashSet<String>();
       for (var line : unreached) {
         var instance = line.substring(0, Math.max(0, line.indexOf(':')));
@@ -474,21 +488,26 @@ public final class MissedStopReconciler implements AutoCloseable {
           System.err.println(
               "  [reconcile] a removed person's credentials are left in "
                   + line
-                  + "; tried again once idle, "
-                  + STRIP_TRIES
-                  + " times in all");
-        } else if (count == STRIP_TRIES) {
-          System.err.println(
-              "  [reconcile] left "
-                  + line
-                  + ", after "
-                  + STRIP_TRIES
-                  + " tries: its next start takes the removed person's credentials out");
+                  + "; tried again at "
+                  + DateTimeUtils.format(now.plus(backoff(1)))
+                  + ", then at twice the wait each time, at most an hour apart");
         }
       }
       stripTries
           .entrySet()
-          .removeIf(tries -> !left.contains(tries.getKey()) && tries.getValue().due(now));
+          .removeIf(
+              tries -> {
+                var reached = !left.contains(tries.getKey()) && tries.getValue().due(now);
+                if (reached) {
+                  System.err.println(
+                      "  [reconcile] "
+                          + tries.getKey()
+                          + " holds no removed person's credentials now, after "
+                          + tries.getValue().count()
+                          + " failed tries");
+                }
+                return reached;
+              });
       lastRoster = roster;
       unlisted = false;
     } catch (Exception e) {
@@ -498,6 +517,11 @@ public final class MissedStopReconciler implements AutoCloseable {
       }
       unlisted = true;
     }
+  }
+
+  private int failuresOf(String instance) {
+    var tries = stripTries.get(instance);
+    return tries == null ? 0 : tries.count();
   }
 
   /** The sweep's rescue of stranded reviews, skipping the specs it already handled. */

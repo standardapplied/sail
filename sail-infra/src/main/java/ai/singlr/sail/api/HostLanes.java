@@ -536,6 +536,7 @@ final class HostLanes {
                         throw WorkspaceDoors.goneOwner(
                             project,
                             workspace,
+                            found,
                             gone,
                             WorkspaceDoors.STARTED,
                             roles.nodeFde().isPresent());

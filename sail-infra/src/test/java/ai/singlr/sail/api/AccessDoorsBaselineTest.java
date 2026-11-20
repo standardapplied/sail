@@ -248,13 +248,14 @@ class AccessDoorsBaselineTest {
   }
 
   /**
-   * N1: the workspace doors on a node whose own person is the cast's owner, asked by that person on
-   * every lane they come in by: acme's {@code try}, labelled for them by id; {@code loose}, for no
-   * one; {@code reused}, for another person of their handle; and {@code gone}, for a person this
-   * box does not hold. Only the first two are theirs.
+   * N1: the workspace doors on a node whose own person is {@code keeper} (the cast's owner, a
+   * member, and its admin), asked by that person and by another member holding a token there, on
+   * every lane they come in by: acme's {@code try}, the owner's by id; {@code loose}, no one's;
+   * {@code reused}, labelled for another person of the keeper's handle; and {@code gone}, for a
+   * person this box does not hold. The last two are no one's to act on, the keeper's included.
    */
-  private static void nodeWorkspaceDoors(World world, List<Door> doors) {
-    var reused = workspace("reused", Cast.OWNER, "fde_another_" + Cast.OWNER);
+  private static void nodeWorkspaceDoors(World world, List<Door> doors, String keeper) {
+    var reused = workspace("reused", keeper, "fde_another_" + keeper);
     var gone = workspace("gone", "zed", "fde_zed");
     var incus = new ScriptedShellExecutor();
     incus
@@ -273,13 +274,14 @@ class AccessDoorsBaselineTest {
                   SessionYield.NONE),
               world.db,
               Files.createTempDirectory("sail-node-doors"),
-              new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", Cast.OWNER, "ada-box"));
+              new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", keeper, keeper + "-box"));
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
-    Predicate<Actor> theNodes = actor -> Cast.OWNER.equals(actor.handle());
+    Predicate<Actor> theNodes =
+        actor -> keeper.equals(actor.handle()) || Cast.OTHER.equals(actor.handle());
     for (var name : List.of("try", "loose", "reused", "gone")) {
-      var which = "workspace " + name + " of acme on its owner's node";
+      var which = "workspace " + name + " of acme on " + keeper + "'s node";
       doors.add(new Door("start " + which, ops -> node.startWorkspace("acme", name), theNodes));
       doors.add(new Door("stop " + which, ops -> node.stopWorkspace("acme", name), theNodes));
       doors.add(
@@ -303,7 +305,8 @@ class AccessDoorsBaselineTest {
     rooms(world, doors);
     projects(doors);
     workspaceDoors(doors);
-    nodeWorkspaceDoors(world, doors);
+    nodeWorkspaceDoors(world, doors, Cast.OWNER);
+    nodeWorkspaceDoors(world, doors, Cast.ADMIN);
     events(world, doors);
     logins(doors);
     return doors;

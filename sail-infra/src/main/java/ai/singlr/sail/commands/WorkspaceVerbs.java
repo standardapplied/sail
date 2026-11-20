@@ -112,7 +112,7 @@ final class WorkspaceVerbs {
   }
 
   /** This box's own person when it is a node, who keeps the workspaces nobody owns; else null. */
-  private static String keeper() {
+  static String keeper() {
     var sync = HostSync.config();
     return HostSync.isNode(sync) ? sync.handle() : null;
   }
