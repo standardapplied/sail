@@ -1757,7 +1757,12 @@ Each row with the tests that prove it:
   (b) git reports
   no user name or email at system or global level; (c) no `authorized_keys` under any home has a
   line; (d) gh holds no login file (`hosts.yml`), read by existence, never by what gh prints. A search or a git or gh command that errors fails the build, as
-  does anything found: nothing is recorded or snapshotted and the version before stays current. A
+  does anything found, with one exception: the template runs while it is searched (the search is an
+  `incus exec` in it), so a file its boot removes can be listed and then gone when grep opens it,
+  and grep's "No such file or directory" alone is no failure, since a file gone holds nothing.
+  grep's errors are kept in a `0600` file of their own on `/dev/shm`, removed on every path and
+  never walked by the search (`/dev` is a mount), and read in the C locale; any other error, an
+  exit 2 that says nothing, and no file for the errors each fail the build: nothing is recorded or snapshotted and the version before stays current. A
   failed build is stripped too; what the strip does not remove is named, never its value, at most
   three files and how many more, with the remedy to remove what wrote it, a step of the
   definition or a hand change to the template, and build again.

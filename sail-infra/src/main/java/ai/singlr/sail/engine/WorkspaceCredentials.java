@@ -101,6 +101,10 @@ final class WorkspaceCredentials {
   /**
    * Searches by content, not by a list of paths, because a token can hide where no list names it;
    * exits 2, never 0, when a search cannot tell. The tokens arrive on stdin so no argv holds one.
+   * The template runs while it is searched, so a file its boot removes can be listed and then gone
+   * when grep opens it: that one error alone is no failure, since a file gone holds nothing. grep's
+   * errors are kept apart in a {@code 0600} file of their own on {@code /dev/shm}, which the search
+   * never walks ({@code /dev} is a mount), and read in the C locale.
    */
   static final String HELD =
       """
@@ -115,14 +119,25 @@ final class WorkspaceCredentials {
         for d in /* /.[!.]*; do
           [ -e "$d" ] && [ ! -L "$d" ] && ! mountpoint -q "$d" && set -- "$@" "$d"
         done
-        found=$(printf '%s\n' "$tokens" | grep -r -l -F --devices=skip -f - -- "$@")
-        case $? in
+        errors=$(mktemp -p /dev/shm sail-held.XXXXXX) || {
+          echo "the search for the build's tokens did not run: it could not make a file on /dev/shm for its errors" >&2
+          exit 2
+        }
+        trap 'rm -f "$errors"' EXIT
+        found=$(printf '%s\n' "$tokens" | LC_ALL=C grep -r -l -F --devices=skip -f - -- "$@" 2> "$errors")
+        searched=$?
+        if [ "$searched" = 2 ] && [ -s "$errors" ] \
+          && ! grep -q -v ': No such file or directory$' "$errors"; then
+          if [ -n "$found" ]; then searched=0; else searched=1; fi
+        fi
+        case $searched in
           0) count=$(printf '%s\n' "$found" | wc -l)
              shown=$(printf '%s\n' "$found" | head -n 3 | paste -s -d ' ' -)
              [ "$count" -le 3 ] || shown="$shown and $((count - 3)) more"
              add "a token this build was given in $shown" ;;
           1) ;;
-          *) echo "the search for the build's tokens failed" >&2; exit 2 ;;
+          *) said=$(head -n 3 "$errors" | paste -s -d ' ' -)
+             echo "the search for the build's tokens failed: ${said:-grep said nothing}" >&2; exit 2 ;;
         esac
       fi
       for key in user.name user.email; do

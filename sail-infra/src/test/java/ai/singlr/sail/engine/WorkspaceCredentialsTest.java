@@ -420,4 +420,124 @@ class WorkspaceCredentialsTest {
     assertEquals(0, script(WorkspaceCredentials.HELD, "").exit());
     assertEquals(0, script(WorkspaceCredentials.HELD, TOKEN + "\n").exit());
   }
+
+  private static final String VANISHED = "grep: /tmp/.XIM-unix: No such file or directory\n";
+  private static final String DENIED = "grep: /root/.cache/x: Permission denied\n";
+
+  private static Path realGrep() {
+    return List.of(Path.of("/usr/bin/grep"), Path.of("/bin/grep")).stream()
+        .filter(Files::isExecutable)
+        .findFirst()
+        .orElseThrow();
+  }
+
+  /**
+   * A grep whose search runs for real and then also says {@code errors} and ends {@code 2}, as one
+   * does when a file it listed is gone, or cannot be read, by the time it opens it; it writes down
+   * the locale it ran in. Every other grep is the real one.
+   */
+  private void grepThatAlsoSays(String errors) throws IOException {
+    stub(
+        "grep",
+        "case \" $* \" in *\" -r \"*) ;; *) exec "
+            + realGrep()
+            + " \"$@\" ;; esac\n"
+            + "echo \"${LC_ALL:-unset}\" > "
+            + bin.resolve("grep-locale")
+            + "\n"
+            + realGrep()
+            + " \"$@\"\n"
+            + "[ $? -le 1 ] || exit 2\n"
+            + "printf '%s' '"
+            + errors
+            + "' >&2\n"
+            + "exit 2\n");
+  }
+
+  /** An mktemp that writes down where it made its file and with what mode, then answers it. */
+  private void mktempWrittenDown() throws IOException {
+    stub(
+        "mktemp",
+        "made=$(/usr/bin/mktemp \"$@\") || exit $?\n"
+            + "echo \"$made $(stat -c %a \"$made\") $*\" > "
+            + bin.resolve("made")
+            + "\necho \"$made\"\n");
+  }
+
+  /**
+   * A file the search listed but found gone when it opened it holds nothing: a running template's
+   * boot removes some of its own (as {@code /tmp/.XIM-unix}), so the check passes. Its errors are
+   * kept in a file of the search's own, {@code 0600} on {@code /dev/shm}, gone after, and the
+   * search runs in the C locale, so the words it is told apart by are never translated.
+   */
+  @Test
+  void aFileGoneBetweenTheListingAndTheOpenHoldsNothing() throws Exception {
+    grepThatAlsoSays(VANISHED);
+    mktempWrittenDown();
+
+    var checked = script(WorkspaceCredentials.HELD, TOKEN + "\n");
+
+    assertEquals(0, checked.exit(), checked.said());
+    assertEquals("C\n", read(bin.resolve("grep-locale")));
+    var made = read(bin.resolve("made")).strip().split(" ", 3);
+    assertTrue(made[0].startsWith("/dev/shm/"), made[0]);
+    assertEquals("600", made[1]);
+    assertFalse(Files.exists(Path.of(made[0])), "the search's error file is gone");
+  }
+
+  /**
+   * Any error but a file gone fails the check as one that cannot tell, saying what grep said: a
+   * file it cannot read, the two together, or an error it does not say.
+   */
+  @Test
+  void aFileTheSearchCannotReadFailsTheCheckAloneOrBesideAFileGone() throws Exception {
+    mktempWrittenDown();
+    for (var errors : List.of(DENIED, VANISHED + DENIED, "")) {
+      grepThatAlsoSays(errors);
+
+      var checked = script(WorkspaceCredentials.HELD, TOKEN + "\n");
+
+      assertEquals(2, checked.exit(), errors + ": " + checked.said());
+      assertTrue(
+          checked.said().contains("the search for the build's tokens failed"), checked.said());
+      assertTrue(checked.said().contains(errors.isEmpty() ? "said nothing" : "Permission denied"));
+      assertFalse(
+          Files.exists(Path.of(read(bin.resolve("made")).split(" ")[0])),
+          "the search's error file is gone");
+    }
+  }
+
+  /** A token is found where it is, whatever else vanished meanwhile. */
+  @Test
+  void aTokenIsFoundBesideAFileGone() throws Exception {
+    grepThatAlsoSays(VANISHED);
+    var file = Files.createDirectories(root.resolve("home/dev/.sail")).resolve("gh-token-01");
+    Files.writeString(file, TOKEN + "\n");
+
+    var checked = script(WorkspaceCredentials.HELD, TOKEN + "\n");
+
+    assertEquals(1, checked.exit(), checked.said());
+    assertTrue(checked.said().contains("home/dev/.sail/gh-token-01"), checked.said());
+    assertFalse(checked.said().contains(TOKEN), "the check never says the token");
+  }
+
+  /** With nowhere to keep its errors, the search does not run, and the check says why. */
+  @Test
+  void aSearchWithNowhereToKeepItsErrorsFailsTheCheckSayingSo() throws Exception {
+    stub(
+        "mktemp",
+        "echo \"mktemp: failed to create file via template '/dev/shm/sail-held.XXXXXX': Read-only"
+            + " file system\" >&2\nexit 1\n");
+
+    var checked = script(WorkspaceCredentials.HELD, TOKEN + "\n");
+
+    assertEquals(2, checked.exit(), checked.said());
+    assertTrue(
+        checked
+            .said()
+            .contains(
+                "the search for the build's tokens did not run: it could not make a file on"
+                    + " /dev/shm for its errors"),
+        checked.said());
+  }
 }
