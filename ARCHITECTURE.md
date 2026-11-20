@@ -1548,7 +1548,10 @@ Each row with the tests that prove it:
   not know as ada, so no terminal opens in it; …"), and one with no id `not_your_workspace` too
   ("old is labelled for ada without the id that says which ada, …"), each before Incus is asked
   to change it; `sail agent attach` of a spec's workspace asks the same before it starts or enters
-  it. A node offers no delete of it: the box's root acts as the node's person, and the pass is the
+  it. Access never takes such a workspace for the node's person's: it is no one's to Access, which
+  refuses only what the asker may not do whoever owned it (a viewer, an agent lane, a project out
+  of scope), so another member on the node is refused it in these words, never as the node's
+  person's. A node offers no delete of it: the box's root acts as the node's person, and the pass is the
   only way such a workspace leaves its label (`MissedStopReconciler`, which lists Incus for it once
   at start, when the roster loses a person or gives a handle to someone new, and when a failed
   strip is due again; an admin on main brings it about by removing the person, and a label edited

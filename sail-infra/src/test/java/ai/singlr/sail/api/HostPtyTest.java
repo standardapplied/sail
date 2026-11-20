@@ -304,6 +304,10 @@ class HostPtyTest {
     var goneOwner = assertThrows(Remedied.Io.class, () -> lane.admitWorkspace("acme", "gone", ada));
     var notStarted = assertThrows(Remedied.Io.class, () -> lane.enterWorkspace("acme", "old", ada));
     lane.admitWorkspace("acme", "loose", ada);
+    var bob = new PtyIdentity.Person(new Actor("bob", Role.MEMBER, Actor.Lane.API));
+    var bobsOld = assertThrows(Remedied.Io.class, () -> lane.admitWorkspace("acme", "old", bob));
+    var bobsLoose =
+        assertThrows(Remedied.Io.class, () -> lane.admitWorkspace("acme", "loose", bob));
 
     assertEquals(
         List.of(
@@ -311,6 +315,11 @@ class HostPtyTest {
             "old is labelled for a person this box does not know as ada, so no terminal opens in"
                 + " it; the next pass leaves it nobody's."),
         List.of(notTheirs.code(), notTheirs.reason()));
+    assertEquals(
+        List.of(notTheirs.code(), notTheirs.reason()),
+        List.of(bobsOld.code(), bobsOld.reason()),
+        "another member is told what it is, never that it is ada's");
+    assertEquals("Workspace 'loose' belongs to 'ada', not you.", bobsLoose.reason());
     assertEquals(
         List.of(
             "owner_gone",

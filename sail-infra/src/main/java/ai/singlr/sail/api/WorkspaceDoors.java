@@ -79,7 +79,33 @@ public final class WorkspaceDoors {
    */
   public static Optional<Refusal> refusal(
       Actor actor, String project, String name, String owner, String keeper) {
-    var decided = owner == null ? keeper : owner;
+    return decided(actor, project, name, owner == null ? keeper : owner, keeper);
+  }
+
+  /**
+   * Access's refusal of {@code actor} entering workspace {@code name} of {@code project}, {@code
+   * found}: decided on its labelled owner, the node's own person ({@code keeper}) keeping what no
+   * one is labelled for ({@link #refusal}). One labelled for a person the node does not hold by id
+   * ({@code another}, N1) is no one's to Access, never the node's person's, so it refuses only what
+   * the actor may not do whoever owned it, and N1 says why no one acts on it.
+   */
+  static Optional<Refusal> accessRefusal(
+      Actor actor,
+      String project,
+      String name,
+      BoxInstances.Instance found,
+      Function<String, WorkspaceOwner> owners,
+      String keeper,
+      boolean another) {
+    if (!another) {
+      return refusal(actor, project, name, Workspaces.ownerOf(found, owners).orElse(null), keeper);
+    }
+    return decided(actor, project, name, null, keeper)
+        .filter(refused -> refused.kind() != Refusal.Kind.NOT_OWNER);
+  }
+
+  private static Optional<Refusal> decided(
+      Actor actor, String project, String name, String decided, String keeper) {
     return switch (Access.decide(
         actor, Action.ENTER_WORKSPACE, Resources.workspace(name, project, decided))) {
       case Decision.Allowed allowed -> Optional.empty();
@@ -310,15 +336,16 @@ public final class WorkspaceDoors {
    * so {@code act} is never done in it as the node's own person.
    */
   private void decide(String project, String name, BoxInstances.Instance found, String act) {
-    requireEnter(
-        Actor.current(), project, name, Workspaces.ownerOf(found, owners).orElse(null), keeper);
-    if (keeper != null) {
-      labelledForAnother(project, name, found, owners, act, true)
-          .ifPresent(
-              refused -> {
-                throw refused;
-              });
-    }
+    var another =
+        keeper == null
+            ? Optional.<ApiException>empty()
+            : labelledForAnother(project, name, found, owners, act, true);
+    accessRefusal(Actor.current(), project, name, found, owners, keeper, another.isPresent())
+        .ifPresent(WorkspaceDoors::refuse);
+    another.ifPresent(
+        refused -> {
+          throw refused;
+        });
   }
 
   /** As {@link #decide}, and refused when its owner is no longer active here, so none is given. */

@@ -707,6 +707,46 @@ class WorkspaceDoorsTest {
   }
 
   /**
+   * #500's wording ruling: Access never takes a workspace whose label does not resolve for the
+   * node's person's. Another member on the node is refused it in N1's words, what it is and why no
+   * one acts on it, never as the node's person's; one no one is labelled for is still the node's
+   * person's to keep, and so said.
+   */
+  @Test
+  void anotherMemberOnANodeIsRefusedAWorkspaceLabelledForAnotherInItsOwnWordsNotAsTheNodesPersons()
+      throws Exception {
+    Function<String, WorkspaceOwner> roster =
+        handle -> {
+          if (handle.equals("zed")) {
+            throw new IllegalStateException("zed is not on this box's roster.");
+          }
+          return TestOwners.of(handle);
+        };
+    var bob = new Actor("bob", Role.MEMBER, Actor.Lane.API);
+    var said = new ArrayList<String>();
+    for (var label :
+        List.of(
+            trying("Stopped", "client").replace("fde_client", "fde_old_client"),
+            trying("Stopped", "zed"),
+            workspace("Stopped", ""))) {
+      var box = box(label);
+      var refused =
+          refused(bob, () -> doors(box, roster, "client").stop("acme", "try", spec -> false));
+      said.add(refused.code() + ": " + refused.reason());
+      assertEquals(List.of(), changes(box));
+    }
+
+    assertEquals(
+        List.of(
+            "not_your_workspace: try is labelled for a person this box does not know as client,"
+                + " so it is not stopped; the next pass leaves it nobody's.",
+            "owner_gone: try is zed's workspace, and zed is no longer active here, so it is not"
+                + " stopped; the next pass leaves it nobody's.",
+            "forbidden_not_assignee: Workspace 'try' belongs to 'client', not you."),
+        said);
+  }
+
+  /**
    * #500's M1 and nit 1: a refusal tells the truth about the pass. Once a strip of the workspace
    * has failed, it says so, why (the strip's own last error, as its label stores it), and when the
    * pass tries next, never that the next pass leaves it nobody's; a label with no id names the

@@ -568,22 +568,29 @@ final class HostLanes {
     private void decide(
         String project, String workspace, BoxInstances.Instance found, PtyIdentity.Person who)
         throws IOException {
-      var owner = Workspaces.ownerOf(found, owners).orElse(null);
       var keeper = roles.nodeFde().orElse(null);
+      var another =
+          keeper == null
+              ? Optional.<ApiException>empty()
+              : WorkspaceDoors.labelledForAnother(
+                  project, workspace, found, owners, WorkspaceDoors.TERMINAL, true);
       var refused =
           Actor.call(
               who.actor(),
-              () -> WorkspaceDoors.refusal(Actor.current(), project, workspace, owner, keeper));
+              () ->
+                  WorkspaceDoors.accessRefusal(
+                      Actor.current(),
+                      project,
+                      workspace,
+                      found,
+                      owners,
+                      keeper,
+                      another.isPresent()));
       if (refused.isPresent()) {
         throw Remedied.io(refused.get().message(), refused.get().fix());
       }
-      if (keeper != null) {
-        var another =
-            WorkspaceDoors.labelledForAnother(
-                project, workspace, found, owners, WorkspaceDoors.TERMINAL, true);
-        if (another.isPresent()) {
-          throw told(another.get());
-        }
+      if (another.isPresent()) {
+        throw told(another.get());
       }
     }
 
