@@ -423,10 +423,10 @@ public final class MissedStopReconciler implements AutoCloseable {
   /**
    * The wait after the {@code failures}th failed try of a workspace a removal did not reach: an
    * idle period, as the spec workspaces' sweep waits, doubled at each failure after the first, and
-   * never longer than {@link #STRIP_BACKOFF_CAP}.
+   * never longer than {@link #STRIP_BACKOFF_CAP}; none or fewer counts as one.
    */
   static Duration backoff(int failures) {
-    var wait = SpecWorkspaces.IDLE.multipliedBy(1L << Math.min(failures - 1, 16));
+    var wait = SpecWorkspaces.IDLE.multipliedBy(1L << Math.clamp(failures - 1L, 0, 16));
     return wait.compareTo(STRIP_BACKOFF_CAP) < 0 ? wait : STRIP_BACKOFF_CAP;
   }
 

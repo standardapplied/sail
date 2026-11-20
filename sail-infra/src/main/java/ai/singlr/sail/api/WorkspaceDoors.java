@@ -388,25 +388,27 @@ public final class WorkspaceDoors {
     return Optional.of(
         new ApiException(
             ErrorCode.NOT_YOUR_WORKSPACE,
-            name + " is " + labelled + ", so " + act + "; " + thePass(found),
+            name + " is " + labelled + ", so " + act + thePass(found),
             Remedy.NONE));
   }
 
   /**
-   * What the box's pass does of workspace {@code found}, labelled for a person it does not hold:
-   * leaves it nobody's at its next try, or, once a strip of it has failed, has not been able to,
-   * for the reason the strip gave, and tries again when its label says.
+   * What the box's pass does of workspace {@code found}, labelled for a person it does not hold, as
+   * the end of a sentence about an act refused there: once a strip of it has failed and that was
+   * written on it, that it has not been able to leave it nobody's, for the reason the strip gave,
+   * and when it tries again; otherwise only what is true whether or not a try has failed unwritten,
+   * that the act waits for the pass.
    */
   private static String thePass(BoxInstances.Instance found) {
     return Workspaces.Unreached.of(found)
         .map(
             unreached ->
-                "the box's pass has not been able to leave it nobody's ("
+                "; the box's pass has not been able to leave it nobody's ("
                     + unreached.reason()
                     + ") and tries again at "
                     + DateTimeUtils.format(unreached.retry())
                     + ".")
-        .orElse("the next pass leaves it nobody's.");
+        .orElse(" until the box's pass leaves it nobody's.");
   }
 
   /**
@@ -430,7 +432,6 @@ public final class WorkspaceDoors {
             + gone
             + " is no longer active here, so "
             + act
-            + "; "
             + thePass(found),
         onNode
             ? Remedy.NONE
