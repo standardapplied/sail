@@ -455,7 +455,9 @@ extension Driver {
             let now = shell.window.frame.size, reached = abs(Double(now.width) - size[0]) < 0.5 && abs(Double(now.height) - size[1]) < 0.5
             let sections: [(String, NSView)] = [("the rail", shell.rail as NSView), ("This Mac", shell.thisMac as NSView), ("Workspaces", pane as NSView), ("Account", shell.account as NSView)]
             let least = sections.map { "\($0.0) \($0.1.fittingSize.width) × \($0.1.fittingSize.height)" }.joined(separator: ", ")
-            return (reached, "the window is \(now.width) × \(now.height)" + (reached ? "" : "; the least each section asks: " + least))
+            let room = shell.window.screen?.visibleFrame.size ?? .zero
+            return (reached, "the window is \(now.width) × \(now.height)"
+                + (reached ? "" : "; the screen leaves windows \(room.width) × \(room.height); the least each section asks: " + least))
         }
         if let gone = step.notSaid {
             let went = await waitUntil(step.seconds ?? 10) { !pane.busy && !pane.text.contains(gone) }
