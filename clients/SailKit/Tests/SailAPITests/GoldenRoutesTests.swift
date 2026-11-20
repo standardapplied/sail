@@ -25,6 +25,8 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "refusal-not-found": { _ = try await $0.send(Endpoint<Whoami>(.get, ["v1", "nowhere"])) },
     "terminal-ticket": { _ = try await $0.send(.terminalTicket(open: "harbor")) },
     "terminal-ticket-workspace": { _ = try await $0.send(.terminalTicket(open: "harbor", workspace: "dock")) },
+    "terminal-ticket-files": { _ = try await $0.send(.terminalTicket(files: "harbor", workspace: "dock")) },
+    "refusal-workspace-stopped": { _ = try await $0.send(.terminalTicket(files: "harbor", workspace: "idle")) },
     "workspace-create": { _ = try await $0.send(.createWorkspace("new", project: "harbor")) },
     "workspace-start": { _ = try await $0.send(.startWorkspace("dock", project: "harbor")) },
     "workspace-stop": { _ = try await $0.send(.stopWorkspace("dock", project: "harbor")) },
@@ -120,6 +122,25 @@ func answer<Response>(
         let ticket = try Endpoint.terminalTicket(open: "harbor", workspace: "dock")
             .decode(response(try Exchange("terminal-ticket-workspace")))
         #expect(ticket.ticket == "tkt_harbor")
+    }
+
+    @Test func aFilesTicketReadsAsATicketForItsWorkspace() throws {
+        let ticket = try Endpoint.terminalTicket(files: "harbor", workspace: "dock")
+            .decode(response(try Exchange("terminal-ticket-files")))
+        #expect(ticket.ticket == "tkt_harbor")
+        #expect(ticket.address == "100.64.0.7:7072")
+    }
+
+    /// A files ticket for a stopped workspace is refused by its code, its remedy the start command,
+    /// typed, never an HTTP call: nothing is started by looking.
+    @Test func aFilesTicketForAStoppedWorkspaceIsRefusedWithTheStartAsACommand() async throws {
+        let (result, _) = try await answer("refusal-workspace-stopped") { client in
+            try await client.send(.terminalTicket(files: "harbor", workspace: "idle"))
+        }
+        guard case let .failure(.refused(refusal)) = result else { Issue.record("not refused: \(result)"); return }
+        #expect(refusal.code == .known(.workspaceStopped))
+        #expect(refusal.message == "Workspace idle of harbor is stopped, and reading its files does not start it.")
+        #expect(refusal.remedy.contains(.command(run: .known(.sail), verb: "project workspace start", args: ["harbor", "idle"])))
     }
 
     /// The project's workspaces as the server lists them: its own container as `main`, with no

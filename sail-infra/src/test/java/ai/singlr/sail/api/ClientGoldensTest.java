@@ -312,6 +312,20 @@ class ClientGoldensTest {
           Map.of("action", "open", "project", PROJECT, "workspace", "dock"));
       box.record(
           http,
+          "terminal-ticket-files",
+          "POST",
+          "/v1/terminal/tickets",
+          uday,
+          Map.of("action", "files", "project", PROJECT, "workspace", "dock"));
+      box.record(
+          http,
+          "refusal-workspace-stopped",
+          "POST",
+          "/v1/terminal/tickets",
+          uday,
+          Map.of("action", "files", "project", PROJECT, "workspace", "idle"));
+      box.record(
+          http,
           "refusal-not-found-session",
           "POST",
           "/v1/terminal/tickets",
@@ -870,6 +884,16 @@ class ClientGoldensTest {
                             PtyMessage.TicketAction action,
                             String target,
                             String workspace) {
+                          if (action == PtyMessage.TicketAction.FILES && workspace.equals("idle")) {
+                            return new PtyMessage.TicketRefused(
+                                PtyMessage.TicketRefusal.STOPPED,
+                                "Workspace idle of harbor is stopped, and reading its files does"
+                                    + " not start it.",
+                                Remedy.of(
+                                    "Start it with: ",
+                                    Remedy.sail("project workspace start", PROJECT, "idle"),
+                                    "."));
+                          }
                           if (target.equals("app-gone")) {
                             return new PtyMessage.TicketRefused(
                                 PtyMessage.TicketRefusal.NOT_FOUND,

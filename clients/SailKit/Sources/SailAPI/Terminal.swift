@@ -30,6 +30,15 @@ extension Endpoint where Response == TerminalTicket {
         return Self(.post, Route.terminalTickets, body: try SailJSON.encode(asked))
     }
 
+    /// A ticket to read the files of workspace `workspace` of `project`; refused `workspace_stopped`
+    /// when it is stopped, which the ticket never starts.
+    public static func terminalTicket(files project: String, workspace: String) throws(SailError) -> Self {
+        Self(
+            .post, Route.terminalTickets,
+            body: try SailJSON.encode(["action": "files", "project": project, "workspace": workspace])
+        )
+    }
+
     /// A ticket to attach to `session`.
     public static func terminalTicket(attach session: String) throws(SailError) -> Self {
         Self(.post, Route.terminalTickets, body: try SailJSON.encode(["action": "attach", "session": session]))
