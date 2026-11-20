@@ -27,6 +27,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 class ShellExecutorTest {
@@ -157,6 +159,27 @@ class ShellExecutorTest {
     }
     assertFalse(
         child.map(ProcessHandle::isAlive).orElse(false), "the timed-out command's child runs on");
+  }
+
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aCommandThatTimesOutListsWhatItsProcessesWereDoingBeforeTheyWereKilled() {
+    var executor = new ShellExecutor(false);
+
+    var timedOut =
+        assertThrows(
+            CommandTimedOut.class,
+            () ->
+                executor.exec(List.of("sh", "-c", "sleep 30; true"), null, Duration.ofSeconds(1)));
+
+    assertTrue(
+        timedOut.getMessage().startsWith("Command timed out after 1s: sh -c sleep 30; true"),
+        timedOut.getMessage());
+    var processes = timedOut.processes();
+    assertTrue(processes.lines().findFirst().orElse("").contains("STAT"), processes);
+    assertTrue(
+        processes.lines().anyMatch(line -> line.matches("\\s*\\d+\\s+\\d+\\s+S\\S*\\s.*sleep 30")),
+        processes);
   }
 
   @Test

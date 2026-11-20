@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
@@ -29,6 +30,18 @@ class SshIdentityProvisionerTest {
     assertTrue(first.contains("|| useradd"), first);
     assertTrue(first.contains("--system"), first);
     assertTrue(first.contains("/home/sail"), first);
+  }
+
+  @Test
+  void theSailHomeIsMadeEmptyAndOwnerOnlyNeverCopiedFromTheBoxsSkeleton() {
+    var plan = plan();
+
+    var user = runCommand(plan, 0);
+    assertTrue(user.contains("useradd --system --no-create-home"), user);
+    assertFalse(user.contains("--create-home"), user);
+    assertEquals("install -d -m 700 -o sail -g sail /home/sail", runCommand(plan, 1));
+    assertEquals(
+        "Create the sail home directory, owner-only (sshd StrictModes)", plan.get(1).description());
   }
 
   @Test

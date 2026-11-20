@@ -22,6 +22,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Thin wrapper around {@link ProcessBuilder} that implements {@link ShellExec}. Supports dry-run
@@ -69,6 +71,12 @@ public final class ShellExecutor implements ShellExec {
 
   private Result exec(List<String> command, Path workDir, String input, Duration timeout)
       throws IOException, InterruptedException, TimeoutException {
+    return exec(command, workDir, input, timeout, true);
+  }
+
+  private Result exec(
+      List<String> command, Path workDir, String input, Duration timeout, boolean listOnTimeout)
+      throws IOException, InterruptedException, TimeoutException {
     if (dryRun) {
       return dryRunResult(command);
     }
@@ -93,14 +101,40 @@ public final class ShellExecutor implements ShellExec {
 
     var finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
     if (!finished) {
+      var processes = listOnTimeout ? processesOf(process) : "";
       destroyWithDescendants(process);
-      throw new TimeoutException(
-          "Command timed out after " + timeout.toSeconds() + "s: " + String.join(" ", command));
+      throw new CommandTimedOut(
+          "Command timed out after " + timeout.toSeconds() + "s: " + String.join(" ", command),
+          processes);
     }
 
     stdoutThread.join();
     stderrThread.join();
     return new Result(process.exitValue(), stdout.get(), stderr.get());
+  }
+
+  /**
+   * What {@code process} and every process it started are doing, as procps' {@code ps} lists them:
+   * state, the kernel function each waits in, and its arguments; or what {@code ps} said instead.
+   * The listing is bounded as a probe is, so a step that hung cannot hang its own diagnosis.
+   */
+  private String processesOf(Process process) throws InterruptedException {
+    var pids =
+        Stream.concat(Stream.of(process.toHandle()), process.descendants())
+            .map(handle -> String.valueOf(handle.pid()))
+            .collect(Collectors.joining(","));
+    try {
+      var listed =
+          exec(
+              List.of("ps", "-ww", "-o", "pid,ppid,stat,wchan:32,etime,args", "-p", pids),
+              null,
+              "",
+              PROBE_TIMEOUT,
+              false);
+      return listed.stdout() + listed.stderr();
+    } catch (IOException | TimeoutException e) {
+      return "ps could not list them: " + e.getMessage();
+    }
   }
 
   /**

@@ -21,6 +21,10 @@ import java.util.List;
  * <p>Every step is safe to re-run: user creation is guarded by {@code id}, directories use {@code
  * install -d}, the database move skips files already relocated, and {@code authorized_keys} is
  * never truncated if it already exists.
+ *
+ * <p>The {@code sail} home is made empty, not copied from {@code /etc/skel}: the account only runs
+ * forced commands, and a box's skeleton can be large (GitHub's Ubuntu runner installs Rust, nvm and
+ * dotnet tools there), each copied by {@code useradd --create-home}.
  */
 public final class SshIdentityProvisioner {
 
@@ -66,13 +70,13 @@ public final class SshIdentityProvisioner {
                 "-c",
                 "id -u "
                     + SAIL_USER
-                    + " >/dev/null 2>&1 || useradd --system --create-home --home-dir "
+                    + " >/dev/null 2>&1 || useradd --system --no-create-home --home-dir "
                     + SAIL_HOME
                     + " --shell /bin/bash "
                     + SAIL_USER)),
         new Run(
-            "Restrict the sail home directory (sshd StrictModes)",
-            List.of("chmod", "700", SAIL_HOME)),
+            "Create the sail home directory, owner-only (sshd StrictModes)",
+            List.of("install", "-d", "-m", "700", "-o", SAIL_USER, "-g", SAIL_USER, SAIL_HOME)),
         new Run(
             "Create the sail user's .ssh directory",
             List.of(

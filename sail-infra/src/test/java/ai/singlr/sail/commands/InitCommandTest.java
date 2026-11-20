@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.ShellExecutor;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -27,6 +28,8 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -615,6 +618,17 @@ class InitCommandTest {
     assertEquals(List.of(), ran);
   }
 
+  @Command(name = "hanging")
+  static final class Hanging implements Runnable {
+    @Override
+    public void run() {
+      CliCommand.run(
+          () ->
+              new ShellExecutor(false)
+                  .exec(List.of("sh", "-c", "sleep 30; true"), null, Duration.ofSeconds(1)));
+    }
+  }
+
   @Command(name = "refusing")
   static final class Refusing implements Runnable {
     @Spec CommandSpec spec;
@@ -626,6 +640,67 @@ class InitCommandTest {
             throw new IllegalStateException("main's SSH host key changed.");
           });
     }
+  }
+
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aHostStepThatTimesOutSaysWhyInOneSentenceAndLeavesItsDiagnosisInTheInitLog()
+      throws Exception {
+    var log = tempDir.resolve("log/init.log");
+    var probes =
+        new ScriptedShellExecutor()
+            .onOk("lslocks", "COMMAND PID TYPE MODE PATH\n")
+            .on("systemctl is-active", new ShellExec.Result(3, "inactive\n", ""))
+            .onOk("getent passwd sail");
+    var diagnosis = new StepTimeoutDiagnosis(probes, log, Duration.ofSeconds(1));
+    var originalErr = System.err;
+    var err = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+    try {
+      var init =
+          new CommandLine(
+              new InitCommand(
+                  () ->
+                      new InitCommand.Box(
+                          root,
+                          sudoUser,
+                          hostConfig,
+                          this::homeOf,
+                          identity,
+                          answers::get,
+                          OperatorCommand.PLAIN,
+                          (command, args) -> InitCommand.runCommand(new Hanging(), diagnosis))));
+      init.setExecutionExceptionHandler((failure, line, parsed) -> Main.report(failure, line));
+
+      assertEquals(1, init.execute("--main", "m"));
+    } finally {
+      System.setErr(originalErr);
+    }
+
+    var lines = err.toString(StandardCharsets.UTF_8).lines().toList();
+    assertEquals(3, lines.size(), String.join("\n", lines));
+    assertEquals("  ✗ Command timed out after 1s: sh -c sleep 30; true", lines.get(0));
+    assertTrue(
+        lines
+            .get(1)
+            .matches("    At the timeout the step was still running sleep \\(pid \\d+, sleeping.*"),
+        lines.get(1));
+    assertTrue(
+        lines
+            .get(1)
+            .endsWith(
+                "; getent passwd sail answered and systemd-userdbd was inactive; the step's"
+                    + " processes and this box's file locks are in "
+                    + log
+                    + "."),
+        lines.get(1));
+    assertEquals(
+        "  ✗ Setup stopped at the step marked ✗ above. Fix the cause above and re-run: sail init"
+            + " --main m",
+        lines.get(2));
+    var written = Files.readString(log);
+    assertTrue(written.contains("Command timed out after 1s: sh -c sleep 30; true"), written);
+    assertTrue(written.contains("sleep 30"), written);
   }
 
   @Test
