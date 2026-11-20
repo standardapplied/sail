@@ -31,9 +31,10 @@ import java.util.concurrent.TimeUnit;
 final class FileScripts {
 
   /**
-   * The prefix of the temporaries a write puts beside the file it replaces: no listing shows them.
+   * The prefix of the temporaries a save puts beside the file it replaces, in its folder: no
+   * listing shows them, and the watch, which stats only the paths a client shows, never names one.
    */
-  static final String WRITING = ".sail-write.";
+  static final String SAVING = ".sail-save-";
 
   /** Exit statuses of the scripts that refuse, each one {@link FilesRefusal}. */
   static final int NOT_FOUND = 20;
@@ -84,7 +85,7 @@ final class FileScripts {
           find . -mindepth 1 -maxdepth 1 ! -name '%s*' -printf '%%y\\0%%Y\\0%%s\\0%%T@\\0%%m\\0%%P\\0' 2>/dev/null
           exit 0
           """
-              .formatted(VERSION, WRITING);
+              .formatted(VERSION, SAVING);
 
   /** Says what the path is: its version, then its own entry as a listing's, named by its base. */
   static final String STAT =
@@ -127,7 +128,11 @@ final class FileScripts {
         if IFS= read -r -d '' -t 0.25 token; then
           token=$part$token part=''
           if [ $want = version ]; then
-            next+=("$name") given[$name]=$token want=path
+            case ${name##*/} in
+              '%s'*) ;;
+              *) next+=("$name") given[$name]=$token ;;
+            esac
+            want=path
           elif [ -n "$token" ]; then
             name=$token want=version
           else
@@ -163,7 +168,7 @@ final class FileScripts {
         fi
       done
       """
-          .formatted(VERSION);
+          .formatted(SAVING, VERSION);
 
   private final UploadCopy.Processes processes;
   private final UploadCopy.Place place;

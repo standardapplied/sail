@@ -176,7 +176,7 @@ class FileScriptsTest {
     Files.createSymbolicLink(tree.resolve("self"), tree.resolve("self"));
     Files.writeString(outside.resolve("hosts"), "secret");
     Files.createSymbolicLink(tree.resolve("hosts"), outside.resolve("hosts"));
-    Files.writeString(tree.resolve(FileScripts.WRITING + "App.java.7"), "half");
+    Files.writeString(tree.resolve(FileScripts.SAVING + "App.java.7"), "half");
     Files.createFile(tree.resolve("App.java"));
 
     var entries = list(tree).entries();
@@ -440,6 +440,9 @@ class FileScriptsTest {
     watch.set(Map.of(docs, version(docs)));
     watch.onlyBeats(1);
     Files.createFile(src.resolve("Unwatched.java"));
+    watch.onlyBeats(2);
+    var saving = Files.writeString(src.resolve(FileScripts.SAVING + "App.java.3"), "half");
+    watch.set(Map.of(saving, "stale"));
     watch.onlyBeats(2);
     var gone = home.resolve("gone");
     watch.set(Map.of(gone, ""));

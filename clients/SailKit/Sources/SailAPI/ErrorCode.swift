@@ -50,6 +50,7 @@ public enum ErrorCode: String, CaseIterable, Sendable {
     case notYourWorkspace = "not_your_workspace"
     case harnessNotInstalled = "harness_not_installed"
     case ownerGone = "owner_gone"
+    case workspaceStopped = "workspace_stopped"
     case agentStatusFailed = "agent_status_failed"
     case agentLogFailed = "agent_log_failed"
     case agentStopFailed = "agent_stop_failed"
