@@ -574,9 +574,16 @@ extension Driver {
         press("w", ["command", "option"])
         _ = await sheet("Close", asking: "Its 4 terminals will end.", within: 5)
         let splits = await timeSplits(10)
-        budgets["⌘D to the new pane's first committed frame p95 <= 100 ms, which over ten splits is the slowest of them (\(splits.said))"] = splits.ours <= 100
+        print("panes4 splits: \(splits.said)")
+        budgets["⌘D: our own time to the new pane's first frame <= \(Int(Self.splitOursBound)) ms in every one of ten splits, the worst \(Self.ms(splits.oursWorst)) ms"] =
+            splits.oursWorst <= Self.splitOursBound
+        budgets["⌘D: the new pane's first drawable waited <= \(Int(Self.splitDrawableBound)) ms at the median of ten splits, \(Self.ms(splits.drawableMedian)) ms (the worst \(Self.ms(splits.drawableWorst)) ms)"] =
+            splits.drawableMedian <= Self.splitDrawableBound
         panes4["⌘D to first committed frame p95 ms"] = splits.total
         panes4["⌘D to first committed frame, less the drive's own thread's hold, p95 ms"] = splits.ours
+        panes4["⌘D: our own time to the first frame, the worst split ms"] = splits.oursWorst
+        panes4["⌘D: the first drawable's wait, the median split ms"] = splits.drawableMedian
+        panes4["⌘D: the first drawable's wait, the worst split ms"] = splits.drawableWorst
         panes4["of which ⌘D handled (pane, view, session made) p95 ms"] = splits.handled
         panes4["main thread's longest stall within a split p95 ms"] = splits.held
 
@@ -1162,8 +1169,24 @@ extension Driver {
     /// in ms, the p95; beside it, of the same splits, the p95 of the key's own handling (the pane
     /// and its view made, its session opened) and of the main thread's longest stall. Each tab is
     /// closed after.
-    private func timeSplits(_ count: Int) async -> (total: Double, ours: Double, said: String, handled: Double, held: Double) {
+    /// Our own time in any one split, ⌘D to the new pane's first committed frame less the system's
+    /// wait for its first drawable and the drive's own thread's hold. Across 107 runs the slowest
+    /// split's whole time, the drawable's wait included, was at most 50.1 ms, so a split of ours
+    /// over this is ours to fix.
+    static let splitOursBound = 75.0
+
+    /// The median, over the ten splits, of the system's wait for the new pane's first drawable. One
+    /// WindowServer stall (153.7 ms in one split of #491's run, 509 ms in an earlier one, about one
+    /// split in six hundred) cannot move a median of ten; a change that makes every first drawable
+    /// wait (a layer over the panes made each frame wait 80 to 100 ms) does. Whole splits, the wait
+    /// included, take 15 to 28 ms.
+    static let splitDrawableBound = 50.0
+
+    private func timeSplits(_ count: Int) async
+        -> (total: Double, ours: Double, said: String, handled: Double, held: Double, oursWorst: Double, drawableMedian: Double, drawableWorst: Double)
+    {
         var totals: [Double] = [], ours: [Double] = [], handled: [Double] = [], held: [Double] = [], ownHeld: [Double] = []
+        var drawables: [Double] = [], ourOwn: [Double] = []
         var samples: [String] = []
         for _ in 0 ..< count {
             press("t", ["command"])
@@ -1183,18 +1206,24 @@ extension Driver {
             held.append(mainThread.longest)
             ownHeld.append(ownThread.stalls.shared(with: wait) * 1000)
             ours.append(self.ours(wait).ours)
+            let drawable = (made?.terminal.drawableAsks(in: wait).reduce(0) { $0 + $1.overlap(wait) } ?? 0) * 1000
+            drawables.append(drawable)
+            ourOwn.append(max(0, (totals.last ?? 0) - drawable - (ownHeld.last ?? 0)))
             if wait.length > 0.1, let view = made?.terminal {
                 print(splitMarks(of: view, in: wait, number: totals.count, visibleAtKey: visibleAtKey))
             }
-            samples.append(String(format: "handled %.1f, first frame %.1f, own thread %.1f, ours %.1f", handled.last ?? 0, totals.last ?? 0, ownHeld.last ?? 0, ours.last ?? 0))
+            samples.append(String(format: "handled %.1f, first frame %.1f, the first drawable's wait %.1f, own thread %.1f, ours %.1f", handled.last ?? 0, totals.last ?? 0,
+                                  drawable, ownHeld.last ?? 0, ourOwn.last ?? 0))
             _ = await waitUntil(5) { made?.session?.state.phase == .attached }
             press("w", ["command", "option"])
             _ = await sheet("Close", asking: nil, within: 5)
         }
         panes4["a thread of the drive's own, held during a split p95 ms"] = Self.p95(ownHeld)
-        let said = "p95 (the slowest of \(totals.count)) waited \(Self.ms(Self.p95(totals))) ms, the drive's own thread held \(Self.ms(Self.p95(ownHeld))) ms, ours "
-            + "\(Self.ms(Self.p95(ours))) ms; each split in ms: " + samples.joined(separator: " | ")
-        return (Self.p95(totals), Self.p95(ours), said, Self.p95(handled), Self.p95(held))
+        let sorted = drawables.sorted(), middle = sorted.count / 2
+        let median = sorted.isEmpty ? 0 : sorted.count % 2 == 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
+        let said = "p95 (the slowest of \(totals.count)) waited \(Self.ms(Self.p95(totals))) ms, the drive's own thread held \(Self.ms(Self.p95(ownHeld))) ms; "
+            + "each split in ms: " + samples.joined(separator: " | ")
+        return (Self.p95(totals), Self.p95(ours), said, Self.p95(handled), Self.p95(held), ourOwn.max() ?? 0, median, drawables.max() ?? 0)
     }
 
     /// What a split's new view did between ⌘D and its first frame, for a split over 100 ms: its
