@@ -85,7 +85,8 @@ public enum Action {
    */
   ENTER_WORKSPACE(
       "Enter a workspace",
-      "open a terminal in a workspace; create, start, stop or delete one",
+      "open a terminal in a workspace; create, start, stop or delete one (on a node, never one"
+          + " labelled for a person the node does not hold by id: N1)",
       "enter",
       "workspaces"),
   /**
