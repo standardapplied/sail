@@ -117,6 +117,8 @@ tests bite, and the deletion count in the body.
 - A unit test of the Mac app never runs AppKit's own mouse tracking (a control's `mouseDown`) or
   posts events to the app's queue (`NSApp.postEvent`): with no `NSApp.run` under it, that stopped
   the main run loop and ended the suite's process (#499); real clicks and keys are the drive's.
+- No view of the Mac app changes a size it reports (`preferredMaxLayoutWidth`, an intrinsic size)
+  inside its own `layout()`: AppKit asks for another pass from inside one and ends the app (#502).
 - Coverage: `ai.singlr.sail.api.*` is held to 100% line and method coverage; new classes
   anywhere should be fully covered in the same pull request. Gates never go down.
 - Prompts, hook files and launch commands are pinned whole by golden tests; a change to them

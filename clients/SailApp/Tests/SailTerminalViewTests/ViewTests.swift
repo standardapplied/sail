@@ -937,6 +937,48 @@ import Testing
         #expect(read >= 20)
     }
 
+    /// No view of the app's own lays itself out by changing a size it reports: a `layout()` that sets
+    /// `preferredMaxLayoutWidth` or invalidates an intrinsic size asks AppKit for another pass from
+    /// inside one, which crashed the drive (#502).
+    @Test func noLayoutChangesAnIntrinsicSize() throws {
+        let sources = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "Sources")
+        var read = 0
+        for target in try FileManager.default.contentsOfDirectory(atPath: sources.path) {
+            let directory = sources.appending(path: target)
+            guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else { continue }
+            for name in names where name.hasSuffix(".swift") {
+                let text = try String(contentsOf: directory.appending(path: name), encoding: .utf8)
+                read += 1
+                for body in Self.bodies(of: "func layout()", in: text) {
+                    for size in ["preferredMaxLayoutWidth", "invalidateIntrinsicContentSize"] {
+                        #expect(!body.contains(size), "\(target)/\(name): layout() changes \(size) inside a layout pass")
+                    }
+                }
+            }
+        }
+        #expect(read >= 50)
+    }
+
+    /// The bodies of every function `signature` in `text`, brace to matching brace.
+    static func bodies(of signature: String, in text: String) -> [String] {
+        var found: [String] = []
+        var rest = text[...]
+        while let head = rest.range(of: signature), let open = rest[head.upperBound...].firstIndex(of: "{") {
+            var depth = 0, end = open
+            for index in rest[open...].indices {
+                if rest[index] == "{" { depth += 1 } else if rest[index] == "}" { depth -= 1 }
+                if depth == 0 {
+                    end = index
+                    break
+                }
+            }
+            found.append(String(rest[open ... end]))
+            rest = rest[rest.index(after: end)...]
+        }
+        return found
+    }
+
     /// What makes `name` in `text` for the `sendEvent` at `use`: from its nearest `let` before it.
     static func declaration(of name: String, in text: String, before use: String.Index) -> String? {
         let before = text.startIndex ..< use
