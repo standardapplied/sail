@@ -913,6 +913,36 @@ import Testing
         }
         #expect(read >= 20)
     }
+
+    /// No unit test sends a mouse-down through the app (`NSApp.sendEvent`): landing on a control, it
+    /// runs AppKit's own mouse tracking, which stopped the main run loop under a test; real clicks
+    /// are the drive's.
+    @Test func noUnitTestSendsAMouseDownThroughTheApp() throws {
+        let tests = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let sent = try NSRegularExpression(pattern: #"NSApp\.sendEvent\(([^)]*)\)"#)
+        var read = 0
+        for target in try FileManager.default.contentsOfDirectory(atPath: tests.path) where target.hasSuffix("Tests") {
+            let directory = tests.appending(path: target)
+            for name in try FileManager.default.contentsOfDirectory(atPath: directory.path) where name.hasSuffix(".swift") {
+                let text = try String(contentsOf: directory.appending(path: name), encoding: .utf8)
+                read += 1
+                for match in sent.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                    guard let range = Range(match.range(at: 1), in: text) else { continue }
+                    let argument = String(text[range])
+                    let made = Self.declaration(of: argument, in: text) ?? argument
+                    #expect(!made.contains("Mouse") && !made.contains("mouseEvent"), "\(target)/\(name) sends a mouse event through the app: \(argument)")
+                }
+            }
+        }
+        #expect(read >= 20)
+    }
+
+    /// What makes `name` in `text`: from its `let` to the app's `sendEvent` that sends it.
+    static func declaration(of name: String, in text: String) -> String? {
+        guard let start = text.range(of: "let \(name) = ") ?? text.range(of: "let \(name): ") else { return nil }
+        let end = text.range(of: "NSApp.sendEvent", range: start.upperBound ..< text.endIndex)?.lowerBound ?? text.endIndex
+        return String(text[start.lowerBound ..< end])
+    }
 }
 
 /// Swift's shared pool held at every priority, in a suite of its own run alone: CI runs every suite

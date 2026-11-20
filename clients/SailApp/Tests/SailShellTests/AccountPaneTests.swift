@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SailAPI
+import SailControls
 import SailKitTestSupport
 import SailLook
 @testable import SailShell
@@ -132,8 +133,124 @@ final class Held: Transport {
         let account = Account(authenticator: Signs(sheet: sheet), vault: OneSession(fde: fde)) { _ in transport }
         return AccountPane(
             account: account, look: .light, title: try TitleFont(directory: LookTests.fonts), mono: try TerminalFonts(directory: LookTests.fonts),
+            labels: try LabelFont(directory: LookTests.fonts), defaults: defaults
+        )
+    }
+
+    /// The pane in a window `width` wide, laid out.
+    static func shown(_ pane: AccountPane, width: Double = 900, look: Look = .light) -> NSWindow {
+        pane.look = look
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 700), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = pane
+        pane.layoutSubtreeIfNeeded()
+        return window
+    }
+
+    static func eyebrows(_ pane: AccountPane) -> [String] {
+        WorkspacesViewTests.found(NSTextField.self, in: pane).filter { !$0.isHiddenOrHasHiddenAncestor && pane.eyebrows.contains($0) }.map(\.stringValue)
+    }
+
+    /// Signed in, the pane speaks the menu's language: the person's name as the display heading,
+    /// mono eyebrows over the facts (SIGNED IN AS, CONTROL PLANE), `@handle · Role`, the control
+    /// plane as the menu's line (its address, state square and word), the session's end in quiet
+    /// text, and Sign Out the secondary button.
+    @Test(arguments: [Look.light, .dark])
+    func signedInItIsTheMenusLanguage(_ look: Look) async throws {
+        let pane = try Self.pane(remembering: "uday", Held(RecordedServer([try Exchange("whoami")]), holding: "nothing is held"))
+        let window = Self.shown(pane, look: look)
+        defer { window.orderOut(nil) }
+        await pane.refresh()
+        pane.layoutSubtreeIfNeeded()
+        #expect(Self.eyebrows(pane) == ["SIGNED IN AS", "CONTROL PLANE"], "the eyebrows are \(Self.eyebrows(pane))")
+        #expect(pane.eyebrows.allSatisfy { $0.textColor == NSColor(look.textSecondary) && $0.stringValue == $0.stringValue.uppercased() })
+        #expect(pane.handle.stringValue == "@uday · Admin" && pane.planeRow.said == "127.0.0.1:7979" && pane.planeRow.plane == .connected)
+        #expect(pane.until.stringValue.hasPrefix("Signed in until ") && pane.until.textColor == NSColor(look.textTertiary))
+        #expect(pane.signOut.kind == .secondary && !pane.signOut.isHiddenOrHasHiddenAncestor && pane.signIn.isHiddenOrHasHiddenAncestor)
+        let lines = pane.text.split(separator: "\n").map(String.init)
+        #expect(Array(lines.prefix(3)) == ["Uday", "@uday · Admin", "127.0.0.1:7979 · Connected"] && lines.count == 4, "the pane says \(lines)")
+    }
+
+    /// Signed out: "Sign in to Sail", the eyebrows over the two fields, one primary (Sign In with
+    /// Passkey) and the rest secondary.
+    @Test(arguments: [Look.light, .dark])
+    func signedOutItHasOnePrimary(_ look: Look) throws {
+        let pane = try Self.pane(remembering: "uday", Held(RecordedServer([]), holding: "nothing is held"))
+        let window = Self.shown(pane, look: look)
+        defer { window.orderOut(nil) }
+        #expect(pane.text == "Sign in to Sail" && Self.eyebrows(pane) == ["CONTROL PLANE", "ENROLLMENT TICKET"], "\(pane.text), \(Self.eyebrows(pane))")
+        #expect(pane.signIn.kind == .primary && pane.enroll.kind == .secondary && pane.signOut.isHiddenOrHasHiddenAncestor)
+    }
+
+    /// A refusal is said under the field it is about, its sentence in crimson and the rest in the
+    /// secondary ink, never as a tinted row: a sign-in's under the control plane's field, above Sign
+    /// In; an enrollment's under the ticket's, above Enroll.
+    @Test(arguments: [Look.light, .dark])
+    func aRefusalIsCrimsonUnderItsField(_ look: Look) async throws {
+        let pane = try Self.pane(remembering: "uday", Held(RecordedServer([]), holding: "nothing is held"))
+        let window = Self.shown(pane, look: look)
+        defer { window.orderOut(nil) }
+        func between(_ above: NSView, _ below: NSView) -> Bool {
+            pane.layoutSubtreeIfNeeded()
+            let said = pane.convert(pane.said.bounds, from: pane.said), top = pane.convert(above.bounds, from: above), bottom = pane.convert(below.bounds, from: below)
+            return said.maxY <= top.minY + 0.5 && said.minY >= bottom.maxY - 0.5
+        }
+        pane.signIn.performClick(nil)
+        #expect(await RunnerTabTests.until { !pane.isActing && !pane.lines.isEmpty }, "the sign-in's refusal was never said")
+        let words = pane.said.attributedStringValue
+        #expect((words.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor) == NSColor(look.error), "the sentence is not crimson")
+        #expect(between(pane.address, pane.signIn), "the sign-in's refusal is not under the control plane's field")
+        pane.ticket.stringValue = Self.ticket
+        pane.enroll.performClick(nil)
+        #expect(await RunnerTabTests.until { !pane.isActing && !pane.lines.isEmpty }, "the enrollment's refusal was never said")
+        #expect(between(pane.ticket, pane.enroll), "the enrollment's refusal is not under the ticket's field")
+    }
+
+    /// The control plane's line is live as the menu's is: out of reach once a check found it so,
+    /// reconnecting while one asks again, then its answer.
+    @Test func theControlPlanesLineIsLive() async throws {
+        let transport = OutOfReach()
+        let defaults = try #require(UserDefaults(suiteName: "sail-account-\(UUID().uuidString)"))
+        defaults.set("http://127.0.0.1:7979", forKey: AccountPane.addressKey)
+        let pane = AccountPane(
+            account: Account(authenticator: Signs(sheet: nil), vault: OneSession(fde: "uday")) { _ in transport }, look: .light,
+            title: try TitleFont(directory: LookTests.fonts), mono: try TerminalFonts(directory: LookTests.fonts), labels: try LabelFont(directory: LookTests.fonts),
             defaults: defaults
         )
+        let window = Self.shown(pane)
+        defer { window.orderOut(nil) }
+        let check = Task { await pane.refresh() }
+        #expect(await RunnerTabTests.until { transport.asked == 1 })
+        transport.answer()
+        await check.value
+        #expect(pane.planeRow.plane == .unreachable && pane.planeRow.said == "127.0.0.1:7979", "after the check the line says \(String(describing: pane.planeRow.plane))")
+        let again = Task { await pane.refresh() }
+        #expect(await RunnerTabTests.until { transport.asked == 2 })
+        #expect(pane.planeRow.plane == .reconnecting, "asking again the line says \(String(describing: pane.planeRow.plane))")
+        transport.answer()
+        await again.value
+        #expect(pane.planeRow.plane == .unreachable)
+    }
+
+    /// Nothing the pane shows is out of reach, signed out, refused and signed in, at every window
+    /// size from the least frame up.
+    @Test func nothingInThePaneIsOutOfReach() async throws {
+        var faults: [String] = []
+        for size in UserMenuTests.sizes {
+            let width = Double(size.width) - Rail.width - 4
+            let out = try Self.pane(remembering: "uday", Held(RecordedServer([]), holding: "nothing is held"))
+            let window = Self.shown(out, width: width)
+            faults += WorkspacesReachTests.outOfReach(in: out).map { "\(width) pt, signed out: \($0)" }
+            out.signIn.performClick(nil)
+            _ = await RunnerTabTests.until { !out.isActing && !out.lines.isEmpty }
+            faults += WorkspacesReachTests.outOfReach(in: out).map { "\(width) pt, refused: \($0)" }
+            window.orderOut(nil)
+            let signedIn = try Self.pane(remembering: "uday", Held(RecordedServer([try Exchange("whoami")]), holding: "nothing is held"))
+            let other = Self.shown(signedIn, width: width)
+            await signedIn.refresh()
+            faults += WorkspacesReachTests.outOfReach(in: signedIn).map { "\(width) pt, signed in: \($0)" }
+            other.orderOut(nil)
+        }
+        #expect(faults.isEmpty, "\(faults.count) faults: \(faults.prefix(20).joined(separator: "\n"))")
     }
 
     /// A sign-in the server refuses, clicked while a check that will find a session is under

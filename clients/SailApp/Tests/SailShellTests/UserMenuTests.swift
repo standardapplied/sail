@@ -14,7 +14,11 @@ import Testing
 /// adds no accent and no grey to the window it opens over. No test here runs a real event loop (a
 /// posted event, a button's own mouse tracking): with no `NSApp.run` under a test, that stopped the
 /// main run loop and so ended the suite's process; real clicks are the drive's. One test at a time:
-/// a menu closes when its window gives up the keys, and another test's window takes them.
+/// a menu closes when its window gives up the keys, and another test's window takes them. Its tests
+/// hold two things that are the whole process's, the key window and `NSApp.appearance` (each test
+/// that sets it puts back what it found): CI runs every suite in a process of its own
+/// (`ci/test-suites`); a plain local `swift test` runs all suites in one, where another suite's
+/// sheet can take the keys and close a menu under a test, which its message then says.
 @MainActor @Suite(.serialized) struct UserMenuTests {
     init() {
         ExitWatch.install()
@@ -105,7 +109,7 @@ import Testing
         defer { shell.window.orderOut(nil) }
         try Self.open(shell)
         let view = shell.userMenu.view
-        let labels = WorkspacesViewTests.found(NSTextField.self, in: view).filter { !$0.isHidden }.map(\.stringValue)
+        let labels = WorkspacesViewTests.found(NSTextField.self, in: view).filter { !$0.isHiddenOrHasHiddenAncestor }.map(\.stringValue)
         #expect(labels == ["Uday Chandra", "@uday · Admin", "main.acme.dev", "Connected", "Appearance"], "the menu says \(labels)")
         #expect(view.items.map(\.item) == [.account, .logins, .signOut] && view.items.allSatisfy { near($0.frame.height, UserMenuView.row) && near($0.frame.minX, 6) })
         #expect(near(view.avatarDisc.width, 32) && near(view.avatarDisc.minX, 16) && view.planeInk == Tint(look.success))
@@ -123,7 +127,7 @@ import Testing
         #expect(signOut.frame.minY - logins.frame.maxY > UserMenuView.appearanceRow, "Sign Out is not in a section apart: \(signOut.frame) after \(logins.frame)")
         shell.userMenu.update(.signedOut(lastUsed: nil), appearance: .auto)
         view.layoutSubtreeIfNeeded()
-        let out = WorkspacesViewTests.found(NSTextField.self, in: view).filter { !$0.isHidden }.map(\.stringValue)
+        let out = WorkspacesViewTests.found(NSTextField.self, in: view).filter { !$0.isHiddenOrHasHiddenAncestor }.map(\.stringValue)
         #expect(out == ["Not signed in", "no control plane yet", "Appearance"] && view.items.map(\.item) == [.signIn], "signed out, the menu says \(out)")
         #expect(view.content.disc == .person && near(view.avatarDisc.width, 32), "signed out, no person's disc")
         shell.userMenu.update(Self.long, appearance: .auto)
@@ -135,10 +139,11 @@ import Testing
     /// menu; ← and → choose the Appearance on it; Return chooses; Escape closes and the keys go back
     /// to the button when the keys opened it, else where they were.
     @Test func theKeysWorkTheMenu() throws {
+        let appearanceWas = NSApp.appearance
         let shell = try Self.shell()
         defer {
             shell.window.orderOut(nil)
-            NSApp.appearance = nil
+            NSApp.appearance = appearanceWas
         }
         let view = shell.userMenu.view, button = try #require(shell.rail.button(.account))
         let had = UserMenu.holder(of: shell.window.firstResponder)
@@ -179,10 +184,11 @@ import Testing
     /// window giving up the keys; Logins, which cannot be chosen, says why when clicked or pointed
     /// at and leaves the menu open; Account shows the Account pane; an Appearance leaves it open.
     @Test func thePointerWorksTheMenu() throws {
+        let appearanceWas = NSApp.appearance
         let shell = try Self.shell()
         defer {
             shell.window.orderOut(nil)
-            NSApp.appearance = nil
+            NSApp.appearance = appearanceWas
         }
         let button = try #require(shell.rail.button(.account)), view = shell.userMenu.view
         button.performClick(nil)
@@ -194,7 +200,7 @@ import Testing
         let outside = try #require(NSEvent.mouseEvent(
             with: .leftMouseDown, location: at, modifierFlags: [], timestamp: 0, windowNumber: shell.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
         ))
-        NSApp.sendEvent(outside)
+        shell.userMenu.clickedAnywhere(outside)
         #expect(!shell.userMenu.isOpen, "a click outside left it open")
         try Self.open(shell)
         NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: shell.window)
@@ -250,10 +256,11 @@ import Testing
     /// Appearance is remembered and taken: Light and Dark set the app's own, Auto leaves the Mac's
     /// (the app follows it as it changes); the one kept is taken at the next launch, Auto when none.
     @Test func appearanceIsRememberedAndTaken() throws {
+        let appearanceWas = NSApp.appearance
         let shell = try Self.shell()
         defer {
             shell.window.orderOut(nil)
-            NSApp.appearance = nil
+            NSApp.appearance = appearanceWas
         }
         #expect(Appearance.stored(in: shell.defaults) == .auto, "a first launch is not Auto")
         for (appearance, name) in [(Appearance.dark, NSAppearance.Name.darkAqua), (.light, .aqua)] {
@@ -271,6 +278,18 @@ import Testing
     /// VoiceOver hears a menu named Account, its items as menu items by their titles (Logins
     /// dimmed, saying why), and Appearance as a group of three choices, the chosen one on; pressing
     /// Account by VoiceOver chooses it.
+    /// N1: the key catcher is VoiceOver's menu only while the menu is open; closed, it is no element
+    /// and has no children, so VoiceOver finds no closed "Account" menu in the window.
+    @Test func theClosedMenuIsNoElement() throws {
+        let shell = try Self.shell()
+        defer { shell.window.orderOut(nil) }
+        try Self.open(shell)
+        let keys = try #require(shell.window.firstResponder as? MenuKeys)
+        #expect(keys.isAccessibilityElement() && (keys.accessibilityChildren()?.count ?? 0) > 0, "open, the menu is no element")
+        shell.userMenu.close()
+        #expect(!keys.isAccessibilityElement() && (keys.accessibilityChildren() ?? []).isEmpty, "closed, the menu is still an element with children")
+    }
+
     @Test func voiceOverHearsAMenu() throws {
         let shell = try Self.shell()
         defer { shell.window.orderOut(nil) }
@@ -485,10 +504,11 @@ import Testing
     /// Right to left the menu is mirrored: the avatar and the state square at its right, the name
     /// set right, the segments' Light at their right, ← choosing the next Appearance.
     @Test func rightToLeftTheMenuIsMirrored() throws {
+        let appearanceWas = NSApp.appearance
         let shell = try Self.shell()
         defer {
             shell.window.orderOut(nil)
-            NSApp.appearance = nil
+            NSApp.appearance = appearanceWas
         }
         try #require(shell.rail.button(.account)).userInterfaceLayoutDirection = .rightToLeft
         try Self.open(shell, withKeys: true)

@@ -92,6 +92,7 @@ package final class UserMenu: NSObject {
         restore = Self.holder(of: window.firstResponder)
         selection = (window.firstResponder as? NSText).flatMap { $0.isFieldEditor ? $0.selectedRange : nil }
         window.makeFirstResponder(keys)
+        keys.setAccessibilityElement(true)
         NSAccessibility.post(element: keys, notification: NSAccessibility.Notification(rawValue: "AXMenuOpened"))
         mouseWatch = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
             MainActor.assumeIsolated { self?.clickedAnywhere(event) }
@@ -129,6 +130,7 @@ package final class UserMenu: NSObject {
             }
         }
         NSAccessibility.post(element: keys, notification: NSAccessibility.Notification(rawValue: "AXMenuClosed"))
+        keys.setAccessibilityElement(false)
         onClose()
     }
 
@@ -176,7 +178,7 @@ package final class UserMenu: NSObject {
     }
 
     /// A click outside the box closes the menu; one on the button is the button's own (it toggles).
-    private func clickedAnywhere(_ event: NSEvent) {
+    func clickedAnywhere(_ event: NSEvent) {
         if event.window === panel { return }
         if let anchor, event.window === anchor.window {
             let at = anchor.convert(event.locationInWindow, from: nil)
@@ -207,7 +209,8 @@ package final class UserMenu: NSObject {
 }
 
 /// Takes the window's keys while the menu is open; VoiceOver reads it as the menu, its children the
-/// menu's items and Appearance, its focus the one highlighted.
+/// menu's items and Appearance, its focus the one highlighted, only while it is open: closed, it is
+/// no element and has no children.
 @MainActor
 final class MenuKeys: NSView {
     weak var owner: UserMenu?
@@ -215,7 +218,7 @@ final class MenuKeys: NSView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        setAccessibilityElement(true)
+        setAccessibilityElement(false)
         setAccessibilityRole(.menu)
         setAccessibilityLabel("Account")
     }
@@ -226,7 +229,8 @@ final class MenuKeys: NSView {
     }
 
     override func accessibilityChildren() -> [Any]? {
-        box.map { $0.items as [Any] + [$0.segments] }
+        guard owner?.isOpen == true else { return nil }
+        return box.map { $0.items as [Any] + [$0.segments] }
     }
 
     override var accessibilityFocusedUIElement: Any? {
@@ -273,8 +277,8 @@ package final class UserMenuView: NSView {
     package private(set) var segments: MenuSegments
     private let name = NSTextField(labelWithString: "")
     private let detail = NSTextField(labelWithString: "")
-    private let address = NSTextField(labelWithString: "")
-    private let state = NSTextField(labelWithString: "")
+    /// The control plane's line, the Account pane's own.
+    let planeRow: ControlPlaneRow
     private let appearanceLabel = NSTextField(labelWithString: "Appearance")
     package let tip: Tooltip
     /// What the keys move through: the enabled items, then Appearance.
@@ -285,12 +289,17 @@ package final class UserMenuView: NSView {
         self.mono = mono
         segments = MenuSegments(look: look)
         tip = Tooltip(UserMenuContent.Item.logins.why ?? "", look: look, mono: nil)
+        planeRow = ControlPlaneRow(look: look, mono: mono, points: Look.Step.micro.points)
         super.init(frame: .zero)
-        for label in [name, detail, address, state, appearanceLabel] {
+        for label in [name, detail] {
             label.lineBreakMode = .byTruncatingTail
             label.maximumNumberOfLines = 1
             addSubview(label)
         }
+        addSubview(planeRow)
+        appearanceLabel.lineBreakMode = .byTruncatingTail
+        appearanceLabel.maximumNumberOfLines = 1
+        addSubview(appearanceLabel)
         addSubview(segments)
         segments.onChoose = { [weak self] appearance in
             self?.chosenLook = appearance
@@ -316,6 +325,7 @@ package final class UserMenuView: NSView {
         set {
             userInterfaceLayoutDirection = newValue
             segments.userInterfaceLayoutDirection = newValue
+            planeRow.userInterfaceLayoutDirection = newValue
             items.forEach { $0.userInterfaceLayoutDirection = newValue }
             needsLayout = true
         }
@@ -449,7 +459,7 @@ package final class UserMenuView: NSView {
 
     /// Where the control plane's state square is drawn.
     var planeSquare: NSRect? {
-        sections.plane.map { mirrored(NSRect(x: Self.padding, y: $0 + 14, width: 6, height: 6)) }
+        sections.plane == nil ? nil : convert(planeRow.squareRect, from: planeRow)
     }
 
     package override func layout() {
@@ -458,11 +468,8 @@ package final class UserMenuView: NSView {
         name.frame = mirrored(NSRect(x: text, y: 14, width: width - text - Self.padding, height: 17))
         detail.frame = mirrored(NSRect(x: text, y: 31, width: width - text - Self.padding, height: 15))
         if let plane = at.plane {
-            // The words' own width and the label cell's 2 pt either side: its intrinsic width cut
-            // "Connected" to "Connect…" in the drive's frames.
-            let stateWidth = ceil(Double(state.attributedStringValue.size().width)) + 4
-            state.frame = mirrored(NSRect(x: width - Self.padding - stateWidth, y: plane + 9, width: stateWidth, height: 16))
-            address.frame = mirrored(NSRect(x: Self.padding + 14, y: plane + 9, width: max(width - Self.padding * 2 - 14 - stateWidth - 8, 0), height: 16))
+            planeRow.frame = NSRect(x: Self.padding, y: plane + 9, width: width - Self.padding * 2, height: 16)
+            planeRow.layoutSubtreeIfNeeded()
         }
         var y = at.items + Self.sectionPad
         for row in items where row.item != .signOut {
@@ -476,8 +483,7 @@ package final class UserMenuView: NSView {
         if let signOut = at.signOut, let row = items.first(where: { $0.item == .signOut }) {
             row.frame = NSRect(x: 6, y: signOut + Self.sectionPad, width: width - 12, height: Self.row)
         }
-        address.isHidden = at.plane == nil
-        state.isHidden = at.plane == nil
+        planeRow.isHidden = at.plane == nil
         detail.isHidden = content.detail == nil
     }
 
@@ -495,9 +501,8 @@ package final class UserMenuView: NSView {
         let micro = mono.font(Look.Step.micro.points, .regular) as NSFont
         name.attributedStringValue = line(content.name, .systemFont(ofSize: Look.Step.body.points, weight: .semibold), look.text)
         detail.attributedStringValue = line(content.detail ?? "", micro, look.textTertiary)
-        address.attributedStringValue = line(content.address ?? "", micro, look.textSecondary, cut: .byTruncatingMiddle)
-        let ink = content.plane == .unreachable ? Tint(look.error) : look.textTertiary
-        state.attributedStringValue = line(content.plane?.said ?? "", .systemFont(ofSize: Look.Step.micro.points), ink, trailing: true)
+        planeRow.look = look
+        if let address = content.address, let plane = content.plane { planeRow.show(address: address, plane: plane) }
         appearanceLabel.attributedStringValue = line("Appearance", .systemFont(ofSize: Look.Step.body.points), look.text)
         items.forEach { $0.look = look }
         segments.look = look
@@ -513,12 +518,7 @@ package final class UserMenuView: NSView {
 
     /// The control plane's square: green connected, teal reconnecting, crimson out of reach.
     var planeInk: Tint? {
-        switch content.plane {
-        case .connected?: Tint(look.success)
-        case .reconnecting?: Tint(look.info)
-        case .unreachable?: Tint(look.error)
-        case nil: nil
-        }
+        content.plane == nil ? nil : planeRow.ink
     }
 
     package override func draw(_: NSRect) {
@@ -548,10 +548,6 @@ package final class UserMenuView: NSView {
         case nil:
             break
         }
-        if let square = planeSquare, let ink = planeInk {
-            NSColor(ink).setFill()
-            square.fill()
-        }
         NSColor(look.separatorStrong).setStroke()
         shape.lineWidth = 1
         shape.stroke()
@@ -580,9 +576,8 @@ extension UserMenuView {
 
 extension UserMenuView: Marked {
     package var drawnMarks: [Mark] {
-        let avatar: [Mark] = if case .initial? = content.disc { look.marks(fill: look.menuAvatar.fill, area: .pi * Self.avatar * Self.avatar / 4) } else { [] }
-        let plane = planeSquare.map { look.marks(fill: planeInk, area: Double($0.width * $0.height)) } ?? []
-        return avatar + plane
+        if case .initial? = content.disc { return look.marks(fill: look.menuAvatar.fill, area: .pi * Self.avatar * Self.avatar / 4) }
+        return []
     }
 }
 

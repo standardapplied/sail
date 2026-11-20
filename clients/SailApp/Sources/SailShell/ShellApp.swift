@@ -94,7 +94,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         thisMac = try WorkbenchView(fonts: fonts, helper: helper, look: look, defaults: defaults)
         account = AccountPane(
             account: Account(authenticator: passkeys { [weak window] in window }, vault: vault, connect: connect), look: look, title: title,
-            mono: mono, defaults: defaults
+            mono: mono, labels: labels, defaults: defaults
         )
         workspaces = WorkspacesView(look: look, title: title, mono: labels)
         rail = Rail(look: look)
@@ -208,10 +208,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// A control plane as the menu names it: its host, and its port when it has one.
-    static func named(_ url: URL) -> String {
-        url.host().map { host in url.port.map { "\(host):\($0)" } ?? host } ?? url.absoluteString
-    }
+
 
     /// Account (⌘,), from the app's menu or the user menu: the Account pane.
     @objc public func showAccount(_: Any?) {
@@ -222,7 +219,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// What the user menu says: who is signed in at which control plane, and whether it answers;
     /// while the app is still asking and knows no one, that it is checking, never "Not signed in".
     var menuContent: UserMenuContent {
-        let lastUsed = defaults.string(forKey: AccountPane.addressKey).flatMap { try? ControlPlane(address: $0) }.map { Self.named($0.url) }
+        let lastUsed = defaults.string(forKey: AccountPane.addressKey).flatMap { try? ControlPlane(address: $0) }.map(\.named)
         guard let standing = account.standing else {
             if account.checks > 0, let lastUsed { return .checking(at: lastUsed) }
             return .signedOut(lastUsed: lastUsed)
@@ -230,7 +227,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let whoami = try? standing.whoami.get()
         let unreachable: Bool = if case let .failure(refusal) = standing.whoami { refusal.reason == .unreachable } else { false }
         return .signedIn(
-            handle: whoami?.fde ?? standing.fde, address: Self.named(standing.controlPlane.url), whoami: whoami,
+            handle: whoami?.fde ?? standing.fde, address: standing.controlPlane.named, whoami: whoami,
             unreachable: unreachable, refreshing: account.checks > 0
         )
     }
