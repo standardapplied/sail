@@ -60,6 +60,13 @@ public struct SignedIn: Equatable, Sendable {
     public let fde: String
     public let until: Date
     public let whoami: Result<Whoami, AccountRefusal>
+
+    public init(controlPlane: ControlPlane, fde: String, until: Date, whoami: Result<Whoami, AccountRefusal>) {
+        self.controlPlane = controlPlane
+        self.fde = fde
+        self.until = until
+        self.whoami = whoami
+    }
 }
 
 /// Signing in to one control plane with a passkey: a ticket enrolls one, the passkey signs in, the

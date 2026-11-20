@@ -3940,6 +3940,65 @@ class WorkspacesTest {
   }
 
   /**
+   * #500's last look, m1: a strip that fails with a long error, over many lines, is written on the
+   * workspace as one line of at most {@code Unreached.REASON_MAX} characters and a mark that it was
+   * cut, so Incus takes it and its doors say it; and when Incus refuses even that, the strip's own
+   * failure is the one the pass is told, the refused word beside it.
+   */
+  @Test
+  void aLongStripErrorIsWrittenOnTheWorkspaceCutToOneLineAndARefusedWriteKeepsTheStripsFailure()
+      throws Exception {
+    var long_ = "Error: line one\n" + "x".repeat(1990) + "\nlast line";
+    var shell =
+        incus(
+                DIR_AND_ZFS,
+                list(
+                    instance(
+                        "acme-a",
+                        "Running",
+                        "tank",
+                        "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"a\","
+                            + " \"user.sail.owner\": \"ana\"")),
+                "[]")
+            .onFail("incus exec acme-a", long_);
+    var refusing =
+        incus(
+                DIR_AND_ZFS,
+                list(
+                    instance(
+                        "acme-a",
+                        "Running",
+                        "tank",
+                        "\"user.sail.project\": \"acme\", \"user.sail.workspace\": \"a\","
+                            + " \"user.sail.owner\": \"ana\"")),
+                "[]")
+            .onFail("incus exec acme-a", long_)
+            .onFail("incus config set acme-a user.sail.unreached", "Error: config refused");
+
+    workspaces(shell, ticks())
+        .disown(
+            (handle, id) -> !handle.equals("ana"),
+            instance -> true,
+            instance -> Instant.parse("2026-11-20T21:00:00Z"));
+    var told =
+        workspaces(refusing, ticks())
+            .disown(
+                (handle, id) -> !handle.equals("ana"),
+                instance -> true,
+                instance -> Instant.parse("2026-11-20T21:00:00Z"));
+
+    var prefix = "incus config set acme-a user.sail.unreached=2026-11-20T21:00:00.000Z ";
+    var said =
+        shell.invocations().stream().filter(c -> c.startsWith(prefix)).findFirst().orElseThrow();
+    var reason = said.substring(prefix.length());
+    assertFalse(reason.contains("\n"), reason);
+    assertTrue(reason.length() <= Workspaces.Unreached.REASON_MAX + 1, reason.length() + "");
+    assertTrue(reason.endsWith("…") && reason.contains("Error: line one x"), reason);
+    assertEquals(1, told.size(), told.toString());
+    assertTrue(told.getFirst().endsWith("last line"), told.getFirst());
+  }
+
+  /**
    * A workspace a removal cannot strip is said, and stops none of the others; its label says why
    * and when the pass tries again, so its doors tell the truth (#500's M1), and one it does reach
    * is left nobody's with no such word.

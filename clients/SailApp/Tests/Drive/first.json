@@ -369,6 +369,7 @@
   {"name": "unreachable-address", "address": "http://127.0.0.1:1"},
   {"name": "sign-in-unreachable", "signIn": true},
   {"name": "row-2", "pane": "Sail cannot reach http://127.0.0.1:1.\nCheck that this Mac is on its network and the address is right."},
+  {"name": "the-account-pane-refused", "shotScreen": "account-refused"},
   {"name": "plain-http-to-a-name", "address": "http://localhost:7979"},
   {"name": "sign-in-to-a-name", "signIn": true},
   {"name": "row-1", "pane": "Sail sends plain HTTP only to a private-network address. Use https:// for localhost."},
@@ -392,7 +393,7 @@
   {"name": "sign-in-unsigned", "signed": false, "signIn": true},
   {"name": "row-13-unsigned", "signed": false, "pane": "Sail could not keep your sign-in in the Keychain: errSecMissingEntitlement (-34018).\nThis build is unsigned. Use a signed build."},
   {"name": "sign-in", "signed": true, "signIn": true},
-  {"name": "signed-in", "signed": true, "pane": "Uday\n@uday\nadmin\nhttp://127.0.0.1:7979\nSigned in until "},
+  {"name": "signed-in", "signed": true, "pane": "Uday\n@uday · Admin\n127.0.0.1:7979 · Connected\nSigned in until "},
   {"name": "item-3", "signed": true, "keychain": "kept"},
   {"name": "five-ceremonies", "asked": 5},
   {"name": "no-session-left-at-the-host-as-it-quits", "heldAtHost": true}

@@ -28,7 +28,7 @@ public struct AccountRefusal: Error, Equatable, Sendable {
     }
 
     /// Which call a server's answer came to: the same code means a different thing at each.
-    enum Step {
+    public enum Step: Sendable {
         case enrolling, signingIn, asking
     }
 
@@ -54,7 +54,7 @@ public struct AccountRefusal: Error, Equatable, Sendable {
         self.system = system
     }
 
-    init(_ error: SailError, at plane: ControlPlane, step: Step) {
+    public init(_ error: SailError, at plane: ControlPlane, step: Step) {
         guard case let .refused(refusal) = error else {
             if case let .unreachable(text) = error {
                 self.init(.unreachable, at: plane, system: text)

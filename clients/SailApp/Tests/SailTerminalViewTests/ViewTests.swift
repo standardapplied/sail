@@ -913,6 +913,94 @@ import Testing
         }
         #expect(read >= 20)
     }
+
+    /// No unit test sends a mouse event through the app or a window (`sendEvent`): landing on a
+    /// control, it runs AppKit's own mouse tracking, which stopped the main run loop under a test; a
+    /// test hands the view its own handler, and real clicks are the drive's.
+    @Test func noUnitTestSendsAMouseDownThroughTheApp() throws {
+        let tests = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let sent = try NSRegularExpression(pattern: #"\.sendEvent\(([^)]*)\)"#)
+        var read = 0
+        for target in try FileManager.default.contentsOfDirectory(atPath: tests.path) where target.hasSuffix("Tests") {
+            let directory = tests.appending(path: target)
+            for name in try FileManager.default.contentsOfDirectory(atPath: directory.path) where name.hasSuffix(".swift") {
+                let text = try String(contentsOf: directory.appending(path: name), encoding: .utf8)
+                read += 1
+                for match in sent.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                    guard let range = Range(match.range(at: 1), in: text) else { continue }
+                    let argument = String(text[range])
+                    let made = Self.declaration(of: argument, in: text, before: range.lowerBound) ?? argument
+                    #expect(!made.contains("Mouse") && !made.contains("mouseEvent"), "\(target)/\(name) sends a mouse event through the app: \(argument)")
+                }
+            }
+        }
+        #expect(read >= 20)
+    }
+
+    /// Nothing a layout pass reaches changes what makes AppKit ask for another pass from inside one,
+    /// which crashed the drive (#502): in `layout()`, `updateConstraints()`, `viewDidLayout()`,
+    /// `resizeSubviews` and `setFrameSize` of every view of the app's own, no
+    /// `preferredMaxLayoutWidth`, intrinsic size, label text or font, or constraint's `constant` or
+    /// `isActive` is set. A view whose height follows its width (no intrinsic width of its own) may
+    /// invalidate its size when its width changes. Helpers those call are not read here: the exit
+    /// watch writes AppKit's layout-loop exception with its stack, in the tests and the drive.
+    @Test func noLayoutChangesAnIntrinsicSize() throws {
+        let sources = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "Sources")
+        var read = 0
+        for target in try FileManager.default.contentsOfDirectory(atPath: sources.path) {
+            let directory = sources.appending(path: target)
+            guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else { continue }
+            for name in names where name.hasSuffix(".swift") {
+                let text = try String(contentsOf: directory.appending(path: name), encoding: .utf8)
+                read += 1
+                let heightForWidth = text.contains("NSSize(width: NSView.noIntrinsicMetric")
+                for entry in ["func layout()", "func updateConstraints()", "func viewDidLayout()", "func resizeSubviews(", "func setFrameSize("] {
+                    for body in Self.bodies(of: entry, in: text) {
+                        for change in Self.anotherPass where body.contains(change) {
+                            let followsWidth = entry == "func setFrameSize(" && change == "invalidateIntrinsicContentSize" && heightForWidth && body.contains("newSize.width != frame.width")
+                            #expect(followsWidth, "\(target)/\(name): \(entry) changes \(change) inside a layout pass")
+                        }
+                    }
+                }
+            }
+        }
+        #expect(read >= 50)
+    }
+
+    /// What, set inside a layout pass, makes AppKit ask for another.
+    static let anotherPass = [
+        "preferredMaxLayoutWidth", "invalidateIntrinsicContentSize", "needsUpdateConstraints = true", ".constant =", ".isActive =",
+        "stringValue =", "attributedStringValue =", ".font =",
+    ]
+
+    /// The bodies of every function `signature` in `text`, brace to matching brace.
+    static func bodies(of signature: String, in text: String) -> [String] {
+        var found: [String] = []
+        var rest = text[...]
+        while let head = rest.range(of: signature), let open = rest[head.upperBound...].firstIndex(of: "{") {
+            var depth = 0, end = open
+            for index in rest[open...].indices {
+                if rest[index] == "{" { depth += 1 } else if rest[index] == "}" { depth -= 1 }
+                if depth == 0 {
+                    end = index
+                    break
+                }
+            }
+            found.append(String(rest[open ... end]))
+            rest = rest[rest.index(after: end)...]
+        }
+        return found
+    }
+
+    /// What makes `name` in `text` for the `sendEvent` at `use`: from its nearest `let` before it.
+    static func declaration(of name: String, in text: String, before use: String.Index) -> String? {
+        let before = text.startIndex ..< use
+        guard let start = [text.range(of: "let \(name) = ", options: .backwards, range: before), text.range(of: "let \(name): ", options: .backwards, range: before)]
+            .compactMap(\.self).max(by: { $0.lowerBound < $1.lowerBound })
+        else { return nil }
+        return String(text[start.lowerBound ..< use])
+    }
 }
 
 /// Swift's shared pool held at every priority, in a suite of its own run alone: CI runs every suite
