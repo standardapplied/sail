@@ -29,6 +29,10 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     public private(set) var ended = 0
+    /// How many checks of who is signed in are under way, told as it changes: a menu saying the
+    /// control plane is reconnecting says so only while one is.
+    public private(set) var checks = 0
+    var onChecking: @MainActor () -> Void = {}
     /// How many actions a person has started here (a sign-in, an enrollment, a sign-out): what the
     /// drive waits on, and what a check's late answer is said after.
     public private(set) var actions = 0
@@ -110,6 +114,12 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     public func refresh() async {
         guard !busy, let used = defaults.string(forKey: Self.addressKey), let plane = try? ControlPlane(address: used) else { return }
         let acted = actions, seen = shown
+        checks += 1
+        onChecking()
+        defer {
+            checks -= 1
+            onChecking()
+        }
         await run(byAPerson: false) { () async throws(AccountRefusal) in
             let answer: Result<SignedIn?, AccountRefusal>
             do throws(AccountRefusal) {

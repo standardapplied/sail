@@ -73,7 +73,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     init(
         fonts: URL, helper: String?, look: Look, passkeys: (@escaping @MainActor @Sendable () -> NSWindow?) -> any PasskeyAuthenticator,
         connect: @escaping @Sendable (ControlPlane) -> any Transport = { URLSessionTransport(base: $0.url) },
-        defaults: UserDefaults = .standard
+        vault: any TokenVault = KeychainVault(), defaults: UserDefaults = .standard
     ) throws(ShellError) {
         self.look = look
         let window = ShellWindow(
@@ -93,8 +93,8 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         thisMac = try WorkbenchView(fonts: fonts, helper: helper, look: look, defaults: defaults)
         account = AccountPane(
-            account: Account(authenticator: passkeys { [weak window] in window }, vault: KeychainVault(), connect: connect), look: look, title: title,
-            mono: mono
+            account: Account(authenticator: passkeys { [weak window] in window }, vault: vault, connect: connect), look: look, title: title,
+            mono: mono, defaults: defaults
         )
         workspaces = WorkspacesView(look: look, title: title, mono: labels)
         rail = Rail(look: look)
@@ -192,9 +192,25 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if userMenu.isOpen { return userMenu.close() }
         guard let button = rail.button(.account) else { return }
         rail.menuOpen = true
-        let pointer: Set<NSEvent.EventType> = [.leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp]
-        let byPointer = NSApp.currentEvent.map { pointer.contains($0.type) } ?? false
-        userMenu.open(from: button, saying: menuContent, appearance: Appearance.stored(in: defaults), withKeys: !byPointer)
+        userMenu.open(from: button, saying: menuContent, appearance: Appearance.stored(in: defaults), withKeys: !rail.pressedByPointer)
+    }
+
+    private func updateMenu() {
+        userMenu.update(menuContent, appearance: Appearance.stored(in: defaults))
+    }
+
+    /// Where the keys rest in the pane shown: This Mac's focused terminal, the Account pane's address.
+    private var restingResponder: NSResponder? {
+        switch rail.selected {
+        case .thisMac?: thisMac.focused?.terminal
+        case .account?: account.address
+        default: nil
+        }
+    }
+
+    /// A control plane as the menu names it: its host, and its port when it has one.
+    static func named(_ url: URL) -> String {
+        url.host().map { host in url.port.map { "\(host):\($0)" } ?? host } ?? url.absoluteString
     }
 
     /// Account (⌘,), from the app's menu or the user menu: the Account pane.
@@ -203,16 +219,19 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         select(.account)
     }
 
-    /// What the user menu says: who is signed in at which control plane, and whether it answers.
+    /// What the user menu says: who is signed in at which control plane, and whether it answers;
+    /// while the app is still asking and knows no one, that it is checking, never "Not signed in".
     var menuContent: UserMenuContent {
-        guard let standing = account.standing else { return .signedOut }
+        let lastUsed = defaults.string(forKey: AccountPane.addressKey).flatMap { try? ControlPlane(address: $0) }.map { Self.named($0.url) }
+        guard let standing = account.standing else {
+            if account.checks > 0, let lastUsed { return .checking(at: lastUsed) }
+            return .signedOut(lastUsed: lastUsed)
+        }
         let whoami = try? standing.whoami.get()
         let unreachable: Bool = if case let .failure(refusal) = standing.whoami { refusal.reason == .unreachable } else { false }
-        let url = standing.controlPlane.url
-        let address = url.host().map { host in url.port.map { "\(host):\($0)" } ?? host } ?? url.absoluteString
         return .signedIn(
-            handle: whoami?.fde ?? standing.fde, address: address, whoami: whoami,
-            unreachable: unreachable, refreshing: account.busy
+            handle: whoami?.fde ?? standing.fde, address: Self.named(standing.controlPlane.url), whoami: whoami,
+            unreachable: unreachable, refreshing: account.checks > 0
         )
     }
 
@@ -433,9 +452,10 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         userMenu.onClose = { [weak self] in self?.rail.menuOpen = false }
         account.onStanding = { [weak self] signedIn in
             self?.standing(signedIn)
-            guard let self else { return }
-            userMenu.update(menuContent, appearance: Appearance.stored(in: defaults))
+            self?.updateMenu()
         }
+        account.onChecking = { [weak self] in self?.updateMenu() }
+        userMenu.fallback = { [weak self] in self?.restingResponder }
         thisMac.signedIn = { [weak self] in self?.signedIn() }
         thisMac.onSignIn = { [weak self] in self?.select(.account) }
         workspaces.onSignIn = { [weak self] in self?.select(.account) }

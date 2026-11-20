@@ -51,10 +51,14 @@ public final class Rail: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         for item in Item.allCases {
-            let button = NSButton(image: Self.image(item, colour: look.textSecondary), target: self, action: #selector(pick(_:)))
+            let button = RailButton(image: Self.image(item, colour: look.textSecondary), target: self, action: #selector(pick(_:)))
             button.isBordered = false
             button.toolTip = item.title
             button.setAccessibilityLabel(item.title)
+            if item == .account {
+                button.setAccessibilityRole(.menuButton)
+                button.setAccessibilityHelp("Opens a menu of who is signed in, the control plane and Appearance.")
+            }
             button.identifier = NSUserInterfaceItemIdentifier(item.rawValue)
             button.translatesAutoresizingMaskIntoConstraints = false
             let wash = NSView()
@@ -99,6 +103,11 @@ public final class Rail: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
+    }
+
+    /// Whether the press being acted on is the pointer's: a click, not the keys or VoiceOver.
+    var pressedByPointer: Bool {
+        buttons.values.contains { ($0 as? RailButton)?.clicked == true }
     }
 
     /// The user button while its menu is open: outlined in the look's `railOpen`, its icon in ink.
@@ -164,5 +173,18 @@ extension Rail: Marked {
     var chosenWash: (size: NSSize, colour: CGColor?, button: NSRect, insets: NSEdgeInsets)? {
         guard let selected, let wash = washes[selected], let button = buttons[selected] else { return nil }
         return (wash.bounds.size, wash.layer?.backgroundColor, button.frame, button.alignmentRectInsets)
+    }
+}
+
+/// A rail item's button, which knows while a click is acting on it: its action runs inside the
+/// click's tracking, so the user menu can tell the pointer from the keys and VoiceOver.
+@MainActor
+final class RailButton: NSButton {
+    private(set) var clicked = false
+
+    override func mouseDown(with event: NSEvent) {
+        clicked = true
+        defer { clicked = false }
+        super.mouseDown(with: event)
     }
 }

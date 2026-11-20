@@ -255,7 +255,7 @@
   {"name": "w-m7-said-signed-out", "workspaces": "You are signed out of the control plane."},
   {"name": "w-m7-signed-out", "shot": "18-signed-out"},
   {"name": "w-m7-the-user-menu-signed-out", "menu": "click"},
-  {"name": "w-m7-the-user-menu-says-signed-out", "menuSays": "open: Not signed in; Sign In highlighted; Auto chosen"},
+  {"name": "w-m7-the-user-menu-says-signed-out", "menuSays": "open: Not signed in; nothing highlighted; Auto chosen"},
   {"name": "w-m7-the-user-menu-signed-out-in-both-looks", "shotScreen": "user-menu-signed-out"},
   {"name": "w-m7-sign-in-from-the-user-menu", "menuClick": "Sign In"}
 ]}

@@ -1,6 +1,7 @@
 {"steps": [
   {"name": "kit-the-account-shown", "select": "account"},
   {"name": "kit-the-user-menu-by-the-keys", "menu": "keys"},
+  {"name": "kit-the-user-menu-highlights-its-first", "menuSays": "open: Not signed in; Sign In highlighted; Auto chosen"},
   {"name": "kit-the-user-menu-shown", "shotScreen": "user-menu-keys"},
   {"name": "kit-escape-closes-the-user-menu", "press": "escape"},
   {"name": "kit-the-keys-back-on-the-button", "menuSays": "closed, the keys on its button"},

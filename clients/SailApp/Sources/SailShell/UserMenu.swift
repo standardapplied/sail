@@ -8,12 +8,13 @@ import SailLook
 /// why), Appearance Light / Dark / Auto, and Sign Out apart; signed out, Not signed in, Sign In and
 /// Appearance. It is drawn by us, not an `NSMenu`, whose highlight is the system's accent: 260 pt,
 /// its leading edge on the button's, its foot 8 pt above it, on the popover's surface and shadow.
-/// It opens with its first item highlighted. The item under the keys or the pointer, the avatar and
-/// the chosen Appearance are turned over to ink. The window keeps the keys: while it is open a key
-/// catcher there takes ↑ ↓ ← → Return and Escape, and the keys go back where they were when it
-/// closes (to the button, when it was opened by anything but the pointer).
-/// It closes on Escape, a click outside it, the button again, a choice (but Appearance), or the
-/// window resigning key.
+/// Opened by the pointer it highlights nothing, as a Mac menu does; opened by the keys or VoiceOver
+/// its first item. The item under the keys or the pointer, the avatar and the chosen Appearance are
+/// turned over to ink. The window keeps the keys: while it is open a key catcher there, which
+/// VoiceOver reads as the menu, takes ↑ ↓ Tab ← → Return and Escape, and the keys go back where
+/// they were when it closes (to the button, when it was opened by anything but the pointer), or,
+/// when that view has left the window, to the shown pane's own. It closes on Escape, a click
+/// outside it, the button again, a choice (but Appearance), or the window resigning key.
 @MainActor
 package final class UserMenu: NSObject {
     static let width = 260.0, gap = 8.0, room = 24.0
@@ -29,13 +30,18 @@ package final class UserMenu: NSObject {
     var onAppearance: @MainActor (Appearance) -> Void = { _ in }
     /// Told when it closes, so the button stops being drawn open.
     var onClose: @MainActor () -> Void = {}
+    /// Where the keys go when the view that held them has left the window (a tab closed, a rename
+    /// ended): the shown pane's own, or the window.
+    var fallback: @MainActor () -> NSResponder? = { nil }
 
     package let view: UserMenuView
     package let panel: NSPanel
     private let shadow: PopShadowView
     private let keys = MenuKeys()
     private weak var anchor: NSView?
-    private var restore: NSResponder?
+    private weak var restore: NSResponder?
+    /// The selection of the field being edited when it opened, given back with the keys.
+    private var selection: NSRange?
     private var withKeys = false
     private var mouseWatch: Any?
     private var resignWatch: (any NSObjectProtocol)?
@@ -55,6 +61,11 @@ package final class UserMenu: NSObject {
         host.addSubview(view)
         panel.contentView = host
         keys.owner = self
+        keys.box = view
+        view.onHighlight = { [weak self] element in
+            guard let self, isOpen, let element else { return }
+            NSAccessibility.post(element: element, notification: .focusedUIElementChanged)
+        }
         view.onChoose = { [weak self] item in self?.choose(item) }
         view.onChanged = { [weak self] in
             guard let self, isOpen, let anchor, let window = anchor.window else { return }
@@ -73,13 +84,15 @@ package final class UserMenu: NSObject {
         anchor = button
         self.withKeys = withKeys
         view.direction = button.userInterfaceLayoutDirection
-        view.show(content, appearance: appearance, fresh: true)
+        view.show(content, appearance: appearance, fresh: true, highlightingFirst: withKeys)
         place(over: button, in: window)
         window.addChildWindow(panel, ordered: .above)
         panel.orderFront(nil)
         if keys.superview !== window.contentView { window.contentView?.addSubview(keys) }
         restore = Self.holder(of: window.firstResponder)
+        selection = (window.firstResponder as? NSText).flatMap { $0.isFieldEditor ? $0.selectedRange : nil }
         window.makeFirstResponder(keys)
+        NSAccessibility.post(element: keys, notification: NSAccessibility.Notification(rawValue: "AXMenuOpened"))
         mouseWatch = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
             MainActor.assumeIsolated { self?.clickedAnywhere(event) }
             return event
@@ -92,11 +105,12 @@ package final class UserMenu: NSObject {
     /// Says `content` while open: who is signed in, or the control plane's state, changed.
     func update(_ content: UserMenuContent, appearance: Appearance) {
         guard isOpen else { return }
-        view.show(content, appearance: appearance, fresh: false)
+        view.show(content, appearance: appearance, fresh: false, highlightingFirst: false)
     }
 
     package func close() {
         guard isOpen else { return }
+        view.letGo()
         if let mouseWatch { NSEvent.removeMonitor(mouseWatch) }
         if let resignWatch { NotificationCenter.default.removeObserver(resignWatch) }
         mouseWatch = nil
@@ -108,8 +122,13 @@ package final class UserMenu: NSObject {
             // A window asked to focus a view that refuses the keys takes them itself and says yes,
             // and a field was being edited through the window's field editor, not by itself.
             let button = withKeys && anchor?.acceptsFirstResponder == true ? anchor : nil
-            window.makeFirstResponder(button ?? restore)
+            let back = button ?? Self.still(restore, in: window) ?? fallback()
+            window.makeFirstResponder(back)
+            if button == nil, back === restore, let selection, let editor = (back as? NSTextField)?.currentEditor() {
+                editor.selectedRange = NSRange(location: min(selection.location, editor.string.utf16.count), length: min(selection.length, max(editor.string.utf16.count - selection.location, 0)))
+            }
         }
+        NSAccessibility.post(element: keys, notification: NSAccessibility.Notification(rawValue: "AXMenuClosed"))
         onClose()
     }
 
@@ -129,6 +148,13 @@ package final class UserMenu: NSObject {
         view.layoutSubtreeIfNeeded()
     }
 
+    /// `responder` when it can still take the keys in `window`: the window itself, or a view shown in it.
+    static func still(_ responder: NSResponder?, in window: NSWindow) -> NSResponder? {
+        if responder === window { return responder }
+        guard let view = responder as? NSView, view.window === window, !view.isHiddenOrHasHiddenAncestor else { return nil }
+        return view
+    }
+
     /// Who holds the keys through `responder`: a field being edited, not the window's field editor,
     /// which forgets the field once its editing ends.
     static func holder(of responder: NSResponder?) -> NSResponder? {
@@ -141,8 +167,10 @@ package final class UserMenu: NSObject {
         panel.frame.insetBy(dx: Self.room, dy: Self.room)
     }
 
+    /// A press let go after the menu closed (Escape or another app while the mouse was held) chooses
+    /// nothing: Sign Out acts at once.
     private func choose(_ item: UserMenuContent.Item) {
-        guard item.enabled else { return }
+        guard item.enabled, isOpen else { return }
         close()
         onChoose(item)
     }
@@ -157,11 +185,13 @@ package final class UserMenu: NSObject {
         close()
     }
 
-    /// A key while open: ↑ ↓ move, ← → choose the Appearance, Return or Space chooses, Escape closes.
+    /// A key while open: ↑ ↓ and Tab move (Tab never takes the keys out of the menu), ← → choose the
+    /// Appearance, Return or Space chooses, Escape closes.
     fileprivate func key(_ event: NSEvent) -> Bool {
         switch event.keyCode {
         case 125: view.move(1)
         case 126: view.move(-1)
+        case 48: view.move(event.modifierFlags.contains(.shift) ? -1 : 1)
         case 123: view.stepAppearance(view.userInterfaceLayoutDirection == .rightToLeft ? 1 : -1)
         case 124: view.stepAppearance(view.userInterfaceLayoutDirection == .rightToLeft ? -1 : 1)
         case 36, 76, 49: view.chooseHighlighted()
@@ -176,10 +206,32 @@ package final class UserMenu: NSObject {
     }
 }
 
-/// Takes the window's keys while the menu is open.
+/// Takes the window's keys while the menu is open; VoiceOver reads it as the menu, its children the
+/// menu's items and Appearance, its focus the one highlighted.
 @MainActor
-private final class MenuKeys: NSView {
+final class MenuKeys: NSView {
     weak var owner: UserMenu?
+    weak var box: UserMenuView?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.menu)
+        setAccessibilityLabel("Account")
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func accessibilityChildren() -> [Any]? {
+        box.map { $0.items as [Any] + [$0.segments] }
+    }
+
+    override var accessibilityFocusedUIElement: Any? {
+        box?.highlightedElement ?? self
+    }
 
     override var acceptsFirstResponder: Bool {
         true
@@ -208,12 +260,14 @@ package final class UserMenuView: NSView {
     var onAppearance: @MainActor (Appearance) -> Void = { _ in }
     /// Told when what it says changed while open, so the box is sized again.
     var onChanged: @MainActor () -> Void = {}
+    /// Told the element highlighted (an item, or Appearance), for VoiceOver to follow.
+    var onHighlight: @MainActor (NSView?) -> Void = { _ in }
 
     private let mono: LabelFont
     /// What it is to say once the item being pressed is let go: an item is never taken from under
     /// a press (at launch, who is signed in is learnt while the menu may be open).
     private var waiting: (content: UserMenuContent, appearance: Appearance)?
-    package private(set) var content = UserMenuContent.signedOut
+    package private(set) var content = UserMenuContent.signedOut(lastUsed: nil)
     package private(set) var chosenLook = Appearance.auto
     package private(set) var items: [MenuRow] = []
     package private(set) var segments: MenuSegments
@@ -274,9 +328,10 @@ package final class UserMenuView: NSView {
         return above + [items.count] + items.indices.filter { items[$0].item == .signOut }
     }
 
-    /// Says `content` with `appearance` chosen: `fresh`, just opened, with its first item highlighted
-    /// (the spec's M1, however it was opened); else with what was highlighted when it is still there.
-    func show(_ content: UserMenuContent, appearance: Appearance, fresh: Bool) {
+    /// Says `content` with `appearance` chosen: `fresh`, just opened, its first item highlighted when
+    /// `highlightingFirst` (opened by the keys) and none when not (by the pointer, as a Mac menu);
+    /// else with what was highlighted when it is still there.
+    func show(_ content: UserMenuContent, appearance: Appearance, fresh: Bool, highlightingFirst: Bool) {
         if !fresh, items.contains(where: \.pressed) {
             waiting = (content, appearance)
             return
@@ -296,7 +351,7 @@ package final class UserMenuView: NSView {
             }
             row.onRelease = { [weak self] in
                 guard let self, let waiting else { return }
-                show(waiting.content, appearance: waiting.appearance, fresh: false)
+                show(waiting.content, appearance: waiting.appearance, fresh: false, highlightingFirst: false)
             }
             row.onLeave = { [weak self, weak row] in
                 guard let self, let row, items.firstIndex(where: { $0 === row }) == highlighted else { return }
@@ -308,7 +363,7 @@ package final class UserMenuView: NSView {
         if let logins = items.first(where: { $0.item == .logins }) { tip.attach(to: logins, saying: logins.item.why ?? "") }
         segments.chosen = appearance
         if fresh {
-            highlight(stops.first)
+            highlight(highlightingFirst ? stops.first : nil)
         } else {
             highlight(onAppearance ? items.count : before.flatMap { item in items.firstIndex { $0.item == item } })
         }
@@ -321,9 +376,24 @@ package final class UserMenuView: NSView {
         highlighted = index
         for (at, row) in items.enumerated() {
             row.highlighted = at == index
+            row.setAccessibilitySelected(at == index)
         }
         segments.highlighted = index == items.count
+        segments.setAccessibilitySelected(index == items.count)
         if let index, items.indices.contains(index), items[index].item == .logins { tip.show() } else { tip.hide() }
+        onHighlight(highlightedElement)
+    }
+
+    /// The element highlighted, for VoiceOver: an item, Appearance, or none.
+    var highlightedElement: NSView? {
+        guard let highlighted else { return nil }
+        return items.indices.contains(highlighted) ? items[highlighted] : highlighted == items.count ? segments : nil
+    }
+
+    /// A press under way is dropped as the menu closes, with what was waiting on it.
+    func letGo() {
+        waiting = nil
+        items.forEach { $0.cancelPress() }
     }
 
     func move(_ by: Int) {
@@ -352,7 +422,7 @@ package final class UserMenuView: NSView {
 
     /// Section tops, measured as the mockup does (`.um-id`, `.um-cp`, `.um-sec`).
     private var sections: (identity: Double, plane: Double?, items: Double, appearance: Double, signOut: Double?, end: Double) {
-        let identity = content.initial == nil ? 14 + 18 + 12 : 14 + Self.avatar + 12
+        let identity = content.disc == nil ? 14 + 18 + 12 : 14 + Self.avatar + 12
         let plane: Double? = content.address == nil ? nil : identity
         let itemsTop = (plane.map { $0 + 33 } ?? identity)
         let main = content.items.filter { $0 != .signOut }
@@ -384,7 +454,7 @@ package final class UserMenuView: NSView {
 
     package override func layout() {
         super.layout()
-        let width = Double(bounds.width), at = sections, text = Self.padding + (content.initial == nil ? 0 : Self.avatar + 10)
+        let width = Double(bounds.width), at = sections, text = Self.padding + (content.disc == nil ? 0 : Self.avatar + 10)
         name.frame = mirrored(NSRect(x: text, y: 14, width: width - text - Self.padding, height: 17))
         detail.frame = mirrored(NSRect(x: text, y: 31, width: width - text - Self.padding, height: 15))
         if let plane = at.plane {
@@ -461,17 +531,22 @@ package final class UserMenuView: NSView {
         for line in [at.plane, at.items, at.appearance, at.signOut].compactMap({ $0 }) where line > 0 {
             NSRect(x: 0, y: line, width: width, height: Look.hairline).fill()
         }
-        if content.initial != nil {
+        switch content.disc {
+        case let .initial(initial)?:
             let mark = look.menuAvatar, disc = avatarDisc
             if let fill = mark.fill {
                 NSColor(fill).setFill()
                 NSBezierPath(ovalIn: disc).fill()
             }
-            let letter = NSAttributedString(string: content.initial ?? "", attributes: [
+            let letter = NSAttributedString(string: initial, attributes: [
                 .font: NSFont.systemFont(ofSize: Look.Step.body.points, weight: .semibold), .foregroundColor: NSColor(mark.ink),
             ])
             let size = letter.size()
             letter.draw(at: NSPoint(x: disc.midX - size.width / 2, y: disc.midY - size.height / 2))
+        case .person?:
+            drawPerson(in: avatarDisc)
+        case nil:
+            break
         }
         if let square = planeSquare, let ink = planeInk {
             NSColor(ink).setFill()
@@ -483,9 +558,29 @@ package final class UserMenuView: NSView {
     }
 }
 
+extension UserMenuView {
+    /// No one signed in: the disc an outline in the strong hairline, a person's head and shoulders in
+    /// the secondary ink, as the mockup's 16 pt person icon.
+    fileprivate func drawPerson(in disc: NSRect) {
+        NSColor(look.separatorStrong).setStroke()
+        let ring = NSBezierPath(ovalIn: disc.insetBy(dx: 0.5, dy: 0.5))
+        ring.lineWidth = 1
+        ring.stroke()
+        let unit = 16.0 / 24, x = Double(disc.midX) - 8, y = Double(disc.midY) - 8
+        let person = NSBezierPath()
+        person.appendOval(in: NSRect(x: x + 8 * unit, y: y + 4 * unit, width: 8 * unit, height: 8 * unit))
+        person.move(to: NSPoint(x: x + 5 * unit, y: y + 20 * unit))
+        person.curve(to: NSPoint(x: x + 19 * unit, y: y + 20 * unit), controlPoint1: NSPoint(x: x + 6 * unit, y: y + 14 * unit), controlPoint2: NSPoint(x: x + 18 * unit, y: y + 14 * unit))
+        person.lineWidth = LineIcon.width * unit
+        person.lineCapStyle = .round
+        NSColor(look.textSecondary).setStroke()
+        person.stroke()
+    }
+}
+
 extension UserMenuView: Marked {
     package var drawnMarks: [Mark] {
-        let avatar = content.initial == nil ? [] : look.marks(fill: look.menuAvatar.fill, area: .pi * Self.avatar * Self.avatar / 4)
+        let avatar: [Mark] = if case .initial? = content.disc { look.marks(fill: look.menuAvatar.fill, area: .pi * Self.avatar * Self.avatar / 4) } else { [] }
         let plane = planeSquare.map { look.marks(fill: planeInk, area: Double($0.width * $0.height)) } ?? []
         return avatar + plane
     }
@@ -555,13 +650,12 @@ package final class MenuRow: NSView {
         let rightToLeft = userInterfaceLayoutDirection == .rightToLeft
         title.draw(at: NSPoint(x: rightToLeft ? Double(bounds.width) - leading - Double(size.width) : leading, y: (Double(bounds.height) - Double(size.height)) / 2))
         guard let key = item.key else { return }
-        let onInk = look.menuHighlight.ink.rgb
         let cap = NSAttributedString(string: "⌘" + key, attributes: [
-            .font: mono.font(10, .regular) as NSFont, .foregroundColor: NSColor(highlighted ? Tint(onInk, alpha: 0.78) : look.textSecondary),
+            .font: mono.font(10, .regular) as NSFont, .foregroundColor: NSColor(highlighted ? look.onInverseSecondary : look.textSecondary),
         ])
         let capSize = cap.size()
         let box = NSRect(x: rightToLeft ? leading : Double(bounds.width) - leading - Double(capSize.width) - 8, y: (Double(bounds.height) - 16) / 2, width: Double(capSize.width) + 8, height: 16)
-        NSColor(highlighted ? Tint(onInk, alpha: 0.3) : look.separatorStrong).setStroke()
+        NSColor(highlighted ? look.onInverseEdge : look.separatorStrong).setStroke()
         let edge = NSBezierPath(roundedRect: box.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3)
         edge.lineWidth = 1
         edge.stroke()
@@ -588,6 +682,11 @@ package final class MenuRow: NSView {
     package override func mouseDown(with _: NSEvent) {
         downs += 1
         pressed = true
+    }
+
+    /// The press is dropped: the menu closed under it.
+    func cancelPress() {
+        pressed = false
     }
 
     package override func acceptsFirstMouse(for _: NSEvent?) -> Bool {
@@ -631,6 +730,9 @@ package final class MenuSegments: NSView {
 
     var onChoose: @MainActor (Appearance) -> Void = { _ in }
     private(set) var buttons: [NSView] = []
+    /// The track is Paper and ink's outline, never filled; a fill here is counted as a control's,
+    /// even in a ground's colour, where it reads as a well.
+    let trackFill: Tint? = nil
 
     init(look: Look) {
         self.look = look
@@ -690,8 +792,10 @@ package final class MenuSegments: NSView {
 
     package override func draw(_: NSRect) {
         let edge = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: Look.contentRadius - 0.5, yRadius: Look.contentRadius - 0.5)
-        NSColor(Tint(look.canvas)).setFill()
-        edge.fill()
+        if let trackFill {
+            NSColor(trackFill).setFill()
+            edge.fill()
+        }
         NSColor(highlighted ? look.textSecondary : look.separatorStrong).setStroke()
         edge.lineWidth = 1
         edge.stroke()
@@ -734,7 +838,8 @@ extension Appearance {
 
 extension MenuSegments: Marked {
     package var drawnMarks: [Mark] {
-        guard let index = Appearance.allCases.firstIndex(of: chosen), rects.indices.contains(index) else { return [] }
-        return look.marks(fill: look.menuHighlight.fill, area: Double(rects[index].width * rects[index].height))
+        let track = look.marks(fill: trackFill, area: Double(bounds.width * bounds.height), inControl: true)
+        guard let index = Appearance.allCases.firstIndex(of: chosen), rects.indices.contains(index) else { return track }
+        return track + look.marks(fill: look.menuHighlight.fill, area: Double(rects[index].width * rects[index].height))
     }
 }

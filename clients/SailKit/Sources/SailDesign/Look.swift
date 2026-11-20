@@ -114,6 +114,16 @@ public struct Look: Equatable, Sendable {
         InkMark(fill: Tint(inverse), ink: Tint(onInverse), edge: nil)
     }
 
+    /// A key cap's words and edge on a turned-over item: the paper ink at the mockup's secondary
+    /// and strong-hairline strengths (its --text2 and --sep2 inside the ink).
+    public var onInverseSecondary: Tint {
+        Tint(onInverse, alpha: 0.78)
+    }
+
+    public var onInverseEdge: Tint {
+        Tint(onInverse, alpha: 0.3)
+    }
+
     /// The user menu's avatar disc: turned over to ink.
     public var menuAvatar: InkMark {
         InkMark(fill: Tint(inverse), ink: Tint(onInverse), edge: nil)

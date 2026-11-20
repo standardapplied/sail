@@ -5,6 +5,7 @@ import SailKitTestSupport
 import SailLook
 import SailVT
 @testable import SailShell
+import Synchronization
 import Testing
 
 /// The user menu behind the rail's user button (the calm spec's PR 2, in Paper and ink): where it
@@ -66,7 +67,7 @@ import Testing
         for size in Self.sizes {
             shell.window.setFrame(NSRect(origin: shell.window.frame.origin, size: size), display: true)
             shell.window.layoutIfNeeded()
-            for content in [Self.uday, .signedOut, Self.long] {
+            for content in [Self.uday, .signedOut(lastUsed: nil), Self.long] {
                 try Self.open(shell, content)
                 let box = shell.userMenu.box, menu = shell.userMenu.view
                 let square = shell.window.convertToScreen(button.convert(button.alignmentRect(forFrame: button.bounds), to: nil))
@@ -113,17 +114,19 @@ import Testing
         view.layoutSubtreeIfNeeded()
         let signOut = try #require(view.items.last), logins = try #require(view.items.first { $0.item == .logins })
         #expect(signOut.frame.minY - logins.frame.maxY > UserMenuView.appearanceRow, "Sign Out is not in a section apart: \(signOut.frame) after \(logins.frame)")
-        shell.userMenu.update(.signedOut, appearance: .auto)
+        shell.userMenu.update(.signedOut(lastUsed: nil), appearance: .auto)
         view.layoutSubtreeIfNeeded()
         let out = WorkspacesViewTests.found(NSTextField.self, in: view).filter { !$0.isHidden }.map(\.stringValue)
-        #expect(out == ["Not signed in", "Appearance"] && view.items.map(\.item) == [.signIn], "signed out, the menu says \(out)")
+        #expect(out == ["Not signed in", "no control plane yet", "Appearance"] && view.items.map(\.item) == [.signIn], "signed out, the menu says \(out)")
+        #expect(view.content.disc == .person && near(view.avatarDisc.width, 32), "signed out, no person's disc")
         shell.userMenu.update(Self.long, appearance: .auto)
         #expect(view.planeInk == Tint(look.error), "out of reach, the square is not the error's")
     }
 
-    /// Opened, the first item is highlighted (M1); ↓ and ↑ walk the items that can be chosen and
-    /// Appearance, round; ← and → choose the Appearance on it; Return chooses; Escape closes and the
-    /// keys go back to the button when the keys opened it, else where they were.
+    /// Opened by the keys the first item is highlighted, by the pointer none (as a Mac menu); ↓, ↑
+    /// and Tab walk the items that can be chosen and Appearance, round, and Tab never leaves the
+    /// menu; ← and → choose the Appearance on it; Return chooses; Escape closes and the keys go back
+    /// to the button when the keys opened it, else where they were.
     @Test func theKeysWorkTheMenu() throws {
         let shell = try Self.shell()
         defer {
@@ -139,6 +142,8 @@ import Testing
             walked.append(Self.highlighted(view))
         }
         #expect(walked == ["Account", "Appearance", "Sign Out", "Account", "Sign Out"], "the keys walk \(walked), not top to bottom")
+        shell.window.sendEvent(try Self.key(48, "\t"))
+        #expect(Self.highlighted(view) == "Account" && shell.userMenu.isOpen && shell.window.firstResponder is MenuKeys, "Tab left the menu, or moved to \(Self.highlighted(view))")
         try Self.press(Self.up, in: shell)
         try Self.press(Self.left, in: shell)
         #expect(view.chosenLook == .dark && Appearance.stored(in: shell.defaults) == .dark && NSApp.appearance?.name == .darkAqua && shell.userMenu.isOpen)
@@ -158,7 +163,7 @@ import Testing
         shell.window.makeFirstResponder(field)
         let before = UserMenu.holder(of: shell.window.firstResponder)
         try Self.open(shell)
-        #expect(Self.highlighted(view) == "Account", "opened with the pointer, \(Self.highlighted(view)) is highlighted")
+        #expect(Self.highlighted(view) == "nothing", "opened with the pointer, \(Self.highlighted(view)) is highlighted")
         try Self.press(Self.escape, in: shell)
         #expect(UserMenu.holder(of: shell.window.firstResponder) === before && before === field, "the keys went to \(String(describing: shell.window.firstResponder))")
     }
@@ -211,14 +216,14 @@ import Testing
         let shell = try Self.shell()
         defer { shell.window.orderOut(nil) }
         let view = shell.userMenu.view
-        try Self.open(shell, .signedOut)
+        try Self.open(shell, .signedOut(lastUsed: nil))
         var signIn = try #require(view.items.first)
         signIn.mouseDown(with: try Self.mouse(.leftMouseDown, at: NSPoint(x: signIn.bounds.midX, y: signIn.bounds.midY), in: signIn))
         shell.userMenu.update(Self.uday, appearance: .auto)
         #expect(view.items.map(\.item) == [.signIn] && view.items.first === signIn, "the pressed Sign In was taken: \(view.items.map(\.item))")
         signIn.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: signIn.bounds.midX, y: signIn.bounds.midY), in: signIn))
         #expect(!shell.userMenu.isOpen && shell.rail.selected == .account, "the click on Sign In chose nothing")
-        try Self.open(shell, .signedOut)
+        try Self.open(shell, .signedOut(lastUsed: nil))
         signIn = try #require(view.items.first)
         signIn.mouseDown(with: try Self.mouse(.leftMouseDown, at: NSPoint(x: signIn.bounds.midX, y: signIn.bounds.midY), in: signIn))
         shell.userMenu.update(Self.uday, appearance: .auto)
@@ -270,8 +275,109 @@ import Testing
         #expect(segments.accessibilityRole() == .radioGroup && segments.accessibilityLabel() == "Appearance")
         let said = segments.buttons.map { "\($0.accessibilityLabel() ?? "?")=\($0.accessibilityValue() as? Int ?? -1)" }
         #expect(said == ["Light=0", "Dark=0", "Auto=1"], "Appearance says \(said)")
+        let logins = try #require(view.items.first { $0.item == .logins })
+        #expect(!logins.isAccessibilityEnabled() && logins.accessibilityHelp() == "Logins come in a later version of Sail.")
+        let button = try #require(shell.rail.button(.account))
+        #expect(button.accessibilityRole() == .menuButton && button.accessibilityHelp()?.contains("Opens a menu") == true, "the rail's button does not say it opens a menu")
+        let keys = try #require(shell.window.firstResponder as? MenuKeys)
+        #expect(keys.isAccessibilityElement() && keys.accessibilityRole() == .menu && keys.accessibilityLabel() == "Account")
+        #expect((keys.accessibilityChildren() as? [NSView])?.count == view.items.count + 1, "the menu's children are not its items and Appearance")
+        #expect(view.items.allSatisfy { !$0.isAccessibilitySelected() } && keys.accessibilityFocusedUIElement as? MenuKeys === keys, "opened by the pointer, something is selected")
+        try Self.press(Self.down, in: shell)
         let account = try #require(view.items.first { $0.item == .account })
+        #expect(account.isAccessibilitySelected() && keys.accessibilityFocusedUIElement as? MenuRow === account, "the highlight is not the selected, focused element")
+        try Self.press(Self.down, in: shell)
+        #expect(!account.isAccessibilitySelected() && segments.isAccessibilitySelected() && keys.accessibilityFocusedUIElement as? MenuSegments === segments)
         #expect(account.accessibilityPerformPress() && !shell.userMenu.isOpen && shell.rail.selected == .account)
+    }
+
+    /// The pointer and the keys are told apart by how the button was pressed, not by the app's last
+    /// event: a click opens it with nothing highlighted, the keys or VoiceOver (a press with no click)
+    /// with the first item, whatever was clicked before.
+    @Test func howTheButtonWasPressedDecides() throws {
+        let shell = try Self.shell()
+        defer { shell.window.orderOut(nil) }
+        let button = try #require(shell.rail.button(.account)), view = shell.userMenu.view
+        let middle = NSPoint(x: button.bounds.midX, y: button.bounds.midY)
+        NSApp.postEvent(try Self.mouse(.leftMouseUp, at: middle, in: button), atStart: false)
+        button.mouseDown(with: try Self.mouse(.leftMouseDown, at: middle, in: button))
+        #expect(shell.userMenu.isOpen && Self.highlighted(view) == "nothing", "a click highlighted \(Self.highlighted(view))")
+        shell.userMenu.close()
+        #expect(button.accessibilityPerformPress() && shell.userMenu.isOpen && Self.highlighted(view) != "nothing", "VoiceOver's press highlighted nothing")
+        shell.userMenu.close()
+    }
+
+    /// M1: the control plane's state is true as a check ends and as one starts, with the menu open:
+    /// "Checking…" while who is signed in is not yet known, "Can’t reach" once the check found it out
+    /// of reach (not "Reconnecting", still counted under way when it answered), "Reconnecting" while
+    /// a check asks again, then its answer.
+    @Test func theControlPlanesStateIsTrueAsChecksStartAndEnd() async throws {
+        let defaults = ReattachTests.defaults()
+        defaults.set("http://127.0.0.1:7979", forKey: AccountPane.addressKey)
+        let transport = OutOfReach()
+        let shell = try ShellApp(
+            fonts: LookTests.fonts, helper: nil, look: .light, passkeys: { _ in Signs(sheet: nil) }, connect: { _ in transport },
+            vault: OneSession(fde: "uday"), defaults: defaults
+        )
+        shell.window.orderFront(nil)
+        defer { shell.window.orderOut(nil) }
+        let view = shell.userMenu.view
+        try Self.open(shell, shell.menuContent)
+        #expect(view.content.name == "Not signed in" && view.content.detail == "127.0.0.1:7979")
+        let check = Task { await shell.account.refresh() }
+        #expect(await RunnerTabTests.until { transport.asked == 1 }, "the check asked nothing")
+        #expect(view.content.name == "Checking…" && view.content.items == [.account], "during the first check the menu says \(view.content.name)")
+        transport.answer()
+        await check.value
+        #expect(view.content.name == "uday" && view.content.plane == .unreachable, "the check ended, the menu says \(String(describing: view.content.plane))")
+        let again = Task { await shell.account.refresh() }
+        #expect(await RunnerTabTests.until { transport.asked == 2 }, "the check asked nothing again")
+        #expect(view.content.plane == .reconnecting, "asking again, the menu says \(String(describing: view.content.plane))")
+        transport.answer()
+        await again.value
+        #expect(view.content.plane == .unreachable && shell.userMenu.isOpen, "asked again, the menu says \(String(describing: view.content.plane))")
+        shell.userMenu.close()
+    }
+
+    /// Minor 1: the keys go back to a field mid-edit with its selection as it was, not all of it
+    /// selected; and to the shown pane's own, never the menu's catcher, when the view that held them
+    /// has left the window (a tab closed, a rename ended).
+    @Test func theKeysGoBackWhereTheyCan() throws {
+        let shell = try Self.shell()
+        defer { shell.window.orderOut(nil) }
+        shell.select(.account)
+        let field = shell.account.address
+        field.stringValue = "sail.example.com"
+        shell.window.makeFirstResponder(field)
+        let editor = try #require(field.currentEditor())
+        editor.selectedRange = NSRange(location: 4, length: 0)
+        try Self.open(shell)
+        try Self.press(Self.escape, in: shell)
+        let back = try #require(field.currentEditor(), "the field did not get the keys back")
+        #expect(back.selectedRange == NSRange(location: 4, length: 0), "the field's selection came back as \(back.selectedRange)")
+        let gone = NSTextField(string: "a name being renamed")
+        shell.window.contentView?.addSubview(gone)
+        shell.window.makeFirstResponder(gone)
+        try Self.open(shell)
+        gone.removeFromSuperview()
+        try Self.press(Self.escape, in: shell)
+        let now = UserMenu.holder(of: shell.window.firstResponder)
+        #expect(!(shell.window.firstResponder is MenuKeys) && now === field, "the keys went to \(String(describing: shell.window.firstResponder)), not the Account pane's field")
+    }
+
+    /// Minor 2: a press let go after the menu closed (Escape while the mouse was held) chooses
+    /// nothing: Sign Out acts at once.
+    @Test func aReleaseAfterTheMenuClosedChoosesNothing() throws {
+        let shell = try Self.shell()
+        defer { shell.window.orderOut(nil) }
+        try Self.open(shell)
+        let view = shell.userMenu.view, selected = shell.rail.selected
+        let account = try #require(view.items.first { $0.item == .account })
+        let middle = NSPoint(x: account.bounds.midX, y: account.bounds.midY)
+        account.mouseDown(with: try Self.mouse(.leftMouseDown, at: middle, in: account))
+        try Self.press(Self.escape, in: shell)
+        account.mouseUp(with: try Self.mouse(.leftMouseUp, at: middle, in: account))
+        #expect(!shell.userMenu.isOpen && shell.rail.selected == selected, "the release chose Account after the menu closed")
     }
 
     /// The rail's user button is drawn open while its menu is: a 1 pt outline in the secondary ink
@@ -287,16 +393,17 @@ import Testing
         #expect(wash.layer?.borderWidth == 0 && !shell.rail.menuOpen)
     }
 
-    /// Open over the window, the menu adds no accent and no grey: its marks are the avatar, the
-    /// highlighted item and the chosen Appearance turned over to ink, 3, however it was opened, and
-    /// the window's count is the same as before plus those.
+    /// Open over the window, the menu adds no accent and no grey: its marks are the avatar and the
+    /// chosen Appearance turned over to ink, 2 opened by the pointer, and the highlighted item too, 3,
+    /// by the keys; the window's count is the same as before plus those. Its Appearance track is an
+    /// outline: a fill there, even in the paper's tone, would be counted grey.
     @Test(arguments: [Look.light, .dark])
     func theMenuIsCalm(_ look: Look) throws {
         let shell = try Self.shell(look)
         defer { shell.window.orderOut(nil) }
         shell.window.displayIfNeeded()
         let before = CalmTests.Count(marks(in: shell.window))
-        for (withKeys, turned) in [(false, 3), (true, 3)] {
+        for (withKeys, turned) in [(false, 2), (true, 3)] {
             try Self.open(shell, withKeys: withKeys)
             let menu = CalmTests.Count(marks(in: shell.userMenu.view)), whole = CalmTests.Count(marks(in: shell.window))
             let said = "\(withKeys ? "by the keys" : "by the pointer"): the menu \(menu); the window \(whole), before \(before)"
@@ -304,6 +411,7 @@ import Testing
             #expect(whole.accent == before.accent && whole.neutral == before.neutral && whole.inverse == before.inverse + turned, "\(said)")
             shell.userMenu.close()
         }
+        #expect(shell.userMenu.view.segments.trackFill == nil && look.marks(fill: Tint(look.canvas), area: 100, inControl: true) == [.neutralFill(100)])
     }
 
     /// The turned-over marks are drawn in ink and paper, read from the menu's own pixels at 2x: the
@@ -355,7 +463,7 @@ import Testing
         defer { shell.window.orderOut(nil) }
         try #require(shell.rail.button(.account)).userInterfaceLayoutDirection = direction
         var faults: [String] = []
-        for content in [Self.uday, Self.long, .signedOut] {
+        for content in [Self.uday, Self.long, .signedOut(lastUsed: nil)] {
             try Self.open(shell, content, withKeys: true)
             faults += WorkspacesReachTests.outOfReach(in: shell.userMenu.view).map { "\(content.name.prefix(12)): \($0)" }
             shell.userMenu.close()
@@ -383,5 +491,34 @@ import Testing
         try Self.press(Self.right, in: shell)
         #expect(view.chosenLook == .dark, "→ right to left did not go back to Dark: \(view.chosenLook)")
         shell.choose(.auto)
+    }
+}
+
+/// A control plane that does not answer: each request waits until answered, then fails as the
+/// network does, counting how many were asked.
+final class OutOfReach: Transport, Sendable {
+    private let state = Mutex<(asked: Int, gates: [Gate])>((0, []))
+
+    var asked: Int {
+        state.withLock { $0.asked }
+    }
+
+    func send(_: HTTPRequest) async throws(SailError) -> HTTPResponse {
+        let gate = Gate()
+        state.withLock {
+            $0.asked += 1
+            $0.gates.append(gate)
+        }
+        await gate.wait()
+        throw .unreachable("The network connection was lost.")
+    }
+
+    func open(_: HTTPRequest) async throws(SailError) -> HTTPStream {
+        throw .unreachable("The network connection was lost.")
+    }
+
+    /// Every request waiting is answered: out of reach.
+    func answer() {
+        state.withLock { $0.gates }.forEach { $0.open() }
     }
 }

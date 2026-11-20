@@ -10,7 +10,7 @@ import Testing
 
     @Test func signedInItSaysWhoAndWhereAndOffersAccountLoginsAndSignOut() {
         let menu = UserMenuContent.signedIn(handle: "uday", address: "sail.example.com", whoami: Self.uday, unreachable: false, refreshing: false)
-        #expect(menu.name == "Uday Chandra" && menu.initial == "U" && menu.detail == "@uday · Admin")
+        #expect(menu.name == "Uday Chandra" && menu.disc == .initial("U") && menu.detail == "@uday · Admin")
         #expect(menu.address == "sail.example.com" && menu.plane == .connected)
         #expect(menu.items == [.account, .logins, .signOut])
     }
@@ -18,7 +18,10 @@ import Testing
     @Test func withNoNameFromTheServerTheHandleIsTheName() {
         let ana = Whoami(fde: "ana", role: .known(.member), capabilities: [])
         let menu = UserMenuContent.signedIn(handle: "ana", address: "sail.example.com", whoami: ana, unreachable: false, refreshing: false)
-        #expect(menu.name == "ana" && menu.initial == "A" && menu.detail == "@ana · Member")
+        #expect(menu.name == "ana" && menu.disc == .initial("A") && menu.detail == "@ana · Member")
+        let blank = Whoami(fde: "ana", name: "", displayName: "", role: .known(.member), capabilities: [])
+        let empty = UserMenuContent.signedIn(handle: "ana", address: "sail.example.com", whoami: blank, unreachable: false, refreshing: false)
+        #expect(empty.name == "ana" && empty.disc == .initial("A"), "an empty name from the server is no name: \(empty.name)")
         let unknown = UserMenuContent.signedIn(handle: "ana", address: "sail.example.com", whoami: nil, unreachable: false, refreshing: false)
         #expect(unknown.name == "ana" && unknown.detail == "@ana")
     }
@@ -32,10 +35,22 @@ import Testing
         #expect(UserMenuContent.Plane.connected.said == "Connected" && UserMenuContent.Plane.reconnecting.said == "Reconnecting" && UserMenuContent.Plane.unreachable.said == "Can’t reach")
     }
 
+    /// Signed out: a person's disc, "Not signed in", the control plane last used (or "no control
+    /// plane yet" when none was), and Sign In.
     @Test func signedOutItOffersSignIn() {
-        let menu = UserMenuContent.signedOut
-        #expect(menu.name == "Not signed in" && menu.initial == nil && menu.detail == nil && menu.address == nil && menu.plane == nil)
+        let menu = UserMenuContent.signedOut(lastUsed: nil)
+        #expect(menu.name == "Not signed in" && menu.disc == .person && menu.detail == "no control plane yet" && menu.address == nil && menu.plane == nil)
         #expect(menu.items == [.signIn])
+        #expect(UserMenuContent.signedOut(lastUsed: "sail.example.com").detail == "sail.example.com")
+    }
+
+    /// While the app asks who it is signed in as (at launch, or brought forward) and knows no one
+    /// yet, the menu says it is checking, never "Not signed in": no disc, the control plane asked,
+    /// and Account, which shows what the pane knows.
+    @Test func whileCheckingItSaysSo() {
+        let menu = UserMenuContent.checking(at: "sail.example.com")
+        #expect(menu.name == "Checking…" && menu.disc == nil && menu.detail == "sail.example.com" && menu.address == nil && menu.plane == nil)
+        #expect(menu.items == [.account])
     }
 
     /// Logins is offered and not yet usable: it says so, the server's spec not built.

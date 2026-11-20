@@ -41,7 +41,7 @@ import Testing
         var faults: [String] = []
         let shell = try UserMenuTests.shell()
         defer { shell.window.orderOut(nil) }
-        for (round, content) in [UserMenuTests.uday, .signedOut, UserMenuTests.uday].enumerated() {
+        for (round, content) in [UserMenuTests.uday, .signedOut(lastUsed: nil), UserMenuTests.uday].enumerated() {
             try UserMenuTests.open(shell, content)
             let menu = shell.userMenu.view
             faults += (menu.items as [NSView] + [menu.segments]).compactMap { Self.missesAClick($0).map { "the user menu, opening \(round + 1): \($0)" } }

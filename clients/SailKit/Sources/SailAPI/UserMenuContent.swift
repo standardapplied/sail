@@ -37,14 +37,27 @@ public struct UserMenuContent: Equatable, Sendable {
         }
     }
 
+    /// The disc beside the name: the person's initial, or a person's outline when no one is signed in.
+    public enum Disc: Equatable, Sendable {
+        case initial(String), person
+    }
+
     public let name: String
-    public let initial: String?
+    public let disc: Disc?
     public let detail: String?
     public let address: String?
     public let plane: Plane?
     public let items: [Item]
 
-    public static let signedOut = Self(name: "Not signed in", initial: nil, detail: nil, address: nil, plane: nil, items: [.signIn])
+    /// No one signed in: the control plane `lastUsed` here, or "no control plane yet".
+    public static func signedOut(lastUsed: String?) -> Self {
+        Self(name: "Not signed in", disc: .person, detail: lastUsed ?? "no control plane yet", address: nil, plane: nil, items: [.signIn])
+    }
+
+    /// Who is signed in at `address` not yet known: the app is asking.
+    public static func checking(at address: String) -> Self {
+        Self(name: "Checking…", disc: nil, detail: address, address: nil, plane: nil, items: [.account])
+    }
 
     /// Signed in as `handle` at `address`; `whoami` as it last answered, `unreachable` when the
     /// control plane last did not answer, `refreshing` while it is asked again.
@@ -56,7 +69,7 @@ public struct UserMenuContent: Equatable, Sendable {
         }
         let plane: Plane = unreachable ? (refreshing ? .reconnecting : .unreachable) : .connected
         return Self(
-            name: name, initial: name.first.map { String($0).uppercased() }, detail: "@\(handle)" + (role.map { " · \($0)" } ?? ""),
+            name: name, disc: name.first.map { .initial(String($0).uppercased()) }, detail: "@\(handle)" + (role.map { " · \($0)" } ?? ""),
             address: address, plane: plane, items: [.account, .logins, .signOut]
         )
     }
