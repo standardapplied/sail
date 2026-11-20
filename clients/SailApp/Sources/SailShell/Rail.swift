@@ -53,8 +53,6 @@ public final class Rail: NSView {
         for item in Item.allCases {
             let button = NSButton(image: Self.image(item, colour: look.textSecondary), target: self, action: #selector(pick(_:)))
             button.isBordered = false
-            button.wantsLayer = true
-            button.layer?.cornerRadius = Look.contentRadius
             button.toolTip = item.title
             button.setAccessibilityLabel(item.title)
             button.identifier = NSUserInterfaceItemIdentifier(item.rawValue)

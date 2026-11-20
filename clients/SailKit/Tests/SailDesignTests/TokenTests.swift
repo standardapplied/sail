@@ -78,6 +78,7 @@ import Testing
             #expect(Self.contrast(ink, look.surface) >= 4.5, "\(name): \(role)'s ink is \(Self.contrast(ink, look.surface)):1")
         }
         #expect(look.wellChosen.edge == look.text && look.well.edge == look.separatorStrong, "\(name): the chosen well is not told apart by its ink outline")
+        #expect(look.barIdle == look.textTertiary, "\(name): a chosen row's bar without the keys is not the tertiary ink")
         let accentTints = [look.textSelection, look.focusHalo].filter { $0.rgb == look.accent }
         #expect(accentTints.count == 2 && look.textSelection.alpha < 1)
         let apart = abs(Self.hue(look.error) - Self.hue(look.accent))

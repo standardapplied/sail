@@ -144,7 +144,6 @@ import Testing
         shell.window.contentView?.layoutSubtreeIfNeeded()
         let wash = try #require(shell.rail.chosenWash)
         #expect(near(wash.size.width, Rail.item) && near(wash.size.height, Rail.item) && wash.colour == NSColor(Tint(look.chromeWash)).cgColor, "\(name): the rail's chosen wash is \(wash)")
-        print("rail: the chosen item's button is \(wash.button) with alignment insets \(wash.insets)")
         #expect(near(wash.button.height - (wash.insets.top + wash.insets.bottom), Rail.item), "\(name): the button's frame \(wash.button) is not its 42 pt alignment rect and insets \(wash.insets)")
         for item in [Rail.Item.account, .thisMac] {
             shell.select(item)
