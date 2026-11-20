@@ -897,6 +897,22 @@ import Testing
         }
         #expect(read >= 10)
     }
+
+    /// No unit test posts an event to the app's queue: with no `NSApp.run` under a test, a posted
+    /// event stopped the main run loop and ended the suite's process; posting is the drive's.
+    @Test func noUnitTestPostsAnEventToTheAppsQueue() throws {
+        let tests = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        var read = 0
+        for target in try FileManager.default.contentsOfDirectory(atPath: tests.path) where target.hasSuffix("Tests") {
+            let directory = tests.appending(path: target)
+            for name in try FileManager.default.contentsOfDirectory(atPath: directory.path) where name.hasSuffix(".swift") {
+                let text = try String(contentsOf: directory.appending(path: name), encoding: .utf8)
+                read += 1
+                #expect(!text.contains("postEvent" + "("), "\(target)/\(name) posts an event to the app's queue: that is the drive's")
+            }
+        }
+        #expect(read >= 20)
+    }
 }
 
 /// Swift's shared pool held at every priority, in a suite of its own run alone: CI runs every suite
