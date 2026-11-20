@@ -2,6 +2,7 @@
 
 ## 0.74.0
 
+- **The drive gates how long four flooding panes wait for drawables.** `s32-panes4` fails when the least of its three floods waited over 60 ms for a drawable in its longest gap between frames (healthy code waits about 1 ms; a busy runner has made unchanged code wait up to 48 ms; a layer over the panes once made it 80 to 100 ms), and it says every view drawn over the flooding panes.
 - **A runner terminal's keyboard, said to everyone watching it.** Someone other than the session's opener (an admin) left watching a keyboard no one holds is told "No one holds the keyboard." with Take Keyboard, and a key typed there sounds the alert once; the opener is told nothing, since their typing takes it; when who opened it cannot be learned, it is said anyway, and the opener's first key takes the keyboard. A long tab name in "… is still running: the keyboard is with …" is cut in its middle, measured at the card's own width, so the sentence keeps to two lines; when the words around it need more on their own, the name is left whole. The client lanes fail when a suite or a test started and never ended, read from Swift Testing's event stream.
 - **The app comes back to a person's sessions on the runner.**
   - **Quitting and signing out end nothing there.** Quitting detaches every terminal and asks nothing. Signing out takes the runner tabs from the window and keeps their places for the same person's next sign-in, which brings them back attached; another person's sign-in drops them. The quit's and sign-out's runner questions (`RunnerEnds`) are gone.
