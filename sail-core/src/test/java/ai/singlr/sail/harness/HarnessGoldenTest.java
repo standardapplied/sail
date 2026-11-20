@@ -328,9 +328,9 @@ class HarnessGoldenTest {
     assertEquals(Optional.empty(), CLAUDE_CODE.modesNote());
     assertEquals(
         Optional.of(
-            "Codex CLI runs in a workspace only with full access: its sandbox needs user"
-                + " namespaces, which a workspace's container does not allow. For a session that"
-                + " asks before it acts, start Claude Code."),
+            "Sail starts Codex CLI in a workspace with full access, running every command without"
+                + " asking and without its sandbox: that sandbox needs user namespaces, which a"
+                + " workspace's container does not allow."),
         CODEX.modesNote());
     assertTrue(
         Stream.of(CLAUDE_CODE, CODEX)

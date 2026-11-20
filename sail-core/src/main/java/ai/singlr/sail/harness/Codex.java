@@ -133,10 +133,11 @@ final class Codex implements Harness {
   @Override
   public Optional<String> modesNote() {
     return Optional.of(
-        displayName()
-            + " runs in a workspace only with full access: its sandbox needs user namespaces,"
-            + " which a workspace's container does not allow. For a session that asks before it"
-            + " acts, start Claude Code.");
+        "Sail starts "
+            + displayName()
+            + " in a workspace with full access, running every command without asking and"
+            + " without its sandbox: that sandbox needs user namespaces, which a workspace's"
+            + " container does not allow.");
   }
 
   /**

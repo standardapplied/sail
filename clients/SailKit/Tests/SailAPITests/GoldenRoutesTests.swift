@@ -170,7 +170,7 @@ func answer<Response>(
         #expect(claude.kinds.map(\.label) == ["long-lived token", "API key"])
         let codex = try #require(owned.offered.last)
         #expect(codex.refusal?.code == .known(.harnessNotInstalled) && !codex.inside && codex.login == nil)
-        #expect(codex.note?.hasSuffix("start Claude Code.") == true && codex.modes.count == 1)
+        #expect(codex.note?.hasPrefix("Sail starts Codex CLI in a workspace with full access") == true && codex.modes.count == 1)
 
         let stopped = try agents("workspace-agents-stopped-no-login", "quay")
         #expect(!stopped.running && stopped.refusal == nil)
