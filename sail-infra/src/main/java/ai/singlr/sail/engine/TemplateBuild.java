@@ -235,8 +235,7 @@ public final class TemplateBuild {
       if (!(found.get().state() instanceof ContainerState.Running)) {
         containers.start(template);
       }
-      WorkspaceCredentials.strip(shell, template);
-      WorkspaceCredentials.requireNone(shell, template, tokens);
+      WorkspaceCredentials.clean(shell, template, tokens);
     } catch (Exception e) {
       unclean = e;
     }

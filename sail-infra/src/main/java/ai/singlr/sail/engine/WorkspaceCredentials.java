@@ -63,6 +63,7 @@ final class WorkspaceCredentials {
   static final String STRIP =
       """
       set -eu
+      PATH=/usr/bin:/bin
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
       rm -f %1$s
       rm -rf %3$s
@@ -109,6 +110,7 @@ final class WorkspaceCredentials {
   static final String HELD =
       """
       set -u
+      PATH=/usr/bin:/bin
       held=""
       add() { held="${held:+$held, }$1"; }
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
@@ -166,7 +168,50 @@ final class WorkspaceCredentials {
 
   private static final Duration HELD_TIMEOUT = Duration.ofMinutes(10);
 
+  /** How long a template's boot may take to settle before it is stripped and searched. */
+  static final int SETTLE_SECONDS = 120;
+
+  /**
+   * Waits for the template's boot to finish, {@code running} or {@code degraded} (a unit that
+   * failed changes nothing it holds): its boot cleans {@code /tmp} and makes directories there, so
+   * a search during it walks a tree that changes under it. Says systemd's state when it does not
+   * settle in time.
+   */
+  static final String SETTLED =
+      """
+      PATH=/usr/bin:/bin
+      state=$(timeout %d systemctl is-system-running --wait 2>/dev/null)
+      case $state in running|degraded) exit 0 ;; esac
+      echo "${state:-no state}"
+      exit 1
+      """
+          .formatted(SETTLE_SECONDS);
+
   private WorkspaceCredentials() {}
+
+  /**
+   * Makes {@code template} hold no one's credentials and proves it holds none of {@code tokens},
+   * once its boot has settled, so what is searched is what is snapshotted.
+   */
+  static void clean(ShellExec shell, String template, Collection<String> tokens)
+      throws IOException, InterruptedException, TimeoutException {
+    var settled =
+        shell.exec(
+            ContainerExec.asRoot(template, List.of("bash", "-c", SETTLED, "sail-settled")),
+            null,
+            Duration.ofSeconds(SETTLE_SECONDS + 30));
+    if (!settled.ok()) {
+      throw new IOException(
+          template
+              + " did not finish starting within "
+              + SETTLE_SECONDS
+              + " s (systemd says it is "
+              + settled.stdout().strip()
+              + "), so it is not searched for its builder's tokens while it changes.");
+    }
+    strip(shell, template);
+    requireNone(shell, template, tokens);
+  }
 
   static void strip(ShellExec shell, String instance)
       throws IOException, InterruptedException, TimeoutException {

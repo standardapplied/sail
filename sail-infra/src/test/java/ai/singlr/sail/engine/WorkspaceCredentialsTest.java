@@ -17,6 +17,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -38,6 +39,7 @@ class WorkspaceCredentialsTest {
 
   @TempDir Path root;
   private Path bin;
+  private Path planted;
 
   @BeforeEach
   void aContainerRoot() throws IOException {
@@ -89,7 +91,7 @@ class WorkspaceCredentialsTest {
 
   private ProcessBuilder environment(ProcessBuilder builder) {
     var env = builder.environment();
-    env.put("PATH", bin + ":" + System.getenv("PATH"));
+    env.put("PATH", (planted == null ? "" : planted + ":") + bin + ":" + System.getenv("PATH"));
     env.put("HOME", root.resolve("home/dev").toString());
     env.put("GIT_CONFIG_SYSTEM", root.resolve("etc/gitconfig").toString());
     return builder;
@@ -106,7 +108,8 @@ class WorkspaceCredentialsTest {
             .replace("/home/*", root + "/home/*")
             .replace("/home/dev", root + "/home/dev")
             .replace("/root/", root + "/root/")
-            .replace("-o dev -g dev ", "");
+            .replace("-o dev -g dev ", "")
+            .replace("PATH=/usr/bin:/bin", "PATH=" + bin + ":/usr/bin:/bin");
     var command = new ArrayList<>(List.of("bash", "-c", rooted, "sail-test"));
     command.addAll(List.of(args));
     var said = Files.createTempFile(bin, "said", ".txt");
@@ -539,5 +542,75 @@ class WorkspaceCredentialsTest {
                 "the search for the build's tokens did not run: it could not make a file on"
                     + " /dev/shm for its errors"),
         checked.said());
+  }
+
+  /**
+   * A file a search cannot read is refused whatever it is named: one named for the error a file
+   * gone gives, and holding the token, is still an error that is not that one.
+   */
+  @Test
+  void aFileNamedForAFileGoneThatCannotBeReadIsStillRefused() throws Exception {
+    Assumptions.assumeFalse("root".equals(System.getProperty("user.name")), "root reads it");
+    var named =
+        Files.createDirectories(root.resolve("srv")).resolve("a: No such file or directory");
+    Files.writeString(named, TOKEN + "\n");
+    Files.setPosixFilePermissions(named, java.util.Set.of());
+
+    var checked = script(WorkspaceCredentials.HELD, TOKEN + "\n");
+
+    assertEquals(2, checked.exit(), checked.said());
+    assertTrue(checked.said().contains("Permission denied"), checked.said());
+    assertFalse(checked.said().contains(TOKEN), "the check never says the token");
+  }
+
+  /**
+   * A grep, or any tool the check runs, planted earlier on the path inside the template answers
+   * nothing: the check and the strip run with their own path.
+   */
+  @Test
+  void aToolPlantedEarlierOnThePathAnswersForNeitherScript() throws Exception {
+    planted = Files.createDirectories(root.resolve("usr/local/bin"));
+    var used = root.resolve("planted-used");
+    var grep = planted.resolve("grep");
+    Files.writeString(grep, "#!/bin/sh\ntouch " + used + "\nexit 1\n");
+    grep.toFile().setExecutable(true);
+    Files.copy(grep, planted.resolve("rm"));
+    planted.resolve("rm").toFile().setExecutable(true);
+    Files.writeString(root.resolve("etc/environment"), TOKEN + "\n");
+
+    var checked = script(WorkspaceCredentials.HELD, TOKEN + "\n");
+    builderLeftEverything();
+    var stripped = script(WorkspaceCredentials.STRIP, "");
+
+    assertEquals(1, checked.exit(), checked.said());
+    assertTrue(checked.said().contains("etc/environment"), checked.said());
+    assertEquals(0, stripped.exit(), stripped.said());
+    assertFalse(Files.exists(root.resolve("home/dev/.git-credentials")));
+    assertFalse(Files.exists(used), "the planted tools never ran");
+  }
+
+  /**
+   * A template is searched once systemd says its boot is done, running or degraded, waited for
+   * within a bound; any other state, or none, is said as it is.
+   */
+  @Test
+  void aTemplateIsSettledOnceItsBootIsDoneRunningOrDegraded() throws Exception {
+    stub("timeout", "echo \"$1\" > " + bin.resolve("bound") + "\nshift\nexec \"$@\"\n");
+    var said = new ArrayList<String>();
+    for (var state : List.of("running:0", "degraded:1", "starting:1", ":1")) {
+      var parts = state.split(":", -1);
+      stub(
+          "systemctl",
+          "[ \"$*\" = \"is-system-running --wait\" ] || exit 9\n"
+              + (parts[0].isEmpty() ? "" : "echo " + parts[0] + "\n")
+              + "exit "
+              + parts[1]
+              + "\n");
+      var ran = script(WorkspaceCredentials.SETTLED, "");
+      said.add(ran.exit() + " " + ran.said().strip());
+    }
+
+    assertEquals(List.of("0 ", "0 ", "1 starting", "1 no state"), said);
+    assertEquals("120\n", read(bin.resolve("bound")));
   }
 }

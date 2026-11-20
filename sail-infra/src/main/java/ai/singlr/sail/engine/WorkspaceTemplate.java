@@ -389,12 +389,10 @@ public final class WorkspaceTemplate {
               new ProjectProvisioner.Instance(
                   template, Optional.of(pool), Map.of(BoxInstances.TEMPLATE_OF_KEY, project)),
               fresh);
-      WorkspaceCredentials.strip(shell, template);
-      WorkspaceCredentials.requireNone(shell, template, source.tokens());
+      WorkspaceCredentials.clean(shell, template, source.tokens());
     } catch (Exception failure) {
       try {
-        WorkspaceCredentials.strip(shell, template);
-        WorkspaceCredentials.requireNone(shell, template, source.tokens());
+        WorkspaceCredentials.clean(shell, template, source.tokens());
       } catch (IOException | TimeoutException unproven) {
         failure.addSuppressed(unproven);
         markUnproven(shell, locks, template).ifPresent(failure::addSuppressed);
