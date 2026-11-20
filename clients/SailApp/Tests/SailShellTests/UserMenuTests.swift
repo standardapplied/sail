@@ -11,12 +11,10 @@ import Testing
 /// The user menu behind the rail's user button (the calm spec's PR 2, in Paper and ink): where it
 /// sits at every window size and in either direction, what it says, how the keys and the pointer
 /// work it, what each item does, Appearance remembered and taken, what VoiceOver hears, and that it
-/// adds no accent and no grey to the window it opens over. Serialized: when its process ends early
-/// (it has, with the main run loop stopped), the one test started and never ended names the cause.
-@MainActor @Suite(.serialized) struct UserMenuTests {
-    /// Says, in the suite's own log, each test as it starts and as it ends.
-    private let inFlight = InFlight()
-
+/// adds no accent and no grey to the window it opens over. No test here runs a real event loop (a
+/// posted event, a button's own mouse tracking): with no `NSApp.run` under a test, that stopped the
+/// main run loop and so ended the suite's process; real clicks are the drive's.
+@MainActor @Suite struct UserMenuTests {
     init() {
         ExitWatch.install()
     }
@@ -300,18 +298,15 @@ import Testing
     }
 
     /// The pointer and the keys are told apart by how the button was pressed, not by the app's last
-    /// event: a click opens it with nothing highlighted, the keys or VoiceOver (a press with no click)
-    /// with the first item, whatever was clicked before. VoiceOver's press and Show Menu on the
-    /// menu-button-role button open our menu and show no other window.
+    /// event: a press with no click (the keys, VoiceOver) opens it with the first item highlighted;
+    /// a click, nothing (the drive's real clicks show it: `m-open-by-a-click`, and kit's keys).
+    /// VoiceOver's press and Show Menu on the menu-button-role button open our menu and show no
+    /// other window.
     @Test func howTheButtonWasPressedDecides() throws {
         let shell = try Self.shell()
         defer { shell.window.orderOut(nil) }
         let button = try #require(shell.rail.button(.account)), view = shell.userMenu.view
-        let middle = NSPoint(x: button.bounds.midX, y: button.bounds.midY)
-        NSApp.postEvent(try Self.mouse(.leftMouseUp, at: middle, in: button), atStart: false)
-        button.mouseDown(with: try Self.mouse(.leftMouseDown, at: middle, in: button))
-        #expect(shell.userMenu.isOpen && Self.highlighted(view) == "nothing", "a click highlighted \(Self.highlighted(view))")
-        shell.userMenu.close()
+        #expect(!shell.rail.pressedByPointer, "no click is under way, yet the rail says the pointer pressed")
         let shown = Set(NSApp.windows.filter(\.isVisible).map(\.windowNumber))
         #expect(button.accessibilityPerformPress() && shell.userMenu.isOpen && Self.highlighted(view) != "nothing", "VoiceOver's press highlighted nothing")
         let opened = Set(NSApp.windows.filter(\.isVisible).map(\.windowNumber)).subtracting(shown)
@@ -534,20 +529,5 @@ final class OutOfReach: Transport, Sendable {
     /// Every request waiting is answered: out of reach.
     func answer() {
         state.withLock { $0.gates }.forEach { $0.open() }
-    }
-}
-
-/// A test's start and end, written to the suite's log, so the one in flight when its process ends
-/// is named without the events file: made with the suite's instance for a test, gone with it.
-final class InFlight: Sendable {
-    private let name: String
-
-    init() {
-        name = Test.current?.name ?? "a test"
-        ExitWatch.say("starts \(name)")
-    }
-
-    deinit {
-        ExitWatch.say("ends \(name)")
     }
 }
