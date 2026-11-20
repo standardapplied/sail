@@ -138,8 +138,7 @@ class HostPtyAgentTest {
   }
 
   private static final String GONE =
-      "gone is zed's workspace, and zed is no longer active here, so no agent starts in it; the"
-          + " next pass leaves it nobody's.";
+      "gone is zed's workspace, and zed is no longer active here, so no agent starts in it until the box's pass leaves it nobody's.";
 
   /**
    * A workspace whose person is no longer active here starts no agent, said as the route that
@@ -181,7 +180,7 @@ class HostPtyAgentTest {
         List.of(
             "not_your_workspace",
             "old is labelled for a person this box does not know as ada, so no agent starts in"
-                + " it; the next pass leaves it nobody's."),
+                + " it until the box's pass leaves it nobody's."),
         List.of(old.code(), old.reason()));
     assertEquals(
         fdes.logins().defaultFor(adaId, Harnesses.of("claude-code")).orElseThrow().row(),
@@ -230,8 +229,7 @@ class HostPtyAgentTest {
   @Test
   void aWorkspaceLabelledForAnotherPersonOfTheSameHandleIsNotTheirs() {
     assertEquals(
-        "old is labelled for a person this box does not know as ada, so no agent starts in it;"
-            + " the next pass leaves it nobody's.",
+        "old is labelled for a person this box does not know as ada, so no agent starts in it until the box's pass leaves it nobody's.",
         assertThrows(Remedied.Io.class, () -> lane.admitAgent("acme", "old", CLAUDE, ada))
             .reason());
   }

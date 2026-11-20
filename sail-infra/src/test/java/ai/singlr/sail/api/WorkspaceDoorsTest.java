@@ -592,8 +592,7 @@ class WorkspaceDoorsTest {
     assertEquals(
         List.of(
             "owner_gone",
-            "try is ada's workspace, and ada is no longer active here, so it is not started; the"
-                + " next pass leaves it nobody's.",
+            "try is ada's workspace, and ada is no longer active here, so it is not started until the box's pass leaves it nobody's.",
             "Delete it meanwhile with: sail project workspace delete acme try --force."),
         List.of(told.code(), told.reason(), told.remedy().plain()));
     assertEquals(List.of(), changes(removed));
@@ -689,7 +688,7 @@ class WorkspaceDoorsTest {
 
     var reusedSaid = "try is labelled for a person this box does not know as client, so it is not ";
     var goneSaid = "try is zed's workspace, and zed is no longer active here, so it is not ";
-    var pass = "; the next pass leaves it nobody's.";
+    var pass = " until the box's pass leaves it nobody's.";
     assertEquals(
         List.of(
             "start not_your_workspace: " + reusedSaid + "started" + pass,
@@ -739,9 +738,9 @@ class WorkspaceDoorsTest {
     assertEquals(
         List.of(
             "not_your_workspace: try is labelled for a person this box does not know as client,"
-                + " so it is not stopped; the next pass leaves it nobody's.",
+                + " so it is not stopped until the box's pass leaves it nobody's.",
             "owner_gone: try is zed's workspace, and zed is no longer active here, so it is not"
-                + " stopped; the next pass leaves it nobody's.",
+                + " stopped until the box's pass leaves it nobody's.",
             "forbidden_not_assignee: Workspace 'try' belongs to 'client', not you."),
         said);
   }
@@ -798,7 +797,7 @@ class WorkspaceDoorsTest {
                 + " stopped"
                 + notYet,
             "not_your_workspace: try is labelled for client without the id that says which"
-                + " client, so it is not stopped; the next pass leaves it nobody's."),
+                + " client, so it is not stopped until the box's pass leaves it nobody's."),
         said);
   }
 

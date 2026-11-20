@@ -561,6 +561,17 @@ class MissedStopReconcilerTest {
   }
 
   /**
+   * #500's last look, nit 1: no count of failures waits less than an idle period, or a negative.
+   */
+  @Test
+  void theWaitAfterNoFailureOrOneIsAnIdlePeriodAndNeverMoreThanTheCap() {
+    assertEquals(SpecWorkspaces.IDLE, MissedStopReconciler.backoff(0));
+    assertEquals(SpecWorkspaces.IDLE, MissedStopReconciler.backoff(1));
+    assertEquals(SpecWorkspaces.IDLE.multipliedBy(2), MissedStopReconciler.backoff(2));
+    assertEquals(MissedStopReconciler.STRIP_BACKOFF_CAP, MissedStopReconciler.backoff(64));
+  }
+
+  /**
    * Review minor 5 and 4: Incus is asked for removed people's workspaces on the first pass, then
    * only when the roster lost someone or gave a handle to someone else, never on a pass where
    * nothing changed.
