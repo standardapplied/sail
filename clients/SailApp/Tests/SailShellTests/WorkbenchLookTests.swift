@@ -365,19 +365,19 @@ import Testing
     }
 
     /// A screen that leaves less than the designed height (a person's tall Dock, a runner whose
-    /// Dock cut the design's 684 pt to 682) gives a shorter window and nothing clipped: at 1024 x 620,
-    /// above the 600 pt minimum, every section shown lies inside the window and asks no more room
-    /// than it has.
+    /// Dock cut the design's 684 pt to 682) gives a shorter window and nothing clipped: at 1024 x 640,
+    /// above the window's 624 pt least frame (600 pt of content and the title bar), every section
+    /// shown lies inside the window and asks no more room than it has.
     @Test func aShorterScreenGivesAShorterWindowWithNothingClipped() throws {
         let shell = try Self.shell(.light)
         let window = shell.window
-        window.setFrame(NSRect(x: 0, y: 0, width: 1024, height: 620), display: false)
+        window.setFrame(NSRect(x: 0, y: 0, width: 1024, height: 640), display: false)
         let content = try #require(window.contentView)
         let sections: [(String, NSView)] = [("the rail", shell.rail), ("This Mac", shell.thisMac), ("Workspaces", shell.workspaces), ("Account", shell.account)]
         for item in Rail.Item.allCases {
             shell.select(item)
             content.layoutSubtreeIfNeeded()
-            #expect(Double(window.frame.height) == 620, "\(item): the window is \(window.frame)")
+            #expect(Double(window.frame.height) == 640, "\(item): the window is \(window.frame)")
             for (name, view) in sections where !view.isHiddenOrHasHiddenAncestor {
                 let frame = content.convert(view.bounds, from: view)
                 #expect(content.bounds.insetBy(dx: -0.5, dy: -0.5).contains(frame), "\(item): \(name) at \(frame) lies outside the window's \(content.bounds)")
