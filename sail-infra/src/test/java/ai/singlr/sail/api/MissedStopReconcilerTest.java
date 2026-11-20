@@ -48,7 +48,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -491,51 +490,73 @@ class MissedStopReconcilerTest {
   }
 
   /**
-   * Scenario 11 and the last look's n1: each pass takes the credentials of every person the roster
-   * no longer holds out of their workspaces, asking of the roster as it is. One it cannot reach is
-   * tried {@link MissedStopReconciler#STRIP_TRIES} times an idle period apart, never at every pass,
-   * said when first left and once more when left for good; Incus is not asked for it again.
+   * Scenario 11, the last look's n1 and #500's M1: each pass takes the credentials of every person
+   * the roster no longer holds out of their workspaces, asking of the roster as it is. One it
+   * cannot reach is never left: it is tried again an idle period after it first failed, then at
+   * twice the wait each time, never more than {@link MissedStopReconciler#STRIP_BACKOFF_CAP} apart
+   * and never at every pass, each try told when the next is, so the doors say it truly. It is said
+   * when first left and once when reached, and Incus is not asked for it again.
    */
   @Test
-  void aWorkspaceARemovalCannotReachIsTriedThreeTimesAnIdlePeriodApartThenLeftAndSaidOnce() {
+  void aWorkspaceARemovalCannotReachIsTriedAgainAtADoublingWaitCappedAtAnHourUntilReached() {
     var ada = TestLogins.store(db, "ada");
+    var start = PAST_GRACE.get();
     var asked = new ArrayList<String>();
+    var failing = new AtomicBoolean(true);
+    var clock = new AtomicReference<>(start);
     var probe =
         new CountingProbe(true) {
           @Override
-          public List<String> disown(BiPredicate<String, String> held, Predicate<String> due) {
+          public List<String> disown(
+              BiPredicate<String, String> held,
+              Predicate<String> due,
+              Function<String, Instant> retry) {
+            assertTrue(held.test("ada", ada) && !held.test("gone", "fde_gone"));
+            if (!due.test("acme-b")) {
+              return List.of();
+            }
             asked.add(
-                "ada "
-                    + held.test("ada", ada)
-                    + ", gone "
-                    + held.test("gone", "fde_gone")
-                    + ", due "
-                    + due.test("acme-b"));
-            return List.of("acme-b: Error: permission denied");
+                Duration.between(start, clock.get()).toMinutes()
+                    + " next "
+                    + Duration.between(start, retry.apply("acme-b")).toMinutes());
+            return failing.get() ? List.of("acme-b: Error: permission denied") : List.of();
           }
         };
-    var now = new AtomicReference<>(PAST_GRACE.get());
     var err = new ByteArrayOutputStream();
     var before = System.err;
     System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
     try {
-      var reconciler = reconciler(probe, now::get);
-      for (var minutes : List.of(0, 1, 10, 15, 20, 30, 60)) {
-        now.set(PAST_GRACE.get().plus(Duration.ofMinutes(minutes)));
+      var reconciler = reconciler(probe, clock::get);
+      for (var minute = 0; minute <= 330; minute++) {
+        clock.set(start.plus(Duration.ofMinutes(minute)));
+        if (minute == 300) {
+          failing.set(false);
+        }
         reconciler.sweep();
       }
     } finally {
       System.setErr(before);
     }
 
-    assertEquals(Collections.nCopies(3, "ada true, gone false, due true"), asked);
+    assertEquals(
+        List.of(
+            "0 next 10",
+            "10 next 30",
+            "30 next 70",
+            "70 next 130",
+            "130 next 190",
+            "190 next 250",
+            "250 next 310",
+            "310 next 370"),
+        asked);
     var said = err.toString(StandardCharsets.UTF_8).lines().toList();
     assertEquals(
         List.of(
             "  [reconcile] a removed person's credentials are left in acme-b: Error: permission"
-                + " denied; tried again once idle, 3 times in all",
-            "  [reconcile] left acme-b: Error: permission denied, after 3 tries: its next start"
-                + " takes the removed person's credentials out"),
+                + " denied; tried again at "
+                + DateTimeUtils.format(start.plus(Duration.ofMinutes(10)))
+                + ", then at twice the wait each time, at most an hour apart",
+            "  [reconcile] acme-b holds no removed person's credentials now, after 7 failed tries"),
         said.stream().filter(line -> line.contains("acme-b")).toList());
   }
 
@@ -552,7 +573,10 @@ class MissedStopReconcilerTest {
     var probe =
         new CountingProbe(true) {
           @Override
-          public List<String> disown(BiPredicate<String, String> held, Predicate<String> due) {
+          public List<String> disown(
+              BiPredicate<String, String> held,
+              Predicate<String> due,
+              Function<String, Instant> retry) {
             asked.add("ada " + held.test("ada", ada) + ", bob " + held.test("bob", bob));
             return List.of();
           }
@@ -608,7 +632,10 @@ class MissedStopReconcilerTest {
     var probe =
         new CountingProbe(true) {
           @Override
-          public List<String> disown(BiPredicate<String, String> held, Predicate<String> due) {
+          public List<String> disown(
+              BiPredicate<String, String> held,
+              Predicate<String> due,
+              Function<String, Instant> retry) {
             asked.add(
                 "ada "
                     + held.test("ada", fdes.byHandle("ada").orElseThrow().id())
@@ -648,7 +675,10 @@ class MissedStopReconcilerTest {
     var probe =
         new CountingProbe(true) {
           @Override
-          public List<String> disown(BiPredicate<String, String> held, Predicate<String> due) {
+          public List<String> disown(
+              BiPredicate<String, String> held,
+              Predicate<String> due,
+              Function<String, Instant> retry) {
             asked.add(
                 "old "
                     + held.test("tmp", "fde_old_tmp")

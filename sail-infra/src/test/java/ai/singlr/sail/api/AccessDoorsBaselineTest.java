@@ -42,8 +42,10 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -172,8 +174,14 @@ class AccessDoorsBaselineTest {
    * stopped or deleted when asked.
    */
   private static ScriptedShellExecutor workspacesOfAcme(World world, ScriptedShellExecutor incus) {
+    return workspacesOfAcme(world, incus, List.of());
+  }
+
+  /** As {@link #workspacesOfAcme(World, ScriptedShellExecutor)}, with {@code more} listed too. */
+  private static ScriptedShellExecutor workspacesOfAcme(
+      World world, ScriptedShellExecutor incus, List<String> more) {
     var fdes = new FdeStore(world.db);
-    var all = new ArrayList<String>();
+    var all = new ArrayList<String>(more);
     all.add(TestWorkspaces.currentTemplate(ProjectReader.ofCatalog(world.projects), "acme"));
     for (var workspace : WORKSPACES.entrySet()) {
       var owner = workspace.getValue();
@@ -239,6 +247,56 @@ class AccessDoorsBaselineTest {
     }
   }
 
+  /**
+   * N1: the workspace doors on a node whose own person is {@code keeper} (the cast's owner, a
+   * member, and its admin), asked by that person and by another member holding a token there, on
+   * every lane they come in by: acme's {@code try}, the owner's by id; {@code loose}, no one's;
+   * {@code reused}, labelled for another person of the keeper's handle; and {@code gone}, for a
+   * person this box does not hold. The last two are no one's to act on, the keeper's included.
+   */
+  private static void nodeWorkspaceDoors(World world, List<Door> doors, String keeper) {
+    var reused = workspace("reused", keeper, "fde_another_" + keeper);
+    var gone = workspace("gone", "zed", "fde_zed");
+    var incus = new ScriptedShellExecutor();
+    incus
+        .onOk("incus list ^acme-reused$", "[" + reused + "]")
+        .onOk("incus list ^acme-gone$", "[" + gone + "]")
+        .onOk("incus storage list", "[{\"name\": \"tank\", \"driver\": \"zfs\"}]");
+    SailOperations node;
+    try {
+      node =
+          TestControlPlane.on(
+              OperationsFactory.create(
+                  world.db,
+                  workspacesOfAcme(world, incus, List.of(reused, gone)),
+                  null,
+                  SyncScheduler.disabled(),
+                  SessionYield.NONE),
+              world.db,
+              Files.createTempDirectory("sail-node-doors"),
+              new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", keeper, keeper + "-box"));
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+    Predicate<Actor> theNodes =
+        actor -> keeper.equals(actor.handle()) || Cast.OTHER.equals(actor.handle());
+    for (var name : List.of("try", "loose", "reused", "gone")) {
+      var which = "workspace " + name + " of acme on " + keeper + "'s node";
+      doors.add(new Door("start " + which, ops -> node.startWorkspace("acme", name), theNodes));
+      doors.add(new Door("stop " + which, ops -> node.stopWorkspace("acme", name), theNodes));
+      doors.add(
+          new Door(
+              "delete " + which + " with force",
+              ops -> node.deleteWorkspace("acme", name, true),
+              theNodes));
+      doors.add(
+          new Door(
+              "ask what can start in " + which,
+              ops -> node.workspaceAgents("acme", name),
+              theNodes));
+    }
+  }
+
   private static List<Door> doors(World world) {
     var doors = new ArrayList<Door>();
     reads(world, doors);
@@ -247,6 +305,8 @@ class AccessDoorsBaselineTest {
     rooms(world, doors);
     projects(doors);
     workspaceDoors(doors);
+    nodeWorkspaceDoors(world, doors, Cast.OWNER);
+    nodeWorkspaceDoors(world, doors, Cast.ADMIN);
     events(world, doors);
     logins(doors);
     return doors;
