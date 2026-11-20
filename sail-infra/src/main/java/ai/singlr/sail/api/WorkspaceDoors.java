@@ -267,11 +267,10 @@ public final class WorkspaceDoors {
     var project = config.name();
     var found = workspaces.find(project, name).orElseThrow(() -> Workspaces.absent(project, name));
     decide(project, name, found);
-    var person = Workspaces.ownerOf(found, owners).orElse(keeper);
+    var person = AgentStarts.person(found, owners, keeper);
     var running = found.state() instanceof ContainerState.Running;
     var refused =
-        Workspaces.goneOwner(found, owners)
-            .map(gone -> goneOwner(project, name, gone))
+        AgentStarts.goneOwner(project, name, found, owners)
             .or(() -> AgentStarts.notTheirs(name, person, Actor.current().handle()));
     if (refused.isPresent()) {
       return new AgentOffersResponse(

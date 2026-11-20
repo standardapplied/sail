@@ -630,6 +630,35 @@ fi
 sudo sail server token revoke "door-$handle" > /dev/null 2>&1
 echo "HTTP $status"; head -c 400 /tmp/door.json; echo'
 
+# The modes the route offers for Claude Code are its own: on the version a workspace installs now,
+# claude --help's --permission-mode choices are the route's modes beside its own start (default).
+readonly MODES_MATCH='set -u
+handle=$1 project=$2 workspace=$3
+token=$(sudo sail server token create "modes-$handle" member --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " ")
+[ -n "$token" ] || { echo "no token"; exit 1; }
+curl -s -H "Authorization: Bearer $token" "http://127.0.0.1:7070/v1/projects/$project/workspaces/$workspace/agents" > /tmp/modes-route.json
+sudo sail server token revoke "modes-$handle" > /dev/null 2>&1
+sudo incus exec "$project-$workspace" --user 1000 --group 1000 --env HOME=/home/dev -- bash -lc \
+  "command -v claude > /dev/null || curl -fsSL https://claude.ai/install.sh | bash > /dev/null 2>&1; ~/.local/bin/claude --version; ~/.local/bin/claude --help" > /tmp/modes-help.txt 2>&1
+head -1 /tmp/modes-help.txt
+python3 -I - <<PY
+import json, re
+offer = [o for o in json.load(open("/tmp/modes-route.json"))["offered"] if o["harness"] == "claude-code"][0]
+route = sorted(m["mode"] for m in offer["modes"] if m["mode"] != "default")
+found = re.search(r"--permission-mode <mode>.*?\\(choices: (.*?)\\)", open("/tmp/modes-help.txt").read(), re.S)
+claude = sorted(re.findall(r"\"([^\"]+)\"", found.group(1))) if found else []
+print("claude --help: " + ", ".join(claude))
+print("the route:     " + ", ".join(route))
+print("SAME" if claude and claude == route else "DIFFERENT")
+PY'
+
+modes_match_claude() {
+  local run=$1 box=$2 handle=$3 project=$4 workspace=$5 out
+  out=$(on "$run" "$box" "cat > /tmp/sail-modes && bash /tmp/sail-modes $handle $project $workspace" <<< "$MODES_MATCH")
+  echo "$out"
+  grep -q '^SAME$' <<< "$out"
+}
+
 http_token_door() {
   local run=$1 box=$2 handle=$3 role=$4 expected=$5 method=$6 path=$7 body=${8:-} says=${9:-} out
   out=$(on "$run" "$box" "cat > /tmp/sail-token-door && bash /tmp/sail-token-door $handle $role $method '$path' '$body'" <<< "$HTTP_TOKEN_DOOR")
@@ -1843,6 +1872,8 @@ storage() {
   check "$run" "eng, a member, creates her own workspace of acme on main through main's API" \
     http_token_door "$run" main eng member 201 POST /v1/projects/acme/workspaces '{"name":"eng-own"}' '"owner": "eng"'
   check "$run" "eng's workspace is labelled hers by her id" owned_by "$run" main acme-eng-own eng
+  check "$run" "the Claude Code modes the route offers in eng's workspace are claude --help's, on the version a workspace installs now" \
+    modes_match_claude "$run" main eng acme eng-own
   check "$run" "eng's workspace commits as eng" commits_as "$run" main acme-eng-own eng@fleet.example
   check "$run" "eng's workspace holds none of main's person's forge token" holds_no_forge_token "$run" main acme-eng-own
   check "$run" "client, a member, is refused eng's workspace on main, naming her" \

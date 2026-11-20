@@ -117,8 +117,9 @@ final class Codex implements Harness {
   }
 
   /**
-   * Only full access, Codex's own name for its mode with no approvals and no sandbox: its sandbox
-   * needs user namespaces, which Incus containers block.
+   * Only full access, Codex's own name for its mode with no approvals and no sandbox: its sandbox,
+   * bubblewrap, cannot start in an Incus container (0.171: {@code bwrap: setting up uid map:
+   * Permission denied}, or with no network {@code bwrap: loopback: Failed RTM_NEWADDR}).
    */
   @Override
   public List<Mode> modes() {
@@ -136,8 +137,8 @@ final class Codex implements Harness {
         "Sail starts "
             + displayName()
             + " in a workspace with full access, running every command without asking and"
-            + " without its sandbox: that sandbox needs user namespaces, which a workspace's"
-            + " container does not allow.");
+            + " without its sandbox: that sandbox, bubblewrap, cannot start in a workspace's"
+            + " container.");
   }
 
   /**

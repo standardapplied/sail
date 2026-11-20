@@ -329,8 +329,8 @@ class HarnessGoldenTest {
     assertEquals(
         Optional.of(
             "Sail starts Codex CLI in a workspace with full access, running every command without"
-                + " asking and without its sandbox: that sandbox needs user namespaces, which a"
-                + " workspace's container does not allow."),
+                + " asking and without its sandbox: that sandbox, bubblewrap, cannot start in a"
+                + " workspace's container."),
         CODEX.modesNote());
     assertTrue(
         Stream.of(CLAUDE_CODE, CODEX)

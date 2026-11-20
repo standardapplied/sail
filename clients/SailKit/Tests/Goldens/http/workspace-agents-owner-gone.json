@@ -11,7 +11,7 @@
         "action": "Delete it meanwhile with: project workspace delete harbor wreck --force.",
         "code": "owner_gone",
         "field_errors": [],
-        "message": "Workspace 'wreck' of harbor is zed's, who is no longer active here, so it is not started: the next pass leaves it nobody's.",
+        "message": "wreck is zed's workspace, and zed is no longer active here, so no agent starts in it; the next pass leaves it nobody's.",
         "remedy": [
           {
             "text": "Delete it meanwhile with: "

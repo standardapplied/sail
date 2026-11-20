@@ -4073,8 +4073,13 @@ first is the one it starts in until a person chooses. Claude Code's are its own 
 and then each of its permission modes once, passed as it names them (`--permission-mode manual`,
 `acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`; its own `default` is Manual, offered
 as `manual`, its alias). Codex's is `full-access` alone (`--dangerously-bypass-approvals-and-sandbox`),
-with why (`Harness.modesNote`): its sandbox needs user namespaces, which a workspace's container does
-not allow. No mode is named anywhere else, and no client branches on one. Only in a workspace, and
+with why (`Harness.modesNote`): its sandbox, bubblewrap, cannot start in a workspace's container
+(measured with Codex 0.171's `codex sandbox` in a workspace on Ubuntu 24.04, no model turn: `bwrap:
+setting up uid map: Permission denied`, and with its network cut `bwrap: loopback: Failed
+RTM_NEWADDR: Operation not permitted`, for the read-only and the workspace-write sandbox alike). No mode is named anywhere else, and no client branches on one. The harness's command is
+not run without a shell: the session's `bash -lc` wrapper ends in `exec <harness> <mode's args>`,
+which is safe because a mode's args are fixed text of its harness, chosen by name from that list,
+never a client's. Only in a workspace, and
 only as its owner: the host's own refusals (`refusal`: closing, a
 live session of the name, either cap, the command's size, the room) and then `PtyAdmission.agent`
 (`HostLanes.Pty.admitAgent`) are asked before the workspace is entered or started. The admission
@@ -4122,10 +4127,15 @@ who is told (`WriterChanged`), as an admin's shell there already reaches the own
 
 **What can start in a workspace** (`GET /v1/projects/{p}/workspaces/{w}/agents`, gated as Enter a
 workspace on its owner: its owner or an admin; another member is refused as every workspace door
-refuses them, and a workspace the runner does not hold is not found). `WorkspaceDoors.agents` answers whose the workspace is and
+refuses them, and a workspace the runner does not hold is not found, before any lane's refusal, as
+at every workspace door: a credential that may read the project, an agent's lane or a read-only one,
+learns only whether a workspace exists, which the workspaces list it may read already says).
+`WorkspaceDoors.agents` answers whose the workspace is and
 whether it runs (a stopped one is no refusal: a start starts it), then makes the same decisions a
-`Create` of an agent makes (`AgentStarts`): a workspace whose person is gone (`owner_gone`) or that
-is not the asker's (`not_your_workspace`, which is what an admin sees in another person's, with
+`Create` of an agent makes (`AgentStarts`, first whose the workspace is: its labelled person, or on
+a node the node's own person only for one no one is labelled for, never for one labelled for
+someone it does not know): a workspace whose person is gone (`owner_gone`) or that is not the
+asker's (`not_your_workspace`, which is what an admin sees in another person's, with
 nothing offered and nothing of that person's logins) is refused whole; otherwise every harness Sail
 knows is offered with its modes (`Harness.modes()`, `mode_default` the first) and `note`, the kinds
 of login it takes and how to make one, and either the login it starts signed in with (`{name,

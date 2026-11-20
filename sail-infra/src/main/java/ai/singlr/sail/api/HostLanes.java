@@ -414,18 +414,20 @@ final class HostLanes {
 
     /**
      * The stored login {@code agent} starts with in {@code who}'s own workspace {@code workspace},
-     * empty when it signs in inside. Whose a workspace is, is decided as every workspace door
-     * decides it, the node's own person keeping what nobody owns on a node; its login is looked up
-     * by the FDE id the workspace is labelled for, as its git tokens are.
+     * empty when it signs in inside. Whose a workspace is, is {@link AgentStarts#person}: its
+     * labelled person, or on a node the node's own person only for one no one is labelled for; its
+     * login is looked up by the FDE id the workspace is labelled for, as its git tokens are.
      */
     @Override
     public Optional<LoginStore.Login> admitAgent(
         String project, String workspace, PtyMessage.Agent agent, PtyIdentity.Person who)
         throws IOException {
-      var owner = personOf(found(project, workspace));
+      var found = found(project, workspace);
+      var owner = personOf(found);
       var harness = Harnesses.of(agent.harness());
       var refused =
-          AgentStarts.notTheirs(workspace, owner, who.actor().handle())
+          AgentStarts.goneOwner(project, workspace, found, owners)
+              .or(() -> AgentStarts.notTheirs(workspace, owner, who.actor().handle()))
               .or(() -> AgentStarts.notInstalled(definitions.require(project), harness));
       if (refused.isPresent()) {
         throw told(refused.get());
@@ -442,12 +444,9 @@ final class HostLanes {
       }
     }
 
-    /**
-     * Whose workspace {@code instance} is, as every workspace door decides it: its labelled person
-     * by handle and id, or on a node the node's own person for one nobody owns; null for nobody.
-     */
+    /** Whose workspace {@code instance} is for an agent start ({@link AgentStarts#person}). */
     private String personOf(BoxInstances.Instance instance) {
-      return Workspaces.ownerOf(instance, owners).or(() -> roles.nodeFde()).orElse(null);
+      return AgentStarts.person(instance, owners, roles.nodeFde().orElse(null));
     }
 
     /**

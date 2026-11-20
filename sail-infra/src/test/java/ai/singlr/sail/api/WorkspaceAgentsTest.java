@@ -329,7 +329,7 @@ class WorkspaceAgentsTest {
     assertEquals(
         List.of(
             "owner_gone",
-            "Workspace 'old' of acme is zed's, who is no longer active here, so it is not started:"
+            "old is zed's workspace, and zed is no longer active here, so no agent starts in it;"
                 + " the next pass leaves it nobody's.",
             "Delete it meanwhile with: project workspace delete acme old --force."),
         said(old.body().get("refusal")));
