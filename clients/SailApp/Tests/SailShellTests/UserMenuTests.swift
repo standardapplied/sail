@@ -136,8 +136,9 @@ import Testing
         try Self.press(Self.right, in: shell)
         #expect(view.chosenLook == .auto && NSApp.appearance == nil, "→ twice from Dark is \(view.chosenLook)")
         try Self.press(Self.escape, in: shell)
-        // The button takes the keys only with Keyboard Navigation on; off, they go back where they were.
-        let back: NSResponder? = NSApp.isFullKeyboardAccessEnabled ? button : had
+        // The rail's button takes the keys on this Mac with Keyboard Navigation off as well (CI's
+        // runner gave them to it); where it refuses them, they go back where they were.
+        let back: NSResponder? = button.acceptsFirstResponder ? button : had
         #expect(!shell.userMenu.isOpen && !shell.rail.menuOpen && UserMenu.holder(of: shell.window.firstResponder) === back,
                 "Escape left the keys on \(String(describing: shell.window.firstResponder)), not \(String(describing: back))")
         try Self.open(shell, withKeys: true)
@@ -191,6 +192,30 @@ import Testing
         account.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: account.bounds.midX, y: account.bounds.midY), in: account))
         #expect(!shell.userMenu.isOpen && shell.rail.selected == .account, "Account showed \(shell.rail.selected?.rawValue ?? "nothing")")
         shell.choose(.auto)
+    }
+
+    /// Who is signed in learnt while an item is pressed (the drive's step at launch): the item stays
+    /// until it is let go, the click chooses it, and the menu then says what was learnt; a press
+    /// let go outside it chooses nothing and the menu says it at once.
+    @Test func anItemIsNeverTakenFromUnderAPress() throws {
+        let shell = try Self.shell()
+        defer { shell.window.orderOut(nil) }
+        let view = shell.userMenu.view
+        try Self.open(shell, .signedOut)
+        var signIn = try #require(view.items.first)
+        signIn.mouseDown(with: try Self.mouse(.leftMouseDown, at: NSPoint(x: signIn.bounds.midX, y: signIn.bounds.midY), in: signIn))
+        shell.userMenu.update(Self.uday, appearance: .auto)
+        #expect(view.items.map(\.item) == [.signIn] && view.items.first === signIn, "the pressed Sign In was taken: \(view.items.map(\.item))")
+        signIn.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: signIn.bounds.midX, y: signIn.bounds.midY), in: signIn))
+        #expect(!shell.userMenu.isOpen && shell.rail.selected == .account, "the click on Sign In chose nothing")
+        try Self.open(shell, .signedOut)
+        signIn = try #require(view.items.first)
+        signIn.mouseDown(with: try Self.mouse(.leftMouseDown, at: NSPoint(x: signIn.bounds.midX, y: signIn.bounds.midY), in: signIn))
+        shell.userMenu.update(Self.uday, appearance: .auto)
+        signIn.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: -10, y: -10), in: signIn))
+        #expect(shell.userMenu.isOpen && view.items.map(\.item) == [.account, .logins, .signOut], "let go outside, the menu says \(view.items.map(\.item))")
+        #expect(near(shell.userMenu.box.height, view.fittingSize.height) && view.items.allSatisfy { near($0.frame.height, UserMenuView.row) }, "the box was not sized again")
+        shell.userMenu.close()
     }
 
     static func mouse(_ type: NSEvent.EventType, at point: NSPoint, in view: NSView) throws -> NSEvent {

@@ -56,6 +56,10 @@ package final class UserMenu: NSObject {
         panel.contentView = host
         keys.owner = self
         view.onChoose = { [weak self] item in self?.choose(item) }
+        view.onChanged = { [weak self] in
+            guard let self, isOpen, let anchor, let window = anchor.window else { return }
+            place(over: anchor, in: window)
+        }
         view.onAppearance = { [weak self] appearance in self?.onAppearance(appearance) }
     }
 
@@ -89,7 +93,6 @@ package final class UserMenu: NSObject {
     func update(_ content: UserMenuContent, appearance: Appearance) {
         guard isOpen else { return }
         view.show(content, appearance: appearance, fresh: false)
-        if let anchor, let window = anchor.window { place(over: anchor, in: window) }
     }
 
     package func close() {
@@ -203,8 +206,13 @@ package final class UserMenuView: NSView {
 
     var onChoose: @MainActor (UserMenuContent.Item) -> Void = { _ in }
     var onAppearance: @MainActor (Appearance) -> Void = { _ in }
+    /// Told when what it says changed while open, so the box is sized again.
+    var onChanged: @MainActor () -> Void = {}
 
     private let mono: LabelFont
+    /// What it is to say once the item being pressed is let go: an item is never taken from under
+    /// a press (at launch, who is signed in is learnt while the menu may be open).
+    private var waiting: (content: UserMenuContent, appearance: Appearance)?
     package private(set) var content = UserMenuContent.signedOut
     package private(set) var chosenLook = Appearance.auto
     package private(set) var items: [MenuRow] = []
@@ -269,6 +277,11 @@ package final class UserMenuView: NSView {
     /// Says `content` with `appearance` chosen: `fresh`, just opened, with its first item highlighted
     /// (the spec's M1, however it was opened); else with what was highlighted when it is still there.
     func show(_ content: UserMenuContent, appearance: Appearance, fresh: Bool) {
+        if !fresh, items.contains(where: \.pressed) {
+            waiting = (content, appearance)
+            return
+        }
+        waiting = nil
         let before = highlighted.flatMap { items.indices.contains($0) ? items[$0].item : nil }, onAppearance = highlighted == items.count
         self.content = content
         self.chosenLook = appearance
@@ -280,6 +293,10 @@ package final class UserMenuView: NSView {
             row.onHover = { [weak self, weak row] in
                 guard let self, let row, let index = items.firstIndex(where: { $0 === row }) else { return }
                 highlight(index)
+            }
+            row.onRelease = { [weak self] in
+                guard let self, let waiting else { return }
+                show(waiting.content, appearance: waiting.appearance, fresh: false)
             }
             row.onLeave = { [weak self, weak row] in
                 guard let self, let row, items.firstIndex(where: { $0 === row }) == highlighted else { return }
@@ -297,6 +314,7 @@ package final class UserMenuView: NSView {
         }
         repaint()
         needsLayout = true
+        if !fresh { onChanged() }
     }
 
     private func highlight(_ index: Int?) {
@@ -487,8 +505,12 @@ package final class MenuRow: NSView {
     var onChoose: @MainActor () -> Void = {}
     var onHover: @MainActor () -> Void = {}
     var onLeave: @MainActor () -> Void = {}
+    /// Told when a press on it ends, chosen or not.
+    var onRelease: @MainActor () -> Void = {}
     /// The mouse-downs and mouse-ups it took, for the drive to say where a click went.
     package private(set) var downs = 0, ups = 0
+    /// Pressed: a mouse-down taken and its mouse-up not yet.
+    private(set) var pressed = false
     private let mono: LabelFont
 
     init(_ item: UserMenuContent.Item, look: Look, mono: LabelFont) {
@@ -555,12 +577,15 @@ package final class MenuRow: NSView {
     /// A click chooses it; on one that cannot be chosen it says why, as pointing at it does.
     package override func mouseUp(with event: NSEvent) {
         ups += 1
+        pressed = false
+        defer { onRelease() }
         guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
         if item.enabled { onChoose() } else { onHover() }
     }
 
     package override func mouseDown(with _: NSEvent) {
         downs += 1
+        pressed = true
     }
 
     package override func acceptsFirstMouse(for _: NSEvent?) -> Bool {
