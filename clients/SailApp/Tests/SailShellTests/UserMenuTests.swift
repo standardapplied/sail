@@ -13,8 +13,9 @@ import Testing
 /// work it, what each item does, Appearance remembered and taken, what VoiceOver hears, and that it
 /// adds no accent and no grey to the window it opens over. No test here runs a real event loop (a
 /// posted event, a button's own mouse tracking): with no `NSApp.run` under a test, that stopped the
-/// main run loop and so ended the suite's process; real clicks are the drive's.
-@MainActor @Suite struct UserMenuTests {
+/// main run loop and so ended the suite's process; real clicks are the drive's. One test at a time:
+/// a menu closes when its window gives up the keys, and another test's window takes them.
+@MainActor @Suite(.serialized) struct UserMenuTests {
     init() {
         ExitWatch.install()
     }
@@ -333,18 +334,19 @@ import Testing
         let view = shell.userMenu.view
         try Self.open(shell, shell.menuContent)
         #expect(view.content.name == "Not signed in" && view.content.detail == "127.0.0.1:7979")
+        let said = { "the menu \(shell.userMenu.isOpen ? "open" : "closed (its window gave up the keys)") says \(view.content.name), \(view.content.plane.map { "\($0)" } ?? "no state"); the account \(shell.account.standing == nil ? "knows no one" : "knows uday"), \(shell.account.checks) checks" }
         let check = Task { await shell.account.refresh() }
         #expect(await RunnerTabTests.until { transport.asked == 1 }, "the check asked nothing")
-        #expect(view.content.name == "Checking…" && view.content.items == [.account], "during the first check the menu says \(view.content.name)")
+        #expect(shell.userMenu.isOpen && view.content.name == "Checking…" && view.content.items == [.account], "during the first check \(said())")
         transport.answer()
         await check.value
-        #expect(view.content.name == "uday" && view.content.plane == .unreachable, "the check ended, the menu says \(String(describing: view.content.plane))")
+        #expect(shell.userMenu.isOpen && view.content.name == "uday" && view.content.plane == .unreachable, "the check ended: \(said())")
         let again = Task { await shell.account.refresh() }
-        #expect(await RunnerTabTests.until { transport.asked == 2 }, "the check asked nothing again")
-        #expect(view.content.plane == .reconnecting, "asking again, the menu says \(String(describing: view.content.plane))")
+        #expect(await RunnerTabTests.until { transport.asked == 2 }, "the check asked nothing again: \(transport.asked) asked")
+        #expect(shell.userMenu.isOpen && view.content.plane == .reconnecting, "asking again: \(said())")
         transport.answer()
         await again.value
-        #expect(view.content.plane == .unreachable && shell.userMenu.isOpen, "asked again, the menu says \(String(describing: view.content.plane))")
+        #expect(shell.userMenu.isOpen && view.content.plane == .unreachable, "asked again: \(said())")
         shell.userMenu.close()
     }
 
@@ -504,7 +506,7 @@ import Testing
 }
 
 /// A control plane that does not answer: each request waits until answered, then fails as the
-/// network does, counting how many were asked.
+/// network does, counting the checks of who is signed in asked (not the lists a sign-in starts).
 final class OutOfReach: Transport, Sendable {
     private let state = Mutex<(asked: Int, gates: [Gate])>((0, []))
 
@@ -512,10 +514,10 @@ final class OutOfReach: Transport, Sendable {
         state.withLock { $0.asked }
     }
 
-    func send(_: HTTPRequest) async throws(SailError) -> HTTPResponse {
+    func send(_ request: HTTPRequest) async throws(SailError) -> HTTPResponse {
         let gate = Gate()
         state.withLock {
-            $0.asked += 1
+            if request.route.contains("whoami") { $0.asked += 1 }
             $0.gates.append(gate)
         }
         await gate.wait()
