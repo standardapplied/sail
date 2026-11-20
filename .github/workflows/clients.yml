@@ -365,8 +365,13 @@ jobs:
         if: ${{ !cancelled() && !inputs.release }}
         env:
           SAIL_SIGNING: ${{ env.SIGNING }}
+        # The Dock hides, so every runner leaves windows the screen less its menu bar: AppKit keeps a
+        # window inside the screen's visible frame, and a runner whose Dock stood 2 pt taller cut the
+        # design's 684 pt window to 682.
         run: |
           defaults write -g AppleAccentColor -int -1
+          defaults write com.apple.dock autohide -bool true
+          killall Dock
           ci/drive "$RUNNER_TEMP/drive/Sail.app" "$RUNNER_TEMP/drive-out"
 
       - name: Sign the shipped app with Developer ID

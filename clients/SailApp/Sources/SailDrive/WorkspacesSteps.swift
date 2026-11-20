@@ -448,14 +448,16 @@ extension Driver {
             let list = await waitUntil(step.seconds ?? 5) { (shell.window.firstResponder === pane.project.list) == held }
             return (list, "first responder \(String(describing: shell.window.firstResponder.map { type(of: $0) }))")
         }
-        if let size = step.window, size.count == 2 {
+        if let size = step.window ?? (step.leastWindow == true ? [Double(ShellApp.leastFrame.width), Double(ShellApp.leastFrame.height)] : nil), size.count == 2 {
             let frame = shell.window.frame
             shell.window.setFrame(NSRect(x: frame.minX, y: frame.maxY - size[1], width: size[0], height: size[1]), display: true)
             pane.layoutSubtreeIfNeeded()
             let now = shell.window.frame.size, reached = abs(Double(now.width) - size[0]) < 0.5 && abs(Double(now.height) - size[1]) < 0.5
             let sections: [(String, NSView)] = [("the rail", shell.rail as NSView), ("This Mac", shell.thisMac as NSView), ("Workspaces", pane as NSView), ("Account", shell.account as NSView)]
             let least = sections.map { "\($0.0) \($0.1.fittingSize.width) × \($0.1.fittingSize.height)" }.joined(separator: ", ")
-            return (reached, "the window is \(now.width) × \(now.height)" + (reached ? "" : "; the least each section asks: " + least))
+            let room = shell.window.screen?.visibleFrame.size ?? .zero
+            return (reached, "the window is \(now.width) × \(now.height)"
+                + (reached ? "" : "; the screen leaves windows \(room.width) × \(room.height); the least each section asks: " + least))
         }
         if let gone = step.notSaid {
             let went = await waitUntil(step.seconds ?? 10) { !pane.busy && !pane.text.contains(gone) }
