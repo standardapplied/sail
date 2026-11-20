@@ -105,7 +105,7 @@ extension Driver {
             return (pkill.terminationStatus <= 1, "pkill -f \(pattern) exited \(pkill.terminationStatus)" + (pkill.terminationStatus == 1 ? " (none was running)" : ""))
         }
         if step.panes4 == true {
-            return await fourPanes()
+            return await fourPanes(byMenu: step.switchBy == "menu")
         }
         if step.colourScript == true {
             return (FileManager.default.fileExists(atPath: Self.colourAsker), Self.colourAsker)
@@ -444,7 +444,7 @@ extension Driver {
     /// the measure's first second; each flood's frames and longest commit gap with what reached
     /// the screen and what was asked for in it; memory; and, after, the same three floods unlimited
     /// for 2.5 s, judged the same way and never gated.
-    private func fourPanes() async -> (Bool, String) {
+    private func fourPanes(byMenu: Bool) async -> (Bool, String) {
         let before = Self.footprint
         let tabsBefore = workbench.model.tabs.count
         _ = mainStacks
@@ -570,7 +570,7 @@ extension Driver {
         panes4["echo output to committed p95 ms"] = echoed.outputToCommitted.p95
         panes4["peak resident memory at one pane MB"] = before
         panes4["peak resident memory at four panes MB"] = four
-        for (bound, met) in await switchLooks(grid, times: 4) {
+        for (bound, met) in await switchLooks(grid, times: 4, byMenu: byMenu) {
             budgets["the look switched 4 times, four panes' scrollback full, \(bound)"] = met
         }
         await unlimitedFloods(floods, start: { generate(Self.paneLoad.lines * 151, every: 0, marker: 3) }, stop: stop)
@@ -783,7 +783,7 @@ extension Driver {
 
     /// Whether the shell took the app's look and every terminal shown drew a frame in its palette,
     /// within 5 s.
-    private func lookDrawn() async -> Bool {
+    func lookDrawn() async -> Bool {
         await waitUntil(5) {
             let look = ShellApp.look(of: NSApp.effectiveAppearance)
             return self.shell.look == look && self.shownTerminals.allSatisfy { pane in
@@ -820,8 +820,9 @@ extension Driver {
     /// change, net of the machine's share (``flood(_:)``). Reported and not judged: the first
     /// switch's hold, every switch's main-thread CPU time, and an empty window's own switches. Nothing of the drive's runs on the main
     /// thread inside a switch: the stacks are described, and every line printed, after the last.
-    private func switchLooks(_ grid: [TerminalPane], times: Int) async -> [(String, Bool)] {
+    private func switchLooks(_ grid: [TerminalPane], times: Int, byMenu: Bool) async -> [(String, Bool)] {
         let empty = await emptyWindowSwitches()
+        let opened = byMenu ? await openMenu("click") : (true, "")
         let quiet = await settled(grid)
         grid.forEach { $0.terminal.resetLatency() }
         mainThread.reset()
@@ -837,7 +838,11 @@ extension Driver {
             let resolved = SymbolInk.resolutions
             let began = ContinuousClock.now
             let at = CACurrentMediaTime()
-            NSApp.appearance = NSAppearance(named: other)
+            if byMenu {
+                _ = await clickAppearance(other == .darkAqua ? .dark : .light)
+            } else {
+                NSApp.appearance = NSAppearance(named: other)
+            }
             let setting = (CACurrentMediaTime() - at) * 1000
             if await lookDrawn() { drawn += 1 }
             await drawnAndCommitted()
@@ -861,7 +866,18 @@ extension Driver {
         let worst = judged.max { $0.ours < $1.ours }
         let changes = grid.map { $0.terminal.latency.changes }
         let draws = grid.map { $0.terminal.latency.refresh.max }.reduce(0, +)
-        _ = await setLook(nil)
+        var closed = (true, "")
+        if byMenu {
+            let auto = await clickAppearance(.auto)
+            let drawnAuto = await lookDrawn() && NSApp.appearance == nil
+            if let escape = Keys.named("escape", modifiers: []) { send(escape) }
+            let shut = await waitUntil(2) { !self.shell.userMenu.isOpen }
+            closed = (auto && drawnAuto && shut, "Auto \(drawnAuto ? "drawn" : "not drawn"); \(menuSaid)")
+        } else {
+            _ = await setLook(nil)
+        }
+        let way = byMenu ? "by clicks on the user menu's Appearance, the menu open over the panes (\(opened.1))" : "by the system's appearance"
+        print("look switch: the looks switched \(way)")
         let longest = holds.map(\.ours).max() ?? 0
         let later = holds.dropFirst().map(\.ours).max() ?? 0
         let beyond = holds.map { $0.ours - empty.second }
@@ -898,7 +914,7 @@ extension Driver {
              (holds.first?.ours ?? 0) <= Self.firstSwitchHold && resolvedFirst <= keptBefore),
             ("6: each switch after the first held the main thread at most \(Self.ms(Self.lookSwitchHold)) ms (\(laterSaid))", later <= Self.lookSwitchHold),
             ("7: no pane waited over 100 ms to show a change (\(waitSaid))", (worst?.ours ?? 0) <= 100),
-        ]
+        ] + (byMenu ? [("8: the user menu opened over the panes, switched each look, chose Auto and closed (\(closed.1))", opened.0 && closed.0)] : [])
     }
 
     /// The main thread's longest hold inside `span`, each of its stalls clipped to the span, so one

@@ -13,7 +13,7 @@ import Testing
 /// Workspaces page, 3 on a terminal page with a split, and 0 pt² of neutral fill on either.
 @MainActor @Suite struct CalmTests {
     struct Count: Equatable, CustomStringConvertible {
-        var fill = 0, line = 0, tint = 0, error = 0
+        var fill = 0, line = 0, tint = 0, error = 0, inverse = 0
         var neutral = 0.0
 
         init(_ marks: [Mark]) {
@@ -23,6 +23,7 @@ import Testing
                 case .accentLine: line += 1
                 case .accentTint: tint += 1
                 case .errorFill, .errorInk: error += 1
+                case .inverseFill: inverse += 1
                 case let .neutralFill(area): neutral += area
                 }
             }
@@ -33,7 +34,7 @@ import Testing
         }
 
         var description: String {
-            "\(fill) accent fills, \(line) accent lines, \(tint) accent tints, \(error) error marks, \(neutral) pt² of neutral fill"
+            "\(fill) accent fills, \(line) accent lines, \(tint) accent tints, \(error) error marks, \(inverse) turned over to ink, \(neutral) pt² of neutral fill"
         }
     }
 
@@ -158,7 +159,7 @@ import Testing
     @Test(arguments: [Look.light, .dark])
     func theCountReadsEveryTokenOfTheAccentAndNoneOfTheChromeAsGround(_ look: Look) {
         #expect(look.marks(fill: Tint(look.chrome), area: 100) == [.neutralFill(100)] && look.marks(fill: Tint(look.chromeWash), area: 100) == [.neutralFill(100)])
-        #expect(look.marks(fill: Tint(look.ink), area: 100) == [.neutralFill(100)] && look.marks(fill: Tint(look.ink, alpha: 0.05), area: 100) == [.neutralFill(100)])
+        #expect(look.marks(fill: Tint(look.ink), area: 100) == [.inverseFill] && look.marks(fill: Tint(look.ink, alpha: 0.05), area: 100) == [.neutralFill(100)])
         for accent in [look.accent, look.accentHover, look.accentPressed] {
             #expect(look.marks(line: Tint(accent)) == [.accentLine] && look.marks(fill: Tint(accent), area: 100) == [.accentFill])
         }
@@ -208,6 +209,7 @@ extension CalmTests.Count {
         sum.line += other.line
         sum.tint += other.tint
         sum.error += other.error
+        sum.inverse += other.inverse
         sum.neutral += other.neutral
         return sum
     }

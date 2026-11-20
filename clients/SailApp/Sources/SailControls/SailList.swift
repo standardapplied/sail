@@ -131,6 +131,13 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     /// The chosen row's first action shows ⏎ while the list holds the keys; off, it shows none,
     /// and Return still presses it (a narrow row's actions column has no room for the keycap).
     public var returnKeyShown = true
+
+    /// How far in from the list's leading edge the chosen row's bar starts: a hairline where the
+    /// card's own edge is drawn over that edge (the panel at the card's leading edge, in dark), so
+    /// the edge does not cover the bar's outer point.
+    public var barInset = 0.0 {
+        didSet { if barInset != oldValue { needsDisplay = true; enumerateAvailableRowViews { row, _ in row.needsDisplay = true } } }
+    }
     public var onChoose: @MainActor (String?) -> Void = { _ in }
     private let mono: LabelFont
 
@@ -407,7 +414,8 @@ final class SailRowView: NSTableRowView {
         guard paint.bar else { return }
         let ink = barInk, rightToLeft = userInterfaceLayoutDirection == .rightToLeft, half = RowStyle.barWidth / 2
         let top = Double(content.minY) + (min(Double(content.height), rowStyle.height) - rowStyle.bar) / 2
-        let bar = NSRect(x: rightToLeft ? Double(bounds.width) - RowStyle.barWidth : 0, y: top, width: RowStyle.barWidth, height: rowStyle.bar)
+        let inset = (superview as? SailList)?.barInset ?? 0
+        let bar = NSRect(x: rightToLeft ? Double(bounds.width) - RowStyle.barWidth - inset : inset, y: top, width: RowStyle.barWidth, height: rowStyle.bar)
         // The bar is a rounded rect and a square half at the edge, overlapping: drawn opaque in one
         // layer, then laid down once at the ink's strength, so a translucent ink is not doubled there.
         let context = NSGraphicsContext.current?.cgContext

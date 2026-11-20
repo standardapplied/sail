@@ -99,6 +99,16 @@ struct Step: Decodable {
     /// Signs in, or out, then waits until the pane is idle.
     var signIn: Bool?
     var signOut: Bool?
+    /// The user menu opened from the rail's user button: "click", a click on the button as a
+    /// person makes it (again, it closes the menu), or "keys", the button given the keys and Space
+    /// pressed (the kit runs, which turn Keyboard Navigation on).
+    var menu: String?
+    /// A click as a person makes it on the open user menu's item or Appearance segment of this
+    /// title, or "outside" (on the card's middle); the step waits for what it did: the look drawn
+    /// for an Appearance, the sign-out ended for Sign Out.
+    var menuClick: String?
+    /// The user menu says exactly this (``Driver/menuSaid``), within `seconds` (2 by default).
+    var menuSays: String?
     /// Waits until the account pane's text contains this, or, with `exactly`, equals these lines.
     var pane: String?
     var exactly: [String]?
@@ -307,6 +317,9 @@ struct Step: Decodable {
     /// Its own waits reach 180 + 60 s, so its script gives `seconds` (300) as the step's whole budget,
     /// which ci/drive's hang watcher reads.
     var panes4: Bool?
+    /// "menu": `panes4`'s looks switched by clicks on the user menu's Appearance, the menu open
+    /// over the panes, not by the system's appearance changing.
+    var switchBy: String?
     /// Makes the colour asker, once, at ``Driver/colourAsker``.
     var colourScript: Bool?
     /// The app's look set to "light", "dark" or "system" (the system's again), as the system's

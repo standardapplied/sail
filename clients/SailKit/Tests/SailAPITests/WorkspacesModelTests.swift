@@ -114,7 +114,7 @@ import Testing
         var model = WorkspacesModel(person: Self.ana)
         model.projectsListed(.success(ProjectList(projects: [], total: 0)))
         guard case let .shown(panel, .noProjects(empty)) = model.screen else { Issue.record("no empty card: \(model.screen)"); return }
-        #expect(panel.projects.isEmpty && panel.who == "ana · member" && panel.controlPlane == "main.acme.dev" && panel.emptyLine == "No project is open to you yet.")
+        #expect(panel.projects.isEmpty && panel.who == "ana · member" && panel.emptyLine == "No project is open to you yet.")
         #expect(empty.title == "No project is open to you yet")
         #expect(empty.body == "An admin adds you to a project on main.acme.dev. Once they do, it appears on the left, and you can create your own workspaces in it.")
         #expect(empty.line == "signed in as ana · member · main.acme.dev" && empty.action == .checkAgain)

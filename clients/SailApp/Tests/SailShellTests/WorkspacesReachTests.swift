@@ -243,7 +243,7 @@ import Testing
                 {
                     faults.append("\(named(label)) clipped: its words need more than its \(label.frame.height) pt")
                 }
-                let drawnThings: Set = ["Initial", "Spinner", "Tile", "ProgressLine"]
+                let drawnThings: Set = ["Initial", "Spinner", "Tile", "ProgressLine", "MenuRow", "MenuSegments"]
                 if !place.isEmpty, child is NSButton || child is Pill || drawnThings.contains(String(describing: type(of: child))) || (child is NSTextField && !words.isEmpty) {
                     leaves.append((child, place))
                 }

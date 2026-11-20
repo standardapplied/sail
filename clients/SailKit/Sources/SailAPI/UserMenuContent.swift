@@ -1,0 +1,84 @@
+import Foundation
+
+/// What the user menu says and offers, from what the account knows: who is signed in (the name
+/// the server gives, else the handle), `@handle · Role`, the control plane's address and whether it
+/// answers, and what can be done there. Nothing a person reads names a command or a route.
+public struct UserMenuContent: Equatable, Sendable {
+    /// Whether the control plane answers: as it last answered, reconnecting while it is asked
+    /// again after not answering.
+    public enum Plane: Equatable, Sendable {
+        case connected, reconnecting, unreachable
+
+        public var said: String {
+            switch self {
+            case .connected: "Connected"
+            case .reconnecting: "Reconnecting"
+            case .unreachable: "Can’t reach"
+            }
+        }
+    }
+
+    /// What the menu offers, in its order; Appearance is offered whoever is signed in.
+    public enum Item: String, Equatable, Sendable, CaseIterable {
+        case account = "Account", logins = "Logins", signOut = "Sign Out", signIn = "Sign In"
+
+        /// Logins waits for its own spec; the menu shows it, and says why it cannot be chosen.
+        public var enabled: Bool {
+            self != .logins
+        }
+
+        public var why: String? {
+            self == .logins ? "Logins come in a later version of Sail." : nil
+        }
+
+        /// The key that chooses it with ⌘ from anywhere.
+        public var key: String? {
+            self == .account ? "," : nil
+        }
+    }
+
+    public let name: String
+    public let initial: String?
+    public let detail: String?
+    public let address: String?
+    public let plane: Plane?
+    public let items: [Item]
+
+    public static let signedOut = Self(name: "Not signed in", initial: nil, detail: nil, address: nil, plane: nil, items: [.signIn])
+
+    /// Signed in as `handle` at `address`; `whoami` as it last answered, `unreachable` when the
+    /// control plane last did not answer, `refreshing` while it is asked again.
+    public static func signedIn(handle: String, address: String, whoami: Whoami?, unreachable: Bool, refreshing: Bool) -> Self {
+        let name = [whoami?.displayName, whoami?.name].compactMap { $0 }.first { !$0.isEmpty } ?? handle
+        let role = whoami.flatMap { whoami -> String? in
+            guard case let .known(role) = whoami.role else { return nil }
+            return role.rawValue.prefix(1).uppercased() + role.rawValue.dropFirst()
+        }
+        let plane: Plane = unreachable ? (refreshing ? .reconnecting : .unreachable) : .connected
+        return Self(
+            name: name, initial: name.first.map { String($0).uppercased() }, detail: "@\(handle)" + (role.map { " · \($0)" } ?? ""),
+            address: address, plane: plane, items: [.account, .logins, .signOut]
+        )
+    }
+}
+
+/// How the app looks on this Mac: light, dark, or the Mac's own (Auto), kept in this Mac's
+/// defaults and never sent anywhere.
+public enum Appearance: String, CaseIterable, Sendable {
+    case light, dark, auto
+
+    public static let key = "appearance"
+
+    public var said: String {
+        rawValue.prefix(1).uppercased() + rawValue.dropFirst()
+    }
+
+    /// The choice kept in `defaults`; Auto until one is made, or for a value it does not know.
+    public static func stored(in defaults: UserDefaults) -> Self {
+        defaults.string(forKey: key).flatMap(Self.init(rawValue:)) ?? .auto
+    }
+
+    public func store(in defaults: UserDefaults) {
+        defaults.set(rawValue, forKey: Self.key)
+    }
+}

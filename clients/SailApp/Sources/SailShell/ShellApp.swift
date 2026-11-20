@@ -31,6 +31,11 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public let account: AccountPane
     /// The card's outline on the chrome, over its edge, taking no clicks; none in light.
     let cardEdge: CardEdge
+    /// The menu behind the rail's user button: who is signed in and where, Account, Logins,
+    /// Appearance and Sign Out.
+    package let userMenu: UserMenu
+    /// Where the app keeps what a person chose: the Appearance among it.
+    package let defaults: UserDefaults
     public let workspaces: WorkspacesView
     public let thisMac: WorkbenchView
     public private(set) var look: Look
@@ -52,6 +57,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     ) throws(ShellError) {
         guard let resources = bundle.resourceURL else { throw .resources("the app's bundle has no resources folder") }
         let helper = bundle.bundleURL.appending(path: "Contents/Helpers/sail").path
+        Self.takeRememberedAppearance(from: .standard)
         try self.init(
             fonts: resources.appending(path: "Fonts"), helper: FileManager.default.isExecutableFile(atPath: helper) ? helper : nil,
             look: Self.look(of: NSApplication.shared.effectiveAppearance), passkeys: passkeys, connect: connect
@@ -93,6 +99,8 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         workspaces = WorkspacesView(look: look, title: title, mono: labels)
         rail = Rail(look: look)
         cardEdge = CardEdge(look: look)
+        userMenu = UserMenu(look: look, mono: labels)
+        self.defaults = defaults
         super.init()
         compose()
     }
@@ -178,6 +186,56 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    /// Opens the user menu over the rail's user button, or closes it when it is open. Opened by
+    /// anything but the pointer (the keys, VoiceOver), the keys go back to the button when it closes.
+    @objc public func toggleUserMenu(_: Any?) {
+        if userMenu.isOpen { return userMenu.close() }
+        guard let button = rail.button(.account) else { return }
+        rail.menuOpen = true
+        let pointer: Set<NSEvent.EventType> = [.leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp]
+        let byPointer = NSApp.currentEvent.map { pointer.contains($0.type) } ?? false
+        userMenu.open(from: button, saying: menuContent, appearance: Appearance.stored(in: defaults), withKeys: !byPointer)
+    }
+
+    /// Account (⌘,), from the app's menu or the user menu: the Account pane.
+    @objc public func showAccount(_: Any?) {
+        userMenu.close()
+        select(.account)
+    }
+
+    /// What the user menu says: who is signed in at which control plane, and whether it answers.
+    var menuContent: UserMenuContent {
+        guard let standing = account.standing else { return .signedOut }
+        let whoami = try? standing.whoami.get()
+        let unreachable: Bool = if case let .failure(refusal) = standing.whoami { refusal.reason == .unreachable } else { false }
+        let url = standing.controlPlane.url
+        let address = url.host().map { host in url.port.map { "\(host):\($0)" } ?? host } ?? url.absoluteString
+        return .signedIn(
+            handle: whoami?.fde ?? standing.fde, address: address, whoami: whoami,
+            unreachable: unreachable, refreshing: account.busy
+        )
+    }
+
+    /// The Appearance chosen last, taken before the window shows, so it opens in that look.
+    static func takeRememberedAppearance(from defaults: UserDefaults) {
+        NSApplication.shared.appearance = Appearance.stored(in: defaults).appearance
+    }
+
+    /// Appearance chosen: kept for the next launch, and the app's from now (Auto, the Mac's, which
+    /// the app follows as it changes).
+    func choose(_ appearance: Appearance) {
+        appearance.store(in: defaults)
+        NSApp.appearance = appearance.appearance
+    }
+
+    private func chose(_ item: UserMenuContent.Item) {
+        switch item {
+        case .account, .signIn: select(.account)
+        case .signOut: account.signOutHere(nil)
+        case .logins: break
+        }
+    }
+
     /// Who is signed in, as the account learnt it: the Workspaces item and the runner's tickets
     /// are theirs, and go with them.
     private func standing(_ signedIn: SignedIn?) {
@@ -207,6 +265,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         self.look = look
         window.backgroundColor = NSColor(look.canvas)
         cardEdge.look = look
+        userMenu.look = look
         rail.look = look
         account.look = look
         workspaces.look = look
@@ -365,8 +424,18 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         ])
         cardEdge.place(around: content, in: root)
         placeTheStrip()
-        rail.onSelect = { [weak self] item in self?.select(item) }
-        account.onStanding = { [weak self] signedIn in self?.standing(signedIn) }
+        rail.onSelect = { [weak self] item in
+            guard let self else { return }
+            if item == .account { toggleUserMenu(nil) } else { select(item) }
+        }
+        userMenu.onChoose = { [weak self] item in self?.chose(item) }
+        userMenu.onAppearance = { [weak self] appearance in self?.choose(appearance) }
+        userMenu.onClose = { [weak self] in self?.rail.menuOpen = false }
+        account.onStanding = { [weak self] signedIn in
+            self?.standing(signedIn)
+            guard let self else { return }
+            userMenu.update(menuContent, appearance: Appearance.stored(in: defaults))
+        }
         thisMac.signedIn = { [weak self] in self?.signedIn() }
         thisMac.onSignIn = { [weak self] in self?.select(.account) }
         workspaces.onSignIn = { [weak self] in self?.select(.account) }
@@ -418,6 +487,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let last = hidden(item("Select Last Tab", #selector(WorkbenchView.selectTab(_:)), "9", target: terminals))
         last.tag = 9
         let app: [NSMenuItem] = [
+            item("Account", #selector(ShellApp.showAccount(_:)), ",", target: self),
             item("Sign Out", #selector(AccountPane.signOutHere(_:)), "", target: account), .separator(),
             item("Quit \(Self.title)", #selector(NSApplication.terminate(_:)), "q"),
         ]

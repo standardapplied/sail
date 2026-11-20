@@ -1,0 +1,694 @@
+import AppKit
+import SailAPI
+import SailControls
+import SailLook
+
+/// The menu behind the rail's user button (`calm-accent-mockup.html`, in Paper and ink): who is
+/// signed in and the control plane with its state; Account (⌘,), Logins (not yet usable, saying
+/// why), Appearance Light / Dark / Auto, and Sign Out apart; signed out, Not signed in, Sign In and
+/// Appearance. It is drawn by us, not an `NSMenu`, whose highlight is the system's accent: 260 pt,
+/// its leading edge on the button's, its foot 8 pt above it, on the popover's surface and shadow.
+/// It opens with its first item highlighted. The item under the keys or the pointer, the avatar and
+/// the chosen Appearance are turned over to ink. The window keeps the keys: while it is open a key
+/// catcher there takes ↑ ↓ ← → Return and Escape, and the keys go back where they were when it
+/// closes (to the button, when it was opened by anything but the pointer).
+/// It closes on Escape, a click outside it, the button again, a choice (but Appearance), or the
+/// window resigning key.
+@MainActor
+package final class UserMenu: NSObject {
+    static let width = 260.0, gap = 8.0, room = 24.0
+
+    var look: Look {
+        didSet {
+            view.look = look
+            shadow.look = look
+        }
+    }
+
+    var onChoose: @MainActor (UserMenuContent.Item) -> Void = { _ in }
+    var onAppearance: @MainActor (Appearance) -> Void = { _ in }
+    /// Told when it closes, so the button stops being drawn open.
+    var onClose: @MainActor () -> Void = {}
+
+    package let view: UserMenuView
+    let panel: NSPanel
+    private let shadow: PopShadowView
+    private let keys = MenuKeys()
+    private weak var anchor: NSView?
+    private var restore: NSResponder?
+    private var withKeys = false
+    private var mouseWatch: Any?
+    private var resignWatch: (any NSObjectProtocol)?
+
+    init(look: Look, mono: LabelFont) {
+        self.look = look
+        view = UserMenuView(look: look, mono: mono)
+        shadow = PopShadowView(look: look)
+        panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        super.init()
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.becomesKeyOnlyIfNeeded = true
+        let host = NSView()
+        host.addSubview(shadow)
+        host.addSubview(view)
+        panel.contentView = host
+        keys.owner = self
+        view.onChoose = { [weak self] item in self?.choose(item) }
+        view.onAppearance = { [weak self] appearance in self?.onAppearance(appearance) }
+    }
+
+    package var isOpen: Bool {
+        panel.isVisible
+    }
+
+    /// Opens from `button` saying `content`, `appearance` chosen; `withKeys` when the keys opened it.
+    func open(from button: NSView, saying content: UserMenuContent, appearance: Appearance, withKeys: Bool) {
+        guard let window = button.window, !isOpen else { return }
+        anchor = button
+        self.withKeys = withKeys
+        view.direction = button.userInterfaceLayoutDirection
+        view.show(content, appearance: appearance, fresh: true)
+        place(over: button, in: window)
+        window.addChildWindow(panel, ordered: .above)
+        panel.orderFront(nil)
+        if keys.superview !== window.contentView { window.contentView?.addSubview(keys) }
+        restore = window.firstResponder
+        window.makeFirstResponder(keys)
+        mouseWatch = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            MainActor.assumeIsolated { self?.clickedAnywhere(event) }
+            return event
+        }
+        resignWatch = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated { self?.close() }
+        }
+    }
+
+    /// Says `content` while open: who is signed in, or the control plane's state, changed.
+    func update(_ content: UserMenuContent, appearance: Appearance) {
+        guard isOpen else { return }
+        view.show(content, appearance: appearance, fresh: false)
+        if let anchor, let window = anchor.window { place(over: anchor, in: window) }
+    }
+
+    package func close() {
+        guard isOpen else { return }
+        if let mouseWatch { NSEvent.removeMonitor(mouseWatch) }
+        if let resignWatch { NotificationCenter.default.removeObserver(resignWatch) }
+        mouseWatch = nil
+        resignWatch = nil
+        view.tip.hide()
+        panel.parent?.removeChildWindow(panel)
+        panel.orderOut(nil)
+        if let window = anchor?.window, window.firstResponder === keys, !(withKeys && window.makeFirstResponder(anchor)) {
+            window.makeFirstResponder(restore)
+        }
+        onClose()
+    }
+
+    /// The box over `button`: its leading edge on the button's, its foot `gap` above it; the panel
+    /// around it holds the shadow's room.
+    private func place(over button: NSView, in window: NSWindow) {
+        let size = view.fittingSize
+        let square = window.convertToScreen(button.convert(button.alignmentRect(forFrame: button.bounds), to: nil))
+        let rightToLeft = button.userInterfaceLayoutDirection == .rightToLeft
+        let box = NSRect(x: rightToLeft ? square.maxX - Self.width : square.minX, y: square.maxY + Self.gap, width: Self.width, height: Double(size.height))
+        panel.setFrame(box.insetBy(dx: -Self.room, dy: -Self.room), display: false)
+        let inside = NSRect(x: Self.room, y: Self.room, width: Self.width, height: Double(size.height))
+        view.frame = inside
+        shadow.frame = inside
+        view.needsLayout = true
+    }
+
+    /// The box on screen, for the tests and the drive.
+    var box: NSRect {
+        panel.frame.insetBy(dx: Self.room, dy: Self.room)
+    }
+
+    private func choose(_ item: UserMenuContent.Item) {
+        guard item.enabled else { return }
+        close()
+        onChoose(item)
+    }
+
+    /// A click outside the box closes the menu; one on the button is the button's own (it toggles).
+    private func clickedAnywhere(_ event: NSEvent) {
+        if event.window === panel { return }
+        if let anchor, event.window === anchor.window {
+            let at = anchor.convert(event.locationInWindow, from: nil)
+            if anchor.bounds.contains(at) { return }
+        }
+        close()
+    }
+
+    /// A key while open: ↑ ↓ move, ← → choose the Appearance, Return or Space chooses, Escape closes.
+    fileprivate func key(_ event: NSEvent) -> Bool {
+        switch event.keyCode {
+        case 125: view.move(1)
+        case 126: view.move(-1)
+        case 123: view.stepAppearance(view.userInterfaceLayoutDirection == .rightToLeft ? 1 : -1)
+        case 124: view.stepAppearance(view.userInterfaceLayoutDirection == .rightToLeft ? -1 : 1)
+        case 36, 76, 49: view.chooseHighlighted()
+        case 53: close()
+        default: return false
+        }
+        return true
+    }
+
+    fileprivate func cancel() {
+        close()
+    }
+}
+
+/// Takes the window's keys while the menu is open.
+@MainActor
+private final class MenuKeys: NSView {
+    weak var owner: UserMenu?
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if owner?.key(event) != true { super.keyDown(with: event) }
+    }
+
+    override func cancelOperation(_: Any?) {
+        owner?.cancel()
+    }
+}
+
+/// The menu's box: identity, the control plane, the items, Appearance; drawn on `surfacePop` with a
+/// `separatorStrong` edge and 6 pt corners, a hairline between its sections.
+@MainActor
+package final class UserMenuView: NSView {
+    static let row = 28.0, appearanceRow = 36.0, padding = 16.0, sectionPad = 4.0, avatar = 32.0
+
+    var look: Look {
+        didSet { repaint() }
+    }
+
+    var onChoose: @MainActor (UserMenuContent.Item) -> Void = { _ in }
+    var onAppearance: @MainActor (Appearance) -> Void = { _ in }
+
+    private let mono: LabelFont
+    package private(set) var content = UserMenuContent.signedOut
+    package private(set) var chosenLook = Appearance.auto
+    package private(set) var items: [MenuRow] = []
+    package private(set) var segments: MenuSegments
+    private let name = NSTextField(labelWithString: "")
+    private let detail = NSTextField(labelWithString: "")
+    private let address = NSTextField(labelWithString: "")
+    private let state = NSTextField(labelWithString: "")
+    private let appearanceLabel = NSTextField(labelWithString: "Appearance")
+    package let tip: Tooltip
+    /// What the keys move through: the enabled items, then Appearance.
+    package private(set) var highlighted: Int?
+
+    init(look: Look, mono: LabelFont) {
+        self.look = look
+        self.mono = mono
+        segments = MenuSegments(look: look)
+        tip = Tooltip(UserMenuContent.Item.logins.why ?? "", look: look, mono: nil)
+        super.init(frame: .zero)
+        for label in [name, detail, address, state, appearanceLabel] {
+            label.lineBreakMode = .byTruncatingTail
+            label.maximumNumberOfLines = 1
+            addSubview(label)
+        }
+        addSubview(segments)
+        segments.onChoose = { [weak self] appearance in
+            self?.chosenLook = appearance
+            self?.onAppearance(appearance)
+        }
+        setAccessibilityElement(true)
+        setAccessibilityRole(.menu)
+        setAccessibilityLabel("Account")
+    }
+
+    @available(*, unavailable)
+    package required init?(coder: NSCoder) {
+        nil
+    }
+
+    package override var isFlipped: Bool {
+        true
+    }
+
+    /// The direction it is laid out in, its button's: its rows and segments with it.
+    var direction: NSUserInterfaceLayoutDirection {
+        get { userInterfaceLayoutDirection }
+        set {
+            userInterfaceLayoutDirection = newValue
+            segments.userInterfaceLayoutDirection = newValue
+            items.forEach { $0.userInterfaceLayoutDirection = newValue }
+            needsLayout = true
+        }
+    }
+
+    /// The selectable rows in order: the enabled items, then Appearance (index `items.count`).
+    private var stops: [Int] {
+        items.indices.filter { items[$0].item.enabled } + [items.count]
+    }
+
+    /// Says `content` with `appearance` chosen: `fresh`, just opened, with its first item highlighted
+    /// (the spec's M1, however it was opened); else with what was highlighted when it is still there.
+    func show(_ content: UserMenuContent, appearance: Appearance, fresh: Bool) {
+        let before = highlighted.flatMap { items.indices.contains($0) ? items[$0].item : nil }, onAppearance = highlighted == items.count
+        self.content = content
+        self.chosenLook = appearance
+        items.forEach { $0.removeFromSuperview() }
+        items = content.items.map { item in
+            let row = MenuRow(item, look: look, mono: mono)
+            row.userInterfaceLayoutDirection = userInterfaceLayoutDirection
+            row.onChoose = { [weak self] in self?.onChoose(item) }
+            row.onHover = { [weak self, weak row] in
+                guard let self, let row, let index = items.firstIndex(where: { $0 === row }) else { return }
+                highlight(index)
+            }
+            row.onLeave = { [weak self, weak row] in
+                guard let self, let row, items.firstIndex(where: { $0 === row }) == highlighted else { return }
+                highlight(nil)
+            }
+            addSubview(row)
+            return row
+        }
+        if let logins = items.first(where: { $0.item == .logins }) { tip.attach(to: logins, saying: logins.item.why ?? "") }
+        segments.chosen = appearance
+        if fresh {
+            highlight(stops.first)
+        } else {
+            highlight(onAppearance ? items.count : before.flatMap { item in items.firstIndex { $0.item == item } })
+        }
+        repaint()
+        needsLayout = true
+    }
+
+    private func highlight(_ index: Int?) {
+        highlighted = index
+        for (at, row) in items.enumerated() {
+            row.highlighted = at == index
+        }
+        segments.highlighted = index == items.count
+        if let index, items.indices.contains(index), items[index].item == .logins { tip.show() } else { tip.hide() }
+    }
+
+    func move(_ by: Int) {
+        let stops = stops
+        guard !stops.isEmpty else { return }
+        let at = highlighted.flatMap { stops.firstIndex(of: $0) } ?? (by > 0 ? -1 : stops.count)
+        highlight(stops[(at + by + stops.count) % stops.count])
+    }
+
+    func stepAppearance(_ by: Int) {
+        guard highlighted == items.count else { return }
+        let all = Appearance.allCases, at = all.firstIndex(of: chosenLook) ?? 0
+        let next = all[min(max(at + by, 0), all.count - 1)]
+        guard next != chosenLook else { return }
+        segments.chosen = next
+        chosenLook = next
+        onAppearance(next)
+    }
+
+    func chooseHighlighted() {
+        guard let highlighted, items.indices.contains(highlighted) else { return }
+        onChoose(items[highlighted].item)
+    }
+
+    // MARK: Drawing and layout
+
+    /// Section tops, measured as the mockup does (`.um-id`, `.um-cp`, `.um-sec`).
+    private var sections: (identity: Double, plane: Double?, items: Double, appearance: Double, signOut: Double?, end: Double) {
+        let identity = content.initial == nil ? 14 + 18 + 12 : 14 + Self.avatar + 12
+        let plane: Double? = content.address == nil ? nil : identity
+        let itemsTop = (plane.map { $0 + 33 } ?? identity)
+        let main = content.items.filter { $0 != .signOut }
+        let appearanceTop = itemsTop + Self.sectionPad * 2 + Double(main.count) * Self.row
+        let signOut: Double? = content.items.contains(.signOut) ? appearanceTop + Self.sectionPad * 2 + Self.appearanceRow : nil
+        let end = (signOut.map { $0 + Self.sectionPad * 2 + Self.row } ?? appearanceTop + Self.sectionPad * 2 + Self.appearanceRow)
+        return (0, plane, itemsTop, appearanceTop, signOut, end)
+    }
+
+    package override var fittingSize: NSSize {
+        NSSize(width: UserMenu.width, height: sections.end)
+    }
+
+    /// `rect` laid out left to right, turned about the middle in a right-to-left layout.
+    private func mirrored(_ rect: NSRect) -> NSRect {
+        guard userInterfaceLayoutDirection == .rightToLeft else { return rect }
+        return NSRect(x: Double(bounds.width) - rect.maxX, y: rect.minY, width: rect.width, height: rect.height)
+    }
+
+    /// Where the avatar's disc is drawn.
+    var avatarDisc: NSRect {
+        mirrored(NSRect(x: Self.padding, y: 14, width: Self.avatar, height: Self.avatar))
+    }
+
+    /// Where the control plane's state square is drawn.
+    var planeSquare: NSRect? {
+        sections.plane.map { mirrored(NSRect(x: Self.padding, y: $0 + 14, width: 6, height: 6)) }
+    }
+
+    package override func layout() {
+        super.layout()
+        let width = Double(bounds.width), at = sections, text = Self.padding + (content.initial == nil ? 0 : Self.avatar + 10)
+        name.frame = mirrored(NSRect(x: text, y: 14, width: width - text - Self.padding, height: 17))
+        detail.frame = mirrored(NSRect(x: text, y: 31, width: width - text - Self.padding, height: 15))
+        if let plane = at.plane {
+            let stateWidth = ceil(Double(state.intrinsicContentSize.width))
+            state.frame = mirrored(NSRect(x: width - Self.padding - stateWidth, y: plane + 9, width: stateWidth, height: 16))
+            address.frame = mirrored(NSRect(x: Self.padding + 14, y: plane + 9, width: max(width - Self.padding * 2 - 14 - stateWidth - 8, 0), height: 16))
+        }
+        var y = at.items + Self.sectionPad
+        for row in items where row.item != .signOut {
+            row.frame = NSRect(x: 6, y: y, width: width - 12, height: Self.row)
+            y += Self.row
+        }
+        let seg = segments.fittingSize
+        let segTop = at.appearance + Self.sectionPad + (Self.appearanceRow - Double(seg.height)) / 2
+        segments.frame = mirrored(NSRect(x: width - 16 - Double(seg.width), y: segTop, width: Double(seg.width), height: Double(seg.height)))
+        appearanceLabel.frame = mirrored(NSRect(x: 16, y: at.appearance + Self.sectionPad + 10, width: width - 32 - Double(seg.width) - 8, height: 16))
+        if let signOut = at.signOut, let row = items.first(where: { $0.item == .signOut }) {
+            row.frame = NSRect(x: 6, y: signOut + Self.sectionPad, width: width - 12, height: Self.row)
+        }
+        address.isHidden = at.plane == nil
+        state.isHidden = at.plane == nil
+        detail.isHidden = content.detail == nil
+    }
+
+    /// `words` on one line in `font` and `ink`, cut at `cut` with an ellipsis, set to the layout's
+    /// leading edge (or its trailing one).
+    private func line(_ words: String, _ font: NSFont, _ ink: Tint, cut: NSLineBreakMode = .byTruncatingTail, trailing: Bool = false) -> NSAttributedString {
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = cut
+        let rightToLeft = userInterfaceLayoutDirection == .rightToLeft
+        style.alignment = rightToLeft != trailing ? .right : .left
+        return NSAttributedString(string: words, attributes: [.font: font, .foregroundColor: NSColor(ink), .paragraphStyle: style])
+    }
+
+    private func repaint() {
+        let micro = mono.font(Look.Step.micro.points, .regular) as NSFont
+        name.attributedStringValue = line(content.name, .systemFont(ofSize: Look.Step.body.points, weight: .semibold), look.text)
+        detail.attributedStringValue = line(content.detail ?? "", micro, look.textTertiary)
+        address.attributedStringValue = line(content.address ?? "", micro, look.textSecondary, cut: .byTruncatingMiddle)
+        let ink = content.plane == .unreachable ? Tint(look.error) : look.textTertiary
+        state.attributedStringValue = line(content.plane?.said ?? "", .systemFont(ofSize: Look.Step.micro.points), ink, trailing: true)
+        appearanceLabel.attributedStringValue = line("Appearance", .systemFont(ofSize: Look.Step.body.points), look.text)
+        items.forEach { $0.look = look }
+        segments.look = look
+        tip.look = look
+        needsLayout = true
+        needsDisplay = true
+    }
+
+    package override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        repaint()
+    }
+
+    /// The control plane's square: green connected, teal reconnecting, crimson out of reach.
+    var planeInk: Tint? {
+        switch content.plane {
+        case .connected?: Tint(look.success)
+        case .reconnecting?: Tint(look.info)
+        case .unreachable?: Tint(look.error)
+        case nil: nil
+        }
+    }
+
+    package override func draw(_: NSRect) {
+        let box = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let shape = NSBezierPath(roundedRect: box, xRadius: Look.contentRadius - 0.5, yRadius: Look.contentRadius - 0.5)
+        NSColor(look.surfacePop).setFill()
+        shape.fill()
+        let at = sections, width = Double(bounds.width)
+        NSColor(look.separator).setFill()
+        for line in [at.plane, at.items, at.appearance, at.signOut].compactMap({ $0 }) where line > 0 {
+            NSRect(x: 0, y: line, width: width, height: Look.hairline).fill()
+        }
+        if content.initial != nil {
+            let mark = look.menuAvatar, disc = avatarDisc
+            if let fill = mark.fill {
+                NSColor(fill).setFill()
+                NSBezierPath(ovalIn: disc).fill()
+            }
+            let letter = NSAttributedString(string: content.initial ?? "", attributes: [
+                .font: NSFont.systemFont(ofSize: Look.Step.body.points, weight: .semibold), .foregroundColor: NSColor(mark.ink),
+            ])
+            let size = letter.size()
+            letter.draw(at: NSPoint(x: disc.midX - size.width / 2, y: disc.midY - size.height / 2))
+        }
+        if let square = planeSquare, let ink = planeInk {
+            NSColor(ink).setFill()
+            square.fill()
+        }
+        NSColor(look.separatorStrong).setStroke()
+        shape.lineWidth = 1
+        shape.stroke()
+    }
+}
+
+extension UserMenuView: Marked {
+    package var drawnMarks: [Mark] {
+        let avatar = content.initial == nil ? [] : look.marks(fill: look.menuAvatar.fill, area: .pi * Self.avatar * Self.avatar / 4)
+        let plane = planeSquare.map { look.marks(fill: planeInk, area: Double($0.width * $0.height)) } ?? []
+        return avatar + plane
+    }
+}
+
+/// One item of the menu: its title, ⌘ and its key at its end when it has one; turned over to ink
+/// under the keys or the pointer; dimmed and said why when it cannot be chosen.
+@MainActor
+package final class MenuRow: NSView {
+    package let item: UserMenuContent.Item
+    var look: Look {
+        didSet { needsDisplay = true }
+    }
+
+    var highlighted = false {
+        didSet { if highlighted != oldValue { needsDisplay = true } }
+    }
+
+    var onChoose: @MainActor () -> Void = {}
+    var onHover: @MainActor () -> Void = {}
+    var onLeave: @MainActor () -> Void = {}
+    private let mono: LabelFont
+
+    init(_ item: UserMenuContent.Item, look: Look, mono: LabelFont) {
+        self.item = item
+        self.look = look
+        self.mono = mono
+        super.init(frame: .zero)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+        setAccessibilityElement(true)
+        setAccessibilityRole(.menuItem)
+        setAccessibilityLabel(item.rawValue)
+        setAccessibilityEnabled(item.enabled)
+        if let why = item.why { setAccessibilityHelp(why) }
+    }
+
+    @available(*, unavailable)
+    package required init?(coder: NSCoder) {
+        nil
+    }
+
+    package override var isFlipped: Bool {
+        true
+    }
+
+    /// The highlight's fill and the words' ink: turned over while highlighted and enabled.
+    var drawn: (fill: Tint?, ink: Tint) {
+        guard item.enabled else { return (nil, look.textTertiary) }
+        return highlighted ? (look.menuHighlight.fill, look.menuHighlight.ink) : (nil, look.text)
+    }
+
+    package override func draw(_: NSRect) {
+        let ink = drawn
+        if let fill = ink.fill {
+            NSColor(fill).setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: Look.innerRadius, yRadius: Look.innerRadius).fill()
+        }
+        let title = NSAttributedString(string: item.rawValue, attributes: [.font: NSFont.systemFont(ofSize: Look.Step.body.points), .foregroundColor: NSColor(ink.ink)])
+        let size = title.size()
+        let leading = 10.0
+        let rightToLeft = userInterfaceLayoutDirection == .rightToLeft
+        title.draw(at: NSPoint(x: rightToLeft ? Double(bounds.width) - leading - Double(size.width) : leading, y: (Double(bounds.height) - Double(size.height)) / 2))
+        guard let key = item.key else { return }
+        let onInk = look.menuHighlight.ink.rgb
+        let cap = NSAttributedString(string: "⌘" + key, attributes: [
+            .font: mono.font(10, .regular) as NSFont, .foregroundColor: NSColor(highlighted ? Tint(onInk, alpha: 0.78) : look.textSecondary),
+        ])
+        let capSize = cap.size()
+        let box = NSRect(x: rightToLeft ? leading : Double(bounds.width) - leading - Double(capSize.width) - 8, y: (Double(bounds.height) - 16) / 2, width: Double(capSize.width) + 8, height: 16)
+        NSColor(highlighted ? Tint(onInk, alpha: 0.3) : look.separatorStrong).setStroke()
+        let edge = NSBezierPath(roundedRect: box.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3)
+        edge.lineWidth = 1
+        edge.stroke()
+        cap.draw(at: NSPoint(x: box.minX + 4, y: box.midY - capSize.height / 2))
+    }
+
+    package override func mouseEntered(with _: NSEvent) {
+        onHover()
+    }
+
+    package override func mouseExited(with _: NSEvent) {
+        onLeave()
+    }
+
+    /// A click chooses it; on one that cannot be chosen it says why, as pointing at it does.
+    package override func mouseUp(with event: NSEvent) {
+        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+        if item.enabled { onChoose() } else { onHover() }
+    }
+
+    package override func mouseDown(with _: NSEvent) {}
+
+    package override func acceptsFirstMouse(for _: NSEvent?) -> Bool {
+        true
+    }
+
+    package override func accessibilityPerformPress() -> Bool {
+        guard item.enabled else { return false }
+        onChoose()
+        return true
+    }
+}
+
+extension MenuRow: Marked {
+    package var drawnMarks: [Mark] {
+        look.marks(fill: drawn.fill, area: Double(bounds.width * bounds.height))
+    }
+}
+
+/// Appearance's three segments, Light, Dark and Auto, in a 1 pt outline; the chosen one turned over.
+@MainActor
+package final class MenuSegments: NSView {
+    static let height = 26.0, pad = 2.0
+
+    var look: Look {
+        didSet { needsDisplay = true }
+    }
+
+    var chosen = Appearance.auto {
+        didSet {
+            needsDisplay = true
+            for (segment, appearance) in zip(buttons, Appearance.allCases) {
+                segment.setAccessibilityValue(appearance == chosen ? 1 : 0)
+            }
+        }
+    }
+
+    var highlighted = false {
+        didSet { needsDisplay = true }
+    }
+
+    var onChoose: @MainActor (Appearance) -> Void = { _ in }
+    private(set) var buttons: [NSView] = []
+
+    init(look: Look) {
+        self.look = look
+        super.init(frame: .zero)
+        buttons = Appearance.allCases.map { appearance in
+            let segment = NSView()
+            segment.setAccessibilityElement(true)
+            segment.setAccessibilityRole(.radioButton)
+            segment.setAccessibilityLabel(appearance.said)
+            addSubview(segment)
+            return segment
+        }
+        setAccessibilityElement(true)
+        setAccessibilityRole(.radioGroup)
+        setAccessibilityLabel("Appearance")
+    }
+
+    @available(*, unavailable)
+    package required init?(coder: NSCoder) {
+        nil
+    }
+
+    package override var isFlipped: Bool {
+        true
+    }
+
+    private var words: [NSAttributedString] {
+        Appearance.allCases.map { appearance in
+            let ink = appearance == chosen ? look.menuHighlight.ink : look.textTertiary
+            return NSAttributedString(string: appearance.said, attributes: [.font: NSFont.systemFont(ofSize: Look.Step.micro.points, weight: .medium), .foregroundColor: NSColor(ink)])
+        }
+    }
+
+    /// Each segment's rect, padded 9 pt about its word, Light at the leading end.
+    package var rects: [NSRect] {
+        var x = Self.pad
+        let laid = words.map { word in
+            let width = ceil(Double(word.size().width)) + 18
+            defer { x += width }
+            return NSRect(x: x, y: Self.pad, width: width, height: Self.height - 2 * Self.pad)
+        }
+        guard userInterfaceLayoutDirection == .rightToLeft else { return laid }
+        let whole = x + Self.pad
+        return laid.map { NSRect(x: whole - $0.maxX, y: $0.minY, width: $0.width, height: $0.height) }
+    }
+
+    package override var fittingSize: NSSize {
+        NSSize(width: (rects.map(\.maxX).max() ?? 0) + Self.pad, height: Self.height)
+    }
+
+    package override func layout() {
+        super.layout()
+        for (segment, rect) in zip(buttons, rects) {
+            segment.frame = rect
+        }
+    }
+
+    package override func draw(_: NSRect) {
+        let edge = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: Look.contentRadius - 0.5, yRadius: Look.contentRadius - 0.5)
+        NSColor(Tint(look.canvas)).setFill()
+        edge.fill()
+        NSColor(highlighted ? look.textSecondary : look.separatorStrong).setStroke()
+        edge.lineWidth = 1
+        edge.stroke()
+        for (appearance, (rect, word)) in zip(Appearance.allCases, zip(rects, words)) {
+            if appearance == chosen, let fill = look.menuHighlight.fill {
+                NSColor(fill).setFill()
+                NSBezierPath(roundedRect: rect, xRadius: Look.innerRadius, yRadius: Look.innerRadius).fill()
+            }
+            let size = word.size()
+            word.draw(at: NSPoint(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2))
+        }
+    }
+
+    package override func mouseDown(with _: NSEvent) {}
+
+    package override func acceptsFirstMouse(for _: NSEvent?) -> Bool {
+        true
+    }
+
+    package override func mouseUp(with event: NSEvent) {
+        let at = convert(event.locationInWindow, from: nil)
+        guard let index = rects.firstIndex(where: { $0.contains(at) }) else { return }
+        let appearance = Appearance.allCases[index]
+        guard appearance != chosen else { return }
+        chosen = appearance
+        onChoose(appearance)
+    }
+}
+
+extension Appearance {
+    /// The app's appearance for this choice: Auto is none of its own, the Mac's.
+    package var appearance: NSAppearance? {
+        switch self {
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        case .auto: nil
+        }
+    }
+}
+
+extension MenuSegments: Marked {
+    package var drawnMarks: [Mark] {
+        guard let index = Appearance.allCases.firstIndex(of: chosen), rects.indices.contains(index) else { return [] }
+        return look.marks(fill: look.menuHighlight.fill, area: Double(rects[index].width * rects[index].height))
+    }
+}

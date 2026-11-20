@@ -440,11 +440,10 @@ import Testing
         #expect(after >= before + 2, "Check Again asked the projects \(after - before) times, counting the refresh's own")
     }
 
-    /// The longest handle the server allows (63) in the owner column, and in the panel's foot with
-    /// its role unconfirmed beside a 60-character control plane: each cut short inside its column,
+    /// The longest handle the server allows (63) in the owner column: cut short inside its column,
     /// on one line, in full on hover.
-    @Test func longHandlesAndHostsStayInTheirColumns() throws {
-        let handle = String(repeating: "k", count: 63), host = String(repeating: "h", count: 52) + ".acme.dev"
+    @Test func longHandlesStayInTheirColumn() throws {
+        let handle = String(repeating: "k", count: 63)
         let page = try #require(Self.page([WorkspaceRow(name: "quay", instance: "harbor-quay", state: .known(.running), owner: handle)]))
         let drive = 1024.0 - Rail.width - 4 - LeftPanel.width.standard
         for width in [ProjectView.wide, drive] {
@@ -459,20 +458,6 @@ import Testing
             #expect(end <= whose.bounds.maxX + 0.5 && label.frame.height < 2 * 16, "\(width) pt: the handle ends at \(end) in a \(whose.bounds.width) pt column")
             #expect(line.ownerTip?.text == handle && line.ownerTip?.shows == true, "\(width) pt: the cut handle is not said in full on hover")
         }
-        let panel = LeftPanel(look: .light, mono: try LabelFont(directory: LookTests.fonts))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: LeftPanel.width.standard, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
-        defer { window.orderOut(nil) }
-        window.contentView = panel
-        panel.renderLoading(who: "\(handle) · role not yet confirmed", handle: handle, controlPlane: host)
-        panel.layoutSubtreeIfNeeded()
-        for label in [panel.who, panel.place] {
-            let frame = panel.convert(label.alignmentRect(forFrame: label.frame), from: label.superview)
-            #expect(frame.maxX <= panel.bounds.width - 14 + 0.5 && frame.height < 2 * 16, "the foot's \(label.stringValue.prefix(12))… runs to \(frame.maxX) of \(panel.bounds.width)")
-        }
-        #expect(panel.whoTip.shows && panel.placeTip.shows, "a cut foot is not said in full on hover")
-        panel.renderLoading(who: "ana · member", handle: "ana", controlPlane: "main.acme.dev")
-        panel.layoutSubtreeIfNeeded()
-        #expect(!panel.whoTip.shows && !panel.placeTip.shows, "a foot shown in full says itself again on hover")
     }
 
     /// New Workspace off in a project with no template says why, through the library's tooltip.

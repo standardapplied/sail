@@ -101,6 +101,16 @@ public final class Rail: NSView {
         nil
     }
 
+    /// The user button while its menu is open: outlined in the look's `railOpen`, its icon in ink.
+    package var menuOpen = false {
+        didSet { if menuOpen != oldValue { show(selected) } }
+    }
+
+    /// The square under `item`'s button: its wash when chosen, its outline while its menu is open.
+    func wash(_ item: Item) -> NSView? {
+        washes[item]
+    }
+
     /// The bar beside `item`'s button, which marks it chosen.
     func bar(_ item: Item) -> NSView? {
         bars[item]
@@ -113,7 +123,10 @@ public final class Rail: NSView {
             bars[each]?.layer?.backgroundColor = NSColor(chosenInk.bar).cgColor
             let chosen = each == item
             washes[each]?.layer?.backgroundColor = chosen ? chosenInk.fill.map { NSColor($0).cgColor } ?? NSColor.clear.cgColor : NSColor.clear.cgColor
-            button.image = Self.image(each, colour: chosen ? chosenInk.icon : look.textSecondary)
+            let open = menuOpen && each == .account
+            washes[each]?.layer?.borderWidth = open ? 1 : 0
+            washes[each]?.layer?.borderColor = look.railOpen.edge.map { NSColor($0).cgColor }
+            button.image = Self.image(each, colour: chosen ? chosenInk.icon : open ? look.railOpen.ink : look.textSecondary)
             bars[each]?.isHidden = !chosen
         }
     }

@@ -510,7 +510,7 @@ import Testing
             ("Equalize Splits", "=", [.command, .control]), ("Move Divider Up", arrow(NSUpArrowFunctionKey), [.command, .control]),
             ("Move Divider Down", arrow(NSDownArrowFunctionKey), [.command, .control]), ("Move Divider Left", arrow(NSLeftArrowFunctionKey), [.command, .control]),
             ("Move Divider Right", arrow(NSRightArrowFunctionKey), [.command, .control]), ("Show Previous Tab", "{", [.command, .shift]),
-            ("Show Next Tab", "}", [.command, .shift]), ("Select Last Tab", "9", command),
+            ("Show Next Tab", "}", [.command, .shift]), ("Select Last Tab", "9", command), ("Account", ",", command),
         ]
         for number in 1 ... 8 {
             table.append(("Select Tab \(number)", "\(number)", command))
