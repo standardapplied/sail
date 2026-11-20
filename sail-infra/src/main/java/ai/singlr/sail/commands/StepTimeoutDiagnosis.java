@@ -6,20 +6,26 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.PrivateDirectory;
 import ai.singlr.sail.engine.CommandTimedOut;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
@@ -107,7 +113,7 @@ final class StepTimeoutDiagnosis {
     var sentence =
         "At the timeout "
             + stepState(timedOut.processes())
-            + "; "
+            + "; just after it, "
             + String.join(" ", LOOKUP.command())
             + " "
             + lookup(answers.get(LOOKUP))
@@ -117,8 +123,13 @@ final class StepTimeoutDiagnosis {
       record(timedOut, answers);
       return sentence + "; the step's processes and this box's file locks are in " + log + ".";
     } catch (IOException e) {
-      return sentence + "; this diagnosis could not be written to " + log + " (" + e + ").";
+      return sentence + "; this diagnosis could not be written to " + log + " (" + reason(e) + ").";
     }
+  }
+
+  /** What went wrong: the message sail wrote, or the exception itself when it names only a path. */
+  private static String reason(IOException e) {
+    return e.getClass() == IOException.class ? e.getMessage() : e.toString();
   }
 
   private Answer ask(Probe probe) {
@@ -135,9 +146,15 @@ final class StepTimeoutDiagnosis {
   }
 
   /**
-   * The deepest of the step's processes, what it was doing and the kernel function it waited in.
+   * The deepest of the step's processes, what it was doing and the kernel function it waited in; or
+   * that {@code ps} listed none of them (its header alone), or why there is no listing.
    */
   private static String stepState(String processes) {
+    var header = processes.lines().findFirst().orElse("");
+    if (!header.contains("PID")) {
+      return "the step's processes could not be listed"
+          + (header.isBlank() ? "" : " (" + header.strip() + ")");
+    }
     var rows =
         processes
             .lines()
@@ -159,7 +176,7 @@ final class StepTimeoutDiagnosis {
                     + STATES.getOrDefault(leaf[2].charAt(0), "in state " + leaf[2])
                     + ("-".equals(leaf[3]) ? "" : " in " + leaf[3])
                     + ")")
-        .orElse("the step's processes could not be listed");
+        .orElse("the step's processes had all ended before ps could list them");
   }
 
   private static String lookup(Answer answer) {
@@ -197,11 +214,44 @@ final class StepTimeoutDiagnosis {
                 .append(String.join(" ", probe.command()))
                 .append('\n')
                 .append(answer.text()));
-    Files.createDirectories(log.getParent());
-    if (!Files.exists(log)) {
-      Files.createFile(
-          log, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+    requireOwnDirectory(log.getParent());
+    try (var out =
+        Files.newByteChannel(
+            log,
+            Set.of(
+                StandardOpenOption.CREATE,
+                StandardOpenOption.APPEND,
+                StandardOpenOption.WRITE,
+                LinkOption.NOFOLLOW_LINKS),
+            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))) {
+      out.write(ByteBuffer.wrap(entry.toString().getBytes(StandardCharsets.UTF_8)));
     }
-    Files.writeString(log, entry, StandardOpenOption.APPEND);
+  }
+
+  /**
+   * The log's directory, made owner-only when it is not there, and refused unless it is a
+   * directory, not a link, owned by the account writing it (root, for init; on a system without
+   * {@code /proc} its owner is not checked): {@code /var/log} is writable by the {@code syslog}
+   * group, which could otherwise plant a link that root writes through.
+   */
+  private static void requireOwnDirectory(Path dir) throws IOException {
+    if (Files.notExists(dir, LinkOption.NOFOLLOW_LINKS)) {
+      Files.createDirectory(
+          dir, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+    }
+    var attributes =
+        Files.readAttributes(dir, PosixFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+    if (attributes.isSymbolicLink()) {
+      throw new IOException(dir + " is a symbolic link, not a directory");
+    }
+    if (!attributes.isDirectory()) {
+      throw new IOException(dir + " is not a directory");
+    }
+    var self = PrivateDirectory.ProcessOwner.current();
+    var owner = (int) Files.getAttribute(dir, "unix:uid", LinkOption.NOFOLLOW_LINKS);
+    if (self.isPresent() && owner != self.get().uid()) {
+      throw new IOException(
+          dir + " is owned by " + attributes.owner().getName() + ", not by this account");
+    }
   }
 }

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SpecCliHelper;
+import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.store.FeedFloors;
 import ai.singlr.sail.sync.SyncedEntities;
 import java.io.BufferedReader;
@@ -49,12 +50,9 @@ public final class NativeFleet implements AutoCloseable {
 
   private static final String IMAGE = "sail-native-fleet";
   private static final String PROVISION_MAIN =
-      """
-      set -e
-      useradd --system --create-home --home-dir /home/sail --shell /bin/bash sail
-      chmod 700 /home/sail
-      install -d -m 700 -o sail -g sail /home/sail/.ssh
-      install -m 600 -o sail -g sail /dev/null /home/sail/.ssh/authorized_keys
+      "set -e\n"
+          + accountSteps()
+          + """
       install -d -m 2770 -o root -g sail /var/lib/sail
       echo 'storage_backend: dir' > /var/lib/sail/host.yaml
       chgrp sail /var/lib/sail/host.yaml
@@ -97,6 +95,23 @@ public final class NativeFleet implements AutoCloseable {
   private final List<Box> boxes = new ArrayList<>();
   private Box main;
   private Daemon sshd;
+
+  /**
+   * The {@code sail} account's steps as {@code sail host ssh-identity} runs them on every box, one
+   * shell line each, so the account the fleet logs in to is the one the product makes.
+   */
+  private static String accountSteps() {
+    return SshIdentityProvisioner.account().stream()
+        .map(step -> ((SshIdentityProvisioner.Run) step).command())
+        .map(command -> command.stream().map(NativeFleet::quoted).collect(Collectors.joining(" ")))
+        .collect(Collectors.joining("\n", "", "\n"));
+  }
+
+  private static String quoted(String argument) {
+    return argument.matches("[A-Za-z0-9_./=:-]+")
+        ? argument
+        : "'" + argument.replace("'", "'\\''") + "'";
+  }
 
   private NativeFleet(String pod, Path candidate, Path released) {
     this.pod = pod;

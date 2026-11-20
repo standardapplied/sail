@@ -689,8 +689,8 @@ class InitCommandTest {
         lines
             .get(1)
             .endsWith(
-                "; getent passwd sail answered and systemd-userdbd was inactive; the step's"
-                    + " processes and this box's file locks are in "
+                "; just after it, getent passwd sail answered and systemd-userdbd was inactive;"
+                    + " the step's processes and this box's file locks are in "
                     + log
                     + "."),
         lines.get(1));

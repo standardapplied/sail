@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import ai.singlr.sail.engine.CommandTimedOut;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
@@ -16,12 +17,17 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 class StepTimeoutDiagnosisTest {
@@ -58,7 +64,7 @@ class StepTimeoutDiagnosisTest {
 
   @Test
   void aStepsTimeoutIsSummedUpInOneSentenceAndRecordedWholeInTheInitLog() throws Exception {
-    var log = tempDir.resolve("log/sail/init.log");
+    var log = tempDir.resolve("sail/init.log");
 
     var sentence =
         new StepTimeoutDiagnosis(box, log, BOUND)
@@ -67,11 +73,14 @@ class StepTimeoutDiagnosisTest {
     assertEquals(
         Optional.of(
             "At the timeout the step was still running useradd (pid 4201, blocked uninterruptibly"
-                + " in folio_wait_bit_common); getent passwd sail answered and systemd-userdbd was"
-                + " inactive; the step's processes and this box's file locks are in "
+                + " in folio_wait_bit_common); just after it, getent passwd sail answered and"
+                + " systemd-userdbd was inactive; the step's processes and this box's file locks"
+                + " are in "
                 + log
                 + "."),
         sentence);
+    assertEquals("rwx------", modeOf(log.getParent()));
+    assertEquals("rw-------", modeOf(log));
     var written = Files.readString(log);
     assertTrue(written.contains("Command timed out after 120s: " + USERADD), written);
     assertTrue(written.contains(PROCESSES), written);
@@ -135,9 +144,82 @@ class StepTimeoutDiagnosisTest {
 
     assertTrue(
         sentence.startsWith(
-            "At the timeout the step's processes could not be listed; getent passwd sail"),
+            "At the timeout the step's processes could not be listed (ps: not found); just after"
+                + " it, getent passwd sail"),
         sentence);
     assertTrue(sentence.contains("; this diagnosis could not be written to " + log), sentence);
+  }
+
+  @Test
+  void aStepWhoseProcessesHadAllEndedIsNotSaidToBeUnlisted() {
+    var sentence =
+        new StepTimeoutDiagnosis(box, tempDir.resolve("sail/init.log"), BOUND)
+            .of(
+                new CommandTimedOut(
+                    "Command timed out after 120s: x",
+                    "    PID    PPID STAT WCHAN    ELAPSED COMMAND\n"))
+            .orElseThrow();
+
+    assertTrue(
+        sentence.startsWith(
+            "At the timeout the step's processes had all ended before ps could list them; just"
+                + " after it,"),
+        sentence);
+  }
+
+  @Test
+  void aLogDirectoryPlantedAsASymlinkIsRefusedAndItsTargetGetsNothing() throws Exception {
+    var target = Files.createDirectory(tempDir.resolve("target"));
+    var planted = Files.createSymbolicLink(tempDir.resolve("sail"), target);
+
+    var sentence = diagnosedInto(planted.resolve("init.log"));
+
+    assertTrue(
+        sentence.endsWith(
+            "; this diagnosis could not be written to "
+                + planted.resolve("init.log")
+                + " ("
+                + planted
+                + " is a symbolic link, not a directory)."),
+        sentence);
+    try (var left = Files.list(target)) {
+      assertEquals(List.of(), left.toList());
+    }
+  }
+
+  @Test
+  void aLogPlantedAsASymlinkIsNotFollowedAndItsTargetIsUnchanged() throws Exception {
+    var dir = Files.createDirectory(tempDir.resolve("sail"));
+    var target = Files.writeString(tempDir.resolve("passwd"), "root:x:0:0::/root:/bin/bash\n");
+    var log = Files.createSymbolicLink(dir.resolve("init.log"), target);
+
+    var sentence = diagnosedInto(log);
+
+    assertTrue(sentence.contains("; this diagnosis could not be written to " + log), sentence);
+    assertEquals("root:x:0:0::/root:/bin/bash\n", Files.readString(target));
+  }
+
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aLogDirectoryThisAccountDoesNotOwnIsRefused() {
+    assumeFalse(
+        "root".equals(System.getProperty("user.name")), "root owns the directory used here");
+    var log = Path.of("/").resolve("sail-init-" + UUID.randomUUID() + ".log");
+
+    var sentence = diagnosedInto(log);
+
+    assertTrue(
+        sentence.contains("; this diagnosis could not be written to " + log + " (/ is "), sentence);
+    assertFalse(Files.exists(log, LinkOption.NOFOLLOW_LINKS));
+  }
+
+  private String diagnosedInto(Path log) {
+    return new StepTimeoutDiagnosis(box, log, BOUND).of(timedOut()).orElseThrow();
+  }
+
+  private static String modeOf(Path path) throws IOException {
+    return PosixFilePermissions.toString(
+        Files.getPosixFilePermissions(path, LinkOption.NOFOLLOW_LINKS));
   }
 
   private static String readString(Path file) {

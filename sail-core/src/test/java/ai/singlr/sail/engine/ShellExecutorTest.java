@@ -166,11 +166,15 @@ class ShellExecutorTest {
   void aCommandThatTimesOutListsWhatItsProcessesWereDoingBeforeTheyWereKilled() {
     var executor = new ShellExecutor(false);
 
-    var timedOut =
-        assertThrows(
-            CommandTimedOut.class,
-            () ->
-                executor.exec(List.of("sh", "-c", "sleep 30; true"), null, Duration.ofSeconds(1)));
+    CommandTimedOut timedOut;
+    try (var listing = ShellExecutor.listingTimedOutProcesses()) {
+      timedOut =
+          assertThrows(
+              CommandTimedOut.class,
+              () ->
+                  executor.exec(
+                      List.of("sh", "-c", "sleep 30; true"), null, Duration.ofSeconds(1)));
+    }
 
     assertTrue(
         timedOut.getMessage().startsWith("Command timed out after 1s: sh -c sleep 30; true"),
@@ -180,6 +184,19 @@ class ShellExecutorTest {
     assertTrue(
         processes.lines().anyMatch(line -> line.matches("\\s*\\d+\\s+\\d+\\s+S\\S*\\s.*sleep 30")),
         processes);
+  }
+
+  @Test
+  void aCommandThatTimesOutUnaskedListsNothingSoNoOtherCallerPaysForTheListing() {
+    var executor = new ShellExecutor(false);
+
+    var timedOut =
+        assertThrows(
+            CommandTimedOut.class,
+            () ->
+                executor.exec(List.of("sh", "-c", "sleep 30; true"), null, Duration.ofMillis(300)));
+
+    assertEquals("", timedOut.processes());
   }
 
   @Test

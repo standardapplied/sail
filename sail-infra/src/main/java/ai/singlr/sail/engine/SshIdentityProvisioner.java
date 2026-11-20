@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -57,11 +58,11 @@ public final class SshIdentityProvisioner {
   }
 
   /**
-   * @param sourceDataDir where the database currently lives (the operator's {@code ~/.sail})
-   * @param dataDir the shared system data directory to move it into
+   * The {@code sail} account's own steps, the plan's first: the user, its home, {@code .ssh} and
+   * {@code authorized_keys}. A test harness that makes the account runs these, so it makes the
+   * account every box gets.
    */
-  public static List<Step> plan(Path sourceDataDir, String dataDir) {
-    var source = sourceDataDir.toString();
+  public static List<Step> account() {
     return List.of(
         new Run(
             "Create the locked-down '" + SAIL_USER + "' system user",
@@ -74,9 +75,7 @@ public final class SshIdentityProvisioner {
                     + SAIL_HOME
                     + " --shell /bin/bash "
                     + SAIL_USER)),
-        new Run(
-            "Create the sail home directory, owner-only (sshd StrictModes)",
-            List.of("install", "-d", "-m", "700", "-o", SAIL_USER, "-g", SAIL_USER, SAIL_HOME)),
+        homeStep(SAIL_HOME),
         new Run(
             "Create the sail user's .ssh directory",
             List.of(
@@ -102,81 +101,117 @@ public final class SshIdentityProvisioner {
                     + SAIL_USER
                     + " /dev/null "
                     + SAIL_HOME
-                    + "/.ssh/authorized_keys")),
-        new Run(
-            "Create the shared control-plane data directory (setgid, group " + SAIL_USER + ")",
-            List.of("install", "-d", "-m", "2770", "-o", "root", "-g", SAIL_USER, dataDir)),
-        new Run(
-            "Stop sail-api before moving the database",
-            List.of(
-                "sh",
-                "-c",
-                "systemctl is-active --quiet sail-api && systemctl stop sail-api || true")),
-        new Run(
-            "Move the control-plane database into " + dataDir,
-            List.of(
-                "sh",
-                "-c",
-                "for f in "
-                    + String.join(" ", DB_FILES)
-                    + "; do [ -e \""
-                    + source
-                    + "/$f\" ] && [ ! -e \""
-                    + dataDir
-                    + "/$f\" ] && mv \""
-                    + source
-                    + "/$f\" \""
-                    + dataDir
-                    + "/$f\"; done; true")),
-        new Run(
-            "Set database ownership and permissions for group access",
-            List.of(
-                "sh",
-                "-c",
-                "cd "
-                    + dataDir
-                    + " && for f in "
-                    + String.join(" ", DB_FILES)
-                    + "; do [ -e \"$f\" ] && chgrp "
-                    + SAIL_USER
-                    + " \"$f\" && chmod 660 \"$f\"; done; true")),
-        new Run(
-            "Move host.yaml into " + dataDir + " (readable by gateway commands)",
-            List.of(
-                "sh",
-                "-c",
-                "[ -e \""
-                    + source
-                    + "/host.yaml\" ] && [ ! -e \""
-                    + dataDir
-                    + "/host.yaml\" ] && mv \""
-                    + source
-                    + "/host.yaml\" \""
-                    + dataDir
-                    + "/host.yaml\"; true")),
-        new Run(
-            "Set host.yaml group access",
-            List.of(
-                "sh",
-                "-c",
-                "[ -e \""
-                    + dataDir
-                    + "/host.yaml\" ] && chgrp "
-                    + SAIL_USER
-                    + " \""
-                    + dataDir
-                    + "/host.yaml\" && chmod 640 \""
-                    + dataDir
-                    + "/host.yaml\"; true")),
-        pointAt("sail-api", DROP_IN, dataDir),
-        pointAt("the pty session host", PTY_HOST_DROP_IN, dataDir),
-        new Run("Reload systemd units", List.of("systemctl", "daemon-reload")),
-        new Run(
-            "Start sail-api on the shared data directory",
-            List.of("systemctl", "start", "sail-api")),
-        new Run(
-            "Restart the pty session host on the shared data directory",
-            List.of("systemctl", "restart", PtyHostUnit.UNIT_NAME)));
+                    + "/.ssh/authorized_keys")));
+  }
+
+  /**
+   * Makes {@code home} the account's empty, owner-only home, refusing first, with what is there,
+   * anything at {@code home} that is not a directory: {@code install -d} follows a symbolic link
+   * and would give its target to {@code sail}.
+   */
+  static Run homeStep(String home) {
+    return new Run(
+        "Create the sail home directory, owner-only (sshd StrictModes)",
+        List.of(
+            "sh",
+            "-c",
+            "if [ -L \"$1\" ]; then what=\"a symbolic link to $(readlink \"$1\")\"; elif [ -e"
+                + " \"$1\" ] && [ ! -d \"$1\" ]; then what=\"a $(stat -c %F \"$1\")\"; fi; if [ -n"
+                + " \"${what:-}\" ]; then echo \"$1 is not a directory but $what, so it cannot be the"
+                + " sail account's home: move it aside and re-run.\" >&2; exit 1; fi; install -d -m"
+                + " 700 -o "
+                + SAIL_USER
+                + " -g "
+                + SAIL_USER
+                + " \"$1\"",
+            "sh",
+            home));
+  }
+
+  /**
+   * @param sourceDataDir where the database currently lives (the operator's {@code ~/.sail})
+   * @param dataDir the shared system data directory to move it into
+   */
+  public static List<Step> plan(Path sourceDataDir, String dataDir) {
+    var source = sourceDataDir.toString();
+    var steps = new ArrayList<Step>(account());
+    steps.addAll(
+        List.of(
+            new Run(
+                "Create the shared control-plane data directory (setgid, group " + SAIL_USER + ")",
+                List.of("install", "-d", "-m", "2770", "-o", "root", "-g", SAIL_USER, dataDir)),
+            new Run(
+                "Stop sail-api before moving the database",
+                List.of(
+                    "sh",
+                    "-c",
+                    "systemctl is-active --quiet sail-api && systemctl stop sail-api || true")),
+            new Run(
+                "Move the control-plane database into " + dataDir,
+                List.of(
+                    "sh",
+                    "-c",
+                    "for f in "
+                        + String.join(" ", DB_FILES)
+                        + "; do [ -e \""
+                        + source
+                        + "/$f\" ] && [ ! -e \""
+                        + dataDir
+                        + "/$f\" ] && mv \""
+                        + source
+                        + "/$f\" \""
+                        + dataDir
+                        + "/$f\"; done; true")),
+            new Run(
+                "Set database ownership and permissions for group access",
+                List.of(
+                    "sh",
+                    "-c",
+                    "cd "
+                        + dataDir
+                        + " && for f in "
+                        + String.join(" ", DB_FILES)
+                        + "; do [ -e \"$f\" ] && chgrp "
+                        + SAIL_USER
+                        + " \"$f\" && chmod 660 \"$f\"; done; true")),
+            new Run(
+                "Move host.yaml into " + dataDir + " (readable by gateway commands)",
+                List.of(
+                    "sh",
+                    "-c",
+                    "[ -e \""
+                        + source
+                        + "/host.yaml\" ] && [ ! -e \""
+                        + dataDir
+                        + "/host.yaml\" ] && mv \""
+                        + source
+                        + "/host.yaml\" \""
+                        + dataDir
+                        + "/host.yaml\"; true")),
+            new Run(
+                "Set host.yaml group access",
+                List.of(
+                    "sh",
+                    "-c",
+                    "[ -e \""
+                        + dataDir
+                        + "/host.yaml\" ] && chgrp "
+                        + SAIL_USER
+                        + " \""
+                        + dataDir
+                        + "/host.yaml\" && chmod 640 \""
+                        + dataDir
+                        + "/host.yaml\"; true")),
+            pointAt("sail-api", DROP_IN, dataDir),
+            pointAt("the pty session host", PTY_HOST_DROP_IN, dataDir),
+            new Run("Reload systemd units", List.of("systemctl", "daemon-reload")),
+            new Run(
+                "Start sail-api on the shared data directory",
+                List.of("systemctl", "start", "sail-api")),
+            new Run(
+                "Restart the pty session host on the shared data directory",
+                List.of("systemctl", "restart", PtyHostUnit.UNIT_NAME))));
+    return List.copyOf(steps);
   }
 
   /**
