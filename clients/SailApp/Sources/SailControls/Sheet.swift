@@ -82,6 +82,7 @@ public final class Sheet: NSObject {
         self.answer = answer
         (window.contentView as? SheetContent)?.fit()
         parent.beginSheet(window)
+        window.contentView?.layoutSubtreeIfNeeded()
     }
 
     /// Ends the sheet unanswered, as Cancel does, when what it asks has gone; nothing once it ended.
