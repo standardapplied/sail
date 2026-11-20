@@ -338,6 +338,10 @@ jobs:
           SAIL_E2E_TOKEN=$token "$PROBE" --api "$SAIL_API" --token-env SAIL_E2E_TOKEN --project term \
             --script Tests/Probe/measure.json --report "$RUNNER_TEMP/reports/runner-measure.json"
 
+      - name: What init recorded of a host step that timed out
+        if: failure()
+        run: sudo cat /var/log/sail/init.log 2> /dev/null || echo "init recorded no host step that timed out."
+
       - name: Leave the probe's reports
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
