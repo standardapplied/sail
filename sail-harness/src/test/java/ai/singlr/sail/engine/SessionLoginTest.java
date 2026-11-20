@@ -159,19 +159,22 @@ class SessionLoginTest {
     assertEquals(0, hand(file, LaunchEnv.loginLines(stored)).status());
     var command =
         new ArrayList<>(
-            SessionLogin.command(Harnesses.of("claude-code"), "full", Optional.of(stored), file));
+            SessionLogin.command(
+                Harnesses.of("claude-code"), "bypassPermissions", Optional.of(stored), file));
 
     assertFalse(String.join(" ", command).contains(TOKEN), "the login is on no command line");
     var ran = run(command, "");
 
     assertEquals(0, ran.status(), ran.output());
     assertEquals(
-        "args: --dangerously-skip-permissions\ntoken: " + fingerprint(TOKEN) + "\napi key: []\n",
+        "args: --permission-mode bypassPermissions\ntoken: "
+            + fingerprint(TOKEN)
+            + "\napi key: []\n",
         ran.output());
     assertFalse(Files.exists(Path.of(file).getParent(), LinkOption.NOFOLLOW_LINKS));
     assertEquals(
-        List.of("claude", "--dangerously-skip-permissions"),
-        SessionLogin.shown(Harnesses.of("claude-code"), "full"));
+        List.of("claude", "--permission-mode", "bypassPermissions"),
+        SessionLogin.shown(Harnesses.of("claude-code"), "bypassPermissions"));
   }
 
   /**
@@ -197,7 +200,8 @@ class SessionLoginTest {
     assertEquals(0, hand(file, LaunchEnv.loginLines(stored)).status());
     var ran =
         run(
-            SessionLogin.command(Harnesses.of("claude-code"), "full", Optional.of(stored), file),
+            SessionLogin.command(
+                Harnesses.of("claude-code"), "bypassPermissions", Optional.of(stored), file),
             "");
     assertEquals(0, ran.status(), ran.output());
     return Files.readAllLines(dir.resolve("home").resolve("claude.env")).stream()
@@ -224,7 +228,9 @@ class SessionLoginTest {
     assertEquals(0, hand(file, LaunchEnv.loginLines(stored)).status());
 
     var ran =
-        run(SessionLogin.command(Harnesses.of("codex"), "full", Optional.of(stored), file), "");
+        run(
+            SessionLogin.command(Harnesses.of("codex"), "full-access", Optional.of(stored), file),
+            "");
 
     assertEquals(0, ran.status(), ran.output());
     assertEquals(
@@ -248,8 +254,8 @@ class SessionLoginTest {
     stub(
         "claude",
         FINGERPRINT
-            + "helper=$(printf %s \"$3\" | sed -n 's/.*\"apiKeyHelper\": \"\\(.*\\)\"}/\\1/p')\n"
-            + "echo \"args: $1 $2\"\n"
+            + "helper=$(printf %s \"$4\" | sed -n 's/.*\"apiKeyHelper\": \"\\(.*\\)\"}/\\1/p')\n"
+            + "echo \"args: $1 $2 $3\"\n"
             + "echo \"helper prints: $(fp \"$(sh -c \"$helper\")\")\"\n"
             + "echo \"api key: [${ANTHROPIC_API_KEY-unset}]\"\n");
     var file = file("i-k");
@@ -258,13 +264,14 @@ class SessionLoginTest {
 
     var ran =
         run(
-            SessionLogin.command(Harnesses.of("claude-code"), "full", Optional.of(stored), file),
+            SessionLogin.command(
+                Harnesses.of("claude-code"), "bypassPermissions", Optional.of(stored), file),
             "");
 
     assertEquals(
         new Ran(
             0,
-            "args: --dangerously-skip-permissions --settings\nhelper prints: "
+            "args: --permission-mode bypassPermissions --settings\nhelper prints: "
                 + fingerprint(KEY)
                 + "\napi key: [unset]\n"),
         ran);

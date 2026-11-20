@@ -224,8 +224,8 @@ class AccessDoorsBaselineTest {
   }
 
   /**
-   * The four workspace doors on acme's: make one's own, and start, stop and delete each of the
-   * owner's, the other member's and no one's, and one that is not there.
+   * The workspace doors on acme's: make one's own, and start, stop and delete each of the owner's,
+   * the other member's and no one's, and one that is not there, and ask what can start in each.
    */
   private static void workspaceDoors(List<Door> doors) {
     doors.add(new Door("make a workspace of acme", ops -> ops.createWorkspace("acme", "new")));
@@ -234,6 +234,8 @@ class AccessDoorsBaselineTest {
       doors.add(new Door("start " + which, ops -> ops.startWorkspace("acme", name)));
       doors.add(new Door("stop " + which, ops -> ops.stopWorkspace("acme", name)));
       doors.add(new Door("delete " + which, ops -> ops.deleteWorkspace("acme", name, false)));
+      doors.add(
+          new Door("ask what can start in " + which, ops -> ops.workspaceAgents("acme", name)));
     }
   }
 
@@ -456,7 +458,7 @@ class AccessDoorsBaselineTest {
         for (var workspace : List.of("try", "spare", "loose")) {
           for (var agent :
               List.of(
-                  new PtyMessage.Agent("claude-code", "full", false),
+                  new PtyMessage.Agent("claude-code", "bypassPermissions", false),
                   new PtyMessage.Agent("claude-code", "default", true))) {
             var label =
                 asker.getKey()

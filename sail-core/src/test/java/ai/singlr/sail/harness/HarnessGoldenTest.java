@@ -7,11 +7,13 @@ package ai.singlr.sail.harness;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.harness.Harness.Launch;
 import ai.singlr.sail.harness.Harness.LiveLaunch;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -304,21 +306,52 @@ class HarnessGoldenTest {
     assertEquals(Optional.empty(), CODEX.liveSettings());
   }
 
+  /**
+   * Claude Code's modes are its own permission modes, each once and passed as it names them, after
+   * its own start with no flag; Codex has the one it runs in inside a container, and says why.
+   */
   @Test
   void anInteractiveSessionStartsOnlyInAModeItsHarnessTakesInAWorkspace() {
-    assertEquals(List.of("default", "full"), CLAUDE_CODE.modes());
-    assertEquals("claude", CLAUDE_CODE.interactive("default"));
-    assertEquals("claude --dangerously-skip-permissions", CLAUDE_CODE.interactive("full"));
-    assertEquals(List.of("full"), CODEX.modes());
-    assertEquals("codex --dangerously-bypass-approvals-and-sandbox", CODEX.interactive("full"));
     assertEquals(
-        "Codex CLI takes no mode 'default' in a workspace; it takes full.",
+        List.of(
+            "default=Claude Code's own: claude",
+            "manual=Manual: claude --permission-mode manual",
+            "acceptEdits=Accept edits: claude --permission-mode acceptEdits",
+            "plan=Plan: claude --permission-mode plan",
+            "auto=Auto: claude --permission-mode auto",
+            "dontAsk=Don't ask: claude --permission-mode dontAsk",
+            "bypassPermissions=Bypass permissions: claude --permission-mode bypassPermissions"),
+        shown(CLAUDE_CODE));
+    assertEquals(
+        List.of("full-access=Full access: codex --dangerously-bypass-approvals-and-sandbox"),
+        shown(CODEX));
+    assertEquals(Optional.empty(), CLAUDE_CODE.modesNote());
+    assertEquals(
+        Optional.of(
+            "Codex CLI runs in a workspace only with full access: its sandbox needs user"
+                + " namespaces, which a workspace's container does not allow. For a session that"
+                + " asks before it acts, start Claude Code."),
+        CODEX.modesNote());
+    assertTrue(
+        Stream.of(CLAUDE_CODE, CODEX)
+            .flatMap(harness -> harness.modes().stream())
+            .noneMatch(mode -> mode.about().isBlank()),
+        "every mode says what it does");
+    assertEquals(
+        "Codex CLI takes no mode 'default' in a workspace; it takes full-access.",
         assertThrows(IllegalArgumentException.class, () -> CODEX.interactive("default"))
             .getMessage());
     assertEquals(
-        "Claude Code takes no mode 'plan' in a workspace; it takes default, full.",
-        assertThrows(IllegalArgumentException.class, () -> CLAUDE_CODE.interactive("plan"))
+        "Claude Code takes no mode 'full' in a workspace; it takes default, manual, acceptEdits,"
+            + " plan, auto, dontAsk, bypassPermissions.",
+        assertThrows(IllegalArgumentException.class, () -> CLAUDE_CODE.interactive("full"))
             .getMessage());
+  }
+
+  private static List<String> shown(Harness harness) {
+    return harness.modes().stream()
+        .map(mode -> mode.name() + "=" + mode.label() + ": " + harness.interactive(mode.name()))
+        .toList();
   }
 
   /**

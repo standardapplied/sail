@@ -19,7 +19,7 @@ import Testing
         #expect(frames["Create"] == .create(SessionCreate(
             session: "lounge", command: [], workingDirectory: "/home/dev", project: "harbor",
             room: "harbor-design", size: TerminalSize(columns: 132, rows: 43), workspace: "dock",
-            agent: SessionAgent(harness: "codex", mode: "full", inside: true)
+            agent: SessionAgent(harness: "codex", mode: "full-access", inside: true)
         )))
         #expect(frames["Attach"] == .attach(session: "lounge", write: true, client: "pane-7f", takes: false))
         #expect(frames["WriterChanged"] == .writerChanged(fde: "uday", yours: true))
@@ -114,7 +114,7 @@ import Testing
     @Test func aPagePlacingOtherThanItsSessionsIsMalformed() throws {
         var page = Array(try golden("Sessions").dropFirst(4))
         let loungePlace = field("harbor") + field("dock") + field("uday") + 8 + field("")
-            + field("claude-code") + field("full") + 1
+            + field("claude-code") + field("bypassPermissions") + 1
         let shellPlace = 3 * field("") + 8 + field("") + 2 * field("") + 1
         let places = page.count - 4 - loungePlace - shellPlace
         page.replaceSubrange(places ..< places + 4, with: [0, 0, 0, 3])
@@ -189,9 +189,9 @@ import Testing
 
 let lounge = SessionInfo(
     name: "lounge", instanceID: "inst-1", live: true, attached: 2, writerFDE: "uday",
-    room: "harbor-design", command: ["claude", "--dangerously-skip-permissions"], project: "harbor",
+    room: "harbor-design", command: ["claude", "--permission-mode", "bypassPermissions"], project: "harbor",
     workspace: "dock", opener: "uday", createdAtMillis: 1_763_460_000_000,
-    agent: SessionAgent(harness: "claude-code", mode: "full")
+    agent: SessionAgent(harness: "claude-code", mode: "bypassPermissions")
 )
 let shell = SessionInfo(
     name: "shell", instanceID: "inst-2", live: false, attached: 0, writerFDE: "", room: "", command: ["bash"]

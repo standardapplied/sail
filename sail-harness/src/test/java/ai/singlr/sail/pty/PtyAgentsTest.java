@@ -182,7 +182,7 @@ class PtyAgentsTest {
   void aClientNamesAHarnessAndAModeItTakesNeverItsCommand() throws Exception {
     try (var ignored = startHost();
         var channel = connect()) {
-      var full = new PtyMessage.Agent("claude-code", "full", false);
+      var full = new PtyMessage.Agent("claude-code", "bypassPermissions", false);
       assertEquals(
           new PtyMessage.Err("A session runs a harness or a command, not both."),
           ask(channel, agent("s", List.of("claude"), "dock", full)));
@@ -197,7 +197,8 @@ class PtyAgentsTest {
                   agent("s", List.of(), "dock", new PtyMessage.Agent("vim", "full", false)));
       assertTrue(unknown.reason().startsWith("Unknown agent CLI: 'vim'."), unknown.reason());
       assertEquals(
-          new PtyMessage.Err("Codex CLI takes no mode 'default' in a workspace; it takes full."),
+          new PtyMessage.Err(
+              "Codex CLI takes no mode 'default' in a workspace; it takes full-access."),
           ask(
               channel,
               agent("s", List.of(), "dock", new PtyMessage.Agent("codex", "default", false))));
@@ -224,7 +225,7 @@ class PtyAgentsTest {
               "login_not_stored"),
           ask(
               channel,
-              agent("s", List.of(), "dock", new PtyMessage.Agent("codex", "full", false))));
+              agent("s", List.of(), "dock", new PtyMessage.Agent("codex", "full-access", false))));
       assertEquals(List.of("agent codex for uday"), calls);
       assertEquals(List.of(), listed(channel));
     }
@@ -239,7 +240,7 @@ class PtyAgentsTest {
   void anAgentStartsWithItsPersonsLoginHandedOverAndNothingOfItOnALineOrARecord() throws Exception {
     try (var ignored = startHost();
         var channel = connect()) {
-      var full = new PtyMessage.Agent("claude-code", "full", false);
+      var full = new PtyMessage.Agent("claude-code", "bypassPermissions", false);
 
       assertInstanceOf(PtyMessage.Ok.class, ask(channel, agent("s", List.of(), "dock", full)));
 
@@ -248,14 +249,15 @@ class PtyAgentsTest {
       var file = SessionLogin.file(info.instanceId());
       assertEquals(
           List.of("acme-dock", file, LaunchEnv.loginLines(LOGIN), "uday"), handed.getFirst());
-      assertEquals(List.of("claude", "--dangerously-skip-permissions"), info.command());
+      assertEquals(List.of("claude", "--permission-mode", "bypassPermissions"), info.command());
       assertEquals(full, info.agent());
       var run = awaitArgv();
       assertEquals(
           ContainerExec.asDevUserTty(
               "acme-dock",
               PtySessionHost.childEnv("", "0.0.0-test"),
-              SessionLogin.command(Harnesses.of("claude-code"), "full", Optional.of(LOGIN), file)),
+              SessionLogin.command(
+                  Harnesses.of("claude-code"), "bypassPermissions", Optional.of(LOGIN), file)),
           run);
       assertFalse(String.join("\n", run).contains(VALUE), "the login is on no command line");
       try (var files = Files.walk(dir.resolve("sessions"))) {
@@ -298,7 +300,11 @@ class PtyAgentsTest {
               PtyAdmission.Unavailable.REMEDY),
           ask(
               channel,
-              agent("s", List.of(), "dock", new PtyMessage.Agent("claude-code", "full", false))));
+              agent(
+                  "s",
+                  List.of(),
+                  "dock",
+                  new PtyMessage.Agent("claude-code", "bypassPermissions", false))));
       assertEquals(List.of(), listed(channel));
       assertEquals(handed.getFirst().subList(0, 2), withdrawn.poll(30, TimeUnit.SECONDS));
     }
@@ -320,7 +326,11 @@ class PtyAgentsTest {
               Remedy.of("Start it again in a workspace of your own.")),
           ask(
               channel,
-              agent("s", List.of(), "dock", new PtyMessage.Agent("claude-code", "full", false))));
+              agent(
+                  "s",
+                  List.of(),
+                  "dock",
+                  new PtyMessage.Agent("claude-code", "bypassPermissions", false))));
       assertEquals(handed.getFirst().subList(0, 2), withdrawn.poll(30, TimeUnit.SECONDS));
     }
   }
@@ -336,7 +346,7 @@ class PtyAgentsTest {
       assertInstanceOf(
           PtyMessage.Ok.class,
           ask(channel, new PtyMessage.Create("s", List.of(), "/tmp", "", "", 80, 24)));
-      var full = new PtyMessage.Agent("claude-code", "full", false);
+      var full = new PtyMessage.Agent("claude-code", "bypassPermissions", false);
 
       assertEquals(
           new PtyMessage.Err("Session 's' is already running; attach or kill it."),
@@ -371,7 +381,11 @@ class PtyAgentsTest {
       var answer =
           ask(
               channel,
-              agent("s", List.of(), "dock", new PtyMessage.Agent("claude-code", "full", false)));
+              agent(
+                  "s",
+                  List.of(),
+                  "dock",
+                  new PtyMessage.Agent("claude-code", "bypassPermissions", false)));
 
       assertEquals(
           new PtyMessage.Err("Session 's' is already running; attach or kill it."), answer);
@@ -391,12 +405,20 @@ class PtyAgentsTest {
           PtyMessage.Ok.class,
           ask(
               channel,
-              agent("s", List.of(), "dock", new PtyMessage.Agent("claude-code", "full", false))));
+              agent(
+                  "s",
+                  List.of(),
+                  "dock",
+                  new PtyMessage.Agent("claude-code", "bypassPermissions", false))));
       assertInstanceOf(
           PtyMessage.Ok.class,
           ask(
               channel,
-              agent("t", List.of(), "dock", new PtyMessage.Agent("claude-code", "full", true))));
+              agent(
+                  "t",
+                  List.of(),
+                  "dock",
+                  new PtyMessage.Agent("claude-code", "bypassPermissions", true))));
       var file = SessionLogin.file(listed(channel).getFirst().instanceId());
       assertEquals(file, handed.getFirst().get(1));
 

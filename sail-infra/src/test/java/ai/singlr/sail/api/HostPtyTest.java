@@ -252,6 +252,7 @@ class HostPtyTest {
             + " next pass leaves it nobody's. Delete it meanwhile with: sail project workspace"
             + " delete acme try --force.",
         refused.getMessage());
+    assertEquals("owner_gone", ((Remedied) refused).code(), "the app tells it apart by its code");
     assertTrue(box.invocations().stream().noneMatch(c -> c.startsWith("incus start")));
   }
 

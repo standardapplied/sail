@@ -194,6 +194,18 @@
       "status": 409
     },
     {
+      "code": "not_your_workspace",
+      "status": 403
+    },
+    {
+      "code": "harness_not_installed",
+      "status": 409
+    },
+    {
+      "code": "owner_gone",
+      "status": 409
+    },
+    {
       "code": "agent_status_failed",
       "status": 500
     },

@@ -270,6 +270,49 @@ final class ClaudeCode implements Harness {
     return fullPermissions ? BINARY + " --dangerously-skip-permissions" : BINARY;
   }
 
+  /**
+   * Claude Code's own start, with no flag, then each of its permission modes once, passed as it
+   * names them ({@code --permission-mode}): its {@code default} is Manual, offered as {@code
+   * manual}, its alias, since a start with no flag is its own start.
+   */
+  @Override
+  public List<Mode> modes() {
+    return List.of(
+        new Mode(
+            "default",
+            "Claude Code's own",
+            "Starts as Claude Code starts by itself: the project's default mode, else Auto where it"
+                + " is available, else Manual.",
+            ""),
+        permissionMode(
+            "manual", "Manual", "Asks before edits, shell commands and network actions."),
+        permissionMode(
+            "acceptEdits",
+            "Accept edits",
+            "Makes file edits and common filesystem commands without asking."),
+        permissionMode(
+            "plan",
+            "Plan",
+            "Researches and proposes changes, and edits nothing until you approve the plan."),
+        permissionMode(
+            "auto",
+            "Auto",
+            "Runs everything, with a classifier reviewing each action first; Manual where auto is"
+                + " not available."),
+        permissionMode(
+            "dontAsk",
+            "Don't ask",
+            "Refuses anything that would ask, and runs only what is approved beforehand."),
+        permissionMode(
+            "bypassPermissions",
+            "Bypass permissions",
+            "Skips every permission prompt and safety check."));
+  }
+
+  private static Mode permissionMode(String name, String label, String about) {
+    return new Mode(name, label, about, " --permission-mode " + name);
+  }
+
   @Override
   public String attach(String sessionId) {
     return sessionId != null

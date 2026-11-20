@@ -116,10 +116,27 @@ final class Codex implements Harness {
             + " reservation guards that lane.");
   }
 
-  /** Only full: its sandbox needs user namespaces, which Incus containers block. */
+  /**
+   * Only full access, Codex's own name for its mode with no approvals and no sandbox: its sandbox
+   * needs user namespaces, which Incus containers block.
+   */
   @Override
-  public List<String> modes() {
-    return List.of(FULL_MODE);
+  public List<Mode> modes() {
+    return List.of(
+        new Mode(
+            "full-access",
+            "Full access",
+            "Runs every command without asking and outside Codex's sandbox.",
+            " --dangerously-bypass-approvals-and-sandbox"));
+  }
+
+  @Override
+  public Optional<String> modesNote() {
+    return Optional.of(
+        displayName()
+            + " runs in a workspace only with full access: its sandbox needs user namespaces,"
+            + " which a workspace's container does not allow. For a session that asks before it"
+            + " acts, start Claude Code.");
   }
 
   /**

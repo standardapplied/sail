@@ -4065,14 +4065,24 @@ opens a workspace on a real host with the app's own `Create`.
 
 **An agent started in a person's workspace (`PtyMessage.Agent`).** A `Create` may name a harness
 (`agent: {harness, mode, inside}`) instead of a command, which must then be empty: the host
-composes the command from the harness (`Harness.interactive(mode)`, its modes `Harness.modes()`:
-Claude Code's own default and `full`, Codex's `full` alone) and never runs a client's line as an
-agent. Only in a workspace, and only as its owner: the host's own refusals (`refusal`: closing, a
+composes the command from the harness (`Harness.interactive(mode)`) and never runs a client's line
+as an agent. A harness's modes are listed once, beside the rest of its description
+(`Harness.modes()`), each with its name, its label and what it does in the harness's own words: the
+first is the one it starts in until a person chooses. Claude Code's are its own start with no flag
+(`default`: the project's `permissions.defaultMode`, else Auto where it is available, else Manual)
+and then each of its permission modes once, passed as it names them (`--permission-mode manual`,
+`acceptEdits`, `plan`, `auto`, `dontAsk`, `bypassPermissions`; its own `default` is Manual, offered
+as `manual`, its alias). Codex's is `full-access` alone (`--dangerously-bypass-approvals-and-sandbox`),
+with why (`Harness.modesNote`): its sandbox needs user namespaces, which a workspace's container does
+not allow. No mode is named anywhere else, and no client branches on one. Only in a workspace, and
+only as its owner: the host's own refusals (`refusal`: closing, a
 live session of the name, either cap, the command's size, the room) and then `PtyAdmission.agent`
 (`HostLanes.Pty.admitAgent`) are asked before the workspace is entered or started. The admission
-refuses an asker who is not the person the workspace is labelled for, an admin who may enter it
-included ("dock is ana's workspace, so an agent starts in it only as ana, with ana's login."; they
-open a shell there), a harness the project's `agent.install` does not list, and an owner with no
+refuses, each with its code on the pty `Err` (`AgentStarts`, the decisions the route below makes
+too), an asker who is not the person the workspace is labelled for, an admin who may enter it
+included (`not_your_workspace`: "dock is ana's workspace, so an agent starts in it only as ana, with
+ana's login."; they open a shell there), a harness the project's `agent.install` does not list
+(`harness_not_installed`), and an owner with no
 default stored login for it (`RunLogins.stored`, the runs' own lookup and words, with the typed
 remedy `agent login <harness>` or `agent login use <harness> <name>`, and the code
 `login_not_stored` on the pty `Err`, so an app acts on data). The login is the owner's, looked up by
@@ -4102,13 +4112,27 @@ signs in with the harness's own login there; Sail never holds that one, and what
 of it (`Harness.storedLogins`: `~/.claude/.credentials.json`, `~/.claude.json`,
 `~/.codex/auth.json`) stays across the person's own starts and goes with every strip, so a re-own
 (which strips before it gives), a disown and a template build take it. The listing, the sidecar and
-every event carry the harness's own command (`["claude", "--dangerously-skip-permissions"]`) and
+every event carry the harness's own command (`["claude", "--permission-mode", "plan"]`) and
 `agent`, never the line that started it; no argv on the runner or in the workspace holds a login.
 A pty host that dies between the hand-over and the read leaves the file until the next agent start
 there (the hand-over's one-minute sweep) or the next give (every start and re-own); removing it at
 host start would take an exec into every workspace. An admin who enters a workspace watches an
 agent session there until they take its keyboard, and then drives an agent signed in as its owner,
 who is told (`WriterChanged`), as an admin's shell there already reaches the owner's login.
+
+**What can start in a workspace** (`GET /v1/projects/{p}/workspaces/{w}/agents`, gated as Enter a
+workspace on its owner: its owner or an admin; another member is refused as every workspace door
+refuses them, and a workspace the runner does not hold is not found). `WorkspaceDoors.agents` answers whose the workspace is and
+whether it runs (a stopped one is no refusal: a start starts it), then makes the same decisions a
+`Create` of an agent makes (`AgentStarts`): a workspace whose person is gone (`owner_gone`) or that
+is not the asker's (`not_your_workspace`, which is what an admin sees in another person's, with
+nothing offered and nothing of that person's logins) is refused whole; otherwise every harness Sail
+knows is offered with its modes (`Harness.modes()`, `mode_default` the first) and `note`, the kinds
+of login it takes and how to make one, and either the login it starts signed in with (`{name,
+kind}`, never a value) or why none (`login_refusal`: `login_not_stored`, with the remedy that
+stores one or makes one the default), with `inside` true; a harness the project does not install
+carries `harness_not_installed` and `inside` false. Each refusal is the API's error shape (`code`,
+`message`, `action`, `remedy`).
 
 What a command the agent runs can read, measured on Claude Code 2.1.329 and Codex 0.170: Claude
 Code keeps a token (`CLAUDE_CODE_OAUTH_TOKEN`) out of the commands its shell runs, but an API key,

@@ -24,7 +24,6 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
-import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
@@ -424,58 +423,22 @@ final class HostLanes {
         String project, String workspace, PtyMessage.Agent agent, PtyIdentity.Person who)
         throws IOException {
       var owner = personOf(found(project, workspace));
-      if (owner == null || !owner.equals(who.actor().handle())) {
-        throw Remedied.io(
-            owner == null
-                ? workspace + " is no one's workspace, so no agent starts in it."
-                : workspace
-                    + " is "
-                    + owner
-                    + "'s workspace, so an agent starts in it only as "
-                    + owner
-                    + ", with "
-                    + owner
-                    + "'s login.",
-            Remedy.of("Open a shell in it, or start the agent in a workspace of your own."));
-      }
       var harness = Harnesses.of(agent.harness());
-      var installs =
-          Optional.ofNullable(definitions.require(project).agent())
-              .map(ProjectDefinition.Agent::installs)
-              .orElse(List.of());
-      if (!installs.contains(harness.yamlName())) {
-        throw Remedied.io(
-            harness.displayName()
-                + " is not installed in "
-                + project
-                + "'s workspaces; its agent installation lists "
-                + (installs.isEmpty()
-                    ? "none"
-                    : String.join(
-                        ", ",
-                        installs.stream().map(Harnesses::of).map(Harness::displayName).toList()))
-                + ".",
-            Remedy.of(
-                "An admin adds "
-                    + harness.yamlName()
-                    + " to "
-                    + project
-                    + "'s agent install list and builds its template again."));
+      var refused =
+          AgentStarts.notTheirs(workspace, owner, who.actor().handle())
+              .or(() -> AgentStarts.notInstalled(definitions.require(project), harness));
+      if (refused.isPresent()) {
+        throw told(refused.get());
       }
       if (agent.inside()) {
         return Optional.empty();
       }
       try {
         return Optional.of(
-            RunLogins.stored(
-                new FdeStore(db),
-                owners.apply(owner).id(),
-                owner,
-                harness,
-                "a " + harness.displayName() + " session cannot start in " + workspace,
-                ""));
-      } catch (ApiException refused) {
-        throw Remedied.io(refused.reason(), refused.remedy(), refused.code());
+            AgentStarts.login(
+                new FdeStore(db), owners.apply(owner).id(), owner, harness, workspace));
+      } catch (ApiException noLogin) {
+        throw told(noLogin);
       }
     }
 
@@ -582,8 +545,8 @@ final class HostLanes {
      * PtyAdmission.Unavailable} with what it said as its cause, for the log.
      */
     private static IOException told(Exception failure) {
-      return failure instanceof Remedied
-          ? Remedied.io(Remedied.reasonOf(failure), Remedied.remedyOf(failure))
+      return failure instanceof Remedied remedied
+          ? Remedied.io(remedied.reason(), remedied.remedy(), remedied.code())
           : new PtyAdmission.Unavailable(PtyAdmission.Unavailable.UNFINISHED, failure);
     }
 

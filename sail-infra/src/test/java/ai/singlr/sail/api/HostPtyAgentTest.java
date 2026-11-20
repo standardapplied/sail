@@ -48,8 +48,9 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class HostPtyAgentTest {
 
-  private static final PtyMessage.Agent CLAUDE = new PtyMessage.Agent("claude-code", "full", false);
-  private static final PtyMessage.Agent CODEX = new PtyMessage.Agent("codex", "full", false);
+  private static final PtyMessage.Agent CLAUDE =
+      new PtyMessage.Agent("claude-code", "bypassPermissions", false);
+  private static final PtyMessage.Agent CODEX = new PtyMessage.Agent("codex", "full-access", false);
 
   @TempDir Path dir;
 
@@ -158,6 +159,7 @@ class HostPtyAgentTest {
       assertEquals(
           Remedy.of("Open a shell in it, or start the agent in a workspace of your own."),
           refused.remedy());
+      assertEquals("not_your_workspace", refused.code(), "the app tells it apart by its code");
     }
     assertEquals(
         "loose is no one's workspace, so no agent starts in it.",
@@ -188,6 +190,7 @@ class HostPtyAgentTest {
         Remedy.of(
             "An admin adds codex to harbor's agent install list and builds its template again."),
         refused.remedy());
+    assertEquals("harness_not_installed", refused.code(), "the app tells it apart by its code");
   }
 
   /** Scenarios 6 and 7: no login stored, or none the default, with the remedy as data. */
@@ -218,12 +221,13 @@ class HostPtyAgentTest {
   void anAgentThatSignsInInsideNeedsNoStoredLogin() throws IOException {
     assertEquals(
         Optional.empty(),
-        lane.admitAgent("acme", "spare", new PtyMessage.Agent("codex", "full", true), bob));
+        lane.admitAgent("acme", "spare", new PtyMessage.Agent("codex", "full-access", true), bob));
     var foreign =
         assertThrows(
             Remedied.Io.class,
             () ->
-                lane.admitAgent("acme", "dock", new PtyMessage.Agent("codex", "full", true), bob));
+                lane.admitAgent(
+                    "acme", "dock", new PtyMessage.Agent("codex", "full-access", true), bob));
     assertTrue(foreign.reason().startsWith("dock is ada's workspace"), foreign.reason());
   }
 

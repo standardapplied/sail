@@ -1,0 +1,39 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/projects/harbor/workspaces/wreck/agents"
+  },
+  "response": {
+    "body": {
+      "offered": [],
+      "project": "harbor",
+      "refusal": {
+        "action": "Delete it meanwhile with: project workspace delete harbor wreck --force.",
+        "code": "owner_gone",
+        "field_errors": [],
+        "message": "Workspace 'wreck' of harbor is zed's, who is no longer active here, so it is not started: the next pass leaves it nobody's.",
+        "remedy": [
+          {
+            "text": "Delete it meanwhile with: "
+          },
+          {
+            "args": [
+              "harbor",
+              "wreck",
+              "--force"
+            ],
+            "run": "sail",
+            "verb": "project workspace delete"
+          },
+          {
+            "text": "."
+          }
+        ]
+      },
+      "running": false,
+      "schema_version": 1,
+      "workspace": "wreck"
+    },
+    "status": 200
+  }
+}

@@ -179,6 +179,7 @@ class RouteGateSweepTest {
               "POST /v1/projects/{project}/template:build decides BUILD_TEMPLATE",
               "POST /v1/projects/{project}/workspaces/{workspace}/start decides ENTER_WORKSPACE",
               "GET /v1/projects/{project}/workspaces/{workspace}/sessions the terminal host decides",
+              "GET /v1/projects/{project}/workspaces/{workspace}/agents decides ENTER_WORKSPACE",
               "POST /v1/projects/{project}/workspaces/{workspace}/stop decides ENTER_WORKSPACE",
               "DELETE /v1/projects/{project}/workspaces/{workspace} decides ENTER_WORKSPACE",
               "DELETE /v1/projects/{project}/snapshots/{label} decides RESTORE",

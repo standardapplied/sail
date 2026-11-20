@@ -15,14 +15,19 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.BoxInstances;
+import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.pty.PtyAdmission;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Callable;
@@ -250,6 +255,46 @@ public final class WorkspaceDoors {
         });
   }
 
+  /**
+   * What can start in workspace {@code name} of {@code config}'s project for the bound actor, who
+   * may enter it: nothing, said why, when it is not theirs or its person is gone; else each harness
+   * Sail knows, with the login it starts signed in with from {@code fdes}, or why none, and why one
+   * the project does not install does not start. The same decisions a terminal Create of an agent
+   * makes ({@link AgentStarts}).
+   */
+  public AgentOffersResponse agents(ProjectDefinition config, String name, FdeStore fdes)
+      throws Exception {
+    var project = config.name();
+    var found = workspaces.find(project, name).orElseThrow(() -> Workspaces.absent(project, name));
+    decide(project, name, found);
+    var person = Workspaces.ownerOf(found, owners).orElse(keeper);
+    var running = found.state() instanceof ContainerState.Running;
+    var refused =
+        Workspaces.goneOwner(found, owners)
+            .map(gone -> goneOwner(project, name, gone))
+            .or(() -> AgentStarts.notTheirs(name, person, Actor.current().handle()));
+    if (refused.isPresent()) {
+      return new AgentOffersResponse(
+          project, name, person, running, refused.get().error(), List.of());
+    }
+    var fdeId = owners.apply(person).id();
+    var offered = new ArrayList<AgentOffer>();
+    for (var harness : Harnesses.all()) {
+      var notInstalled = AgentStarts.notInstalled(config, harness);
+      if (notInstalled.isPresent()) {
+        offered.add(new AgentOffer(harness, null, null, false, notInstalled.get().error()));
+        continue;
+      }
+      try {
+        var login = AgentStarts.login(fdes, fdeId, person, harness, name);
+        offered.add(new AgentOffer(harness, login.row(), null, true, null));
+      } catch (ApiException noLogin) {
+        offered.add(new AgentOffer(harness, null, noLogin.error(), true, null));
+      }
+    }
+    return new AgentOffersResponse(project, name, person, running, null, offered);
+  }
+
   /** Refuses the bound actor workspace {@code found} unless they may enter it. */
   private void decide(String project, String name, BoxInstances.Instance found) {
     requireEnter(
@@ -270,8 +315,9 @@ public final class WorkspaceDoors {
    * What a start of workspace {@code name} labelled for {@code gone}, no longer active here, is
    * refused with, and how to be rid of it meanwhile.
    */
-  static IllegalStateException goneOwner(String project, String name, String gone) {
-    return Remedied.state(
+  static ApiException goneOwner(String project, String name, String gone) {
+    return new ApiException(
+        ErrorCode.OWNER_GONE,
         "Workspace '"
             + name
             + "' of "

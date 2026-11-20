@@ -276,17 +276,20 @@ class PtyAgentIT extends AbstractIncusIT {
         try (var host = startHost(lane);
             var ada = connect("ada");
             var root = connect("root")) {
-          var refused = root.ask(create("a0", new PtyMessage.Agent("claude-code", "full", false)));
+          var refused =
+              root.ask(
+                  create("a0", new PtyMessage.Agent("claude-code", "bypassPermissions", false)));
           assertEquals(
               "w is ada's workspace, so an agent starts in it only as ada, with ada's login.",
               assertInstanceOf(PtyMessage.Err.class, refused).reason());
 
           assertInstanceOf(
               PtyMessage.Ok.class,
-              ada.ask(create("a1", new PtyMessage.Agent("claude-code", "full", false))));
+              ada.ask(
+                  create("a1", new PtyMessage.Agent("claude-code", "bypassPermissions", false))));
           assertEquals(
               List.of(
-                  "claude --dangerously-skip-permissions",
+                  "claude --permission-mode bypassPermissions",
                   fingerprint(claude),
                   "set:CLAUDE_CODE_OAUTH_TOKEN"),
               report());
@@ -295,7 +298,7 @@ class PtyAgentIT extends AbstractIncusIT {
 
           assertInstanceOf(
               PtyMessage.Ok.class,
-              ada.ask(create("a2", new PtyMessage.Agent("codex", "full", false))));
+              ada.ask(create("a2", new PtyMessage.Agent("codex", "full-access", false))));
           assertEquals(
               List.of(
                   "codex --dangerously-bypass-approvals-and-sandbox",
@@ -323,8 +326,8 @@ class PtyAgentIT extends AbstractIncusIT {
                       info -> info.toString().contains(TOKEN) || info.toString().contains(KEY)));
           assertEquals(
               List.of(
-                  new PtyMessage.Agent("claude-code", "full", false),
-                  new PtyMessage.Agent("codex", "full", false)),
+                  new PtyMessage.Agent("claude-code", "bypassPermissions", false),
+                  new PtyMessage.Agent("codex", "full-access", false)),
               listed.sessions().stream().map(PtyMessage.SessionInfo::agent).toList());
         }
       } finally {
