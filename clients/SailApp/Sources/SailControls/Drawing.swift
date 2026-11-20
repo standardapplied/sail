@@ -17,7 +17,7 @@ enum KeyWatch {
 
 /// What every control draws the same way: a box in its corners, filled, with a 1 pt edge laid on
 /// pixel boundaries, and the focus halo around it.
-enum Draw {
+package enum Draw {
     static func box(_ box: NSRect, radius: Double, fill: Tint?, edge: Tint?, dash: [CGFloat] = []) {
         if let fill {
             NSColor(fill).setFill()
@@ -60,7 +60,7 @@ enum Draw {
     }
 
     /// One of the design's line icons filling `rect`, its strokes scaled with it as an SVG's are.
-    static func icon(_ icon: LineIcon, in rect: NSRect, ink: Tint) {
+    package static func icon(_ icon: LineIcon, in rect: NSRect, ink: Tint) {
         let scale = Double(rect.width) / LineIcon.side, down = NSGraphicsContext.current?.isFlipped ?? true
         func at(_ point: LineIcon.Point) -> NSPoint {
             NSPoint(x: Double(rect.minX) + point.x * scale, y: down ? Double(rect.minY) + point.y * scale : Double(rect.maxY) - point.y * scale)

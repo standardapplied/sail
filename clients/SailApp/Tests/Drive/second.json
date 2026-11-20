@@ -1,6 +1,6 @@
 {"steps": [
   {"name": "account-at-launch", "select": "account"},
-  {"name": "still-signed-in", "signed": true, "pane": "Uday\n@uday\nadmin\nhttp://127.0.0.1:7979\nSigned in until ", "seconds": 20},
+  {"name": "still-signed-in", "signed": true, "pane": "Uday\n@uday · Admin\n127.0.0.1:7979 · Connected\nSigned in until ", "seconds": 20},
   {"name": "no-ceremony", "asked": 0},
   {"name": "this-mac", "select": "thisMac"},
   {"name": "s27-the-window-as-it-was", "resize": [920, 720]},
@@ -44,6 +44,7 @@
   {"name": "m-return-chooses-account", "press": "enter"},
   {"name": "m-closed-by-return", "menuSays": "closed"},
   {"name": "m-the-account-by-return", "pane": "Signed in until "},
+  {"name": "the-account-pane-signed-in", "shotScreen": "account-signed-in"},
   {"name": "sign-out", "signed": true, "signOut": true},
   {"name": "signed-out-again", "signed": true, "exactly": ["Sign in to Sail"]},
   {"name": "item-gone", "signed": true, "keychain": "gone"},

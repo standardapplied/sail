@@ -386,8 +386,22 @@ public final class InitCommand implements Runnable {
    * and without a trace, answering whether it succeeded.
    */
   static boolean runCommand(Object command, String... args) {
+    return runCommand(command, StepTimeoutDiagnosis.here(), args);
+  }
+
+  /**
+   * As {@link #runCommand(Object, String...)}, a step that timed out also saying why: its commands
+   * list their processes when they time out, for {@code diagnosis} to read.
+   */
+  static boolean runCommand(Object command, StepTimeoutDiagnosis diagnosis, String... args) {
     var line = SailCommandLine.of(command);
-    line.setExecutionExceptionHandler((failure, failed, parsed) -> Main.report(failure, failed));
-    return line.execute(args) == 0;
+    line.setExecutionExceptionHandler(
+        (failure, failed, parsed) -> {
+          diagnosis.of(failure).ifPresent(why -> failed.getErr().println("    " + why));
+          return Main.report(failure, failed);
+        });
+    try (var listing = ShellExecutor.listingTimedOutProcesses()) {
+      return line.execute(args) == 0;
+    }
   }
 }

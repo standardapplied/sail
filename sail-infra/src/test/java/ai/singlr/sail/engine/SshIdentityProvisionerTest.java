@@ -6,11 +6,18 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
 
 class SshIdentityProvisionerTest {
 
@@ -29,6 +36,73 @@ class SshIdentityProvisionerTest {
     assertTrue(first.contains("|| useradd"), first);
     assertTrue(first.contains("--system"), first);
     assertTrue(first.contains("/home/sail"), first);
+  }
+
+  @Test
+  void theSailHomeIsMadeEmptyAndOwnerOnlyNeverCopiedFromTheBoxsSkeleton() {
+    var plan = plan();
+
+    var user = runCommand(plan, 0);
+    assertTrue(user.contains("useradd --system --no-create-home"), user);
+    assertFalse(user.contains("--create-home"), user);
+    var home = ((SshIdentityProvisioner.Run) plan.get(1)).command();
+    assertEquals(List.of("sh", "-c"), home.subList(0, 2));
+    assertTrue(home.get(2).endsWith("; install -d -m 700 -o sail -g sail \"$1\""), home.get(2));
+    assertEquals(List.of("sh", "/home/sail"), home.subList(3, 5));
+    assertEquals(
+        "Create the sail home directory, owner-only (sshd StrictModes)", plan.get(1).description());
+  }
+
+  @Test
+  void theAccountStepsAreThePlansFirstStepsSoAHarnessThatRunsThemRunsThePlans() {
+    assertEquals(plan().subList(0, 4), SshIdentityProvisioner.account());
+  }
+
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aSymlinkAtTheHomeIsRefusedBeforeItsTargetIsReownedOrRemoded(@TempDir Path dir)
+      throws Exception {
+    var elsewhere = Files.createDirectory(dir.resolve("elsewhere"));
+    Files.setPosixFilePermissions(elsewhere, PosixFilePermissions.fromString("rwxr-xr-x"));
+    var home = Files.createSymbolicLink(dir.resolve("home"), elsewhere);
+
+    var result = run(SshIdentityProvisioner.homeStep(home.toString()));
+
+    assertEquals(1, result.exitCode(), result.stdout() + result.stderr());
+    assertTrue(
+        result
+            .stderr()
+            .startsWith(
+                home
+                    + " is not a directory but a symbolic link to "
+                    + elsewhere
+                    + ", so it cannot be the sail account's home: move it aside and re-run."),
+        result.stderr());
+    assertEquals(
+        "rwxr-xr-x", PosixFilePermissions.toString(Files.getPosixFilePermissions(elsewhere)));
+  }
+
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aFileAtTheHomeIsRefusedNamingWhatIsThere(@TempDir Path dir) throws Exception {
+    var home = Files.writeString(dir.resolve("home"), "not a home\n");
+
+    var result = run(SshIdentityProvisioner.homeStep(home.toString()));
+
+    assertEquals(1, result.exitCode(), result.stdout() + result.stderr());
+    assertTrue(
+        result
+            .stderr()
+            .startsWith(
+                home
+                    + " is not a directory but a regular file, so it cannot be the sail account's"
+                    + " home: move it aside and re-run."),
+        result.stderr());
+    assertEquals("not a home\n", Files.readString(home));
+  }
+
+  private static ShellExec.Result run(SshIdentityProvisioner.Run step) throws Exception {
+    return new ShellExecutor(false).exec(step.command(), null, Duration.ofSeconds(10));
   }
 
   @Test

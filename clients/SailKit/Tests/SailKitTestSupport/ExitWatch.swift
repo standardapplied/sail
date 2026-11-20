@@ -12,6 +12,7 @@ import AppKit
 public enum ExitWatch {
     private static let installed: Bool = {
         atexit { ExitWatch.tell() }
+        watchExceptions()
         #if canImport(AppKit)
         let watched: [(Selector, Selector)] = [
             (#selector(NSApplication.stop(_:)), #selector(NSApplication.exitWatchStop(_:))),
@@ -32,6 +33,28 @@ public enum ExitWatch {
     /// Watches this process's exit, once however often it is asked.
     public static func install() {
         _ = installed
+    }
+
+    private static let exceptions: Bool = {
+        #if canImport(AppKit)
+        let reported: [(Selector, Selector)] = [
+            (#selector(NSApplication.reportException(_:)), #selector(NSApplication.exitWatchReport(_:))),
+            (NSSelectorFromString("_crashOnException:"), #selector(NSApplication.exitWatchCrash(on:))),
+        ]
+        for (original, watch) in reported {
+            if let one = class_getInstanceMethod(NSApplication.self, original), let other = class_getInstanceMethod(NSApplication.self, watch) {
+                method_exchangeImplementations(one, other)
+            }
+        }
+        #endif
+        return true
+    }()
+
+    /// Writes every exception AppKit reports or ends the app on (a window asking for another layout
+    /// pass from inside one, say) with its reason and its stack, which names the view that asked:
+    /// the tests' and the drive's logs say it before the process goes.
+    public static func watchExceptions() {
+        _ = exceptions
     }
 
     public static func say(_ what: String, _ stack: [String] = []) {
@@ -68,6 +91,16 @@ extension NSApplication {
     @objc func exitWatchStopModalWithoutCode() {
         ExitWatch.say("NSApplication.stopModal()", Thread.callStackSymbols)
         exitWatchStopModalWithoutCode()
+    }
+
+    @objc func exitWatchReport(_ exception: NSException) {
+        ExitWatch.say("AppKit reports \(exception.name.rawValue): \(exception.reason ?? "")", exception.callStackSymbols)
+        exitWatchReport(exception)
+    }
+
+    @objc func exitWatchCrash(on exception: NSException) {
+        ExitWatch.say("AppKit ends the app on \(exception.name.rawValue): \(exception.reason ?? "")", exception.callStackSymbols)
+        exitWatchCrash(on: exception)
     }
 
     @objc func exitWatchStopModal(withCode code: NSApplication.ModalResponse) {
