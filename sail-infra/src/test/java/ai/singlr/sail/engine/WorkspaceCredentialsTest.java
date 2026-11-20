@@ -591,26 +591,64 @@ class WorkspaceCredentialsTest {
 
   /**
    * A template is searched once systemd says its boot is done, running or degraded, waited for
-   * within a bound; any other state, or none, is said as it is.
+   * within a bound; asked while its bus is not up yet (just after its start, systemctl answers
+   * nothing), it is asked again; any other state is said as it is, and one that never answers as
+   * that.
    */
   @Test
   void aTemplateIsSettledOnceItsBootIsDoneRunningOrDegraded() throws Exception {
-    stub("timeout", "echo \"$1\" > " + bin.resolve("bound") + "\nshift\nexec \"$@\"\n");
+    stub("timeout", "echo \"$1\" >> " + bin.resolve("bound") + "\nshift\nexec \"$@\"\n");
+    stub("sleep", "exit 0\n");
     var said = new ArrayList<String>();
-    for (var state : List.of("running:0", "degraded:1", "starting:1", ":1")) {
-      var parts = state.split(":", -1);
+    var firstBound = "";
+    for (var states :
+        List.of(
+            List.of("running:0"),
+            List.of("degraded:1"),
+            List.of("starting:1"),
+            List.of(":1", ":1", "running:0"),
+            List.of(":1"))) {
+      Files.deleteIfExists(bin.resolve("asked"));
+      Files.deleteIfExists(bin.resolve("bound"));
+      var never = states.size() == 1 && states.getFirst().equals(":1");
+      stub(
+          "date",
+          never
+              ? "n=$(cat "
+                  + bin.resolve("clock")
+                  + " 2>/dev/null || echo 0); echo $((n + 61)) > "
+                  + bin.resolve("clock")
+                  + "; echo $((n + 61))\n"
+              : "echo 1000\n");
+      Files.deleteIfExists(bin.resolve("clock"));
+      var answers =
+          new StringBuilder(
+              "n=$(cat "
+                  + bin.resolve("asked")
+                  + " 2>/dev/null || echo 0)\n"
+                  + "echo $((n + 1)) > "
+                  + bin.resolve("asked")
+                  + "\ncase $n in\n");
+      for (var k = 0; k < states.size(); k++) {
+        var parts = states.get(k).split(":", -1);
+        answers
+            .append(k == states.size() - 1 ? "  *) " : "  " + k + ") ")
+            .append(parts[0].isEmpty() ? "" : "echo " + parts[0] + "; ")
+            .append("exit ")
+            .append(parts[1])
+            .append(" ;;\n");
+      }
       stub(
           "systemctl",
-          "[ \"$*\" = \"is-system-running --wait\" ] || exit 9\n"
-              + (parts[0].isEmpty() ? "" : "echo " + parts[0] + "\n")
-              + "exit "
-              + parts[1]
-              + "\n");
+          "case \"$*\" in is-system-running*) ;; *) exit 9 ;; esac\n" + answers + "esac\n");
       var ran = script(WorkspaceCredentials.SETTLED, "");
       said.add(ran.exit() + " " + ran.said().strip());
+      if (firstBound.isEmpty()) {
+        firstBound = read(bin.resolve("bound")).lines().findFirst().orElseThrow();
+      }
     }
 
-    assertEquals(List.of("0 ", "0 ", "1 starting", "1 no state"), said);
-    assertEquals("120\n", read(bin.resolve("bound")));
+    assertEquals(List.of("0 ", "0 ", "1 starting", "0 ", "1 not answering"), said);
+    assertEquals("120", firstBound, "the wait is bounded by the settle time");
   }
 }

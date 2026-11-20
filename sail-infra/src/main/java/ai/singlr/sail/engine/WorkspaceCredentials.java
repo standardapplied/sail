@@ -174,15 +174,24 @@ final class WorkspaceCredentials {
   /**
    * Waits for the template's boot to finish, {@code running} or {@code degraded} (a unit that
    * failed changes nothing it holds): its boot cleans {@code /tmp} and makes directories there, so
-   * a search during it walks a tree that changes under it. Says systemd's state when it does not
-   * settle in time.
+   * a search during it walks a tree that changes under it. Just after its start systemd's bus is
+   * not up and systemctl answers nothing, so it is asked again until the bound. Says systemd's
+   * state when it does not settle in time.
    */
   static final String SETTLED =
       """
       PATH=/usr/bin:/bin
-      state=$(timeout %d systemctl is-system-running --wait 2>/dev/null)
-      case $state in running|degraded) exit 0 ;; esac
-      echo "${state:-no state}"
+      end=$(( $(date +%%s) + %d ))
+      while left=$(( end - $(date +%%s) )); [ "$left" -gt 0 ]; do
+        state=$(timeout "$left" systemctl is-system-running --wait 2>/dev/null)
+        case $state in
+          running|degraded) exit 0 ;;
+          "") sleep 0.5 ;;
+          *) echo "$state"; exit 1 ;;
+        esac
+      done
+      state=$(systemctl is-system-running 2>/dev/null)
+      echo "${state:-not answering}"
       exit 1
       """
           .formatted(SETTLE_SECONDS);
