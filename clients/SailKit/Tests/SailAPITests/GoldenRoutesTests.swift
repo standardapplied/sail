@@ -42,6 +42,12 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "workspace-sessions-not-theirs": { _ = try await $0.send(.sessions(workspace: "dock", project: "harbor")) },
     "refusal-not-found-workspace": { _ = try await $0.send(.sessions(workspace: "gone", project: "harbor")) },
     "refusal-project-not-in-catalog-sessions": { _ = try await $0.send(.sessions(workspace: "dock", project: "harbor")) },
+    "workspace-agents": { _ = try await $0.send(.agents(workspace: "berth", project: "harbor")) },
+    "workspace-agents-stopped-no-login": { _ = try await $0.send(.agents(workspace: "quay", project: "harbor")) },
+    "workspace-agents-no-default": { _ = try await $0.send(.agents(workspace: "quay", project: "harbor")) },
+    "workspace-agents-not-yours": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
+    "workspace-agents-owner-gone": { _ = try await $0.send(.agents(workspace: "wreck", project: "harbor")) },
+    "refusal-forbidden-not-assignee-agents": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
     "attention": { _ = try await $0.send(.attention(conversation: "harbor-docks")) },
     "changes": { _ = try await $0.send(.changes(since: "golden.0.0")) },
     "board-specs": { _ = try await $0.send(.specs(SpecFilter(project: "harbor"))) },
@@ -145,6 +151,40 @@ func answer<Response>(
             ),
         ]))
         #expect(try sessions.decode(response(try Exchange("workspace-sessions-not-theirs"))) == RunnerSessions(sessions: []))
+    }
+
+    /// What can start in a workspace, each case as the server answers it: its owner signed in, with
+    /// a harness the project does not install refused; no login stored, then none the default, each
+    /// with the remedy as data and a start inside still offered; another person's, and one whose
+    /// person is gone, refused whole with nothing offered.
+    @Test func whatCanStartInAWorkspaceIsReadAsAnswered() throws {
+        func agents(_ name: String, _ workspace: String) throws -> WorkspaceAgents {
+            try Endpoint.agents(workspace: workspace, project: "harbor").decode(response(try Exchange(name)))
+        }
+        let owned = try agents("workspace-agents", "berth")
+        #expect(owned.owner == "dana" && owned.running && owned.refusal == nil)
+        let claude = try #require(owned.offered.first)
+        #expect(claude.login?.name == "work" && claude.login?.kind == "api-key")
+        #expect(claude.modeDefault == claude.modes.first?.mode)
+        #expect(claude.modes.count == 7 && claude.refusal == nil && claude.loginRefusal == nil && claude.inside)
+        #expect(claude.kinds.map(\.label) == ["long-lived token", "API key"])
+        let codex = try #require(owned.offered.last)
+        #expect(codex.refusal?.code == .known(.harnessNotInstalled) && !codex.inside && codex.login == nil)
+        #expect(codex.note?.hasPrefix("Sail starts Codex CLI in a workspace with full access") == true && codex.modes.count == 1)
+
+        let stopped = try agents("workspace-agents-stopped-no-login", "quay")
+        #expect(!stopped.running && stopped.refusal == nil)
+        let none = try #require(stopped.offered.first)
+        #expect(none.login == nil && none.inside && none.loginRefusal?.code == .known(.loginNotStored))
+        #expect(none.loginRefusal?.remedy.isEmpty == false)
+
+        let noDefault = try #require(try agents("workspace-agents-no-default", "quay").offered.first)
+        #expect(noDefault.loginRefusal?.message.hasSuffix("stored: home.") == true)
+
+        let theirs = try agents("workspace-agents-not-yours", "dock")
+        #expect(theirs.refusal?.code == .known(.notYourWorkspace) && theirs.offered.isEmpty && theirs.owner == "uday")
+        let gone = try agents("workspace-agents-owner-gone", "wreck")
+        #expect(gone.refusal?.code == .known(.ownerGone) && gone.offered.isEmpty && gone.owner == nil)
     }
 
     /// A running workspace, a stopped one and another person's, as the server lists them and as

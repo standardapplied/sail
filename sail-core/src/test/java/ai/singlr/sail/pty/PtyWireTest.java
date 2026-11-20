@@ -153,7 +153,7 @@ class PtyWireTest {
    */
   @Test
   void theHarnessASessionRunsSurvivesTheWire() throws Exception {
-    var agent = new PtyMessage.Agent("claude-code", "full", true);
+    var agent = new PtyMessage.Agent("claude-code", "bypassPermissions", true);
     var create = new PtyMessage.Create("s", List.of(), "/", "acme", "", 80, 24, "dock", agent);
     assertEquals(create, roundTrip(create));
     var shell = new PtyMessage.Create("s", List.of("bash"), "/", "acme", "", 80, 24, "dock");
@@ -162,7 +162,7 @@ class PtyWireTest {
         new PtyMessage.SessionInfo("s", "i", true, 1, "uday", "", List.of("claude"))
             .placed("acme", "dock", "uday")
             .lived(7, "")
-            .running(new PtyMessage.Agent("codex", "full", false));
+            .running(new PtyMessage.Agent("codex", "full-access", false));
     var plain = new PtyMessage.SessionInfo("t", "j", false, 0, "", "", List.of("bash", "-l"));
     assertEquals(info, roundTrip(info));
     assertEquals(

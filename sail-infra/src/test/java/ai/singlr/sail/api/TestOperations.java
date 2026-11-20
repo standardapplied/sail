@@ -369,6 +369,11 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public Result<AgentOffersResponse> workspaceAgents(String project, String name) {
+    return Result.failure(ErrorCode.NOT_FOUND, "no workspaces here");
+  }
+
+  @Override
   public Result<WorkspaceChangeResponse> stopWorkspace(String project, String name) {
     return Result.failure(ErrorCode.NOT_FOUND, "no workspaces here");
   }

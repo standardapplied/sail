@@ -1597,6 +1597,16 @@ public final class SailOperations implements HostOperations {
   }
 
   @Override
+  public Result<AgentOffersResponse> workspaceAgents(String project, String name) {
+    return safe(
+        () ->
+            WorkspaceDoors.answered(
+                () ->
+                    workspaceDoors()
+                        .agents(projects.definition(readable(project)), name, fdeStore)));
+  }
+
+  @Override
   public Result<WorkspaceChangeResponse> stopWorkspace(String project, String name) {
     return safe(
         () ->

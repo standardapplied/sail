@@ -116,10 +116,29 @@ final class Codex implements Harness {
             + " reservation guards that lane.");
   }
 
-  /** Only full: its sandbox needs user namespaces, which Incus containers block. */
+  /**
+   * Only full access, Codex's own name for its mode with no approvals and no sandbox: its sandbox,
+   * bubblewrap, cannot start in an Incus container (0.171: {@code bwrap: setting up uid map:
+   * Permission denied}, or with no network {@code bwrap: loopback: Failed RTM_NEWADDR}).
+   */
   @Override
-  public List<String> modes() {
-    return List.of(FULL_MODE);
+  public List<Mode> modes() {
+    return List.of(
+        new Mode(
+            "full-access",
+            "Full access",
+            "Runs every command without asking and outside Codex's sandbox.",
+            " --dangerously-bypass-approvals-and-sandbox"));
+  }
+
+  @Override
+  public Optional<String> modesNote() {
+    return Optional.of(
+        "Sail starts "
+            + displayName()
+            + " in a workspace with full access, running every command without asking and"
+            + " without its sandbox: that sandbox, bubblewrap, cannot start in a workspace's"
+            + " container.");
   }
 
   /**

@@ -100,6 +100,13 @@ public interface Operations extends LocalLaneOperations {
   /** Starts workspace {@code name} of {@code project}, the caller's or, for an admin, anyone's. */
   Result<WorkspaceChangeResponse> startWorkspace(String project, String name);
 
+  /**
+   * What can start in workspace {@code name} of {@code project} for the caller, who may enter it as
+   * {@link #startWorkspace} may: each harness, its modes and the login it starts signed in with, or
+   * why it does not start.
+   */
+  Result<AgentOffersResponse> workspaceAgents(String project, String name);
+
   /** Stops workspace {@code name} of {@code project}, as {@link #startWorkspace} may. */
   Result<WorkspaceChangeResponse> stopWorkspace(String project, String name);
 

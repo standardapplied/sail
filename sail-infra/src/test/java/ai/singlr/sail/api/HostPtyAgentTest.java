@@ -48,8 +48,9 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class HostPtyAgentTest {
 
-  private static final PtyMessage.Agent CLAUDE = new PtyMessage.Agent("claude-code", "full", false);
-  private static final PtyMessage.Agent CODEX = new PtyMessage.Agent("codex", "full", false);
+  private static final PtyMessage.Agent CLAUDE =
+      new PtyMessage.Agent("claude-code", "bypassPermissions", false);
+  private static final PtyMessage.Agent CODEX = new PtyMessage.Agent("codex", "full-access", false);
 
   @TempDir Path dir;
 
@@ -110,25 +111,78 @@ class HostPtyAgentTest {
             .onOk("incus list ^acme-spare$", "[" + workspace("acme", "spare", "bob", bobId) + "]")
             .onOk("incus list ^acme-loose$", "[" + workspace("acme", "loose", null, null) + "]")
             .onOk("incus list ^acme-old$", "[" + workspace("acme", "old", "ada", "fde_gone") + "]")
+            .onOk("incus list ^acme-gone$", "[" + workspace("acme", "gone", "zed", "fde_zed") + "]")
             .onOk("incus list ^harbor-pier$", "[" + workspace("harbor", "pier", "ada", adaId) + "]")
             .onOk("incus exec acme-dock", "");
-    lane =
-        new HostLanes.Pty(
-            db,
-            TestAuth.roles(db, new SyncConfig("main", null, "root", "box")),
-            null,
-            new BoxInstances(box),
-            TestWorkspaces.over(box),
-            project ->
-                Optional.of(
-                    TestDefinitions.yaml(
-                        "name: "
-                            + project
-                            + "\nagent:\n  type: claude-code\n  install: "
-                            + (project.equals("acme") ? "[claude-code, codex]" : "[claude-code]")
-                            + "\n")),
-            handle -> WorkspaceOwner.onThisBox(fdes, handle, "root"),
-            box);
+    lane = lane(new SyncConfig("main", null, "root", "box"));
+  }
+
+  /** The lane on a box {@code config} makes main or a node. */
+  private HostLanes.Pty lane(SyncConfig config) {
+    return new HostLanes.Pty(
+        db,
+        TestAuth.roles(db, config),
+        null,
+        new BoxInstances(box),
+        TestWorkspaces.over(box),
+        project ->
+            Optional.of(
+                TestDefinitions.yaml(
+                    "name: "
+                        + project
+                        + "\nagent:\n  type: claude-code\n  install: "
+                        + (project.equals("acme") ? "[claude-code, codex]" : "[claude-code]")
+                        + "\n")),
+        handle -> WorkspaceOwner.onThisBox(fdes, handle, "root"),
+        box);
+  }
+
+  private static final String GONE =
+      "gone is zed's workspace, and zed is no longer active here, so no agent starts in it; the"
+          + " next pass leaves it nobody's.";
+
+  /**
+   * A workspace whose person is no longer active here starts no agent, said as the route that
+   * offers agents says it, whoever asks: an admin, or a person who may enter it.
+   */
+  @Test
+  void aWorkspaceWhosePersonIsGoneStartsNoAgentSaidAsTheRouteSaysIt() {
+    for (var asker : List.of(root, ada)) {
+      var refused =
+          assertThrows(Remedied.Io.class, () -> lane.admitAgent("acme", "gone", CLAUDE, asker));
+
+      assertEquals(GONE, refused.reason());
+      assertEquals("owner_gone", refused.code(), "the app tells it apart by its code");
+      assertEquals(
+          List.of(
+              new Remedy.Command(
+                  Remedy.Runs.SAIL,
+                  "project workspace delete",
+                  List.of("acme", "gone", "--force"))),
+          refused.remedy().commands());
+    }
+  }
+
+  /**
+   * On a node, its own person keeps only a workspace no one is labelled for: one labelled for a
+   * person gone from it, or for another person of their handle, is never theirs to start an agent
+   * in.
+   */
+  @Test
+  void onANodeItsPersonStartsAnAgentOnlyInAWorkspaceNoOneElseIsLabelledFor() throws IOException {
+    var node = lane(new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "ada", "ada-box"));
+
+    var gone = assertThrows(Remedied.Io.class, () -> node.admitAgent("acme", "gone", CLAUDE, ada));
+    var old = assertThrows(Remedied.Io.class, () -> node.admitAgent("acme", "old", CLAUDE, ada));
+    var loose = node.admitAgent("acme", "loose", CLAUDE, ada).orElseThrow();
+
+    assertEquals(List.of("owner_gone", GONE), List.of(gone.code(), gone.reason()));
+    assertEquals(
+        List.of("not_your_workspace", "old is no one's workspace, so no agent starts in it."),
+        List.of(old.code(), old.reason()));
+    assertEquals(
+        fdes.logins().defaultFor(adaId, Harnesses.of("claude-code")).orElseThrow().row(),
+        loose.row());
   }
 
   @AfterEach
@@ -158,6 +212,7 @@ class HostPtyAgentTest {
       assertEquals(
           Remedy.of("Open a shell in it, or start the agent in a workspace of your own."),
           refused.remedy());
+      assertEquals("not_your_workspace", refused.code(), "the app tells it apart by its code");
     }
     assertEquals(
         "loose is no one's workspace, so no agent starts in it.",
@@ -188,6 +243,7 @@ class HostPtyAgentTest {
         Remedy.of(
             "An admin adds codex to harbor's agent install list and builds its template again."),
         refused.remedy());
+    assertEquals("harness_not_installed", refused.code(), "the app tells it apart by its code");
   }
 
   /** Scenarios 6 and 7: no login stored, or none the default, with the remedy as data. */
@@ -218,12 +274,13 @@ class HostPtyAgentTest {
   void anAgentThatSignsInInsideNeedsNoStoredLogin() throws IOException {
     assertEquals(
         Optional.empty(),
-        lane.admitAgent("acme", "spare", new PtyMessage.Agent("codex", "full", true), bob));
+        lane.admitAgent("acme", "spare", new PtyMessage.Agent("codex", "full-access", true), bob));
     var foreign =
         assertThrows(
             Remedied.Io.class,
             () ->
-                lane.admitAgent("acme", "dock", new PtyMessage.Agent("codex", "full", true), bob));
+                lane.admitAgent(
+                    "acme", "dock", new PtyMessage.Agent("codex", "full-access", true), bob));
     assertTrue(foreign.reason().startsWith("dock is ada's workspace"), foreign.reason());
   }
 

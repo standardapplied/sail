@@ -20,11 +20,13 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.TemplateBuild;
 import ai.singlr.sail.engine.TemplateBuildService;
 import ai.singlr.sail.engine.Workspaces;
+import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
+import ai.singlr.sail.store.LoginStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -2100,6 +2102,92 @@ record TemplateResponse(TemplateBuildService.Status status) implements Mappable 
               said.put("joined", status.joined());
               m.put("build", said);
             });
+    return m;
+  }
+}
+
+/**
+ * What can start in a workspace for the person asking ({@code GET
+ * .../workspaces/{workspace}/agents}): whose it is and whether it runs, and either why no agent
+ * starts in it ({@code refusal}, with nothing offered) or each harness Sail knows, offered as
+ * {@link AgentOffer} says.
+ */
+record AgentOffersResponse(
+    String project,
+    String workspace,
+    String owner,
+    boolean running,
+    ApiError refusal,
+    List<AgentOffer> offered)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("project", project);
+    m.put("workspace", workspace);
+    if (owner != null) {
+      m.put("owner", owner);
+    }
+    m.put("running", running);
+    if (refusal != null) {
+      m.put("refusal", refusal.toMap());
+    }
+    m.put("offered", offered.stream().map(AgentOffer::toMap).toList());
+    return m;
+  }
+}
+
+/**
+ * One harness as a workspace offers it: its modes, the first the one it starts in until a person
+ * chooses, and why there are no others ({@code note}); the login it starts signed in with, or why
+ * there is none ({@code loginRefusal}), and the kinds a person stores one of; whether it starts
+ * with the person signing in inside it ({@code inside}); and why it does not start at all ({@code
+ * refusal}).
+ */
+record AgentOffer(
+    Harness harness, LoginStore.Row login, ApiError loginRefusal, boolean inside, ApiError refusal)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("harness", harness.yamlName());
+    m.put("display", harness.displayName());
+    m.put(
+        "modes",
+        harness.modes().stream()
+            .map(
+                mode -> {
+                  var shown = new LinkedHashMap<String, Object>();
+                  shown.put("mode", mode.name());
+                  shown.put("label", mode.label());
+                  shown.put("about", mode.about());
+                  return shown;
+                })
+            .toList());
+    m.put("mode_default", harness.modes().getFirst().name());
+    harness.modesNote().ifPresent(note -> m.put("note", note));
+    if (login != null) {
+      m.put("login", Map.of("name", login.name(), "kind", login.kind()));
+    }
+    if (loginRefusal != null) {
+      m.put("login_refusal", loginRefusal.toMap());
+    }
+    m.put(
+        "kinds",
+        harness.loginKinds().stream()
+            .map(
+                kind -> {
+                  var shown = new LinkedHashMap<String, Object>();
+                  shown.put("kind", kind.kind());
+                  shown.put("label", kind.noun());
+                  shown.put("how", kind.howToMake().described());
+                  return shown;
+                })
+            .toList());
+    m.put("inside", inside);
+    if (refusal != null) {
+      m.put("refusal", refusal.toMap());
+    }
     return m;
   }
 }

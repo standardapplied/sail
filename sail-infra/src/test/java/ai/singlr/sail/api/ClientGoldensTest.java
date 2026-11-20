@@ -25,6 +25,7 @@ import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerConfig;
 import ai.singlr.sail.engine.HeldLocks;
@@ -414,6 +415,7 @@ class ClientGoldensTest {
           workspace("dock", "Running", "uday", box.idOf("uday")),
           workspace("new", "Running", "uday", box.idOf("uday")));
       box.record(http, "workspaces-made", "GET", workspaces, dana, null);
+      box.recordAgents(http, ana, dana);
       box.recordTemplates(
           http, dana, box.session("ike", "Ike", "ike@example.com", Role.ADMIN), ana, vik);
 
@@ -617,10 +619,10 @@ class ClientGoldensTest {
                 2,
                 "uday",
                 ROOM,
-                List.of("claude", "--dangerously-skip-permissions"))
+                List.of("claude", "--permission-mode", "bypassPermissions"))
             .placed(PROJECT, "dock", "uday")
             .lived(1_763_460_000_000L, "")
-            .running(new PtyMessage.Agent("claude-code", "full", false));
+            .running(new PtyMessage.Agent("claude-code", "bypassPermissions", false));
     var shell = new PtyMessage.SessionInfo("shell", "inst-2", false, 0, "", "", List.of("bash"));
     return List.of(
         new PtyMessage.Hello("tok-uday"),
@@ -634,7 +636,7 @@ class ClientGoldensTest {
             132,
             43,
             "dock",
-            new PtyMessage.Agent("codex", "full", true)),
+            new PtyMessage.Agent("codex", "full-access", true)),
         new PtyMessage.Attach("lounge", true, "pane-7f", false),
         new PtyMessage.Input(42, "ls -la\r".getBytes(StandardCharsets.UTF_8)),
         new PtyMessage.Resize(100, 30),
@@ -1404,6 +1406,53 @@ class ClientGoldensTest {
       } finally {
         Files.deleteIfExists(hostYaml);
       }
+    }
+
+    /**
+     * Records what can start in a workspace, each case the app draws: its owner signed in, with a
+     * harness the project does not install; a stopped one whose person stored no login, then logins
+     * but no default; an admin in another person's; one whose person is gone; and a member refused
+     * another person's. Harbor is defined with its agent installation only meanwhile, so no other
+     * answer changes.
+     */
+    void recordAgents(Map<String, String> goldens, String ana, String dana) throws Exception {
+      Acting.system(
+          () ->
+              new ProjectStore(db)
+                  .upsert(
+                      TestDefinitions.yaml(
+                          "name: harbor\nagent:\n  type: claude-code\n  install: [claude-code]\n")));
+      var claude = Harnesses.of("claude-code");
+      var logins = new FdeStore(db).logins();
+      logins.store(idOf("dana"), claude, "work", "api-key", "sk-ant-api03-golden-dana-work");
+      incus
+          .onOk(
+              "incus list ^harbor-berth$",
+              "[" + workspace("berth", "Running", "dana", idOf("dana")) + "]")
+          .onOk(
+              "incus list ^harbor-quay$",
+              "[" + workspace("quay", "Stopped", "ana", idOf("ana")) + "]")
+          .onOk(
+              "incus list ^harbor-wreck$",
+              "[" + workspace("wreck", "Stopped", "zed", "fde_zed") + "]");
+      var agents = "/v1/projects/" + PROJECT + "/workspaces/%s/agents";
+      record(goldens, "workspace-agents", "GET", agents.formatted("berth"), dana, null);
+      record(
+          goldens, "workspace-agents-stopped-no-login", "GET", agents.formatted("quay"), ana, null);
+      logins.store(idOf("ana"), claude, "work", "token", "sk-ant-oat01-golden-ana-work");
+      logins.store(idOf("ana"), claude, "home", "api-key", "sk-ant-api03-golden-ana-home");
+      logins.remove(idOf("ana"), claude, "work");
+      record(goldens, "workspace-agents-no-default", "GET", agents.formatted("quay"), ana, null);
+      record(goldens, "workspace-agents-not-yours", "GET", agents.formatted("dock"), dana, null);
+      record(goldens, "workspace-agents-owner-gone", "GET", agents.formatted("wreck"), dana, null);
+      record(
+          goldens,
+          "refusal-forbidden-not-assignee-agents",
+          "GET",
+          agents.formatted("dock"),
+          ana,
+          null);
+      Acting.system(() -> new ProjectStore(db).upsert(HARBOR));
     }
 
     private Path recordOf(String project) {

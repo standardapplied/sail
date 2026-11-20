@@ -580,7 +580,7 @@ class WorkspaceDoorsTest {
     var noId = refused(Actors.OWNER_API, () -> doors(handleOnly).start(ACME, "try"));
     var told =
         assertThrows(
-            IllegalStateException.class,
+            ApiException.class,
             () -> Actor.call(Actors.ADMIN, () -> doors(removed, gone, null).start(ACME, "try")));
     Actor.call(Actors.OWNER_API, () -> doors(hers).start(ACME, "try"));
 
@@ -590,10 +590,12 @@ class WorkspaceDoorsTest {
           "Workspace 'try' has no owner, so only an admin may enter it.", refusal.getMessage());
     }
     assertEquals(
-        "Workspace 'try' of acme is ada's, who is no longer active here, so it is not started: the"
-            + " next pass leaves it nobody's. Delete it meanwhile with: sail project workspace"
-            + " delete acme try --force.",
-        told.getMessage());
+        List.of(
+            "owner_gone",
+            "Workspace 'try' of acme is ada's, who is no longer active here, so it is not started:"
+                + " the next pass leaves it nobody's.",
+            "Delete it meanwhile with: sail project workspace delete acme try --force."),
+        List.of(told.code(), told.reason(), told.remedy().plain()));
     assertEquals(List.of(), changes(removed));
     assertEquals(List.of("start"), changes(hers));
   }
