@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SailKitTestSupport
 @testable import SailControls
 import SailLook
 import Testing
@@ -8,6 +9,10 @@ import Testing
 /// against swatches it composes the same way, each beside a wrong one; and their keys, menus and
 /// VoiceOver actions.
 @MainActor @Suite(.serialized) struct RowsTests {
+    init() {
+        ExitWatch.install()
+    }
+
     final class Counts {
         var opened = 0, copied = 0
         var chosen: [String?] = []

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SailKitTestSupport
 import SailLook
 import SailVT
 @testable import SailShell
@@ -12,6 +13,10 @@ import Testing
 /// graphite, so each colour is asserted, not only seen); every command in the menu with the
 /// table's key (W8); no pane's view added anywhere but its tab's view (W2, scenario 33).
 @MainActor @Suite struct WorkbenchLookTests {
+    init() {
+        ExitWatch.install()
+    }
+
     static func shell(_ look: Look) throws -> ShellApp {
         let folder = FileManager.default.temporaryDirectory.appending(path: "sail-tabs-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

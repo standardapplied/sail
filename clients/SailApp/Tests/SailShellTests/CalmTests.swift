@@ -12,6 +12,10 @@ import Testing
 /// ink, no area is filled grey at rest. The numbers are the approved pages': 4 marks on a plain
 /// Workspaces page, 3 on a terminal page with a split, and 0 pt² of neutral fill on either.
 @MainActor @Suite struct CalmTests {
+    init() {
+        ExitWatch.install()
+    }
+
     struct Count: Equatable, CustomStringConvertible {
         var fill = 0, line = 0, tint = 0, error = 0, inverse = 0
         var neutral = 0.0

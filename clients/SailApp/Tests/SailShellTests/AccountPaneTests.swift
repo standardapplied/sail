@@ -120,6 +120,10 @@ final class Held: Transport {
 /// for it to end, and is then shown unless who is signed in was set since the check began, said
 /// after what the action said.
 @MainActor @Suite struct AccountPaneTests {
+    init() {
+        ExitWatch.install()
+    }
+
     static let ticket = "enr_0123456789abcdef0123456789abcdef"
 
     static func pane(remembering fde: String, _ transport: Held, sheet: Gate? = nil) throws -> AccountPane {

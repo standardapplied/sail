@@ -12,6 +12,10 @@ import Testing
 /// words or buttons over each other, no wrapped words taller than their frame, and every button
 /// taking a click across its face, the actions shown only on hover or choice among them.
 @MainActor @Suite struct WorkspacesReachTests {
+    init() {
+        ExitWatch.install()
+    }
+
     /// The longest name and handle the server allows.
     static let long = String(repeating: "n", count: 63), handle = String(repeating: "k", count: 63)
 

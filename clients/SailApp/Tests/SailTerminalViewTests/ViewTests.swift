@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SailKitTestSupport
 import SailLook
 import SailRenderer
 import SailSurface
@@ -10,6 +11,10 @@ import Testing
 
 @MainActor
 @Suite(.serialized, .timeLimit(.minutes(1))) struct ViewTests {
+    init() {
+        ExitWatch.install()
+    }
+
     /// Scenario 7: Ctrl-C sends 0x03; a dead key composes (Option-e marks ´, e commits é) and sends
     /// é once; an arrow in a program's cursor mode sends the application arrow.
     @Test func controlADeadKeyAndAnApplicationArrowReachTheSessionAsTheirBytes() throws {
@@ -871,6 +876,10 @@ import Testing
 
 /// V2: the app parses and makes no escape sequence; the screen's encoders and libghostty-vt do.
 @Suite struct SweepTests {
+    init() {
+        ExitWatch.install()
+    }
+
     @Test func noAppSourceSpellsAnEscapeSequence() throws {
         let sources = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appending(path: "Sources")
@@ -896,6 +905,10 @@ import Testing
 /// start (well under a second).
 @MainActor
 @Suite(.serialized) struct SharedPoolTests {
+    init() {
+        ExitWatch.install()
+    }
+
     /// A change of the screen, told on the session's thread, reaches the queue that draws while
     /// Swift's shared pool is held at every priority: nothing between the change and that queue
     /// needs one of its threads. The wake's queue is a private one here, and the test waits for it

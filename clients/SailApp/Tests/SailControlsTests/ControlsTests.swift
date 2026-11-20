@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SailKitTestSupport
 @testable import SailControls
 import SailLook
 import Testing
@@ -8,6 +9,10 @@ import Testing
 /// fills, edges on pixel boundaries, the halo outside the box, the field's caret and selection,
 /// the pills' dots; and how each behaves: in flight, focus, VoiceOver, Reduce Motion.
 @MainActor @Suite(.serialized) struct ControlsTests {
+    init() {
+        ExitWatch.install()
+    }
+
     static let fonts = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appending(path: "Fonts")
 

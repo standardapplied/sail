@@ -13,6 +13,10 @@ import Testing
 /// work it, what each item does, Appearance remembered and taken, what VoiceOver hears, and that it
 /// adds no accent and no grey to the window it opens over.
 @MainActor @Suite struct UserMenuTests {
+    init() {
+        ExitWatch.install()
+    }
+
     static let uday = UserMenuContent.signedIn(
         handle: "uday", address: "main.acme.dev", whoami: Whoami(fde: "uday", displayName: "Uday Chandra", role: .known(.admin), capabilities: []),
         unreachable: false, refreshing: false
@@ -293,7 +297,8 @@ import Testing
 
     /// The pointer and the keys are told apart by how the button was pressed, not by the app's last
     /// event: a click opens it with nothing highlighted, the keys or VoiceOver (a press with no click)
-    /// with the first item, whatever was clicked before.
+    /// with the first item, whatever was clicked before. VoiceOver's press and Show Menu on the
+    /// menu-button-role button open our menu and show no other window.
     @Test func howTheButtonWasPressedDecides() throws {
         let shell = try Self.shell()
         defer { shell.window.orderOut(nil) }
@@ -303,7 +308,12 @@ import Testing
         button.mouseDown(with: try Self.mouse(.leftMouseDown, at: middle, in: button))
         #expect(shell.userMenu.isOpen && Self.highlighted(view) == "nothing", "a click highlighted \(Self.highlighted(view))")
         shell.userMenu.close()
+        let shown = Set(NSApp.windows.filter(\.isVisible).map(\.windowNumber))
         #expect(button.accessibilityPerformPress() && shell.userMenu.isOpen && Self.highlighted(view) != "nothing", "VoiceOver's press highlighted nothing")
+        let opened = Set(NSApp.windows.filter(\.isVisible).map(\.windowNumber)).subtracting(shown)
+        #expect(opened == [shell.userMenu.panel.windowNumber], "VoiceOver's press showed windows \(opened), not only the menu's \(shell.userMenu.panel.windowNumber)")
+        shell.userMenu.close()
+        #expect(button.accessibilityPerformShowMenu() && shell.userMenu.isOpen && Self.highlighted(view) != "nothing", "VoiceOver's Show Menu did not open the menu")
         shell.userMenu.close()
     }
 

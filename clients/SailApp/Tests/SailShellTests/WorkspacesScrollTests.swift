@@ -9,6 +9,10 @@ import Testing
 /// The list and the left panel scroll with the quiet scroller while their heads and feet stay put;
 /// the panel's foot and loading head as the frames draw them; and the words that must fit, fit.
 @MainActor @Suite struct WorkspacesScrollTests {
+    init() {
+        ExitWatch.install()
+    }
+
     static func rows(_ count: Int) throws -> Exchange {
         try WorkspacesReachTests.list((1 ... count).map { ["name": String(format: "ws-%02d", $0), "instance": String(format: "harbor-ws-%02d", $0), "state": "running", "owner": "uday"] })
     }

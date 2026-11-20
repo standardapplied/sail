@@ -11,6 +11,10 @@ import Testing
 /// Cancel; and the section asks with the person's terminals counted, then, refused for the work it
 /// holds, asks Delete Anyway in the server's words.
 @MainActor @Suite struct WorkspacesSheetTests {
+    init() {
+        ExitWatch.install()
+    }
+
     static let questions: [(title: String, body: String, confirm: String, kind: ButtonKind)] = [
         ("Stop dock?", "Your 2 terminals in it end. Its files stay, and Start and Open brings it back.", "Stop", .destructiveQuiet),
         ("Delete exp-ui?", "Its files on the runner go with it, and any terminal open in it ends. Commits you pushed are kept by the repo host.", "Delete Workspace", .destructive),

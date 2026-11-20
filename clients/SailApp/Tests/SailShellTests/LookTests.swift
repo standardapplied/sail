@@ -4,6 +4,7 @@ import AppKit
 import SailControls
 import CoreText
 import SailControls
+import SailKitTestSupport
 import SailLook
 @testable import SailShell
 import SailTestPasskey
@@ -15,6 +16,10 @@ import Testing
 /// text on the accent fill, white in the light appearance, is large text and 3:1 or better; no
 /// source of the app names the system's accent; and the window's chrome is the look's.
 @Suite struct LookTests {
+    init() {
+        ExitWatch.install()
+    }
+
     static func luminance(_ rgb: RGB) -> Double {
         func channel(_ value: UInt8) -> Double {
             let linear = Double(value) / 255

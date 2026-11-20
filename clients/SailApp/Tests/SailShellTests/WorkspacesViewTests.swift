@@ -9,6 +9,10 @@ import Testing
 /// The Workspaces section drawn from the server's recorded answers: the left panel and a project's
 /// list, what a refresh holds (nothing), and the panel hidden under a narrow card.
 @MainActor @Suite struct WorkspacesViewTests {
+    init() {
+        ExitWatch.install()
+    }
+
     static let uday = WorkspacesModel.Person(handle: "uday", admin: true, confirmed: true, controlPlane: "127.0.0.1")
     static let ana = WorkspacesModel.Person(handle: "ana", admin: false, confirmed: true, controlPlane: "127.0.0.1")
 
