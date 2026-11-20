@@ -442,6 +442,40 @@ allowed() {
   on "$run" "$box" "$*"
 }
 
+# N1 on client's node: a workspace labelled for another person of client's handle (as if the handle
+# were given anew) and one labelled for a person the node does not hold are client's for no door
+# while they stay labelled. Their labels are written as a re-grant and a removal leave them, while
+# sail-api, whose pass would take them back, is held; once it runs again its pass leaves them
+# nobody's, and client then deletes them.
+node_never_borrows() {
+  local run=$1 name
+  check "$run" "on client's node, two workspaces of client's are made and stopped" \
+    on "$run" client "for w in fleet-reused fleet-gone; do sudo sail project workspace create acme \$w > /dev/null && sudo sail project workspace stop acme \$w > /dev/null || exit 1; done"
+  check "$run" "sail-api, whose pass takes such a workspace back, is held on client" \
+    on "$run" client "sudo systemctl stop sail-api"
+  check "$run" "one is labelled for another person of client's handle, one for a person the node does not hold" \
+    on "$run" client "sudo incus config set acme-fleet-reused user.sail.owner_id fde_another_client && sudo incus config set acme-fleet-gone user.sail.owner zed user.sail.owner_id fde_zed"
+  for name in reused gone; do
+    local says
+    [[ $name == reused ]] && says="is labelled for a person this box does not know as client" || says="is zed's workspace, and zed is no longer active here"
+    check "$run" "client is refused a shell in fleet-$name, saying why" \
+      refused "$run" client "$says, so no terminal opens in it" "sudo sail project workspace shell acme fleet-$name < /dev/null"
+    check "$run" "client is refused a start of fleet-$name" \
+      refused "$run" client "$says, so it is not started" "sudo sail project workspace start acme fleet-$name"
+    check "$run" "client is refused a stop of fleet-$name" \
+      refused "$run" client "$says, so it is not stopped" "sudo sail project workspace stop acme fleet-$name"
+    check "$run" "client is refused a delete of fleet-$name, with force too" \
+      refused "$run" client "$says, so it is not deleted" "sudo sail project workspace delete acme fleet-$name --force --yes"
+  done
+  check "$run" "neither was started or deleted" \
+    on "$run" client "[ \"\$(sudo incus list '^acme-fleet-(reused|gone)\$' -c s -f csv | sort | uniq)\" = STOPPED ]"
+  check "$run" "sail-api runs on client again" on "$run" client "sudo systemctl start sail-api"
+  check "$run" "client's pass leaves both nobody's" \
+    until_true 240 10 on "$run" client "[ -z \"\$(sudo incus config get acme-fleet-reused user.sail.owner)\$(sudo incus config get acme-fleet-gone user.sail.owner)\" ]"
+  check "$run" "client deletes both now they are no one's" \
+    allowed "$run" client "sudo sail project workspace delete acme fleet-reused --force --yes && sudo sail project workspace delete acme fleet-gone --force --yes"
+}
+
 refused() {
   local run=$1 box=$2 because=$3 out
   shift 3
@@ -1860,6 +1894,7 @@ storage() {
     workspace_on "$run" client
   check "$run" "the workspace commits as client's person" \
     commits_as "$run" client acme-fleet-w client@fleet.example
+  node_never_borrows "$run"
   check "$run" "on client's node, eng is refused a workspace of her own, told hers live on main" \
     http_token_door "$run" client eng member 403 POST /v1/projects/acme/workspaces '{"name":"eng-node"}' "workspaces live on main"
   check "$run" "main, the runner several people share, adds a ZFS pool in a 10 GiB file" \

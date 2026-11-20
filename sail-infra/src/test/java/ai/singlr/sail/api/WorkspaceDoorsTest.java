@@ -592,8 +592,8 @@ class WorkspaceDoorsTest {
     assertEquals(
         List.of(
             "owner_gone",
-            "Workspace 'try' of acme is ada's, who is no longer active here, so it is not started:"
-                + " the next pass leaves it nobody's.",
+            "try is ada's workspace, and ada is no longer active here, so it is not started; the"
+                + " next pass leaves it nobody's.",
             "Delete it meanwhile with: sail project workspace delete acme try --force."),
         List.of(told.code(), told.reason(), told.remedy().plain()));
     assertEquals(List.of(), changes(removed));
@@ -640,6 +640,166 @@ class WorkspaceDoorsTest {
           "Workspace 'try' has no owner, so only an admin may enter it.", mainRefuses.getMessage());
       assertEquals(Optional.of("client"), node.nodeFde());
     }
+  }
+
+  /**
+   * N1: on a node, its own person acts on a workspace labelled for them by id, or for no one, and
+   * on no other: one labelled for another person of their handle, or for a person gone from the
+   * node, is refused to every door, start, stop, delete and delete with force alike, before Incus
+   * is asked to change it, each with its code and in words for its act. On main an admin still
+   * stops and deletes a gone person's workspace.
+   */
+  @Test
+  void onANodeItsPersonActsOnlyOnAWorkspaceLabelledForThemByIdOrForNoOne() throws Exception {
+    Function<String, WorkspaceOwner> roster =
+        handle -> {
+          if (handle.equals("zed")) {
+            throw new IllegalStateException("zed is not on this box's roster.");
+          }
+          return TestOwners.of(handle);
+        };
+    var client = new Actor("client", Role.MEMBER, Actor.Lane.API);
+    var reused = trying("Stopped", "client").replace("fde_client", "fde_old_client");
+    var gone = trying("Stopped", "zed");
+    var said = new ArrayList<String>();
+    for (var label : List.of(reused, gone)) {
+      for (var act : List.of("start", "stop", "delete", "force")) {
+        var box = box(label);
+        var doors = doors(box, roster, "client");
+        Door door =
+            switch (act) {
+              case "start" -> () -> doors.start(ACME, "try");
+              case "stop" -> () -> doors.stop("acme", "try", spec -> false);
+              case "delete" ->
+                  () -> doors.delete(ACME, "try", spec -> false, false, FORCED, found -> {});
+              default -> () -> doors.delete(ACME, "try", spec -> false, true, FORCED, found -> {});
+            };
+        var refused = refused(client, door);
+        said.add(act + " " + refused.code() + ": " + refused.reason());
+        assertEquals(List.of(), changes(box), act);
+        assertTrue(refused.remedy().commands().isEmpty(), "no delete is offered on a node");
+      }
+    }
+    var mine = box(trying("Stopped", "client"));
+    var loose = box(workspace("Stopped", ""));
+    Actor.call(client, () -> doors(mine, roster, "client").start(ACME, "try"));
+    Actor.call(client, () -> doors(loose, roster, "client").start(ACME, "try"));
+    var onMain = box(trying("Running", "zed"));
+    Actor.call(Actors.ADMIN, () -> doors(onMain, roster, null).stop("acme", "try", spec -> false));
+
+    var reusedSaid = "try is labelled for a person this box does not know as client, so it is not ";
+    var goneSaid = "try is zed's workspace, and zed is no longer active here, so it is not ";
+    var pass = "; the next pass leaves it nobody's.";
+    assertEquals(
+        List.of(
+            "start not_your_workspace: " + reusedSaid + "started" + pass,
+            "stop not_your_workspace: " + reusedSaid + "stopped" + pass,
+            "delete not_your_workspace: " + reusedSaid + "deleted" + pass,
+            "force not_your_workspace: " + reusedSaid + "deleted" + pass,
+            "start owner_gone: " + goneSaid + "started" + pass,
+            "stop owner_gone: " + goneSaid + "stopped" + pass,
+            "delete owner_gone: " + goneSaid + "deleted" + pass,
+            "force owner_gone: " + goneSaid + "deleted" + pass),
+        said);
+    assertEquals(List.of("start"), changes(mine));
+    assertEquals(List.of("start"), changes(loose));
+    assertEquals(List.of("stop"), changes(onMain));
+  }
+
+  /**
+   * #500's wording ruling: Access never takes a workspace whose label does not resolve for the
+   * node's person's. Another member on the node is refused it in N1's words, what it is and why no
+   * one acts on it, never as the node's person's; one no one is labelled for is still the node's
+   * person's to keep, and so said.
+   */
+  @Test
+  void anotherMemberOnANodeIsRefusedAWorkspaceLabelledForAnotherInItsOwnWordsNotAsTheNodesPersons()
+      throws Exception {
+    Function<String, WorkspaceOwner> roster =
+        handle -> {
+          if (handle.equals("zed")) {
+            throw new IllegalStateException("zed is not on this box's roster.");
+          }
+          return TestOwners.of(handle);
+        };
+    var bob = new Actor("bob", Role.MEMBER, Actor.Lane.API);
+    var said = new ArrayList<String>();
+    for (var label :
+        List.of(
+            trying("Stopped", "client").replace("fde_client", "fde_old_client"),
+            trying("Stopped", "zed"),
+            workspace("Stopped", ""))) {
+      var box = box(label);
+      var refused =
+          refused(bob, () -> doors(box, roster, "client").stop("acme", "try", spec -> false));
+      said.add(refused.code() + ": " + refused.reason());
+      assertEquals(List.of(), changes(box));
+    }
+
+    assertEquals(
+        List.of(
+            "not_your_workspace: try is labelled for a person this box does not know as client,"
+                + " so it is not stopped; the next pass leaves it nobody's.",
+            "owner_gone: try is zed's workspace, and zed is no longer active here, so it is not"
+                + " stopped; the next pass leaves it nobody's.",
+            "forbidden_not_assignee: Workspace 'try' belongs to 'client', not you."),
+        said);
+  }
+
+  /**
+   * #500's M1 and nit 1: a refusal tells the truth about the pass. Once a strip of the workspace
+   * has failed, it says so, why (the strip's own last error, as its label stores it), and when the
+   * pass tries next, never that the next pass leaves it nobody's; a label with no id names the
+   * person the box does know as missing the id that says which, not as a person it does not know.
+   */
+  @Test
+  void aRefusalSaysWhyThePassHasNotReachedItAndWhenItTriesNextAndALabelWithNoIdSaysSo()
+      throws Exception {
+    Function<String, WorkspaceOwner> roster =
+        handle -> {
+          if (handle.equals("zed")) {
+            throw new IllegalStateException("zed is not on this box's roster.");
+          }
+          return TestOwners.of(handle);
+        };
+    var client = new Actor("client", Role.MEMBER, Actor.Lane.API);
+    var failing =
+        ", \"user.sail.unreached\": \"2026-11-20T21:00:00.000Z Error: Failed to start device"
+            + " \\\"eth0\\\": Device does not exist\"";
+    var reused =
+        workspace(
+            "Stopped",
+            ", \"user.sail.owner\": \"client\", \"user.sail.owner_id\": \"fde_old_client\""
+                + failing);
+    var gone =
+        workspace(
+            "Stopped",
+            ", \"user.sail.owner\": \"zed\", \"user.sail.owner_id\": \"fde_zed\"" + failing);
+    var noId = workspace("Stopped", ", \"user.sail.owner\": \"client\"");
+
+    var said = new ArrayList<String>();
+    for (var label : List.of(reused, gone, noId)) {
+      var box = box(label);
+      var refused =
+          refused(client, () -> doors(box, roster, "client").stop("acme", "try", spec -> false));
+      said.add(refused.code() + ": " + refused.reason());
+      assertEquals(List.of(), changes(box));
+    }
+
+    var notYet =
+        "; the box's pass has not been able to leave it nobody's (Error: Failed to start device"
+            + " \"eth0\": Device does not exist) and tries again at 2026-11-20T21:00:00.000Z.";
+    assertEquals(
+        List.of(
+            "not_your_workspace: try is labelled for a person this box does not know as client,"
+                + " so it is not stopped"
+                + notYet,
+            "owner_gone: try is zed's workspace, and zed is no longer active here, so it is not"
+                + " stopped"
+                + notYet,
+            "not_your_workspace: try is labelled for client without the id that says which"
+                + " client, so it is not stopped; the next pass leaves it nobody's."),
+        said);
   }
 
   /**

@@ -11,6 +11,7 @@ import ai.singlr.sail.api.LiveMembers;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.RunReservation;
 import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.WorkspaceDoors;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
@@ -419,7 +420,8 @@ public final class AgentAttachCommand implements Runnable {
           place,
           Workspaces.onThisBox(new ShellExecutor(false)),
           operations.catalog().definitions()::require,
-          operations.identity()::workspaceOwner);
+          operations.identity()::workspaceOwner,
+          WorkspaceVerbs.keeper());
     }
 
     if (member) {
@@ -588,15 +590,34 @@ public final class AgentAttachCommand implements Runnable {
   /**
    * Puts {@code place} within an attach's reach: a spec's workspace through its own door ({@link
    * Workspaces#startExisting}), started when stopped and given its owner's credentials; any other
-   * place must be running.
+   * place must be running. On a node ({@code keeper}, its person; null on main), a spec's workspace
+   * labelled for a person the node does not hold by id is refused first, running or stopped (N1):
+   * no terminal opens on that person's credentials, and only the box's pass strips it.
    */
   static void reach(
       RunPlace place,
       Workspaces workspaces,
       Function<String, ProjectDefinition> definitions,
-      Function<String, WorkspaceOwner> owners)
+      Function<String, WorkspaceOwner> owners,
+      String keeper)
       throws Exception {
     if (place instanceof RunPlace.SpecWorkspace workspace) {
+      if (keeper != null) {
+        var found = workspaces.find(workspace.project(), workspace.workspace());
+        if (found.isPresent()) {
+          var refused =
+              WorkspaceDoors.labelledForAnother(
+                  workspace.project(),
+                  workspace.workspace(),
+                  found.get(),
+                  owners,
+                  WorkspaceDoors.TERMINAL,
+                  true);
+          if (refused.isPresent()) {
+            throw new IllegalStateException(refused.get().getMessage());
+          }
+        }
+      }
       workspaces.startExisting(workspace, definitions.apply(workspace.project()), owners);
       return;
     }
