@@ -41,33 +41,6 @@ final class AgentStarts {
   }
 
   /**
-   * Why no agent starts in workspace {@code workspace} of {@code project}, {@code found}, whose
-   * labelled person is no longer active here: empty when they are, or when no one is labelled.
-   */
-  static Optional<ApiException> goneOwner(
-      String project,
-      String workspace,
-      BoxInstances.Instance found,
-      Function<String, WorkspaceOwner> owners) {
-    return Workspaces.goneOwner(found, owners)
-        .map(
-            gone ->
-                new ApiException(
-                    ErrorCode.OWNER_GONE,
-                    workspace
-                        + " is "
-                        + gone
-                        + "'s workspace, and "
-                        + gone
-                        + " is no longer active here, so no agent starts in it; the next pass"
-                        + " leaves it nobody's.",
-                    Remedy.of(
-                        "Delete it meanwhile with: ",
-                        Remedy.sail("project workspace delete", project, workspace, "--force"),
-                        ".")));
-  }
-
-  /**
    * Why an agent does not start in workspace {@code workspace}, {@code person}'s (null for no
    * one's), for {@code asker}: empty when it is the asker's own.
    */

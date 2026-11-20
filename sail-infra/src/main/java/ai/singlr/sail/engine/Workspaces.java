@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -917,7 +918,8 @@ public final class Workspaces {
                 instance,
                 List.of(
                     BoxInstances.OWNER_KEY + "=" + handle,
-                    BoxInstances.OWNER_ID_KEY + "=" + Objects.requireNonNullElse(id, "")));
+                    BoxInstances.OWNER_ID_KEY + "=" + Objects.requireNonNullElse(id, ""),
+                    BoxInstances.UNREACHED_KEY + "="));
     if (!owned.ok()) {
       throw new IOException(
           "Workspace "
@@ -1003,9 +1005,11 @@ public final class Workspaces {
    * nobody's, when {@code due} says of its name that it is time to try. It is read again under its
    * lock first, and left as it is when it now has an owner {@code held} holds, or none. Clears the
    * owner too, so a person later given the handle is re-given theirs at their next entry. Answers
-   * those not reached.
+   * those not reached, each with why and when {@code retry} says of its name it is tried again
+   * written on it ({@link Unreached}), so its doors say the truth meanwhile.
    */
-  public List<String> disown(BiPredicate<String, String> held, Predicate<String> due)
+  public List<String> disown(
+      BiPredicate<String, String> held, Predicate<String> due, Function<String, Instant> retry)
       throws IOException, InterruptedException, TimeoutException {
     var unreached = new ArrayList<String>();
     for (var listed : box.all()) {
@@ -1019,24 +1023,93 @@ public final class Workspaces {
         if (now.isEmpty() || heldOrNobodys(now.get(), held)) {
           continue;
         }
-        var instance = now.get();
-        var stopped = !(instance.state() instanceof ContainerState.Running);
-        if (stopped) {
-          containers.start(instance.name());
-        }
         try {
-          WorkspaceCredentials.strip(shell, instance.name());
-        } finally {
-          if (stopped) {
-            containers.stop(instance.name());
+          disownOne(now.get());
+        } catch (IOException | TimeoutException failure) {
+          try {
+            sayUnreached(
+                listed.name(),
+                new Unreached(retry.apply(listed.name()), Remedied.reasonOf(failure)));
+          } catch (IOException | TimeoutException unsaid) {
+            failure.addSuppressed(unsaid);
           }
+          throw failure;
         }
-        label(instance.name(), "");
       } catch (IOException | TimeoutException failure) {
         unreached.add(listed.name() + ": " + Remedied.reasonOf(failure).strip());
       }
     }
     return List.copyOf(unreached);
+  }
+
+  /**
+   * Takes the credentials out of {@code instance}, started for it when stopped, and unlabels it.
+   */
+  private void disownOne(BoxInstances.Instance instance)
+      throws IOException, InterruptedException, TimeoutException {
+    var stopped = !(instance.state() instanceof ContainerState.Running);
+    if (stopped) {
+      containers.start(instance.name());
+    }
+    try {
+      WorkspaceCredentials.strip(shell, instance.name());
+    } finally {
+      if (stopped) {
+        containers.stop(instance.name());
+      }
+    }
+    label(instance.name(), "");
+  }
+
+  /** Writes on {@code instance} why the pass did not reach it and when it tries again. */
+  private void sayUnreached(String instance, Unreached unreached)
+      throws IOException, InterruptedException, TimeoutException {
+    var said =
+        new ContainerConfig(shell, locks)
+            .set(instance, List.of(BoxInstances.UNREACHED_KEY + "=" + unreached.label()));
+    if (!said.ok()) {
+      throw new IOException(
+          "Workspace " + instance + " was not told why it is not reached: " + said.reason());
+    }
+  }
+
+  /**
+   * Why the box's pass could not leave a workspace nobody's, the strip's own last error on one line
+   * and at most {@link #REASON_MAX} characters, and when it tries again: what {@link
+   * BoxInstances#UNREACHED_KEY} stores. The strip is handed no token, so its error holds none.
+   */
+  public record Unreached(Instant retry, String reason) {
+
+    static final int REASON_MAX = 200;
+
+    public Unreached {
+      reason = reason.replaceAll("\\s+", " ").strip();
+      reason = reason.length() <= REASON_MAX ? reason : reason.substring(0, REASON_MAX) + "…";
+    }
+
+    String label() {
+      return DateTimeUtils.format(retry) + " " + reason;
+    }
+
+    /**
+     * What {@code found}'s label says of the pass's last try, if it failed; nothing it cannot read.
+     */
+    public static Optional<Unreached> of(BoxInstances.Instance found) {
+      return found
+          .key(BoxInstances.UNREACHED_KEY)
+          .flatMap(
+              said -> {
+                var space = said.indexOf(' ');
+                try {
+                  return Optional.of(
+                      new Unreached(
+                          DateTimeUtils.parse(space < 0 ? said : said.substring(0, space)),
+                          space < 0 ? "" : said.substring(space + 1)));
+                } catch (DateTimeParseException unreadable) {
+                  return Optional.empty();
+                }
+              });
+    }
   }
 
   /** Whether {@code instance}'s labelled owner is one {@code held} holds, or it has none. */

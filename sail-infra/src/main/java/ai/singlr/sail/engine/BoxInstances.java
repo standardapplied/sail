@@ -63,6 +63,12 @@ public final class BoxInstances {
   public static final String OWNER_ID_KEY = "user.sail.owner_id";
 
   /**
+   * Why the box's pass could not leave a workspace labelled for a person it does not hold nobody's,
+   * and when it tries again ({@link Workspaces.Unreached}); cleared by every write of its label.
+   */
+  public static final String UNREACHED_KEY = "user.sail.unreached";
+
+  /**
    * Why a spec's workspace is kept though its spec is done: what deleting it would lose. Written by
    * the sweep that keeps it ({@code SpecWorkspaces}) once it has said so in the spec's room; the
    * sweep never starts, reads or deletes a workspace carrying it again. A run of the spec entering

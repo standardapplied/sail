@@ -44,6 +44,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
@@ -692,17 +694,79 @@ class AgentAttachCommandTest {
             .onOk("incus list --format json", "[]");
 
     AgentAttachCommand.reach(
-        place, TestWorkspaces.over(stopped), TestDefinitions::named, TestOwners::of);
+        place, TestWorkspaces.over(stopped), TestDefinitions::named, TestOwners::of, null);
     var refused =
         assertThrows(
             IllegalStateException.class,
             () ->
                 AgentAttachCommand.reach(
-                    place, TestWorkspaces.over(gone), TestDefinitions::named, TestOwners::of));
+                    place,
+                    TestWorkspaces.over(gone),
+                    TestDefinitions::named,
+                    TestOwners::of,
+                    null));
 
     assertTrue(
         stopped.invocations().contains("incus start acme-u2"), stopped.invocations().toString());
     assertTrue(refused.getMessage().endsWith("sail spec dispatch -p acme --spec u2 --restart"));
     assertTrue(gone.invocations().stream().noneMatch(c -> c.startsWith("incus start")));
+  }
+
+  /**
+   * #500's m1: on a node, an attach of a spec's workspace labelled for another person of the node's
+   * handle (an old id) is refused in the door's words: running, no raw terminal opens on that
+   * person's credentials; stopped, it is neither started nor stripped, which is the pass's job. One
+   * of the node's person by id is reached.
+   */
+  @Test
+  void onANodeAnAttachIsRefusedASpecsWorkspaceLabelledForAnotherPersonOfItsHandle()
+      throws Exception {
+    var place = RunPlace.of("acme", "u2");
+    var said = new ArrayList<String>();
+    for (var state : List.of("Running", "Stopped")) {
+      var listed =
+          "["
+              + TestWorkspaces.specWorkspace("acme", "u2", state, "uday")
+                  .replace("fde_uday", "fde_old_uday")
+              + "]";
+      var box =
+          new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+              .onOk("incus list ^acme-u2$", listed)
+              .onOk("incus list --format json", listed);
+      var refused =
+          assertThrows(
+              IllegalStateException.class,
+              () ->
+                  AgentAttachCommand.reach(
+                      place,
+                      TestWorkspaces.over(box),
+                      TestDefinitions::named,
+                      TestOwners::of,
+                      "uday"));
+      said.add(refused.getMessage());
+      assertTrue(
+          box.invocations().stream().allMatch(c -> c.startsWith("incus list")),
+          box.invocations().toString());
+    }
+    var mine =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk(
+                "incus list ^acme-u2$",
+                "[" + TestWorkspaces.specWorkspace("acme", "u2", "Running", "uday") + "]")
+            .onOk(
+                "incus list --format json",
+                "[" + TestWorkspaces.specWorkspace("acme", "u2", "Running", "uday") + "]");
+
+    AgentAttachCommand.reach(
+        place, TestWorkspaces.over(mine), TestDefinitions::named, TestOwners::of, "uday");
+
+    var workspace = ((RunPlace.SpecWorkspace) place).workspace();
+    assertEquals(
+        Collections.nCopies(
+            2,
+            workspace
+                + " is labelled for a person this box does not know as uday, so no terminal opens"
+                + " in it; the next pass leaves it nobody's."),
+        said);
   }
 }

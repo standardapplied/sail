@@ -1078,7 +1078,11 @@ class WorkspaceIT extends AbstractIncusIT {
         instances.named(running.instance()).orElseThrow().key(BoxInstances.OWNER_ID_KEY));
 
     assertEquals(
-        List.of(), workspaces.disown((handle, id) -> !"fde_old_tmp".equals(id), instance -> true));
+        List.of(),
+        workspaces.disown(
+            (handle, id) -> !"fde_old_tmp".equals(id),
+            instance -> true,
+            instance -> Instant.EPOCH));
 
     for (var made : List.of(running, stopped)) {
       var found = instances.named(made.instance()).orElseThrow();
@@ -1132,7 +1136,9 @@ class WorkspaceIT extends AbstractIncusIT {
             List.of("incus", "config", "set", instance, BoxInstances.KEPT_KEY + "=app holds work"));
     assertTrue(kept.ok(), kept.reason());
     assertEquals(
-        List.of(), workspaces.disown((handle, id) -> !"fde_old_tmp".equals(id), name -> true));
+        List.of(),
+        workspaces.disown(
+            (handle, id) -> !"fde_old_tmp".equals(id), name -> true, name -> Instant.EPOCH));
     var ana =
         new WorkspaceOwner(
             "ana",
