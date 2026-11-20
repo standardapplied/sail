@@ -418,14 +418,6 @@ public final class AccountPane: NSView, NSMenuItemValidation, NSTextFieldDelegat
         if notification.object as AnyObject? === ticket { ticketFrame.failed = false }
     }
 
-    /// The wrapping lines take the width they are given, so they are as tall as their words.
-    override public func layout() {
-        super.layout()
-        for label in [until, said] where label.frame.width > 0 && label.preferredMaxLayoutWidth != label.frame.width {
-            label.preferredMaxLayoutWidth = label.frame.width
-            needsLayout = true
-        }
-    }
 
     /// `view` in the column, straight after `anchor`.
     private func place(_ view: NSView, under anchor: NSView) {
@@ -498,6 +490,7 @@ public final class AccountPane: NSView, NSMenuItemValidation, NSTextFieldDelegat
             column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Look.Space.x3l),
             column.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Look.Space.x3l),
             said.widthAnchor.constraint(lessThanOrEqualToConstant: 560),
+            until.widthAnchor.constraint(lessThanOrEqualToConstant: 380),
         ])
         // 380 pt where the pane has room, narrower at the window's least frame.
         for view in [addressFrame, ticketFrame, planeRow] as [NSView] {
