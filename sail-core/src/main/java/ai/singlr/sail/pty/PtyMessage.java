@@ -173,10 +173,22 @@ public sealed interface PtyMessage {
     }
   }
 
-  /** What a {@link Ticket} lets its holder do: open a session in a project, or attach to one. */
+  /**
+   * Ends every live session in workspace {@code workspace} of {@code project}, each as a {@link
+   * Yield} ends one, and every files connection to it, each told {@code record}: the dispatch
+   * authority's alone, sent as the workspace is stopped or deleted.
+   */
+  record YieldWorkspace(String project, String workspace, String reason, String record)
+      implements PtyMessage {}
+
+  /**
+   * What a {@link Ticket} lets its holder do: open a session in a project, attach to one, or read
+   * the files of a workspace.
+   */
   enum TicketAction {
     OPEN,
-    ATTACH;
+    ATTACH,
+    FILES;
 
     /** The action as the wire and the API name it. */
     public String wire() {
@@ -190,7 +202,8 @@ public sealed interface PtyMessage {
           return action;
         }
       }
-      throw new IOException("A ticket opens or attaches; '" + wire + "' is neither.");
+      throw new IOException(
+          "A ticket opens, attaches or reads files; '" + wire + "' is none of them.");
     }
   }
 
@@ -237,7 +250,8 @@ public sealed interface PtyMessage {
     NOT_FOUND,
     FORBIDDEN,
     LIMITED,
-    UNAVAILABLE;
+    UNAVAILABLE,
+    STOPPED;
 
     /** The kind as the wire names it. */
     public String wire() {
@@ -325,6 +339,144 @@ public sealed interface PtyMessage {
         }
       }
       throw new IOException("Corrupt pty frame: an upload refusal of kind '" + wire + "'.");
+    }
+  }
+
+  /**
+   * Lists folder {@code path} of a files ticket's workspace, an absolute path under its home: one
+   * or more {@link FilesListing} frames, or a {@link FilesRefused}. {@code id} is the client's, one
+   * per request under way.
+   */
+  record FilesList(int id, String path) implements PtyMessage {}
+
+  /** What {@code path} is: a {@link FilesEntry}, or a {@link FilesRefused}. */
+  record FilesStat(int id, String path) implements PtyMessage {}
+
+  /**
+   * Reads at most {@code length} bytes of file {@code path} from {@code offset}: {@link FilesData}
+   * frames of at most {@link #FILE_CHUNK} bytes, the last one at the file's end saying so, or a
+   * {@link FilesRefused}.
+   */
+  record FilesRead(int id, String path, long offset, long length) implements PtyMessage {}
+
+  /** Ends request {@code id}, under way or waiting, unanswered from now on. */
+  record FilesCancel(int id) implements PtyMessage {}
+
+  /**
+   * Replaces the connection's whole watch set: each path is watched from the version the client
+   * holds of it, so a change made before the watch took it is reported all the same.
+   */
+  record FilesWatch(List<Watched> paths) implements PtyMessage {
+    public FilesWatch {
+      paths = List.copyOf(paths);
+    }
+  }
+
+  /** A watched path and the version the client holds of it, blank for one it holds as missing. */
+  record Watched(String path, String version) {}
+
+  /**
+   * Entries of the folder request {@code id} lists, at {@code version}, in no order: {@code more}
+   * while frames of it follow, and on its last frame {@code truncated} when the folder holds more
+   * than {@link #LISTING_CAP} entries, of which this is the first {@link #LISTING_CAP}.
+   */
+  record FilesListing(
+      int id, String version, List<FileEntry> entries, boolean more, boolean truncated)
+      implements PtyMessage {
+    public FilesListing {
+      entries = List.copyOf(entries);
+    }
+  }
+
+  /** What request {@code id}'s path is, and its version. */
+  record FilesEntry(int id, FileEntry entry, String version) implements PtyMessage {}
+
+  /**
+   * The next bytes request {@code id} reads, at the version the file had when the read began;
+   * {@code eof} on the last frame when it reached the file's end.
+   */
+  record FilesData(int id, String version, byte[] bytes, boolean eof) implements PtyMessage {}
+
+  /** These watched paths changed: the client reads them again. */
+  record FilesChanged(List<String> paths) implements PtyMessage {
+    public FilesChanged {
+      paths = List.copyOf(paths);
+    }
+  }
+
+  /** The watch is live: said each second it runs. */
+  record FilesTick() implements PtyMessage {}
+
+  /** Request {@code id} refused, in a sentence naming the file and the reason. */
+  record FilesRefused(int id, FilesRefusal kind, String message) implements PtyMessage {}
+
+  /** The most entries a listing carries. */
+  int LISTING_CAP = 50_000;
+
+  /** The most bytes one {@link FilesData} frame carries. */
+  int FILE_CHUNK = 256 << 10;
+
+  /**
+   * One entry of a folder: its {@code name}, its {@code kind}, a link's {@code target} kind ({@link
+   * FileKind#NONE} for any other), its own size and modification time in nanoseconds since the
+   * epoch, and its permission bits.
+   */
+  record FileEntry(
+      String name, FileKind kind, FileKind target, long size, long mtimeNanos, int mode) {}
+
+  /**
+   * What an entry is: a file, a folder, a link, or another kind (a pipe, a socket, a device); and
+   * what a link leads to, which may also be nothing or itself.
+   */
+  enum FileKind {
+    NONE,
+    FILE,
+    FOLDER,
+    LINK,
+    OTHER,
+    MISSING,
+    LOOP;
+
+    /** The kind as the wire names it, blank for {@link #NONE}. */
+    public String wire() {
+      return this == NONE ? "" : name().toLowerCase(Locale.ROOT);
+    }
+
+    /** The kind {@code wire} names, refused when it names none. */
+    public static FileKind of(String wire) throws IOException {
+      for (var kind : values()) {
+        if (kind.wire().equals(wire)) {
+          return kind;
+        }
+      }
+      throw new IOException("Corrupt pty frame: a file of kind '" + wire + "'.");
+    }
+  }
+
+  /** Why a files request was refused. */
+  enum FilesRefusal {
+    NOT_FOUND,
+    NOT_PERMITTED,
+    OUTSIDE_HOME,
+    IS_FOLDER,
+    NOT_A_FOLDER,
+    NOT_A_FILE,
+    LOOP,
+    FAILED;
+
+    /** The kind as the wire names it. */
+    public String wire() {
+      return name().toLowerCase(Locale.ROOT);
+    }
+
+    /** The kind {@code wire} names, refused when it names none. */
+    public static FilesRefusal of(String wire) throws IOException {
+      for (var kind : values()) {
+        if (kind.wire().equals(wire)) {
+          return kind;
+        }
+      }
+      throw new IOException("Corrupt pty frame: a files refusal of kind '" + wire + "'.");
     }
   }
 
