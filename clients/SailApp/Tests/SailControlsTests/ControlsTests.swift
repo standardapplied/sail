@@ -253,7 +253,7 @@ import Testing
         let editor = try #require(field.field.currentEditor() as? NSTextView)
         #expect(field.paint.edge == Tint(look.accent) && field.paint.eyebrow == look.text)
         #expect(editor.insertionPointColor == NSColor(Tint(look.accent)))
-        #expect(editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(look.fillSelected))
+        #expect(editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(look.textSelection))
         let box = field.box
         for scale in [1.0, 2.0] {
             let ring = backdrop.colour(at: NSPoint(x: box.minX - 1.5, y: box.midY), scale: scale)

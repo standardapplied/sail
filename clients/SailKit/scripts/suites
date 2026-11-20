@@ -17,6 +17,7 @@ usage() {
 case $1 in
   rest)
     [[ $# -eq 2 ]] || usage
+    "$(dirname "$0")/ends-check"
     rm -f "$2"
     swift test --skip "$EXHAUSTIVE" --event-stream-output-path "$2" --event-stream-version 0
     "$(dirname "$0")/ends" "$2"

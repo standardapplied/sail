@@ -219,7 +219,7 @@ package final class LeftPanel: NSView {
         let rows = Double(list.rect(ofRow: max(list.numberOfRows - 1, 0)).maxY)
         scroll.frame = NSRect(x: 0, y: top, width: Double(bounds.width) - Look.hairline, height: min(rows, max(footTop - top, 0)))
         list.frame = NSRect(x: 0, y: 0, width: Double(scroll.contentSize.width), height: rows)
-        let under = top + RowStyle.groupHeight
+        let under = top + RowStyle.sidebar.head
         emptyLine.frame = NSRect(x: 14, y: under + 8, width: max(Double(bounds.width) - 28, 0), height: Double(emptyLine.intrinsicContentSize.height))
         for (index, (tile, name)) in skeletons.enumerated() {
             let middle = under + (Double(index) + 0.5) * RowStyle.sidebar.height
