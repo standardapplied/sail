@@ -454,7 +454,9 @@ extension TabButton: Marked {
 
     package var drawnMarks: [Mark] {
         let ink = drawnInk, renaming = field != nil
-        return look.marks(fill: ink.fill, area: Double(bounds.width * bounds.height)) + (renaming ? look.marks(line: ink.edge) : []) + (isSelected && !renaming ? look.marks(line: ink.bar) : [])
+        let caret = renaming ? look.marks(line: Tint(look.accent)) : []
+        return look.marks(fill: ink.fill, area: Double(bounds.width * bounds.height)) + (renaming ? look.marks(line: ink.edge) : []) + caret
+            + (isSelected && !renaming ? look.marks(line: ink.bar) : [])
     }
 }
 

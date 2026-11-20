@@ -123,6 +123,7 @@ public final class Banner: NSView {
 
 extension Banner: Marked {
     package var drawnMarks: [Mark] {
-        look.marks(fill: Tint(BannerPaint(tone, look: look).fill), area: Double(bounds.width * bounds.height)) + (tone == .error ? [.errorInk] : [])
+        let paint = BannerPaint(tone, look: look)
+        return look.marks(fill: Tint(paint.fill), area: Double(bounds.width * bounds.height)) + look.marks(line: paint.mark)
     }
 }

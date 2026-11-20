@@ -38,6 +38,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let root = NSView()
     private let content = NSView()
     private var appearanceWatch: NSKeyValueObservation?
+    private var contrastWatch: (any NSObjectProtocol)?
     private let titleBarRow = NSTitlebarAccessoryViewController()
     private let band = NSToolbar(identifier: "sh.standardapplied.sail.band")
     private var stripInTheWindow: [NSLayoutConstraint] = []
@@ -57,8 +58,10 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
     }
 
-    public static func look(of appearance: NSAppearance) -> Look {
-        appearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua ? .light : .dark
+    /// The look the appearance names, contrasted while the Mac's Increase Contrast is on.
+    public static func look(of appearance: NSAppearance, contrast: Bool = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast) -> Look {
+        let look: Look = appearance.bestMatch(from: [.darkAqua, .aqua]) == .aqua ? .light : .dark
+        return contrast ? look.contrasted() : look
     }
 
     init(
@@ -98,6 +101,11 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.mainMenu = menu()
         appearanceWatch = NSApp.observe(\.effectiveAppearance) { [weak self] application, _ in
             MainActor.assumeIsolated { self?.apply(Self.look(of: application.effectiveAppearance)) }
+        }
+        contrastWatch = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.apply(Self.look(of: NSApp.effectiveAppearance)) }
         }
         if let visible = (window.screen ?? NSScreen.main)?.visibleFrame { window.setFrame(Self.fitted(window.frame, in: visible), display: false) }
         window.center()

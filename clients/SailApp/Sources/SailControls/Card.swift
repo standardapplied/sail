@@ -177,6 +177,7 @@ public final class Card: NSView {
 
 extension Card: Marked {
     package var drawnMarks: [Mark] {
-        look.marks(fill: Tint(bannerPaint.fill), area: Double(bounds.width * bounds.height)) + (tone == .error ? [.errorInk] : [])
+        let paint = bannerPaint
+        return look.marks(fill: Tint(paint.fill), area: Double(bounds.width * bounds.height)) + look.marks(line: paint.mark)
     }
 }

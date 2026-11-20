@@ -57,11 +57,13 @@ import Testing
             let line = backdrop.colour(at: NSPoint(x: 200, y: pier.minY + 0.5), scale: scale), under = backdrop.colour(at: NSPoint(x: 200, y: pier.minY + 1.5), scale: scale)
             #expect(ControlsTests.tells(line, ControlsTests.swatch(canvas, [NSColor(look.gridLine)], scale: scale), from: bare) && ControlsTests.tells(under, bare, from: grey),
                     "\(name) at \(scale)x: the hairline \(line), under it \(under)")
+            let idle = ControlsTests.swatch(canvas, [NSColor(look.barIdle)], scale: scale)
             for emphasized in [true, false] {
                 chosen.isEmphasized = emphasized
                 let fill = backdrop.colour(at: NSPoint(x: 200, y: dock.midY), scale: scale), bar = backdrop.colour(at: NSPoint(x: 0.5, y: dock.midY), scale: scale)
                 #expect(ControlsTests.tells(fill, bare, from: grey), "\(name) at \(scale)x, keys \(emphasized): the chosen row is filled, \(fill)")
-                #expect(ControlsTests.tells(bar, accent, from: bare), "\(name): the bar is \(bar)")
+                #expect(ControlsTests.tells(bar, emphasized ? accent : idle, from: emphasized ? idle : accent), "\(name), keys \(emphasized): the bar is \(bar)")
+                #expect(chosen.drawnMarks == (emphasized ? [.accentLine] : []), "\(name), keys \(emphasized): the row counts \(chosen.drawnMarks)")
                 let outside = backdrop.colour(at: NSPoint(x: 0.5, y: dock.minY + 1.5 + 13), scale: scale)
                 #expect(ControlsTests.tells(outside, bare, from: accent), "\(name): the bar is longer than 24 pt")
             }
@@ -71,7 +73,7 @@ import Testing
             #expect(ControlsTests.tells(hovered, bare, from: grey), "\(name) at \(scale)x: the hovered row is filled, \(hovered)")
             rest.hovered = false
         }
-        #expect(chosen.paint.bar && chosen.paint.strong && chosen.drawnMarks == [.accentLine], "\(name): the chosen row is not found by its bar and weight")
+        #expect(chosen.paint.bar && chosen.paint.strong, "\(name): the chosen row is not found by its bar and weight")
     }
 
     /// The sidebar's rows, as the left panel draws a project: 30 pt with no gap between rows, no fill
@@ -101,6 +103,9 @@ import Testing
         let leadingCorner = backdrop.colour(at: NSPoint(x: 0.25, y: dock.minY + 8.25), scale: 2), trailingCorner = backdrop.colour(at: NSPoint(x: 1.75, y: dock.minY + 8.25), scale: 2)
         #expect(leadingCorner.near(accent) && !trailingCorner.near(accent), "\(name): the bar's corners are \(leadingCorner) and \(trailingCorner), not square at the edge and rounded away from it")
         #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: 100, y: pier.midY), scale: 2), bare, from: grey), "\(name): the hovered row is filled")
+        chosen.isEmphasized = false
+        let idle = ControlsTests.swatch(canvas, [NSColor(look.barIdle)], scale: 2)
+        #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: 0.5, y: dock.midY), scale: 2), idle, from: accent), "\(name): the bar without the keys is not the quiet ink")
     }
 
     /// A sidebar row lays a project out as the left panel does: the tile after the disclosure's
@@ -359,6 +364,19 @@ import Testing
         let under = link.underline, title = link.cell?.titleRect(forBounds: link.bounds) ?? .zero
         #expect(near(under.height, 1) && under.width > 20 && under.width <= title.width + 0.5, "the underline is \(under) under \(title)")
         #expect(link.underlineInk == Tint(look.accent) && link.drawnMarks == [.accentLine])
+    }
+
+    /// The underline runs under the words from their leading edge, which is the trailing side of
+    /// the title's rect when the layout runs right to left.
+    @Test func aLinksUnderlineStartsAtItsLeadingEdgeInEitherDirection() {
+        for direction in [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft] {
+            let link = LinkButton("Show dock", look: .light, target: nil, action: nil)
+            link.userInterfaceLayoutDirection = direction
+            link.frame = NSRect(x: 0, y: 0, width: link.intrinsicContentSize.width + 40, height: link.intrinsicContentSize.height)
+            let under = link.underline, title = link.cell?.titleRect(forBounds: link.bounds) ?? .zero
+            let leading = direction == .rightToLeft ? near(under.maxX, title.maxX) : near(under.minX, title.minX)
+            #expect(leading && under.width < title.width, "\(direction == .rightToLeft ? "right to left" : "left to right"): the underline is \(under) in \(title)")
+        }
     }
 
     static func key(_ code: UInt16, _ characters: String, _ flags: NSEvent.ModifierFlags = []) throws -> NSEvent {

@@ -56,6 +56,13 @@ import Testing
         }
     }
 
+    /// The Mac's Increase Contrast gives the contrasted look, in either appearance; off, the look itself.
+    @MainActor @Test func increaseContrastGivesTheContrastedLook() throws {
+        let light = try #require(NSAppearance(named: .aqua)), dark = try #require(NSAppearance(named: .darkAqua))
+        #expect(ShellApp.look(of: light, contrast: true) == Look.light.contrasted() && ShellApp.look(of: dark, contrast: true) == Look.dark.contrasted())
+        #expect(ShellApp.look(of: light, contrast: false) == .light && ShellApp.look(of: dark, contrast: false) == .dark)
+    }
+
     @Test func noSourceOfTheAppNamesTheSystemAccent() throws {
         let sources = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appending(path: "Sources")
@@ -134,6 +141,8 @@ import Testing
         let chosen = try #require(shell.rail.bar(.thisMac))
         #expect(!chosen.isHidden && chosen.layer?.backgroundColor == NSColor(look.accent).cgColor, "\(name): the rail's chosen item has no accent bar, as a tab's")
         #expect(shell.rail.drawnMarks == [.accentLine], "\(name): the rail's chosen item draws \(shell.rail.drawnMarks), not one accent bar on ink")
+        let wash = try #require(shell.rail.chosenWash)
+        #expect(near(wash.size.width, Rail.item) && near(wash.size.height, Rail.item) && wash.colour == NSColor(Tint(look.chromeWash)).cgColor, "\(name): the rail's chosen wash is \(wash)")
         shell.window.contentView?.layoutSubtreeIfNeeded()
         let edge = shell.cardEdge, parts = edge.layer?.sublayers ?? []
         #expect(edge.isHidden == (look.cardEdge == nil), "\(name): the card's outline shows \(!edge.isHidden) with \(String(describing: look.cardEdge))")

@@ -99,6 +99,12 @@ public struct Look: Equatable, Sendable {
         info: RGB(0x17646F), ink: RGB(0x0E1217), onInk: RGB(0xF8FAFC)
     ).withTerminalInk()
 
+    /// A chosen row's bar while its list does not hold the keys: quiet ink, as macOS draws an
+    /// unemphasized selection; the accent marks only the list that does.
+    public var barIdle: Tint {
+        textTertiary
+    }
+
     /// The rail's chosen item: the chrome's wash under its icon in full ink; the bar beside it says
     /// which.
     public var railChosen: InkMark {
@@ -148,7 +154,7 @@ public struct Look: Equatable, Sendable {
         look.gridLine = Tint(gridLine.rgb, alpha: dark ? 0.16 : 0.15)
         look.textTertiary = textSecondary
         look.focusHalo = Tint(accent)
-        return look
+        return look.withTerminalInk()
     }
 
     /// Content corners, drawn at 6 pt; windows, sheets, menus and system controls keep the

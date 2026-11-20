@@ -1,5 +1,6 @@
 import AppKit
 import SailControls
+import SailKitTestSupport
 import SailLook
 @testable import SailShell
 import SailTerminalView
@@ -62,8 +63,9 @@ import Testing
         }
     }
 
-    /// A1: harbor and dock chosen: the rail's bar, the panel's project bar, dock's bar and Open, and
-    /// no tinted fill.
+    /// A1: harbor and dock chosen, the workspaces list holding the keys: the rail's bar, dock's bar
+    /// and Open in the accent, harbor's bar in the quiet ink; and the reverse with the keys in the
+    /// panel. Never more than 4 marks, exactly one list's bar in the accent, no tinted fill.
     @Test(arguments: [Look.light, .dark])
     func thePlainWorkspacesPageHasFourMarks(_ look: Look) async throws {
         let (view, window, _) = try await WorkspacesViewTests.listed()
@@ -73,51 +75,98 @@ import Testing
         #expect(await RunnerTabTests.until { view.project.list.chosen == "dock" })
         view.layoutSubtreeIfNeeded()
         view.project.list.layoutSubtreeIfNeeded()
-        let section = Count(marks(in: window)), rail = Self.rail(look)
-        #expect(section == Count([.accentLine, .accentLine, .accentFill]), "the section draws \(section)")
-        #expect(rail == Count([.accentLine]), "the rail draws \(rail)")
-        #expect(section.accent + rail.accent == 4 && section.tint + rail.tint == 0)
-        #expect(section.neutral == 0 && rail.neutral == 0, "grey at rest: the section \(section.neutral) pt², the rail \(rail.neutral) pt²")
         let dock = try #require(view.project.list.row("dock")), harbor = try #require(view.panel.list.row("harbor"))
+        let rail = Self.rail(look)
+        #expect(rail == Count([.accentLine]), "the rail draws \(rail)")
+        for listKeys in [true, false] {
+            dock.view.isEmphasized = listKeys
+            harbor.view.isEmphasized = !listKeys
+            let section = Count(marks(in: window))
+            #expect(section == Count([.accentLine, .accentFill]), "keys in the \(listKeys ? "list" : "panel"): the section draws \(section)")
+            #expect(section.accent + rail.accent <= 4 && section.tint + rail.tint == 0)
+            #expect(Count(marks(in: dock.view)).line == (listKeys ? 1 : 0), "dock's bar is in the accent \(listKeys ? "without" : "with") the keys elsewhere")
+            #expect(section.neutral == 0 && rail.neutral == 0, "grey at rest: the section \(section.neutral) pt², the rail \(rail.neutral) pt²")
+        }
         #expect(dock.paint.bar && dock.paint.strong, "dock, chosen, has no bar or no weight")
         let line = try #require(Self.found(WorkspaceLine.self, in: dock.view).first)
         #expect(Self.weight(line.title) == .semibold, "dock's name is not at full weight")
         let project = try #require(Self.found(SidebarRowCell.self, in: harbor.view).first)
         #expect(harbor.paint.bar && Self.weight(project.label) == .semibold && project.tile.chosen, "harbor, chosen, has no bar, no weight or no ink well")
         dock.view.isEmphasized = true
+        harbor.view.isEmphasized = false
         let open = try #require(Self.found(SailButton.self, in: dock.view).first { $0.title == "Open" })
         #expect(open.keyEquivalent == "\r", "the list holding the keys is not said by Open's ⏎")
     }
 
-    /// A5: three tabs and a split: the rail's bar, the chosen tab's bar, and the cursor of the pane
-    /// with the keys; the other pane's cursor is ink. A6: an ended terminal's cursor is ink too, and
-    /// the card's Open a New One is the only accent fill.
+    /// A5: the real workbench, three tabs and a split attached through a host: the rail's bar, the
+    /// chosen tab's underline, and the cursor of the pane with the keys; every other pane's cursor
+    /// is ink, and nothing it draws (cards, scrim, the card's edge) adds a mark or grey. A6: once
+    /// that pane's terminal has ended, its cursor is ink too, and its card's Open a New One is the
+    /// only accent fill.
     @Test(arguments: [Look.light, .dark])
-    func aTerminalPageWithASplitHasThreeMarks(_ look: Look) throws {
-        let shell = try WorkbenchLookTests.shell(look)
-        shell.select(.thisMac)
-        let strip = shell.thisMac.strip
-        strip.showsTabs = true
-        strip.show(WorkbenchLookTests.items() + [TabStrip.Item(id: TabID(3), title: "web", zoomed: false)], selected: TabID(1))
-        let fonts = try TerminalFonts(directory: LookTests.fonts)
-        let typing = try TerminalView(fonts: fonts), other = try TerminalView(fonts: fonts)
-        let split = NSStackView(views: [typing, other])
-        let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
-        window.contentView = split
+    func aTerminalPageWithASplitHasThreeMarks(_ look: Look) async throws {
+        let door = try FakeRunnerDoor(thisMac: true)
+        defer { door.stop() }
+        let bench = try await ThisMacEndingTests.workbench(at: door, tabs: 3)
+        bench.look = look
+        let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: 1000, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = bench
         window.orderFront(nil)
         defer { window.orderOut(nil) }
-        #expect(window.makeFirstResponder(typing) && typing.holdsTheKeys, "the typing pane holds no keys")
-        let rail = Count(marks(in: shell.rail)), tabs = Count(marks(in: strip)), panes = Count(marks(in: window))
-        #expect(rail == Count([.accentLine]) && tabs == Count([.accentLine]) && panes == Count([.accentLine]), "the rail draws \(rail), the tabs \(tabs), the panes \(panes)")
-        #expect(rail.neutral + tabs.neutral + panes.neutral == 0, "grey at rest on the terminal page: \(rail), \(tabs), \(panes)")
-        let chosen = try #require(strip.tabs.first)
-        #expect(chosen.label.font == NSFont.systemFont(ofSize: Look.Step.callout.points, weight: .semibold) && !chosen.bar.isHidden, "the chosen tab has no weight or no underline")
-        typing.inert = true
+        bench.layoutSubtreeIfNeeded()
+        bench.splitRight(nil)
+        let split = await RunnerTabTests.until(10) { bench.panes.count == 4 && bench.panes.values.allSatisfy { $0.attachedOnce && $0.status.says == nil } }
+        #expect(split, "the split did not attach")
+        bench.strip.showsTabs = true
+        bench.apply()
+        let focused = try #require(bench.model.focusedPane.flatMap { bench.panes[$0.id] })
+        #expect(window.makeFirstResponder(focused.terminal) && focused.terminal.holdsTheKeys, "the focused pane holds no keys")
+        let rail = Rail(look: look)
+        rail.show(.thisMac)
+        let page = Count(marks(in: window)) + Count(marks(in: bench.strip)) + Count(rail.drawnMarks)
+        #expect(page == Count([.accentLine, .accentLine, .accentLine]), "the terminal page draws \(page)")
+        let chosen = try #require(bench.strip.tabs.first { !$0.bar.isHidden })
+        #expect(chosen.label.font == NSFont.systemFont(ofSize: Look.Step.callout.points, weight: .semibold), "the chosen tab has no weight")
+        focused.terminal.inert = true
         let card = Card(look: look)
         card.frame = NSRect(x: 0, y: 0, width: Card.width, height: 80)
         card.show("This terminal ended while you were away.", tone: .warning, button: "Open a New One", second: "Close")
         let ended = Count(marks(in: window)) + Count(marks(in: card))
         #expect(ended == Count([.accentFill]), "an ended terminal and its card draw \(ended)")
+    }
+
+    /// M2: the card's outline per look: none in light, so nothing lies over the panes; in dark,
+    /// small layers under an empty host that draws nothing and takes no click.
+    @Test(arguments: [Look.light, .dark])
+    func theCardEdgeIsNoneInLightAndSmallLayersInDark(_ look: Look) throws {
+        let shell = try WorkbenchLookTests.shell(look)
+        shell.window.contentView?.layoutSubtreeIfNeeded()
+        let edge = shell.cardEdge, host = try #require(edge.layer)
+        #expect(edge.isHidden == (look.cardEdge == nil) && edge.isHidden == !look.palette.isDark, "the card's outline shows \(!edge.isHidden) in \(look.palette.isDark ? "dark" : "light")")
+        #expect(edge.hitTest(NSPoint(x: 10, y: 10)) == nil, "the card's outline takes a click")
+        #expect(host.contents == nil && host.backgroundColor == nil, "the outline's host draws")
+        let parts = host.sublayers ?? []
+        #expect(parts.count == 8 && parts.allSatisfy { $0.contents == nil }, "the outline is \(parts.count) layers")
+        for part in parts {
+            let side = (Double(part.bounds.width), Double(part.bounds.height))
+            #expect(min(side.0, side.1) <= 1 || max(side.0, side.1) <= CardEdge.reach, "a part of the outline is \(part.bounds), a large layer over the card")
+        }
+    }
+
+    /// Minor 1: the count reads tokens, not exemptions: the chrome's colours inside the card are
+    /// grey; ink at any strength is grey (no turned-over mark is built); a bar, a fill or a line in
+    /// any of the accent's tokens is a mark; the error's tones are error marks.
+    @Test(arguments: [Look.light, .dark])
+    func theCountReadsEveryTokenOfTheAccentAndNoneOfTheChromeAsGround(_ look: Look) {
+        #expect(look.marks(fill: Tint(look.chrome), area: 100) == [.neutralFill(100)] && look.marks(fill: Tint(look.chromeWash), area: 100) == [.neutralFill(100)])
+        #expect(look.marks(fill: Tint(look.ink), area: 100) == [.neutralFill(100)] && look.marks(fill: Tint(look.ink, alpha: 0.05), area: 100) == [.neutralFill(100)])
+        for accent in [look.accent, look.accentHover, look.accentPressed] {
+            #expect(look.marks(line: Tint(accent)) == [.accentLine] && look.marks(fill: Tint(accent), area: 100) == [.accentFill])
+        }
+        for error in [look.error, look.errorHover, look.errorPressed] {
+            #expect(look.marks(line: Tint(error)) == [.errorInk] && look.marks(fill: Tint(error), area: 100) == [.errorFill])
+        }
+        #expect(look.marks(fill: Tint(look.surface), area: 100).isEmpty && look.marks(fill: Tint(look.canvas), area: 100).isEmpty)
     }
 }
 

@@ -1,4 +1,5 @@
 import AppKit
+import SailVT
 
 /// What a control draws in terracotta or in the error ink, by token: what the calm look counts, so
 /// it cannot erode unseen.
@@ -21,24 +22,32 @@ package enum Mark: Equatable, Sendable {
 }
 
 package extension Look {
-    /// What a fill of `area` points draws: the accent, the error, or a neutral grey (ink at any
-    /// strength short of turned over, or an opaque tone that is neither a ground, a banner's tone nor
-    /// a colour).
+    /// The accent's tokens: whichever a control draws in, it is the accent.
+    var accents: [RGB] {
+        [accent, accentHover, accentPressed]
+    }
+
+    /// The error's tokens.
+    var errors: [RGB] {
+        [error, errorHover, errorPressed]
+    }
+
+    /// What a fill of `area` points inside the card draws: the accent, the error, or a neutral grey
+    /// (ink at any strength, or an opaque tone that is neither the card's ground, a banner's tone nor
+    /// a colour). The chrome's own tones are grey here: they belong to the chrome alone.
     func marks(fill: Tint?, area: Double) -> [Mark] {
         guard let fill, fill.alpha > 0 else { return [] }
-        if fill.rgb == accent { return [fill.alpha >= 1 ? .accentFill : .accentTint] }
-        if fill.rgb == error, fill.alpha >= 1 { return [.errorFill] }
+        if accents.contains(fill.rgb) { return [fill.alpha >= 1 ? .accentFill : .accentTint] }
+        if errors.contains(fill.rgb), fill.alpha >= 1 { return [.errorFill] }
         guard area > 0 else { return [] }
-        if fill.rgb == error { return [.neutralFill(area)] }
-        if fill.rgb == ink || fill.rgb == text.rgb { return fill.alpha < 0.95 ? [.neutralFill(area)] : [] }
-        let grounds = [canvas, surface, surfacePop, chrome, chromeWash, palette.background] + BannerTone.allCases.map { BannerPaint($0, look: self).fill }
-        let colours = [accentHover, accentPressed, errorHover, errorPressed, warning, success, info, onAccent, onError, onInk]
+        let grounds = [canvas, surface, surfacePop, palette.background] + BannerTone.allCases.map { BannerPaint($0, look: self).fill }
+        let colours = [warning, success, info, onAccent, onError, onInk]
         return grounds.contains(fill.rgb) || colours.contains(fill.rgb) ? [] : [.neutralFill(area)]
     }
 
     func marks(line: Tint?) -> [Mark] {
         guard let line, line.alpha > 0 else { return [] }
-        return line.rgb == accent ? [.accentLine] : line.rgb == error ? [.errorInk] : []
+        return accents.contains(line.rgb) ? [.accentLine] : errors.contains(line.rgb) ? [.errorInk] : []
     }
 }
 

@@ -35,11 +35,14 @@ public struct RowState: Equatable, Sendable {
     }
 }
 
-/// How a row is drawn, on paper: no row is ever filled. A chosen row has the accent bar and its
-/// name at full weight; one under the pointer has its name at full weight too. Its actions show
-/// while it is hovered or chosen.
+/// How a row is drawn, on paper: no row is ever filled. A chosen row has the bar and its name at
+/// full weight: the bar in the accent while its list holds the keys, in the quiet `barIdle` while
+/// another does, as macOS draws a selection; one under the pointer has its name at full weight
+/// too. Its actions show while it is hovered or chosen.
 public struct RowPaint: Equatable, Sendable {
     public let bar: Bool
+    /// Its list holds the keys: the bar in the accent.
+    public let keys: Bool
     /// Its name at full weight (semibold).
     public let strong: Bool
     public let actions: Bool
@@ -48,38 +51,40 @@ public struct RowPaint: Equatable, Sendable {
 
     public init(_ state: RowState) {
         bar = state.chosen
+        keys = state.chosen && state.emphasized
         strong = state.chosen || state.hovered
         actions = state.chosen || state.hovered
         progress = false
     }
 
-    private init(bar: Bool, strong: Bool, actions: Bool, progress: Bool) {
+    private init(bar: Bool, keys: Bool, strong: Bool, actions: Bool, progress: Bool) {
         self.bar = bar
+        self.keys = keys
         self.strong = strong
         self.actions = actions
         self.progress = progress
     }
 
+    /// The bar's ink: the accent while the list holds the keys, else the quiet one.
+    public func barInk(_ look: Look) -> Tint {
+        keys ? Tint(look.accent) : look.barIdle
+    }
+
     /// A create row open for a name: drawn chosen, its field holding the keys.
-    public static let naming = Self(bar: true, strong: false, actions: false, progress: false)
+    public static let naming = Self(bar: true, keys: true, strong: false, actions: false, progress: false)
 
     /// A create row refused: no bar; its field's edge, mark and sentence say it.
-    public static let refused = Self(bar: false, strong: false, actions: false, progress: false)
+    public static let refused = Self(bar: false, keys: false, strong: false, actions: false, progress: false)
 
     /// A row being created: its actions (how long, a spinner) shown, the progress line along its foot.
-    public static let creating = Self(bar: false, strong: false, actions: true, progress: true)
+    public static let creating = Self(bar: false, keys: false, strong: false, actions: true, progress: true)
 }
 
 /// A project's tile, 20 pt square in 4 pt corners: the look's `well` for every project, an outline
 /// and a quiet letter, and `wellChosen` for the chosen project's. No project has a hue of its own
-/// (the owner, 19 Nov 2026). `mark` flips every tile to the box icon instead of the initial.
+/// (the owner, 19 Nov 2026).
 public struct TilePaint: Equatable, Sendable {
-    public enum Mark: Equatable, Sendable {
-        case initial, icon(LineIcon)
-    }
-
     public static let side = 20.0, points = 11.0, radius = Look.innerRadius
-    public static let mark = Mark.initial
 
     public let ink: Tint
     public let fill: Tint?

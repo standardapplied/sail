@@ -351,9 +351,10 @@ final class SailRowView: NSTableRowView {
         item?.paint ?? RowPaint(RowState(chosen: isSelected, emphasized: isEmphasized, hovered: hovered))
     }
 
-    /// The chosen row's bar, which says which row is chosen.
+    /// The chosen row's bar, which says which row is chosen: in the accent while its list holds the
+    /// keys, in the quiet ink while another does.
     var barInk: Tint {
-        Tint(look.accent)
+        paint.barInk(look)
     }
 
     /// The table sets a row's state on every layout pass; only a change touches the row, or each

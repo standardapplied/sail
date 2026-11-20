@@ -129,9 +129,17 @@ extension Rail: Marked {
         (look.railChosen.fill, look.railChosen.ink, Tint(look.accent))
     }
 
+    /// Its chosen item's icon and bar; the wash under it is the chrome's, on the chrome, and not
+    /// counted as the card's.
     package var drawnMarks: [Mark] {
-        guard let selected, let button = buttons[selected] else { return [] }
+        guard selected != nil else { return [] }
         let ink = chosenInk
-        return look.marks(fill: ink.fill, area: Double(button.bounds.width * button.bounds.height)) + look.marks(line: ink.icon) + look.marks(line: ink.bar)
+        return look.marks(line: ink.icon) + look.marks(line: ink.bar)
+    }
+
+    /// The chosen item's wash: its square and its colour, for the tests.
+    var chosenWash: (size: NSSize, colour: CGColor?)? {
+        guard let selected, let button = buttons[selected] else { return nil }
+        return (button.bounds.size, button.layer?.backgroundColor)
     }
 }

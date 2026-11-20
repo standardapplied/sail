@@ -94,6 +94,14 @@ import Testing
         #expect(look.palette.idleCursor == Self.over(look.textTertiary, look.palette.background))
     }
 
+    /// Increase Contrast reaches the terminal: its idle cursor is the contrasted tertiary ink over the
+    /// terminal's background, as the look's own is.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func increaseContrastReachesTheTerminalsIdleCursor(_ name: String, _ look: Look) {
+        let strong = look.contrasted()
+        #expect(strong.palette.idleCursor == Self.over(strong.textTertiary, strong.palette.background), "\(name): the contrasted idle cursor is \(String(describing: strong.palette.idleCursor))")
+    }
+
     static func hue(_ rgb: RGB) -> Double {
         let (r, g, b) = (Double(rgb.red) / 255, Double(rgb.green) / 255, Double(rgb.blue) / 255)
         let high = max(r, g, b), low = min(r, g, b), span = high - low

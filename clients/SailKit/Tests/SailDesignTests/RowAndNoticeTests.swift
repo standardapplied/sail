@@ -22,6 +22,17 @@ import Testing
         #expect(RowPaint.naming.bar && !RowPaint.refused.bar && !RowPaint.refused.actions && RowPaint.creating.progress && RowPaint.creating.actions)
     }
 
+    /// M1: the chosen row's bar says whether its list holds the keys, as macOS's selection does: in
+    /// the accent while it does, in the quiet `barIdle` while it does not; the create row's bar is
+    /// in the accent, its field holding the keys.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func theBarSaysWhichListHoldsTheKeys(_ name: String, _ look: Look) {
+        let keys = RowPaint(RowState(chosen: true, emphasized: true)), away = RowPaint(RowState(chosen: true))
+        #expect(keys.bar && keys.keys && away.bar && !away.keys, "\(name): the bar does not tell the keys")
+        #expect(keys.barInk(look) == Tint(look.accent) && away.barInk(look) == look.barIdle && look.barIdle.rgb != look.accent, "\(name): \(keys.barInk(look)), \(away.barInk(look))")
+        #expect(RowPaint.naming.keys && RowPaint.naming.barInk(look) == Tint(look.accent))
+    }
+
     @Test func theTwoRowStylesAreTheSheets() {
         let sidebar = RowStyle.sidebar, list = RowStyle.list
         #expect([sidebar.height, sidebar.margin, sidebar.leading, sidebar.radius, sidebar.bar] == [30, 6, 6, 5, 14])
@@ -38,7 +49,7 @@ import Testing
         let tile = TilePaint(look: look), chosen = TilePaint(look: look, chosen: true)
         #expect(tile.fill == nil && tile.ring == look.separatorStrong && tile.ink == look.textSecondary, "\(name)")
         #expect(chosen.fill == nil && chosen.ring == look.text && chosen.ink == look.text, "\(name): the chosen well")
-        #expect(TilePaint.mark == .initial && [TilePaint.side, TilePaint.points, TilePaint.radius] == [20, 11, 4])
+        #expect([TilePaint.side, TilePaint.points, TilePaint.radius] == [20, 11, 4])
     }
 
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
