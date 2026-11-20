@@ -196,13 +196,14 @@ public final class WorkspaceDoors {
 
   /** Starts workspace {@code name}, given its owner's credentials again. */
   public Workspaces.Changed start(ProjectDefinition config, String name) throws Exception {
-    return workspaces.start(config, name, owners, found -> entering(config.name(), name, found));
+    return workspaces.start(
+        config, name, owners, found -> entering(config.name(), name, found, STARTED));
   }
 
   /** Starts workspace {@code name} for a shell, and answers its instance. */
   public String startExisting(ProjectDefinition config, String name) throws Exception {
     return workspaces.startExisting(
-        config, name, owners, found -> entering(config.name(), name, found));
+        config, name, owners, found -> entering(config.name(), name, found, TERMINAL));
   }
 
   /**
@@ -215,7 +216,7 @@ public final class WorkspaceDoors {
         project,
         name,
         live,
-        found -> decide(project, name, found),
+        found -> decide(project, name, found, STOPPED),
         found -> endTerminals(project, name, "stopped"));
   }
 
@@ -239,7 +240,7 @@ public final class WorkspaceDoors {
         project,
         name,
         live,
-        found -> decide(project, name, found),
+        found -> decide(project, name, found, DELETED),
         found -> {
           if (!force) {
             workspaces.whileRunning(
@@ -266,11 +267,11 @@ public final class WorkspaceDoors {
       throws Exception {
     var project = config.name();
     var found = workspaces.find(project, name).orElseThrow(() -> Workspaces.absent(project, name));
-    decide(project, name, found);
+    decide(project, name, found, AGENT);
     var person = AgentStarts.person(found, owners, keeper);
     var running = found.state() instanceof ContainerState.Running;
     var refused =
-        AgentStarts.goneOwner(project, name, found, owners)
+        labelledForAnother(project, name, found, owners, AGENT, keeper != null)
             .or(() -> AgentStarts.notTheirs(name, person, Actor.current().handle()));
     if (refused.isPresent()) {
       return new AgentOffersResponse(
@@ -294,41 +295,99 @@ public final class WorkspaceDoors {
     return new AgentOffersResponse(project, name, person, running, null, offered);
   }
 
-  /** Refuses the bound actor workspace {@code found} unless they may enter it. */
-  private void decide(String project, String name, BoxInstances.Instance found) {
+  /** What a door does, as its refusal says it is not done. */
+  static final String STARTED = "it is not started";
+
+  static final String STOPPED = "it is not stopped";
+  static final String DELETED = "it is not deleted";
+  static final String TERMINAL = "no terminal opens in it";
+  static final String AGENT = "no agent starts in it";
+
+  /**
+   * Refuses the bound actor workspace {@code found} unless they may enter it; and on a node (N1),
+   * one labelled for a person this box does not hold by id, whoever may otherwise enter it there,
+   * so {@code act} is never done in it as the node's own person.
+   */
+  private void decide(String project, String name, BoxInstances.Instance found, String act) {
     requireEnter(
         Actor.current(), project, name, Workspaces.ownerOf(found, owners).orElse(null), keeper);
+    if (keeper != null) {
+      labelledForAnother(project, name, found, owners, act, true)
+          .ifPresent(
+              refused -> {
+                throw refused;
+              });
+    }
   }
 
   /** As {@link #decide}, and refused when its owner is no longer active here, so none is given. */
-  private void entering(String project, String name, BoxInstances.Instance found) {
-    decide(project, name, found);
+  private void entering(String project, String name, BoxInstances.Instance found, String act) {
+    decide(project, name, found, act);
     Workspaces.goneOwner(found, owners)
         .ifPresent(
             gone -> {
-              throw goneOwner(project, name, gone);
+              throw goneOwner(project, name, gone, STARTED, keeper != null);
             });
   }
 
   /**
-   * What a start of workspace {@code name} labelled for {@code gone}, no longer active here, is
-   * refused with, and how to be rid of it meanwhile.
+   * Why {@code act} is not done in workspace {@code name} of {@code project}, {@code found}, for
+   * anyone, when its label names a person this box does not hold by the id it stores: one gone from
+   * the box ({@code owner_gone}), or another person of the label's handle, or a label with no id
+   * ({@code not_your_workspace}). Empty for a workspace labelled for a person here by id, or for no
+   * one. Only the box's pass makes such a workspace nobody's; on a node ({@code onNode}) no door is
+   * offered for it, and on main an admin may delete it.
    */
-  static ApiException goneOwner(String project, String name, String gone) {
+  static Optional<ApiException> labelledForAnother(
+      String project,
+      String name,
+      BoxInstances.Instance found,
+      Function<String, WorkspaceOwner> owners,
+      String act,
+      boolean onNode) {
+    var handle = found.key(BoxInstances.OWNER_KEY).filter(Strings::isNotBlank);
+    if (handle.isEmpty() || Workspaces.ownerOf(found, owners).isPresent()) {
+      return Optional.empty();
+    }
+    var gone = Workspaces.goneOwner(found, owners);
+    if (gone.isPresent()) {
+      return Optional.of(goneOwner(project, name, gone.get(), act, onNode));
+    }
+    return Optional.of(
+        new ApiException(
+            ErrorCode.NOT_YOUR_WORKSPACE,
+            name
+                + " is labelled for a person this box does not know as "
+                + handle.get()
+                + ", so "
+                + act
+                + "; the next pass leaves it nobody's.",
+            Remedy.NONE));
+  }
+
+  /**
+   * Why {@code act} is not done in workspace {@code name} of {@code project}, labelled for {@code
+   * gone}, no longer active here, and on main ({@code onNode} false) how an admin is rid of it
+   * meanwhile.
+   */
+  static ApiException goneOwner(
+      String project, String name, String gone, String act, boolean onNode) {
     return new ApiException(
         ErrorCode.OWNER_GONE,
-        "Workspace '"
-            + name
-            + "' of "
-            + project
+        name
             + " is "
             + gone
-            + "'s, who is no longer active here, so it is not started: the next pass leaves it"
-            + " nobody's.",
-        Remedy.of(
-            "Delete it meanwhile with: ",
-            Remedy.sail("project workspace delete", project, name, "--force"),
-            "."));
+            + "'s workspace, and "
+            + gone
+            + " is no longer active here, so "
+            + act
+            + "; the next pass leaves it nobody's.",
+        onNode
+            ? Remedy.NONE
+            : Remedy.of(
+                "Delete it meanwhile with: ",
+                Remedy.sail("project workspace delete", project, name, "--force"),
+                "."));
   }
 
   /**

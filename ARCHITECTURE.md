@@ -1536,10 +1536,21 @@ Each row with the tests that prove it:
   every agent never; one no one owns, an admin alone; one being made is its caller's, and a
   credential that names no person makes none. On a node every person but the node's own acts as a
   viewer (the role rule's cap), so there they are refused naming main, where other people's
-  workspaces live; and the node's own person keeps what no one owns on it (a workspace disowned,
-  or labelled for someone no longer active, until the pass takes it back), deciding it as an admin
-  decides it on main: they may stop or delete a gone person's workspace, and, as an admin, are
-  refused a start or terminal in it, so its person's credentials stay unread. The
+  workspaces live. The node's own person keeps a workspace no one is labelled for (one made by
+  hand, or one the pass has made nobody's), deciding it as an admin decides it on main, and **N1**
+  holds on a node at every door (`WorkspaceDoors.labelledForAnother`, after Access, for the shell
+  and the ticket, start, stop, delete with or without force, what can start, and an agent start): a
+  workspace labelled for a person the node does not hold by the id its label stores is no one's to
+  act on there, its own person included, until the box's disown pass strips it and clears its
+  label. One labelled for a person gone is refused `owner_gone` ("gone is zed's workspace, and zed
+  is no longer active here, so it is not stopped; the next pass leaves it nobody's."), one for
+  another person of the handle, or with no id, `not_your_workspace` ("old is labelled for a person
+  this box does not know as ada, so no terminal opens in it; …"), each before Incus is asked to
+  change it. A node offers no delete of it: the box's root acts as the node's person, and the pass
+  is the only way such a workspace leaves its label (`MissedStopReconciler`, every minute; an admin
+  on main brings it about by removing the person). On main an admin still stops and deletes it
+  (`owner_gone` there names the forced delete) and a start or terminal in a gone person's
+  workspace is refused, so its person's credentials stay unread. The
   routes are `POST /v1/projects/{p}/workspaces` (`{"name"}`, from the current template, which the
   server never builds: none is refused naming its build, a stale one is cloned and the answer says
   so), `POST …/workspaces/{w}/start` and `…/stop`, and `DELETE …/workspaces/{w}[?force=true]`,
@@ -3641,7 +3652,7 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 | Dispatch | dispatch or resume a spec; seat or remove a room agent | no | owner | yes | no | no | no |
 | Operate a run | stop it; attach to it; read its log | no | owner | yes | no | no | no |
 | Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | its own | its own | no |
-| Enter a workspace | open a terminal in a workspace; create, start, stop or delete one | no | owner | yes | no | no | no |
+| Enter a workspace | open a terminal in a workspace; create, start, stop or delete one (on a node, never one labelled for a person the node does not hold by id: N1) | no | owner | yes | no | no | no |
 | Build a template | build or rebuild a project's template, which its workspaces are created from | no | no | yes | no | no | no |
 | Share | add, change or remove project files and skills | no | yes | yes | no | no | no |
 | Serve | start and stop the project's processes | no | yes | yes | own work | no | yes |

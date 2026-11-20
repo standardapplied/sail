@@ -426,7 +426,13 @@ final class HostLanes {
       var owner = personOf(found);
       var harness = Harnesses.of(agent.harness());
       var refused =
-          AgentStarts.goneOwner(project, workspace, found, owners)
+          WorkspaceDoors.labelledForAnother(
+                  project,
+                  workspace,
+                  found,
+                  owners,
+                  WorkspaceDoors.AGENT,
+                  roles.nodeFde().isPresent())
               .or(() -> AgentStarts.notTheirs(workspace, owner, who.actor().handle()))
               .or(() -> AgentStarts.notInstalled(definitions.require(project), harness));
       if (refused.isPresent()) {
@@ -527,7 +533,12 @@ final class HostLanes {
               Workspaces.goneOwner(found, owners)
                   .ifPresent(
                       gone -> {
-                        throw WorkspaceDoors.goneOwner(project, workspace, gone);
+                        throw WorkspaceDoors.goneOwner(
+                            project,
+                            workspace,
+                            gone,
+                            WorkspaceDoors.STARTED,
+                            roles.nodeFde().isPresent());
                       });
             });
       } catch (Exception failed) {
@@ -564,6 +575,14 @@ final class HostLanes {
               () -> WorkspaceDoors.refusal(Actor.current(), project, workspace, owner, keeper));
       if (refused.isPresent()) {
         throw Remedied.io(refused.get().message(), refused.get().fix());
+      }
+      if (keeper != null) {
+        var another =
+            WorkspaceDoors.labelledForAnother(
+                project, workspace, found, owners, WorkspaceDoors.TERMINAL, true);
+        if (another.isPresent()) {
+          throw told(another.get());
+        }
       }
     }
 

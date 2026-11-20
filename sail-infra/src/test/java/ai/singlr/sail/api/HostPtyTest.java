@@ -248,12 +248,81 @@ class HostPtyTest {
     var refused = assertThrows(IOException.class, () -> lane.enterWorkspace("acme", "try", root));
 
     assertEquals(
-        "Workspace 'try' of acme is zed's, who is no longer active here, so it is not started: the"
-            + " next pass leaves it nobody's. Delete it meanwhile with: sail project workspace"
-            + " delete acme try --force.",
+        "try is zed's workspace, and zed is no longer active here, so it is not started; the next"
+            + " pass leaves it nobody's. Delete it meanwhile with: sail project workspace delete"
+            + " acme try --force.",
         refused.getMessage());
     assertEquals("owner_gone", ((Remedied) refused).code(), "the app tells it apart by its code");
     assertTrue(box.invocations().stream().noneMatch(c -> c.startsWith("incus start")));
+  }
+
+  /** Workspace {@code name} of acme as Incus lists it, stopped, labelled {@code label}. */
+  private static String acme(String name, String label) {
+    return """
+        {"name": "acme-%s", "status": "Stopped", "type": "container",
+         "config": {"user.sail.project": "acme", "user.sail.workspace": "%s",
+                    "user.sail.ready": "1762941601000"%s},
+         "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}"""
+        .formatted(name, name, label);
+  }
+
+  /**
+   * N1: on a node, its own person opens a terminal in, or starts, a workspace labelled for them by
+   * id or for no one, never one labelled for anyone else: a person gone from the node, or another
+   * person of their handle. Each is refused before anything starts or is stripped, with its code.
+   */
+  @Test
+  void onANodeItsPersonEntersOnlyAWorkspaceLabelledForThemByIdOrForNoOne() throws IOException {
+    var old = acme("old", ", \"user.sail.owner\": \"ada\", \"user.sail.owner_id\": \"fde_old\"");
+    var gone = acme("gone", ", \"user.sail.owner\": \"zed\", \"user.sail.owner_id\": \"fde_zed\"");
+    var loose = acme("loose", "");
+    var box =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus storage list --format json", TestWorkspaces.POOL)
+            .onOk("incus list ^acme-old$", "[" + old + "]")
+            .onOk("incus list ^acme-gone$", "[" + gone + "]")
+            .onOk("incus list ^acme-loose$", "[" + loose + "]")
+            .onOk("incus list --format json", "[" + old + "," + gone + "," + loose + "]");
+    var lane =
+        new HostLanes.Pty(
+            db,
+            TestAuth.roles(db, new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "ada", "ada-box")),
+            null,
+            new BoxInstances(box),
+            TestWorkspaces.over(box),
+            project -> Optional.of(TestDefinitions.named(project)),
+            handle -> {
+              if (handle.equals("zed")) {
+                throw new IllegalStateException("zed is not on this box's roster.");
+              }
+              return TestOwners.of(handle);
+            },
+            box);
+    var ada = new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API));
+
+    var notTheirs = assertThrows(Remedied.Io.class, () -> lane.admitWorkspace("acme", "old", ada));
+    var goneOwner = assertThrows(Remedied.Io.class, () -> lane.admitWorkspace("acme", "gone", ada));
+    var notStarted = assertThrows(Remedied.Io.class, () -> lane.enterWorkspace("acme", "old", ada));
+    lane.admitWorkspace("acme", "loose", ada);
+
+    assertEquals(
+        List.of(
+            "not_your_workspace",
+            "old is labelled for a person this box does not know as ada, so no terminal opens in"
+                + " it; the next pass leaves it nobody's."),
+        List.of(notTheirs.code(), notTheirs.reason()));
+    assertEquals(
+        List.of(
+            "owner_gone",
+            "gone is zed's workspace, and zed is no longer active here, so no terminal opens in"
+                + " it; the next pass leaves it nobody's."),
+        List.of(goneOwner.code(), goneOwner.reason()));
+    assertEquals(Remedy.NONE, goneOwner.remedy(), "on a node no one deletes it but the pass");
+    assertEquals("not_your_workspace", notStarted.code());
+    assertTrue(
+        box.invocations().stream()
+            .noneMatch(c -> c.startsWith("incus start") || c.contains("sail-strip")),
+        box.invocations().toString());
   }
 
   /** A workspace Incus does not answer for, or whose start fails, opens nothing, saying why. */

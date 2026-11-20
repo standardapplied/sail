@@ -178,7 +178,10 @@ class HostPtyAgentTest {
 
     assertEquals(List.of("owner_gone", GONE), List.of(gone.code(), gone.reason()));
     assertEquals(
-        List.of("not_your_workspace", "old is no one's workspace, so no agent starts in it."),
+        List.of(
+            "not_your_workspace",
+            "old is labelled for a person this box does not know as ada, so no agent starts in"
+                + " it; the next pass leaves it nobody's."),
         List.of(old.code(), old.reason()));
     assertEquals(
         fdes.logins().defaultFor(adaId, Harnesses.of("claude-code")).orElseThrow().row(),
@@ -220,11 +223,15 @@ class HostPtyAgentTest {
             .reason());
   }
 
-  /** Scenario 12: a workspace labelled for another person of a reused handle is no one's. */
+  /**
+   * Scenario 12: a workspace labelled for another person of a reused handle is not theirs, and is
+   * said so truly, by id: someone is labelled for it, not no one.
+   */
   @Test
   void aWorkspaceLabelledForAnotherPersonOfTheSameHandleIsNotTheirs() {
     assertEquals(
-        "old is no one's workspace, so no agent starts in it.",
+        "old is labelled for a person this box does not know as ada, so no agent starts in it;"
+            + " the next pass leaves it nobody's.",
         assertThrows(Remedied.Io.class, () -> lane.admitAgent("acme", "old", CLAUDE, ada))
             .reason());
   }
