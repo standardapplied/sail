@@ -101,6 +101,16 @@ import Testing
         #expect(labels == ["Uday Chandra", "@uday · Admin", "main.acme.dev", "Connected", "Appearance"], "the menu says \(labels)")
         #expect(view.items.map(\.item) == [.account, .logins, .signOut] && view.items.allSatisfy { near($0.frame.height, UserMenuView.row) && near($0.frame.minX, 6) })
         #expect(near(view.avatarDisc.width, 32) && near(view.avatarDisc.minX, 16) && view.planeInk == Tint(look.success))
+        for words in ["Connected", "Reconnecting", "Can’t reach"] {
+            let label = try #require(WorkspacesViewTests.found(NSTextField.self, in: view).first { $0.stringValue == "Connected" || $0.stringValue == "Reconnecting" || $0.stringValue == "Can’t reach" })
+            let plane: UserMenuContent.Plane = words == "Connected" ? .connected : words == "Reconnecting" ? .reconnecting : .unreachable
+            shell.userMenu.update(.signedIn(handle: "uday", address: "main.acme.dev", whoami: nil, unreachable: plane != .connected, refreshing: plane == .reconnecting), appearance: .auto)
+            view.layoutSubtreeIfNeeded()
+            let needs = ceil(Double(label.attributedStringValue.size().width)) + 4
+            #expect(label.stringValue == words && needs <= Double(label.frame.width) + 0.5, "\(words) needs \(needs) pt and has \(label.frame.width): cut")
+        }
+        shell.userMenu.update(Self.uday, appearance: .auto)
+        view.layoutSubtreeIfNeeded()
         let signOut = try #require(view.items.last), logins = try #require(view.items.first { $0.item == .logins })
         #expect(signOut.frame.minY - logins.frame.maxY > UserMenuView.appearanceRow, "Sign Out is not in a section apart: \(signOut.frame) after \(logins.frame)")
         shell.userMenu.update(.signedOut, appearance: .auto)

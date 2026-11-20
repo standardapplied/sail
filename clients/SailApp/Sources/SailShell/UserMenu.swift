@@ -388,7 +388,9 @@ package final class UserMenuView: NSView {
         name.frame = mirrored(NSRect(x: text, y: 14, width: width - text - Self.padding, height: 17))
         detail.frame = mirrored(NSRect(x: text, y: 31, width: width - text - Self.padding, height: 15))
         if let plane = at.plane {
-            let stateWidth = ceil(Double(state.intrinsicContentSize.width))
+            // The words' own width and the label cell's 2 pt either side: its intrinsic width cut
+            // "Connected" to "Connect…" in the drive's frames.
+            let stateWidth = ceil(Double(state.attributedStringValue.size().width)) + 4
             state.frame = mirrored(NSRect(x: width - Self.padding - stateWidth, y: plane + 9, width: stateWidth, height: 16))
             address.frame = mirrored(NSRect(x: Self.padding + 14, y: plane + 9, width: max(width - Self.padding * 2 - 14 - stateWidth - 8, 0), height: 16))
         }
