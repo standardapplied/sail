@@ -136,20 +136,19 @@ import Testing
     }
 
     /// M2: the card's outline per look: none in light, so nothing lies over the panes; in dark,
-    /// small layers under an empty host that draws nothing and takes no click.
+    /// eight small views round the card, four 1 pt lines and four corners of the card's radius, none
+    /// of them the card's size, none drawing a bitmap, none taking a click.
     @Test(arguments: [Look.light, .dark])
-    func theCardEdgeIsNoneInLightAndSmallLayersInDark(_ look: Look) throws {
+    func theCardEdgeIsNoneInLightAndSmallViewsInDark(_ look: Look) throws {
         let shell = try WorkbenchLookTests.shell(look)
         shell.window.contentView?.layoutSubtreeIfNeeded()
-        let edge = shell.cardEdge, host = try #require(edge.layer)
+        let edge = shell.cardEdge
         #expect(edge.isHidden == (look.cardEdge == nil) && edge.isHidden == !look.palette.isDark, "the card's outline shows \(!edge.isHidden) in \(look.palette.isDark ? "dark" : "light")")
-        #expect(edge.hitTest(NSPoint(x: 10, y: 10)) == nil, "the card's outline takes a click")
-        #expect(host.contents == nil && host.backgroundColor == nil, "the outline's host draws")
-        let parts = host.sublayers ?? []
-        #expect(parts.count == 8 && parts.allSatisfy { $0.contents == nil }, "the outline is \(parts.count) layers")
-        for part in parts {
-            let side = (Double(part.bounds.width), Double(part.bounds.height))
-            #expect(min(side.0, side.1) <= 1 || max(side.0, side.1) <= CardEdge.reach, "a part of the outline is \(part.bounds), a large layer over the card")
+        #expect(edge.parts.count == 8 && edge.parts.allSatisfy { $0.isHidden == edge.isHidden }, "the outline's parts disagree on being shown")
+        for part in edge.parts {
+            let side = (Double(part.frame.width), Double(part.frame.height))
+            #expect(min(side.0, side.1) <= 1 || max(side.0, side.1) <= Look.contentRadius, "a part of the outline is \(part.frame), a large view over the card")
+            #expect(part.hitTest(NSPoint(x: part.frame.midX, y: part.frame.midY)) == nil && part.layer?.contents == nil, "a part of the outline takes a click or draws a bitmap")
         }
     }
 

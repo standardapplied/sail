@@ -331,7 +331,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         root.wantsLayer = true
         paintChrome()
         titleBarRow.layoutAttribute = .left
-        for view in [rail, content, cardEdge] as [NSView] {
+        for view in [rail, content] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
@@ -353,9 +353,8 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             content.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -Self.cardMargin), underTheRow,
             content.topAnchor.constraint(greaterThanOrEqualTo: root.topAnchor, constant: Self.bandHeight),
             content.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -Self.cardMargin),
-            cardEdge.leadingAnchor.constraint(equalTo: content.leadingAnchor), cardEdge.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            cardEdge.topAnchor.constraint(equalTo: content.topAnchor), cardEdge.bottomAnchor.constraint(equalTo: content.bottomAnchor),
         ])
+        cardEdge.place(around: content, in: root)
         placeTheStrip()
         rail.onSelect = { [weak self] item in self?.select(item) }
         account.onStanding = { [weak self] signedIn in self?.standing(signedIn) }
