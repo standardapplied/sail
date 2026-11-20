@@ -683,7 +683,6 @@ class AgentAttachCommandTest {
    */
   @Test
   void anAttachStartsItsSpecsIdleStoppedWorkspaceAndRefusesAMissingOne() throws Exception {
-    var announced = new ArrayList<String>();
     var place = RunPlace.of("acme", "u2");
     var stopped =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
@@ -694,13 +693,16 @@ class AgentAttachCommandTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("incus list --format json", "[]");
 
+    var said = new Said(stopped);
+    var announced = new Said(gone);
     AgentAttachCommand.reach(
         place,
         TestWorkspaces.over(stopped),
+        stopped,
         TestDefinitions::named,
         TestOwners::of,
         null,
-        () -> {});
+        said);
     var refused =
         assertThrows(
             IllegalStateException.class,
@@ -708,16 +710,21 @@ class AgentAttachCommandTest {
                 AgentAttachCommand.reach(
                     place,
                     TestWorkspaces.over(gone),
+                    gone,
                     TestDefinitions::named,
                     TestOwners::of,
                     null,
-                    () -> announced.add("gone")));
+                    announced));
 
     assertTrue(
         stopped.invocations().contains("incus start acme-u2"), stopped.invocations().toString());
     assertTrue(refused.getMessage().endsWith("sail spec dispatch -p acme --spec u2 --restart"));
     assertTrue(gone.invocations().stream().noneMatch(c -> c.startsWith("incus start")));
-    assertEquals(List.of(), announced, "a refused attach announces nothing");
+    assertEquals(List.of(), announced.lines(), "a refused attach announces nothing");
+    assertEquals(
+        List.of("starting acme-u2", "reached"),
+        said.lines(),
+        "a cold start is said before the start, and the attach once reached");
   }
 
   /**
@@ -748,10 +755,21 @@ class AgentAttachCommandTest {
                   AgentAttachCommand.reach(
                       place,
                       TestWorkspaces.over(box),
+                      box,
                       TestDefinitions::named,
                       TestOwners::of,
                       "uday",
-                      () -> said.add("announced")));
+                      new Said(box) {
+                        @Override
+                        public void reached() {
+                          said.add("announced");
+                        }
+
+                        @Override
+                        public void starting(String instance) {
+                          said.add("starting");
+                        }
+                      }));
       said.add(refused.getMessage());
       assertTrue(
           box.invocations().stream().allMatch(c -> c.startsWith("incus list")),
@@ -766,14 +784,15 @@ class AgentAttachCommandTest {
                 "incus list --format json",
                 "[" + TestWorkspaces.specWorkspace("acme", "u2", "Running", "uday") + "]");
 
-    var announced = new ArrayList<String>();
+    var announced = new Said(mine);
     AgentAttachCommand.reach(
         place,
         TestWorkspaces.over(mine),
+        mine,
         TestDefinitions::named,
         TestOwners::of,
         "uday",
-        () -> announced.add("announced"));
+        announced);
 
     var workspace = ((RunPlace.SpecWorkspace) place).workspace();
     assertEquals(
@@ -784,6 +803,79 @@ class AgentAttachCommandTest {
                 + " in it until the box's pass leaves it nobody's."),
         said);
     assertEquals(
-        List.of("announced"), announced, "an attach says what it attaches only once reached");
+        List.of("reached"),
+        announced.lines(),
+        "a running workspace is not said to start; the attach is said once reached");
+  }
+
+  /**
+   * #503's last look: an attach to the project's own container, not a spec's workspace, says what
+   * it attaches only once the container is found running, and nothing when it is refused.
+   */
+  @Test
+  void anAttachToTheProjectsContainerIsAnnouncedOnlyOnceItRuns() throws Exception {
+    var place = RunPlace.of("acme", null);
+    var running =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk(
+                "incus list ^acme$",
+                "[{\"name\": \"acme\", \"status\": \"Running\", \"type\": \"container\","
+                    + " \"config\": {}}]");
+    var stopped =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk(
+                "incus list ^acme$",
+                "[{\"name\": \"acme\", \"status\": \"Stopped\", \"type\": \"container\","
+                    + " \"config\": {}}]");
+    var said = new Said(running);
+    var refusedSaid = new Said(stopped);
+
+    AgentAttachCommand.reach(
+        place,
+        TestWorkspaces.over(running),
+        running,
+        TestDefinitions::named,
+        TestOwners::of,
+        null,
+        said);
+    assertThrows(
+        Exception.class,
+        () ->
+            AgentAttachCommand.reach(
+                place,
+                TestWorkspaces.over(stopped),
+                stopped,
+                TestDefinitions::named,
+                TestOwners::of,
+                null,
+                refusedSaid));
+
+    assertEquals(List.of("reached"), said.lines());
+    assertEquals(List.of(), refusedSaid.lines(), "a refused attach announces nothing");
+  }
+
+  /** What an attach says while it reaches its place, in order, told against the box it reaches. */
+  private static class Said implements AgentAttachCommand.Reaching {
+    private final List<String> lines = new ArrayList<>();
+    private final ScriptedShellExecutor box;
+
+    Said(ScriptedShellExecutor box) {
+      this.box = box;
+    }
+
+    List<String> lines() {
+      return lines;
+    }
+
+    @Override
+    public void starting(String instance) {
+      var started = box.invocations().stream().anyMatch(c -> c.startsWith("incus start"));
+      lines.add("starting " + instance + (started ? " after its start" : ""));
+    }
+
+    @Override
+    public void reached() {
+      lines.add("reached");
+    }
   }
 }

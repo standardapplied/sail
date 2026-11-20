@@ -3947,7 +3947,7 @@ class WorkspacesTest {
    */
   @Test
   void aLongStripErrorIsWrittenOnTheWorkspaceCutToOneLineAndARefusedWriteKeepsTheStripsFailure()
-      throws Exception {
+      throws Throwable {
     var long_ = "Error: line one\n" + "x".repeat(1990) + "\nlast line";
     var shell =
         incus(
@@ -3980,12 +3980,16 @@ class WorkspacesTest {
             (handle, id) -> !handle.equals("ana"),
             instance -> true,
             instance -> Instant.parse("2026-11-20T21:00:00Z"));
-    var told =
-        workspaces(refusing, ticks())
-            .disown(
-                (handle, id) -> !handle.equals("ana"),
-                instance -> true,
-                instance -> Instant.parse("2026-11-20T21:00:00Z"));
+    var told = new ArrayList<List<String>>();
+    var logged =
+        stderrOf(
+            () ->
+                told.add(
+                    workspaces(refusing, ticks())
+                        .disown(
+                            (handle, id) -> !handle.equals("ana"),
+                            instance -> true,
+                            instance -> Instant.parse("2026-11-20T21:00:00Z"))));
 
     var prefix = "incus config set acme-a user.sail.unreached=2026-11-20T21:00:00.000Z ";
     var said =
@@ -3994,8 +3998,14 @@ class WorkspacesTest {
     assertFalse(reason.contains("\n"), reason);
     assertTrue(reason.length() <= Workspaces.Unreached.REASON_MAX + 1, reason.length() + "");
     assertTrue(reason.endsWith("…") && reason.contains("Error: line one x"), reason);
-    assertEquals(1, told.size(), told.toString());
-    assertTrue(told.getFirst().endsWith("last line"), told.getFirst());
+    assertEquals(1, told.getFirst().size(), told.toString());
+    assertTrue(told.getFirst().getFirst().endsWith("last line"), told.toString());
+    assertEquals(
+        List.of(
+            "  [workspaces] why the pass did not reach acme-a could not be written on it: Workspace"
+                + " acme-a was not told why it is not reached: Error: config refused"),
+        logged.lines().toList(),
+        "a refused word is said once, with Incus's reason and nothing of the strip's");
   }
 
   /**
