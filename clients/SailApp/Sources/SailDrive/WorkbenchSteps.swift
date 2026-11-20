@@ -488,6 +488,8 @@ extension Driver {
         print(String(format: "panes4 phase floods typed %.3f", CACurrentMediaTime()))
         let begun = await waitUntil(10) { floods.allSatisfy { ((try? $0.session?.screen.text()) ?? "").contains("xxxxxxxxxx") } }
         print(String(format: "panes4 phase floods begun %.3f", CACurrentMediaTime()))
+        let over = overThe(floods)
+        print("panes4 over the floods' terminals: " + (over.isEmpty ? "nothing" : over.joined(separator: "; ")))
         let shares = await cpuShares()
         print("panes4 CPU shares over the measure's first second: \(shares.said)")
         panes4["terminal host CPU share at the measure's start, %"] = shares.host
@@ -544,6 +546,14 @@ extension Driver {
             panes4["flood \(index + 1) longest wait to be shown ms"] = figures.outputToShown.max
             panes4["flood \(index + 1) refresh p95 ms"] = figures.refresh.p95
         }
+        // A layer over the panes' Metal layers is composited with every frame they present: the
+        // full-card shape layer once made each flood wait 80 to 100 ms for drawables. Healthy code
+        // waits about 1 ms, but a busy runner has made unchanged code wait up to 48 ms in all three
+        // floods, so the bound is on the least of the three, above that.
+        let waits = floods.indices.map { panes4["flood \($0 + 1) ms a drawable was being asked for in its longest commit gap"] ?? 0 }
+        let waited = waits.map { String(format: "%.1f", $0) }.joined(separator: ", ")
+        budgets["the least of the floods' drawable waits in their longest commit gaps <= \(Int(Self.drawableWaitBound)) ms (\(waited))"] =
+            (waits.min() ?? 0) <= Self.drawableWaitBound
         for gap in mainThread.stalls.gaps where gap.length > 0.06 {
             print(String(format: "panes4 main thread held %.3f–%.3f (%.1f ms), the drive's own thread %.1f ms of it", gap.start, gap.end, gap.length * 1000,
                          ownThread.stalls.shared(with: gap) * 1000))
@@ -573,6 +583,45 @@ extension Driver {
         let missed = budgets.filter { !$0.value }.keys.sorted()
         let numbers = panes4.sorted { $0.key < $1.key }.map { "\($0.key) \(String(format: "%.1f", $0.value))" }.joined(separator: ", ")
         return (ok && missed.isEmpty, (missed.isEmpty ? "within every budget" : "missed: \(missed.joined(separator: "; "))") + "; echo: \(said); \(numbers)")
+    }
+
+    /// The bound on the least of the three floods' drawable waits, in ms.
+    static let drawableWaitBound = 60.0
+
+    /// What the window draws over each of `panes`' terminals: every view shown, other than the
+    /// terminal's own, that lies over part of it later in the window's order, with its size and
+    /// whether it has a layer. A layer over a pane's Metal layer is composited with every frame the
+    /// pane presents, so one the pane's size slows each frame's drawable.
+    private func overThe(_ panes: [TerminalPane]) -> [String] {
+        guard let root = shell.window.contentView?.superview else { return [] }
+        func path(_ view: NSView) -> [Int] {
+            var indices: [Int] = [], view = view
+            while let parent = view.superview {
+                indices.insert(parent.subviews.firstIndex(of: view) ?? 0, at: 0)
+                view = parent
+            }
+            return indices
+        }
+        func over(_ one: [Int], _ other: [Int]) -> Bool {
+            for (a, b) in zip(one, other) where a != b { return a > b }
+            return false
+        }
+        var shown: [NSView] = []
+        func walk(_ view: NSView) {
+            for child in view.subviews where !child.isHidden && child.alphaValue > 0 {
+                shown.append(child)
+                walk(child)
+            }
+        }
+        walk(root)
+        return panes.enumerated().flatMap { index, pane in
+            let terminal = pane.terminal, place = path(pane.terminal)
+            let rect = terminal.convert(terminal.bounds, to: nil)
+            return shown.filter { view in
+                view !== terminal && !view.isDescendant(of: terminal) && !terminal.isDescendant(of: view) && over(path(view), place)
+                    && view.convert(view.bounds, to: nil).intersects(rect)
+            }.map { view in "pane \(index + 1): \(type(of: view)) \(Int(view.frame.width))x\(Int(view.frame.height))\(view.layer == nil ? "" : ", a layer")" }
+        }
     }
 
     /// The terminal host's and the app's CPU shares, in %, over the next second.
