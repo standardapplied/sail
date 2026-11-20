@@ -135,6 +135,7 @@ func answer<Response>(
         #expect(listed == RunnerSessions(sessions: [
             RunnerSession(
                 name: "app-1f2e3d4c", live: true, attached: 1, writer: "uday", opener: "uday", command: ["claude"],
+                agent: RunnerAgent(harness: "claude-code", mode: "default", login: "stored"),
                 createdAt: Date(timeIntervalSince1970: 1_763_460_000), endedReason: nil
             ),
             RunnerSession(

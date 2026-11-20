@@ -54,6 +54,39 @@ class SessionMetaTest {
   }
 
   @Test
+  void theHarnessASessionRunsRoundTripsAndASidecarWithoutOneRunsNone() throws Exception {
+    var path = dir.resolve("s2.meta");
+    var agent = new PtyMessage.Agent("codex", "full", true);
+    var meta =
+        new SessionMeta(
+            new PtySession.Origin(
+                "s2",
+                "inst-2",
+                "uday",
+                "acme",
+                "",
+                List.of("codex", "--dangerously-bypass-approvals-and-sandbox"),
+                "dock",
+                agent),
+            "/",
+            80,
+            24,
+            "",
+            0,
+            1,
+            1L,
+            "0.74.0",
+            false);
+    meta.write(path);
+    assertEquals(agent, SessionMeta.read(path).origin().agent());
+
+    var before = Files.readString(path).replaceAll(",\\s*\"agent_[a-z]+\"\\s*:\\s*[^,}]+", "");
+    assertFalse(before.contains("agent_"), before);
+    Files.writeString(path, before);
+    assertEquals(PtyMessage.Agent.NONE, SessionMeta.read(path).origin().agent());
+  }
+
+  @Test
   void aRewriteReplacesTheWholeFileAndACrashMidWriteLeavesTheOldOne() throws Exception {
     var path = dir.resolve("s1.meta");
     sample().write(path);

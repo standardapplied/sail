@@ -204,41 +204,65 @@ final class RunLogins {
     if (Strings.isBlank(specId)) {
       return Optional.empty();
     }
-    var harness = Harnesses.of(agent);
     var fde = fdes == null || Strings.isBlank(owner) ? null : fdes.byHandle(owner).orElse(null);
-    var stored = fde == null ? null : fdes.logins().defaultFor(fde.id(), harness).orElse(null);
-    if (stored != null) {
-      return Optional.of(stored);
-    }
-    var others =
-        fde == null
-            ? List.<LoginStore.Row>of()
-            : fdes.logins().list(fde.id()).stream()
-                .filter(row -> row.harness().equals(harness.yamlName()))
-                .toList();
-    throw others.isEmpty() ? noneStored(harness, owner) : noDefault(harness, owner, others);
+    return Optional.of(
+        stored(
+            fdes,
+            fde == null ? null : fde.id(),
+            owner,
+            Harnesses.of(agent),
+            "a run of a spec cannot start",
+            ": a login made by hand in the project's container is not used by runs"));
   }
 
-  private static ApiException noneStored(Harness harness, String owner) {
+  /**
+   * The default login {@code person}, of FDE id {@code fdeId} (null for none on this box), stored
+   * for {@code harness}: what {@code cannot} says cannot start without one, as the refusal says it,
+   * with {@code why} after it when none is stored at all.
+   *
+   * @throws ApiException {@link ErrorCode#LOGIN_NOT_STORED} with the remedy that stores one, or
+   *     that makes one of their logins the default when they have some
+   */
+  static LoginStore.Login stored(
+      FdeStore fdes, String fdeId, String person, Harness harness, String cannot, String why) {
+    var stored = fdeId == null ? null : fdes.logins().defaultFor(fdeId, harness).orElse(null);
+    if (stored != null) {
+      return stored;
+    }
+    var others =
+        fdeId == null
+            ? List.<LoginStore.Row>of()
+            : fdes.logins().list(fdeId).stream()
+                .filter(row -> row.harness().equals(harness.yamlName()))
+                .toList();
+    throw others.isEmpty()
+        ? noneStored(harness, person, cannot + why)
+        : noDefault(harness, person, cannot, others);
+  }
+
+  private static ApiException noneStored(Harness harness, String owner, String cannot) {
     return new ApiException(
         ErrorCode.LOGIN_NOT_STORED,
         "No "
             + harness.displayName()
             + " login stored for "
             + (Strings.isBlank(owner) ? "this box's person" : owner)
-            + ", so a run of a spec cannot start: a login made by hand in the project's container"
-            + " is not used by runs.",
+            + ", so "
+            + cannot
+            + ".",
         howToStore(harness));
   }
 
   private static ApiException noDefault(
-      Harness harness, String owner, List<LoginStore.Row> others) {
+      Harness harness, String owner, String cannot, List<LoginStore.Row> others) {
     return new ApiException(
         ErrorCode.LOGIN_NOT_STORED,
         owner
             + " has no default "
             + harness.displayName()
-            + " login, so a run of a spec cannot start; stored: "
+            + " login, so "
+            + cannot
+            + "; stored: "
             + String.join(", ", others.stream().map(LoginStore.Row::name).toList())
             + ".",
         Remedy.of(

@@ -12,7 +12,10 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.pty.PtyMessage;
+import ai.singlr.sail.store.LoginStore;
 import java.io.IOException;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
@@ -92,6 +95,31 @@ final class PtyHostAccess implements PtyIdentity.Resolver, PtyIdentity.Holders, 
   public void enter(String project, String workspace, PtyIdentity.Person who) throws IOException {
     try (var opened = operations.get()) {
       opened.pty().enterWorkspace(project, workspace, who);
+    }
+  }
+
+  @Override
+  public Optional<LoginStore.Login> agent(
+      String project, String workspace, PtyMessage.Agent agent, PtyIdentity.Person who)
+      throws IOException {
+    try (var opened = operations.get()) {
+      return opened.pty().admitAgent(project, workspace, agent, who);
+    }
+  }
+
+  @Override
+  public void handOver(
+      String project, String workspace, String file, String lines, PtyIdentity.Person who)
+      throws IOException {
+    try (var opened = operations.get()) {
+      opened.pty().handOver(project, workspace, file, lines, who);
+    }
+  }
+
+  @Override
+  public void withdraw(String instance, String file) {
+    try (var opened = operations.get()) {
+      opened.pty().withdraw(instance, file);
     }
   }
 

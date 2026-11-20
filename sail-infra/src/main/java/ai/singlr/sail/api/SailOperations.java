@@ -134,7 +134,8 @@ public final class SailOperations implements HostOperations {
             new BoxInstances(shell),
             Workspaces.onThisBox(shell),
             ProjectReader.ofCatalog(projectStore),
-            identity::workspaceOwner);
+            identity::workspaceOwner,
+            shell);
     projectSkills = new ProjectSkills(this::projectFiles);
     dispatchOps.useProjectSkills(projectSkills);
     return this;

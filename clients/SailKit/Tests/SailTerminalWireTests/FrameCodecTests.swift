@@ -17,8 +17,9 @@ import Testing
     @Test func theGoldenFramesCarryTheirFieldsInOrder() throws {
         let frames = try Dictionary(uniqueKeysWithValues: Goldens.frames().map { ($0.name, try decoded($0.wire)) })
         #expect(frames["Create"] == .create(SessionCreate(
-            session: "lounge", command: ["bash", "-l"], workingDirectory: "/home/dev", project: "harbor",
-            room: "harbor-design", size: TerminalSize(columns: 132, rows: 43), workspace: "dock"
+            session: "lounge", command: [], workingDirectory: "/home/dev", project: "harbor",
+            room: "harbor-design", size: TerminalSize(columns: 132, rows: 43), workspace: "dock",
+            agent: SessionAgent(harness: "codex", mode: "full", inside: true)
         )))
         #expect(frames["Attach"] == .attach(session: "lounge", write: true, client: "pane-7f", takes: false))
         #expect(frames["WriterChanged"] == .writerChanged(fde: "uday", yours: true))
@@ -57,7 +58,8 @@ import Testing
                 .words("Run "),
                 .command(run: .known(.sail), verb: "session", args: ["take", "lounge"]),
                 .words(" to take it."),
-            ]
+            ],
+            code: "login_not_stored"
         )))
     }
 
@@ -80,7 +82,8 @@ import Testing
                 .words("Run "),
                 .command(run: .unknown("TUGS"), verb: "session", args: ["take", "lounge"]),
                 .words(" to take it."),
-            ]
+            ],
+            code: "login_not_stored"
         )))
         #expect(try FrameCodec.encode(frame) == grown)
     }
@@ -111,7 +114,8 @@ import Testing
     @Test func aPagePlacingOtherThanItsSessionsIsMalformed() throws {
         var page = Array(try golden("Sessions").dropFirst(4))
         let loungePlace = field("harbor") + field("dock") + field("uday") + 8 + field("")
-        let shellPlace = 3 * field("") + 8 + field("")
+            + field("claude-code") + field("full") + 1
+        let shellPlace = 3 * field("") + 8 + field("") + 2 * field("") + 1
         let places = page.count - 4 - loungePlace - shellPlace
         page.replaceSubrange(places ..< places + 4, with: [0, 0, 0, 3])
         #expect(throws: TerminalWireError.malformed("a page places 3 sessions but holds 2")) {
@@ -185,8 +189,9 @@ import Testing
 
 let lounge = SessionInfo(
     name: "lounge", instanceID: "inst-1", live: true, attached: 2, writerFDE: "uday",
-    room: "harbor-design", command: ["claude", "--resume"], project: "harbor", workspace: "dock",
-    opener: "uday", createdAtMillis: 1_763_460_000_000
+    room: "harbor-design", command: ["claude", "--dangerously-skip-permissions"], project: "harbor",
+    workspace: "dock", opener: "uday", createdAtMillis: 1_763_460_000_000,
+    agent: SessionAgent(harness: "claude-code", mode: "full")
 )
 let shell = SessionInfo(
     name: "shell", instanceID: "inst-2", live: false, attached: 0, writerFDE: "", room: "", command: ["bash"]
