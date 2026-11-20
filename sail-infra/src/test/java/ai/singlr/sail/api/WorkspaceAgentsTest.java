@@ -336,8 +336,7 @@ class WorkspaceAgentsTest {
     assertEquals(
         List.of(
             "owner_gone",
-            "old is zed's workspace, and zed is no longer active here, so no agent starts in it;"
-                + " the next pass leaves it nobody's.",
+            "old is zed's workspace, and zed is no longer active here, so no agent starts in it until the box's pass leaves it nobody's.",
             "Delete it meanwhile with: project workspace delete acme old --force."),
         said(old.body().get("refusal")));
     assertEquals(List.of(), old.body().get("offered"));
@@ -399,7 +398,7 @@ class WorkspaceAgentsTest {
       assertEquals("not_your_workspace", reused.code());
       assertEquals(
           "reused is labelled for a person this box does not know as sam, so no agent starts in"
-              + " it; the next pass leaves it nobody's.",
+              + " it until the box's pass leaves it nobody's.",
           ((Map<?, ?>) reused.body().get("error")).get("message"));
       assertEquals(409, gone.status(), gone.toString());
       assertEquals("owner_gone", gone.code());

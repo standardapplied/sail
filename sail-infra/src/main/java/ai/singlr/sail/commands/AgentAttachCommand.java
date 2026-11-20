@@ -410,18 +410,20 @@ public final class AgentAttachCommand implements Runnable {
       System.out.println(printed(exec));
       return;
     }
-    if (sessionId == null) {
-      announceFresh(run);
-    } else {
-      announceResume(run, harness, sessionId, place.instance());
-    }
     try (var operations = this.operations.apply(operator)) {
       reach(
           place,
           Workspaces.onThisBox(new ShellExecutor(false)),
           operations.catalog().definitions()::require,
           operations.identity()::workspaceOwner,
-          WorkspaceVerbs.keeper());
+          WorkspaceVerbs.keeper(),
+          () -> {
+            if (sessionId == null) {
+              announceFresh(run);
+            } else {
+              announceResume(run, harness, sessionId, place.instance());
+            }
+          });
     }
 
     if (member) {
@@ -592,14 +594,17 @@ public final class AgentAttachCommand implements Runnable {
    * Workspaces#startExisting}), started when stopped and given its owner's credentials; any other
    * place must be running. On a node ({@code keeper}, its person; null on main), a spec's workspace
    * labelled for a person the node does not hold by id is refused first, running or stopped (N1):
-   * no terminal opens on that person's credentials, and only the box's pass strips it.
+   * no terminal opens on that person's credentials, and only the box's pass strips it. {@code
+   * reached} runs once the place is within reach, so what an attach says it attaches is never said
+   * of one it refuses.
    */
   static void reach(
       RunPlace place,
       Workspaces workspaces,
       Function<String, ProjectDefinition> definitions,
       Function<String, WorkspaceOwner> owners,
-      String keeper)
+      String keeper,
+      Runnable reached)
       throws Exception {
     if (place instanceof RunPlace.SpecWorkspace workspace) {
       if (keeper != null) {
@@ -619,9 +624,11 @@ public final class AgentAttachCommand implements Runnable {
         }
       }
       workspaces.startExisting(workspace, definitions.apply(workspace.project()), owners);
+      reached.run();
       return;
     }
     requireRunning(place);
+    reached.run();
   }
 
   /**
