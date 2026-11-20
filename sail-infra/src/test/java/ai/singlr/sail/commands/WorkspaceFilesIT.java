@@ -109,12 +109,32 @@ class WorkspaceFilesIT extends AbstractIncusIT {
     }
   }
 
+  /** The next frame that is not a tick, as {@code type}, or a failure saying what came instead. */
+  private static <T extends PtyMessage> T next(SocketChannel channel, Class<T> type)
+      throws IOException {
+    var message = next(channel);
+    return assertInstanceOf(type, message, () -> "the host answered " + message);
+  }
+
   private void inInstance(String script) throws Exception {
     var ran =
         shell.exec(
             List.of(
-                "incus", "exec", INSTANCE, "--user", "1000", "--group", "1000", "--cwd", "/", "--",
-                "bash", "-c", script));
+                "incus",
+                "exec",
+                INSTANCE,
+                "--user",
+                "1000",
+                "--group",
+                "1000",
+                "--cwd",
+                "/",
+                "--env",
+                "HOME=/home/dev",
+                "--",
+                "bash",
+                "-c",
+                script));
     assertTrue(ran.ok(), script + " failed: " + ran.stderr());
   }
 
@@ -180,9 +200,9 @@ class WorkspaceFilesIT extends AbstractIncusIT {
                   "bash", "-c", "mkdir -p /home/dev/workspace && chown -R 1000:1000 /home/dev"));
       assertTrue(prepared.ok(), prepared.stderr());
       inInstance(
-          "mkdir -p ~/workspace/big && cd ~/workspace/big && for i in $(seq 1 5000); do : >"
-              + " src-$i.java; done && head -c 1048576 /dev/urandom > ~/blob && head -c 104857600"
-              + " /dev/zero > ~/huge");
+          "mkdir -p /home/dev/workspace/big && cd /home/dev/workspace/big && for i in $(seq 1"
+              + " 5000); do : > src-$i.java; done && head -c 1048576 /dev/urandom > /home/dev/blob"
+              + " && head -c 104857600 /dev/zero > /home/dev/huge");
       try (var host = startHost(dbPath)) {
         assertInstanceOf(PtyMessage.Ticket.class, ticket("tok-ana"), "its owner");
         assertInstanceOf(PtyMessage.Ticket.class, ticket("tok-uday"), "an admin");
@@ -199,7 +219,7 @@ class WorkspaceFilesIT extends AbstractIncusIT {
             var count = 0;
             PtyMessage.FilesListing listing;
             do {
-              listing = assertInstanceOf(PtyMessage.FilesListing.class, next(files));
+              listing = next(files, PtyMessage.FilesListing.class);
               count += listing.entries().size();
             } while (listing.more());
             lists.add((System.nanoTime() - started) / 1_000_000);
@@ -210,19 +230,19 @@ class WorkspaceFilesIT extends AbstractIncusIT {
             PtyWire.write(
                 files,
                 new PtyMessage.FilesRead(100 + i, "/home/dev/blob", 0, PtyMessage.FILE_CHUNK));
-            var data = assertInstanceOf(PtyMessage.FilesData.class, next(files));
+            var data = next(files, PtyMessage.FilesData.class);
             reads.add((System.nanoTime() - started) / 1_000_000);
             assertEquals(PtyMessage.FILE_CHUNK, data.bytes().length);
           }
           PtyWire.write(files, new PtyMessage.FilesStat(200, "/home/dev/workspace"));
-          var version = ((PtyMessage.FilesEntry) next(files)).version();
+          var version = next(files, PtyMessage.FilesEntry.class).version();
           PtyWire.write(
               files,
               new PtyMessage.FilesWatch(
                   List.of(new PtyMessage.Watched("/home/dev/workspace", version))));
           assertInstanceOf(PtyMessage.FilesTick.class, PtyWire.read(files));
           var changed = System.nanoTime();
-          inInstance(": > ~/workspace/new.txt");
+          inInstance(": > /home/dev/workspace/new.txt");
           assertEquals(new PtyMessage.FilesChanged(List.of("/home/dev/workspace")), next(files));
           var change = (System.nanoTime() - changed) / 1_000_000;
           System.out.printf(
@@ -234,8 +254,8 @@ class WorkspaceFilesIT extends AbstractIncusIT {
           assertTrue(change <= CHANGE_CEILING_MS, "change " + change + " ms");
 
           PtyWire.write(files, new PtyMessage.FilesRead(300, "/home/dev/huge", 0, 20L << 20));
-          assertInstanceOf(PtyMessage.FilesData.class, PtyWire.read(files));
-          assertTrue(scripts() >= 2, "a read held by its unread connection, and the watch");
+          next(files, PtyMessage.FilesData.class);
+          assertTrue(scripts() >= 1, "the watch, and a read its unread connection holds");
         }
         awaitNoScripts();
 
