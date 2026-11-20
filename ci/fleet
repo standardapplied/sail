@@ -867,7 +867,7 @@ inside() {
     http_door "$run" client client 201 POST /v1/specs '{"project":"acme","id":"http-client'"$x"'","title":"over http"}'
   check "$run" "over HTTP, client cannot create a spec in beta" \
     http_door "$run" client client 404 POST /v1/specs '{"project":"beta","id":"http-beta'"$x"'","title":"over http"}'
-  check "$run" "from main, over client's private address, a ticket opens a session over TCP that echoes a line, and is refused a second time" \
+  check "$run" "from main, over client's private address, a ticket opens a session over TCP that echoes a line, and is refused a second time; a files ticket for acme's own container is refused, naming a workspace" \
     direct_terminal "$run" client main client
 }
 
@@ -887,7 +887,7 @@ done
 sudo sail server token revoke "direct-$handle" > /dev/null 2>&1 || true
 sudo sail server token create "direct-$handle" member --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " "'
 
-readonly DIRECT_TERMINAL='import json, socket, struct, sys, urllib.request
+readonly DIRECT_TERMINAL='import json, socket, struct, sys, urllib.error, urllib.request
 ip, token = sys.argv[1], sys.stdin.readline().strip()
 workspace = sys.argv[2] if len(sys.argv) > 2 else ""
 def text(value):
@@ -908,8 +908,8 @@ def read(conn):
     return payload[0], payload[1:]
 def present(ticket):
     conn = socket.create_connection((ip, 7072), timeout=30)
-    conn.sendall(b"SAILPTY6")
-    if exactly(conn, 8) != b"SAILPTY6":
+    conn.sendall(b"SAILPTY7")
+    if exactly(conn, 8) != b"SAILPTY7":
         raise SystemExit("not a sail pty host")
     conn.sendall(frame(9, text(ticket)))
     return conn, read(conn)
@@ -937,7 +937,33 @@ print("the session echoed 42-over-tcp over TCP")
 again, (kind, payload) = present(ticket)
 if kind != 31 or b"presented already" not in payload:
     raise SystemExit("the second presentation was not refused as used: frame %d" % kind)
-print("the same ticket, presented again, is refused")'
+print("the same ticket, presented again, is refused")
+asked = urllib.request.Request(
+    "http://%s:7071/v1/terminal/tickets" % ip,
+    data=json.dumps({"action": "files", "project": "acme", "workspace": workspace}).encode(),
+    headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+if not workspace:
+    try:
+        urllib.request.urlopen(asked, timeout=30)
+        raise SystemExit("a files ticket for the project container was issued")
+    except urllib.error.HTTPError as refused:
+        said = refused.read()
+        if refused.code != 422 or b"names a workspace" not in said:
+            raise SystemExit("a files ticket for the container was answered %d %r" % (refused.code, said))
+    print("a files ticket for the project container is refused: it names a workspace")
+    raise SystemExit(0)
+files, (kind, _) = present(json.load(urllib.request.urlopen(asked, timeout=30))["ticket"])
+if kind != 32:
+    raise SystemExit("the files ticket was not welcomed: frame %d" % kind)
+files.sendall(frame(40, struct.pack(">i", 1) + text("/home/dev")))
+kind, payload = read(files)
+if kind != 50 or b"workspace" not in payload:
+    raise SystemExit("the home was not listed: frame %d %r" % (kind, payload[:200]))
+files.sendall(frame(44, struct.pack(">i", 0)))
+kind, _ = read(files)
+if kind != 54:
+    raise SystemExit("the watch did not tick: frame %d" % kind)
+print("a files ticket lists the workspace home over TCP and its watch ticks")'
 
 # With "open", opens session NAME in acme's container over a ticket, starts it counting (n-1, n-2,
 # ...), prints the last number it saw and is killed, so the host sees its client vanish unsaid; with "back", waits up to 60 s for
@@ -969,8 +995,8 @@ def api(method, path, body=None):
     return json.load(urllib.request.urlopen(asked, timeout=30))
 def present(ticket):
     conn = socket.create_connection((ip, 7072), timeout=30)
-    conn.sendall(b"SAILPTY6")
-    if exactly(conn, 8) != b"SAILPTY6":
+    conn.sendall(b"SAILPTY7")
+    if exactly(conn, 8) != b"SAILPTY7":
         raise SystemExit("not a sail pty host")
     conn.sendall(frame(9, text(ticket)))
     kind, payload = read(conn)
@@ -1045,7 +1071,9 @@ sudo sail server token revoke "direct-$handle" > /dev/null 2>&1 || true
 exit $status'
 
 # From box FROM, over box HOST's private address: a ticket HANDLE asks HOST's API for, to open a
-# terminal in acme's container, or in its WORKSPACE, opens a session over TCP that echoes a line.
+# terminal in acme's container, or in its WORKSPACE, opens a session over TCP that echoes a line;
+# then a files ticket for WORKSPACE lists /home/dev there and its watch ticks, and one for the
+# container is refused naming a workspace.
 # HOST's listeners are read first, set for it, and put back as they were after it, whether it passed
 # or not, all with Sail's own commands (host status --json, host config set); HOST's sail-api and
 # pty host restart for each. That is safe only where nothing else uses HOST meanwhile: each group
@@ -1915,7 +1943,7 @@ storage() {
     http_token_door "$run" main client member 403 POST /v1/projects/acme/workspaces/eng-own/stop '' "belongs to 'eng'"
   check "$run" "obs, a viewer, creates no workspace on main" \
     http_token_door "$run" main obs viewer 403 POST /v1/projects/acme/workspaces '{"name":"obs-own"}' read_only_credential
-  check "$run" "from client, eng's ticket for her workspace on main opens a session in it over TCP that echoes a line" \
+  check "$run" "from client, eng's ticket for her workspace on main opens a session in it over TCP that echoes a line, and her files ticket lists its home and its watch ticks" \
     direct_terminal "$run" main client eng eng-own
   check "$run" "a command is left running in eng's workspace, as an open terminal would be" \
     on "$run" main "sudo sh -c 'nohup incus exec acme-eng-own -- sleep 600 > /dev/null 2>&1 &'"
