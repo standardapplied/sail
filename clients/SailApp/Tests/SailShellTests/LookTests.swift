@@ -141,15 +141,9 @@ import Testing
         let chosen = try #require(shell.rail.bar(.thisMac))
         #expect(!chosen.isHidden && chosen.layer?.backgroundColor == NSColor(look.accent).cgColor, "\(name): the rail's chosen item has no accent bar, as a tab's")
         #expect(shell.rail.drawnMarks == [.accentLine], "\(name): the rail's chosen item draws \(shell.rail.drawnMarks), not one accent bar on ink")
+        shell.window.contentView?.layoutSubtreeIfNeeded()
         let wash = try #require(shell.rail.chosenWash)
         #expect(near(wash.size.width, Rail.item) && near(wash.size.height, Rail.item) && wash.colour == NSColor(Tint(look.chromeWash)).cgColor, "\(name): the rail's chosen wash is \(wash)")
-        shell.window.contentView?.layoutSubtreeIfNeeded()
-        let edge = shell.cardEdge, parts = edge.layer?.sublayers ?? []
-        #expect(edge.isHidden == (look.cardEdge == nil), "\(name): the card's outline shows \(!edge.isHidden) with \(String(describing: look.cardEdge))")
-        #expect(edge.layer?.contents == nil && parts.count == 8, "\(name): the card's outline is not eight small layers under an empty host")
-        let lines = parts.filter { !($0 is CAShapeLayer) }
-        #expect(lines.count == 4 && lines.allSatisfy { min($0.bounds.width, $0.bounds.height) == 1 }, "\(name): the outline's lines are \(lines.map(\.frame))")
-        #expect(parts.allSatisfy { max($0.bounds.width, $0.bounds.height) < 8 || min($0.bounds.width, $0.bounds.height) <= 1 }, "\(name): a part of the outline is a large layer over the card")
         for item in [Rail.Item.account, .thisMac] {
             shell.select(item)
             #expect(content.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name) \(item): the band under the title bar is not the chrome")

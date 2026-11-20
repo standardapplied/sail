@@ -405,12 +405,20 @@ final class SailRowView: NSTableRowView {
         guard item != nil else { return }
         let paint = self.paint
         guard paint.bar else { return }
-        NSColor(barInk).setFill()
-        let rightToLeft = userInterfaceLayoutDirection == .rightToLeft, half = RowStyle.barWidth / 2
+        let ink = barInk, rightToLeft = userInterfaceLayoutDirection == .rightToLeft, half = RowStyle.barWidth / 2
         let top = Double(content.minY) + (min(Double(content.height), rowStyle.height) - rowStyle.bar) / 2
         let bar = NSRect(x: rightToLeft ? Double(bounds.width) - RowStyle.barWidth : 0, y: top, width: RowStyle.barWidth, height: rowStyle.bar)
+        // The bar is a rounded rect and a square half at the edge, overlapping: drawn opaque in one
+        // layer, then laid down once at the ink's strength, so a translucent ink is not doubled there.
+        let context = NSGraphicsContext.current?.cgContext
+        context?.saveGState()
+        context?.setAlpha(ink.alpha)
+        context?.beginTransparencyLayer(auxiliaryInfo: nil)
+        NSColor(Tint(ink.rgb)).setFill()
         NSBezierPath(roundedRect: bar, xRadius: half, yRadius: half).fill()
         NSBezierPath(rect: NSRect(x: rightToLeft ? Double(bar.maxX) - half : Double(bar.minX), y: Double(bar.minY), width: half, height: Double(bar.height))).fill()
+        context?.endTransparencyLayer()
+        context?.restoreGState()
     }
 
     override func drawSelection(in _: NSRect) {}
