@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SailAPI
+import SailKitTestSupport
 import SailShell
 import SailTestPasskey
 
@@ -10,6 +11,7 @@ import SailTestPasskey
 /// `SAIL_DRIVE_GOLDENS=on` answers every control-plane call from the server's goldens. Never shipped:
 /// it is its own executable, bundled only for CI's drive runs.
 LineBuffered.standardOutput()
+ExitWatch.watchExceptions()
 let arguments = CommandLine.arguments
 func value(after flag: String) -> String? {
     arguments.firstIndex(of: flag).flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }

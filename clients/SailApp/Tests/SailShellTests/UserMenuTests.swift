@@ -13,9 +13,11 @@ import Testing
 /// work it, what each item does, Appearance remembered and taken, what VoiceOver hears, and that it
 /// adds no accent and no grey to the window it opens over. No test here runs a real event loop (a
 /// posted event, a button's own mouse tracking): with no `NSApp.run` under a test, that stopped the
-/// main run loop and so ended the suite's process; real clicks are the drive's. One test at a time:
-/// a menu closes when its window gives up the keys, and another test's window takes them.
-@MainActor @Suite(.serialized) struct UserMenuTests {
+/// main run loop and so ended the suite's process; real clicks are the drive's. No test here holds
+/// what is the whole process's, so it passes beside any other suite in one process: each shell's
+/// menu is told its window gave up the keys by a notification of the test's own, not the real key
+/// window, and its Appearance is set through a recorder, not `NSApp.appearance`.
+@MainActor @Suite struct UserMenuTests {
     init() {
         ExitWatch.install()
     }
@@ -33,7 +35,23 @@ import Testing
     static func shell(_ look: Look = .light) throws -> ShellApp {
         let shell = try WorkbenchLookTests.shell(look)
         shell.window.orderFront(nil)
+        own(shell)
         return shell
+    }
+
+    /// What each test's shell set as the app's appearance, in place of the process's own.
+    static var appearances: [ObjectIdentifier: NSAppearance.Name?] = [:]
+
+    /// `shell` told it gave up the keys by a notification of its own, and its Appearance recorded.
+    static func own(_ shell: ShellApp) {
+        shell.userMenu.keysLeft = Notification.Name("sail.tests.keys-left.\(UUID().uuidString)")
+        let id = ObjectIdentifier(shell)
+        shell.setAppearance = { Self.appearances[id] = .some($0?.name) }
+    }
+
+    /// The appearance `shell` last set, nil for the Mac's own (or none set).
+    static func appearance(of shell: ShellApp) -> NSAppearance.Name? {
+        appearances[ObjectIdentifier(shell)] ?? nil
     }
 
     static func open(_ shell: ShellApp, _ content: UserMenuContent = uday, withKeys: Bool = false) throws {
@@ -105,7 +123,7 @@ import Testing
         defer { shell.window.orderOut(nil) }
         try Self.open(shell)
         let view = shell.userMenu.view
-        let labels = WorkspacesViewTests.found(NSTextField.self, in: view).filter { !$0.isHidden }.map(\.stringValue)
+        let labels = WorkspacesViewTests.found(NSTextField.self, in: view).filter { !$0.isHiddenOrHasHiddenAncestor }.map(\.stringValue)
         #expect(labels == ["Uday Chandra", "@uday · Admin", "main.acme.dev", "Connected", "Appearance"], "the menu says \(labels)")
         #expect(view.items.map(\.item) == [.account, .logins, .signOut] && view.items.allSatisfy { near($0.frame.height, UserMenuView.row) && near($0.frame.minX, 6) })
         #expect(near(view.avatarDisc.width, 32) && near(view.avatarDisc.minX, 16) && view.planeInk == Tint(look.success))
@@ -123,7 +141,7 @@ import Testing
         #expect(signOut.frame.minY - logins.frame.maxY > UserMenuView.appearanceRow, "Sign Out is not in a section apart: \(signOut.frame) after \(logins.frame)")
         shell.userMenu.update(.signedOut(lastUsed: nil), appearance: .auto)
         view.layoutSubtreeIfNeeded()
-        let out = WorkspacesViewTests.found(NSTextField.self, in: view).filter { !$0.isHidden }.map(\.stringValue)
+        let out = WorkspacesViewTests.found(NSTextField.self, in: view).filter { !$0.isHiddenOrHasHiddenAncestor }.map(\.stringValue)
         #expect(out == ["Not signed in", "no control plane yet", "Appearance"] && view.items.map(\.item) == [.signIn], "signed out, the menu says \(out)")
         #expect(view.content.disc == .person && near(view.avatarDisc.width, 32), "signed out, no person's disc")
         shell.userMenu.update(Self.long, appearance: .auto)
@@ -136,10 +154,7 @@ import Testing
     /// to the button when the keys opened it, else where they were.
     @Test func theKeysWorkTheMenu() throws {
         let shell = try Self.shell()
-        defer {
-            shell.window.orderOut(nil)
-            NSApp.appearance = nil
-        }
+        defer { shell.window.orderOut(nil) }
         let view = shell.userMenu.view, button = try #require(shell.rail.button(.account))
         let had = UserMenu.holder(of: shell.window.firstResponder)
         try Self.open(shell, withKeys: true)
@@ -153,10 +168,10 @@ import Testing
         #expect(Self.highlighted(view) == "Account" && shell.userMenu.isOpen && shell.window.firstResponder is MenuKeys, "Tab left the menu, or moved to \(Self.highlighted(view))")
         try Self.press(Self.down, in: shell)
         try Self.press(Self.left, in: shell)
-        #expect(view.chosenLook == .dark && Appearance.stored(in: shell.defaults) == .dark && NSApp.appearance?.name == .darkAqua && shell.userMenu.isOpen)
+        #expect(view.chosenLook == .dark && Appearance.stored(in: shell.defaults) == .dark && Self.appearance(of: shell) == .darkAqua && shell.userMenu.isOpen)
         try Self.press(Self.right, in: shell)
         try Self.press(Self.right, in: shell)
-        #expect(view.chosenLook == .auto && NSApp.appearance == nil, "→ twice from Dark is \(view.chosenLook)")
+        #expect(view.chosenLook == .auto && Self.appearance(of: shell) == nil, "→ twice from Dark is \(view.chosenLook)")
         try Self.press(Self.escape, in: shell)
         // The rail's button takes the keys on this Mac with Keyboard Navigation off as well (CI's
         // runner gave them to it); where it refuses them, they go back where they were.
@@ -180,10 +195,7 @@ import Testing
     /// at and leaves the menu open; Account shows the Account pane; an Appearance leaves it open.
     @Test func thePointerWorksTheMenu() throws {
         let shell = try Self.shell()
-        defer {
-            shell.window.orderOut(nil)
-            NSApp.appearance = nil
-        }
+        defer { shell.window.orderOut(nil) }
         let button = try #require(shell.rail.button(.account)), view = shell.userMenu.view
         button.performClick(nil)
         #expect(shell.userMenu.isOpen && shell.rail.menuOpen, "the button did not open the menu")
@@ -194,10 +206,10 @@ import Testing
         let outside = try #require(NSEvent.mouseEvent(
             with: .leftMouseDown, location: at, modifierFlags: [], timestamp: 0, windowNumber: shell.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
         ))
-        NSApp.sendEvent(outside)
+        shell.userMenu.clickedAnywhere(outside)
         #expect(!shell.userMenu.isOpen, "a click outside left it open")
         try Self.open(shell)
-        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: shell.window)
+        NotificationCenter.default.post(name: shell.userMenu.keysLeft, object: shell.window)
         #expect(!shell.userMenu.isOpen, "the window giving up the keys left it open")
         try Self.open(shell)
         let logins = try #require(view.items.first { $0.item == .logins })
@@ -210,7 +222,7 @@ import Testing
         #expect(!view.tip.isShown && account.highlighted && account.drawn.fill == shell.look.menuHighlight.fill, "pointing at Account did not highlight it")
         let dark = view.segments.rects[1]
         view.segments.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: dark.midX, y: dark.midY), in: view.segments))
-        #expect(shell.userMenu.isOpen && Appearance.stored(in: shell.defaults) == .dark && NSApp.appearance?.name == .darkAqua)
+        #expect(shell.userMenu.isOpen && Appearance.stored(in: shell.defaults) == .dark && Self.appearance(of: shell) == .darkAqua)
         account.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: account.bounds.midX, y: account.bounds.midY), in: account))
         #expect(!shell.userMenu.isOpen && shell.rail.selected == .account, "Account showed \(shell.rail.selected?.rawValue ?? "nothing")")
         shell.choose(.auto)
@@ -251,26 +263,47 @@ import Testing
     /// (the app follows it as it changes); the one kept is taken at the next launch, Auto when none.
     @Test func appearanceIsRememberedAndTaken() throws {
         let shell = try Self.shell()
-        defer {
-            shell.window.orderOut(nil)
-            NSApp.appearance = nil
-        }
+        defer { shell.window.orderOut(nil) }
         #expect(Appearance.stored(in: shell.defaults) == .auto, "a first launch is not Auto")
+        var taken: NSAppearance.Name?? = .none
         for (appearance, name) in [(Appearance.dark, NSAppearance.Name.darkAqua), (.light, .aqua)] {
             shell.choose(appearance)
-            #expect(NSApp.appearance?.name == name && Appearance.stored(in: shell.defaults) == appearance)
-            NSApp.appearance = nil
-            ShellApp.takeRememberedAppearance(from: shell.defaults)
-            #expect(NSApp.appearance?.name == name, "\(appearance) was not taken at launch")
+            #expect(Self.appearance(of: shell) == name && Appearance.stored(in: shell.defaults) == appearance)
+            ShellApp.takeRememberedAppearance(from: shell.defaults) { taken = .some($0?.name) }
+            #expect(taken == .some(name), "\(appearance) was not taken at launch")
         }
         shell.choose(.auto)
-        ShellApp.takeRememberedAppearance(from: shell.defaults)
-        #expect(NSApp.appearance == nil && Appearance.stored(in: shell.defaults) == .auto, "Auto set an appearance of the app's own")
+        ShellApp.takeRememberedAppearance(from: shell.defaults) { taken = .some($0?.name) }
+        #expect(taken == .some(nil) && Self.appearance(of: shell) == nil && Appearance.stored(in: shell.defaults) == .auto, "Auto set an appearance of the app's own")
     }
 
     /// VoiceOver hears a menu named Account, its items as menu items by their titles (Logins
     /// dimmed, saying why), and Appearance as a group of three choices, the chosen one on; pressing
     /// Account by VoiceOver chooses it.
+    /// The window giving up the keys closes the menu, by the window's own notice: the one test whose
+    /// shell keeps the real name (no other test's window can close a menu it does not hold open).
+    @Test func theWindowGivingUpTheKeysClosesTheMenu() throws {
+        let shell = try WorkbenchLookTests.shell(.light)
+        shell.window.orderFront(nil)
+        defer { shell.window.orderOut(nil) }
+        #expect(shell.userMenu.keysLeft == NSWindow.didResignKeyNotification, "the menu listens for \(shell.userMenu.keysLeft.rawValue)")
+        try Self.open(shell)
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: shell.window)
+        #expect(!shell.userMenu.isOpen && !shell.rail.menuOpen, "the window gave up the keys and the menu is still open")
+    }
+
+    /// N1: the key catcher is VoiceOver's menu only while the menu is open; closed, it is no element
+    /// and has no children, so VoiceOver finds no closed "Account" menu in the window.
+    @Test func theClosedMenuIsNoElement() throws {
+        let shell = try Self.shell()
+        defer { shell.window.orderOut(nil) }
+        try Self.open(shell)
+        let keys = try #require(shell.window.firstResponder as? MenuKeys)
+        #expect(keys.isAccessibilityElement() && (keys.accessibilityChildren()?.count ?? 0) > 0, "open, the menu is no element")
+        shell.userMenu.close()
+        #expect(!keys.isAccessibilityElement() && (keys.accessibilityChildren() ?? []).isEmpty, "closed, the menu is still an element with children")
+    }
+
     @Test func voiceOverHearsAMenu() throws {
         let shell = try Self.shell()
         defer { shell.window.orderOut(nil) }
@@ -329,10 +362,11 @@ import Testing
             fonts: LookTests.fonts, helper: nil, look: .light, passkeys: { _ in Signs(sheet: nil) }, connect: { _ in transport },
             vault: OneSession(fde: "uday"), defaults: defaults
         )
+        Self.own(shell)
         shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }
         let view = shell.userMenu.view
-        try Self.open(shell, shell.menuContent)
+        try Self.open(shell, shell.account.menuContent)
         #expect(view.content.name == "Not signed in" && view.content.detail == "127.0.0.1:7979")
         let said = { "the menu \(shell.userMenu.isOpen ? "open" : "closed (its window gave up the keys)") says \(view.content.name), \(view.content.plane.map { "\($0)" } ?? "no state"); the account \(shell.account.standing == nil ? "knows no one" : "knows uday"), \(shell.account.checks) checks" }
         let check = Task { await shell.account.refresh() }
@@ -341,9 +375,11 @@ import Testing
         transport.answer()
         await check.value
         #expect(shell.userMenu.isOpen && view.content.name == "uday" && view.content.plane == .unreachable, "the check ended: \(said())")
+        #expect(view.content == shell.account.menuContent, "the menu and the account disagree: \(view.content) against \(shell.account.menuContent)")
         let again = Task { await shell.account.refresh() }
         #expect(await RunnerTabTests.until { transport.asked == 2 }, "the check asked nothing again: \(transport.asked) asked")
         #expect(shell.userMenu.isOpen && view.content.plane == .reconnecting, "asking again: \(said())")
+        #expect(view.content == shell.account.menuContent, "the menu and the account disagree asking again")
         transport.answer()
         await again.value
         #expect(shell.userMenu.isOpen && view.content.plane == .unreachable, "asked again: \(said())")
@@ -486,10 +522,7 @@ import Testing
     /// set right, the segments' Light at their right, ← choosing the next Appearance.
     @Test func rightToLeftTheMenuIsMirrored() throws {
         let shell = try Self.shell()
-        defer {
-            shell.window.orderOut(nil)
-            NSApp.appearance = nil
-        }
+        defer { shell.window.orderOut(nil) }
         try #require(shell.rail.button(.account)).userInterfaceLayoutDirection = .rightToLeft
         try Self.open(shell, withKeys: true)
         let view = shell.userMenu.view, width = Double(view.bounds.width)

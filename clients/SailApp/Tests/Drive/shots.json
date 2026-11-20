@@ -28,5 +28,11 @@
   {"name": "s-the-pane-menu-open", "shotMenu": "5-pane-menu"},
   {"name": "s-full-screen", "fullScreen": "6-full-screen"},
   {"name": "s-account", "select": "account"},
-  {"name": "s-the-account-pane", "shot": "7-account"}
+  {"name": "s-the-account-pane", "shot": "7-account"},
+  {"name": "s-the-least-window", "resize": [480, 600]},
+  {"name": "s-account-long", "accountShows": "long"},
+  {"name": "s-account-long-shown", "shotScreen": "8-account-long-least"},
+  {"name": "s-account-long-unconfirmed", "accountShows": "long-unconfirmed"},
+  {"name": "s-account-long-unconfirmed-shown", "shotScreen": "9-account-long-unconfirmed-least"},
+  {"name": "s-account-as-it-was", "accountShows": "none"}
 ]}

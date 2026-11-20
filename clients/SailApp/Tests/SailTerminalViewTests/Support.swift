@@ -238,7 +238,13 @@ struct Harness {
         case .leftMouseDown: view.mouseDown(with: event)
         case .leftMouseDragged: view.mouseDragged(with: event)
         case .leftMouseUp: view.mouseUp(with: event)
-        default: window.sendEvent(event)
+        case .rightMouseDown: view.rightMouseDown(with: event)
+        case .rightMouseDragged: view.rightMouseDragged(with: event)
+        case .rightMouseUp: view.rightMouseUp(with: event)
+        case .otherMouseDown: view.otherMouseDown(with: event)
+        case .otherMouseDragged: view.otherMouseDragged(with: event)
+        case .otherMouseUp: view.otherMouseUp(with: event)
+        default: view.mouseMoved(with: event)
         }
     }
 }

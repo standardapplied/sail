@@ -1,5 +1,6 @@
 {"steps": [
   {"name": "kit-the-account-shown", "select": "account"},
+  {"name": "kit-the-account-pane", "shotScreen": "account-signed-out"},
   {"name": "kit-the-user-menu-by-the-keys", "menu": "keys"},
   {"name": "kit-the-user-menu-highlights-its-first", "menuSays": "open: Not signed in; Sign In highlighted; Auto chosen"},
   {"name": "kit-the-user-menu-shown", "shotScreen": "user-menu-keys"},
