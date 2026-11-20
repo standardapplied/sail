@@ -203,6 +203,8 @@ final class Held: Transport {
         pane.enroll.performClick(nil)
         #expect(await RunnerTabTests.until { !pane.isActing && !pane.lines.isEmpty }, "the enrollment's refusal was never said")
         #expect(between(pane.ticket, pane.enroll), "the enrollment's refusal is not under the ticket's field")
+        pane.look = look == .light ? .dark : .light
+        #expect(between(pane.ticket, pane.enroll) && pane.ticketFrame.failed && !pane.addressFrame.failed, "a change of look moved the enrollment's refusal, or the field drawn refused")
     }
 
     /// The control plane's line is live as the menu's is: out of reach once a check found it so,

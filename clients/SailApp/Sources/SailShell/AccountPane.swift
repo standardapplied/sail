@@ -31,6 +31,9 @@ public final class AccountPane: NSView, NSMenuItemValidation, NSTextFieldDelegat
     private var refused = false
     /// The field what a person's action says is about: the control plane's, or the ticket's.
     private var about: NSView?
+    /// Where the lines said now sit, kept with them: said again unchanged (a change of look, the
+    /// signed-out rows shown again) they stay there, after the action that placed them has ended.
+    private var saidUnder: NSView?
     public private(set) var standing: SignedIn?
     /// Whether a ceremony or a call is under way, and how many have ended.
     public var busy: Bool {
@@ -187,7 +190,7 @@ public final class AccountPane: NSView, NSMenuItemValidation, NSTextFieldDelegat
 
     /// A check started or ended: the control plane's line says so, and so does the menu.
     private func checking() {
-        showPlane()
+        paintFacts()
         onChecking()
     }
 
@@ -325,7 +328,7 @@ public final class AccountPane: NSView, NSMenuItemValidation, NSTextFieldDelegat
         let whoami = try? signedIn.whoami.get()
         let ends = signedIn.until.formatted(date: .long, time: .shortened)
         until.stringValue = whoami == nil ? "Not yet confirmed: remembered on this Mac until \(ends)" : "Signed in until \(ends)"
-        showPlane()
+        paintFacts()
         var now = lines.filter { $0 != Self.signInWithIt }
         var refusing = refused && !now.isEmpty
         if case let .failure(refusal) = signedIn.whoami {
@@ -338,10 +341,6 @@ public final class AccountPane: NSView, NSMenuItemValidation, NSTextFieldDelegat
     /// The heading, the handle and the control plane's line, from what the menu says: the person's
     /// name, `@handle · Role`, the address and whether it answers (reconnecting while a check asks
     /// again after it did not); signed out, "Sign in to Sail".
-    private func showPlane() {
-        paintFacts()
-    }
-
     private func paintFacts() {
         let content = menuContent
         let signedIn = standing != nil
@@ -378,8 +377,13 @@ public final class AccountPane: NSView, NSMenuItemValidation, NSTextFieldDelegat
     }
 
     /// Says `lines` under the field they are about (signed in, the control plane's line), the first
-    /// in crimson when `refused`, else in ink, the rest in the secondary ink.
+    /// in crimson when `refused`, else in ink, the rest in the secondary ink. Lines said again
+    /// unchanged stay under the field they were first said under, while it is shown.
     private func say(_ lines: [String], refused: Bool = false) {
+        let shown = standing == nil ? signedOutRows : signedInRows
+        let kept = lines == self.lines ? saidUnder.flatMap { $0.superview === shown ? $0 : nil } : nil
+        let anchor = kept ?? (standing == nil ? about ?? addressFrame : planeRow)
+        saidUnder = lines.isEmpty ? nil : anchor
         self.lines = lines
         self.refused = refused && !lines.isEmpty
         let text = NSMutableAttributedString()
@@ -391,7 +395,6 @@ public final class AccountPane: NSView, NSMenuItemValidation, NSTextFieldDelegat
         }
         said.attributedStringValue = text
         said.isHidden = lines.isEmpty
-        let anchor = standing == nil ? (about ?? addressFrame) : planeRow
         addressFrame.failed = self.refused && anchor === addressFrame
         ticketFrame.failed = self.refused && anchor === ticketFrame
         place(said, under: anchor)
@@ -417,7 +420,6 @@ public final class AccountPane: NSView, NSMenuItemValidation, NSTextFieldDelegat
         if notification.object as AnyObject? === address { addressFrame.failed = false }
         if notification.object as AnyObject? === ticket { ticketFrame.failed = false }
     }
-
 
     /// `view` in the column, straight after `anchor`.
     private func place(_ view: NSView, under anchor: NSView) {

@@ -937,9 +937,13 @@ import Testing
         #expect(read >= 20)
     }
 
-    /// No view of the app's own lays itself out by changing a size it reports: a `layout()` that sets
-    /// `preferredMaxLayoutWidth` or invalidates an intrinsic size asks AppKit for another pass from
-    /// inside one, which crashed the drive (#502).
+    /// Nothing a layout pass reaches changes what makes AppKit ask for another pass from inside one,
+    /// which crashed the drive (#502): in `layout()`, `updateConstraints()`, `viewDidLayout()`,
+    /// `resizeSubviews` and `setFrameSize` of every view of the app's own, no
+    /// `preferredMaxLayoutWidth`, intrinsic size, label text or font, or constraint's `constant` or
+    /// `isActive` is set. A view whose height follows its width (no intrinsic width of its own) may
+    /// invalidate its size when its width changes. Helpers those call are not read here: the exit
+    /// watch writes AppKit's layout-loop exception with its stack, in the tests and the drive.
     @Test func noLayoutChangesAnIntrinsicSize() throws {
         let sources = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appending(path: "Sources")
@@ -950,15 +954,25 @@ import Testing
             for name in names where name.hasSuffix(".swift") {
                 let text = try String(contentsOf: directory.appending(path: name), encoding: .utf8)
                 read += 1
-                for body in Self.bodies(of: "func layout()", in: text) {
-                    for size in ["preferredMaxLayoutWidth", "invalidateIntrinsicContentSize"] {
-                        #expect(!body.contains(size), "\(target)/\(name): layout() changes \(size) inside a layout pass")
+                let heightForWidth = text.contains("NSSize(width: NSView.noIntrinsicMetric")
+                for entry in ["func layout()", "func updateConstraints()", "func viewDidLayout()", "func resizeSubviews(", "func setFrameSize("] {
+                    for body in Self.bodies(of: entry, in: text) {
+                        for change in Self.anotherPass where body.contains(change) {
+                            let followsWidth = entry == "func setFrameSize(" && change == "invalidateIntrinsicContentSize" && heightForWidth && body.contains("newSize.width != frame.width")
+                            #expect(followsWidth, "\(target)/\(name): \(entry) changes \(change) inside a layout pass")
+                        }
                     }
                 }
             }
         }
         #expect(read >= 50)
     }
+
+    /// What, set inside a layout pass, makes AppKit ask for another.
+    static let anotherPass = [
+        "preferredMaxLayoutWidth", "invalidateIntrinsicContentSize", "needsUpdateConstraints = true", ".constant =", ".isActive =",
+        "stringValue =", "attributedStringValue =", ".font =",
+    ]
 
     /// The bodies of every function `signature` in `text`, brace to matching brace.
     static func bodies(of signature: String, in text: String) -> [String] {

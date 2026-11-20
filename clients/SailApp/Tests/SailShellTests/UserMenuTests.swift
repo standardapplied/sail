@@ -280,6 +280,18 @@ import Testing
     /// VoiceOver hears a menu named Account, its items as menu items by their titles (Logins
     /// dimmed, saying why), and Appearance as a group of three choices, the chosen one on; pressing
     /// Account by VoiceOver chooses it.
+    /// The window giving up the keys closes the menu, by the window's own notice: the one test whose
+    /// shell keeps the real name (no other test's window can close a menu it does not hold open).
+    @Test func theWindowGivingUpTheKeysClosesTheMenu() throws {
+        let shell = try WorkbenchLookTests.shell(.light)
+        shell.window.orderFront(nil)
+        defer { shell.window.orderOut(nil) }
+        #expect(shell.userMenu.keysLeft == NSWindow.didResignKeyNotification, "the menu listens for \(shell.userMenu.keysLeft.rawValue)")
+        try Self.open(shell)
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: shell.window)
+        #expect(!shell.userMenu.isOpen && !shell.rail.menuOpen, "the window gave up the keys and the menu is still open")
+    }
+
     /// N1: the key catcher is VoiceOver's menu only while the menu is open; closed, it is no element
     /// and has no children, so VoiceOver finds no closed "Account" menu in the window.
     @Test func theClosedMenuIsNoElement() throws {
