@@ -14,6 +14,9 @@ import Testing
 /// adds no accent and no grey to the window it opens over. Serialized: when its process ends early
 /// (it has, with the main run loop stopped), the one test started and never ended names the cause.
 @MainActor @Suite(.serialized) struct UserMenuTests {
+    /// Says, in the suite's own log, each test as it starts and as it ends.
+    private let inFlight = InFlight()
+
     init() {
         ExitWatch.install()
     }
@@ -531,5 +534,20 @@ final class OutOfReach: Transport, Sendable {
     /// Every request waiting is answered: out of reach.
     func answer() {
         state.withLock { $0.gates }.forEach { $0.open() }
+    }
+}
+
+/// A test's start and end, written to the suite's log, so the one in flight when its process ends
+/// is named without the events file: made with the suite's instance for a test, gone with it.
+final class InFlight: Sendable {
+    private let name: String
+
+    init() {
+        name = Test.current?.name ?? "a test"
+        ExitWatch.say("starts \(name)")
+    }
+
+    deinit {
+        ExitWatch.say("ends \(name)")
     }
 }
