@@ -246,4 +246,39 @@ class PtyTicketsTest {
         OPEN_ACME.refusal(there, null, null), "a ticket to the container opens no workspace");
     assertNull(OPEN_ACME.refusal(container, null, null));
   }
+
+  /**
+   * A files ticket reads its workspace's files and does nothing else; no other ticket reads any.
+   */
+  @Test
+  void aFilesTicketListsStatsReadsAndWatchesAndNothingElse() {
+    var files = new PtyTickets.Ticket(PtyMessage.TicketAction.FILES, "acme", "tok-ana", "dock");
+    var refusal =
+        new PtyMessage.Err(
+            "This connection's ticket is to read the files of workspace 'dock' of project 'acme',"
+                + " and it admits nothing else; ask the API for a ticket for that.");
+    var reading =
+        List.<PtyMessage>of(
+            new PtyMessage.FilesList(1, "/home/dev"),
+            new PtyMessage.FilesStat(1, "/home/dev"),
+            new PtyMessage.FilesRead(1, "/home/dev/a", 0, 1),
+            new PtyMessage.FilesCancel(1),
+            new PtyMessage.FilesWatch(List.of()));
+    for (var message : reading) {
+      assertNull(files.refusal(message, null, null));
+      assertNotNull(OPEN_ACME.refusal(message, null, null), "an open ticket reads no files");
+      assertNotNull(ATTACH_LOUNGE.refusal(message, null, null), "nor does an attach ticket");
+    }
+    for (var other :
+        List.<PtyMessage>of(
+            new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24, "dock"),
+            new PtyMessage.Attach("lounge", true),
+            new PtyMessage.Input(1, new byte[] {'a'}),
+            new PtyMessage.PutBegin(1, "a", 1),
+            new PtyMessage.Kill("lounge"),
+            new PtyMessage.YieldWorkspace("acme", "dock", "x", "x"),
+            new PtyMessage.ListSessions("", 16))) {
+      assertEquals(refusal, files.refusal(other, null, "lounge"));
+    }
+  }
 }

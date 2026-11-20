@@ -206,6 +206,10 @@
       "status": 409
     },
     {
+      "code": "workspace_stopped",
+      "status": 409
+    },
+    {
       "code": "agent_status_failed",
       "status": 500
     },
@@ -282,6 +286,25 @@
     "sync_degraded",
     "sync_recovered"
   ],
+  "file_kinds": [
+    "",
+    "file",
+    "folder",
+    "link",
+    "other",
+    "missing",
+    "loop"
+  ],
+  "file_refusals": [
+    "not_found",
+    "not_permitted",
+    "outside_home",
+    "is_folder",
+    "not_a_folder",
+    "not_a_file",
+    "loop",
+    "failed"
+  ],
   "member_modes": [
     "full",
     "read_only"
@@ -326,6 +349,19 @@
     "done",
     "cancelled",
     "archived"
+  ],
+  "ticket_actions": [
+    "open",
+    "attach",
+    "files"
+  ],
+  "ticket_refusals": [
+    "invalid",
+    "not_found",
+    "forbidden",
+    "limited",
+    "unavailable",
+    "stopped"
   ],
   "upload_refusals": [
     "too_large",

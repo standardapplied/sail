@@ -485,6 +485,24 @@ class ClientGoldensTest {
     vocabulary.put(
         "upload_refusals",
         Arrays.stream(PtyMessage.PutRefusal.values()).map(PtyMessage.PutRefusal::wire).toList());
+    vocabulary.put(
+        "file_kinds",
+        Arrays.stream(PtyMessage.FileKind.values()).map(PtyMessage.FileKind::wire).toList());
+    vocabulary.put(
+        "file_refusals",
+        Arrays.stream(PtyMessage.FilesRefusal.values())
+            .map(PtyMessage.FilesRefusal::wire)
+            .toList());
+    vocabulary.put(
+        "ticket_actions",
+        Arrays.stream(PtyMessage.TicketAction.values())
+            .map(PtyMessage.TicketAction::wire)
+            .toList());
+    vocabulary.put(
+        "ticket_refusals",
+        Arrays.stream(PtyMessage.TicketRefusal.values())
+            .map(PtyMessage.TicketRefusal::wire)
+            .toList());
     vocabulary.put("run_presences", List.of(RunPresence.WORKING, RunPresence.QUIET));
     vocabulary.put("run_statuses", Arrays.stream(RunStatus.values()).map(RunStatus::wire).toList());
     vocabulary.put(
@@ -676,7 +694,46 @@ class ClientGoldensTest {
                     new Remedy.Words("Run "),
                     new Remedy.Command(Remedy.Runs.SAIL, "session", List.of("take", "lounge")),
                     new Remedy.Words(" to take it."))),
-            ErrorCode.LOGIN_NOT_STORED.code()));
+            ErrorCode.LOGIN_NOT_STORED.code()),
+        new PtyMessage.YieldWorkspace(
+            PROJECT,
+            "dock",
+            "Workspace dock of harbor is being stopped by ana, which ends this terminal.",
+            "Workspace dock of harbor was stopped by ana."),
+        new PtyMessage.FilesList(1, "/home/dev/workspace"),
+        new PtyMessage.FilesStat(2, "/home/dev/workspace/App.java"),
+        new PtyMessage.FilesRead(3, "/home/dev/workspace/App.java", 65536, 262144),
+        new PtyMessage.FilesCancel(3),
+        new PtyMessage.FilesWatch(
+            List.of(
+                new PtyMessage.Watched("/home/dev/workspace", "51:9:4096:1.5:1.5"),
+                new PtyMessage.Watched("/home/dev/workspace/gone.md", ""))),
+        new PtyMessage.FilesListing(
+            1,
+            "51:9:4096:1795210162.152082747:1795210162.152082747",
+            List.of(
+                new PtyMessage.FileEntry(
+                    "App.java",
+                    PtyMessage.FileKind.FILE,
+                    PtyMessage.FileKind.NONE,
+                    12,
+                    1_795_210_162_152_082_747L,
+                    0644),
+                new PtyMessage.FileEntry(
+                    "src", PtyMessage.FileKind.LINK, PtyMessage.FileKind.FOLDER, 3, -1, 0777)),
+            false,
+            true),
+        new PtyMessage.FilesEntry(
+            2,
+            new PtyMessage.FileEntry(
+                "App.java", PtyMessage.FileKind.FILE, PtyMessage.FileKind.NONE, 12, 7, 0600),
+            "51:10:12:7.0:7.0"),
+        new PtyMessage.FilesData(
+            3, "51:10:12:7.0:7.0", "class App {}".getBytes(StandardCharsets.UTF_8), true),
+        new PtyMessage.FilesChanged(List.of("/home/dev/workspace", "/home/dev/workspace/App.java")),
+        new PtyMessage.FilesTick(),
+        new PtyMessage.FilesRefused(
+            4, PtyMessage.FilesRefusal.LOOP, "/home/dev/workspace/self leads back to itself."));
   }
 
   /** The largest chunk an upload carries, every byte value in turn. */
