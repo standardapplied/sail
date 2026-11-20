@@ -2663,7 +2663,8 @@ class WorkspacesTest {
                 "set",
                 "acme-fix-login",
                 "user.sail.owner=uday",
-                "user.sail.owner_id=fde_uday"));
+                "user.sail.owner_id=fde_uday",
+                "user.sail.unreached="));
     assertTrue(0 <= start && start < owned, String.join("\n", shell.invocations()));
     assertFalse(shell.invocations().stream().anyMatch(c -> c.startsWith("incus copy")));
   }
@@ -2972,7 +2973,8 @@ class WorkspacesTest {
     assertTrue(shell.invocations().stream().anyMatch(c -> c.contains("sail-strip")), "given");
     assertEquals(
         List.of(
-            "incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=fde_ana",
+            "incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=fde_ana"
+                + " user.sail.unreached=",
             "incus config set acme-fix-login user.sail.kept="),
         shell.invocations().stream().filter(c -> c.startsWith("incus config set")).toList());
   }
@@ -3476,7 +3478,8 @@ class WorkspacesTest {
                 "set",
                 "acme-fix-login",
                 "user.sail.owner=ana",
-                "user.sail.owner_id=fde_ana"));
+                "user.sail.owner_id=fde_ana",
+                "user.sail.unreached="));
     assertTrue(
         0 <= stripped && stripped < gh && gh < owned, String.join("\n", scripted.invocations()));
     var signedOut = indexOf(scripted, strip("acme-fix-login"));
@@ -3538,7 +3541,7 @@ class WorkspacesTest {
               .invocations()
               .contains(
                   "incus config set acme-fix-login user.sail.owner=ana"
-                      + " user.sail.owner_id=fde_new_ana");
+                      + " user.sail.owner_id=fde_new_ana user.sail.unreached=");
       assertEquals(
           labelled.equals("fde_old_ana") ? List.of(true, true) : List.of(false, false),
           List.of(stripped, relabelled),
@@ -3719,7 +3722,8 @@ class WorkspacesTest {
         shell
             .invocations()
             .contains(
-                "incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=fde_ana"),
+                "incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=fde_ana"
+                    + " user.sail.unreached="),
         "already hers: no owner is written");
   }
 
@@ -3843,7 +3847,8 @@ class WorkspacesTest {
     var store = indexOfFirst(ran, c -> c.endsWith("acme-fix-login/home/dev/.git-credentials"));
     var labelled =
         ran.indexOf(
-            "incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=fde_ana");
+            "incus config set acme-fix-login user.sail.owner=ana user.sail.owner_id=fde_ana"
+                + " user.sail.unreached=");
     assertTrue(
         0 <= stripped && stripped < keys && keys < store && store < labelled,
         String.join("\n", ran));
@@ -3912,7 +3917,8 @@ class WorkspacesTest {
         new Workspaces(scripted, scripted, ticks(), locks(), () -> 65536, url -> false)
             .disown(
                 (handle, id) -> id == null ? !handle.equals("ana") : id.equals("fde_new_tmp"),
-                instance -> !instance.equals("acme-e"));
+                instance -> !instance.equals("acme-e"),
+                instance -> Instant.EPOCH);
 
     assertEquals(List.of(), unreached);
     assertEquals(
@@ -3920,9 +3926,9 @@ class WorkspacesTest {
             "incus start acme-b",
             String.join(" ", strip("acme-b")),
             "incus stop acme-b",
-            "incus config set acme-b user.sail.owner= user.sail.owner_id=",
+            "incus config set acme-b user.sail.owner= user.sail.owner_id= user.sail.unreached=",
             String.join(" ", strip("acme-c")),
-            "incus config set acme-c user.sail.owner= user.sail.owner_id="),
+            "incus config set acme-c user.sail.owner= user.sail.owner_id= user.sail.unreached="),
         scripted.invocations().stream()
             .filter(c -> c.contains("acme-") && !c.startsWith("incus list"))
             .map(c -> c.startsWith("incus stop acme-b") ? "incus stop acme-b" : c)
@@ -3933,9 +3939,13 @@ class WorkspacesTest {
         "the kept mark is left as it was");
   }
 
-  /** A workspace a removal cannot strip is said, and stops none of the others. */
+  /**
+   * A workspace a removal cannot strip is said, and stops none of the others; its label says why
+   * and when the pass tries again, so its doors tell the truth (#500's M1), and one it does reach
+   * is left nobody's with no such word.
+   */
   @Test
-  void aWorkspaceARemovalCannotReachIsSaidAndStopsNoneOfTheOthers() throws Exception {
+  void aWorkspaceARemovalCannotReachIsSaidWithItsNextTryAndStopsNoneOfTheOthers() throws Exception {
     var shell =
         incus(
                 DIR_AND_ZFS,
@@ -3956,9 +3966,21 @@ class WorkspacesTest {
             .onFail("incus exec acme-a", "/home/dev/.ssh/authorized_keys still has a key");
 
     var unreached =
-        workspaces(shell, ticks()).disown((handle, id) -> !handle.equals("ana"), instance -> true);
+        workspaces(shell, ticks())
+            .disown(
+                (handle, id) -> !handle.equals("ana"),
+                instance -> true,
+                instance -> Instant.parse("2026-11-20T21:00:00Z"));
 
     assertEquals(1, unreached.size(), unreached.toString());
+    var said =
+        shell.invocations().stream().filter(c -> c.startsWith("incus config set acme-a ")).toList();
+    assertEquals(1, said.size(), said.toString());
+    assertTrue(
+        said.getFirst()
+                .startsWith("incus config set acme-a user.sail.unreached=2026-11-20T21:00:00.000Z ")
+            && said.getFirst().endsWith("/home/dev/.ssh/authorized_keys still has a key"),
+        said.getFirst());
     assertTrue(
         unreached.getFirst().startsWith("acme-a: ")
             && unreached.getFirst().endsWith("/home/dev/.ssh/authorized_keys still has a key"),
@@ -3966,7 +3988,9 @@ class WorkspacesTest {
     assertTrue(
         shell
             .invocations()
-            .contains("incus config set acme-b user.sail.owner= user.sail.owner_id="));
+            .contains(
+                "incus config set acme-b user.sail.owner= user.sail.owner_id="
+                    + " user.sail.unreached="));
   }
 
   /**
@@ -4202,7 +4226,10 @@ class WorkspacesTest {
                 () -> {
                   try {
                     unreached.set(
-                        workspaces.disown((handle, id) -> "fde_ada".equals(id), name -> true));
+                        workspaces.disown(
+                            (handle, id) -> "fde_ada".equals(id),
+                            name -> true,
+                            name -> Instant.EPOCH));
                   } catch (Exception e) {
                     throw new IllegalStateException(e);
                   }

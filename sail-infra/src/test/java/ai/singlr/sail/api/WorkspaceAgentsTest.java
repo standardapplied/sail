@@ -131,7 +131,10 @@ class WorkspaceAgentsTest {
                 "[" + workspace("acme", "loose", "Running", null, null) + "]")
             .onOk(
                 "incus list ^acme-old$",
-                "[" + workspace("acme", "old", "Stopped", "zed", "fde_zed") + "]");
+                "[" + workspace("acme", "old", "Stopped", "zed", "fde_zed") + "]")
+            .onOk(
+                "incus list ^acme-reused$",
+                "[" + workspace("acme", "reused", "Running", "sam", "fde_another_sam") + "]");
     var operations =
         TestControlPlane.on(
             OperationsFactory.create(db, incus, null, SyncScheduler.disabled(), SessionYield.NONE),
@@ -170,11 +173,15 @@ class WorkspaceAgentsTest {
   }
 
   private Answer ask(String token, String workspace) throws Exception {
+    return ask(server, token, workspace);
+  }
+
+  private Answer ask(HttpServer on, String token, String workspace) throws Exception {
     var request =
         HttpRequest.newBuilder(
                 URI.create(
                     "http://127.0.0.1:"
-                        + server.getAddress().getPort()
+                        + on.getAddress().getPort()
                         + "/v1/projects/"
                         + workspace.replace("-", "/workspaces/")
                         + "/agents"))
@@ -351,5 +358,54 @@ class WorkspaceAgentsTest {
     assertEquals(403, viewer.status(), viewer.toString());
     assertEquals(404, absent.status(), absent.toString());
     assertEquals("not_found", absent.code());
+  }
+
+  /**
+   * N1 at this route: on sam's node, sam is offered agents with sam's own login in a workspace no
+   * one is labelled for, and is refused, as every workspace door refuses, one labelled for another
+   * person of the handle sam or for a person gone from the node, offered nothing.
+   */
+  @Test
+  void onANodeItsPersonIsOfferedAgentsOnlyInAWorkspaceLabelledForThemByIdOrForNoOne()
+      throws Exception {
+    var config = new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "sam", "sam-box");
+    var auth = new TokenAuth(new TokenStore(db), TestAuth.roles(db, config));
+    var node = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    node.createContext(
+        "/",
+        new ApiRouter(
+            TestControlPlane.on(
+                OperationsFactory.create(
+                    db, incus, null, SyncScheduler.disabled(), SessionYield.NONE),
+                db,
+                tempDir,
+                config),
+            auth,
+            new RateLimitGate(),
+            new AgentLogStreamer(auth),
+            Optional.empty()));
+    node.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
+    node.start();
+    try {
+      var loose = ask(node, sam, "acme-loose");
+      var reused = ask(node, sam, "acme-reused");
+      var gone = ask(node, sam, "acme-old");
+
+      assertEquals(200, loose.status(), loose.toString());
+      assertEquals("sam", loose.body().get("owner"));
+      assertEquals(
+          Map.of("name", "work", "kind", "api-key"), loose.offer("claude-code").get("login"));
+      assertEquals(403, reused.status(), reused.toString());
+      assertEquals("not_your_workspace", reused.code());
+      assertEquals(
+          "reused is labelled for a person this box does not know as sam, so no agent starts in"
+              + " it; the next pass leaves it nobody's.",
+          ((Map<?, ?>) reused.body().get("error")).get("message"));
+      assertEquals(409, gone.status(), gone.toString());
+      assertEquals("owner_gone", gone.code());
+      assertFalse(reused.toString().contains("api-key"), "nothing of a login is offered");
+    } finally {
+      node.stop(0);
+    }
   }
 }
