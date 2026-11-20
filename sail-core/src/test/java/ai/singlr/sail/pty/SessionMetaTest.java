@@ -56,7 +56,7 @@ class SessionMetaTest {
   @Test
   void theHarnessASessionRunsRoundTripsAndASidecarWithoutOneRunsNone() throws Exception {
     var path = dir.resolve("s2.meta");
-    var agent = new PtyMessage.Agent("codex", "full", true);
+    var agent = new PtyMessage.Agent("codex", "full-access", true);
     var meta =
         new SessionMeta(
             new PtySession.Origin(

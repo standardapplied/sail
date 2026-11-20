@@ -4021,21 +4021,35 @@ class WorkspacesTest {
    */
   @Test
   void aTemplateWhoseBootNeverSettlesIsNotSearchedAndItsBuildFailsSayingSo() {
-    var shell =
-        incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"))
-            .on("sail-settled", new ShellExec.Result(1, "starting\n", ""));
+    for (var answer :
+        List.of(
+            new ShellExec.Result(1, "systemd says it is starting after 120 s\n", ""),
+            new ShellExec.Result(1, "", "Error: Instance is not running"))) {
+      var shell =
+          incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"))
+              .on("sail-settled", answer);
 
-    var failure = assertThrows(IOException.class, () -> templates(shell).ensure(acme(), source()));
+      var failure =
+          assertThrows(IOException.class, () -> templates(shell).ensure(acme(), source()));
 
-    assertEquals(
-        "acme--tmpl did not finish starting within 120 s (systemd says it is starting), so it is"
-            + " not searched for its builder's tokens while it changes.",
-        failure.getMessage());
-    assertFalse(
-        shell.invocations().stream()
-            .anyMatch(
-                c -> c.contains("user.sail.template.current=") || c.contains("snapshot create")));
-    assertTrue(shell.invocations().contains("incus stop acme--tmpl"));
+      assertEquals(
+          "acme--tmpl was not searched for its builder's tokens, since its boot did not settle: "
+              + (answer.stdout().isBlank() ? answer.stderr() : answer.stdout().strip())
+              + ".",
+          failure.getMessage());
+      assertEquals(
+          1,
+          shell.invocations().stream().filter(c -> c.contains("sail-settled")).count(),
+          "a boot that did not settle is waited for once");
+      assertTrue(
+          shell.invocations().stream().anyMatch(c -> c.contains("user.sail.template.unproven")),
+          String.join("\n", shell.invocations()));
+      assertFalse(
+          shell.invocations().stream()
+              .anyMatch(
+                  c -> c.contains("user.sail.template.current=") || c.contains("snapshot create")));
+      assertTrue(shell.invocations().contains("incus stop acme--tmpl"));
+    }
   }
 
   /** The check is given the build's tokens on its stdin, and none ever on a command line. */

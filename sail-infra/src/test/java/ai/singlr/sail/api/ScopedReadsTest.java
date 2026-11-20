@@ -172,6 +172,7 @@ class ScopedReadsTest {
           "/v1/projects/{project}/ports",
           "/v1/projects/{project}/snapshots",
           "/v1/projects/{project}/workspaces",
+          "/v1/projects/{project}/workspaces/w/agents",
           "/v1/projects/{project}/template",
           "/v1/projects/{project}/files",
           "/v1/projects/{project}/files/{file}");
@@ -305,6 +306,7 @@ class ScopedReadsTest {
   @TempDir Path tempDir;
 
   private final List<String> containers = new CopyOnWriteArrayList<>();
+  private String samId;
   private final Set<String> reached = new ConcurrentSkipListSet<>();
   private final HttpClient client = HttpClient.newHttpClient();
   private Sqlite db;
@@ -330,11 +332,8 @@ class ScopedReadsTest {
                   .create(
                       "ada-laptop", "admin", fdes.add("ada", "Ada", "ada@x", "admin").id(), null)
                   .token();
-          sam =
-              tokens
-                  .create(
-                      "sam-laptop", "member", fdes.add("sam", "Sam", "sam@x", "member").id(), null)
-                  .token();
+          samId = fdes.add("sam", "Sam", "sam@x", "member").id();
+          sam = tokens.create("sam-laptop", "member", samId, null).token();
           fdes.restrict("sam");
           fdes.grant("sam", "alpha");
           alphaReview = arrive("alpha", A_RUN, A_FILE, "main", "sam", 1);
@@ -1585,6 +1584,9 @@ class ScopedReadsTest {
       if (asked.equals("incus list --format json")) {
         return new Result(0, containers.stream().map(BoxShell::running).toList().toString(), "");
       }
+      if (asked.equals("incus list ^alpha-w$ --format json")) {
+        return new Result(0, "[" + samsWorkspace() + "]", "");
+      }
       for (var container : containers) {
         if (asked.equals("incus list ^" + container + "$ --format json")) {
           return new Result(0, "[" + running(container) + "]", "");
@@ -1613,6 +1615,16 @@ class ScopedReadsTest {
     @Override
     public boolean isDryRun() {
       return false;
+    }
+
+    /** Workspace {@code w} of alpha, sam's by his id, stopped. */
+    private String samsWorkspace() {
+      return """
+          {"name": "alpha-w", "status": "Stopped", "type": "container",
+           "config": {"user.sail.project": "alpha", "user.sail.workspace": "w",
+                      "user.sail.ready": "1762941601000", "user.sail.owner": "sam",
+                      "user.sail.owner_id": "%s"}}"""
+          .formatted(samId);
     }
 
     private static String running(String container) {

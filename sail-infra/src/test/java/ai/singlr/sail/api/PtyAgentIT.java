@@ -58,8 +58,8 @@ class PtyAgentIT extends AbstractIncusIT {
   private static final String KEY = "sk-proj-pty-agent-it-" + System.nanoTime();
 
   /**
-   * A stub harness: it writes down its arguments, the fingerprint of the credential it was handed
-   * (its variable's, or for Codex what its own login stored) and the names of its credential
+   * A stub harness: it writes down all its arguments, the fingerprint of the credential it was
+   * handed (its variable's, or for Codex what its own login stored) and the names of its credential
    * variables that hold anything, then waits on its terminal.
    */
   private static final String STUB =
@@ -69,7 +69,7 @@ class PtyAgentIT extends AbstractIncusIT {
       if [ "$1" = login ]; then echo "the harness's own login ran" > /tmp/report; exit 1; fi
       given=${CLAUDE_CODE_OAUTH_TOKEN:-$CODEX_API_KEY}
       set=$(env | sed -n 's/^\\(CODEX_API_KEY\\|CODEX_ACCESS_TOKEN\\|ANTHROPIC_[A-Z_]*\\|CLAUDE_CODE_OAUTH_TOKEN\\)=..*/\\1/p' | sort | tr '\\n' ' ')
-      printf '%s\\n%s\\nset:%s\\n' "$(basename "$0") $1" "$(fp "$given")" "$set" > /tmp/report.part
+      printf '%s\\n%s\\nset:%s\\n' "$(basename "$0") $*" "$(fp "$given")" "$set" > /tmp/report.part
       mv /tmp/report.part /tmp/report
       exec cat
       """;
@@ -276,17 +276,20 @@ class PtyAgentIT extends AbstractIncusIT {
         try (var host = startHost(lane);
             var ada = connect("ada");
             var root = connect("root")) {
-          var refused = root.ask(create("a0", new PtyMessage.Agent("claude-code", "full", false)));
+          var refused =
+              root.ask(
+                  create("a0", new PtyMessage.Agent("claude-code", "bypassPermissions", false)));
           assertEquals(
               "w is ada's workspace, so an agent starts in it only as ada, with ada's login.",
               assertInstanceOf(PtyMessage.Err.class, refused).reason());
 
           assertInstanceOf(
               PtyMessage.Ok.class,
-              ada.ask(create("a1", new PtyMessage.Agent("claude-code", "full", false))));
+              ada.ask(
+                  create("a1", new PtyMessage.Agent("claude-code", "bypassPermissions", false))));
           assertEquals(
               List.of(
-                  "claude --dangerously-skip-permissions",
+                  "claude --permission-mode bypassPermissions",
                   fingerprint(claude),
                   "set:CLAUDE_CODE_OAUTH_TOKEN"),
               report());
@@ -295,10 +298,13 @@ class PtyAgentIT extends AbstractIncusIT {
 
           assertInstanceOf(
               PtyMessage.Ok.class,
-              ada.ask(create("a2", new PtyMessage.Agent("codex", "full", false))));
+              ada.ask(create("a2", new PtyMessage.Agent("codex", "full-access", false))));
           assertEquals(
               List.of(
-                  "codex --dangerously-bypass-approvals-and-sandbox",
+                  "codex --dangerously-bypass-approvals-and-sandbox -c model_provider=sail -c"
+                      + " model_providers.sail={name=\"OpenAI\","
+                      + " base_url=\"https://api.openai.com/v1\", env_key=\"CODEX_API_KEY\","
+                      + " wire_api=\"responses\"} -c shell_environment_policy.set.CODEX_API_KEY=\"\"",
                   fingerprint(codex),
                   "set:CODEX_API_KEY"),
               report());
@@ -323,8 +329,8 @@ class PtyAgentIT extends AbstractIncusIT {
                       info -> info.toString().contains(TOKEN) || info.toString().contains(KEY)));
           assertEquals(
               List.of(
-                  new PtyMessage.Agent("claude-code", "full", false),
-                  new PtyMessage.Agent("codex", "full", false)),
+                  new PtyMessage.Agent("claude-code", "bypassPermissions", false),
+                  new PtyMessage.Agent("codex", "full-access", false)),
               listed.sessions().stream().map(PtyMessage.SessionInfo::agent).toList());
         }
       } finally {

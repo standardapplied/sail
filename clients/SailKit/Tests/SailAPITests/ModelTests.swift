@@ -116,11 +116,15 @@ import Testing
         #expect(try roundTrip(whoami) == whoami)
         let projects = try Endpoint.projects.decode(response(try Exchange("projects")))
         #expect(try roundTrip(projects) == projects)
+        for name in ["workspace-agents", "workspace-agents-no-default", "workspace-agents-not-yours"] {
+            let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(response(try Exchange(name)))
+            #expect(try roundTrip(agents) == agents, "\(name)")
+        }
     }
 
     @Test func everyRefusalWrittenAsJSONReadsBackAsItself() throws {
         let refusals = try Goldens.names(in: "http").filter { $0.hasPrefix("refusal-") }
-        #expect(refusals.count == 28)
+        #expect(refusals.count == 29)
         for name in refusals {
             guard case let .refused(refusal) = SailJSON.refusal(response(try Exchange(name)), route: name) else {
                 Issue.record("\(name) holds no refusal")

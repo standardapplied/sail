@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/projects/harbor/workspaces/dock/agents"
+  },
+  "response": {
+    "body": {
+      "offered": [],
+      "owner": "uday",
+      "project": "harbor",
+      "refusal": {
+        "action": "Open a shell in it, or start the agent in a workspace of your own.",
+        "code": "not_your_workspace",
+        "field_errors": [],
+        "message": "dock is uday's workspace, so an agent starts in it only as uday, with uday's login."
+      },
+      "running": true,
+      "schema_version": 1,
+      "workspace": "dock"
+    },
+    "status": 200
+  }
+}

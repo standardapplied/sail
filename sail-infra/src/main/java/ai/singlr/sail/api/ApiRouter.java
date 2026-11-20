@@ -280,6 +280,13 @@ public final class ApiRouter implements HttpHandler, RouteTable {
                     operations.startWorkspace(call.project(), call.param("workspace")))),
         route(GET, PROJECT + "/workspaces/{workspace}/sessions", Gate.TERMINAL, this::sessions),
         route(
+            GET,
+            PROJECT + "/workspaces/{workspace}/agents",
+            enterWorkspace,
+            call ->
+                ApiResponse.from(
+                    operations.workspaceAgents(call.project(), call.param("workspace")))),
+        route(
             POST,
             PROJECT + "/workspaces/{workspace}/stop",
             enterWorkspace,
