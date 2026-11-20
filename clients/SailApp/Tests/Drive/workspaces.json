@@ -67,7 +67,7 @@
   {"name": "w05-other-peoples-rows", "golden": ["GET /v1/projects/harbor/workspaces", "workspaces-three"]},
   {"name": "w05-command-r", "press": "r", "modifiers": ["command"]},
   {"name": "w05-with-anas", "workspaces": "quay · running · ana"},
-  {"name": "w05-a-narrow-card", "window": [480, 624]},
+  {"name": "w05-a-narrow-card", "leastWindow": true},
   {"name": "w05-at-the-minimum-width", "shot": "w05-at-the-minimum-width"},
   {"name": "w05-show-sidebar", "showSidebar": true},
   {"name": "w05-the-panel-over-the-content", "shot": "w05-the-panel-over-the-content"},

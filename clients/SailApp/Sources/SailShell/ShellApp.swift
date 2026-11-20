@@ -6,7 +6,7 @@ import SailTerminal
 import SailTerminalView
 import SailWorkbench
 
-/// "Sail": one window, 1180 by 800 and no smaller than 480 by 600, laid out as Mast's shell: one band
+/// "Sail": one window, 1180 by 800 and no smaller than `leastFrame` (480 by 624), laid out as Mast's shell: one band
 /// across the window's top in the chrome, the window buttons' home and its drag surface; under it
 /// the icon rail on the chrome at the left, and beside the rail the selected pane ("This Mac", the
 /// local terminals in tabs and splits, or the account) as a card with 6 pt corners and a 2 pt
@@ -217,6 +217,15 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// The band's height in full screen, where the band is drawn by the window: the unified title
     /// bar–toolbar area's in a window (Mast's band is 44 px; AppKit sets this one).
     static let bandHeight = 52.0
+    /// The least frame the window takes. AppKit keeps the unified toolbar's row out of `minSize` and
+    /// adds it above: a frame asked for at 620 pt with `minSize` 600 was held at 624, the band's 52 pt
+    /// less a 28 pt title bar. So `minSize` is this less that row, and the drive and the tests read
+    /// this alone.
+    public static let leastFrame = NSSize(width: 480, height: 624)
+    /// The unified toolbar's row: the band less a plain title bar.
+    static var toolbarRow: Double {
+        bandHeight - Double(NSWindow.frameRect(forContentRect: .zero, styleMask: [.titled]).height)
+    }
     /// What the band keeps clear for the window buttons before the tabs (Mast's `.topbar__inset`),
     /// and in full screen, where macOS hides them.
     static let buttonsInset = 96.0
@@ -301,7 +310,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func compose() {
         window.title = Self.title
-        window.minSize = NSSize(width: 480, height: 600)
+        window.minSize = NSSize(width: Self.leastFrame.width, height: Self.leastFrame.height - Self.toolbarRow)
         window.delegate = self
         window.isReleasedWhenClosed = false
         apply(look)

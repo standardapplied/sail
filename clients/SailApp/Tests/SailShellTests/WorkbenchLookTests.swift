@@ -365,19 +365,23 @@ import Testing
     }
 
     /// A screen that leaves less than the designed height (a person's tall Dock, a runner whose
-    /// Dock cut the design's 684 pt to 682) gives a shorter window and nothing clipped: at 1024 x 640,
-    /// above the window's 624 pt least frame (600 pt of content and the title bar), every section
-    /// shown lies inside the window and asks no more room than it has.
+    /// Dock cut the design's 684 pt to 682) gives a shorter window and nothing clipped: at 1024 by
+    /// 16 pt over the least frame, and at the least frame itself, every section shown lies inside
+    /// the window and asks no more room than it has; a frame asked for below it is held at it.
     @Test func aShorterScreenGivesAShorterWindowWithNothingClipped() throws {
         let shell = try Self.shell(.light)
         let window = shell.window
-        window.setFrame(NSRect(x: 0, y: 0, width: 1024, height: 640), display: false)
         let content = try #require(window.contentView)
         let sections: [(String, NSView)] = [("the rail", shell.rail), ("This Mac", shell.thisMac), ("Workspaces", shell.workspaces), ("Account", shell.account)]
-        for item in Rail.Item.allCases {
+        let least = Double(ShellApp.leastFrame.height)
+        window.setFrame(NSRect(x: 0, y: 0, width: 1024, height: 100), display: false)
+        #expect(Double(window.frame.height) == least,
+                "a frame asked for at 100 pt is held at \(window.frame.height), not the least frame's \(least) (minSize \(window.minSize.height), the band \(window.frame.height - window.contentLayoutRect.height), the toolbar's row \(ShellApp.toolbarRow))")
+        for (item, height) in Rail.Item.allCases.flatMap({ item in [(item, least + 16), (item, least)] }) {
+            window.setFrame(NSRect(x: 0, y: 0, width: 1024, height: height), display: false)
             shell.select(item)
             content.layoutSubtreeIfNeeded()
-            #expect(Double(window.frame.height) == 640, "\(item): the window is \(window.frame)")
+            #expect(Double(window.frame.height) == height, "\(item): the window is \(window.frame)")
             for (name, view) in sections where !view.isHiddenOrHasHiddenAncestor {
                 let frame = content.convert(view.bounds, from: view)
                 #expect(content.bounds.insetBy(dx: -0.5, dy: -0.5).contains(frame), "\(item): \(name) at \(frame) lies outside the window's \(content.bounds)")

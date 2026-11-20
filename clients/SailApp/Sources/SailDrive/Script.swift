@@ -218,6 +218,8 @@ struct Step: Decodable {
     /// The window's frame made `[width, height]`, its top left kept: each frame shot at the
     /// design's size.
     var window: [Double]?
+    /// The window's frame made the least it takes (`ShellApp.leastFrame`), its top left kept.
+    var leastWindow: Bool?
     /// The Workspaces section no longer says this, within `seconds` (10 by default).
     var notSaid: String?
     /// The Workspaces button of this title clicked with a real mouse-down and mouse-up through the

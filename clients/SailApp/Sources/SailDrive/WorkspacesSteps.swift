@@ -448,7 +448,7 @@ extension Driver {
             let list = await waitUntil(step.seconds ?? 5) { (shell.window.firstResponder === pane.project.list) == held }
             return (list, "first responder \(String(describing: shell.window.firstResponder.map { type(of: $0) }))")
         }
-        if let size = step.window, size.count == 2 {
+        if let size = step.window ?? (step.leastWindow == true ? [Double(ShellApp.leastFrame.width), Double(ShellApp.leastFrame.height)] : nil), size.count == 2 {
             let frame = shell.window.frame
             shell.window.setFrame(NSRect(x: frame.minX, y: frame.maxY - size[1], width: size[0], height: size[1]), display: true)
             pane.layoutSubtreeIfNeeded()
