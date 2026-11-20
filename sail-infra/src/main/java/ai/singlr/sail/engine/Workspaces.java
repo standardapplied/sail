@@ -848,7 +848,8 @@ public final class Workspaces {
 
   /**
    * The label is cleared before the give and written after it, and a give cut short is stripped
-   * again: a re-own that fails is nobody's and holds nothing of anyone's. A kept mark is cleared.
+   * again: a re-own that fails is nobody's and holds nothing of anyone's. A re-own strips first, so
+   * what its previous person signed in to a harness with leaves too. A kept mark is cleared.
    */
   private Reused reuse(BoxInstances.Instance found, ProjectDefinition config, Owning owning)
       throws Exception {
@@ -865,6 +866,7 @@ public final class Workspaces {
       }
       try {
         var owner = owning.now(this, config);
+        WorkspaceCredentials.strip(shell, found.name());
         giveAll(found.name(), config, owner);
         label(found.name(), owner.handle(), owner.id());
       } catch (Exception failure) {
@@ -954,6 +956,33 @@ public final class Workspaces {
       }
     }
     return List.copyOf(unreached);
+  }
+
+  /** What is done to a workspace's instance, by its name, under the workspace's lock. */
+  @FunctionalInterface
+  public interface Act {
+    void on(String instance) throws IOException, InterruptedException, TimeoutException;
+  }
+
+  /**
+   * Does {@code act} to workspace {@code name} of {@code project} under its lock, once it is read
+   * again there and {@code still} holds of it: what was decided of it before the lock is decided
+   * again, so nothing done to it meanwhile, a re-own say, is acted past.
+   *
+   * @throws IOException naming what changed, when it is gone or {@code still} no longer holds
+   */
+  public void underLock(
+      String project, String name, Predicate<BoxInstances.Instance> still, Act act)
+      throws IOException, InterruptedException, TimeoutException {
+    try (var held = nameLock(project + "-" + name)) {
+      var now = find(project, name);
+      if (now.isEmpty() || !still.test(now.get())) {
+        throw Remedied.io(
+            "workspace " + name + " of " + project + " changed hands while it was entered.",
+            Remedy.of("Start it again in a workspace of your own."));
+      }
+      act.on(now.get().name());
+    }
   }
 
   /** {@code listed} as Incus has it now: what an act that waited for its lock decides on. */

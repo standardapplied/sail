@@ -219,6 +219,73 @@ class WorkspaceCredentialsTest {
     assertFalse(Files.readString(root.resolve("home/dev/.gitconfig")).contains("user"));
   }
 
+  /** What a person signed in to each harness with, and an agent session's login file. */
+  private void harnessesSignedIn() throws Exception {
+    for (var file : WorkspaceCredentials.HARNESS_LOGINS) {
+      var at = root.resolve(file.substring(1));
+      Files.createDirectories(at.getParent());
+      Files.writeString(at, "{\"approved\": [\"" + TOKEN + "\"]}\n");
+    }
+    var login =
+        root.resolve(SessionLogin.file("0f0e0d0c-0000-7000-8000-000000000000").substring(1));
+    Files.createDirectories(login.getParent());
+    Files.writeString(login, "CODEX_API_KEY=" + TOKEN + "\n");
+  }
+
+  /**
+   * M1: a strip, what every re-own, disown and template build runs as a workspace leaves its
+   * person, takes every file a harness keeps a person's login in, or a part of one, and every agent
+   * session's login file, and the check after it finds none of them.
+   */
+  @Test
+  void theStripTakesWhatAPersonSignedInToEachHarnessWithAndEverySessionsLogin() throws Exception {
+    harnessesSignedIn();
+
+    var stripped = script(WorkspaceCredentials.STRIP, "");
+
+    assertEquals(0, stripped.exit(), stripped.said());
+    for (var file : WorkspaceCredentials.HARNESS_LOGINS) {
+      assertFalse(Files.exists(root.resolve(file.substring(1))), file);
+    }
+    assertFalse(Files.exists(root.resolve(WorkspaceCredentials.SESSIONS.substring(1))));
+    assertEquals(
+        List.of(
+            "/home/dev/.claude/.credentials.json",
+            "/home/dev/.claude.json",
+            "/home/dev/.codex/auth.json"),
+        WorkspaceCredentials.HARNESS_LOGINS);
+  }
+
+  /**
+   * A give to the workspace's own person at its start keeps what that person signed in to their
+   * harnesses with, and takes every agent session's login file, since no session outlives a stop.
+   */
+  @Test
+  void aGiveToItsOwnPersonKeepsTheirHarnessSignInsAndTakesEverySessionsLogin() throws Exception {
+    harnessesSignedIn();
+
+    var given = script(WorkspaceCredentials.STRIP, "", "Ana", "ana@sail.invalid");
+
+    assertEquals(0, given.exit(), given.said());
+    for (var file : WorkspaceCredentials.HARNESS_LOGINS) {
+      assertTrue(Files.exists(root.resolve(file.substring(1))), file);
+    }
+    assertFalse(Files.exists(root.resolve(WorkspaceCredentials.SESSIONS.substring(1))));
+  }
+
+  /** A strip whose harness file could not be removed fails, by what is left, never silently. */
+  @Test
+  void aHarnessLoginTheStripCannotRemoveFailsIt() throws Exception {
+    var held = root.resolve("home/dev/.codex/auth.json");
+    Files.createDirectories(held);
+    Files.writeString(held.resolve("inside"), TOKEN);
+
+    var stripped = script(WorkspaceCredentials.STRIP, "");
+
+    assertEquals(1, stripped.exit(), stripped.said());
+    assertTrue(stripped.said().contains(".codex/auth.json"), stripped.said());
+  }
+
   /** The strip given a name and email leaves them as the identity, and nothing else of anyone. */
   @Test
   void theStripGivenAnOwnersNameAndEmailSetsThemAsTheIdentity() throws Exception {

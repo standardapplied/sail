@@ -8,6 +8,8 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -34,6 +36,25 @@ final class WorkspaceCredentials {
       List.of(STORE, STORE + NEW, GH_HOSTS, DEV + ForgeCliLogin.TOKEN_FILE);
 
   /**
+   * Where agent sessions' logins are handed over ({@link SessionLogin#DIR}): no session lives
+   * across a give, so every give and every strip removes the directory whole.
+   */
+  static final String SESSIONS = SessionLogin.DIR;
+
+  /**
+   * Every file a harness keeps a person's login in, or a part of one, signed in by hand in a
+   * session ({@link Harness#storedLogins}): a workspace keeps them across its own person's starts
+   * and loses them when it leaves that person, by a strip, which every re-own, disown and template
+   * build runs.
+   */
+  static final List<String> HARNESS_LOGINS =
+      Harnesses.all().stream()
+          .flatMap(harness -> harness.storedLogins().stream())
+          .map(path -> DEV + path)
+          .distinct()
+          .toList();
+
+  /**
    * Every give runs it whole, so nothing of a previous owner survives a re-own or a restart, and so
    * does a disown, and a template's build that failed or was cut short, before its dev user was
    * even made (which then holds no git identity of anyone's to remove). Each removal is idempotent
@@ -44,6 +65,8 @@ final class WorkspaceCredentials {
       set -eu
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
       rm -f %1$s
+      rm -rf %3$s
+      if [ "$#" -ne 2 ]; then rm -f %4$s; fi
       dev=$(id -u dev 2>/dev/null) || dev=""
       if [ -n "$dev" ]; then
         for key in user.name user.email; do
@@ -51,9 +74,14 @@ final class WorkspaceCredentials {
         done
       fi
       if [ -e %2$s ]; then : > %2$s; fi
-      for file in %1$s; do
-        if [ -e "$file" ]; then echo "$file is still there" >&2; exit 1; fi
+      for file in %1$s %3$s; do
+        if [ -e "$file" ] || [ -L "$file" ]; then echo "$file is still there" >&2; exit 1; fi
       done
+      if [ "$#" -ne 2 ]; then
+        for file in %4$s; do
+          if [ -e "$file" ] || [ -L "$file" ]; then echo "$file is still there" >&2; exit 1; fi
+        done
+      fi
       if [ -n "$dev" ]; then
         for key in user.name user.email; do
           if as_dev git config --global --get "$key" >/dev/null; then
@@ -68,7 +96,7 @@ final class WorkspaceCredentials {
         as_dev git config --global user.email "$2"
       fi
       """
-          .formatted(String.join(" ", FILES), KEYS);
+          .formatted(String.join(" ", FILES), KEYS, SESSIONS, String.join(" ", HARNESS_LOGINS));
 
   /**
    * Searches by content, not by a list of paths, because a token can hide where no list names it;

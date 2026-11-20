@@ -25,9 +25,11 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
@@ -42,6 +44,7 @@ import org.junit.jupiter.api.io.TempDir;
  * store, and launchd keeps no descriptors, so a host on macOS loses its sessions with itself.
  */
 @EnabledOnOs(OS.LINUX)
+@Timeout(value = 120, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
 class PtySessionHostHandoffTest {
 
   @TempDir Path dir;

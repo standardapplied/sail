@@ -305,6 +305,50 @@ class HarnessGoldenTest {
   }
 
   @Test
+  void anInteractiveSessionStartsOnlyInAModeItsHarnessTakesInAWorkspace() {
+    assertEquals(List.of("default", "full"), CLAUDE_CODE.modes());
+    assertEquals("claude", CLAUDE_CODE.interactive("default"));
+    assertEquals("claude --dangerously-skip-permissions", CLAUDE_CODE.interactive("full"));
+    assertEquals(List.of("full"), CODEX.modes());
+    assertEquals("codex --dangerously-bypass-approvals-and-sandbox", CODEX.interactive("full"));
+    assertEquals(
+        "Codex CLI takes no mode 'default' in a workspace; it takes full.",
+        assertThrows(IllegalArgumentException.class, () -> CODEX.interactive("default"))
+            .getMessage());
+    assertEquals(
+        "Claude Code takes no mode 'plan' in a workspace; it takes default, full.",
+        assertThrows(IllegalArgumentException.class, () -> CLAUDE_CODE.interactive("plan"))
+            .getMessage());
+  }
+
+  /**
+   * How an interactive session takes each kind, so the harness keeps nothing of it: Claude Code's
+   * token from its variable; its API key through a helper of the session's own settings, so it is
+   * neither asked about nor kept; Codex's key through a provider of its own config reading the
+   * variable, never its store.
+   */
+  @Test
+  void anInteractiveSessionTakesEachLoginWithoutTheHarnessKeepingIt() {
+    assertEquals(
+        Harness.InteractiveLogin.READS_ITS_VARIABLE,
+        CLAUDE_CODE.interactiveLogin(CLAUDE_CODE.loginKind("token")));
+    assertEquals(
+        new Harness.InteractiveLogin(
+            "export SAIL_ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\"; unset ANTHROPIC_API_KEY",
+            " --settings '{\"apiKeyHelper\": \"printenv SAIL_ANTHROPIC_API_KEY\"}'"),
+        CLAUDE_CODE.interactiveLogin(CLAUDE_CODE.loginKind("api-key")));
+    assertEquals(
+        new Harness.InteractiveLogin(
+            "",
+            " -c model_provider=sail -c 'model_providers.sail={name=\"OpenAI\","
+                + " base_url=\"https://api.openai.com/v1\", env_key=\"CODEX_API_KEY\","
+                + " wire_api=\"responses\"}' -c 'shell_environment_policy.set.CODEX_API_KEY=\"\"'"),
+        CODEX.interactiveLogin(CODEX.loginKind("api-key")));
+    assertEquals(List.of(".claude/.credentials.json", ".claude.json"), CLAUDE_CODE.storedLogins());
+    assertEquals(List.of(".codex/auth.json"), CODEX.storedLogins());
+  }
+
+  @Test
   void interactive() {
     assertEquals("claude", CLAUDE_CODE.interactive(false));
     assertEquals("claude --dangerously-skip-permissions", CLAUDE_CODE.interactive(true));

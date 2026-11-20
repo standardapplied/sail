@@ -53,6 +53,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
+@Timeout(value = 120, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
 class PtySessionHostTest {
 
   @TempDir Path dir;
@@ -1091,6 +1092,7 @@ class PtySessionHostTest {
   }
 
   @Test
+  @Timeout(30)
   void aNonWritersInputIsRefusedWithoutKillingTheConnection() throws Exception {
     try (var ignored = startHost()) {
       try (var owner = connect("tok-uday")) {

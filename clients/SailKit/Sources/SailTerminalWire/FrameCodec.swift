@@ -116,7 +116,7 @@ private extension Frame {
             [
                 .string(create.session), .strings(create.command), .string(create.workingDirectory),
                 .string(create.project), .string(create.room),
-            ] + create.size.fields + [.string(create.workspace)]
+            ] + create.size.fields + [.string(create.workspace)] + create.agent.fields
         case let .attach(session, write, client, takes): [.string(session), .bool(write), .string(client), .bool(takes)]
         case let .input(sequence, bytes): [.int64(sequence), .blob(bytes)]
         case let .resize(size), let .resized(size): size.fields
@@ -144,7 +144,7 @@ private extension Frame {
             [.count(page.sessions.count)] + page.sessions.flatMap(\.fields) + [.string(page.next)]
                 + [.count(page.sessions.count)] + page.sessions.flatMap(\.place)
         case let .refused(refusal):
-            [.string(refusal.message), .count(refusal.remedy.count)] + refusal.remedy.flatMap(\.fields)
+            [.string(refusal.message), .count(refusal.remedy.count)] + refusal.remedy.flatMap(\.fields) + [.string(refusal.code)]
         case .takeWrite, .detach, .replayEnd, .paused, .continued, .accepted: []
         }
     }
@@ -168,6 +168,13 @@ private extension SessionInfo {
     /// the frame, a page's after its cursor.
     var place: [Field] {
         [.string(project), .string(workspace), .string(opener), .int64(createdAtMillis), .string(endedReason)]
+            + agent.fields
+    }
+}
+
+private extension SessionAgent {
+    var fields: [Field] {
+        [.string(harness), .string(mode), .bool(inside)]
     }
 }
 
@@ -259,8 +266,12 @@ private struct Cursor {
     private mutating func create() throws(TerminalWireError) -> SessionCreate {
         SessionCreate(
             session: try string(), command: try strings(), workingDirectory: try string(), project: try string(),
-            room: try string(), size: try size(), workspace: try string()
+            room: try string(), size: try size(), workspace: try string(), agent: try agent()
         )
+    }
+
+    private mutating func agent() throws(TerminalWireError) -> SessionAgent {
+        SessionAgent(harness: try string(), mode: try string(), inside: try bool())
     }
 
 
@@ -287,6 +298,7 @@ private struct Cursor {
         placed.opener = try string()
         placed.createdAtMillis = try int64()
         placed.endedReason = try string()
+        placed.agent = try agent()
         return placed
     }
 
@@ -305,7 +317,10 @@ private struct Cursor {
     }
 
     private mutating func refusal() throws(TerminalWireError) -> HostRefusal {
-        HostRefusal(message: try string(), remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() })
+        HostRefusal(
+            message: try string(), remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() },
+            code: try string()
+        )
     }
 
     private mutating func part() throws(TerminalWireError) -> RemedyPart {

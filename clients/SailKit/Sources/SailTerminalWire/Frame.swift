@@ -93,8 +93,29 @@ public struct TerminalSize: Equatable, Sendable {
     }
 }
 
+/// The harness a session runs, by the host's name for it (`claude-code`, `codex`), in one of the
+/// harness's own modes, signed in with its person's stored login, or, `inside`, with none handed
+/// over, so the person signs in with the harness's own login there. ``none`` for a command.
+public struct SessionAgent: Equatable, Sendable {
+    public var harness: String
+    public var mode: String
+    public var inside: Bool
+
+    public init(harness: String, mode: String, inside: Bool = false) {
+        self.harness = harness
+        self.mode = mode
+        self.inside = inside
+    }
+
+    public static let none = SessionAgent(harness: "", mode: "")
+
+    /// Whether this names no harness: a session that runs a command.
+    public var isNone: Bool { harness.isEmpty }
+}
+
 /// A session to start: `room` is the room it is pinned to, empty for none; `workspace` the project's
-/// workspace it runs in, empty (or `main`) for the project's own container.
+/// workspace it runs in, empty (or `main`) for the project's own container. `agent` names a harness
+/// the host starts there instead of a command, the command then empty: the host composes it.
 public struct SessionCreate: Equatable, Sendable {
     public var session: String
     public var command: [String]
@@ -103,10 +124,11 @@ public struct SessionCreate: Equatable, Sendable {
     public var room: String
     public var size: TerminalSize
     public var workspace: String
+    public var agent: SessionAgent
 
     public init(
         session: String, command: [String], workingDirectory: String, project: String, room: String,
-        size: TerminalSize, workspace: String = ""
+        size: TerminalSize, workspace: String = "", agent: SessionAgent = .none
     ) {
         self.session = session
         self.command = command
@@ -115,6 +137,7 @@ public struct SessionCreate: Equatable, Sendable {
         self.room = room
         self.size = size
         self.workspace = workspace
+        self.agent = agent
     }
 }
 
@@ -139,11 +162,13 @@ public struct SessionInfo: Equatable, Sendable {
     public var createdAtMillis: Int64
     /// The host's words for why it ended, empty while it lives.
     public var endedReason: String
+    /// The harness it runs, ``SessionAgent/none`` for a command; `command` is then the harness's own.
+    public var agent: SessionAgent
 
     public init(
         name: String, instanceID: String, live: Bool, attached: Int32, writerFDE: String, room: String,
         command: [String], project: String = "", workspace: String = "", opener: String = "",
-        createdAtMillis: Int64 = 0, endedReason: String = ""
+        createdAtMillis: Int64 = 0, endedReason: String = "", agent: SessionAgent = .none
     ) {
         self.name = name
         self.instanceID = instanceID
@@ -157,6 +182,7 @@ public struct SessionInfo: Equatable, Sendable {
         self.opener = opener
         self.createdAtMillis = createdAtMillis
         self.endedReason = endedReason
+        self.agent = agent
     }
 }
 
@@ -177,10 +203,14 @@ public struct SessionPage: Equatable, Sendable {
 public struct HostRefusal: Equatable, Sendable {
     public var message: String
     public var remedy: [RemedyPart]
+    /// Its kind as the API's error codes name it (`login_not_stored`), empty for none: what a client
+    /// acts on, never the words.
+    public var code: String
 
-    public init(message: String, remedy: [RemedyPart]) {
+    public init(message: String, remedy: [RemedyPart], code: String = "") {
         self.message = message
         self.remedy = remedy
+        self.code = code
     }
 
     /// What a person reads of it, as every refusal is said (``Said/lines(_:remedy:otherwise:)``).

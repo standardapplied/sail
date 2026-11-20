@@ -57,7 +57,8 @@ class HostPtyTest {
             new BoxInstances(incus),
             TestWorkspaces.over(incus),
             project -> Optional.of(TestDefinitions.named(project)),
-            TestOwners::of);
+            TestOwners::of,
+            incus);
   }
 
   @AfterEach
@@ -188,7 +189,8 @@ class HostPtyTest {
             new BoxInstances(box),
             TestWorkspaces.over(box),
             project -> Optional.of(TestDefinitions.named(project)),
-            TestOwners::of);
+            TestOwners::of,
+            box);
     var ada = new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API));
     var bob = new PtyIdentity.Person(new Actor("bob", Role.MEMBER, Actor.Lane.API));
     var root = new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API));
@@ -239,7 +241,8 @@ class HostPtyTest {
             project -> Optional.of(TestDefinitions.named(project)),
             handle -> {
               throw new IllegalStateException(handle + " is not on this box's roster.");
-            });
+            },
+            box);
     var root = new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API));
 
     var refused = assertThrows(IOException.class, () -> lane.enterWorkspace("acme", "try", root));
@@ -298,7 +301,8 @@ class HostPtyTest {
             new BoxInstances(interrupting),
             TestWorkspaces.over(interrupting),
             project -> Optional.of(TestDefinitions.named(project)),
-            TestOwners::of);
+            TestOwners::of,
+            interrupting);
 
     var slow =
         assertThrows(PtyAdmission.Unavailable.class, () -> pty.admitWorkspace("acme", "slow", ada));
@@ -347,7 +351,8 @@ class HostPtyTest {
             new BoxInstances(box),
             TestWorkspaces.over(box),
             project -> Optional.of(TestDefinitions.named(project)),
-            TestOwners::of);
+            TestOwners::of,
+            box);
 
     var bob = new PtyIdentity.Person(new Actor("bob", Role.MEMBER, Actor.Lane.API));
     var unstarted =

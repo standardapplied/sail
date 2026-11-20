@@ -70,8 +70,10 @@ record TicketResponse(String ticket, String address, String expiresAt) implement
  */
 record WorkspaceSessionsResponse(List<Session> sessions) implements Mappable {
   /**
-   * One session: {@code writer} holds its keyboard (blank for no one), {@code command} is blank for
-   * the login shell, and {@code endedReason} is the host's words for its end, null while it lives.
+   * One session: {@code writer} holds its keyboard (blank for no one), {@code command} is what it
+   * runs ({@code ["bash", "-l"]} for the login shell, the harness's own command for an agent, never
+   * what started it), {@code agent} the harness it runs (null for a command), and {@code
+   * endedReason} the host's words for its end, null while it lives.
    */
   record Session(
       String name,
@@ -80,6 +82,7 @@ record WorkspaceSessionsResponse(List<Session> sessions) implements Mappable {
       String writer,
       String opener,
       List<String> command,
+      PtyMessage.Agent agent,
       Instant createdAt,
       String endedReason)
       implements Mappable {
@@ -91,6 +94,7 @@ record WorkspaceSessionsResponse(List<Session> sessions) implements Mappable {
           info.writerFde(),
           info.opener(),
           info.command(),
+          info.agent(),
           DateTimeUtils.ofMillis(info.createdAtMillis()),
           Strings.isBlank(info.endedReason()) ? null : info.endedReason());
     }
@@ -104,6 +108,17 @@ record WorkspaceSessionsResponse(List<Session> sessions) implements Mappable {
       m.put("writer", writer);
       m.put("opener", opener);
       m.put("command", command);
+      m.put(
+          "agent",
+          agent.none()
+              ? null
+              : Map.of(
+                  "harness",
+                  agent.harness(),
+                  "mode",
+                  agent.mode(),
+                  "login",
+                  agent.inside() ? "inside" : "stored"));
       m.put("created_at", DateTimeUtils.format(createdAt));
       if (endedReason != null) m.put("ended_reason", endedReason);
       return m;

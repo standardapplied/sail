@@ -84,13 +84,18 @@ class LoginOperationsTest {
       var again = Actor.call(UDAY, () -> doors.remove("codex", "default", null));
 
       assertEquals("default", stored.login().name());
-      assertNull(stored.note());
-      assertNull(removed.note());
+      assertNull(stored.note(), "a first login replaces nothing a session holds");
+      assertEquals(LoginOperations.SESSIONS_KEEP, removed.note());
       assertNull(again.login());
       assertEquals(
           "No Codex CLI login named 'default' is stored for uday; nothing was removed.",
           again.note());
       assertEquals(2, events.size(), "removing nothing announces nothing");
+      Actor.call(UDAY, () -> doors.store("codex", "work", null, "sk-proj-2", null));
+      var replaced = Actor.call(UDAY, () -> doors.store("codex", "work", null, "sk-proj-3", null));
+      var chosen = Actor.call(UDAY, () -> doors.use("codex", "work"));
+      assertEquals(LoginOperations.SESSIONS_KEEP, replaced.note(), "m5: said where it is replaced");
+      assertEquals(LoginOperations.SESSIONS_KEEP, chosen.note());
     }
   }
 

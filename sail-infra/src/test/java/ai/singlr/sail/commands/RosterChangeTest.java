@@ -55,9 +55,11 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.function.ThrowingConsumer;
@@ -74,6 +76,7 @@ import org.junit.jupiter.api.io.TempDir;
  * sail-people-are-managed} adds the commands. A node whose own person main disables is refused its
  * rounds and so never mirrors that disable; {@code sail-people-are-managed} closes it.
  */
+@Timeout(value = 120, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
 class RosterChangeTest {
 
   private static final SyncConfig MAIN = new SyncConfig(SyncConfig.ROLE_MAIN, null, "ada", "main");

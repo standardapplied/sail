@@ -35,7 +35,7 @@ class CreateNotMakeTest {
   private static final List<String> NOT_ABOUT_CREATING =
       List.of(
           " and nothing its runs made is lost",
-          ", so a run of a spec cannot start: a login made by hand in the project's container",
+          ": a login made by hand in the project's container is not used by runs",
           "'s definition or a change made by hand in ",
           "Make a project's container match its definition: create it if absent, start it if",
           "skills made by hand",

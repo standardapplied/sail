@@ -993,9 +993,14 @@ class WorkspaceIT extends AbstractIncusIT {
             List.of(
                 "bash",
                 "-c",
-                "set -eu; install -d -o dev -g dev /home/dev/.sail /home/dev/.config/gh;"
+                "set -eu; install -d -o dev -g dev /home/dev/.sail /home/dev/.config/gh"
+                    + " /home/dev/.claude /home/dev/.codex"
+                    + " /home/dev/.sail/sessions/0f0e0d0c-0000-7000-8000-000000000000;"
                     + " for f in /home/dev/.git-credentials.sail-new /home/dev/.sail/gh-token"
-                    + " /home/dev/.config/gh/hosts.yml; do echo "
+                    + " /home/dev/.config/gh/hosts.yml "
+                    + String.join(" ", WorkspaceCredentials.HARNESS_LOGINS)
+                    + " /home/dev/.sail/sessions/0f0e0d0c-0000-7000-8000-000000000000/login.env;"
+                    + " do echo "
                     + STRIPPED_TOKEN
                     + " > \"$f\"; chown dev:dev \"$f\"; done"));
     assertTrue(planted.ok(), planted.stderr());
@@ -1011,6 +1016,10 @@ class WorkspaceIT extends AbstractIncusIT {
                 "-c",
                 "found=0; for f in "
                     + String.join(" ", WorkspaceCredentials.FILES)
+                    + " "
+                    + String.join(" ", WorkspaceCredentials.HARNESS_LOGINS)
+                    + " "
+                    + WorkspaceCredentials.SESSIONS
                     + "; do [ ! -e \"$f\" ] || { echo \"file $f\"; found=1; }; done;"
                     + " runuser -u dev -- env HOME=/home/dev git config --global --get user.email"
                     + " && found=1;"
@@ -1162,6 +1171,61 @@ class WorkspaceIT extends AbstractIncusIT {
         "ana@sail.invalid\nssh-ed25519 AAAAana ana@laptop\n1\n",
         held.stdout(),
         "only ana's credentials: " + held.stderr());
+  }
+
+  /**
+   * M1 of #488's review on a real Incus: a spec's workspace entered by another person's run, with
+   * no disown between, holds nothing its previous person signed in to a harness with (Claude Code's
+   * sign-in and its state, holding an approved key's last 20 characters; Codex's store), and no
+   * agent session's login file: the re-own strips before it gives.
+   */
+  @Test
+  void aWorkspaceEnteredForAnotherPersonHoldsNothingThePreviousSignedInToAHarnessWith()
+      throws Exception {
+    var place = (RunPlace.SpecWorkspace) RunPlace.of(PROJECT, KEPT);
+    var inputs = ProjectProvisioner.inputs(definition(), Optional.empty());
+    var instance =
+        workspaces
+            .enterSpec(
+                workspaces.checkSpec(place, inputs, name -> false),
+                definition(),
+                "tmp",
+                h -> leaving(),
+                null,
+                whole -> {})
+            .instance();
+    plantLeftovers(instance);
+    var ana =
+        new WorkspaceOwner(
+            "ana",
+            "Ana",
+            "ana@sail.invalid",
+            Map.of("example.invalid", "tok-ana-0123456789abcdef"),
+            List.of("ssh-ed25519 AAAAana ana@laptop"),
+            "fde_ana");
+
+    workspaces.enterSpec(
+        workspaces.checkSpec(place, inputs, name -> false),
+        definition(),
+        "ana",
+        h -> ana,
+        null,
+        whole -> {});
+
+    var left =
+        exec(
+            instance,
+            List.of(
+                "bash",
+                "-c",
+                "for f in "
+                    + String.join(" ", WorkspaceCredentials.HARNESS_LOGINS)
+                    + " "
+                    + WorkspaceCredentials.SESSIONS
+                    + "; do [ -e \"$f\" ] && echo \"$f\"; done; grep -r -l -F "
+                    + STRIPPED_TOKEN
+                    + " /home/dev; true"));
+    assertEquals("", left.stdout(), "the previous person's sign-ins are gone: " + left.stderr());
   }
 
   /**

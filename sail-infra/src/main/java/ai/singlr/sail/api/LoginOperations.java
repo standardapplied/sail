@@ -9,6 +9,7 @@ import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Resources;
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.harness.Harness;
@@ -36,6 +37,14 @@ public final class LoginOperations {
   static final String STORED = "login_stored";
   static final String DEFAULT = "login_default";
   static final String REMOVED = "login_removed";
+
+  /**
+   * What replacing or removing a harness login leaves: an agent session already running took the
+   * login into its harness when it started, and nothing of it rests in a workspace.
+   */
+  static final String SESSIONS_KEEP =
+      "An agent session already running keeps the login it started with until it ends; no"
+          + " workspace keeps any of it.";
 
   private final FdeStore fdes;
   private final RunStore runs;
@@ -80,9 +89,14 @@ public final class LoginOperations {
     var named = LoginStore.requireName(name);
     var known = Harnesses.of(harness);
     var still = liveOn(person, known, named);
+    var replacing =
+        logins().list(person.id()).stream()
+            .anyMatch(
+                stored -> stored.harness().equals(known.yamlName()) && stored.name().equals(named));
     var row = stored(() -> logins().store(person.id(), known, named, kind, value));
     announce(STORED, person, row);
-    return new LoginResponse(view(person, row), still);
+    return new LoginResponse(
+        view(person, row), replacing ? Remedied.joined(still, SESSIONS_KEEP) : still);
   }
 
   /** Makes the caller's login {@code name} of {@code harness} the default for launches after it. */
@@ -95,7 +109,7 @@ public final class LoginOperations {
     }
     var row = found(() -> logins().use(person.id(), Harnesses.of(harness), name));
     announce(DEFAULT, person, row);
-    return new LoginResponse(view(person, row), null);
+    return new LoginResponse(view(person, row), SESSIONS_KEEP);
   }
 
   /**
@@ -122,7 +136,8 @@ public final class LoginOperations {
     }
     var row = removed.get();
     announce(REMOVED, person, row);
-    return new LoginResponse(view(person, row), liveOn(person, known, row.name()));
+    return new LoginResponse(
+        view(person, row), Remedied.joined(liveOn(person, known, row.name()), SESSIONS_KEEP));
   }
 
   private String unreached(FdeStore.Fde person) {

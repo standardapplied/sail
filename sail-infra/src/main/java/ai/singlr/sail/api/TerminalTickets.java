@@ -129,7 +129,7 @@ public final class TerminalTickets {
           case PtyMessage.Sessions(var sessions, var next) -> sessions;
           case PtyMessage.TicketRefused(var kind, var reason, var remedy) ->
               throw new ApiException(code(kind), reason, remedy);
-          case PtyMessage.Err(var reason, var remedy) ->
+          case PtyMessage.Err(var reason, var remedy, _) ->
               throw new ApiException(ErrorCode.TERMINAL_UNAVAILABLE, reason, remedy);
           default ->
               throw new ApiException(
