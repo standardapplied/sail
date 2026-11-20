@@ -144,7 +144,7 @@ import Testing
         #expect(walked == ["Account", "Appearance", "Sign Out", "Account", "Sign Out"], "the keys walk \(walked), not top to bottom")
         shell.window.sendEvent(try Self.key(48, "\t"))
         #expect(Self.highlighted(view) == "Account" && shell.userMenu.isOpen && shell.window.firstResponder is MenuKeys, "Tab left the menu, or moved to \(Self.highlighted(view))")
-        try Self.press(Self.up, in: shell)
+        try Self.press(Self.down, in: shell)
         try Self.press(Self.left, in: shell)
         #expect(view.chosenLook == .dark && Appearance.stored(in: shell.defaults) == .dark && NSApp.appearance?.name == .darkAqua && shell.userMenu.isOpen)
         try Self.press(Self.right, in: shell)

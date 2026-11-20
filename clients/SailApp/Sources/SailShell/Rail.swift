@@ -187,4 +187,16 @@ final class RailButton: NSButton {
         defer { clicked = false }
         super.mouseDown(with: event)
     }
+
+    /// VoiceOver's press, and its Show Menu on a menu button, act at once, as a press of the keys:
+    /// AppKit's own press of this menu-button-role button did not open the menu in the test.
+    override func accessibilityPerformPress() -> Bool {
+        guard isEnabled else { return false }
+        performClick(nil)
+        return true
+    }
+
+    override func accessibilityPerformShowMenu() -> Bool {
+        accessibilityPerformPress()
+    }
 }

@@ -48,7 +48,8 @@ package extension Look {
         guard area > 0 else { return [] }
         let grounds = [canvas, surface, surfacePop, palette.background] + BannerTone.allCases.map { BannerPaint($0, look: self).fill }
         let colours = [warning, success, info, onAccent, onError, onInk]
-        return (grounds.contains(fill.rgb) && !inControl) || colours.contains(fill.rgb) ? [] : [.neutralFill(area)]
+        if inControl, grounds.contains(fill.rgb) { return [.neutralFill(area)] }
+        return grounds.contains(fill.rgb) || colours.contains(fill.rgb) ? [] : [.neutralFill(area)]
     }
 
     func marks(line: Tint?) -> [Mark] {
