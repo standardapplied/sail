@@ -334,6 +334,133 @@ class HostPtyTest {
         box.invocations().toString());
   }
 
+  /** Workspace {@code name} of acme as Incus lists it, {@code status}, labelled {@code label}. */
+  private static String acme(String name, String status, String label) {
+    return acme(name, label).replace("\"Stopped\"", "\"" + status + "\"");
+  }
+
+  /** A box's pty lane over {@code box}, as {@code role} with {@code handle} its person. */
+  private HostLanes.Pty lane(ScriptedShellExecutor box, SyncConfig config) {
+    return new HostLanes.Pty(
+        db,
+        TestAuth.roles(db, config),
+        null,
+        new BoxInstances(box),
+        TestWorkspaces.over(box),
+        project -> Optional.of(TestDefinitions.named(project)),
+        handle -> {
+          if (handle.equals("zed")) {
+            throw new IllegalStateException("zed is not on this box's roster.");
+          }
+          return TestOwners.of(handle);
+        },
+        box);
+  }
+
+  /**
+   * A workspace's files are read by whoever may enter it, decided as entering it is: its owner and
+   * an admin, never another member; one the project does not have is not found; and a stopped one
+   * is refused with the remedy that starts it, and nothing is started.
+   */
+  @Test
+  void aWorkspacesFilesAreItsOwnersOrAnAdminsAndAStoppedOneIsNeverStartedForThem()
+      throws IOException {
+    var owned = ", \"user.sail.owner\": \"ada\", \"user.sail.owner_id\": \"fde_ada\"";
+    var running = acme("try", "Running", owned);
+    var idle = acme("idle", owned);
+    var box =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus storage list --format json", TestWorkspaces.POOL)
+            .onOk("incus list ^acme-try$", "[" + running + "]")
+            .onOk("incus list ^acme-idle$", "[" + idle + "]")
+            .onOk("incus list ^acme-gone$", "[]");
+    var lane = lane(box, new SyncConfig("main", null, "root", "box"));
+    var ada = new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API));
+    var bob = new PtyIdentity.Person(new Actor("bob", Role.MEMBER, Actor.Lane.API));
+    var root = new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API));
+
+    lane.admitFiles("acme", "try", ada);
+    lane.admitFiles("acme", "try", root);
+    var refused = assertThrows(Remedied.Io.class, () -> lane.admitFiles("acme", "try", bob));
+    var absent =
+        assertThrows(PtyAdmission.Absent.class, () -> lane.admitFiles("acme", "gone", ada));
+    var stopped =
+        assertThrows(PtyAdmission.Stopped.class, () -> lane.admitFiles("acme", "idle", ada));
+    var bobs = assertThrows(Remedied.Io.class, () -> lane.admitFiles("acme", "idle", bob));
+
+    assertEquals("Workspace 'try' belongs to 'ada', not you.", refused.reason());
+    assertEquals("Project 'acme' has no workspace 'gone' on this box.", absent.reason());
+    assertEquals(
+        "Workspace idle of acme is stopped, and reading its files does not start it. Start it with:"
+            + " sail project workspace start acme idle.",
+        stopped.getMessage());
+    assertEquals("workspace_stopped", stopped.code());
+    assertEquals(
+        List.of(
+            new Remedy.Command(
+                Remedy.Runs.SAIL, "project workspace start", List.of("acme", "idle"))),
+        stopped.remedy().commands());
+    assertEquals(
+        "Workspace 'idle' belongs to 'ada', not you.",
+        bobs.reason(),
+        "who may enter it is asked before whether it runs, so a stranger learns nothing more");
+    assertTrue(
+        box.invocations().stream()
+            .noneMatch(c -> c.startsWith("incus start") || c.contains("sail-strip")),
+        box.invocations().toString());
+  }
+
+  /**
+   * N1 for files: on a node, its own person reads the files of a workspace labelled for them by id
+   * or for no one, never of one labelled for another person of their handle or for a person gone
+   * from the node, each refused with its code in a files ticket's own words.
+   */
+  @Test
+  void onANodeAWorkspacesFilesAreReadOnlyWhereItsPersonMayEnter() throws IOException {
+    var old =
+        acme(
+            "old",
+            "Running",
+            ", \"user.sail.owner\": \"ada\", \"user.sail.owner_id\": \"fde_old\"");
+    var gone =
+        acme(
+            "gone",
+            "Running",
+            ", \"user.sail.owner\": \"zed\", \"user.sail.owner_id\": \"fde_zed\"");
+    var loose = acme("loose", "Running", "");
+    var box =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus storage list --format json", TestWorkspaces.POOL)
+            .onOk("incus list ^acme-old$", "[" + old + "]")
+            .onOk("incus list ^acme-gone$", "[" + gone + "]")
+            .onOk("incus list ^acme-loose$", "[" + loose + "]");
+    var lane = lane(box, new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "ada", "ada-box"));
+    var ada = new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API));
+    var bob = new PtyIdentity.Person(new Actor("bob", Role.MEMBER, Actor.Lane.API));
+
+    var reused = assertThrows(Remedied.Io.class, () -> lane.admitFiles("acme", "old", ada));
+    var goneOwner = assertThrows(Remedied.Io.class, () -> lane.admitFiles("acme", "gone", ada));
+    lane.admitFiles("acme", "loose", ada);
+    var bobsOld = assertThrows(Remedied.Io.class, () -> lane.admitFiles("acme", "old", bob));
+
+    assertEquals(
+        List.of(
+            "not_your_workspace",
+            "old is labelled for a person this box does not know as ada, so its files are not"
+                + " read; the next pass leaves it nobody's."),
+        List.of(reused.code(), reused.reason()));
+    assertEquals(
+        List.of(reused.code(), reused.reason()),
+        List.of(bobsOld.code(), bobsOld.reason()),
+        "another member is told what it is, never that it is ada's");
+    assertEquals(
+        List.of(
+            "owner_gone",
+            "gone is zed's workspace, and zed is no longer active here, so its files are not read;"
+                + " the next pass leaves it nobody's."),
+        List.of(goneOwner.code(), goneOwner.reason()));
+  }
+
   /** A workspace Incus does not answer for, or whose start fails, opens nothing, saying why. */
   @Test
   void aWorkspaceIncusCannotAnswerForOrStartOpensNothingSayingWhy() throws IOException {

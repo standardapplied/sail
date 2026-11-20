@@ -8,22 +8,32 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyAdmissions;
+import ai.singlr.sail.pty.PtyChildShim;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtySessionHost;
+import ai.singlr.sail.pty.PtyWire;
+import ai.singlr.sail.pty.SdNotify;
 import java.io.IOException;
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
+import java.nio.channels.SocketChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -173,28 +183,88 @@ class PtyHostYieldTest {
   }
 
   /**
-   * Review 1's final F-M2: what a stop or a forced delete of workspace {@code try} of acme ends is
-   * the live sessions in that workspace alone: not one in acme's own container, in acme's other
-   * workspace, in another project's workspace of the same name, or one already ended.
+   * Review 1's final F-M2, in one frame: what a stop or a forced delete of workspace {@code try} of
+   * acme ends is the live sessions in that workspace alone: not one in acme's own container, in
+   * acme's other workspace, or in another project's workspace of the same name. A missing host has
+   * nothing to end.
    */
   @Test
-  void aWorkspacesTerminalsAreTheLiveSessionsInThatWorkspaceAlone() {
-    var sessions =
-        List.of(
-            session("in-try", true, "acme", "try"),
-            session("ended-in-try", false, "acme", "try"),
-            session("in-container", true, "acme", ""),
-            session("in-spare", true, "acme", "spare"),
-            session("beta-try", true, "beta", "try"),
-            session("no-project", true, "", ""));
+  void aWorkspacesEndIsTheLiveSessionsInThatWorkspaceAlone() throws Exception {
+    assertDoesNotThrow(
+        () ->
+            new PtyHostYield(dir.resolve("absent.sock"))
+                .endIn("acme", "try", new SessionYield.Ending("r", "")));
+    var socket = dir.resolve("h.sock");
+    try (var host =
+        new PtySessionHost(
+            socket,
+            dir.resolve("s"),
+            64 * 1024,
+            RESOLVER,
+            new PtyAdmission() {
+              @Override
+              public void box(PtyIdentity.Person who) {}
 
-    assertEquals(List.of("in-try"), PtyHostYield.liveIn(sessions, "acme", "try"));
-    assertEquals(List.of("in-spare"), PtyHostYield.liveIn(sessions, "acme", "spare"));
+              @Override
+              public void project(String project, PtyIdentity.Person who) {}
+
+              @Override
+              public void workspace(String project, String workspace, PtyIdentity.Person who) {}
+
+              @Override
+              public void room(String room, String project, PtyIdentity.Person who) {}
+            },
+            PtyEvents.NONE,
+            "0.0.0-test",
+            new PtySessionHost.Handoff(
+                SdNotify.NONE,
+                Map.of(),
+                exit ->
+                    Stream.concat(
+                            PtyChildShim.onClassPath(exit).stream(),
+                            Stream.of("sh", "-c", "read a", "--"))
+                        .toList()),
+            PtySessionHost.Network.NONE)) {
+      host.start();
+      create(socket, "in-try", "acme", "try");
+      create(socket, "in-container", "acme", "");
+      create(socket, "in-spare", "acme", "spare");
+      create(socket, "beta-try", "beta", "try");
+
+      new PtyHostYield(socket)
+          .endIn(
+              "acme",
+              "try",
+              new SessionYield.Ending(
+                  "Workspace try of acme is being stopped by ada, which ends this terminal.",
+                  "Workspace try of acme was stopped by ada."));
+
+      try (var client = SessionClient.connect(socket, "")) {
+        assertEquals(
+            List.of(
+                "beta-try live",
+                "in-container live",
+                "in-spare live",
+                "in-try Workspace try of acme was stopped by ada."),
+            client.list().stream()
+                .map(info -> info.name() + " " + (info.live() ? "live" : info.endedReason()))
+                .sorted()
+                .toList());
+      }
+    }
   }
 
-  private static PtyMessage.SessionInfo session(
-      String name, boolean live, String project, String workspace) {
-    return new PtyMessage.SessionInfo(name, "i-" + name, live, 0, "", "", List.of())
-        .placed(project, workspace, "ada");
+  /** Opens session {@code name} in workspace {@code workspace} of {@code project}, as the box. */
+  private static void create(Path socket, String name, String project, String workspace)
+      throws IOException {
+    try (var channel = SocketChannel.open(StandardProtocolFamily.UNIX)) {
+      channel.connect(UnixDomainSocketAddress.of(socket));
+      PtyWire.handshake(channel, channel);
+      PtyWire.write(channel, new PtyMessage.Hello(""));
+      assertInstanceOf(PtyMessage.Welcome.class, PtyWire.read(channel));
+      PtyWire.write(
+          channel, new PtyMessage.Create(name, List.of(), "/tmp", project, "", 80, 24, workspace));
+      assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
+    }
   }
 }
