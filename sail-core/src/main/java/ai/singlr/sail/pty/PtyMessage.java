@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 /**
  * The session-host wire vocabulary — one sealed hierarchy for both directions. Client to host:
@@ -44,7 +45,8 @@ public sealed interface PtyMessage {
    * the session's events, and back out on listings. {@code command} is capped at {@link
    * #MAX_COMMAND_BYTES} as encoded on the wire. {@code workspace} names a workspace of the project
    * to run in, its owner's or an admin's to enter; blank (or {@code main}) is the project's own
-   * container.
+   * container. {@code agent} names a harness the host starts there, signed in as the workspace's
+   * owner, instead of a command: the host composes its command, so {@code command} is then empty.
    */
   record Create(
       String session,
@@ -54,11 +56,26 @@ public sealed interface PtyMessage {
       String room,
       int cols,
       int rows,
-      String workspace)
+      String workspace,
+      Agent agent)
       implements PtyMessage {
 
     public Create {
       workspace = workspaceOf(workspace);
+      agent = Objects.requireNonNullElse(agent, Agent.NONE);
+    }
+
+    /** A session that runs {@code command}, or the login shell when it is empty. */
+    public Create(
+        String session,
+        List<String> command,
+        String cwd,
+        String project,
+        String room,
+        int cols,
+        int rows,
+        String workspace) {
+      this(session, command, cwd, project, room, cols, rows, workspace, Agent.NONE);
     }
 
     /** A session in the project's own container, or on the host when it names no project. */
@@ -71,6 +88,26 @@ public sealed interface PtyMessage {
         int cols,
         int rows) {
       this(session, command, cwd, project, room, cols, rows, "");
+    }
+  }
+
+  /**
+   * The harness a session runs, by its {@code yamlName}, in {@code mode}, one of the harness's own
+   * ({@link ai.singlr.sail.harness.Harness#modes}): signed in with its person's stored login, or,
+   * {@code inside}, with none handed over, so the person signs in with the harness's own login
+   * there, which Sail never holds. {@link #NONE} for a session that runs a command.
+   */
+  record Agent(String harness, String mode, boolean inside) {
+    public static final Agent NONE = new Agent("", "", false);
+
+    public Agent {
+      harness = Objects.toString(harness, "");
+      mode = Objects.toString(mode, "");
+    }
+
+    /** Whether this names no harness: a session that runs a command. */
+    public boolean none() {
+      return harness.isEmpty();
     }
   }
 
@@ -318,7 +355,9 @@ public sealed interface PtyMessage {
    * tell an agent session from a plain shell; {@code room} is blank when the session is not
    * room-bound, {@code project} when it is in none, and {@code workspace} when it runs in the
    * project's own container; {@code opener} is the person who opened it, {@code createdAtMillis}
-   * when, and {@code endedReason} why it ended, blank while it lives.
+   * when, and {@code endedReason} why it ended, blank while it lives. {@code agent} is the harness
+   * it runs, {@link Agent#NONE} for a command, whose {@code command} is then the harness's own,
+   * never what started it.
    */
   record SessionInfo(
       String name,
@@ -332,8 +371,13 @@ public sealed interface PtyMessage {
       String workspace,
       String opener,
       long createdAtMillis,
-      String endedReason)
+      String endedReason,
+      Agent agent)
       implements PtyMessage {
+
+    public SessionInfo {
+      agent = Objects.requireNonNullElse(agent, Agent.NONE);
+    }
 
     /** A session in no workspace, its opener unsaid. */
     public SessionInfo(
@@ -344,7 +388,20 @@ public sealed interface PtyMessage {
         String writerFde,
         String room,
         List<String> command) {
-      this(name, instanceId, live, attached, writerFde, room, command, "", "", "", 0, "");
+      this(
+          name,
+          instanceId,
+          live,
+          attached,
+          writerFde,
+          room,
+          command,
+          "",
+          "",
+          "",
+          0,
+          "",
+          Agent.NONE);
     }
 
     /**
@@ -364,7 +421,8 @@ public sealed interface PtyMessage {
           workspace,
           opener,
           createdAtMillis,
-          endedReason);
+          endedReason,
+          agent);
     }
 
     /** This session, opened at {@code createdAtMillis} and ended for {@code endedReason}. */
@@ -381,7 +439,26 @@ public sealed interface PtyMessage {
           workspace,
           opener,
           createdAtMillis,
-          endedReason);
+          endedReason,
+          agent);
+    }
+
+    /** This session, running {@code agent}. */
+    public SessionInfo running(Agent agent) {
+      return new SessionInfo(
+          name,
+          instanceId,
+          live,
+          attached,
+          writerFde,
+          room,
+          command,
+          project,
+          workspace,
+          opener,
+          createdAtMillis,
+          endedReason,
+          agent);
     }
   }
 
@@ -393,15 +470,28 @@ public sealed interface PtyMessage {
   /**
    * A refusal: what happened, naming no command, and what to do about it, each command kept as data
    * so the client that prints it renders it for its own reader; never one flattened into the other.
+   * {@code code} is its kind as the API's error codes name it ({@code login_not_stored}), blank for
+   * a refusal no client acts on by kind.
    */
-  record Err(String reason, Remedy remedy) implements PtyMessage {
+  record Err(String reason, Remedy remedy, String code) implements PtyMessage {
+    public Err {
+      code = Objects.toString(code, "");
+    }
+
+    public Err(String reason, Remedy remedy) {
+      this(reason, remedy, "");
+    }
+
     public Err(String reason) {
       this(reason, Remedy.NONE);
     }
 
-    /** The refusal {@code failure} is: its reason and its remedy as they are. */
+    /** The refusal {@code failure} is: its reason, its remedy and its kind as they are. */
     public static Err of(Throwable failure) {
-      return new Err(Remedied.reasonOf(failure), Remedied.remedyOf(failure));
+      return new Err(
+          Remedied.reasonOf(failure),
+          Remedied.remedyOf(failure),
+          failure instanceof Remedied remedied ? remedied.code() : "");
     }
 
     /** The refusal as an account whose own plain {@code sail} runs reads it. */

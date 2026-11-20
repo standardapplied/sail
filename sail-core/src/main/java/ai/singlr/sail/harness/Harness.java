@@ -163,6 +163,62 @@ public interface Harness {
   /** The command for an interactive (TTY) session. */
   String interactive(boolean fullPermissions);
 
+  /** The harness's own default mode: it asks before it acts, as it does when run bare. */
+  String DEFAULT_MODE = "default";
+
+  /** The mode that approves every action without asking: {@link #interactive interactive(true)}. */
+  String FULL_MODE = "full";
+
+  /**
+   * The modes a person starts an interactive session of this harness in: its own default and {@link
+   * #FULL_MODE}.
+   */
+  default List<String> modes() {
+    return List.of(DEFAULT_MODE, FULL_MODE);
+  }
+
+  /**
+   * The interactive command in {@code mode}, one of {@link #modes}.
+   *
+   * @throws IllegalArgumentException naming the modes it takes, for any other
+   */
+  default String interactive(String mode) {
+    if (!modes().contains(mode)) {
+      throw new IllegalArgumentException(
+          displayName()
+              + " takes no mode '"
+              + mode
+              + "' in a workspace; it takes "
+              + String.join(", ", modes())
+              + ".");
+    }
+    return interactive(FULL_MODE.equals(mode));
+  }
+
+  /**
+   * How an interactive session takes a login of {@code kind}, exported as the kind's variable:
+   * {@code step}, shell text run before the harness starts, and {@code args}, appended to its
+   * command, each naming no value. Neither may leave the login, or any part of it, anywhere the
+   * harness keeps state: what an interactive session holds of its login ends with it.
+   */
+  record InteractiveLogin(String step, String args) {
+    /** The harness reads the kind's variable itself and keeps nothing of it. */
+    public static final InteractiveLogin READS_ITS_VARIABLE = new InteractiveLogin("", "");
+  }
+
+  /** {@link InteractiveLogin} for a login of {@code kind}. */
+  default InteractiveLogin interactiveLogin(LoginKind kind) {
+    return InteractiveLogin.READS_ITS_VARIABLE;
+  }
+
+  /**
+   * Where, under the dev user's home, this harness keeps a login, or a part of one, that a person
+   * made in its session: the files a workspace loses when it leaves its person.
+   */
+  default List<String> storedLogins() {
+    return List.of();
+  }
+
   /**
    * The interactive command resuming the recorded session {@code sessionId} exactly by id, or a
    * fresh conversation when it is {@code null}: never an interactive picker.

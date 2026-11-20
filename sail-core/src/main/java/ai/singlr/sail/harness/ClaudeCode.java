@@ -238,6 +238,33 @@ final class ClaudeCode implements Harness {
     return Optional.empty();
   }
 
+  /**
+   * An API key in {@code ANTHROPIC_API_KEY} makes an interactive session ask the person to approve
+   * it, showing its first 7 and last 20 characters, and keep those last 20 in {@code
+   * ~/.claude.json} once approved (2.1.327, seen with a throwaway key). A key a session's own
+   * {@code apiKeyHelper} prints is neither asked about nor kept, so the key moves to a variable of
+   * Sail's own, which the helper prints. A long-lived token is read from its variable, which asks
+   * nothing and keeps nothing.
+   */
+  @Override
+  public InteractiveLogin interactiveLogin(LoginKind kind) {
+    if (!"ANTHROPIC_API_KEY".equals(kind.variable())) {
+      return InteractiveLogin.READS_ITS_VARIABLE;
+    }
+    return new InteractiveLogin(
+        "export SAIL_ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\"; unset ANTHROPIC_API_KEY",
+        " --settings '{\"apiKeyHelper\": \"printenv SAIL_ANTHROPIC_API_KEY\"}'");
+  }
+
+  /**
+   * Its sign-in ({@code /login}) and its own state, which holds an approved key's last 20
+   * characters and the signed-in account.
+   */
+  @Override
+  public List<String> storedLogins() {
+    return List.of(".claude/.credentials.json", ".claude.json");
+  }
+
   @Override
   public String interactive(boolean fullPermissions) {
     return fullPermissions ? BINARY + " --dangerously-skip-permissions" : BINARY;

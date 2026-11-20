@@ -3474,6 +3474,11 @@ class WorkspacesTest {
                 "user.sail.owner_id=fde_ana"));
     assertTrue(
         0 <= stripped && stripped < gh && gh < owned, String.join("\n", scripted.invocations()));
+    var signedOut = indexOf(scripted, strip("acme-fix-login"));
+    assertTrue(
+        0 <= signedOut && signedOut < stripped,
+        "M1: the re-own first strips what uday signed in to a harness with: "
+            + String.join("\n", scripted.invocations()));
     assertEquals(
         "ssh-ed25519 AAAAana ana@laptop\n",
         shell.pushed.get("acme-fix-login/home/dev/.ssh/authorized_keys"),

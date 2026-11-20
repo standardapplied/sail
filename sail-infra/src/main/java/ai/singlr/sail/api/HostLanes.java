@@ -13,19 +13,24 @@ import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.BoxInstances;
+import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectCatalogRename;
+import ai.singlr.sail.engine.SessionLogin;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
+import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.AttentionStore;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -35,6 +40,7 @@ import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.LoginStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -342,8 +348,13 @@ final class HostLanes {
       BoxInstances box,
       Workspaces workspaces,
       ProjectReader definitions,
-      Function<String, WorkspaceOwner> owners)
+      Function<String, WorkspaceOwner> owners,
+      ShellExec shell)
       implements HostPty {
+
+    /** How long a login's hand-over to a workspace may take. */
+    static final Duration HAND_OVER = Duration.ofSeconds(30);
+
     @Override
     public PtyIdentity.Person identity(String token) throws IOException {
       return new HostAccess(db, roles).identity(token);
@@ -399,6 +410,132 @@ final class HostLanes {
     @Override
     public void admitWorkspace(String project, String workspace, PtyIdentity.Person who)
         throws IOException {
+      decide(project, workspace, found(project, workspace), who);
+    }
+
+    /**
+     * The stored login {@code agent} starts with in {@code who}'s own workspace {@code workspace},
+     * empty when it signs in inside. Whose a workspace is, is decided as every workspace door
+     * decides it, the node's own person keeping what nobody owns on a node; its login is looked up
+     * by the FDE id the workspace is labelled for, as its git tokens are.
+     */
+    @Override
+    public Optional<LoginStore.Login> admitAgent(
+        String project, String workspace, PtyMessage.Agent agent, PtyIdentity.Person who)
+        throws IOException {
+      var owner = personOf(found(project, workspace));
+      if (owner == null || !owner.equals(who.actor().handle())) {
+        throw Remedied.io(
+            owner == null
+                ? workspace + " is no one's workspace, so no agent starts in it."
+                : workspace
+                    + " is "
+                    + owner
+                    + "'s workspace, so an agent starts in it only as "
+                    + owner
+                    + ", with "
+                    + owner
+                    + "'s login.",
+            Remedy.of("Open a shell in it, or start the agent in a workspace of your own."));
+      }
+      var harness = Harnesses.of(agent.harness());
+      var installs =
+          Optional.ofNullable(definitions.require(project).agent())
+              .map(ProjectDefinition.Agent::installs)
+              .orElse(List.of());
+      if (!installs.contains(harness.yamlName())) {
+        throw Remedied.io(
+            harness.displayName()
+                + " is not installed in "
+                + project
+                + "'s workspaces; its agent installation lists "
+                + (installs.isEmpty()
+                    ? "none"
+                    : String.join(
+                        ", ",
+                        installs.stream().map(Harnesses::of).map(Harness::displayName).toList()))
+                + ".",
+            Remedy.of(
+                "An admin adds "
+                    + harness.yamlName()
+                    + " to "
+                    + project
+                    + "'s agent install list and builds its template again."));
+      }
+      if (agent.inside()) {
+        return Optional.empty();
+      }
+      try {
+        return Optional.of(
+            RunLogins.stored(
+                new FdeStore(db),
+                owners.apply(owner).id(),
+                owner,
+                harness,
+                "a " + harness.displayName() + " session cannot start in " + workspace,
+                ""));
+      } catch (ApiException refused) {
+        throw Remedied.io(refused.reason(), refused.remedy(), refused.code());
+      }
+    }
+
+    /**
+     * Whose workspace {@code instance} is, as every workspace door decides it: its labelled person
+     * by handle and id, or on a node the node's own person for one nobody owns; null for nobody.
+     */
+    private String personOf(BoxInstances.Instance instance) {
+      return Workspaces.ownerOf(instance, owners).or(() -> roles.nodeFde()).orElse(null);
+    }
+
+    /**
+     * Writes the login under the workspace's lock, once its person is read again there and is still
+     * {@code who}: a re-own while the workspace was entered refuses it.
+     */
+    @Override
+    public void handOver(
+        String project, String workspace, String file, String lines, PtyIdentity.Person who)
+        throws IOException {
+      try {
+        workspaces.underLock(
+            project,
+            workspace,
+            instance -> who.actor().handle().equals(personOf(instance)),
+            instance -> {
+              var ran =
+                  shell.execWithInput(asDev(instance, SessionLogin.HAND, file), lines, HAND_OVER);
+              if (!ran.ok()) {
+                throw new IOException("the hand-over ended " + ran.exitCode());
+              }
+            });
+      } catch (TimeoutException late) {
+        throw new IOException("the hand-over did not end within " + HAND_OVER.toSeconds() + " s");
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw new IOException("the hand-over was interrupted");
+      }
+    }
+
+    @Override
+    public void withdraw(String instance, String file) {
+      try {
+        shell.exec(asDev(instance, SessionLogin.REMOVE, file));
+      } catch (IOException | TimeoutException failed) {
+        System.err.println("  [pty] a login file was not withdrawn: " + failed.getMessage());
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+      }
+    }
+
+    private static List<String> asDev(String instance, String script, String file) {
+      return ContainerExec.asDevUser(
+          instance, "/", Map.of(), List.of("sh", "-c", script, "sail-login", file));
+    }
+
+    /**
+     * The instance of workspace {@code workspace} of {@code project}: {@link PtyAdmission.Absent}
+     * when there is none, {@link PtyAdmission.Unavailable} when Incus cannot say.
+     */
+    private BoxInstances.Instance found(String project, String workspace) throws IOException {
       Optional<BoxInstances.Instance> found;
       try {
         found = workspaces.find(project, workspace);
@@ -412,7 +549,7 @@ final class HostLanes {
         var absent = Workspaces.absent(project, workspace);
         throw new PtyAdmission.Absent(absent.reason(), absent.remedy());
       }
-      decide(project, workspace, found.get(), who);
+      return found.get();
     }
 
     @Override

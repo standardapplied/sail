@@ -10,6 +10,11 @@
     "allRecordComponents": true
   },
   {
+    "name": "ai.singlr.sail.pty.PtyMessage$Agent",
+    "allDeclaredMethods": true,
+    "allRecordComponents": true
+  },
+  {
     "name": "ai.singlr.sail.commands.PtyEventDrops$Drops",
     "allDeclaredMethods": true,
     "allRecordComponents": true

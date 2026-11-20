@@ -38,6 +38,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -48,6 +49,7 @@ import org.junit.jupiter.api.io.TempDir;
  * read or written. Every wait is bounded by {@link #STEP}, and every process a test starts is gone
  * when it ends, killed if a failure left it.
  */
+@Timeout(value = 120, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
 class LocalPtyHostTest {
 
   static final Duration STEP = Duration.ofSeconds(20);

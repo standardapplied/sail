@@ -317,7 +317,9 @@ class LoginRoutesTest {
 
     var removed = ask(sam, "DELETE", "/v1/logins/claude-code/work", null);
 
-    assertEquals("2 live runs finish on the old `work`.", removed.map().get("note"));
+    assertEquals(
+        "2 live runs finish on the old `work`. " + LoginOperations.SESSIONS_KEEP,
+        removed.map().get("note"));
   }
 
   @SuppressWarnings("unchecked")

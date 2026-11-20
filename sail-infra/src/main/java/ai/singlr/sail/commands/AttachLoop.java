@@ -138,7 +138,7 @@ public final class AttachLoop {
                   stdout, "history resumes mid-sequence; the screen settles on the next redraw");
             }
           }
-          case PtyMessage.Err(var reason, var remedy) ->
+          case PtyMessage.Err(var reason, var remedy, _) ->
               narrate(stdout, Remedied.joined(reason, reader.render(remedy)));
           default -> {}
         }
