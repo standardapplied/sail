@@ -148,7 +148,7 @@ public final class Tooltip: NSResponder {
 
     public let chip: TooltipChip
     private let beside: Bool
-    private weak var anchor: NSView?
+    package private(set) weak var anchor: NSView?
     private var panel: NSPanel?
     private var pending: DispatchWorkItem?
 

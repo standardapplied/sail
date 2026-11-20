@@ -117,9 +117,12 @@ extension Driver {
         // A person's first click on a window that is not the key one only brings it forward.
         guard await waitUntil(5, { self.shell.window.isKeyWindow }) else { return (false, "the window never became key: \(menuSaid)") }
         let clickedAt = ContinuousClock.now
+        var scene = ""
         switch how {
         case "click":
-            guard await click(button, at: NSPoint(x: button.bounds.midX, y: button.bounds.midY)) else { return (false, "the click was not made") }
+            let at = NSPoint(x: button.bounds.midX, y: button.bounds.midY)
+            scene = "; at the click " + clickScene(button, at: at)
+            guard await click(button, at: at) else { return (false, "the click was not made") }
         case "keys":
             guard NSApplication.shared.isFullKeyboardAccessEnabled else { return (false, "keyboard navigation is off, so the button cannot take the keys") }
             guard shell.window.makeFirstResponder(button), let space = Keys.named(" ", modifiers: []) else { return (false, "the button did not take the keys") }
@@ -129,7 +132,7 @@ extension Driver {
         let sent = (ContinuousClock.now - clickedAt) / .milliseconds(1)
         let toggled = await waitUntil(2) { self.shell.userMenu.isOpen != wasOpen && self.shell.rail.menuOpen == !wasOpen }
         let took = (ContinuousClock.now - clickedAt) / .milliseconds(1)
-        return (toggled, "\(menuSaid); the \(how) returned in \(Self.ms(sent)) ms, the menu \(wasOpen ? "closed" : "open") \(Self.ms(took)) ms after it")
+        return (toggled, "\(menuSaid); the \(how) returned in \(Self.ms(sent)) ms, the menu \(wasOpen ? "closed" : "open") \(Self.ms(took)) ms after it\(scene)")
     }
 
     private func clickInMenu(_ title: String, _ step: Step) async -> (Bool, String) {
@@ -149,7 +152,9 @@ extension Driver {
         guard let row = view.items.first(where: { $0.item.rawValue == title }) else { return (false, "the menu has no \(title): \(menuSaid)") }
         let began = shell.account.actions
         let before = (row.downs, row.ups), clickedAt = ContinuousClock.now
-        guard await click(row, at: NSPoint(x: row.bounds.midX, y: row.bounds.midY)) else { return (false, "the click was not made") }
+        let at = NSPoint(x: row.bounds.midX, y: row.bounds.midY)
+        let scene = clickScene(row, at: at)
+        guard await click(row, at: at) else { return (false, "the click was not made") }
         let done: Bool
         switch row.item {
         case .logins: done = await waitUntil(2) { view.tip.isShown } && menu.isOpen
@@ -158,8 +163,31 @@ extension Driver {
             done = await waitUntil(step.seconds ?? 20) { self.shell.account.actions > began && !self.shell.account.isActing && self.shell.account.standing == nil }
         }
         let took = (ContinuousClock.now - clickedAt) / .milliseconds(1)
-        let reached = "\(title) took \(row.downs - before.0) mouse-down and \(row.ups - before.1) mouse-up in \(Self.ms(took)) ms; the app's current event \(NSApp.currentEvent.map { "\($0.type.rawValue) in window \($0.windowNumber)" } ?? "none"), the menu's window \(menu.panel.windowNumber)"
+        let reached = "\(title) took \(row.downs - before.0) mouse-down and \(row.ups - before.1) mouse-up in \(Self.ms(took)) ms; at the click \(scene); "
+            + "the app's current event after it \(NSApp.currentEvent.map { "\($0.type.rawValue) in window \($0.windowNumber)" } ?? "none")"
         return (done && (row.item == .logins || !menu.isOpen), "\(menuSaid); \(reached)" + (row.item == .signOut ? "; \(said)" : ""))
+    }
+
+    /// Where a click at `point` in `view` lands, as the window server and AppKit see it just before
+    /// it is made: the key and main windows, the window under the point on screen and the view that
+    /// window's content hits there, the clicked view's window and whether it can become key, and
+    /// whether the view takes a first click in a window that is not key.
+    func clickScene(_ view: NSView, at point: NSPoint) -> String {
+        guard let window = view.window else { return "no window" }
+        func named(_ window: NSWindow?) -> String {
+            window.map { "\(type(of: $0)) \($0.windowNumber)" } ?? "none"
+        }
+        let screen = window.convertPoint(toScreen: view.convert(point, to: nil))
+        let number = NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0)
+        let under = NSApp.window(withWindowNumber: number)
+        let hit = under.flatMap { under in under.contentView?.superview?.hitTest(under.convertPoint(fromScreen: screen)) }
+        let first = NSEvent.mouseEvent(
+            with: .leftMouseDown, location: view.convert(point, to: nil), modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
+            eventNumber: 0, clickCount: 1, pressure: 1
+        )
+        return "key \(named(NSApp.keyWindow)), main \(named(NSApp.mainWindow)), under the point \(under.map { named($0) } ?? "window \(number), not the app's") hitting "
+            + "\(hit.map { String(describing: type(of: $0)) } ?? "nothing"), the clicked view's window \(named(window)) (can become key \(window.canBecomeKey), key \(window.isKeyWindow)), "
+            + "it takes a first click \(view.acceptsFirstMouse(for: first)), the app active \(NSApp.isActive)"
     }
 
     /// A click on the open user menu's `appearance` segment as a person makes it.

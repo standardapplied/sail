@@ -174,6 +174,7 @@ import Testing
         #expect(!shell.userMenu.isOpen, "the window giving up the keys left it open")
         try Self.open(shell)
         let logins = try #require(view.items.first { $0.item == .logins })
+        #expect(view.tip.text == "Logins come in a later version of Sail." && view.tip.anchor === logins && !view.tip.isShown, "the Logins tooltip says \(view.tip.text)")
         logins.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: logins.bounds.midX, y: logins.bounds.midY), in: logins))
         #expect(shell.userMenu.isOpen && view.tip.isShown && logins.accessibilityHelp() == UserMenuContent.Item.logins.why, "Logins did not say why")
         #expect(logins.drawn.fill == nil && logins.drawn.ink == shell.look.textTertiary, "Logins is drawn as one that can be chosen")
