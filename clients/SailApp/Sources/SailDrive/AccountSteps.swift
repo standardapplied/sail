@@ -181,13 +181,16 @@ extension Driver {
         let number = NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0)
         let under = NSApp.window(withWindowNumber: number)
         let hit = under.flatMap { under in under.contentView?.superview?.hitTest(under.convertPoint(fromScreen: screen)) }
+        let inWindow = view.convert(point, to: nil)
+        let hitThere = window.contentView?.superview?.hitTest(inWindow)
         let first = NSEvent.mouseEvent(
             with: .leftMouseDown, location: view.convert(point, to: nil), modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
             eventNumber: 0, clickCount: 1, pressure: 1
         )
         return "key \(named(NSApp.keyWindow)), main \(named(NSApp.mainWindow)), under the point \(under.map { named($0) } ?? "window \(number), not the app's") hitting "
             + "\(hit.map { String(describing: type(of: $0)) } ?? "nothing"), the clicked view's window \(named(window)) (can become key \(window.canBecomeKey), key \(window.isKeyWindow)), "
-            + "it takes a first click \(view.acceptsFirstMouse(for: first)), the app active \(NSApp.isActive)"
+            + "it takes a first click \(view.acceptsFirstMouse(for: first)), the app active \(NSApp.isActive); the clicked view's frame \(view.convert(view.bounds, to: nil)) "
+            + "in its window, which hits \(hitThere.map { String(describing: type(of: $0)) } ?? "nothing") at \(inWindow)"
     }
 
     /// A click on the open user menu's `appearance` segment as a person makes it.

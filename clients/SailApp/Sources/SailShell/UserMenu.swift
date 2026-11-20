@@ -74,7 +74,7 @@ package final class UserMenu: NSObject {
         window.addChildWindow(panel, ordered: .above)
         panel.orderFront(nil)
         if keys.superview !== window.contentView { window.contentView?.addSubview(keys) }
-        restore = window.firstResponder
+        restore = Self.holder(of: window.firstResponder)
         window.makeFirstResponder(keys)
         mouseWatch = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
             MainActor.assumeIsolated { self?.clickedAnywhere(event) }
@@ -105,8 +105,7 @@ package final class UserMenu: NSObject {
             // A window asked to focus a view that refuses the keys takes them itself and says yes,
             // and a field was being edited through the window's field editor, not by itself.
             let button = withKeys && anchor?.acceptsFirstResponder == true ? anchor : nil
-            let editor = restore as? NSText
-            window.makeFirstResponder(button ?? (editor?.isFieldEditor == true ? editor?.delegate as? NSResponder : restore))
+            window.makeFirstResponder(button ?? restore)
         }
         onClose()
     }
@@ -122,7 +121,16 @@ package final class UserMenu: NSObject {
         let inside = NSRect(x: Self.room, y: Self.room, width: Self.width, height: Double(size.height))
         view.frame = inside
         shadow.frame = inside
-        view.needsLayout = true
+        // Laid out now, not at the next display: only the panel's first ordering in draws it at once,
+        // and a click on a later opening's new rows would find them with no frame.
+        view.layoutSubtreeIfNeeded()
+    }
+
+    /// Who holds the keys through `responder`: a field being edited, not the window's field editor,
+    /// which forgets the field once its editing ends.
+    static func holder(of responder: NSResponder?) -> NSResponder? {
+        guard let editor = responder as? NSText, editor.isFieldEditor else { return responder }
+        return editor.delegate as? NSResponder
     }
 
     /// The box on screen, for the tests and the drive.

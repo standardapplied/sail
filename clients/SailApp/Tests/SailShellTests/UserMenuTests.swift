@@ -32,7 +32,6 @@ import Testing
         let button = try #require(shell.rail.button(.account))
         shell.rail.menuOpen = true
         shell.userMenu.open(from: button, saying: content, appearance: Appearance.stored(in: shell.defaults), withKeys: withKeys)
-        shell.userMenu.view.layoutSubtreeIfNeeded()
     }
 
     static func key(_ code: UInt16, _ characters: String) throws -> NSEvent {
@@ -78,6 +77,10 @@ import Testing
                 if direction == .leftToRight { #expect(shell.window.frame.insetBy(dx: -0.5, dy: -0.5).contains(box), "\(said): out of the window") }
                 #expect(near(shell.userMenu.panel.frame.width, box.width + 2 * UserMenu.room) && shell.window.childWindows?.contains(shell.userMenu.panel) == true, "\(said)")
                 #expect(near(menu.frame.width, UserMenu.width) && menu.userInterfaceLayoutDirection == direction, "\(said): the box is laid out \(menu.frame)")
+                // Each opening makes its rows anew; a click must find them laid out at once, the
+                // first opening (which draws the panel at once) or any later one.
+                let unlaid = menu.items.filter { !near($0.frame.height, UserMenuView.row) }.map(\.item.rawValue)
+                #expect(unlaid.isEmpty, "\(said): \(unlaid) not laid out as the menu opens")
                 shell.userMenu.close()
                 #expect(!shell.userMenu.panel.isVisible && shell.window.childWindows?.contains(shell.userMenu.panel) != true, "\(said): still shown closed")
             }
@@ -118,7 +121,7 @@ import Testing
             NSApp.appearance = nil
         }
         let view = shell.userMenu.view, button = try #require(shell.rail.button(.account))
-        let had = shell.window.firstResponder
+        let had = UserMenu.holder(of: shell.window.firstResponder)
         try Self.open(shell, withKeys: true)
         var walked = [Self.highlighted(view)]
         for code in [Self.down, Self.down, Self.down, Self.up] {
@@ -135,17 +138,18 @@ import Testing
         try Self.press(Self.escape, in: shell)
         // The button takes the keys only with Keyboard Navigation on; off, they go back where they were.
         let back: NSResponder? = NSApp.isFullKeyboardAccessEnabled ? button : had
-        #expect(!shell.userMenu.isOpen && !shell.rail.menuOpen && shell.window.firstResponder === back, "Escape left the keys on \(String(describing: shell.window.firstResponder))")
+        #expect(!shell.userMenu.isOpen && !shell.rail.menuOpen && UserMenu.holder(of: shell.window.firstResponder) === back,
+                "Escape left the keys on \(String(describing: shell.window.firstResponder)), not \(String(describing: back))")
         try Self.open(shell, withKeys: true)
         try Self.press(Self.enter, in: shell)
         #expect(!shell.userMenu.isOpen && shell.rail.selected == .account, "Return on Account showed \(shell.rail.selected?.rawValue ?? "nothing")")
         let field = shell.account.address
         shell.window.makeFirstResponder(field)
-        let before = shell.window.firstResponder
+        let before = UserMenu.holder(of: shell.window.firstResponder)
         try Self.open(shell)
         #expect(Self.highlighted(view) == "Account", "opened with the pointer, \(Self.highlighted(view)) is highlighted")
         try Self.press(Self.escape, in: shell)
-        #expect(shell.window.firstResponder === before, "the keys went to \(String(describing: shell.window.firstResponder))")
+        #expect(UserMenu.holder(of: shell.window.firstResponder) === before && before === field, "the keys went to \(String(describing: shell.window.firstResponder))")
     }
 
     /// The button opens the menu and, again, closes it; a click outside it closes it, as does the
