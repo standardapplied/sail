@@ -683,6 +683,7 @@ class AgentAttachCommandTest {
    */
   @Test
   void anAttachStartsItsSpecsIdleStoppedWorkspaceAndRefusesAMissingOne() throws Exception {
+    var announced = new ArrayList<String>();
     var place = RunPlace.of("acme", "u2");
     var stopped =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
@@ -694,7 +695,12 @@ class AgentAttachCommandTest {
             .onOk("incus list --format json", "[]");
 
     AgentAttachCommand.reach(
-        place, TestWorkspaces.over(stopped), TestDefinitions::named, TestOwners::of, null);
+        place,
+        TestWorkspaces.over(stopped),
+        TestDefinitions::named,
+        TestOwners::of,
+        null,
+        () -> {});
     var refused =
         assertThrows(
             IllegalStateException.class,
@@ -704,12 +710,14 @@ class AgentAttachCommandTest {
                     TestWorkspaces.over(gone),
                     TestDefinitions::named,
                     TestOwners::of,
-                    null));
+                    null,
+                    () -> announced.add("gone")));
 
     assertTrue(
         stopped.invocations().contains("incus start acme-u2"), stopped.invocations().toString());
     assertTrue(refused.getMessage().endsWith("sail spec dispatch -p acme --spec u2 --restart"));
     assertTrue(gone.invocations().stream().noneMatch(c -> c.startsWith("incus start")));
+    assertEquals(List.of(), announced, "a refused attach announces nothing");
   }
 
   /**
@@ -742,7 +750,8 @@ class AgentAttachCommandTest {
                       TestWorkspaces.over(box),
                       TestDefinitions::named,
                       TestOwners::of,
-                      "uday"));
+                      "uday",
+                      () -> said.add("announced")));
       said.add(refused.getMessage());
       assertTrue(
           box.invocations().stream().allMatch(c -> c.startsWith("incus list")),
@@ -757,8 +766,14 @@ class AgentAttachCommandTest {
                 "incus list --format json",
                 "[" + TestWorkspaces.specWorkspace("acme", "u2", "Running", "uday") + "]");
 
+    var announced = new ArrayList<String>();
     AgentAttachCommand.reach(
-        place, TestWorkspaces.over(mine), TestDefinitions::named, TestOwners::of, "uday");
+        place,
+        TestWorkspaces.over(mine),
+        TestDefinitions::named,
+        TestOwners::of,
+        "uday",
+        () -> announced.add("announced"));
 
     var workspace = ((RunPlace.SpecWorkspace) place).workspace();
     assertEquals(
@@ -766,7 +781,9 @@ class AgentAttachCommandTest {
             2,
             workspace
                 + " is labelled for a person this box does not know as uday, so no terminal opens"
-                + " in it; the next pass leaves it nobody's."),
+                + " in it until the box's pass leaves it nobody's."),
         said);
+    assertEquals(
+        List.of("announced"), announced, "an attach says what it attaches only once reached");
   }
 }

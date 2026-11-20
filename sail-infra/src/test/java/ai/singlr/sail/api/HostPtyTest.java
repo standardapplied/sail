@@ -216,7 +216,7 @@ class HostPtyTest {
 
   /**
    * A terminal opened by an admin in a workspace whose labelled person is no longer active here is
-   * refused saying so, and nothing is started: the next pass leaves it nobody's.
+   * refused saying so, and nothing is started until the box's pass leaves it nobody's.
    */
   @Test
   void aWorkspaceWhosePersonIsGoneIsNotStartedForATerminalSayingSo() {
@@ -248,8 +248,8 @@ class HostPtyTest {
     var refused = assertThrows(IOException.class, () -> lane.enterWorkspace("acme", "try", root));
 
     assertEquals(
-        "try is zed's workspace, and zed is no longer active here, so it is not started; the next"
-            + " pass leaves it nobody's. Delete it meanwhile with: sail project workspace delete"
+        "try is zed's workspace, and zed is no longer active here, so it is not started until the"
+            + " box's pass leaves it nobody's. Delete it meanwhile with: sail project workspace delete"
             + " acme try --force.",
         refused.getMessage());
     assertEquals("owner_gone", ((Remedied) refused).code(), "the app tells it apart by its code");
@@ -313,7 +313,7 @@ class HostPtyTest {
         List.of(
             "not_your_workspace",
             "old is labelled for a person this box does not know as ada, so no terminal opens in"
-                + " it; the next pass leaves it nobody's."),
+                + " it until the box's pass leaves it nobody's."),
         List.of(notTheirs.code(), notTheirs.reason()));
     assertEquals(
         List.of(notTheirs.code(), notTheirs.reason()),
@@ -324,7 +324,7 @@ class HostPtyTest {
         List.of(
             "owner_gone",
             "gone is zed's workspace, and zed is no longer active here, so no terminal opens in"
-                + " it; the next pass leaves it nobody's."),
+                + " it until the box's pass leaves it nobody's."),
         List.of(goneOwner.code(), goneOwner.reason()));
     assertEquals(Remedy.NONE, goneOwner.remedy(), "on a node no one deletes it but the pass");
     assertEquals("not_your_workspace", notStarted.code());

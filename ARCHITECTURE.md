@@ -1543,7 +1543,7 @@ Each row with the tests that prove it:
   workspace labelled for a person the node does not hold by the id its label stores is no one's to
   act on there, its own person included, until the box's disown pass strips it and clears its
   label. One labelled for a person gone is refused `owner_gone` ("gone is zed's workspace, and zed
-  is no longer active here, so it is not stopped; the next pass leaves it nobody's."), one for
+  is no longer active here, so it is not stopped until the box's pass leaves it nobody's."), one for
   another person of the handle `not_your_workspace` ("old is labelled for a person this box does
   not know as ada, so no terminal opens in it; …"), and one with no id `not_your_workspace` too
   ("old is labelled for ada without the id that says which ada, …"), each before Incus is asked
@@ -1559,8 +1559,10 @@ Each row with the tests that prove it:
   an idle period later, then at twice the wait each time, at most an hour apart, until it is
   reached, and each failure writes on the workspace why and when it tries next
   (`user.sail.unreached`, cleared by every write of its label), so meanwhile its doors say "the
-  box's pass has not been able to leave it nobody's (Error: …) and tries again at …" instead of
-  promising the next pass. A label's handle and id are always written together. N1 refuses new
+  box's pass has not been able to leave it nobody's (Error: …) and tries again at …"; with no such
+  word on it, a try not yet made or one whose word Incus refused, they say only that the act waits
+  for the pass, never that the next pass reaches it. The word's reason is the strip's error on one
+  line, cut at 200 characters, so Incus takes it. A label's handle and id are always written together. N1 refuses new
   entries only: a session opened in the workspace before its label stopped resolving runs on, and
   its opener may attach to it again, after the host's handover too, until it ends; the pass strips
   the workspace's files under it, and what a running process already read stays with it until it
