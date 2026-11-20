@@ -181,20 +181,22 @@ final class WorkspaceCredentials {
   static final String SETTLED =
       """
       PATH=/usr/sbin:/usr/bin:/sbin:/bin
+      command -v systemctl > /dev/null || { echo "it has no systemctl"; exit 1; }
       end=$(( $(date +%%s) + %d ))
       while left=$(( end - $(date +%%s) )); [ "$left" -gt 0 ]; do
         state=$(timeout "$left" systemctl is-system-running --wait 2>/dev/null)
         case $state in
           running|degraded) exit 0 ;;
           "") sleep 0.5 ;;
-          *) echo "$state"; exit 1 ;;
+          *) echo "systemd says it is $state"; exit 1 ;;
         esac
       done
       state=$(systemctl is-system-running 2>/dev/null)
-      echo "${state:-not answering}"
+      if [ -n "$state" ]; then echo "systemd says it is $state after %d s"
+      else echo "systemd did not answer within %d s"; fi
       exit 1
       """
-          .formatted(SETTLE_SECONDS);
+          .formatted(SETTLE_SECONDS, SETTLE_SECONDS, SETTLE_SECONDS);
 
   private WorkspaceCredentials() {}
 
@@ -210,16 +212,24 @@ final class WorkspaceCredentials {
             null,
             Duration.ofSeconds(SETTLE_SECONDS + 30));
     if (!settled.ok()) {
-      throw new IOException(
+      throw new Unsettled(
           template
-              + " did not finish starting within "
-              + SETTLE_SECONDS
-              + " s (systemd says it is "
-              + settled.stdout().strip()
-              + "), so it is not searched for its builder's tokens while it changes.");
+              + " was not searched for its builder's tokens, since its boot did not settle: "
+              + (settled.stdout().isBlank() ? settled.reason() : settled.stdout().strip())
+              + ".");
     }
     strip(shell, template);
     requireNone(shell, template, tokens);
+  }
+
+  /**
+   * A template whose boot did not settle, so it was neither stripped nor searched: waiting for it
+   * again cannot prove it holds nothing, and it is marked unproven.
+   */
+  static final class Unsettled extends IOException {
+    Unsettled(String message) {
+      super(message);
+    }
   }
 
   static void strip(ShellExec shell, String instance)

@@ -1761,7 +1761,8 @@ Each row with the tests that prove it:
   exec` in it), so both wait first for its boot to finish (`WorkspaceCredentials.clean`:
   `systemctl is-system-running --wait`, at most 120 s, `running` or `degraded`), since its boot
   cleans `/tmp` and makes directories there; one that never settles fails the build saying
-  systemd's state. Both scripts run with `PATH=/usr/sbin:/usr/bin:/sbin:/bin`, so no tool the template installed
+  systemd's state, once (the build's failure path marks it unproven without waiting again), and
+  one with no `systemctl`, or whose `incus exec` fails, says so at once. Both scripts run with `PATH=/usr/sbin:/usr/bin:/sbin:/bin`, so no tool the template installed
   earlier on its path answers for them. As a guard against later churn, grep's "No such file or
   directory" alone is no failure, since a file gone holds nothing; its errors are kept in a `0600`
   file of their own on `/dev/shm`, removed on every path and never walked by the search (`/dev` is

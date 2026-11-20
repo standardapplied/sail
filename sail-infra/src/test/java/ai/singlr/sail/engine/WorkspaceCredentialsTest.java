@@ -650,7 +650,14 @@ class WorkspaceCredentialsTest {
       }
     }
 
-    assertEquals(List.of("0 ", "0 ", "1 starting", "0 ", "1 not answering"), said);
+    assertEquals(
+        List.of(
+            "0 ",
+            "0 ",
+            "1 systemd says it is starting",
+            "0 ",
+            "1 systemd did not answer within 120 s"),
+        said);
     assertEquals("120", firstBound, "the wait is bounded by the settle time");
   }
 
@@ -689,5 +696,35 @@ class WorkspaceCredentialsTest {
       assertTrue(process.waitFor(30, TimeUnit.SECONDS));
       assertEquals(tools.size(), found.lines().count(), path + " finds only:\n" + found);
     }
+  }
+
+  /** A template with no systemctl is not waited for: it is said at once. */
+  @Test
+  void aTemplateWithNoSystemctlIsSaidAtOnceNotWaitedFor() throws Exception {
+    var empty = Files.createDirectories(root.resolve("no-systemctl"));
+    for (var tool : List.of("date", "timeout", "sleep")) {
+      var real =
+          List.of(Path.of("/usr/bin", tool), Path.of("/bin", tool)).stream()
+              .filter(Files::isExecutable)
+              .findFirst()
+              .orElseThrow();
+      Files.createSymbolicLink(empty.resolve(tool), real);
+    }
+    var process =
+        new ProcessBuilder(
+                List.of(
+                    "/bin/bash",
+                    "-c",
+                    WorkspaceCredentials.SETTLED.replace(
+                        "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "PATH=" + empty)))
+            .redirectErrorStream(true)
+            .start();
+    var said = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    var ended = process.waitFor(10, TimeUnit.SECONDS);
+    process.destroyForcibly();
+    assertTrue(ended, "it does not wait the bound");
+
+    assertEquals(1, process.exitValue(), said);
+    assertEquals("it has no systemctl", said.strip());
   }
 }

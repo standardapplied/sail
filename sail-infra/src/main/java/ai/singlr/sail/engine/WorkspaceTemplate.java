@@ -391,11 +391,15 @@ public final class WorkspaceTemplate {
               fresh);
       WorkspaceCredentials.clean(shell, template, source.tokens());
     } catch (Exception failure) {
-      try {
-        WorkspaceCredentials.clean(shell, template, source.tokens());
-      } catch (IOException | TimeoutException unproven) {
-        failure.addSuppressed(unproven);
+      if (failure instanceof WorkspaceCredentials.Unsettled) {
         markUnproven(shell, locks, template).ifPresent(failure::addSuppressed);
+      } else {
+        try {
+          WorkspaceCredentials.clean(shell, template, source.tokens());
+        } catch (IOException | TimeoutException unproven) {
+          failure.addSuppressed(unproven);
+          markUnproven(shell, locks, template).ifPresent(failure::addSuppressed);
+        }
       }
       if (startedHere) {
         try {
