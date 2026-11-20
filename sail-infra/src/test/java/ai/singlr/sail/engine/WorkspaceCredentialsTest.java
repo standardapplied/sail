@@ -109,7 +109,9 @@ class WorkspaceCredentialsTest {
             .replace("/home/dev", root + "/home/dev")
             .replace("/root/", root + "/root/")
             .replace("-o dev -g dev ", "")
-            .replace("PATH=/usr/bin:/bin", "PATH=" + bin + ":/usr/bin:/bin");
+            .replace(
+                "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+                "PATH=" + bin + ":/usr/sbin:/usr/bin:/sbin:/bin");
     var command = new ArrayList<>(List.of("bash", "-c", rooted, "sail-test"));
     command.addAll(List.of(args));
     var said = Files.createTempFile(bin, "said", ".txt");
@@ -650,5 +652,42 @@ class WorkspaceCredentialsTest {
 
     assertEquals(List.of("0 ", "0 ", "1 starting", "0 ", "1 not answering"), said);
     assertEquals("120", firstBound, "the wait is bounded by the settle time");
+  }
+
+  /**
+   * The path each script fixes for itself holds every tool it runs, as a container's Ubuntu lays
+   * them out ({@code runuser} is in {@code /usr/sbin}): a tool it cannot find would fail every
+   * give, strip and check, whatever the template holds.
+   */
+  @Test
+  void eachScriptsOwnPathHoldsEveryToolItRuns() throws Exception {
+    var tools =
+        List.of(
+            "runuser",
+            "mountpoint",
+            "grep",
+            "git",
+            "id",
+            "mktemp",
+            "head",
+            "paste",
+            "wc",
+            "rm",
+            "cat",
+            "timeout",
+            "date");
+    for (var script :
+        List.of(
+            WorkspaceCredentials.STRIP, WorkspaceCredentials.HELD, WorkspaceCredentials.SETTLED)) {
+      var path = script.lines().filter(line -> line.startsWith("PATH=")).findFirst().orElseThrow();
+      var process =
+          new ProcessBuilder(
+                  List.of("bash", "-c", path + "; command -v " + String.join(" ", tools)))
+              .redirectErrorStream(true)
+              .start();
+      var found = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+      assertTrue(process.waitFor(30, TimeUnit.SECONDS));
+      assertEquals(tools.size(), found.lines().count(), path + " finds only:\n" + found);
+    }
   }
 }

@@ -63,7 +63,7 @@ final class WorkspaceCredentials {
   static final String STRIP =
       """
       set -eu
-      PATH=/usr/bin:/bin
+      PATH=/usr/sbin:/usr/bin:/sbin:/bin
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
       rm -f %1$s
       rm -rf %3$s
@@ -110,7 +110,7 @@ final class WorkspaceCredentials {
   static final String HELD =
       """
       set -u
-      PATH=/usr/bin:/bin
+      PATH=/usr/sbin:/usr/bin:/sbin:/bin
       held=""
       add() { held="${held:+$held, }$1"; }
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
@@ -180,7 +180,7 @@ final class WorkspaceCredentials {
    */
   static final String SETTLED =
       """
-      PATH=/usr/bin:/bin
+      PATH=/usr/sbin:/usr/bin:/sbin:/bin
       end=$(( $(date +%%s) + %d ))
       while left=$(( end - $(date +%%s) )); [ "$left" -gt 0 ]; do
         state=$(timeout "$left" systemctl is-system-running --wait 2>/dev/null)
