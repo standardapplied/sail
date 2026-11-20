@@ -27,9 +27,7 @@ final class WorkspaceLine: NSStackView {
 
     init(_ line: WorkspacesModel.Line, narrow: Bool, look: Look, mono: LabelFont) {
         Self.made += 1
-        title = NSTextField(labelWithAttributedString: NSAttributedString(string: line.name, attributes: [
-            .font: NSFont.systemFont(ofSize: Look.Step.body.points, weight: .medium), .foregroundColor: NSColor(look.text),
-        ]).cut(.byTruncatingTail))
+        title = NSTextField(labelWithAttributedString: Self.name(line.name, strong: false, look: look))
         let theirs = narrow ? line.owner.map { Self.whose($0) } : nil
         let below = ([theirs ?? line.instance] + [narrow ? line.sessionsSaid : nil].compactMap { $0 }).joined(separator: " · ")
         place = NSTextField(labelWithAttributedString: NSAttributedString(string: below, attributes: [
@@ -166,5 +164,24 @@ final class WorkspaceLine: NSStackView {
         row.alignment = .centerY
         row.setClippingResistancePriority(.defaultLow, for: .horizontal)
         return (row, tooltip)
+    }
+}
+
+extension WorkspaceLine: MarkedRow {
+    /// The name in the body size, at full weight while the row is chosen or under the pointer.
+    static func name(_ name: String, strong: Bool, look: Look) -> NSAttributedString {
+        NSAttributedString(string: name, attributes: [
+            .font: NSFont.systemFont(ofSize: Look.Step.body.points, weight: strong ? .semibold : .medium), .foregroundColor: NSColor(look.text),
+        ]).cut(.byTruncatingTail)
+    }
+
+    package func mark(chosen _: Bool, strong: Bool) {
+        let weight: NSFont.Weight = strong ? .semibold : .medium
+        guard let font = title.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont,
+              font != NSFont.systemFont(ofSize: Look.Step.body.points, weight: weight),
+              let ink = title.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+        else { return }
+        title.attributedStringValue = NSAttributedString(string: title.stringValue, attributes: [.font: NSFont.systemFont(ofSize: Look.Step.body.points, weight: weight), .foregroundColor: ink])
+            .cut(.byTruncatingTail)
     }
 }

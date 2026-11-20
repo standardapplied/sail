@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Proves scripts/ends on hand-made event streams: every started test ended passes; one never
+# ended fails; a stream whose events name no test (`testID` renamed or missing) fails rather than
+# passing on a list of nulls; events that name none beside ones that do are not counted.
+set -euo pipefail
+
+ends="$(dirname "$0")/ends"
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+event() {
+  printf '{"kind":"event","payload":{"kind":"%s","testID":%s}}\n' "$1" "$2"
+}
+
+expect() {
+  local want=$1 name=$2 stream=$3
+  if "$ends" "$stream" > /dev/null 2>&1; then got=pass; else got=fail; fi
+  [[ $got == "$want" ]] || { echo "scripts/ends-check: $name: $got, not $want" >&2; exit 1; }
+}
+
+{ event testStarted '"A/one()"'; event testEnded '"A/one()"'; } > "$work/ended"
+expect pass "every test ended" "$work/ended"
+
+{ event testStarted '"A/one()"'; event testStarted '"A/two()"'; event testEnded '"A/one()"'; } > "$work/missing"
+expect fail "a test that never ended" "$work/missing"
+
+printf '{"kind":"event","payload":{"kind":"testStarted","test_id":"A/one()"}}\n{"kind":"event","payload":{"kind":"testEnded","test_id":"A/one()"}}\n' > "$work/renamed"
+expect fail "a stream whose testID was renamed" "$work/renamed"
+
+{ event testStarted null; event testEnded null; } > "$work/nulls"
+expect fail "events that name no test" "$work/nulls"
+
+{ event testStarted '"A/one()"'; event testStarted null; event testEnded '"A/one()"'; } > "$work/mixed"
+expect pass "events that name no test beside one that ended" "$work/mixed"
+
+echo "scripts/ends-check: scripts/ends passed and failed the 5 hand-made streams as it must"

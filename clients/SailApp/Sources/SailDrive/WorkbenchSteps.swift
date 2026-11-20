@@ -501,6 +501,9 @@ extension Driver {
         let (ok, said) = await measure(200, interval: 50, name: "panes4-echo")
         print(String(format: "panes4 phase echo measured %.3f", CACurrentMediaTime()))
         await Self.processes().forEach { print("panes4 ps at the echo's end: \($0)") }
+        // The gaps between frames are judged up to the stop: after it come the drive's own tail
+        // (the stop file, the shell starting `cat`), which once read as a 469 ms stall.
+        let flooding = floods.map(\.terminal.latency)
         await Self.touch(stop)
         panes4["main thread's longest stall while four ran ms"] = mainThread.longest
         panes4["a thread of the drive's own, longest stall while four ran ms"] = ownThread.longest
@@ -527,22 +530,22 @@ extension Driver {
             "every flood shown to its last bytes": shown,
         ]
         for (index, view) in floods.enumerated() {
-            let figures = ran[index] ?? view.terminal.latency
+            let figures = ran[index] ?? view.terminal.latency, gaps = flooding[index]
             let judged = flood(figures)
-            if let span = figures.longestBetweenCommits {
+            if let span = gaps.longestBetweenCommits {
                 print(String(format: "panes4 flood %d longest gap %.3f–%.3f; refresh max %.1f ms", index + 1, span.start, span.end, figures.refresh.max))
                 mainStacks.told(span).forEach { print("panes4 flood \(index + 1) in its longest gap: \($0)") }
             }
             budgets["flood \(index + 1): no output waited, nor the main thread held, over 100 ms in its \(frames[index]) frames (\(judged.said))"] =
                 frames[index] > 0 && judged.ours <= 100
             measures.append(measurement("panes4-flood-\(index + 1)", keys: 0, figures: figures, budgets: [:]))
-            panes4["flood \(index + 1) longest gap between committed frames ms"] = (figures.longestBetweenCommits?.length ?? 0) * 1000
+            panes4["flood \(index + 1) longest gap between committed frames ms"] = (gaps.longestBetweenCommits?.length ?? 0) * 1000
             panes4["flood \(index + 1), ours (the larger of its longest output wait and the main thread's longest hold, less the machine's share), ms"] = judged.ours
             panes4["flood \(index + 1) frames committed"] = Double(frames[index])
             panes4["flood \(index + 1) screen changes a second"] = Double(figures.changes) / max(lasted[index], 1e-9)
             panes4["flood \(index + 1) main-thread wakes for them a second"] = Double(figures.wakes) / max(lasted[index], 1e-9)
-            panes4["flood \(index + 1) outputs that reached the screen in its longest commit gap"] = Double(figures.longestGapOutputs)
-            panes4["flood \(index + 1) ms a drawable was being asked for in its longest commit gap"] = figures.longestGapFetching
+            panes4["flood \(index + 1) outputs that reached the screen in its longest commit gap"] = Double(gaps.longestGapOutputs)
+            panes4["flood \(index + 1) ms a drawable was being asked for in its longest commit gap"] = gaps.longestGapFetching
             panes4["flood \(index + 1) longest wait to be shown ms"] = figures.outputToShown.max
             panes4["flood \(index + 1) refresh p95 ms"] = figures.refresh.p95
         }

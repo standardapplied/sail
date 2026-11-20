@@ -188,6 +188,15 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         return item
     }
 
+    /// The row drawing item `id`, and how it is drawn: for the calm tests, which find the chosen row
+    /// by its bar and its weight.
+    package func row(_ id: String) -> (view: NSTableRowView, paint: RowPaint)? {
+        guard let index = entries.indices.first(where: { item(at: $0)?.id == id }),
+              let row = rowView(atRow: index, makeIfNecessary: true) as? SailRowView
+        else { return nil }
+        return (row, row.paint)
+    }
+
     /// The chosen item's id.
     public var chosen: String? {
         item(at: selectedRow)?.id
@@ -260,7 +269,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
 
     public func tableView(_: NSTableView, heightOfRow row: Int) -> CGFloat {
         let hairline = rowStyle.hairline && row > 0 ? 1.0 : 0
-        guard let item = item(at: row) else { return RowStyle.groupHeight + hairline }
+        guard let item = item(at: row) else { return rowStyle.head + hairline }
         return (item.height ?? rowStyle.height) + (rowStyle.hairline ? 1 : 0)
     }
 
@@ -339,7 +348,13 @@ final class SailRowView: NSTableRowView {
     }
 
     var paint: RowPaint {
-        item?.paint ?? RowPaint(RowState(chosen: isSelected, emphasized: isEmphasized, hovered: hovered), look: look)
+        item?.paint ?? RowPaint(RowState(chosen: isSelected, emphasized: isEmphasized, hovered: hovered))
+    }
+
+    /// The chosen row's bar, which says which row is chosen: in the accent while its list holds the
+    /// keys, in the quiet ink while another does.
+    var barInk: Tint {
+        paint.barInk(look)
     }
 
     /// The table sets a row's state on every layout pass; only a change touches the row, or each
@@ -366,6 +381,7 @@ final class SailRowView: NSTableRowView {
         let paint = self.paint
         if numberOfColumns > 0, let cell = view(atColumn: 0) as? RowCell {
             cell.show(paint.actions, chosen: isSelected, keys: isEmphasized)
+            (cell.content as? MarkedRow)?.mark(chosen: isSelected, strong: paint.strong)
         }
         needsDisplay = true
     }
@@ -383,26 +399,26 @@ final class SailRowView: NSTableRowView {
     override func drawBackground(in _: NSRect) {
         let content = NSRect(x: 0, y: top, width: Double(bounds.width), height: Double(bounds.height) - top)
         if top > 0 {
-            NSColor(look.gridLine).setFill()
+            NSColor(item == nil ? look.separator : look.gridLine).setFill()
             NSBezierPath(rect: NSRect(x: 0, y: 0, width: Double(bounds.width), height: 1)).fill()
         }
-        guard item != nil else {
-            guard rowStyle != .sidebar else { return }
-            NSColor(look.fillHover).setFill()
-            return NSBezierPath(rect: content).fill()
-        }
-        let paint = self.paint, area = content.insetBy(dx: rowStyle.margin, dy: 0)
-        if let fill = paint.fill {
-            NSColor(fill).setFill()
-            NSBezierPath(roundedRect: area, xRadius: rowStyle.radius, yRadius: rowStyle.radius).fill()
-        }
+        guard item != nil else { return }
+        let paint = self.paint
         guard paint.bar else { return }
-        NSColor(Tint(look.accent)).setFill()
-        let rightToLeft = userInterfaceLayoutDirection == .rightToLeft, half = RowStyle.barWidth / 2
+        let ink = barInk, rightToLeft = userInterfaceLayoutDirection == .rightToLeft, half = RowStyle.barWidth / 2
         let top = Double(content.minY) + (min(Double(content.height), rowStyle.height) - rowStyle.bar) / 2
         let bar = NSRect(x: rightToLeft ? Double(bounds.width) - RowStyle.barWidth : 0, y: top, width: RowStyle.barWidth, height: rowStyle.bar)
+        // The bar is a rounded rect and a square half at the edge, overlapping: drawn opaque in one
+        // layer, then laid down once at the ink's strength, so a translucent ink is not doubled there.
+        let context = NSGraphicsContext.current?.cgContext
+        context?.saveGState()
+        context?.setAlpha(ink.alpha)
+        context?.beginTransparencyLayer(auxiliaryInfo: nil)
+        NSColor(Tint(ink.rgb)).setFill()
         NSBezierPath(roundedRect: bar, xRadius: half, yRadius: half).fill()
         NSBezierPath(rect: NSRect(x: rightToLeft ? Double(bar.maxX) - half : Double(bar.minX), y: Double(bar.minY), width: half, height: Double(bar.height))).fill()
+        context?.endTransparencyLayer()
+        context?.restoreGState()
     }
 
     override func drawSelection(in _: NSRect) {}
@@ -684,16 +700,25 @@ final class MenuOpener: NSObject {
 /// the design's `prog` is (cubic-bezier .2 .6 .3 1): a create under way, the server's median long.
 /// Held at 94 % while motion is reduced.
 @MainActor
-final class ProgressLine: NSView {
+final class ProgressLine: NSView, Marked {
     static let height = 2.0, reach = 0.94, seconds = 3.0
 
     let bar = CALayer()
+    /// Teal, as the Creating pill: something under way, not an action.
+    let ink: Tint
+    private let look: Look
+
+    package var drawnMarks: [Mark] {
+        look.marks(line: ink)
+    }
     private var laidWidth = 0.0
 
     init(look: Look) {
+        self.look = look
+        ink = Tint(look.info)
         super.init(frame: .zero)
         wantsLayer = true
-        bar.backgroundColor = NSColor(Tint(look.accent)).cgColor
+        bar.backgroundColor = NSColor(ink).cgColor
         bar.anchorPoint = CGPoint(x: 0, y: 0.5)
         layer?.addSublayer(bar)
         setAccessibilityElement(false)
@@ -740,3 +765,14 @@ final class ProgressLine: NSView {
     }
 }
 
+extension SailRowView: Marked {
+    package var drawnMarks: [Mark] {
+        paint.bar ? look.marks(line: barInk) : []
+    }
+}
+
+/// A row's content that marks it chosen without a fill, as paper and ink does: its name at full
+/// weight while `strong` (chosen or under the pointer), and its own chosen mark.
+@MainActor package protocol MarkedRow: AnyObject {
+    func mark(chosen: Bool, strong: Bool)
+}

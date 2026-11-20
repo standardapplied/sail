@@ -120,3 +120,10 @@ public final class Banner: NSView {
         words.draw(with: reading(wordsRect(width: Double(bounds.width))), options: [.usesLineFragmentOrigin])
     }
 }
+
+extension Banner: Marked {
+    package var drawnMarks: [Mark] {
+        let paint = BannerPaint(tone, look: look)
+        return look.marks(fill: Tint(paint.fill), area: Double(bounds.width * bounds.height)) + look.marks(line: paint.mark)
+    }
+}

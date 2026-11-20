@@ -133,6 +133,8 @@ public final class SailButton: NSButton {
     override public var title: String {
         didSet {
             guard busyWord == nil else { return }
+            invalidateIntrinsicContentSize()
+            needsDisplay = true
             setAccessibilityLabel(title)
             NSAccessibility.post(element: self, notification: .titleChanged)
         }
@@ -345,5 +347,13 @@ public final class SailButton: NSButton {
 
     @objc private func motionChanged() {
         spinner.turn(busyWord != nil)
+    }
+}
+
+extension SailButton: Marked {
+    package var drawnMarks: [Mark] {
+        let paint = paint
+        let area = Double(box.width * box.height)
+        return look.marks(fill: paint.fill, area: area) + look.marks(line: paint.edge) + look.marks(line: paint.label) + look.marks(line: paint.halo?.ring)
     }
 }

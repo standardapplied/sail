@@ -155,8 +155,13 @@ public final class Card: NSView {
         return NSRect(x: Double(bounds.width) - Double(box.maxX), y: Double(box.minY), width: Double(box.width), height: Double(box.height))
     }
 
+    /// Information quiet on the paper; a warning or an error in its tone.
+    package var bannerPaint: BannerPaint {
+        tone == .info ? BannerPaint(quiet: look) : BannerPaint(tone, look: look)
+    }
+
     override public func draw(_: NSRect) {
-        let paint = tone == .info ? BannerPaint(quiet: look) : BannerPaint(tone, look: look)
+        let paint = bannerPaint
         Draw.box(bounds, radius: Look.contentRadius, fill: Tint(paint.fill), edge: paint.edge)
         Draw.icon(tone.icon, in: markBox, ink: paint.mark)
     }
@@ -167,5 +172,12 @@ public final class Card: NSView {
 
     @objc private func actSecondary() {
         secondaryHandler()
+    }
+}
+
+extension Card: Marked {
+    package var drawnMarks: [Mark] {
+        let paint = bannerPaint
+        return look.marks(fill: Tint(paint.fill), area: Double(bounds.width * bounds.height)) + look.marks(line: paint.mark)
     }
 }
