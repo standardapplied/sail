@@ -11,8 +11,9 @@ import Testing
 /// The user menu behind the rail's user button (the calm spec's PR 2, in Paper and ink): where it
 /// sits at every window size and in either direction, what it says, how the keys and the pointer
 /// work it, what each item does, Appearance remembered and taken, what VoiceOver hears, and that it
-/// adds no accent and no grey to the window it opens over.
-@MainActor @Suite struct UserMenuTests {
+/// adds no accent and no grey to the window it opens over. Serialized: when its process ends early
+/// (it has, with the main run loop stopped), the one test started and never ended names the cause.
+@MainActor @Suite(.serialized) struct UserMenuTests {
     init() {
         ExitWatch.install()
     }
