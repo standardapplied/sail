@@ -54,8 +54,10 @@ import Testing
     }
 
     /// At every window size and in either direction the menu is 260 pt wide, its leading edge on the
-    /// button's, its foot 8 pt above the button's top, inside the window, the shadow's room about
-    /// it; a child of the window while open, gone when closed.
+    /// button's, its foot 8 pt above the button's top, the shadow's room about it; a child of the
+    /// window while open, gone when closed. Left to right, where the button is where the app puts it,
+    /// the menu is inside the window; right to left only the button is turned here, still at the
+    /// window's left, so the kit-rtl drive's frame shows it inside a right-to-left window.
     @Test(arguments: [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft])
     func theMenuSitsOnItsButtonAtEverySize(_ direction: NSUserInterfaceLayoutDirection) throws {
         let shell = try Self.shell()
@@ -73,7 +75,7 @@ import Testing
                 #expect(near(box.width, UserMenu.width) && near(box.height, menu.fittingSize.height), "\(said)")
                 let leading = direction == .rightToLeft ? near(box.maxX, square.maxX) : near(box.minX, square.minX)
                 #expect(leading && near(box.minY, square.maxY + UserMenu.gap), "\(said)")
-                #expect(shell.window.frame.insetBy(dx: -0.5, dy: -0.5).contains(box), "\(said): out of the window")
+                if direction == .leftToRight { #expect(shell.window.frame.insetBy(dx: -0.5, dy: -0.5).contains(box), "\(said): out of the window") }
                 #expect(near(shell.userMenu.panel.frame.width, box.width + 2 * UserMenu.room) && shell.window.childWindows?.contains(shell.userMenu.panel) == true, "\(said)")
                 #expect(near(menu.frame.width, UserMenu.width) && menu.userInterfaceLayoutDirection == direction, "\(said): the box is laid out \(menu.frame)")
                 shell.userMenu.close()
@@ -123,7 +125,7 @@ import Testing
             try Self.press(code, in: shell)
             walked.append(Self.highlighted(view))
         }
-        #expect(walked == ["Account", "Appearance", "Sign Out", "Account", "Sign Out"], "the keys walk \(walked)")
+        #expect(walked == ["Account", "Appearance", "Sign Out", "Account", "Sign Out"], "the keys walk \(walked), not top to bottom")
         try Self.press(Self.up, in: shell)
         try Self.press(Self.left, in: shell)
         #expect(view.chosenLook == .dark && Appearance.stored(in: shell.defaults) == .dark && NSApp.appearance?.name == .darkAqua && shell.userMenu.isOpen)
@@ -276,12 +278,24 @@ import Testing
         let image = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: image)
         let scale = Double(image.pixelsWide) / Double(view.bounds.width)
-        func colour(_ point: NSPoint) -> [Double] {
-            guard let drawn = image.colorAt(x: Int(point.x * scale), y: Int(point.y * scale))?.usingColorSpace(.sRGB) else { return [] }
+        func channels(_ drawn: NSColor?) -> [Double] {
+            guard let drawn = drawn?.usingColorSpace(.sRGB) else { return [] }
             return [drawn.redComponent, drawn.greenComponent, drawn.blueComponent].map { Double($0) * 255 }
         }
+        func colour(_ point: NSPoint) -> [Double] {
+            channels(image.colorAt(x: Int(point.x * scale), y: Int(point.y * scale)))
+        }
+        // The window's colour space is the screen's, so a token is read back as it is drawn there:
+        // a swatch of it filled into a bitmap of the same view, read the same way.
         func near(_ drawn: [Double], _ rgb: RGB) -> Bool {
-            drawn.count == 3 && zip(drawn, [rgb.red, rgb.green, rgb.blue].map(Double.init)).allSatisfy { abs($0 - $1) <= 3 }
+            guard let swatch = view.bitmapImageRepForCachingDisplay(in: NSRect(x: 0, y: 0, width: 4, height: 4)), let context = NSGraphicsContext(bitmapImageRep: swatch) else { return false }
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = context
+            NSColor(Tint(rgb)).setFill()
+            NSRect(x: 0, y: 0, width: 4, height: 4).fill()
+            NSGraphicsContext.restoreGraphicsState()
+            let reference = channels(swatch.colorAt(x: 1, y: 1))
+            return drawn.count == 3 && reference.count == 3 && zip(drawn, reference).allSatisfy { abs($0 - $1) <= 3 }
         }
         let account = try #require(view.items.first)
         let corner = view.convert(NSPoint(x: account.bounds.maxX - 4, y: account.bounds.midY), from: account)

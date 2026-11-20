@@ -31,7 +31,7 @@ package final class UserMenu: NSObject {
     var onClose: @MainActor () -> Void = {}
 
     package let view: UserMenuView
-    let panel: NSPanel
+    package let panel: NSPanel
     private let shadow: PopShadowView
     private let keys = MenuKeys()
     private weak var anchor: NSView?
@@ -101,8 +101,12 @@ package final class UserMenu: NSObject {
         view.tip.hide()
         panel.parent?.removeChildWindow(panel)
         panel.orderOut(nil)
-        if let window = anchor?.window, window.firstResponder === keys, !(withKeys && window.makeFirstResponder(anchor)) {
-            window.makeFirstResponder(restore)
+        if let window = anchor?.window, window.firstResponder === keys {
+            // A window asked to focus a view that refuses the keys takes them itself and says yes,
+            // and a field was being edited through the window's field editor, not by itself.
+            let button = withKeys && anchor?.acceptsFirstResponder == true ? anchor : nil
+            let editor = restore as? NSText
+            window.makeFirstResponder(button ?? (editor?.isFieldEditor == true ? editor?.delegate as? NSResponder : restore))
         }
         onClose()
     }
@@ -247,9 +251,11 @@ package final class UserMenuView: NSView {
         }
     }
 
-    /// The selectable rows in order: the enabled items, then Appearance (index `items.count`).
+    /// The rows the keys stop at, top to bottom: the enabled items above Appearance, Appearance
+    /// (index `items.count`), then Sign Out under it.
     private var stops: [Int] {
-        items.indices.filter { items[$0].item.enabled } + [items.count]
+        let above = items.indices.filter { items[$0].item.enabled && items[$0].item != .signOut }
+        return above + [items.count] + items.indices.filter { items[$0].item == .signOut }
     }
 
     /// Says `content` with `appearance` chosen: `fresh`, just opened, with its first item highlighted
@@ -473,6 +479,8 @@ package final class MenuRow: NSView {
     var onChoose: @MainActor () -> Void = {}
     var onHover: @MainActor () -> Void = {}
     var onLeave: @MainActor () -> Void = {}
+    /// The mouse-downs and mouse-ups it took, for the drive to say where a click went.
+    package private(set) var downs = 0, ups = 0
     private let mono: LabelFont
 
     init(_ item: UserMenuContent.Item, look: Look, mono: LabelFont) {
@@ -538,11 +546,14 @@ package final class MenuRow: NSView {
 
     /// A click chooses it; on one that cannot be chosen it says why, as pointing at it does.
     package override func mouseUp(with event: NSEvent) {
+        ups += 1
         guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
         if item.enabled { onChoose() } else { onHover() }
     }
 
-    package override func mouseDown(with _: NSEvent) {}
+    package override func mouseDown(with _: NSEvent) {
+        downs += 1
+    }
 
     package override func acceptsFirstMouse(for _: NSEvent?) -> Bool {
         true

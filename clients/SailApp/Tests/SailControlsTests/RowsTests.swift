@@ -120,7 +120,9 @@ import Testing
         let (window, backdrop) = Self.shown(list)
         defer { window.orderOut(nil) }
         list.choose("dock")
-        try Self.row(list, 2).isEmphasized = true
+        let row = try Self.row(list, 2)
+        row.isEmphasized = true
+        row.userInterfaceLayoutDirection = direction
         let dock = list.rect(ofRow: 2), width = Double(list.bounds.width)
         let at = { (x: Double) in direction == .rightToLeft ? width - x : x }
         let bare = ControlsTests.swatch(canvas, [], scale: 2), accent = ControlsTests.swatch(canvas, [NSColor(Tint(look.accent))], scale: 2)

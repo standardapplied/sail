@@ -116,6 +116,7 @@ extension Driver {
         let wasOpen = shell.userMenu.isOpen
         // A person's first click on a window that is not the key one only brings it forward.
         guard await waitUntil(5, { self.shell.window.isKeyWindow }) else { return (false, "the window never became key: \(menuSaid)") }
+        let clickedAt = ContinuousClock.now
         switch how {
         case "click":
             guard await click(button, at: NSPoint(x: button.bounds.midX, y: button.bounds.midY)) else { return (false, "the click was not made") }
@@ -125,8 +126,10 @@ extension Driver {
             send(space)
         default: return (false, "no way to open the menu named \(how)")
         }
+        let sent = (ContinuousClock.now - clickedAt) / .milliseconds(1)
         let toggled = await waitUntil(2) { self.shell.userMenu.isOpen != wasOpen && self.shell.rail.menuOpen == !wasOpen }
-        return (toggled, menuSaid)
+        let took = (ContinuousClock.now - clickedAt) / .milliseconds(1)
+        return (toggled, "\(menuSaid); the \(how) returned in \(Self.ms(sent)) ms, the menu \(wasOpen ? "closed" : "open") \(Self.ms(took)) ms after it")
     }
 
     private func clickInMenu(_ title: String, _ step: Step) async -> (Bool, String) {
@@ -145,14 +148,18 @@ extension Driver {
         }
         guard let row = view.items.first(where: { $0.item.rawValue == title }) else { return (false, "the menu has no \(title): \(menuSaid)") }
         let began = shell.account.actions
+        let before = (row.downs, row.ups), clickedAt = ContinuousClock.now
         guard await click(row, at: NSPoint(x: row.bounds.midX, y: row.bounds.midY)) else { return (false, "the click was not made") }
+        let done: Bool
         switch row.item {
-        case .logins: return (await waitUntil(2) { view.tip.isShown } && menu.isOpen, menuSaid)
-        case .account, .signIn: return (await waitUntil(2) { !menu.isOpen && self.shell.rail.selected == .account }, menuSaid)
+        case .logins: done = await waitUntil(2) { view.tip.isShown } && menu.isOpen
+        case .account, .signIn: done = await waitUntil(2) { !menu.isOpen && self.shell.rail.selected == .account }
         case .signOut:
-            let ended = await waitUntil(step.seconds ?? 20) { self.shell.account.actions > began && !self.shell.account.isActing && self.shell.account.standing == nil }
-            return (ended && !menu.isOpen, "\(menuSaid); \(said)")
+            done = await waitUntil(step.seconds ?? 20) { self.shell.account.actions > began && !self.shell.account.isActing && self.shell.account.standing == nil }
         }
+        let took = (ContinuousClock.now - clickedAt) / .milliseconds(1)
+        let reached = "\(title) took \(row.downs - before.0) mouse-down and \(row.ups - before.1) mouse-up in \(Self.ms(took)) ms; the app's current event \(NSApp.currentEvent.map { "\($0.type.rawValue) in window \($0.windowNumber)" } ?? "none"), the menu's window \(menu.panel.windowNumber)"
+        return (done && (row.item == .logins || !menu.isOpen), "\(menuSaid); \(reached)" + (row.item == .signOut ? "; \(said)" : ""))
     }
 
     /// A click on the open user menu's `appearance` segment as a person makes it.

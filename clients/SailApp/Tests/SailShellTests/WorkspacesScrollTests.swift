@@ -46,8 +46,8 @@ import Testing
     /// thirty rows, and the panel part way down its twenty projects, neither jumping to its top or
     /// to the chosen row.
     @Test func aChangeOfLookKeepsBothScrolls() async throws {
-        let names = (["harbor"] + (2 ... 20).map { "project-\($0)" }).map { #"{"name": "\#($0)", "container_status": "running", "template": "ready"}"# }
-        let projects = Exchange(method: "GET", path: "/v1/projects", status: 200, body: Data(#"{"projects": [\#(names.joined(separator: ", "))], "total": 20, "schema_version": 1}"#.utf8))
+        let names = (["harbor"] + (2 ... 24).map { "project-\($0)" }).map { #"{"name": "\#($0)", "container_status": "running", "template": "ready"}"# }
+        let projects = Exchange(method: "GET", path: "/v1/projects", status: 200, body: Data(#"{"projects": [\#(names.joined(separator: ", "))], "total": 24, "schema_version": 1}"#.utf8))
         let (view, window) = try WorkspacesViewTests.view(RecordedServer([projects, try Self.rows(30)]), width: 1024 - Rail.width - 4)
         defer { window.orderOut(nil) }
         view.shown()
