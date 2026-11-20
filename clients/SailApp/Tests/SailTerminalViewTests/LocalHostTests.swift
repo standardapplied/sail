@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import SailKitTestSupport
 @testable import SailShell
 import SailTerminal
 import SailTerminalWire
@@ -7,6 +8,10 @@ import Synchronization
 import Testing
 
 @Suite(.timeLimit(.minutes(1))) struct LocalHostTests {
+    init() {
+        ExitWatch.install()
+    }
+
     /// A bundled host that refuses to start is told in its own words, at once, not as "did not
     /// answer within 15 s".
     @Test func aHostThatRefusesToStartIsToldInItsOwnWords() async throws {

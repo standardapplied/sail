@@ -51,10 +51,14 @@ public final class Rail: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         for item in Item.allCases {
-            let button = NSButton(image: Self.image(item, colour: look.textSecondary), target: self, action: #selector(pick(_:)))
+            let button = RailButton(image: Self.image(item, colour: look.textSecondary), target: self, action: #selector(pick(_:)))
             button.isBordered = false
             button.toolTip = item.title
             button.setAccessibilityLabel(item.title)
+            if item == .account {
+                button.setAccessibilityRole(.menuButton)
+                button.setAccessibilityHelp("Opens a menu of who is signed in, the control plane and Appearance.")
+            }
             button.identifier = NSUserInterfaceItemIdentifier(item.rawValue)
             button.translatesAutoresizingMaskIntoConstraints = false
             let wash = NSView()
@@ -101,6 +105,21 @@ public final class Rail: NSView {
         nil
     }
 
+    /// Whether the press being acted on is the pointer's: a click, not the keys or VoiceOver.
+    var pressedByPointer: Bool {
+        buttons.values.contains { ($0 as? RailButton)?.clicked == true }
+    }
+
+    /// The user button while its menu is open: outlined in the look's `railOpen`, its icon in ink.
+    package var menuOpen = false {
+        didSet { if menuOpen != oldValue { show(selected) } }
+    }
+
+    /// The square under `item`'s button: its wash when chosen, its outline while its menu is open.
+    func wash(_ item: Item) -> NSView? {
+        washes[item]
+    }
+
     /// The bar beside `item`'s button, which marks it chosen.
     func bar(_ item: Item) -> NSView? {
         bars[item]
@@ -113,7 +132,10 @@ public final class Rail: NSView {
             bars[each]?.layer?.backgroundColor = NSColor(chosenInk.bar).cgColor
             let chosen = each == item
             washes[each]?.layer?.backgroundColor = chosen ? chosenInk.fill.map { NSColor($0).cgColor } ?? NSColor.clear.cgColor : NSColor.clear.cgColor
-            button.image = Self.image(each, colour: chosen ? chosenInk.icon : look.textSecondary)
+            let open = menuOpen && each == .account
+            washes[each]?.layer?.borderWidth = open ? 1 : 0
+            washes[each]?.layer?.borderColor = look.railOpen.edge.map { NSColor($0).cgColor }
+            button.image = Self.image(each, colour: chosen ? chosenInk.icon : open ? look.railOpen.ink : look.textSecondary)
             bars[each]?.isHidden = !chosen
         }
     }
@@ -151,5 +173,30 @@ extension Rail: Marked {
     var chosenWash: (size: NSSize, colour: CGColor?, button: NSRect, insets: NSEdgeInsets)? {
         guard let selected, let wash = washes[selected], let button = buttons[selected] else { return nil }
         return (wash.bounds.size, wash.layer?.backgroundColor, button.frame, button.alignmentRectInsets)
+    }
+}
+
+/// A rail item's button, which knows while a click is acting on it: its action runs inside the
+/// click's tracking, so the user menu can tell the pointer from the keys and VoiceOver.
+@MainActor
+final class RailButton: NSButton {
+    private(set) var clicked = false
+
+    override func mouseDown(with event: NSEvent) {
+        clicked = true
+        defer { clicked = false }
+        super.mouseDown(with: event)
+    }
+
+    /// VoiceOver's press, and its Show Menu on a menu button, act at once, as a press of the keys:
+    /// AppKit's own press of this menu-button-role button did not open the menu in the test.
+    override func accessibilityPerformPress() -> Bool {
+        guard isEnabled else { return false }
+        performClick(nil)
+        return true
+    }
+
+    override func accessibilityPerformShowMenu() -> Bool {
+        accessibilityPerformPress()
     }
 }

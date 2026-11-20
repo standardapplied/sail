@@ -110,6 +110,8 @@ public final class Card: NSView {
         setAccessibilityLabel(text)
         isHidden = false
         needsDisplay = true
+        // Laid out now, its buttons framed in the turn it shows, not at the next display.
+        (superview ?? self).layoutSubtreeIfNeeded()
     }
 
     public func hide() {

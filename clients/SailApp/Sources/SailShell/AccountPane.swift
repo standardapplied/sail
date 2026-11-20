@@ -19,8 +19,8 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     public let address = NSTextField()
     public let ticket = NSSecureTextField()
     public let signIn: SailButton
-    public let enroll = NSButton(title: "Enroll with a Ticket", target: nil, action: nil)
-    public let signOut = NSButton(title: "Sign Out", target: nil, action: nil)
+    public let enroll: SailButton
+    public let signOut: SailButton
     public let said = NSTextField(wrappingLabelWithString: "")
     public private(set) var standing: SignedIn?
     /// Whether a ceremony or a call is under way, and how many have ended.
@@ -29,6 +29,10 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     public private(set) var ended = 0
+    /// How many checks of who is signed in are under way, told as it changes: a menu saying the
+    /// control plane is reconnecting says so only while one is.
+    public private(set) var checks = 0
+    var onChecking: @MainActor () -> Void = {}
     /// How many actions a person has started here (a sign-in, an enrollment, a sign-out): what the
     /// drive waits on, and what a check's late answer is said after.
     public private(set) var actions = 0
@@ -82,6 +86,8 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         self.look = look
         self.mono = mono
         signIn = SailButton("Sign In with Passkey", kind: .primary, look: look, target: nil, action: #selector(AccountPane.signInWithPasskey(_:)))
+        enroll = SailButton("Enroll with a Ticket", kind: .secondary, look: look, target: nil, action: nil)
+        signOut = SailButton("Sign Out", kind: .secondary, look: look, target: nil, action: nil)
         super.init(frame: .zero)
         signIn.target = self
         heading.font = title.font(.title2) as NSFont
@@ -108,6 +114,12 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     public func refresh() async {
         guard !busy, let used = defaults.string(forKey: Self.addressKey), let plane = try? ControlPlane(address: used) else { return }
         let acted = actions, seen = shown
+        checks += 1
+        onChecking()
+        defer {
+            checks -= 1
+            onChecking()
+        }
         await run(byAPerson: false) { () async throws(AccountRefusal) in
             let answer: Result<SignedIn?, AccountRefusal>
             do throws(AccountRefusal) {
@@ -288,6 +300,8 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         who.textColor = NSColor(look.textSecondary)
         labels.forEach { $0.textColor = NSColor(look.textSecondary) }
         signIn.look = look
+        enroll.look = look
+        signOut.look = look
         addressFrame.look = look
         ticketFrame.look = look
         say(lines)
@@ -330,7 +344,6 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         ticket.action = #selector(enrollWithTicket(_:))
         enroll.target = self
         enroll.action = #selector(enrollWithTicket(_:))
-        enroll.controlSize = .large
         signOut.target = self
         signOut.action = #selector(signOutHere(_:))
         said.isSelectable = true

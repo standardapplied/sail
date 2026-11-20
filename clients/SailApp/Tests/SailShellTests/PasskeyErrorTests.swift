@@ -2,11 +2,16 @@ import AuthenticationServices
 import Foundation
 import SailAccount
 import SailAPI
+import SailKitTestSupport
 import Testing
 
 /// Scenario 13: every `ASAuthorizationError` code, and the association failure's words, end in one
 /// `PasskeyFailure`, which SailKit's `RefusalRowTests` turns into rows 7 and 9 to 12.
 @Suite struct PasskeyErrorTests {
+    init() {
+        ExitWatch.install()
+    }
+
     func error(_ code: ASAuthorizationError.Code, reason: String? = nil) -> any Error {
         NSError(domain: ASAuthorizationError.errorDomain, code: code.rawValue, userInfo: reason.map { [NSLocalizedFailureReasonErrorKey: $0] } ?? [:])
     }

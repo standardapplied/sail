@@ -152,7 +152,7 @@ public final class WorkspacesView: NSView {
         switch model.screen {
         case .loading: return "Workspaces"
         case .unreachable: return (["Workspaces"] + cardSaid).joined(separator: "\n")
-        case let .shown(panel, .noProjects(empty)): return (["Workspaces", panel.who, empty.title, empty.body] + (empty.line.map { [$0] } ?? [])).joined(separator: "\n")
+        case let .shown(_, .noProjects(empty)): return (["Workspaces", empty.title, empty.body] + (empty.line.map { [$0] } ?? [])).joined(separator: "\n")
         case let .shown(_, .project(page)):
             var lines = ["Workspaces", page.name, page.lede] + (page.banner.map { [$0.title, $0.line] } ?? [])
             switch page.body {
@@ -512,7 +512,7 @@ public final class WorkspacesView: NSView {
             }
         case (_, .loading?):
             card.isHidden = true
-            panel.renderLoading(who: model.who, handle: model.person.handle, controlPlane: model.person.controlPlane)
+            panel.renderLoading()
             setPanel(shown: true)
             project.isHidden = false
             project.renderLoading()
