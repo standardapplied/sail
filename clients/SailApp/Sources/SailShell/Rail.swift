@@ -50,6 +50,9 @@ public final class Rail: NSView {
         for item in Item.allCases {
             let button = NSButton(image: Self.image(item, colour: look.textSecondary), target: self, action: #selector(pick(_:)))
             button.isBordered = false
+            // A rounded push button keeps 3 pt alignment insets above and below even unbordered, so
+            // its frame, and the chosen item's wash, would be 42 by 48: the square style has none.
+            button.bezelStyle = .regularSquare
             button.wantsLayer = true
             button.layer?.cornerRadius = Look.contentRadius
             button.toolTip = item.title
