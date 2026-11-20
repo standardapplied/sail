@@ -9,6 +9,11 @@ public struct UserMenuContent: Equatable, Sendable {
     public enum Plane: Equatable, Sendable {
         case connected, reconnecting, unreachable
 
+        /// As it last answered: out of reach, reconnecting while it is asked again; else connected.
+        public init(unreachable: Bool, refreshing: Bool) {
+            self = unreachable ? (refreshing ? .reconnecting : .unreachable) : .connected
+        }
+
         public var said: String {
             switch self {
             case .connected: "Connected"
@@ -67,7 +72,7 @@ public struct UserMenuContent: Equatable, Sendable {
             guard case let .known(role) = whoami.role else { return nil }
             return role.rawValue.prefix(1).uppercased() + role.rawValue.dropFirst()
         }
-        let plane: Plane = unreachable ? (refreshing ? .reconnecting : .unreachable) : .connected
+        let plane = Plane(unreachable: unreachable, refreshing: refreshing)
         return Self(
             name: name, disc: name.first.map { .initial(String($0).uppercased()) }, detail: "@\(handle)" + (role.map { " · \($0)" } ?? ""),
             address: address, plane: plane, items: [.account, .logins, .signOut]

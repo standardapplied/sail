@@ -51,6 +51,8 @@ import Testing
             faults += (menu.items as [NSView] + [menu.segments]).compactMap { Self.missesAClick($0).map { "the user menu, opening \(round + 1): \($0)" } }
             shell.userMenu.close()
         }
+        shell.select(.account)
+        faults += [shell.account.signIn, shell.account.enroll].compactMap { Self.missesAClick($0).map { "the Account pane: \($0)" } }
         let sheet = Sheet(title: "Delete dock?", body: "Its files on the runner go with it.", confirm: "Delete Workspace", kind: .destructive, look: .light, titleFont: try TitleFont(directory: LookTests.fonts))
         sheet.ask(on: shell.window) { _ in }
         faults += [sheet.cancel, sheet.confirm].compactMap { Self.missesAClick($0).map { "the sheet: \($0)" } }

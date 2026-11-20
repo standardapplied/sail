@@ -99,6 +99,10 @@ struct Step: Decodable {
     /// Signs in, or out, then waits until the pane is idle.
     var signIn: Bool?
     var signOut: Bool?
+    /// The Account pane shows a sign-in of the drive's own, for its frames: "long" (the longest
+    /// handle, a long name, a long control plane, confirmed), "long-unconfirmed" (the same, not yet
+    /// confirmed: the control plane out of reach), or "none".
+    var accountShows: String?
     /// The user menu opened from the rail's user button: "click", a click on the button as a
     /// person makes it (again, it closes the menu), or "keys", the button given the keys and Space
     /// pressed (the kit runs, which turn Keyboard Navigation on).
