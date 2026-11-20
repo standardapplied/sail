@@ -40,7 +40,7 @@ public final class WorkbenchView: NSView {
     private var shownSelected: TabID?
     private let banner: Card
     private let emptyLabel = NSTextField(labelWithString: "No terminal is open")
-    private let newTerminal: AccentButton
+    private let newTerminal: SailButton
     private var started = false
     private var pendingKeep: DispatchWorkItem?
     private var kept: Data?
@@ -78,7 +78,7 @@ public final class WorkbenchView: NSView {
         }
         banner = Card(look: look)
         strip = TabStrip(look: look)
-        newTerminal = AccentButton("New Terminal", look: look, target: nil, action: #selector(WorkbenchView.newTab(_:)))
+        newTerminal = SailButton("New Terminal", kind: .primary, look: look, target: nil, action: #selector(WorkbenchView.newTab(_:)))
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         compose()
     }

@@ -70,9 +70,16 @@ public final class FieldFrame: NSView {
     private func repaint() {
         field.textColor = NSColor(look.text)
         if let editor = field.currentEditor() as? NSTextView {
-            editor.selectedTextAttributes = [.backgroundColor: NSColor(look.fillSelected), .foregroundColor: NSColor(look.text)]
+            editor.selectedTextAttributes = [.backgroundColor: NSColor(look.textSelection), .foregroundColor: NSColor(look.text)]
             editor.insertionPointColor = NSColor(look.accent)
         }
         needsDisplay = true
+    }
+}
+
+extension FieldFrame: Marked {
+    /// Its focus ring and caret while it is edited.
+    package var drawnMarks: [Mark] {
+        field.currentEditor() == nil ? [] : look.marks(line: Tint(look.accent)) + look.marks(line: Tint(look.accent))
     }
 }

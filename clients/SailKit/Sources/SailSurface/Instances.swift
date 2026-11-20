@@ -150,17 +150,22 @@ public protocol GlyphSource: AnyObject {
 }
 
 /// What a view adds to the screen's frame: whether it has focus (the cursor is hollow without
-/// it), whether a blinking cursor is in its shown half (`cursorOn`), and the text an input method
-/// is composing, drawn at the cursor.
+/// it, in `idleCursor` when given), whether a blinking cursor is in its shown half (`cursorOn`),
+/// the text an input method is composing, drawn at the cursor, and selected text's fixed colours
+/// (nil inverts each selected cell).
 public struct Overlay: Equatable, Sendable {
     public var focused: Bool
     public var cursorOn: Bool
     public var marked: String
+    public var selection: SelectionInk?
+    public var idleCursor: RGB?
 
-    public init(focused: Bool = true, cursorOn: Bool = true, marked: String = "") {
+    public init(focused: Bool = true, cursorOn: Bool = true, marked: String = "", selection: SelectionInk? = nil, idleCursor: RGB? = nil) {
         self.focused = focused
         self.cursorOn = cursorOn
         self.marked = marked
+        self.selection = selection
+        self.idleCursor = idleCursor
     }
 }
 
@@ -191,6 +196,8 @@ public struct InstanceBuilder: Sendable {
     private var overlayComplete = true
     private var rows: [RowInstances] = []
     private var size: GridSize?
+    /// The selection's colours the rows were laid out in: another lays every row out again.
+    private var selection: SelectionInk?
 
     private struct RowInstances: Sendable {
         var backgrounds: [SolidInstance] = []
@@ -213,7 +220,8 @@ public struct InstanceBuilder: Sendable {
 
     public mutating func build(_ frame: ScreenFrame, overlay: Overlay, glyphs: some GlyphSource) -> FrameInstances {
         let dirty: Set<Int>
-        if size != frame.size || rows.count != frame.rows.count {
+        if size != frame.size || rows.count != frame.rows.count || overlay.selection != selection {
+            selection = overlay.selection
             rows = Array(repeating: RowInstances(), count: frame.rows.count)
             dirty = Set(frame.rows.indices)
         } else {
@@ -226,7 +234,7 @@ public struct InstanceBuilder: Sendable {
         size = frame.size
         rebuilt = []
         let overlaid: Overlaid = !overlay.marked.isEmpty ? composing(overlay.marked, frame, glyphs: glyphs)
-            : overlay.cursorOn ? cursor(frame, focused: overlay.focused, glyphs: glyphs) : ([], true)
+            : overlay.cursorOn ? cursor(frame, focused: overlay.focused, idle: overlay.idleCursor, glyphs: glyphs) : ([], true)
         overlayComplete = overlaid.complete
         var memo = PlaceMemo()
         for y in frame.rows.indices {
@@ -250,7 +258,8 @@ public struct InstanceBuilder: Sendable {
     ) -> RowInstances {
         var laid = RowInstances()
         for (x, cell) in row.cells.enumerated() {
-            let (foreground, background) = cell.selected ? (cell.background, cell.foreground) : (cell.foreground, cell.background)
+            let (foreground, background) = !cell.selected ? (cell.foreground, cell.background)
+                : selection.map { ($0.foreground, $0.background) } ?? (cell.background, cell.foreground)
             let origin = metrics.origin(of: CellPoint(x: x, y: y))
             if background != defaults.background {
                 let color = Self.color(background)
@@ -295,7 +304,7 @@ public struct InstanceBuilder: Sendable {
     /// What the cursor or the composing text draws, and whether every item of it found a slot.
     private typealias Overlaid = (drawn: [GlyphInstance], complete: Bool)
 
-    private func cursor(_ frame: ScreenFrame, focused: Bool, glyphs: some GlyphSource) -> Overlaid {
+    private func cursor(_ frame: ScreenFrame, focused: Bool, idle: RGB?, glyphs: some GlyphSource) -> Overlaid {
         guard frame.cursor.visible, let position = frame.cursor.position, frame.rows.indices.contains(position.y),
               frame.rows[position.y].cells.indices.contains(position.x)
         else { return ([], true) }
@@ -310,12 +319,13 @@ public struct InstanceBuilder: Sendable {
         let origin = metrics.origin(of: position)
         let area = rect(origin, cells: wide ? 2 : 1)
         guard let block = glyphs.place(.sprite(.cursor(shape), wide: wide)) else { return ([], false) }
-        let drawn = [GlyphInstance(rect: area, slot: Self.origin(block.slot), colour: false, color: Self.color(frame.colors.cursor))]
+        let ink = focused ? frame.colors.cursor : idle ?? frame.colors.cursor
+        let drawn = [GlyphInstance(rect: area, slot: Self.origin(block.slot), colour: false, color: Self.color(ink))]
         guard shape == .block, !cell.attributes.contains(.invisible),
               let item = Self.item(for: cell.grapheme, style: FontStyle(cell.attributes), wide: wide)
         else { return (drawn, true) }
         guard let place = glyphs.place(item) else { return (drawn, false) }
-        let under = cell.selected ? cell.foreground : cell.background
+        let under = !cell.selected ? cell.background : selection?.background ?? cell.foreground
         return (drawn + [GlyphInstance(rect: area, slot: Self.origin(place.slot), colour: place.colour, color: Self.color(under))], true)
     }
 

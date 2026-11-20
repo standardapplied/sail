@@ -26,7 +26,7 @@ import Testing
             ]
         case .quiet:
             return [
-                Wanted(fill: nil, edge: nil, label: look.textSecondary), Wanted(fill: look.fillHover, edge: nil, label: look.text),
+                Wanted(fill: nil, edge: nil, label: look.textSecondary), Wanted(fill: nil, edge: nil, label: look.text),
                 Wanted(fill: look.fillPressed, edge: nil, label: look.text),
             ]
         case .destructiveQuiet:
@@ -143,7 +143,7 @@ import Testing
         #expect([FieldSize.gap, FieldSize.mark, FieldSize.regular.textInset, FieldSize.small.textInset] == [6, 14, 11, 9])
         #expect([ButtonSize.mark, ButtonSize.markGap, ButtonSize.hintGap, ButtonSize.icon] == [14, 6, 8, 15])
         #expect(ButtonSize.hintOpacity == 0.7)
-        #expect(Look.Tracking.eyebrow == 0.14 && Look.Tracking.pill == 0.08 && Look.Tracking.smallPill == 0.06)
+        #expect(Look.Tracking.eyebrow == 0.2 && Look.Tracking.pill == 0.08 && Look.Tracking.smallPill == 0.06)
         #expect(Look.Timing.hover == 0.12 && Look.Timing.turn == 0.7 && Look.Timing.pulse == 1.2 && Look.Timing.skeletonDelay == 0.15)
         for look in [Look.light, Look.dark] {
             #expect(ButtonPaint(.destructive, ButtonState(busy: true), look: look).spinner == SpinnerInk(track: Tint(look.onError, alpha: 0.35), arc: Tint(look.onError)))

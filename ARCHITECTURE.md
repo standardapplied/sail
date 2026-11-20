@@ -1757,7 +1757,20 @@ Each row with the tests that prove it:
   (b) git reports
   no user name or email at system or global level; (c) no `authorized_keys` under any home has a
   line; (d) gh holds no login file (`hosts.yml`), read by existence, never by what gh prints. A search or a git or gh command that errors fails the build, as
-  does anything found: nothing is recorded or snapshotted and the version before stays current. A
+  does anything found. The template runs while it is stripped and searched (each is an `incus
+  exec` in it), so both wait first for its boot to finish (`WorkspaceCredentials.clean`:
+  `systemctl is-system-running --wait`, at most 120 s, `running` or `degraded`), since its boot
+  cleans `/tmp` and makes directories there; one that never settles fails the build saying
+  systemd's state. Both scripts run with `PATH=/usr/sbin:/usr/bin:/sbin:/bin`, so no tool the template installed
+  earlier on its path answers for them. As a guard against later churn, grep's "No such file or
+  directory" alone is no failure, since a file gone holds nothing; its errors are kept in a `0600`
+  file of their own on `/dev/shm`, removed on every path and never walked by the search (`/dev` is
+  a mount), read in the C locale and matched to the end of each line, so a file named for that
+  error cannot pass for one; any other error, an exit 2 that says nothing, and no file for the
+  errors each fail the build. What the check promises is about a template that has stopped changing:
+  one that changes itself during the search (a process that moves a file from a directory not yet
+  read to one already read) can move a token past it, as it always could; the check catches a
+  credential a build left by accident, not one a hostile definition hides: nothing is recorded or snapshotted and the version before stays current. A
   failed build is stripped too; what the strip does not remove is named, never its value, at most
   three files and how many more, with the remedy to remove what wrote it, a step of the
   definition or a hand change to the template, and build again.

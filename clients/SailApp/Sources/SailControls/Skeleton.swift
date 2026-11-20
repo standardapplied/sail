@@ -32,7 +32,7 @@ public final class Skeleton: NSView {
     }
 
     override public func draw(_: NSRect) {
-        NSColor(look.fillHover).setFill()
+        NSColor(look.skeleton).setFill()
         NSBezierPath(roundedRect: bounds, xRadius: 3, yRadius: 3).fill()
     }
 

@@ -8,51 +8,47 @@ import Testing
 
 /// Rows, tiles, banners, empty tiles and where a tooltip goes, as the component sheet draws them.
 @Suite struct RowAndNoticeTests {
+    /// On paper no row is filled: chosen, it has the bar and its name at full weight; under the
+    /// pointer, its name at full weight and its actions; the create row open has the bar; refused,
+    /// nothing; under way, its progress line.
+    @Test func eachRowStateIsTheSheets() {
+        let rest = RowPaint(RowState())
+        #expect(!rest.bar && !rest.strong && !rest.actions)
+        let hovered = RowPaint(RowState(hovered: true))
+        #expect(!hovered.bar && hovered.strong && hovered.actions)
+        for chosen in [RowPaint(RowState(chosen: true)), RowPaint(RowState(chosen: true, emphasized: true, hovered: true))] {
+            #expect(chosen.bar && chosen.strong && chosen.actions, "the chosen row is not found by its bar and its weight")
+        }
+        #expect(RowPaint.naming.bar && !RowPaint.refused.bar && !RowPaint.refused.actions && RowPaint.creating.progress && RowPaint.creating.actions)
+    }
+
+    /// M1: the chosen row's bar says whether its list holds the keys, as macOS's selection does: in
+    /// the accent while it does, in the quiet `barIdle` while it does not; the create row's bar is
+    /// in the accent, its field holding the keys.
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
-    func eachRowStateIsTheSheets(_ name: String, _ look: Look) {
-        let rest = RowPaint(RowState(), look: look)
-        #expect(rest.fill == nil && !rest.bar && !rest.actions)
-        let hovered = RowPaint(RowState(hovered: true), look: look)
-        #expect(hovered.fill == look.fillHover && !hovered.bar && hovered.actions)
-        let focused = RowPaint(RowState(chosen: true, emphasized: true, hovered: true), look: look)
-        #expect(focused.fill == look.fillSelected && focused.bar && focused.actions, "\(name): the chosen row of the list with the keys")
-        let quiet = RowPaint(RowState(chosen: true), look: look)
-        #expect(quiet.fill == look.fillSelectedQuiet && quiet.bar && quiet.actions, "\(name): the chosen row of a list without the keys")
-        #expect(look.fillSelectedQuiet.alpha == look.fillSelected.alpha / 2 && look.fillSelectedQuiet.rgb == look.fillSelected.rgb)
+    func theBarSaysWhichListHoldsTheKeys(_ name: String, _ look: Look) {
+        let keys = RowPaint(RowState(chosen: true, emphasized: true)), away = RowPaint(RowState(chosen: true))
+        #expect(keys.bar && keys.keys && away.bar && !away.keys, "\(name): the bar does not tell the keys")
+        #expect(keys.barInk(look) == Tint(look.accent) && away.barInk(look) == look.barIdle && look.barIdle.rgb != look.accent, "\(name): \(keys.barInk(look)), \(away.barInk(look))")
+        #expect(RowPaint.naming.keys && RowPaint.naming.barInk(look) == Tint(look.accent))
     }
 
     @Test func theTwoRowStylesAreTheSheets() {
         let sidebar = RowStyle.sidebar, list = RowStyle.list
         #expect([sidebar.height, sidebar.margin, sidebar.leading, sidebar.radius, sidebar.bar] == [30, 6, 6, 5, 14])
+        #expect(list.head == 34 && sidebar.head == 30 && Look.Tracking.eyebrow == 0.2)
         #expect(sidebar.trailing == 6 && RowStyle.disclosure == 12 && RowStyle.gap == 7)
         #expect([list.height, list.margin, list.leading, list.trailing, list.radius, list.bar] == [52, 0, 20, 12, 0, 24])
-        #expect(list.hairline && !sidebar.hairline && RowStyle.groupHeight == 30 && RowStyle.barWidth == 2)
+        #expect(list.hairline && !sidebar.hairline && RowStyle.barWidth == 2)
     }
 
-    /// Every name the design shows takes the design's hue, from its first letter.
-    @Test(arguments: [Look.light, .dark])
-    func aTileTakesTheDesignsHue(_ look: Look) {
-        let designs: [(String, Tint)] = [
-            ("harbor", Tint(look.accentText)), ("demo", Tint(look.warning)), ("lighthouse", Tint(look.info)), ("marina", Tint(look.success)),
-            ("atlas", look.textSecondary), ("keel", Tint(look.info)), ("quarry", Tint(look.warning)), ("beacon", Tint(look.success)),
-            ("tidewater", Tint(look.accentText)), ("Harbor", Tint(look.accentText)),
-        ]
-        for (name, hue) in designs {
-            let tile = TilePaint(name, look: look)
-            #expect(tile.ink == hue && tile.fill == Tint(hue.rgb, alpha: hue.alpha * 0.14) && tile.ring == Tint(hue.rgb, alpha: hue.alpha * 0.22), "\(name)")
-        }
-    }
-
-    /// A letter the design does not show takes a hue by its place in the alphabet, always the same;
-    /// anything but a Latin letter, or no name, is secondary.
-    @Test func otherLettersTakeAHueByTheirPlace() {
-        let look = Look.light, four = [look.accentText, look.warning, look.info, look.success]
-        #expect(TilePaint("cove", look: look).ink == Tint(four[2]) && TilePaint("eddy", look: look).ink == Tint(four[0]))
-        #expect(TilePaint("fjord", look: look).ink == Tint(four[1]) && TilePaint("gull", look: look).ink == Tint(four[2]))
-        #expect(TilePaint("zephyr", look: look).ink == Tint(four[1]) && TilePaint("cove", look: look) == TilePaint("Cove", look: look))
-        for name in ["7seas", "", "éclat"] {
-            #expect(TilePaint(name, look: look).ink == look.textSecondary, "\(name)")
-        }
+    /// Every project's tile is the same outlined well (the owner, 19 Nov 2026): no fill, the strong
+    /// hairline, the letter quiet; the chosen project's is outlined and lettered in full ink.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func everyTileIsTheSameOutlinedWell(_ name: String, _ look: Look) {
+        let tile = TilePaint(look: look), chosen = TilePaint(look: look, chosen: true)
+        #expect(tile.fill == nil && tile.ring == look.separatorStrong && tile.ink == look.textSecondary, "\(name)")
+        #expect(chosen.fill == nil && chosen.ring == look.text && chosen.ink == look.text, "\(name): the chosen well")
         #expect([TilePaint.side, TilePaint.points, TilePaint.radius] == [20, 11, 4])
     }
 
