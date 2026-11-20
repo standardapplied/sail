@@ -769,7 +769,9 @@ extension Driver {
             if !drawn { undrawn.append(look) }
             await drawnAndCommitted()
             await onTheCursorsVisiblePhase()
-            let file = folder.appending(path: "\(name)-\(look).png")
+            // kit-rtl shoots kit's steps again: its frames are named apart, not over kit's.
+            let direction = NSApp.userInterfaceLayoutDirection == .rightToLeft ? "-rtl" : ""
+            let file = folder.appending(path: "\(name)\(direction)-\(look).png")
             await take(file)
             let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int) ?? 0
             taken.append("\(file.lastPathComponent) \(size) bytes")

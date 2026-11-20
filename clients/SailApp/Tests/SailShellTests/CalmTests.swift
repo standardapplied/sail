@@ -38,6 +38,29 @@ import Testing
         }
     }
 
+    /// The Account pane, signed out and signed in, in either look: every button is the library's
+    /// (a system button's dark bezel is a grey slab the count cannot see), no grey is filled, and
+    /// the one accent fill is Sign In with Passkey; signed in, Sign Out is outlined and none is.
+    @Test(arguments: [Look.light, .dark])
+    func theAccountPaneIsCalm(_ look: Look) async throws {
+        let transport = Held(RecordedServer([try Exchange("whoami")]), holding: "nothing is held")
+        let pane = try AccountPaneTests.pane(remembering: "uday", transport)
+        pane.look = look
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 700), styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.orderOut(nil) }
+        window.contentView = pane
+        pane.layoutSubtreeIfNeeded()
+        let system = WorkspacesViewTests.found(NSButton.self, in: pane).filter { !($0 is SailButton) && !($0 is LinkButton) }.map(\.title)
+        #expect(system.isEmpty, "the pane holds system buttons: \(system)")
+        let out = Count(marks(in: pane))
+        #expect(out.neutral == 0 && out.fill == 1 && out.tint == 0, "signed out: \(out)")
+        await pane.refresh()
+        pane.layoutSubtreeIfNeeded()
+        #expect(pane.standing != nil && !pane.signOut.isHiddenOrHasHiddenAncestor && pane.signOut.kind == .secondary, "not signed in, or Sign Out is not the outlined secondary")
+        let signedIn = Count(marks(in: pane))
+        #expect(signedIn.neutral == 0 && signedIn.fill == 0 && signedIn.tint == 0, "signed in: \(signedIn)")
+    }
+
     /// The rail's chosen item: one accent bar on an ink fill.
     static func rail(_ look: Look) -> Count {
         let rail = Rail(look: look)
