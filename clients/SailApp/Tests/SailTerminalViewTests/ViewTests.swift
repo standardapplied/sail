@@ -914,12 +914,12 @@ import Testing
         #expect(read >= 20)
     }
 
-    /// No unit test sends a mouse-down through the app (`NSApp.sendEvent`): landing on a control, it
-    /// runs AppKit's own mouse tracking, which stopped the main run loop under a test; real clicks
-    /// are the drive's.
+    /// No unit test sends a mouse event through the app or a window (`sendEvent`): landing on a
+    /// control, it runs AppKit's own mouse tracking, which stopped the main run loop under a test; a
+    /// test hands the view its own handler, and real clicks are the drive's.
     @Test func noUnitTestSendsAMouseDownThroughTheApp() throws {
         let tests = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-        let sent = try NSRegularExpression(pattern: #"NSApp\.sendEvent\(([^)]*)\)"#)
+        let sent = try NSRegularExpression(pattern: #"\.sendEvent\(([^)]*)\)"#)
         var read = 0
         for target in try FileManager.default.contentsOfDirectory(atPath: tests.path) where target.hasSuffix("Tests") {
             let directory = tests.appending(path: target)
@@ -929,7 +929,7 @@ import Testing
                 for match in sent.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
                     guard let range = Range(match.range(at: 1), in: text) else { continue }
                     let argument = String(text[range])
-                    let made = Self.declaration(of: argument, in: text) ?? argument
+                    let made = Self.declaration(of: argument, in: text, before: range.lowerBound) ?? argument
                     #expect(!made.contains("Mouse") && !made.contains("mouseEvent"), "\(target)/\(name) sends a mouse event through the app: \(argument)")
                 }
             }
@@ -937,11 +937,13 @@ import Testing
         #expect(read >= 20)
     }
 
-    /// What makes `name` in `text`: from its `let` to the app's `sendEvent` that sends it.
-    static func declaration(of name: String, in text: String) -> String? {
-        guard let start = text.range(of: "let \(name) = ") ?? text.range(of: "let \(name): ") else { return nil }
-        let end = text.range(of: "NSApp.sendEvent", range: start.upperBound ..< text.endIndex)?.lowerBound ?? text.endIndex
-        return String(text[start.lowerBound ..< end])
+    /// What makes `name` in `text` for the `sendEvent` at `use`: from its nearest `let` before it.
+    static func declaration(of name: String, in text: String, before use: String.Index) -> String? {
+        let before = text.startIndex ..< use
+        guard let start = [text.range(of: "let \(name) = ", options: .backwards, range: before), text.range(of: "let \(name): ", options: .backwards, range: before)]
+            .compactMap(\.self).max(by: { $0.lowerBound < $1.lowerBound })
+        else { return nil }
+        return String(text[start.lowerBound ..< use])
     }
 }
 

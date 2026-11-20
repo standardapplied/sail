@@ -30,6 +30,10 @@ package final class UserMenu: NSObject {
     var onAppearance: @MainActor (Appearance) -> Void = { _ in }
     /// Told when it closes, so the button stops being drawn open.
     var onClose: @MainActor () -> Void = {}
+    /// What tells it its window gave up the keys (the menu then closes): the window's own notice; a
+    /// test names one of its own, so another test's window taking the keys closes nothing of its.
+    var keysLeft = NSWindow.didResignKeyNotification
+
     /// Where the keys go when the view that held them has left the window (a tab closed, a rename
     /// ended): the shown pane's own, or the window.
     var fallback: @MainActor () -> NSResponder? = { nil }
@@ -98,7 +102,7 @@ package final class UserMenu: NSObject {
             MainActor.assumeIsolated { self?.clickedAnywhere(event) }
             return event
         }
-        resignWatch = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: nil) { [weak self] _ in
+        resignWatch = NotificationCenter.default.addObserver(forName: keysLeft, object: window, queue: nil) { [weak self] _ in
             MainActor.assumeIsolated { self?.close() }
         }
     }

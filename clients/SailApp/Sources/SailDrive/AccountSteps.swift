@@ -17,6 +17,9 @@ extension Driver {
             button.performClick(nil)
             return (shell.rail.selected == chosen, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing")")
         }
+        if let shows = step.accountShows {
+            return accountShows(shows)
+        }
         if let how = step.menu {
             return await openMenu(how)
         }
@@ -85,6 +88,21 @@ extension Driver {
             return sweep()
         }
         return nil
+    }
+
+    private func accountShows(_ shows: String) -> (Bool, String) {
+        guard shows != "none" else {
+            shell.account.show(nil)
+            return (true, shell.account.text)
+        }
+        let handle = String(repeating: "k", count: 63)
+        guard let plane = try? ControlPlane(address: "https://" + String(repeating: "h", count: 52) + ".acme.dev"), ["long", "long-unconfirmed"].contains(shows) else {
+            return (false, "no sign-in named \(shows)")
+        }
+        let whoami = Whoami(fde: handle, name: handle, displayName: "Uday Chandra-Bhattacharyya of the Standard Applied Mac app team", role: .known(.member), capabilities: [])
+        let answer: Swift.Result<Whoami, AccountRefusal> = shows == "long" ? .success(whoami) : .failure(AccountRefusal(.unreachable("The network connection was lost."), at: plane, step: .asking))
+        shell.account.show(SignedIn(controlPlane: plane, fde: handle, until: Date(timeIntervalSinceNow: 30 * 86400), whoami: answer))
+        return (true, shell.account.text)
     }
 
     /// What the user menu shows, as one line: closed, and whether its button has the keys; or open,

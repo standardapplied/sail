@@ -231,8 +231,103 @@ final class Held: Transport {
         #expect(pane.planeRow.plane == .unreachable)
     }
 
+    /// A recorded `whoami` answering for `fde`, named `name`.
+    static func whoami(_ fde: String, name: String) -> Exchange {
+        let body = #"{"capabilities": ["read"], "display_name": "\#(name)", "email": "e@example.com", "fde": "\#(fde)", "name": "\#(fde)", "role": "member", "schema_version": 1}"#
+        return Exchange(method: "GET", path: "/v1/whoami", status: 200, body: Data(body.utf8))
+    }
+
+    static let longHandle = String(repeating: "k", count: 63)
+    static let longName = "Uday Chandra-Bhattacharyya of the Standard Applied Mac app team"
+
+    /// M1: the pane and the menu say one thing, from one source: the heading, `@handle · Role` and
+    /// the control plane's line are the menu content's name, detail, address and state, confirmed,
+    /// during a check and out of reach.
+    @Test func thePaneAndTheMenuCannotDisagree() async throws {
+        func agree(_ pane: AccountPane, _ when: String) {
+            let content = pane.menuContent
+            #expect(pane.heading.stringValue == content.name && pane.handle.stringValue == (content.detail ?? ""), "\(when): \(pane.heading.stringValue) / \(pane.handle.stringValue) against \(content)")
+            #expect(pane.planeRow.said == (content.address ?? "") && pane.planeRow.plane == content.plane, "\(when): the line says \(pane.planeRow.said), \(String(describing: pane.planeRow.plane)) against \(content)")
+        }
+        let confirmed = try Self.pane(remembering: "uday", Held(RecordedServer([try Exchange("whoami")]), holding: "nothing is held"))
+        await confirmed.refresh()
+        agree(confirmed, "confirmed")
+        let transport = OutOfReach()
+        let defaults = try #require(UserDefaults(suiteName: "sail-account-\(UUID().uuidString)"))
+        defaults.set("http://127.0.0.1:7979", forKey: AccountPane.addressKey)
+        let away = AccountPane(
+            account: Account(authenticator: Signs(sheet: nil), vault: OneSession(fde: "ana")) { _ in transport }, look: .light,
+            title: try TitleFont(directory: LookTests.fonts), mono: try TerminalFonts(directory: LookTests.fonts), labels: try LabelFont(directory: LookTests.fonts),
+            defaults: defaults
+        )
+        let check = Task { await away.refresh() }
+        #expect(await RunnerTabTests.until { transport.asked == 1 })
+        transport.answer()
+        await check.value
+        agree(away, "out of reach")
+        let again = Task { await away.refresh() }
+        #expect(await RunnerTabTests.until { transport.asked == 2 })
+        agree(away, "asking again")
+        transport.answer()
+        await again.value
+    }
+
+    /// M2: a long name and a long handle are cut at their end and said in full on hover; the session's
+    /// end, confirmed or not, wraps.
+    @Test func longWordsAreCutAndSaidInFull() async throws {
+        let pane = try Self.pane(remembering: Self.longHandle, Held(RecordedServer([Self.whoami(Self.longHandle, name: Self.longName)]), holding: "nothing is held"))
+        let window = Self.shown(pane, width: Double(ShellApp.leastFrame.width) - Rail.width - 4)
+        defer { window.orderOut(nil) }
+        await pane.refresh()
+        pane.layoutSubtreeIfNeeded()
+        for (label, tip) in [(pane.heading, pane.headingTip), (pane.handle, pane.handleTip)] {
+            let style = label.attributedStringValue.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+            #expect(style?.lineBreakMode == .byTruncatingTail && tip.shows && tip.text == label.stringValue, "\(label.stringValue.prefix(12))… is not cut at its end and said in full")
+        }
+        #expect(pane.until.maximumNumberOfLines != 1, "the session's end does not wrap")
+    }
+
+    /// Minor 1: a refused field is drawn refused, a crimson edge with the error's mark before the
+    /// sentence, until the field is edited again.
+    @Test func aRefusedFieldIsDrawnRefused() async throws {
+        let pane = try Self.pane(remembering: "uday", Held(RecordedServer([]), holding: "nothing is held"))
+        let window = Self.shown(pane)
+        defer { window.orderOut(nil) }
+        pane.signIn.performClick(nil)
+        #expect(await RunnerTabTests.until { !pane.isActing && !pane.lines.isEmpty })
+        #expect(pane.addressFrame.failed && pane.addressFrame.ring.colour == NSColor(pane.look.error) && !pane.ticketFrame.failed, "the refused field is not drawn refused")
+        #expect(pane.said.attributedStringValue.containsAttachments, "the sentence has no error mark")
+        pane.address.stringValue = "https://sail.example.com"
+        pane.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: pane.address))
+        #expect(!pane.addressFrame.failed, "edited again, the field is still drawn refused")
+    }
+
+    /// Minor 2: which field a refusal is about ends with the action: after an enrollment's sentence
+    /// under the ticket, a check that finds the session ended says so under the control plane's field.
+    @Test func aLaterRefusalIsNotUnderTheEnrollmentsField() async throws {
+        let server = RecordedServer([try Exchange("whoami"), try Exchange("passkey-register-start"), try Exchange("passkey-register-finish")])
+        let transport = Held(server, holding: "whoami", after: 1, then: try Exchange("refusal-invalid-bearer-token"))
+        let pane = try Self.pane(remembering: "uday", transport)
+        let window = Self.shown(pane)
+        defer { window.orderOut(nil) }
+        await pane.refresh()
+        pane.ticket.stringValue = Self.ticket
+        pane.enroll.performClick(nil)
+        #expect(await RunnerTabTests.until { !pane.isActing && !pane.lines.isEmpty }, "the enrollment said nothing")
+        let checking = Task { await pane.refresh() }
+        #expect(await RunnerTabTests.until { transport.routes.filter { $0.contains("whoami") }.count == 2 })
+        transport.release()
+        await checking.value
+        pane.layoutSubtreeIfNeeded()
+        #expect(pane.standing == nil && pane.lines.contains { $0.hasSuffix("has ended.") }, "\(pane.lines)")
+        let said = pane.convert(pane.said.bounds, from: pane.said), field = pane.convert(pane.address.bounds, from: pane.address)
+        let ticket = pane.convert(pane.ticket.bounds, from: pane.ticket)
+        #expect(said.maxY <= field.minY + 0.5 && said.minY >= ticket.maxY, "the session's end is said at \(said), not under the control plane's field \(field)")
+    }
+
     /// Nothing the pane shows is out of reach, signed out, refused and signed in, at every window
-    /// size from the least frame up.
+    /// size from the least frame up; signed in with the longest handle and a long name, confirmed and
+    /// not yet confirmed.
     @Test func nothingInThePaneIsOutOfReach() async throws {
         var faults: [String] = []
         for size in UserMenuTests.sizes {
@@ -249,6 +344,22 @@ final class Held: Transport {
             await signedIn.refresh()
             faults += WorkspacesReachTests.outOfReach(in: signedIn).map { "\(width) pt, signed in: \($0)" }
             other.orderOut(nil)
+            let long = try Self.pane(remembering: Self.longHandle, Held(RecordedServer([Self.whoami(Self.longHandle, name: Self.longName)]), holding: "nothing is held"))
+            let longWindow = Self.shown(long, width: width)
+            await long.refresh()
+            faults += WorkspacesReachTests.outOfReach(in: long).map { "\(width) pt, long and confirmed: \($0)" }
+            longWindow.orderOut(nil)
+            let failing = Held(RecordedServer([]), holding: "whoami", then: Exchange(method: "GET", path: "/v1/whoami", status: 502, body: Data("{}".utf8)))
+            let unconfirmed = try Self.pane(remembering: Self.longHandle, failing)
+            let unconfirmedWindow = Self.shown(unconfirmed, width: width)
+            let checking = Task { await unconfirmed.refresh() }
+            _ = await RunnerTabTests.until { failing.routes.contains { $0.contains("whoami") } }
+            failing.release()
+            await checking.value
+            unconfirmed.layoutSubtreeIfNeeded()
+            #expect(unconfirmed.until.stringValue.hasPrefix("Not yet confirmed"), "\(unconfirmed.until.stringValue)")
+            faults += WorkspacesReachTests.outOfReach(in: unconfirmed).map { "\(width) pt, long and not yet confirmed: \($0)" }
+            unconfirmedWindow.orderOut(nil)
         }
         #expect(faults.isEmpty, "\(faults.count) faults: \(faults.prefix(20).joined(separator: "\n"))")
     }

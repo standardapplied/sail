@@ -13,13 +13,11 @@ import Testing
 /// work it, what each item does, Appearance remembered and taken, what VoiceOver hears, and that it
 /// adds no accent and no grey to the window it opens over. No test here runs a real event loop (a
 /// posted event, a button's own mouse tracking): with no `NSApp.run` under a test, that stopped the
-/// main run loop and so ended the suite's process; real clicks are the drive's. One test at a time:
-/// a menu closes when its window gives up the keys, and another test's window takes them. Its tests
-/// hold two things that are the whole process's, the key window and `NSApp.appearance` (each test
-/// that sets it puts back what it found): CI runs every suite in a process of its own
-/// (`ci/test-suites`); a plain local `swift test` runs all suites in one, where another suite's
-/// sheet can take the keys and close a menu under a test, which its message then says.
-@MainActor @Suite(.serialized) struct UserMenuTests {
+/// main run loop and so ended the suite's process; real clicks are the drive's. No test here holds
+/// what is the whole process's, so it passes beside any other suite in one process: each shell's
+/// menu is told its window gave up the keys by a notification of the test's own, not the real key
+/// window, and its Appearance is set through a recorder, not `NSApp.appearance`.
+@MainActor @Suite struct UserMenuTests {
     init() {
         ExitWatch.install()
     }
@@ -37,7 +35,23 @@ import Testing
     static func shell(_ look: Look = .light) throws -> ShellApp {
         let shell = try WorkbenchLookTests.shell(look)
         shell.window.orderFront(nil)
+        own(shell)
         return shell
+    }
+
+    /// What each test's shell set as the app's appearance, in place of the process's own.
+    static var appearances: [ObjectIdentifier: NSAppearance.Name?] = [:]
+
+    /// `shell` told it gave up the keys by a notification of its own, and its Appearance recorded.
+    static func own(_ shell: ShellApp) {
+        shell.userMenu.keysLeft = Notification.Name("sail.tests.keys-left.\(UUID().uuidString)")
+        let id = ObjectIdentifier(shell)
+        shell.setAppearance = { Self.appearances[id] = .some($0?.name) }
+    }
+
+    /// The appearance `shell` last set, nil for the Mac's own (or none set).
+    static func appearance(of shell: ShellApp) -> NSAppearance.Name? {
+        appearances[ObjectIdentifier(shell)] ?? nil
     }
 
     static func open(_ shell: ShellApp, _ content: UserMenuContent = uday, withKeys: Bool = false) throws {
@@ -139,12 +153,8 @@ import Testing
     /// menu; ← and → choose the Appearance on it; Return chooses; Escape closes and the keys go back
     /// to the button when the keys opened it, else where they were.
     @Test func theKeysWorkTheMenu() throws {
-        let appearanceWas = NSApp.appearance
         let shell = try Self.shell()
-        defer {
-            shell.window.orderOut(nil)
-            NSApp.appearance = appearanceWas
-        }
+        defer { shell.window.orderOut(nil) }
         let view = shell.userMenu.view, button = try #require(shell.rail.button(.account))
         let had = UserMenu.holder(of: shell.window.firstResponder)
         try Self.open(shell, withKeys: true)
@@ -158,10 +168,10 @@ import Testing
         #expect(Self.highlighted(view) == "Account" && shell.userMenu.isOpen && shell.window.firstResponder is MenuKeys, "Tab left the menu, or moved to \(Self.highlighted(view))")
         try Self.press(Self.down, in: shell)
         try Self.press(Self.left, in: shell)
-        #expect(view.chosenLook == .dark && Appearance.stored(in: shell.defaults) == .dark && NSApp.appearance?.name == .darkAqua && shell.userMenu.isOpen)
+        #expect(view.chosenLook == .dark && Appearance.stored(in: shell.defaults) == .dark && Self.appearance(of: shell) == .darkAqua && shell.userMenu.isOpen)
         try Self.press(Self.right, in: shell)
         try Self.press(Self.right, in: shell)
-        #expect(view.chosenLook == .auto && NSApp.appearance == nil, "→ twice from Dark is \(view.chosenLook)")
+        #expect(view.chosenLook == .auto && Self.appearance(of: shell) == nil, "→ twice from Dark is \(view.chosenLook)")
         try Self.press(Self.escape, in: shell)
         // The rail's button takes the keys on this Mac with Keyboard Navigation off as well (CI's
         // runner gave them to it); where it refuses them, they go back where they were.
@@ -184,12 +194,8 @@ import Testing
     /// window giving up the keys; Logins, which cannot be chosen, says why when clicked or pointed
     /// at and leaves the menu open; Account shows the Account pane; an Appearance leaves it open.
     @Test func thePointerWorksTheMenu() throws {
-        let appearanceWas = NSApp.appearance
         let shell = try Self.shell()
-        defer {
-            shell.window.orderOut(nil)
-            NSApp.appearance = appearanceWas
-        }
+        defer { shell.window.orderOut(nil) }
         let button = try #require(shell.rail.button(.account)), view = shell.userMenu.view
         button.performClick(nil)
         #expect(shell.userMenu.isOpen && shell.rail.menuOpen, "the button did not open the menu")
@@ -203,7 +209,7 @@ import Testing
         shell.userMenu.clickedAnywhere(outside)
         #expect(!shell.userMenu.isOpen, "a click outside left it open")
         try Self.open(shell)
-        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: shell.window)
+        NotificationCenter.default.post(name: shell.userMenu.keysLeft, object: shell.window)
         #expect(!shell.userMenu.isOpen, "the window giving up the keys left it open")
         try Self.open(shell)
         let logins = try #require(view.items.first { $0.item == .logins })
@@ -216,7 +222,7 @@ import Testing
         #expect(!view.tip.isShown && account.highlighted && account.drawn.fill == shell.look.menuHighlight.fill, "pointing at Account did not highlight it")
         let dark = view.segments.rects[1]
         view.segments.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: dark.midX, y: dark.midY), in: view.segments))
-        #expect(shell.userMenu.isOpen && Appearance.stored(in: shell.defaults) == .dark && NSApp.appearance?.name == .darkAqua)
+        #expect(shell.userMenu.isOpen && Appearance.stored(in: shell.defaults) == .dark && Self.appearance(of: shell) == .darkAqua)
         account.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: account.bounds.midX, y: account.bounds.midY), in: account))
         #expect(!shell.userMenu.isOpen && shell.rail.selected == .account, "Account showed \(shell.rail.selected?.rawValue ?? "nothing")")
         shell.choose(.auto)
@@ -256,23 +262,19 @@ import Testing
     /// Appearance is remembered and taken: Light and Dark set the app's own, Auto leaves the Mac's
     /// (the app follows it as it changes); the one kept is taken at the next launch, Auto when none.
     @Test func appearanceIsRememberedAndTaken() throws {
-        let appearanceWas = NSApp.appearance
         let shell = try Self.shell()
-        defer {
-            shell.window.orderOut(nil)
-            NSApp.appearance = appearanceWas
-        }
+        defer { shell.window.orderOut(nil) }
         #expect(Appearance.stored(in: shell.defaults) == .auto, "a first launch is not Auto")
+        var taken: NSAppearance.Name?? = .none
         for (appearance, name) in [(Appearance.dark, NSAppearance.Name.darkAqua), (.light, .aqua)] {
             shell.choose(appearance)
-            #expect(NSApp.appearance?.name == name && Appearance.stored(in: shell.defaults) == appearance)
-            NSApp.appearance = nil
-            ShellApp.takeRememberedAppearance(from: shell.defaults)
-            #expect(NSApp.appearance?.name == name, "\(appearance) was not taken at launch")
+            #expect(Self.appearance(of: shell) == name && Appearance.stored(in: shell.defaults) == appearance)
+            ShellApp.takeRememberedAppearance(from: shell.defaults) { taken = .some($0?.name) }
+            #expect(taken == .some(name), "\(appearance) was not taken at launch")
         }
         shell.choose(.auto)
-        ShellApp.takeRememberedAppearance(from: shell.defaults)
-        #expect(NSApp.appearance == nil && Appearance.stored(in: shell.defaults) == .auto, "Auto set an appearance of the app's own")
+        ShellApp.takeRememberedAppearance(from: shell.defaults) { taken = .some($0?.name) }
+        #expect(taken == .some(nil) && Self.appearance(of: shell) == nil && Appearance.stored(in: shell.defaults) == .auto, "Auto set an appearance of the app's own")
     }
 
     /// VoiceOver hears a menu named Account, its items as menu items by their titles (Logins
@@ -348,10 +350,11 @@ import Testing
             fonts: LookTests.fonts, helper: nil, look: .light, passkeys: { _ in Signs(sheet: nil) }, connect: { _ in transport },
             vault: OneSession(fde: "uday"), defaults: defaults
         )
+        Self.own(shell)
         shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }
         let view = shell.userMenu.view
-        try Self.open(shell, shell.menuContent)
+        try Self.open(shell, shell.account.menuContent)
         #expect(view.content.name == "Not signed in" && view.content.detail == "127.0.0.1:7979")
         let said = { "the menu \(shell.userMenu.isOpen ? "open" : "closed (its window gave up the keys)") says \(view.content.name), \(view.content.plane.map { "\($0)" } ?? "no state"); the account \(shell.account.standing == nil ? "knows no one" : "knows uday"), \(shell.account.checks) checks" }
         let check = Task { await shell.account.refresh() }
@@ -360,9 +363,11 @@ import Testing
         transport.answer()
         await check.value
         #expect(shell.userMenu.isOpen && view.content.name == "uday" && view.content.plane == .unreachable, "the check ended: \(said())")
+        #expect(view.content == shell.account.menuContent, "the menu and the account disagree: \(view.content) against \(shell.account.menuContent)")
         let again = Task { await shell.account.refresh() }
         #expect(await RunnerTabTests.until { transport.asked == 2 }, "the check asked nothing again: \(transport.asked) asked")
         #expect(shell.userMenu.isOpen && view.content.plane == .reconnecting, "asking again: \(said())")
+        #expect(view.content == shell.account.menuContent, "the menu and the account disagree asking again")
         transport.answer()
         await again.value
         #expect(shell.userMenu.isOpen && view.content.plane == .unreachable, "asked again: \(said())")
@@ -504,12 +509,8 @@ import Testing
     /// Right to left the menu is mirrored: the avatar and the state square at its right, the name
     /// set right, the segments' Light at their right, ← choosing the next Appearance.
     @Test func rightToLeftTheMenuIsMirrored() throws {
-        let appearanceWas = NSApp.appearance
         let shell = try Self.shell()
-        defer {
-            shell.window.orderOut(nil)
-            NSApp.appearance = appearanceWas
-        }
+        defer { shell.window.orderOut(nil) }
         try #require(shell.rail.button(.account)).userInterfaceLayoutDirection = .rightToLeft
         try Self.open(shell, withKeys: true)
         let view = shell.userMenu.view, width = Double(view.bounds.width)

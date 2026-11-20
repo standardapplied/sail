@@ -18,7 +18,7 @@ import SailTerminalView
 /// own action, Sign In from the address and Enroll from the ticket: no button is the window's default,
 /// which AppKit would paint in the system accent.
 @MainActor
-public final class AccountPane: NSView, NSMenuItemValidation {
+public final class AccountPane: NSView, NSMenuItemValidation, NSTextFieldDelegate {
     static let addressKey = "controlPlane.address"
 
     public let address = NSTextField()
@@ -83,15 +83,20 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     private(set) var lines: [String] = []
     /// The facts' mono eyebrows, signed out and signed in.
     private(set) var eyebrows: [NSTextField] = []
-    private lazy var addressFrame = FieldFrame(address, look: look)
-    private lazy var ticketFrame = FieldFrame(ticket, look: look)
+    private(set) lazy var addressFrame = FieldFrame(address, look: look)
+    private(set) lazy var ticketFrame = FieldFrame(ticket, look: look)
+    /// The display heading: who is signed in, or "Sign in to Sail"; cut at its end, said in full on
+    /// hover.
     let heading = NSTextField(labelWithString: "Sign in to Sail")
-    /// `@handle · Role`, signed in.
+    /// `@handle · Role`, signed in; cut at its end, said in full on hover.
     let handle = NSTextField(labelWithString: "")
+    private(set) lazy var headingTip = Tooltip("", look: look, mono: nil)
+    private(set) lazy var handleTip = Tooltip("", look: look, mono: nil)
+    private let headingFont: NSFont
     /// The control plane as the user menu draws it, signed in.
     let planeRow: ControlPlaneRow
-    /// Until when the session lasts, or that it is not yet confirmed, in quiet text.
-    let until = NSTextField(labelWithString: "")
+    /// Until when the session lasts, or that it is not yet confirmed, in quiet text that wraps.
+    let until = NSTextField(wrappingLabelWithString: "")
     private let signedOutRows = NSStackView()
     private let signedInRows = NSStackView()
 
@@ -101,12 +106,12 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         self.look = look
         self.mono = mono
         planeRow = ControlPlaneRow(look: look, mono: labels, points: Look.Step.callout.points)
+        headingFont = title.font(.title2) as NSFont
         signIn = SailButton("Sign In with Passkey", kind: .primary, look: look, target: nil, action: #selector(AccountPane.signInWithPasskey(_:)))
         enroll = SailButton("Enroll with a Ticket", kind: .secondary, look: look, target: nil, action: nil)
         signOut = SailButton("Sign Out", kind: .secondary, look: look, target: nil, action: nil)
         super.init(frame: .zero)
         signIn.target = self
-        heading.font = title.font(.title2) as NSFont
         compose()
         address.stringValue = defaults.string(forKey: Self.addressKey) ?? ""
         show(nil)
@@ -120,7 +125,22 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     /// Everything the pane says now, a line each, as the drive reads it.
     public var text: String {
         let facts = standing == nil ? [] : [handle.stringValue, "\(planeRow.said) · \(planeRow.plane?.said ?? "")", until.stringValue]
-        return ([heading.stringValue] + facts + [said.isHidden ? "" : said.stringValue]).filter { !$0.isEmpty }.joined(separator: "\n")
+        return ([heading.stringValue] + facts + lines).filter { !$0.isEmpty }.joined(separator: "\n")
+    }
+
+    /// What the user menu says, from what the pane knows: who is signed in at which control plane
+    /// and whether it answers; while it is still asking and knows no one, that it is checking, never
+    /// "Not signed in". The pane's own heading, handle and control plane line are drawn from it too,
+    /// so the two never disagree.
+    var menuContent: UserMenuContent {
+        let lastUsed = defaults.string(forKey: Self.addressKey).flatMap { try? ControlPlane(address: $0) }.map(\.named)
+        guard let standing else {
+            if checks > 0, let lastUsed { return .checking(at: lastUsed) }
+            return .signedOut(lastUsed: lastUsed)
+        }
+        let whoami = try? standing.whoami.get()
+        let unreachable: Bool = if case let .failure(refusal) = standing.whoami { refusal.reason == .unreachable } else { false }
+        return .signedIn(handle: whoami?.fde ?? standing.fde, address: standing.controlPlane.named, whoami: whoami, unreachable: unreachable, refreshing: checks > 0)
     }
 
     /// Asks the server who this Mac is signed in as at the control plane it last used, when it
@@ -253,6 +273,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     /// check's answer that came meanwhile is taken.
     private func end() {
         acting -= 1
+        about = nil
         holdTheButtons()
         guard acting == 0, let held = heldAnswer else { return }
         heldAnswer = nil
@@ -288,25 +309,20 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     /// Shows who is signed in, and why `whoami` could not confirm it, after what the pane says;
-    /// "Sign in with it." is never said beside someone signed in.
-    private func show(_ signedIn: SignedIn?) {
+    /// "Sign in with it." is never said beside someone signed in. The drive shows one of its own for
+    /// the frames of long words at the least window.
+    package func show(_ signedIn: SignedIn?) {
         shown += 1
         standing = signedIn
         signedOutRows.isHidden = signedIn != nil
         signedInRows.isHidden = signedIn == nil
         onStanding(signedIn)
         guard let signedIn else {
-            heading.stringValue = "Sign in to Sail"
+            paintFacts()
             say(lines, refused: refused)
             return
         }
         let whoami = try? signedIn.whoami.get()
-        heading.stringValue = [whoami?.displayName, whoami?.name].compactMap { $0 }.first { !$0.isEmpty } ?? signedIn.fde
-        let role = whoami.flatMap { whoami -> String? in
-            guard case let .known(role) = whoami.role else { return nil }
-            return role.rawValue.prefix(1).uppercased() + role.rawValue.dropFirst()
-        }
-        handle.stringValue = "@\(whoami?.fde ?? signedIn.fde)" + (role.map { " · \($0)" } ?? "")
         let ends = signedIn.until.formatted(date: .long, time: .shortened)
         until.stringValue = whoami == nil ? "Not yet confirmed: remembered on this Mac until \(ends)" : "Signed in until \(ends)"
         showPlane()
@@ -319,12 +335,27 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         say(now, refused: refusing)
     }
 
-    /// The control plane's line: its address and whether it answers, reconnecting while a check asks
-    /// again after it did not.
+    /// The heading, the handle and the control plane's line, from what the menu says: the person's
+    /// name, `@handle · Role`, the address and whether it answers (reconnecting while a check asks
+    /// again after it did not); signed out, "Sign in to Sail".
     private func showPlane() {
-        guard let standing else { return }
-        let unreachable: Bool = if case let .failure(refusal) = standing.whoami { refusal.reason == .unreachable } else { false }
-        planeRow.show(address: standing.controlPlane.named, plane: UserMenuContent.Plane(unreachable: unreachable, refreshing: checks > 0))
+        paintFacts()
+    }
+
+    private func paintFacts() {
+        let content = menuContent
+        let signedIn = standing != nil
+        set(heading, to: signedIn ? content.name : "Sign in to Sail", font: headingFont, ink: look.text, tip: headingTip)
+        set(handle, to: signedIn ? content.detail ?? "" : "", font: monospaced(.callout), ink: look.textSecondary, tip: handleTip)
+        if signedIn, let address = content.address, let plane = content.plane { planeRow.show(address: address, plane: plane) }
+    }
+
+    /// `label` saying `words` on one line, cut at its end, with `tip` saying them in full when cut.
+    private func set(_ label: NSTextField, to words: String, font: NSFont, ink: Tint, tip: Tooltip) {
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingTail
+        label.attributedStringValue = NSAttributedString(string: words, attributes: [.font: font, .foregroundColor: NSColor(ink), .paragraphStyle: style])
+        tip.text = words
     }
 
     static let signInWithIt = "Sign in with it."
@@ -332,9 +363,10 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     private func paint() {
         lookPaints += 1
         layer?.backgroundColor = NSColor(look.canvas).cgColor
-        heading.textColor = NSColor(look.text)
-        handle.textColor = NSColor(look.textSecondary)
         until.textColor = NSColor(look.textTertiary)
+        headingTip.look = look
+        handleTip.look = look
+        paintFacts()
         eyebrows.forEach { $0.textColor = NSColor(look.textSecondary) }
         planeRow.look = look
         signIn.look = look
@@ -351,16 +383,48 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         self.lines = lines
         self.refused = refused && !lines.isEmpty
         let text = NSMutableAttributedString()
+        let font = NSFont.systemFont(ofSize: Look.Step.callout.points)
         for (index, line) in lines.enumerated() {
             let color = NSColor(index == 0 ? (self.refused ? Tint(look.error) : look.text) : look.textSecondary)
-            text.append(NSAttributedString(
-                string: (index == 0 ? "" : "\n") + line,
-                attributes: [.foregroundColor: color, .font: NSFont.systemFont(ofSize: Look.Step.callout.points)]
-            ))
+            if index == 0, self.refused { text.append(errorMark(color: color, font: font)) }
+            text.append(NSAttributedString(string: (index == 0 ? "" : "\n") + line, attributes: [.foregroundColor: color, .font: font]))
         }
         said.attributedStringValue = text
         said.isHidden = lines.isEmpty
-        place(said, under: standing == nil ? (about ?? addressFrame) : planeRow)
+        let anchor = standing == nil ? (about ?? addressFrame) : planeRow
+        addressFrame.failed = self.refused && anchor === addressFrame
+        ticketFrame.failed = self.refused && anchor === ticketFrame
+        place(said, under: anchor)
+    }
+
+    /// The error's mark before a refusal's sentence, as the create row's field draws it.
+    private func errorMark(color: NSColor, font: NSFont) -> NSAttributedString {
+        let side = 12.0, ink = Tint(look.error)
+        let mark = NSTextAttachment()
+        mark.image = NSImage(size: NSSize(width: side, height: side), flipped: true) { rect in
+            Draw.icon(.error, in: rect, ink: ink)
+            return true
+        }
+        mark.bounds = NSRect(x: 0, y: (Double(font.capHeight) - side) / 2, width: side, height: side)
+        let words = NSMutableAttributedString(attachment: mark)
+        words.append(NSAttributedString(string: " "))
+        words.addAttributes([.foregroundColor: color, .font: font], range: NSRange(location: 0, length: words.length))
+        return words
+    }
+
+    /// A refused field is drawn refused until it is edited again.
+    public func controlTextDidChange(_ notification: Notification) {
+        if notification.object as AnyObject? === address { addressFrame.failed = false }
+        if notification.object as AnyObject? === ticket { ticketFrame.failed = false }
+    }
+
+    /// The wrapping lines take the width they are given, so they are as tall as their words.
+    override public func layout() {
+        super.layout()
+        for label in [until, said] where label.frame.width > 0 && label.preferredMaxLayoutWidth != label.frame.width {
+            label.preferredMaxLayoutWidth = label.frame.width
+            needsLayout = true
+        }
     }
 
     /// `view` in the column, straight after `anchor`.
@@ -385,13 +449,20 @@ public final class AccountPane: NSView, NSMenuItemValidation {
 
     private func compose() {
         wantsLayer = true
-        handle.font = monospaced(.callout)
         until.font = .systemFont(ofSize: Look.Step.footnote.points)
+        for (label, tip) in [(heading, headingTip), (handle, handleTip)] {
+            label.maximumNumberOfLines = 1
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            tip.onlyWhenCut = true
+            tip.attach(to: label, saying: "")
+        }
+        until.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         address.placeholderString = "https://sail.example.com or http://100.64.0.7:7443"
         address.font = monospaced(.callout)
         ticket.placeholderString = "enr_… or the link sail fde enroll printed"
         for field in [address, ticket] {
             field.target = self
+            field.delegate = self
         }
         address.action = #selector(signInWithPasskey(_:))
         ticket.action = #selector(enrollWithTicket(_:))

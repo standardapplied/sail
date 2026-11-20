@@ -3,8 +3,9 @@ import SailLook
 
 /// Every text field of the app's panes, a secure one included, drawn in the look: its text 8 pt
 /// in, on the surface, in content corners, ringed 1 pt in the strong separator, 2 pt in the accent
-/// while it is edited (the system's ring off); the editor's selection and caret are the look's. The
-/// frame draws the ring itself, so it shows wherever the view is drawn.
+/// while it is edited (the system's ring off), in the error's crimson while refused, as the
+/// Workspaces create row's field is; the editor's selection and caret are the look's. The frame
+/// draws the ring itself, so it shows wherever the view is drawn.
 @MainActor
 public final class FieldFrame: NSView {
     static let height = 28.0
@@ -17,6 +18,11 @@ public final class FieldFrame: NSView {
     }
 
     private var focusWatch: NSKeyValueObservation?
+
+    /// Refused: what it holds was refused, until it is edited again or another action starts.
+    var failed = false {
+        didSet { if failed != oldValue { repaint() } }
+    }
 
     init(_ field: NSTextField, look: Look) {
         self.field = field
@@ -45,7 +51,9 @@ public final class FieldFrame: NSView {
     /// The ring drawn now: 2 pt in the accent while the field is edited, else 1 pt in the strong
     /// separator.
     var ring: (width: Double, colour: NSColor) {
-        field.currentEditor() == nil ? (1, NSColor(look.separatorStrong)) : (2, NSColor(look.accent))
+        let editing = field.currentEditor() != nil
+        if failed { return (editing ? 2 : 1, NSColor(look.error)) }
+        return editing ? (2, NSColor(look.accent)) : (1, NSColor(look.separatorStrong))
     }
 
     override public func viewDidMoveToWindow() {
@@ -78,8 +86,10 @@ public final class FieldFrame: NSView {
 }
 
 extension FieldFrame: Marked {
-    /// Its focus ring and caret while it is edited.
+    /// Its focus ring and caret while it is edited; its crimson edge while refused.
     package var drawnMarks: [Mark] {
-        field.currentEditor() == nil ? [] : look.marks(line: Tint(look.accent)) + look.marks(line: Tint(look.accent))
+        let caret = field.currentEditor() == nil ? [] : look.marks(line: Tint(look.accent))
+        if failed { return look.marks(line: Tint(look.error)) + caret }
+        return field.currentEditor() == nil ? [] : look.marks(line: Tint(look.accent)) + caret
     }
 }
