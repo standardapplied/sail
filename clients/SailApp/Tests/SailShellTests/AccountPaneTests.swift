@@ -304,6 +304,23 @@ final class Held: Transport {
         #expect(!pane.addressFrame.failed, "edited again, the field is still drawn refused")
     }
 
+    /// A field the person corrected stays corrected when the pane says the same lines again (a
+    /// change of look); one not touched stays drawn refused.
+    @Test(arguments: [Look.light, .dark])
+    func aCorrectedFieldStaysCorrectedAcrossALookChange(_ look: Look) async throws {
+        let pane = try Self.pane(remembering: "uday", Held(RecordedServer([]), holding: "nothing is held"))
+        let window = Self.shown(pane, look: look)
+        defer { window.orderOut(nil) }
+        pane.signIn.performClick(nil)
+        #expect(await RunnerTabTests.until { !pane.isActing && !pane.lines.isEmpty })
+        pane.look = look == .light ? .dark : .light
+        #expect(pane.addressFrame.failed, "untouched, the refused field is no longer drawn refused after a change of look")
+        pane.address.stringValue = "https://sail.example.com"
+        pane.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: pane.address))
+        pane.look = look
+        #expect(!pane.addressFrame.failed, "corrected, the field turned crimson again at a change of look")
+    }
+
     /// Minor 2: which field a refusal is about ends with the action: after an enrollment's sentence
     /// under the ticket, a check that finds the session ended says so under the control plane's field.
     @Test func aLaterRefusalIsNotUnderTheEnrollmentsField() async throws {

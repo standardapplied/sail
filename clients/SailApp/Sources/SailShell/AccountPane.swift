@@ -378,7 +378,8 @@ public final class AccountPane: NSView, NSMenuItemValidation, NSTextFieldDelegat
 
     /// Says `lines` under the field they are about (signed in, the control plane's line), the first
     /// in crimson when `refused`, else in ink, the rest in the secondary ink. Lines said again
-    /// unchanged stay under the field they were first said under, while it is shown.
+    /// unchanged stay under the field they were first said under, while it is shown, and leave that
+    /// field as it is: refused, or corrected since by the person.
     private func say(_ lines: [String], refused: Bool = false) {
         let shown = standing == nil ? signedOutRows : signedInRows
         let kept = lines == self.lines ? saidUnder.flatMap { $0.superview === shown ? $0 : nil } : nil
@@ -395,8 +396,10 @@ public final class AccountPane: NSView, NSMenuItemValidation, NSTextFieldDelegat
         }
         said.attributedStringValue = text
         said.isHidden = lines.isEmpty
-        addressFrame.failed = self.refused && anchor === addressFrame
-        ticketFrame.failed = self.refused && anchor === ticketFrame
+        if kept == nil {
+            addressFrame.failed = self.refused && anchor === addressFrame
+            ticketFrame.failed = self.refused && anchor === ticketFrame
+        }
         place(said, under: anchor)
     }
 
