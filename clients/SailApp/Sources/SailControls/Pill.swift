@@ -197,13 +197,24 @@ public final class Initial: NSView {
     }
 
     override public func draw(_: NSRect) {
-        NSColor(look.fillHover).setFill()
-        NSBezierPath(ovalIn: bounds).fill()
-        NSColor(look.separator).setStroke()
-        let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5))
-        ring.lineWidth = 1
-        ring.stroke()
-        let letter = Draw.text(String(name.prefix(1)).uppercased(), .systemFont(ofSize: Look.Step.caption.points, weight: .semibold), look.text)
+        let mark = look.avatar
+        if let fill = mark.fill {
+            NSColor(fill).setFill()
+            NSBezierPath(ovalIn: bounds).fill()
+        }
+        if let edge = mark.edge {
+            NSColor(edge).setStroke()
+            let ring = NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5))
+            ring.lineWidth = 1
+            ring.stroke()
+        }
+        let letter = Draw.text(String(name.prefix(1)).uppercased(), .systemFont(ofSize: Look.Step.caption.points, weight: .semibold), mark.ink)
         letter.draw(at: NSPoint(x: ((bounds.width - letter.size().width) / 2).rounded(), y: ((bounds.height - letter.size().height) / 2).rounded()))
+    }
+}
+
+extension Initial: Marked {
+    package var drawnMarks: [Mark] {
+        look.marks(fill: look.avatar.fill, area: Double(bounds.width * bounds.height))
     }
 }

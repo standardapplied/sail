@@ -2,13 +2,15 @@
 # Fails when a suite or a test that started never ended, read from Swift Testing's own event stream
 # (EVENTS..., written by `swift test --event-stream-output-path`), and when no stream holds a test.
 # The console is not the record: on macOS runners it drops end lines (a hundred in a run whose
-# totals passed), so it can neither prove nor disprove that every test ended.
+# totals passed), so it can neither prove nor disprove that every test ended. Only events naming a
+# test count, so a stream whose schema renamed `testID` holds no test and fails, never passing
+# vacuously on a list of nulls; scripts/ends-check proves it on hand-made streams.
 set -euo pipefail
 
 [[ $# -ge 1 ]] || { echo "usage: scripts/ends EVENTS..." >&2; exit 2; }
 
 ids() {
-  jq -r --arg kind "$1" 'select(.kind == "event" and .payload.kind == $kind) | .payload.testID' "${@:2}" | sort
+  jq -r --arg kind "$1" 'select(.kind == "event" and .payload.kind == $kind and .payload.testID != null) | .payload.testID' "${@:2}" | sort
 }
 
 started=$(ids testStarted "$@")

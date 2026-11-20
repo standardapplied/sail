@@ -165,7 +165,6 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             button.isEnabled = page.canCreate
             button.why = page.createWhy
         }
-        newWorkspace.kind = Self.isEmptyList(page.body) ? .primary : .secondary
         centred?.removeFromSuperview()
         var views: [NSView] = [head, spacer(Self.listGap)]
         if let notice = page.banner { views += [banner(notice), spacer(12)] }
@@ -323,11 +322,6 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         return frame
     }
 
-    private static func isEmptyList(_ body: WorkspacesModel.Body) -> Bool {
-        if case let .empty(empty) = body { return empty.action == .newWorkspace }
-        return false
-    }
-
     /// How often "listed … ago" is said again while the list is stale.
     static let ageTick = 15.0
 
@@ -393,7 +387,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         let content = WorkspaceLine(line, narrow: narrow, look: look, mono: mono)
         let voice = [line.name, WorkspaceLine.pill(line).label.lowercased(), line.why].compactMap { $0 }.joined(separator: ", ")
         return SailList.Item(
-            id: Self.creatingID, name: line.name, voice: voice, content: content, note: line.why, paint: .creating(look), accessory: Spinner(look: look)
+            id: Self.creatingID, name: line.name, voice: voice, content: content, note: line.why, paint: .creating, accessory: Spinner(look: look)
         )
     }
 
@@ -406,7 +400,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         let row = CreateRow(field: field, existing: create.existing, look: look, mono: mono) { [weak self] act in self?.on(act) }
         let room = Double(bounds.width) - 2 * Self.padding.sides - 2 - RowStyle.list.leading - RowStyle.list.trailing
         let height = row.height(room: bounds.width > 0 ? room : CreateRow.column + CreateRow.gap + Double(row.buttons.fittingSize.width))
-        let paint: RowPaint = refused ? .refused(look) : .naming(look)
+        let paint: RowPaint = refused ? .refused : .naming
         return SailList.Item(id: Self.createID, name: "", voice: "A new workspace's name", content: row, height: height, paint: paint, full: true)
     }
 

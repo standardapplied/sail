@@ -175,6 +175,45 @@ import Testing
         #expect(drawn.glyphs.dropFirst(2).allSatisfy { $0.color == foreground })
     }
 
+    /// A selection with fixed colours, as a theme's in Ghostty, draws every selected cell in them
+    /// whatever a program set: over light text on a dark cell and dark text on a light one alike,
+    /// so selected text stays readable; the unselected cells keep their own colours.
+    @Test(arguments: [("light on dark", "\u{1b}[38;2;250;250;250;48;2;20;20;20m"), ("dark on light", "\u{1b}[38;2;20;20;20;48;2;250;250;250m")])
+    func aSelectionDrawsInItsOwnColoursOverAnyProgramsColours(_ name: String, _ colours: String) throws {
+        let screen = try screen(10, 2).fed(colours + "hello")
+        #expect(screen.select(.range(from: CellPoint(x: 0, y: 0), to: CellPoint(x: 1, y: 0))))
+        let ink = SelectionInk(foreground: RGB(0x0E1217), background: RGB(0xF9D7D1))
+        var builder = try InstanceBuilder(metrics: metrics(points: 15))
+        let drawn = builder.build(try screen.frame(), overlay: Overlay(selection: ink), glyphs: Glyphs())
+        let selected = InstanceBuilder.color(ink.background)
+        #expect(drawn.backgrounds.first?.color == selected && drawn.backgrounds.first?.rect.z == 36, "\(name): the selection's background")
+        #expect(drawn.backgrounds.dropFirst().allSatisfy { $0.color != selected }, "\(name): an unselected cell took the selection")
+        #expect(drawn.glyphs.prefix(2).allSatisfy { $0.color == InstanceBuilder.color(ink.foreground) }, "\(name): the selected glyphs")
+        #expect(drawn.glyphs.dropFirst(2).allSatisfy { $0.color != InstanceBuilder.color(ink.foreground) }, "\(name): an unselected glyph took the selection's ink")
+    }
+
+    /// A new selection ink (a look switched) lays every row out again: the rows drawn in the old
+    /// one are not kept.
+    @Test func aNewSelectionInkLaysEveryRowOutAgain() throws {
+        let screen = try screen(10, 3).fed("one\r\ntwo")
+        var builder = try InstanceBuilder(metrics: metrics(points: 15))
+        _ = builder.build(try screen.frame(), overlay: Overlay(), glyphs: Glyphs())
+        _ = builder.build(try screen.frame(), overlay: Overlay(selection: SelectionInk(foreground: RGB(0xFFFFFF), background: RGB(0x532017))), glyphs: Glyphs())
+        #expect(builder.rebuilt == [0, 1, 2])
+    }
+
+    /// Calm: a cursor marking no keys (the view without focus, or a terminal that ended) is hollow
+    /// in the idle ink; only the one with the keys is in the cursor's colour.
+    @Test func aCursorWithoutTheKeysIsHollowInTheIdleInk() throws {
+        let screen = try screen(10, 2).fed("ab\u{1b}[1;1H")
+        var builder = try InstanceBuilder(metrics: metrics(points: 15))
+        let idle = RGB(0x8C8B88)
+        let away = builder.build(try screen.frame(), overlay: Overlay(focused: false, idleCursor: idle), glyphs: Glyphs())
+        #expect(away.decorations.count == 1 && away.decorations.first?.color == InstanceBuilder.color(idle))
+        let typing = builder.build(try screen.frame(), overlay: Overlay(focused: true, idleCursor: idle), glyphs: Glyphs())
+        #expect(typing.decorations.first?.color == InstanceBuilder.color(Palette.dark.cursor))
+    }
+
     /// Scenario 17's drawing: a view without focus draws the cursor hollow; with focus, a block
     /// cursor and the cell's glyph again in the cell's background over it.
     @Test func theCursorIsHollowWithoutFocusAndABlockOverItsGlyphWithIt() throws {

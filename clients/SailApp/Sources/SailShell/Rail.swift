@@ -41,6 +41,9 @@ public final class Rail: NSView {
     }
 
     private var buttons: [Item: NSButton] = [:]
+    /// The wash under each item, shown under the chosen one: a plain view sized 42 pt square by its
+    /// constraints, so its size does not depend on how a button draws its own frame.
+    private var washes: [Item: NSView] = [:]
     private var bars: [Item: NSView] = [:]
 
     init(look: Look) {
@@ -50,12 +53,16 @@ public final class Rail: NSView {
         for item in Item.allCases {
             let button = NSButton(image: Self.image(item, colour: look.textSecondary), target: self, action: #selector(pick(_:)))
             button.isBordered = false
-            button.wantsLayer = true
-            button.layer?.cornerRadius = Look.contentRadius
             button.toolTip = item.title
             button.setAccessibilityLabel(item.title)
             button.identifier = NSUserInterfaceItemIdentifier(item.rawValue)
             button.translatesAutoresizingMaskIntoConstraints = false
+            let wash = NSView()
+            wash.wantsLayer = true
+            wash.layer?.cornerRadius = Look.contentRadius
+            wash.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(wash, positioned: .below, relativeTo: nil)
+            washes[item] = wash
             let bar = NSView()
             bar.wantsLayer = true
             bar.translatesAutoresizingMaskIntoConstraints = false
@@ -73,6 +80,8 @@ public final class Rail: NSView {
                 button.heightAnchor.constraint(equalToConstant: Self.item), bar.leadingAnchor.constraint(equalTo: leadingAnchor),
                 bar.widthAnchor.constraint(equalToConstant: Self.bar), bar.centerYAnchor.constraint(equalTo: button.centerYAnchor),
                 bar.heightAnchor.constraint(equalToConstant: Self.barHeight), placed,
+                wash.centerXAnchor.constraint(equalTo: button.centerXAnchor), wash.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+                wash.widthAnchor.constraint(equalToConstant: Self.item), wash.heightAnchor.constraint(equalToConstant: Self.item),
             ])
         }
         widthAnchor.constraint(equalToConstant: Self.width).isActive = true
@@ -83,6 +92,7 @@ public final class Rail: NSView {
     /// Shows `item` or takes it off the rail.
     func offer(_ item: Item, _ shown: Bool) {
         buttons[item]?.isHidden = !shown
+        washes[item]?.isHidden = !shown
         if !shown { bars[item]?.isHidden = true }
     }
 
@@ -100,10 +110,10 @@ public final class Rail: NSView {
         selected = item
         layer?.backgroundColor = NSColor.clear.cgColor
         for (each, button) in buttons {
-            bars[each]?.layer?.backgroundColor = NSColor(look.accentText).cgColor
+            bars[each]?.layer?.backgroundColor = NSColor(chosenInk.bar).cgColor
             let chosen = each == item
-            button.layer?.backgroundColor = chosen ? NSColor(look.fillSelected).cgColor : NSColor.clear.cgColor
-            button.image = Self.image(each, colour: chosen ? Tint(look.accentText) : look.textSecondary)
+            washes[each]?.layer?.backgroundColor = chosen ? chosenInk.fill.map { NSColor($0).cgColor } ?? NSColor.clear.cgColor : NSColor.clear.cgColor
+            button.image = Self.image(each, colour: chosen ? chosenInk.icon : look.textSecondary)
             bars[each]?.isHidden = !chosen
         }
     }
@@ -120,5 +130,26 @@ public final class Rail: NSView {
     /// `item`'s symbol in `colour`, made once (``SymbolInk``).
     private static func image(_ item: Item, colour: Tint) -> NSImage {
         SymbolInk.image(item.symbol, points: 20, weight: .regular, colour: colour, accessibility: item.title)
+    }
+}
+
+extension Rail: Marked {
+    /// The chosen item: its ink fill and icon, and the accent bar that says which.
+    var chosenInk: (fill: Tint?, icon: Tint, bar: Tint) {
+        (look.railChosen.fill, look.railChosen.ink, Tint(look.accent))
+    }
+
+    /// Its chosen item's icon and bar; the wash under it is the chrome's, on the chrome, and not
+    /// counted as the card's.
+    package var drawnMarks: [Mark] {
+        guard selected != nil else { return [] }
+        let ink = chosenInk
+        return look.marks(line: ink.icon) + look.marks(line: ink.bar)
+    }
+
+    /// The chosen item's wash: its square and its colour, for the tests.
+    var chosenWash: (size: NSSize, colour: CGColor?, button: NSRect, insets: NSEdgeInsets)? {
+        guard let selected, let wash = washes[selected], let button = buttons[selected] else { return nil }
+        return (wash.bounds.size, wash.layer?.backgroundColor, button.frame, button.alignmentRectInsets)
     }
 }
