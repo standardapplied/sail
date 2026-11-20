@@ -47,7 +47,8 @@ Usage:
   ci/fleet inside RUN           apply acme on client and observer; each role at the in-container spec
                                 CLI and at the HTTP API Mast calls; from main, over client's private address,
                                 a ticket from the API opens a session over TCP that echoes a line, and the
-                                same ticket is refused a second time
+                                same ticket is refused a second time; a files ticket for acme's own
+                                container is refused, naming a workspace
   ci/fleet rooms RUN            client opens a room over HTTP; who may post in it at each door, and the
                                 conversation reads the same on every box; no other project's room leaks
   ci/fleet access RUN           the access matrix's rows, at each door that offers them: client comments on
@@ -102,7 +103,8 @@ Usage:
                                 (built once, its time in the report), and there eng creates her own
                                 through main's API, labelled hers by her id, committing as her with
                                 none of main's person's forge token, refused to client and to obs
-                                (a viewer), opened by her ticket over TCP from client, refused a
+                                (a viewer), opened by her ticket over TCP from client, its home listed and
+                                watched by her files ticket, refused a
                                 delete while a command runs in it, and deleted with force; a second
                                 is created and stopped,
                                 apply --all leaves both and the template alone; with acme's repos set
