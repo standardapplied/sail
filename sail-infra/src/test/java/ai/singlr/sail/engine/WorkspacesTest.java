@@ -431,6 +431,11 @@ class WorkspacesTest {
     assertEquals(
         List.of(
             "incus start acme--tmpl",
+            String.join(
+                " ",
+                ContainerExec.asRoot(
+                    "acme--tmpl",
+                    List.of("bash", "-c", WorkspaceCredentials.SETTLED, "sail-settled"))),
             String.join(" ", strip("acme--tmpl")),
             String.join(
                 " ",
@@ -3985,13 +3990,52 @@ class WorkspacesTest {
             "-c",
             WorkspaceCredentials.HELD,
             "sail-held");
+    var settled =
+        indexOf(
+            shell,
+            List.of(
+                "incus",
+                "exec",
+                "acme--tmpl",
+                "--",
+                "bash",
+                "-c",
+                WorkspaceCredentials.SETTLED,
+                "sail-settled"));
     var stripped = indexOf(shell, strip("acme--tmpl"));
     var checked = indexOf(shell, held);
     var stop = indexOf(shell, List.of("incus", "stop", "acme--tmpl"));
     var snapshot = indexOf(shell, List.of("incus", "snapshot", "create", "acme--tmpl", "v2"));
     assertTrue(
-        0 <= stripped && stripped < checked && checked < stop && stop < snapshot,
+        0 <= settled
+            && settled < stripped
+            && stripped < checked
+            && checked < stop
+            && stop < snapshot,
         String.join("\n", shell.invocations()));
+  }
+
+  /**
+   * A template whose own boot never settles is not searched while it changes: the build fails
+   * saying so, and nothing is recorded or snapshotted.
+   */
+  @Test
+  void aTemplateWhoseBootNeverSettlesIsNotSearchedAndItsBuildFailsSayingSo() {
+    var shell =
+        incus(DIR_AND_ZFS, list(template("v1", "an-older-definition")), snapshots("v1"))
+            .on("sail-settled", new ShellExec.Result(1, "starting\n", ""));
+
+    var failure = assertThrows(IOException.class, () -> templates(shell).ensure(acme(), source()));
+
+    assertEquals(
+        "acme--tmpl did not finish starting within 120 s (systemd says it is starting), so it is"
+            + " not searched for its builder's tokens while it changes.",
+        failure.getMessage());
+    assertFalse(
+        shell.invocations().stream()
+            .anyMatch(
+                c -> c.contains("user.sail.template.current=") || c.contains("snapshot create")));
+    assertTrue(shell.invocations().contains("incus stop acme--tmpl"));
   }
 
   /** The check is given the build's tokens on its stdin, and none ever on a command line. */
