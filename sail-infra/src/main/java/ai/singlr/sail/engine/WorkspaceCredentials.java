@@ -63,6 +63,7 @@ final class WorkspaceCredentials {
   static final String STRIP =
       """
       set -eu
+      PATH=/usr/sbin:/usr/bin:/sbin:/bin
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
       rm -f %1$s
       rm -rf %3$s
@@ -101,10 +102,15 @@ final class WorkspaceCredentials {
   /**
    * Searches by content, not by a list of paths, because a token can hide where no list names it;
    * exits 2, never 0, when a search cannot tell. The tokens arrive on stdin so no argv holds one.
+   * The template runs while it is searched, so a file its boot removes can be listed and then gone
+   * when grep opens it: that one error alone is no failure, since a file gone holds nothing. grep's
+   * errors are kept apart in a {@code 0600} file of their own on {@code /dev/shm}, which the search
+   * never walks ({@code /dev} is a mount), and read in the C locale.
    */
   static final String HELD =
       """
       set -u
+      PATH=/usr/sbin:/usr/bin:/sbin:/bin
       held=""
       add() { held="${held:+$held, }$1"; }
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
@@ -115,14 +121,25 @@ final class WorkspaceCredentials {
         for d in /* /.[!.]*; do
           [ -e "$d" ] && [ ! -L "$d" ] && ! mountpoint -q "$d" && set -- "$@" "$d"
         done
-        found=$(printf '%s\n' "$tokens" | grep -r -l -F --devices=skip -f - -- "$@")
-        case $? in
+        errors=$(mktemp -p /dev/shm sail-held.XXXXXX) || {
+          echo "the search for the build's tokens did not run: it could not make a file on /dev/shm for its errors" >&2
+          exit 2
+        }
+        trap 'rm -f "$errors"' EXIT
+        found=$(printf '%s\n' "$tokens" | LC_ALL=C grep -r -l -F --devices=skip -f - -- "$@" 2> "$errors")
+        searched=$?
+        if [ "$searched" = 2 ] && [ -s "$errors" ] \
+          && ! grep -q -v ': No such file or directory$' "$errors"; then
+          if [ -n "$found" ]; then searched=0; else searched=1; fi
+        fi
+        case $searched in
           0) count=$(printf '%s\n' "$found" | wc -l)
              shown=$(printf '%s\n' "$found" | head -n 3 | paste -s -d ' ' -)
              [ "$count" -le 3 ] || shown="$shown and $((count - 3)) more"
              add "a token this build was given in $shown" ;;
           1) ;;
-          *) echo "the search for the build's tokens failed" >&2; exit 2 ;;
+          *) said=$(head -n 3 "$errors" | paste -s -d ' ' -)
+             echo "the search for the build's tokens failed: ${said:-grep said nothing}" >&2; exit 2 ;;
         esac
       fi
       for key in user.name user.email; do
@@ -151,7 +168,59 @@ final class WorkspaceCredentials {
 
   private static final Duration HELD_TIMEOUT = Duration.ofMinutes(10);
 
+  /** How long a template's boot may take to settle before it is stripped and searched. */
+  static final int SETTLE_SECONDS = 120;
+
+  /**
+   * Waits for the template's boot to finish, {@code running} or {@code degraded} (a unit that
+   * failed changes nothing it holds): its boot cleans {@code /tmp} and makes directories there, so
+   * a search during it walks a tree that changes under it. Just after its start systemd's bus is
+   * not up and systemctl answers nothing, so it is asked again until the bound. Says systemd's
+   * state when it does not settle in time.
+   */
+  static final String SETTLED =
+      """
+      PATH=/usr/sbin:/usr/bin:/sbin:/bin
+      end=$(( $(date +%%s) + %d ))
+      while left=$(( end - $(date +%%s) )); [ "$left" -gt 0 ]; do
+        state=$(timeout "$left" systemctl is-system-running --wait 2>/dev/null)
+        case $state in
+          running|degraded) exit 0 ;;
+          "") sleep 0.5 ;;
+          *) echo "$state"; exit 1 ;;
+        esac
+      done
+      state=$(systemctl is-system-running 2>/dev/null)
+      echo "${state:-not answering}"
+      exit 1
+      """
+          .formatted(SETTLE_SECONDS);
+
   private WorkspaceCredentials() {}
+
+  /**
+   * Makes {@code template} hold no one's credentials and proves it holds none of {@code tokens},
+   * once its boot has settled, so what is searched is what is snapshotted.
+   */
+  static void clean(ShellExec shell, String template, Collection<String> tokens)
+      throws IOException, InterruptedException, TimeoutException {
+    var settled =
+        shell.exec(
+            ContainerExec.asRoot(template, List.of("bash", "-c", SETTLED, "sail-settled")),
+            null,
+            Duration.ofSeconds(SETTLE_SECONDS + 30));
+    if (!settled.ok()) {
+      throw new IOException(
+          template
+              + " did not finish starting within "
+              + SETTLE_SECONDS
+              + " s (systemd says it is "
+              + settled.stdout().strip()
+              + "), so it is not searched for its builder's tokens while it changes.");
+    }
+    strip(shell, template);
+    requireNone(shell, template, tokens);
+  }
 
   static void strip(ShellExec shell, String instance)
       throws IOException, InterruptedException, TimeoutException {

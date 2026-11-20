@@ -17,6 +17,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -38,6 +39,7 @@ class WorkspaceCredentialsTest {
 
   @TempDir Path root;
   private Path bin;
+  private Path planted;
 
   @BeforeEach
   void aContainerRoot() throws IOException {
@@ -89,7 +91,7 @@ class WorkspaceCredentialsTest {
 
   private ProcessBuilder environment(ProcessBuilder builder) {
     var env = builder.environment();
-    env.put("PATH", bin + ":" + System.getenv("PATH"));
+    env.put("PATH", (planted == null ? "" : planted + ":") + bin + ":" + System.getenv("PATH"));
     env.put("HOME", root.resolve("home/dev").toString());
     env.put("GIT_CONFIG_SYSTEM", root.resolve("etc/gitconfig").toString());
     return builder;
@@ -106,7 +108,10 @@ class WorkspaceCredentialsTest {
             .replace("/home/*", root + "/home/*")
             .replace("/home/dev", root + "/home/dev")
             .replace("/root/", root + "/root/")
-            .replace("-o dev -g dev ", "");
+            .replace("-o dev -g dev ", "")
+            .replace(
+                "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+                "PATH=" + bin + ":/usr/sbin:/usr/bin:/sbin:/bin");
     var command = new ArrayList<>(List.of("bash", "-c", rooted, "sail-test"));
     command.addAll(List.of(args));
     var said = Files.createTempFile(bin, "said", ".txt");
@@ -419,5 +424,270 @@ class WorkspaceCredentialsTest {
   void aCleanContainerPasses() throws Exception {
     assertEquals(0, script(WorkspaceCredentials.HELD, "").exit());
     assertEquals(0, script(WorkspaceCredentials.HELD, TOKEN + "\n").exit());
+  }
+
+  private static final String VANISHED = "grep: /tmp/.XIM-unix: No such file or directory\n";
+  private static final String DENIED = "grep: /root/.cache/x: Permission denied\n";
+
+  private static Path realGrep() {
+    return List.of(Path.of("/usr/bin/grep"), Path.of("/bin/grep")).stream()
+        .filter(Files::isExecutable)
+        .findFirst()
+        .orElseThrow();
+  }
+
+  /**
+   * A grep whose search runs for real and then also says {@code errors} and ends {@code 2}, as one
+   * does when a file it listed is gone, or cannot be read, by the time it opens it; it writes down
+   * the locale it ran in. Every other grep is the real one.
+   */
+  private void grepThatAlsoSays(String errors) throws IOException {
+    stub(
+        "grep",
+        "case \" $* \" in *\" -r \"*) ;; *) exec "
+            + realGrep()
+            + " \"$@\" ;; esac\n"
+            + "echo \"${LC_ALL:-unset}\" > "
+            + bin.resolve("grep-locale")
+            + "\n"
+            + realGrep()
+            + " \"$@\"\n"
+            + "[ $? -le 1 ] || exit 2\n"
+            + "printf '%s' '"
+            + errors
+            + "' >&2\n"
+            + "exit 2\n");
+  }
+
+  /** An mktemp that writes down where it made its file and with what mode, then answers it. */
+  private void mktempWrittenDown() throws IOException {
+    stub(
+        "mktemp",
+        "made=$(/usr/bin/mktemp \"$@\") || exit $?\n"
+            + "echo \"$made $(stat -c %a \"$made\") $*\" > "
+            + bin.resolve("made")
+            + "\necho \"$made\"\n");
+  }
+
+  /**
+   * A file the search listed but found gone when it opened it holds nothing: a running template's
+   * boot removes some of its own (as {@code /tmp/.XIM-unix}), so the check passes. Its errors are
+   * kept in a file of the search's own, {@code 0600} on {@code /dev/shm}, gone after, and the
+   * search runs in the C locale, so the words it is told apart by are never translated.
+   */
+  @Test
+  void aFileGoneBetweenTheListingAndTheOpenHoldsNothing() throws Exception {
+    grepThatAlsoSays(VANISHED);
+    mktempWrittenDown();
+
+    var checked = script(WorkspaceCredentials.HELD, TOKEN + "\n");
+
+    assertEquals(0, checked.exit(), checked.said());
+    assertEquals("C\n", read(bin.resolve("grep-locale")));
+    var made = read(bin.resolve("made")).strip().split(" ", 3);
+    assertTrue(made[0].startsWith("/dev/shm/"), made[0]);
+    assertEquals("600", made[1]);
+    assertFalse(Files.exists(Path.of(made[0])), "the search's error file is gone");
+  }
+
+  /**
+   * Any error but a file gone fails the check as one that cannot tell, saying what grep said: a
+   * file it cannot read, the two together, or an error it does not say.
+   */
+  @Test
+  void aFileTheSearchCannotReadFailsTheCheckAloneOrBesideAFileGone() throws Exception {
+    mktempWrittenDown();
+    for (var errors : List.of(DENIED, VANISHED + DENIED, "")) {
+      grepThatAlsoSays(errors);
+
+      var checked = script(WorkspaceCredentials.HELD, TOKEN + "\n");
+
+      assertEquals(2, checked.exit(), errors + ": " + checked.said());
+      assertTrue(
+          checked.said().contains("the search for the build's tokens failed"), checked.said());
+      assertTrue(checked.said().contains(errors.isEmpty() ? "said nothing" : "Permission denied"));
+      assertFalse(
+          Files.exists(Path.of(read(bin.resolve("made")).split(" ")[0])),
+          "the search's error file is gone");
+    }
+  }
+
+  /** A token is found where it is, whatever else vanished meanwhile. */
+  @Test
+  void aTokenIsFoundBesideAFileGone() throws Exception {
+    grepThatAlsoSays(VANISHED);
+    var file = Files.createDirectories(root.resolve("home/dev/.sail")).resolve("gh-token-01");
+    Files.writeString(file, TOKEN + "\n");
+
+    var checked = script(WorkspaceCredentials.HELD, TOKEN + "\n");
+
+    assertEquals(1, checked.exit(), checked.said());
+    assertTrue(checked.said().contains("home/dev/.sail/gh-token-01"), checked.said());
+    assertFalse(checked.said().contains(TOKEN), "the check never says the token");
+  }
+
+  /** With nowhere to keep its errors, the search does not run, and the check says why. */
+  @Test
+  void aSearchWithNowhereToKeepItsErrorsFailsTheCheckSayingSo() throws Exception {
+    stub(
+        "mktemp",
+        "echo \"mktemp: failed to create file via template '/dev/shm/sail-held.XXXXXX': Read-only"
+            + " file system\" >&2\nexit 1\n");
+
+    var checked = script(WorkspaceCredentials.HELD, TOKEN + "\n");
+
+    assertEquals(2, checked.exit(), checked.said());
+    assertTrue(
+        checked
+            .said()
+            .contains(
+                "the search for the build's tokens did not run: it could not make a file on"
+                    + " /dev/shm for its errors"),
+        checked.said());
+  }
+
+  /**
+   * A file a search cannot read is refused whatever it is named: one named for the error a file
+   * gone gives, and holding the token, is still an error that is not that one.
+   */
+  @Test
+  void aFileNamedForAFileGoneThatCannotBeReadIsStillRefused() throws Exception {
+    Assumptions.assumeFalse("root".equals(System.getProperty("user.name")), "root reads it");
+    var named =
+        Files.createDirectories(root.resolve("srv")).resolve("a: No such file or directory");
+    Files.writeString(named, TOKEN + "\n");
+    Files.setPosixFilePermissions(named, java.util.Set.of());
+
+    var checked = script(WorkspaceCredentials.HELD, TOKEN + "\n");
+
+    assertEquals(2, checked.exit(), checked.said());
+    assertTrue(checked.said().contains("Permission denied"), checked.said());
+    assertFalse(checked.said().contains(TOKEN), "the check never says the token");
+  }
+
+  /**
+   * A grep, or any tool the check runs, planted earlier on the path inside the template answers
+   * nothing: the check and the strip run with their own path.
+   */
+  @Test
+  void aToolPlantedEarlierOnThePathAnswersForNeitherScript() throws Exception {
+    planted = Files.createDirectories(root.resolve("usr/local/bin"));
+    var used = root.resolve("planted-used");
+    var grep = planted.resolve("grep");
+    Files.writeString(grep, "#!/bin/sh\ntouch " + used + "\nexit 1\n");
+    grep.toFile().setExecutable(true);
+    Files.copy(grep, planted.resolve("rm"));
+    planted.resolve("rm").toFile().setExecutable(true);
+    Files.writeString(root.resolve("etc/environment"), TOKEN + "\n");
+
+    var checked = script(WorkspaceCredentials.HELD, TOKEN + "\n");
+    builderLeftEverything();
+    var stripped = script(WorkspaceCredentials.STRIP, "");
+
+    assertEquals(1, checked.exit(), checked.said());
+    assertTrue(checked.said().contains("etc/environment"), checked.said());
+    assertEquals(0, stripped.exit(), stripped.said());
+    assertFalse(Files.exists(root.resolve("home/dev/.git-credentials")));
+    assertFalse(Files.exists(used), "the planted tools never ran");
+  }
+
+  /**
+   * A template is searched once systemd says its boot is done, running or degraded, waited for
+   * within a bound; asked while its bus is not up yet (just after its start, systemctl answers
+   * nothing), it is asked again; any other state is said as it is, and one that never answers as
+   * that.
+   */
+  @Test
+  void aTemplateIsSettledOnceItsBootIsDoneRunningOrDegraded() throws Exception {
+    stub("timeout", "echo \"$1\" >> " + bin.resolve("bound") + "\nshift\nexec \"$@\"\n");
+    stub("sleep", "exit 0\n");
+    var said = new ArrayList<String>();
+    var firstBound = "";
+    for (var states :
+        List.of(
+            List.of("running:0"),
+            List.of("degraded:1"),
+            List.of("starting:1"),
+            List.of(":1", ":1", "running:0"),
+            List.of(":1"))) {
+      Files.deleteIfExists(bin.resolve("asked"));
+      Files.deleteIfExists(bin.resolve("bound"));
+      var never = states.size() == 1 && states.getFirst().equals(":1");
+      stub(
+          "date",
+          never
+              ? "n=$(cat "
+                  + bin.resolve("clock")
+                  + " 2>/dev/null || echo 0); echo $((n + 61)) > "
+                  + bin.resolve("clock")
+                  + "; echo $((n + 61))\n"
+              : "echo 1000\n");
+      Files.deleteIfExists(bin.resolve("clock"));
+      var answers =
+          new StringBuilder(
+              "n=$(cat "
+                  + bin.resolve("asked")
+                  + " 2>/dev/null || echo 0)\n"
+                  + "echo $((n + 1)) > "
+                  + bin.resolve("asked")
+                  + "\ncase $n in\n");
+      for (var k = 0; k < states.size(); k++) {
+        var parts = states.get(k).split(":", -1);
+        answers
+            .append(k == states.size() - 1 ? "  *) " : "  " + k + ") ")
+            .append(parts[0].isEmpty() ? "" : "echo " + parts[0] + "; ")
+            .append("exit ")
+            .append(parts[1])
+            .append(" ;;\n");
+      }
+      stub(
+          "systemctl",
+          "case \"$*\" in is-system-running*) ;; *) exit 9 ;; esac\n" + answers + "esac\n");
+      var ran = script(WorkspaceCredentials.SETTLED, "");
+      said.add(ran.exit() + " " + ran.said().strip());
+      if (firstBound.isEmpty()) {
+        firstBound = read(bin.resolve("bound")).lines().findFirst().orElseThrow();
+      }
+    }
+
+    assertEquals(List.of("0 ", "0 ", "1 starting", "0 ", "1 not answering"), said);
+    assertEquals("120", firstBound, "the wait is bounded by the settle time");
+  }
+
+  /**
+   * The path each script fixes for itself holds every tool it runs, as a container's Ubuntu lays
+   * them out ({@code runuser} is in {@code /usr/sbin}): a tool it cannot find would fail every
+   * give, strip and check, whatever the template holds.
+   */
+  @Test
+  void eachScriptsOwnPathHoldsEveryToolItRuns() throws Exception {
+    var tools =
+        List.of(
+            "runuser",
+            "mountpoint",
+            "grep",
+            "git",
+            "id",
+            "mktemp",
+            "head",
+            "paste",
+            "wc",
+            "rm",
+            "cat",
+            "timeout",
+            "date");
+    for (var script :
+        List.of(
+            WorkspaceCredentials.STRIP, WorkspaceCredentials.HELD, WorkspaceCredentials.SETTLED)) {
+      var path = script.lines().filter(line -> line.startsWith("PATH=")).findFirst().orElseThrow();
+      var process =
+          new ProcessBuilder(
+                  List.of("bash", "-c", path + "; command -v " + String.join(" ", tools)))
+              .redirectErrorStream(true)
+              .start();
+      var found = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+      assertTrue(process.waitFor(30, TimeUnit.SECONDS));
+      assertEquals(tools.size(), found.lines().count(), path + " finds only:\n" + found);
+    }
   }
 }
