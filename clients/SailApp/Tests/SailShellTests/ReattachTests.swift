@@ -23,6 +23,10 @@ import Testing
 /// A session on the runner outlives the app, the sign-out and the tab's own client: the app comes
 /// back to it as the person it is, and says when it cannot.
 @MainActor @Suite(.serialized) struct ReattachTests {
+    init() {
+        ExitWatch.install()
+    }
+
     /// Defaults of a test's own, so no suite running beside it reads or overwrites its arrangement.
     static func defaults() -> UserDefaults {
         let name = "sail.tests.\(UUID().uuidString)"

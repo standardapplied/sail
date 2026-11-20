@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SailKitTestSupport
 @testable import SailControls
 import SailLook
 import Testing
@@ -8,6 +9,10 @@ import Testing
 /// against swatches it composes the same way, each beside a wrong one; and their keys, menus and
 /// VoiceOver actions.
 @MainActor @Suite(.serialized) struct RowsTests {
+    init() {
+        ExitWatch.install()
+    }
+
     final class Counts {
         var opened = 0, copied = 0
         var chosen: [String?] = []
@@ -106,6 +111,35 @@ import Testing
         chosen.isEmphasized = false
         let idle = ControlsTests.swatch(canvas, [NSColor(look.barIdle)], scale: 2)
         #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: 0.5, y: dock.midY), scale: 2), idle, from: accent), "\(name): the bar without the keys is not the quiet ink")
+    }
+
+    /// N2: where the card's edge is drawn over the list's leading edge (the left panel, in dark), the
+    /// chosen row's bar starts a hairline in, read at 2x: the edge's point holds no bar, the two
+    /// after it are the bar, its outer end still square; mirrored right to left.
+    @Test(arguments: [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft])
+    func theBarStartsClearOfTheCardsEdge(_ direction: NSUserInterfaceLayoutDirection) throws {
+        let look = Look.dark, canvas = NSColor(Tint(look.canvas))
+        let list = try Self.list(.sidebar, look: look, counts: Counts())
+        list.userInterfaceLayoutDirection = direction
+        list.barInset = Look.hairline
+        let (window, backdrop) = Self.shown(list)
+        defer { window.orderOut(nil) }
+        list.choose("dock")
+        let row = try Self.row(list, 2)
+        row.isEmphasized = true
+        row.userInterfaceLayoutDirection = direction
+        let dock = list.rect(ofRow: 2), width = Double(list.bounds.width)
+        let at = { (x: Double) in direction == .rightToLeft ? width - x : x }
+        let bare = ControlsTests.swatch(canvas, [], scale: 2), accent = ControlsTests.swatch(canvas, [NSColor(Tint(look.accent))], scale: 2)
+        let side = direction == .rightToLeft ? "right to left" : "left to right"
+        for x in [0.25, 0.75] {
+            #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: at(x), y: dock.midY), scale: 2), bare, from: accent), "\(side): the bar is under the card's edge at \(x) pt")
+        }
+        for x in [1.25, 1.75, 2.25, 2.75] {
+            #expect(ControlsTests.tells(backdrop.colour(at: NSPoint(x: at(x), y: dock.midY), scale: 2), accent, from: bare), "\(side): no bar at \(x) pt")
+        }
+        let outer = backdrop.colour(at: NSPoint(x: at(1.25), y: dock.minY + 8.25), scale: 2)
+        #expect(outer.near(accent), "\(side): the bar's outer corner is \(outer), not square")
     }
 
     /// A sidebar row lays a project out as the left panel does: the tile after the disclosure's
@@ -377,6 +411,36 @@ import Testing
             let leading = direction == .rightToLeft ? near(under.maxX, title.maxX) : near(under.minX, title.minX)
             #expect(leading && under.width < title.width, "\(direction == .rightToLeft ? "right to left" : "left to right"): the underline is \(under) in \(title)")
         }
+    }
+
+    /// N4: drawn, the underline runs under the words, pixel for pixel, in either direction: its first
+    /// and last accent columns within a point and a half of the words' first and last ink columns
+    /// (a glyph's side bearing), the link 40 pt wider than its words.
+    @Test(arguments: [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft])
+    func aLinksUnderlineIsUnderItsWordsByPixels(_ direction: NSUserInterfaceLayoutDirection) throws {
+        let look = Look.light, scale = 2.0
+        let link = LinkButton("Show dock", look: look, target: nil, action: nil)
+        link.userInterfaceLayoutDirection = direction
+        link.frame = NSRect(x: 0, y: 0, width: ceil(link.intrinsicContentSize.width) + 40, height: ceil(link.intrinsicContentSize.height) + 4)
+        let image = try #require(Backdrop(NSColor(Tint(look.surface)), holding: link).drawn(scale: scale))
+        let accent = [Double(look.accent.red), Double(look.accent.green), Double(look.accent.blue)]
+        var words: [Int] = [], line: [Int] = []
+        for x in 0 ..< image.pixelsWide {
+            for y in 0 ..< image.pixelsHigh {
+                guard let colour = image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                let rgb = [colour.redComponent, colour.greenComponent, colour.blueComponent].map { Double($0) * 255 }
+                if zip(rgb, accent).allSatisfy({ abs($0 - $1) <= 24 }) {
+                    line.append(x)
+                } else if 0.3 * rgb[0] + 0.59 * rgb[1] + 0.11 * rgb[2] < 110 {
+                    words.append(x)
+                }
+            }
+        }
+        let side = direction == .rightToLeft ? "right to left" : "left to right"
+        let ink = try #require(words.min().flatMap { min in words.max().map { (min, $0) } }, "\(side): no words drawn")
+        let under = try #require(line.min().flatMap { min in line.max().map { (min, $0) } }, "\(side): no underline drawn")
+        let slack = Int(1.5 * scale)
+        #expect(abs(ink.0 - under.0) <= slack && abs(ink.1 - under.1) <= slack, "\(side): the words' ink spans pixels \(ink.0)–\(ink.1), the underline \(under.0)–\(under.1)")
     }
 
     static func key(_ code: UInt16, _ characters: String, _ flags: NSEvent.ModifierFlags = []) throws -> NSEvent {

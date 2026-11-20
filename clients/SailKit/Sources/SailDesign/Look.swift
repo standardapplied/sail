@@ -99,6 +99,41 @@ public struct Look: Equatable, Sendable {
         info: RGB(0x17646F), ink: RGB(0x0E1217), onInk: RGB(0xF8FAFC)
     ).withTerminalInk()
 
+    /// What is turned over to ink: the text's own ink as a ground, and the paper's warm white on it.
+    public var inverse: RGB {
+        text.rgb
+    }
+
+    public var onInverse: RGB {
+        palette.isDark ? RGB(0x0E1217) : RGB(0xF6F1E9)
+    }
+
+    /// The user menu's item under the keys or the pointer, and its chosen Appearance: turned over to
+    /// ink, as a Mac menu's highlight is.
+    public var menuHighlight: InkMark {
+        InkMark(fill: Tint(inverse), ink: Tint(onInverse), edge: nil)
+    }
+
+    /// A key cap's words and edge on a turned-over item: the paper ink at the mockup's secondary
+    /// and strong-hairline strengths (its --text2 and --sep2 inside the ink).
+    public var onInverseSecondary: Tint {
+        Tint(onInverse, alpha: 0.78)
+    }
+
+    public var onInverseEdge: Tint {
+        Tint(onInverse, alpha: 0.3)
+    }
+
+    /// The user menu's avatar disc: turned over to ink.
+    public var menuAvatar: InkMark {
+        InkMark(fill: Tint(inverse), ink: Tint(onInverse), edge: nil)
+    }
+
+    /// The rail's user button while its menu is open: outlined in the secondary ink.
+    public var railOpen: InkMark {
+        InkMark(fill: nil, ink: text, edge: textSecondary)
+    }
+
     /// A chosen row's bar while its list does not hold the keys: quiet ink, as macOS draws an
     /// unemphasized selection; the accent marks only the list that does.
     public var barIdle: Tint {

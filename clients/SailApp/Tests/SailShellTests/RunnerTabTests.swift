@@ -115,6 +115,10 @@ actor Proxied: Transport {
 /// the person can do; closed or quit, its session is ended at the runner, and what could not be
 /// ended is said.
 @MainActor @Suite struct RunnerTabTests {
+    init() {
+        ExitWatch.install()
+    }
+
     static let notYours = Refusal(
         code: .known(.forbiddenNotAssignee), message: "Workspace 'dock' belongs to 'uday', not you.",
         action: "Ask uday to enter it, or have an admin do it."

@@ -9,6 +9,10 @@ import Testing
 /// The list and the left panel scroll with the quiet scroller while their heads and feet stay put;
 /// the panel's foot and loading head as the frames draw them; and the words that must fit, fit.
 @MainActor @Suite struct WorkspacesScrollTests {
+    init() {
+        ExitWatch.install()
+    }
+
     static func rows(_ count: Int) throws -> Exchange {
         try WorkspacesReachTests.list((1 ... count).map { ["name": String(format: "ws-%02d", $0), "instance": String(format: "harbor-ws-%02d", $0), "state": "running", "owner": "uday"] })
     }
@@ -46,8 +50,8 @@ import Testing
     /// thirty rows, and the panel part way down its twenty projects, neither jumping to its top or
     /// to the chosen row.
     @Test func aChangeOfLookKeepsBothScrolls() async throws {
-        let names = (["harbor"] + (2 ... 20).map { "project-\($0)" }).map { #"{"name": "\#($0)", "container_status": "running", "template": "ready"}"# }
-        let projects = Exchange(method: "GET", path: "/v1/projects", status: 200, body: Data(#"{"projects": [\#(names.joined(separator: ", "))], "total": 20, "schema_version": 1}"#.utf8))
+        let names = (["harbor"] + (2 ... 24).map { "project-\($0)" }).map { #"{"name": "\#($0)", "container_status": "running", "template": "ready"}"# }
+        let projects = Exchange(method: "GET", path: "/v1/projects", status: 200, body: Data(#"{"projects": [\#(names.joined(separator: ", "))], "total": 24, "schema_version": 1}"#.utf8))
         let (view, window) = try WorkspacesViewTests.view(RecordedServer([projects, try Self.rows(30)]), width: 1024 - Rail.width - 4)
         defer { window.orderOut(nil) }
         view.shown()
@@ -217,8 +221,9 @@ import Testing
         #expect(buttons.count == 2 && abs(Double(shown) - project.narrowActionsColumn) < 0.5, "the column is \(project.narrowActionsColumn) pt, the widest actions take \(shown) pt")
     }
 
-    /// Twenty projects scroll between the panel's header and its foot, which stays put.
-    @Test func twentyProjectsScrollAboveThePanelsFoot() throws {
+    /// Twenty projects scroll between the panel's header and its bottom edge: the panel has no foot,
+    /// the user menu saying who is signed in and where.
+    @Test func twentyProjectsScrollToThePanelsBottom() throws {
         let panel = LeftPanel(look: .light, mono: try LabelFont(directory: LookTests.fonts))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: LeftPanel.width.standard, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
         defer { window.orderOut(nil) }
@@ -232,30 +237,35 @@ import Testing
         panel.layoutSubtreeIfNeeded()
         let document = Double(panel.scroll.documentView?.frame.height ?? 0), room = Double(panel.scroll.frame.height)
         #expect(document > room + 1 && panel.scroll.verticalScroller is QuietScroller, "twenty projects (\(document) pt) in \(room) pt")
-        let foot = panel.convert(panel.who.bounds, from: panel.who)
-        #expect(panel.scroll.frame.maxY <= foot.minY && foot.maxY <= panel.bounds.maxY, "the projects run to \(panel.scroll.frame.maxY), the foot is at \(foot)")
+        #expect(near(panel.scroll.frame.maxY, panel.bounds.maxY), "the projects run to \(panel.scroll.frame.maxY) of \(panel.bounds.maxY)")
         let chosen = panel.list.rect(ofRow: panel.list.selectedRow)
         #expect(panel.scroll.contentView.documentVisibleRect.insetBy(dx: -0.5, dy: -0.5).contains(chosen), "the chosen project is not scrolled into view")
     }
 
-    /// The loading panel keeps its PROJECTS head, with no count, over its skeleton rows; its foot
-    /// sets the handle apart: weight 500 in the secondary ink, the rest in the tertiary.
+    /// N2: the card's edge is drawn over the panel's leading edge in dark, so there the chosen bar
+    /// starts a hairline in, clear of it; in light, with no edge, at the panel's edge; a change of
+    /// look moves it.
+    @Test func theChosenBarStartsClearOfTheCardsEdge() throws {
+        let panel = LeftPanel(look: .dark, mono: try LabelFont(directory: LookTests.fonts))
+        #expect(Look.dark.cardEdge != nil && near(panel.list.barInset, Look.hairline), "dark: the bar starts \(panel.list.barInset) pt in")
+        panel.look = .light
+        #expect(Look.light.cardEdge == nil && near(panel.list.barInset, 0), "light: the bar starts \(panel.list.barInset) pt in")
+        panel.look = .dark
+        #expect(near(panel.list.barInset, Look.hairline), "back in dark: the bar starts \(panel.list.barInset) pt in")
+    }
+
+    /// The loading panel keeps its PROJECTS head, with no count, over its skeleton rows.
     @Test(arguments: [Look.light, .dark])
-    func theLoadingPanelHasItsHeadAndTheFootSetsTheHandleApart(_ look: Look) throws {
+    func theLoadingPanelHasItsHead(_ look: Look) throws {
         let panel = LeftPanel(look: look, mono: try LabelFont(directory: LookTests.fonts))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: LeftPanel.width.standard, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
         defer { window.orderOut(nil) }
         window.contentView = panel
-        panel.renderLoading(who: "ana · member", handle: "ana", controlPlane: "main.acme.dev")
+        panel.renderLoading()
         panel.layoutSubtreeIfNeeded()
         #expect(!panel.scroll.isHidden && panel.list.numberOfRows == 1, "the loading panel shows \(panel.list.numberOfRows) rows")
         let head = try #require(panel.list.view(atColumn: 0, row: 0, makeIfNecessary: true))
         #expect(head.accessibilityLabel() == "Projects", "the head says \(head.accessibilityLabel() ?? "nothing")")
-        let words = panel.who.attributedStringValue
-        let handle = words.attributes(at: 0, effectiveRange: nil), rest = words.attributes(at: words.length - 1, effectiveRange: nil)
-        #expect((handle[.foregroundColor] as? NSColor) == NSColor(look.textSecondary) && (rest[.foregroundColor] as? NSColor) == NSColor(look.textTertiary))
-        let handleFont = (handle[.font] as? NSFont)?.fontName ?? "none", restFont = (rest[.font] as? NSFont)?.fontName ?? "none"
-        #expect(handleFont.contains("Medium") && !restFont.contains("Medium"), "the handle is \(handleFont), the rest \(restFont)")
     }
 
     /// r3-2: the longest taken name at the narrowest card: "Show …" is cut at its end yet reads as a

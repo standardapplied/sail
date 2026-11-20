@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SailKitTestSupport
 @testable import SailControls
 import SailLook
 import Testing
@@ -8,6 +9,10 @@ import Testing
 /// card draws them, at the width the card takes: the widest card, and the card at the least window
 /// (480 pt, less the rail and the card's margins). No window is shown.
 @MainActor @Suite struct CardFittingTests {
+    init() {
+        ExitWatch.install()
+    }
+
     static let sentence = { (tab: String) in "\(tab) is still running: the keyboard is with your other window or Mac." }
     nonisolated static let widths = [420.0, 384.0]
 

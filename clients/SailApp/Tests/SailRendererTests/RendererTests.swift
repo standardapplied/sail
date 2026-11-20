@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import Metal
+import SailKitTestSupport
 @testable import SailRenderer
 import SailLook
 import SailSurface
@@ -8,6 +9,10 @@ import SailVT
 import Testing
 
 @Suite struct RendererTests {
+    init() {
+        ExitWatch.install()
+    }
+
     /// Scenario 2 as drawn: at 10, 15 and 32 pt a box's top edge is one unbroken line of the
     /// foreground across all three cells, from the corner's arm to the other corner's.
     @Test(arguments: [10.0, 15, 32])

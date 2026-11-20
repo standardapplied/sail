@@ -249,9 +249,13 @@
   {"name": "w-r8-ended-while-away", "shot": "23-ended-while-away"},
   {"name": "w-r8-close", "pressStatus": "Close"},
   {"name": "w-r8-one-tab-left", "arrangement": {"titles": ["harbor · dock"]}},
-  {"name": "w-m7-account", "select": "account"},
-  {"name": "w-m7-sign-out", "signOutNow": true},
+  {"name": "w-m7-open-the-user-menu", "menu": "click"},
+  {"name": "w-m7-sign-out-from-the-user-menu", "menuClick": "Sign Out"},
   {"name": "w-m7-workspaces", "select": "workspaces"},
   {"name": "w-m7-said-signed-out", "workspaces": "You are signed out of the control plane."},
-  {"name": "w-m7-signed-out", "shot": "18-signed-out"}
+  {"name": "w-m7-signed-out", "shot": "18-signed-out"},
+  {"name": "w-m7-the-user-menu-signed-out", "menu": "click"},
+  {"name": "w-m7-the-user-menu-says-signed-out", "menuSays": "open: Not signed in; nothing highlighted; Auto chosen"},
+  {"name": "w-m7-the-user-menu-signed-out-in-both-looks", "shotScreen": "user-menu-signed-out"},
+  {"name": "w-m7-sign-in-from-the-user-menu", "menuClick": "Sign In"}
 ]}
