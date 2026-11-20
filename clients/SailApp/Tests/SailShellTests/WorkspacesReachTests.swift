@@ -12,6 +12,10 @@ import Testing
 /// words or buttons over each other, no wrapped words taller than their frame, and every button
 /// taking a click across its face, the actions shown only on hover or choice among them.
 @MainActor @Suite struct WorkspacesReachTests {
+    init() {
+        ExitWatch.install()
+    }
+
     /// The longest name and handle the server allows.
     static let long = String(repeating: "n", count: 63), handle = String(repeating: "k", count: 63)
 
@@ -31,6 +35,61 @@ import Testing
             faults += try await scene.faults(width: width, panel: panel).map { "\(scene) at \(width) pt beside a \(panel) pt panel: \($0)" }
         }
         #expect(faults.isEmpty, "\(faults.count) faults, the first: \(faults.prefix(60).joined(separator: "\n"))")
+    }
+
+    /// What a view shows takes a click in the turn it appears, before any display pass lays it out:
+    /// the user menu's items and Appearance at each opening, a sheet's buttons, a card's actions as
+    /// it shows, and a row's actions as the row is chosen. Each is framed, and its window hits it at
+    /// its middle.
+    @Test func whatIsShownTakesAClickAtOnce() throws {
+        var faults: [String] = []
+        let shell = try UserMenuTests.shell()
+        defer { shell.window.orderOut(nil) }
+        for (round, content) in [UserMenuTests.uday, .signedOut(lastUsed: nil), UserMenuTests.uday].enumerated() {
+            try UserMenuTests.open(shell, content)
+            let menu = shell.userMenu.view
+            faults += (menu.items as [NSView] + [menu.segments]).compactMap { Self.missesAClick($0).map { "the user menu, opening \(round + 1): \($0)" } }
+            shell.userMenu.close()
+        }
+        let sheet = Sheet(title: "Delete dock?", body: "Its files on the runner go with it.", confirm: "Delete Workspace", kind: .destructive, look: .light, titleFont: try TitleFont(directory: LookTests.fonts))
+        sheet.ask(on: shell.window) { _ in }
+        faults += [sheet.cancel, sheet.confirm].compactMap { Self.missesAClick($0).map { "the sheet: \($0)" } }
+        sheet.withdraw()
+        let card = Card(look: .light)
+        let host = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        defer { host.orderOut(nil) }
+        let content = try #require(host.contentView)
+        card.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(card)
+        NSLayoutConstraint.activate([card.centerXAnchor.constraint(equalTo: content.centerXAnchor), card.centerYAnchor.constraint(equalTo: content.centerYAnchor)])
+        host.orderFront(nil)
+        host.displayIfNeeded()
+        card.show("This terminal ended.", tone: .warning, button: "Open a New One", second: "Close")
+        faults += WorkspacesViewTests.found(SailButton.self, in: card).filter { !$0.isHidden }.compactMap { Self.missesAClick($0).map { "the card: \($0)" } }
+        let page = try #require(WorkspacesViewTests.page([WorkspaceRow(name: "dock", instance: "harbor-dock", state: .known(.running), owner: "uday")]))
+        let (project, window) = try WorkspacesViewTests.project(width: 900)
+        defer { window.orderOut(nil) }
+        project.render(page)
+        project.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        let id = try #require(Self.ids(project.list).first)
+        project.list.choose(id)
+        let row = try #require(project.list.row(id)?.view)
+        let actions = WorkspacesViewTests.found(SailButton.self, in: row).filter { !$0.isHiddenOrHasHiddenAncestor }
+        if actions.isEmpty { faults.append("the chosen row shows no action") }
+        faults += actions.compactMap { Self.missesAClick($0).map { "the chosen row: \($0)" } }
+        #expect(faults.isEmpty, "\(faults.count) faults: \(faults.joined(separator: "\n"))")
+    }
+
+    /// Why a click at `view`'s middle would miss it now, with no display pass: nil when it lands.
+    static func missesAClick(_ view: NSView) -> String? {
+        let name = (view as? NSButton)?.title ?? String(describing: type(of: view))
+        guard let window = view.window, let frameView = window.contentView?.superview else { return "\(name) is in no window" }
+        guard view.bounds.width >= 1, view.bounds.height >= 1 else { return "\(name) has no frame (\(view.frame))" }
+        let middle = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
+        let hit = frameView.hitTest(middle)
+        guard let hit, hit === view || hit.isDescendant(of: view) else { return "\(name)'s middle \(middle) hits \(hit.map { String(describing: type(of: $0)) } ?? "nothing")" }
+        return nil
     }
 
     @MainActor enum Scene: CaseIterable {
@@ -243,7 +302,7 @@ import Testing
                 {
                     faults.append("\(named(label)) clipped: its words need more than its \(label.frame.height) pt")
                 }
-                let drawnThings: Set = ["Initial", "Spinner", "Tile", "ProgressLine"]
+                let drawnThings: Set = ["Initial", "Spinner", "Tile", "ProgressLine", "MenuRow", "MenuSegments"]
                 if !place.isEmpty, child is NSButton || child is Pill || drawnThings.contains(String(describing: type(of: child))) || (child is NSTextField && !words.isEmpty) {
                     leaves.append((child, place))
                 }

@@ -148,7 +148,7 @@ public final class Tooltip: NSResponder {
 
     public let chip: TooltipChip
     private let beside: Bool
-    private weak var anchor: NSView?
+    package private(set) weak var anchor: NSView?
     private var panel: NSPanel?
     private var pending: DispatchWorkItem?
 
@@ -244,8 +244,9 @@ public final class Tooltip: NSResponder {
         Self.up = nil
     }
 
-    /// Placed by `TooltipPlacement` against the anchor's frame on its screen.
-    func show() {
+    /// Placed by `TooltipPlacement` against the anchor's frame on its screen; also shown by a view
+    /// that knows when its anchor is pointed at by the keys (the user menu's Logins).
+    package func show() {
         guard let anchor, let window = anchor.window, let screen = window.screen else { return }
         let size = chip.chip
         let at = window.convertToScreen(anchor.convert(anchor.alignmentRect(forFrame: anchor.bounds), to: nil))

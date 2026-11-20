@@ -15,6 +15,10 @@ import Testing
 /// emoji fails, a redrawn one does not. Every run leaves its images in `SAIL_FRAMES_OUT`, and a
 /// difference image beside a failing one.
 @Suite struct GoldenTests {
+    init() {
+        ExitWatch.install()
+    }
+
     static let themes: [(name: String, palette: Palette)] = [("dark", .dark), ("light", .light)]
 
     @Test(arguments: try VTFixtures.all(), [0, 1])

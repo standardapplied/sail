@@ -34,11 +34,8 @@ public struct WorkspacesModel: Sendable {
     public struct Panel: Equatable, Sendable {
         public let projects: [Project]
         public let chosen: String?
-        /// Who is signed in and their role ("ana · member").
+        /// Who is signed in and their role ("ana · member"), which the empty card's line says.
         public let who: String
-        /// Who is signed in alone, which the foot sets apart from the role.
-        public let handle: String
-        public let controlPlane: String
         /// What the panel says when it lists no project.
         public let emptyLine: String?
         /// What is shown is the last listed, its refresh having failed: the panel is drawn dimmed.
@@ -549,7 +546,7 @@ public struct WorkspacesModel: Sendable {
     public var screen: Screen {
         guard let projects else { return projectsFailure.map { .unreachable(unreachable($0)) } ?? .loading }
         let panel = Panel(
-            projects: projects.map { Project(name: $0.name, mark: Self.mark($0.template)) }, chosen: chosen, who: who, handle: person.handle, controlPlane: person.controlPlane,
+            projects: projects.map { Project(name: $0.name, mark: Self.mark($0.template)) }, chosen: chosen, who: who,
             emptyLine: projects.isEmpty ? "No project is open to you yet." : nil,
             stale: projectsFailure != nil || (chosen != nil && listing.listed == chosen && listFailure != nil)
         )

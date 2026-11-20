@@ -20,6 +20,11 @@ public final class LinkButton: NSButton {
 
     private var painting = false
 
+    /// The words are set to the layout's leading edge, where the underline starts.
+    override public var userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection {
+        didSet { paint() }
+    }
+
     public init(_ title: String, points: Double = Look.Step.footnote.points, look: Look, target: AnyObject?, action: Selector?) {
         self.look = look
         self.points = points
@@ -48,6 +53,7 @@ public final class LinkButton: NSButton {
         let font = NSFont.systemFont(ofSize: points, weight: .medium)
         let cut = NSMutableParagraphStyle()
         cut.lineBreakMode = .byTruncatingTail
+        cut.alignment = userInterfaceLayoutDirection == .rightToLeft ? .right : .left
         attributedTitle = NSAttributedString(string: title, attributes: [.font: font, .foregroundColor: NSColor(look.text), .paragraphStyle: cut])
         attributedAlternateTitle = NSAttributedString(string: title, attributes: [.font: font, .foregroundColor: NSColor(look.textSecondary), .paragraphStyle: cut])
         needsDisplay = true

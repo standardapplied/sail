@@ -32,6 +32,10 @@ import Testing
 /// the session running with no pane; one answered at once closes the pane without a word, the
 /// focus already on the next. Against ``FakeRunnerDoor`` playing this Mac's host.
 @MainActor @Suite(.timeLimit(.minutes(1))) struct ThisMacEndingTests {
+    init() {
+        ExitWatch.install()
+    }
+
     static func host(at door: FakeRunnerDoor) -> LocalHost {
         let folder = FileManager.default.temporaryDirectory.appending(path: "sail-mac-end-\(UUID().uuidString.prefix(8))")
         let address = HostAddress.tcp(host: "127.0.0.1", port: door.port)

@@ -52,10 +52,10 @@ let package = Package(
         ),
         .testTarget(
             name: "SailTerminalViewTests",
-            dependencies: ["SailTerminalView", "SailShell", "SailRenderer", "SailLook", kit("SailSurface"), kit("SailTerminal"), kit("SailTerminalWire"), kit("SailVT")],
+            dependencies: ["SailTerminalView", "SailShell", "SailRenderer", "SailLook", kit("SailSurface"), kit("SailTerminal"), kit("SailTerminalWire"), kit("SailVT"), kit("SailKitTestSupport")],
             swiftSettings: strict
         ),
-        .testTarget(name: "SailControlsTests", dependencies: ["SailControls", "SailLook"], swiftSettings: strict),
+        .testTarget(name: "SailControlsTests", dependencies: ["SailControls", "SailLook", kit("SailKitTestSupport")], swiftSettings: strict),
         .testTarget(
             name: "SailShellTests",
             dependencies: [

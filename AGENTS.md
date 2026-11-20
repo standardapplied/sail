@@ -114,6 +114,9 @@ tests bite, and the deletion count in the body.
   callbacks, fake clocks with a horizon that throws.
 - No network and no external service in a unit test. A test that fails once is a bug to
   root-cause with evidence; "flaky" is not a diagnosis and a rerun is not a fix.
+- A unit test of the Mac app never runs AppKit's own mouse tracking (a control's `mouseDown`) or
+  posts events to the app's queue (`NSApp.postEvent`): with no `NSApp.run` under it, that stopped
+  the main run loop and ended the suite's process (#499); real clicks and keys are the drive's.
 - Coverage: `ai.singlr.sail.api.*` is held to 100% line and method coverage; new classes
   anywhere should be fully covered in the same pull request. Gates never go down.
 - Prompts, hook files and launch commands are pinned whole by golden tests; a change to them

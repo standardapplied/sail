@@ -1,6 +1,7 @@
 import Foundation
 @testable import SailAccount
 import SailAPI
+import SailKitTestSupport
 import Testing
 
 /// What a kept item holds: a session this build wrote reads back; an item of the earlier shape
@@ -8,6 +9,10 @@ import Testing
 /// which the vault then removes and says as unreadable (`AccountTests` in SailKit, the drive's
 /// `keychain-item-of-the-old-shape` on signed runs).
 @Suite struct KeychainItemTests {
+    init() {
+        ExitWatch.install()
+    }
+
     @Test func aSessionThisBuildKeptReadsBack() throws {
         let kept = PasskeySession(sessionToken: "sess_item", fde: "uday", expiresAt: Date(timeIntervalSince1970: 1_800_000_000))
         #expect(KeychainVault.session(in: try JSONEncoder().encode(kept)) == kept)

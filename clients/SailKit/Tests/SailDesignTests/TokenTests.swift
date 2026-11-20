@@ -95,6 +95,21 @@ import Testing
         #expect(look.palette.idleCursor == Self.over(look.textTertiary, look.palette.background))
     }
 
+    /// The user menu's turned-over marks (its highlight, its avatar, the chosen Appearance): ink on
+    /// warm white in light, warm white on ink in dark, at least 15:1; the rail's user button while
+    /// its menu is open is outlined in the secondary ink, never filled.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func theMenusTurnedOverMarksAreInkAndPaper(_ name: String, _ look: Look) throws {
+        let highlight = look.menuHighlight
+        let fill = try #require(highlight.fill)
+        #expect(fill == Tint(look.inverse) && highlight.ink == Tint(look.onInverse) && look.menuAvatar == highlight, "\(name)")
+        #expect(Self.contrast(look.inverse, look.onInverse) >= 15, "\(name): \(Self.contrast(look.inverse, look.onInverse)):1")
+        #expect(look.inverse == look.text.rgb && look.onInverse == (look.palette.isDark ? RGB(0x0E1217) : RGB(0xF6F1E9)))
+        #expect(look.railOpen.fill == nil && look.railOpen.edge == look.textSecondary && look.railOpen.ink == look.text)
+        // A key cap on the turned-over item: the mockup's --text2 and --sep2 inside its ink.
+        #expect(look.onInverseSecondary == Tint(look.onInverse, alpha: 0.78) && look.onInverseEdge == Tint(look.onInverse, alpha: 0.3), "\(name)")
+    }
+
     /// Increase Contrast reaches the terminal: its idle cursor is the contrasted tertiary ink over the
     /// terminal's background, as the look's own is.
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])

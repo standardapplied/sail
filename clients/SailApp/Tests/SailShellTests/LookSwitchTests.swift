@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SailKitTestSupport
 import SailLook
 @testable import SailShell
 import SailVT
@@ -9,6 +10,10 @@ import Testing
 /// A change of look recolours and lays nothing out, and colours each symbol once per look (the
 /// spec `sail-app-a-change-of-look-holds-the-main-thread-briefly`, I2 and I3).
 @MainActor @Suite struct LookSwitchTests {
+    init() {
+        ExitWatch.install()
+    }
+
     /// Every view of the window, its frame view's included: the strip lives in the title bar.
     static func views(under view: NSView) -> [NSView] {
         [view] + view.subviews.flatMap { views(under: $0) }
