@@ -452,6 +452,35 @@ class FilesHostTest {
     }
   }
 
+  /**
+   * F1's window: a change made after a folder was listed and before its watch took it is reported
+   * at the watch's first tick, since the watch starts from the listing's version; a folder
+   * unchanged since its listing is not.
+   */
+  @Test
+  void aChangeBetweenAListingAndItsWatchIsReportedAndNoneIsNot() throws Exception {
+    var src = Files.createDirectory(home.resolve("src"));
+    var docs = Files.createDirectory(home.resolve("docs"));
+    try (var files = open("tok-mady")) {
+      PtyWire.write(files, new PtyMessage.FilesList(1, src.toString()));
+      var listed = assertInstanceOf(PtyMessage.FilesListing.class, next(files));
+      PtyWire.write(files, new PtyMessage.FilesList(2, docs.toString()));
+      var quiet = assertInstanceOf(PtyMessage.FilesListing.class, next(files));
+      Files.createFile(src.resolve("Late.java"));
+
+      PtyWire.write(
+          files,
+          new PtyMessage.FilesWatch(
+              List.of(
+                  new PtyMessage.Watched(src.toString(), listed.version()),
+                  new PtyMessage.Watched(docs.toString(), quiet.version()))));
+
+      assertEquals(new PtyMessage.FilesChanged(List.of(src.toString())), next(files));
+      assertInstanceOf(PtyMessage.FilesTick.class, PtyWire.read(files));
+      assertInstanceOf(PtyMessage.FilesTick.class, PtyWire.read(files), "docs never changed");
+    }
+  }
+
   @Test
   void fourScriptsRunAtOnceTwoOfThemReadsTheRestInTheOrderAsked() throws Exception {
     stall.add("read");
