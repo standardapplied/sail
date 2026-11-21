@@ -19,6 +19,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
@@ -180,8 +181,7 @@ public final class AgentAttachCommand implements Runnable {
       throw new IllegalStateException(
           "Attaching needs an interactive terminal to open session '" + plan.session() + "'.");
     }
-    announceResume(run, harness, sessionId, plan);
-    requireRunning(place);
+    resumeIn(place, new ShellExecutor(false), () -> announceResume(run, harness, sessionId, plan));
     if (member) {
       endMember(run, operator);
     }
@@ -411,17 +411,27 @@ public final class AgentAttachCommand implements Runnable {
       return;
     }
     try (var operations = this.operations.apply(operator)) {
+      var shell = new ShellExecutor(false);
       reach(
           place,
-          Workspaces.onThisBox(new ShellExecutor(false)),
+          Workspaces.onThisBox(shell),
+          shell,
           operations.catalog().definitions()::require,
           operations.identity()::workspaceOwner,
           WorkspaceVerbs.keeper(),
-          () -> {
-            if (sessionId == null) {
-              announceFresh(run);
-            } else {
-              announceResume(run, harness, sessionId, place.instance());
+          new Reaching() {
+            @Override
+            public void starting(String instance) {
+              System.out.println(Ansi.AUTO.string("  @|faint Starting " + instance + "...|@"));
+            }
+
+            @Override
+            public void reached() {
+              if (sessionId == null) {
+                announceFresh(run);
+              } else {
+                announceResume(run, harness, sessionId, place.instance());
+              }
             }
           });
     }
@@ -584,51 +594,76 @@ public final class AgentAttachCommand implements Runnable {
     }
   }
 
-  private static void requireRunning(RunPlace place) throws Exception {
-    var state = new AgentPresence(new ShellExecutor(false)).state(place);
+  /**
+   * Refuses a resumed host session in {@code place} unless it runs, as {@code shell} finds it, and
+   * only then {@code says} that it resumes, so a refusal is never announced first.
+   */
+  static void resumeIn(RunPlace place, ShellExec shell, Runnable says) throws Exception {
+    requireRunning(place, shell);
+    says.run();
+  }
+
+  private static void requireRunning(RunPlace place, ShellExec shell) throws Exception {
+    var state = new AgentPresence(shell).state(place);
     ContainerStateGuard.requireRunning(state, place);
+  }
+
+  /** What an attach says while it puts its place within reach. */
+  interface Reaching {
+    /** Said before {@code instance}, a stopped spec's workspace, is started for the attach. */
+    void starting(String instance);
+
+    /** Said once the place is within reach, never of one the attach refuses. */
+    void reached();
   }
 
   /**
    * Puts {@code place} within an attach's reach: a spec's workspace through its own door ({@link
    * Workspaces#startExisting}), started when stopped and given its owner's credentials; any other
-   * place must be running. On a node ({@code keeper}, its person; null on main), a spec's workspace
-   * labelled for a person the node does not hold by id is refused first, running or stopped (N1):
-   * no terminal opens on that person's credentials, and only the box's pass strips it. {@code
-   * reached} runs once the place is within reach, so what an attach says it attaches is never said
-   * of one it refuses.
+   * place must be running, as {@code shell} finds it. On a node ({@code keeper}, its person; null
+   * on main), a spec's workspace labelled for a person the node does not hold by id is refused
+   * first, running or stopped (N1), decided on the instance the door found under its lock: no
+   * terminal opens on that person's credentials, and only the box's pass strips it. {@code said} is
+   * told before a stopped workspace is started, so a cold start is not silent, and once the place
+   * is within reach.
    */
   static void reach(
       RunPlace place,
       Workspaces workspaces,
+      ShellExec shell,
       Function<String, ProjectDefinition> definitions,
       Function<String, WorkspaceOwner> owners,
       String keeper,
-      Runnable reached)
+      Reaching said)
       throws Exception {
     if (place instanceof RunPlace.SpecWorkspace workspace) {
-      if (keeper != null) {
-        var found = workspaces.find(workspace.project(), workspace.workspace());
-        if (found.isPresent()) {
-          var refused =
-              WorkspaceDoors.labelledForAnother(
-                  workspace.project(),
-                  workspace.workspace(),
-                  found.get(),
-                  owners,
-                  WorkspaceDoors.TERMINAL,
-                  true);
-          if (refused.isPresent()) {
-            throw new IllegalStateException(refused.get().getMessage());
-          }
-        }
-      }
-      workspaces.startExisting(workspace, definitions.apply(workspace.project()), owners);
-      reached.run();
+      workspaces.startExisting(
+          workspace,
+          definitions.apply(workspace.project()),
+          owners,
+          found -> {
+            if (keeper != null) {
+              var refused =
+                  WorkspaceDoors.labelledForAnother(
+                      workspace.project(),
+                      workspace.workspace(),
+                      found,
+                      owners,
+                      WorkspaceDoors.TERMINAL,
+                      true);
+              if (refused.isPresent()) {
+                throw new IllegalStateException(refused.get().getMessage());
+              }
+            }
+            if (!(found.state() instanceof ContainerState.Running)) {
+              said.starting(found.name());
+            }
+          });
+      said.reached();
       return;
     }
-    requireRunning(place);
-    reached.run();
+    requireRunning(place, shell);
+    said.reached();
   }
 
   /**

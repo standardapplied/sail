@@ -488,6 +488,13 @@ jobs:
           ci/check its ${{ matrix.shard }} 4 NativeFleetIT UpgradeE2EIT -- -Dsail.it.requireNative=true
           2>&1 | tee "$RUNNER_TEMP/maven.log"
 
+      - name: What Sail recorded of an incus start or stop that timed out
+        if: failure()
+        run: |
+          found=$(find . -path '*/target/it-home-*/.sail/logs/containers.log' 2> /dev/null)
+          if [ -z "$found" ]; then echo "No incus start or stop timed out."; fi
+          for log in $found; do echo "== $log"; cat "$log"; done
+
       - name: Leave the test evidence
         if: always()
         uses: ./.github/actions/test-evidence

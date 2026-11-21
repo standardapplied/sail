@@ -629,6 +629,19 @@ public final class Workspaces {
       ProjectDefinition config,
       Function<String, WorkspaceOwner> owners)
       throws Exception {
+    startExisting(place, config, owners, Entry.ANY);
+  }
+
+  /**
+   * As {@link #startExisting(RunPlace.SpecWorkspace, ProjectDefinition, Function)}, the instance
+   * found under the workspace's lock decided by {@code enter} first, before it is started.
+   */
+  public void startExisting(
+      RunPlace.SpecWorkspace place,
+      ProjectDefinition config,
+      Function<String, WorkspaceOwner> owners,
+      Entry enter)
+      throws Exception {
     try (var held = entryLock(place.project(), place.workspace())) {
       var found =
           requireTheSpecs(place, name -> false, box.all())
@@ -651,6 +664,7 @@ public final class Workspaces {
                                   "--spec",
                                   place.specId(),
                                   "--restart"))));
+      enter.decide(found);
       startGiving(found, config, owners);
     }
   }
@@ -1031,6 +1045,11 @@ public final class Workspaces {
                 listed.name(),
                 new Unreached(retry.apply(listed.name()), Remedied.reasonOf(failure)));
           } catch (IOException | TimeoutException unsaid) {
+            System.err.println(
+                "  [workspaces] why the pass did not reach "
+                    + listed.name()
+                    + " could not be written on it: "
+                    + Remedied.reasonOf(unsaid).strip());
             failure.addSuppressed(unsaid);
           }
           throw failure;

@@ -26,10 +26,16 @@ public final class ContainerManager {
 
   private final ShellExec shell;
   private final ContainerConfig config;
+  private final InstanceTimeoutDiagnosis timeouts;
 
   public ContainerManager(ShellExec shell) {
+    this(shell, InstanceTimeoutDiagnosis.of(shell));
+  }
+
+  ContainerManager(ShellExec shell, InstanceTimeoutDiagnosis timeouts) {
     this.shell = shell;
     this.config = new ContainerConfig(shell, SailPaths.locksDir());
+    this.timeouts = timeouts;
   }
 
   /** Resource limits configured on a container (raw strings from Incus config). */
@@ -73,7 +79,7 @@ public final class ContainerManager {
 
   /** Starts a container. Throws on failure. */
   public void start(String name) throws IOException, InterruptedException, TimeoutException {
-    var result = shell.exec(List.of("incus", "start", name));
+    var result = changing("start", name);
     if (!result.ok()) {
       throw new IOException("Failed to start container '" + name + "': " + result.stderr());
     }
@@ -105,9 +111,22 @@ public final class ContainerManager {
     return false;
   }
 
+  /**
+   * {@code incus <verb> <name>}, a start or a stop; one that runs out of time says why, from what
+   * the box said of the instance just after ({@link InstanceTimeoutDiagnosis}).
+   */
+  private ShellExec.Result changing(String verb, String name)
+      throws IOException, InterruptedException, TimeoutException {
+    try {
+      return shell.exec(List.of("incus", verb, name));
+    } catch (CommandTimedOut timedOut) {
+      throw timeouts.of(name, timedOut);
+    }
+  }
+
   /** Stops a container. Throws on failure. */
   public void stop(String name) throws IOException, InterruptedException, TimeoutException {
-    var result = shell.exec(List.of("incus", "stop", name));
+    var result = changing("stop", name);
     if (!result.ok()) {
       throw new IOException("Failed to stop container '" + name + "': " + result.stderr());
     }
