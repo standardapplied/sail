@@ -811,10 +811,13 @@ extension Driver {
         workbench.panes.values.filter { $0.window != nil && !$0.isHiddenOrHasHiddenAncestor }
     }
 
-    /// The most a switch after the first may hold the main thread, counted as ours and clipped to
-    /// the switch: half the 100 ms within which a change reads as instant, the other half the panes'
-    /// frames'. The first switch the four panes' views see is AppKit's first measuring of their
-    /// text in the other look, so it is reported, not judged.
+    /// The most the median of switches 2 to 4 may hold the main thread, counted as ours and clipped
+    /// to each switch: half the 100 ms within which a change reads as instant, the other half the
+    /// panes' frames'. That median was at most 34.8 ms (median 11.3, p99 26.6) in 166 passing runs of
+    /// the two four-pane steps, and 36.4 ms on a runner whose CPUs had none idle; one busy switch
+    /// moves one of the three, a cost every switch pays moves the median. The first switch the four
+    /// panes' views see is AppKit's first measuring of their text in the other look, so it is judged
+    /// on its own bound, ``firstSwitchHold``.
     static let lookSwitchHold = 50.0
     /// The most the first switch may hold the main thread, counted as ours: about two and a half
     /// times the 54–58 ms seen, so a cost of ours that lands only there cannot pass unseen.
@@ -838,8 +841,9 @@ extension Driver {
     /// whatever the machine: the panes quiet before the switches; every pane drew every look by
     /// the step's end; no symbol resolved by switches 2 to 4, between looks already shown
     /// (``SymbolInk/resolutions``); no layout of the workbench's tabs during any switch
-    /// (``WorkbenchView/tabLayouts``); each switch after the first held the main thread at most
-    /// ``lookSwitchHold``, counted as ours and clipped to it; the median of the four switches' worst
+    /// (``WorkbenchView/tabLayouts``); the median of switches 2 to 4's main-thread holds at most
+    /// ``lookSwitchHold``, counted as ours and clipped to each, every switch measured by a main
+    /// thread still ticking after it, the worst always said; the median of the four switches' worst
     /// pane waits to show the change at most ``lookShownMedian``, each net of the machine's share
     /// (``shownWait(_:hold:)``), with a change shown in every switch, the worst always said. Reported and not judged: the first
     /// switch's hold, every switch's main-thread CPU time, and an empty window's own switches. Nothing of the drive's runs on the main
@@ -915,6 +919,10 @@ extension Driver {
         print("look switch: the looks switched \(way)")
         let longest = holds.map(\.ours).max() ?? 0
         let later = holds.dropFirst().map(\.ours).max() ?? 0
+        let laterMedian = Self.median(holds.dropFirst().map(\.ours))
+        let ticked = mainThread.lastTick
+        let unmeasured = switches.indices.filter { switches[$0].span.end > ticked }.map { $0 + 1 }
+        let worstLater = holds.indices.dropFirst().max { holds[$0].ours < holds[$1].ours }.map { $0 + 1 }
         let beyond = holds.map { $0.ours - empty.second }
         panes4["look switched, ours, the worst pane ms"] = worstBySwitch.max() ?? 0
         panes4["look switched, ours, the worst pane, the median switch ms"] = medianWait
@@ -922,6 +930,7 @@ extension Driver {
         panes4["look switched first, the main thread's hold, ours ms (reported, not judged)"] = holds.first?.ours ?? 0
         panes4["look switched first, the main thread's CPU time ms"] = (cpus.first ?? nil) ?? -1
         panes4["look switched after the first, the main thread's longest hold, ours ms"] = later
+        panes4["look switched after the first, the main thread's hold, the median switch, ours ms"] = laterMedian
         panes4["look switched, the main thread's CPU time in a switch, the most ms"] = cpus.compactMap(\.self).max() ?? -1
         panes4["look switched, the longest hold less an empty window's second switch ms"] = beyond.max() ?? 0
         panes4["look switched, an empty window's first switch, ours ms"] = empty.first
@@ -929,7 +938,7 @@ extension Driver {
         panes4["look switched, the four panes' longest draws summed ms"] = draws
         let perSwitch = holds.map { Self.ms($0.ours) }.joined(separator: ", ")
         let cpuSaid = cpus.map { $0.map { Self.ms($0) } ?? "?" }.joined(separator: ", ")
-        print("look switch: the main thread's longest hold a switch, ours and clipped to it (after the first, judged at \(Self.ms(Self.lookSwitchHold)) ms), \(perSwitch) ms; its CPU time a switch \(cpuSaid) ms; "
+        print("look switch: the main thread's longest hold a switch, ours and clipped to it (the median of switches 2 to \(times) judged at \(Self.ms(Self.lookSwitchHold)) ms), \(perSwitch) ms; its CPU time a switch \(cpuSaid) ms; "
             + "an empty window's own first switch \(Self.ms(empty.first)) ms and second \(Self.ms(empty.second)) ms")
         let changed = changes.map { "\($0)" }.joined(separator: ", ")
         let quietSaid = "no screen changed for \(Self.ms(Self.quietBeforeSwitching * 1000)) ms before them"
@@ -939,7 +948,9 @@ extension Driver {
         let firstHold = Self.ms(holds.first?.ours ?? 0)
         let firstCPU = (cpus.first ?? nil).map { Self.ms($0) } ?? "?"
         let firstSaid = "ours \(firstHold) ms, its CPU time \(firstCPU) ms; \(resolvedFirst) symbol images resolved, \(keptBefore) kept before it"
-        let laterSaid = "ours, clipped to each: \(laterHolds) ms; the first, reported: \(firstHold) ms, its CPU time \(firstCPU) ms"
+        let measuredSaid = unmeasured.isEmpty ? "every switch measured" : "switches \(unmeasured.map(String.init).joined(separator: ", ")) not measured: the main thread's clock last ticked before they ended"
+        let laterSaid = "ours, clipped to each: \(laterHolds) ms, the median \(Self.ms(laterMedian)) ms; the worst, \(Self.ms(later)) ms, at switch \(worstLater.map(String.init) ?? "none"); "
+            + "\(measuredSaid); the first, judged on its own: \(firstHold) ms, its CPU time \(firstCPU) ms"
         let waitSaid = "a change shown and measured in \(measured.reduce(0, +)) of \(times * grid.count) panes' switches; the worst pane a switch, ours, \(worstBySwitch.map { Self.ms($0) }.joined(separator: ", ")) ms, the median \(Self.ms(medianWait)) ms; "
             + "the worst, \(Self.ms(worstBySwitch.max() ?? 0)) ms, \(worstSaid); the four panes' longest draws summed \(Self.ms(draws)) ms"
         return [
@@ -948,8 +959,8 @@ extension Driver {
             ("3: no symbol resolved by switches 2 to \(times), between looks already shown (\(resolvedLater) resolved)", resolvedLater == 0),
             ("4: no layout of the workbench's tabs during the switches (\(layouts) laid out)", layouts == 0),
             ("5: the first switch held the main thread at most \(Self.ms(Self.firstSwitchHold)) ms and resolved at most one symbol image per one kept (\(firstSaid))",
-             (holds.first?.ours ?? 0) <= Self.firstSwitchHold && resolvedFirst <= keptBefore),
-            ("6: each switch after the first held the main thread at most \(Self.ms(Self.lookSwitchHold)) ms (\(laterSaid))", later <= Self.lookSwitchHold),
+             (holds.first?.ours ?? 0) <= Self.firstSwitchHold && resolvedFirst <= keptBefore && !unmeasured.contains(1)),
+            ("6: switches 2 to \(times) held the main thread at most \(Self.ms(Self.lookSwitchHold)) ms at their median (\(laterSaid))", laterMedian <= Self.lookSwitchHold && unmeasured.isEmpty),
             ("7: the median switch's worst pane waited at most \(Self.ms(Self.lookShownMedian)) ms to show the change (\(waitSaid))", medianWait <= Self.lookShownMedian && measured.allSatisfy { $0 > 0 }),
         ] + (byMenu ? [("8: the user menu opened over the panes, switched each look, chose Auto and closed (\(closed.1))", opened.0 && closed.0)] : [])
     }
