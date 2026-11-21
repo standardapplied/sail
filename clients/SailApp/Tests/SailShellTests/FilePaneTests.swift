@@ -1,11 +1,13 @@
 import AppKit
 import Foundation
 import SailFiles
+import SailControls
 import SailKitTestSupport
 import SailLook
 @testable import SailShell
 import SailTerminal
 import SailTerminalWire
+import SailVT
 import SailWorkbench
 import Testing
 
@@ -64,6 +66,98 @@ import Testing
         #expect(pane.editor.string == "two\nmine", "an unsaved pane was replaced: \(pane.editor.string)")
         pane.discardPressed()
         #expect(await RunnerTabTests.until(10) { pane.editor.string == "theirs\n" && pane.file.clean && panel.unsaved == nil })
+    }
+
+    /// A changed line that wraps is barred along every row it takes, its number on its first.
+    @Test func aWrappedChangedLineIsBarredAlongEveryRow() async throws {
+        let (door, _, bench, _, pane) = try await Self.opened(Array("short\n".utf8))
+        #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
+        let long = "short\n" + String(repeating: "a long line that wraps ", count: 30) + "\nend\n"
+        door.setFile(Self.path, Array(long.utf8))
+        #expect(await RunnerTabTests.until(10) { pane.editor.string == long })
+        bench.layoutSubtreeIfNeeded()
+        let rows = pane.lineNumbers.rows
+        let first = try #require(rows.first { $0.number == 1 }), wrapped = try #require(rows.first { $0.number == 2 })
+        #expect(wrapped.barred && !first.barred && wrapped.height > first.height * 1.5, "the wrapped line's bar spans \(wrapped.height) pt against a row's \(first.height): \(rows)")
+    }
+
+    /// The sheet bars each differing line in its gutter and fills none, and says when the
+    /// workspace's text was read.
+    @Test func theSheetBarsItsLinesAndSaysWhenTheirsWasRead() throws {
+        let read = Date(timeIntervalSince1970: 1_700_000_000)
+        let sheet = ConflictSheet(name: "tide.ts", theirs: "same\ntheirs\n", theirsRead: read, yours: "same\nmine\n", deleted: false, look: .light, mono: try LabelFont(directory: LookTests.fonts))
+        let filled = [sheet.theirsView, sheet.yoursView].contains { view in
+            var found = false
+            view.textStorage?.enumerateAttribute(.backgroundColor, in: NSRange(location: 0, length: view.textStorage?.length ?? 0)) { value, _, _ in found = found || value != nil }
+            return found
+        }
+        #expect(!filled, "a differing line was filled rather than barred")
+        let rulers = [sheet.theirsView, sheet.yoursView].compactMap { $0.enclosingScrollView?.verticalRulerView as? LineNumbers }
+        #expect(rulers.count == 2 && rulers.allSatisfy { $0.barred == IndexSet(integer: 2) }, "the differing line is not barred on both sides")
+        #expect([sheet.theirsView, sheet.yoursView].allSatisfy { $0.enclosingScrollView is QuietScrollView })
+        let time = DateFormatter.localizedString(from: read, dateStyle: .none, timeStyle: .short)
+        #expect(Self.words(in: sheet.contentView).contains("Theirs  on the workspace, \(time)"), "\(Self.words(in: sheet.contentView))")
+    }
+
+    static func words(in view: NSView?) -> [String] {
+        guard let view else { return [] }
+        return ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap { words(in: $0) }
+    }
+
+    /// The look's tokens as colours, read from every token it holds.
+    static func tokens(_ look: Look) -> Set<RGB> {
+        func collect(_ value: Any) -> [RGB] {
+            if let rgb = value as? RGB { return [rgb] }
+            if let tint = value as? Tint { return [tint.rgb] }
+            return Mirror(reflecting: value).children.flatMap { collect($0.value) }
+        }
+        return Set(collect(look))
+    }
+
+    static func rgb(_ colour: NSColor?) -> RGB? {
+        guard let colour = colour?.usingColorSpace(.sRGB) else { return nil }
+        func byte(_ value: CGFloat) -> UInt8 {
+            UInt8(max(0, min(255, (Double(value) * 255).rounded())))
+        }
+        return RGB(red: byte(colour.redComponent), green: byte(colour.greenComponent), blue: byte(colour.blueComponent))
+    }
+
+    /// Every colour a shown view paints with: its layer's fill and edge, a text field's and a text
+    /// view's ink and fill, with the view that paints it.
+    static func colours(in view: NSView) -> [(String, RGB)] {
+        guard !view.isHidden else { return [] }
+        var found: [(String, RGB)] = []
+        let name = "\(type(of: view))"
+        if let fill = view.layer?.backgroundColor, let rgb = rgb(NSColor(cgColor: fill)), (NSColor(cgColor: fill)?.alphaComponent ?? 0) > 0 { found.append((name + " fill", rgb)) }
+        if let layer = view.layer, layer.borderWidth > 0, let edge = layer.borderColor, let rgb = rgb(NSColor(cgColor: edge)) { found.append((name + " edge", rgb)) }
+        if let field = view as? NSTextField, !field.stringValue.isEmpty, let rgb = rgb(field.textColor) { found.append((name + " \"\(field.stringValue.prefix(24))\"", rgb)) }
+        if let text = view as? NSTextView {
+            if let rgb = rgb(text.textColor) { found.append((name + " ink", rgb)) }
+            if text.drawsBackground, let rgb = rgb(text.backgroundColor) { found.append((name + " fill", rgb)) }
+        }
+        return found + view.subviews.flatMap { colours(in: $0) }
+    }
+
+    /// A change of look reaches every surface the workbench shows (the terminals, the tree, the file
+    /// pane and its divider, the conflict sheet over them): after light to dark, no view paints a
+    /// colour only light has, so a new surface that forgets the look fails here on its own.
+    @Test func aChangeOfLookReachesEverySurface() async throws {
+        let (door, shell, bench, _, pane) = try await Self.opened(Array("one\n".utf8))
+        #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
+        pane.editor.insertText("mine", replacementRange: NSRange(location: 0, length: 0))
+        door.setFile(Self.path, Array("theirs\n".utf8))
+        #expect(await RunnerTabTests.until(10) { pane.file.note == .changed })
+        #expect(bench.compareFile())
+        let window = try #require(bench.window)
+        #expect(await RunnerTabTests.until(5) { window.attachedSheet != nil }, "the sheet did not come up")
+        shell.apply(.dark)
+        bench.layoutSubtreeIfNeeded()
+        let lightOnly = Self.tokens(.light).subtracting(Self.tokens(.dark))
+        let painted = Self.colours(in: bench) + (window.attachedSheet?.contentView.map(Self.colours) ?? [])
+        let stale = painted.filter { lightOnly.contains($0.1) }
+        #expect(stale.isEmpty, "light's colours after the switch to dark: \(stale.map { "\($0.0) \($0.1)" })")
+        #expect(painted.count > 20, "the walk found only \(painted.count) colours")
+        window.attachedSheet.map { window.endSheet($0) }
     }
 
     /// M14a: a file that is not text is one sentence and Copy Path.

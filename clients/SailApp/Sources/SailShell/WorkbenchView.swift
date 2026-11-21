@@ -809,6 +809,7 @@ public final class WorkbenchView: NSView {
             view.filePane?.look = look
             view.fileDivider.look = look
         }
+        (window?.attachedSheet as? ConflictSheet)?.look = look
     }
 }
 

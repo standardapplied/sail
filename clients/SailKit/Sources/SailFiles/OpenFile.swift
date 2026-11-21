@@ -100,7 +100,8 @@ public struct OpenFile: Sendable {
     public private(set) var version = ""
     /// The workspace's bytes, read while the pane was unsaved and found different.
     public private(set) var theirs: [UInt8]?
-    private var theirsDigest = ""
+    /// The digest of ``theirs``: the version the conflict sheet shows.
+    public private(set) var theirsDigest = ""
     private var base: [UInt8] = []
     private var baseUnits = 0
     private var text = ""

@@ -204,7 +204,7 @@ extension WorkbenchView {
     /// Theirs, Cancel, with no default (M27, M48).
     func compare(_ pane: FilePane, theirs: String) {
         guard let window else { return }
-        let sheet = ConflictSheet(name: pane.file.name, theirs: theirs, yours: pane.editor.string, deleted: pane.file.note == .deletedWhileTyped, look: look, mono: labels)
+        let sheet = ConflictSheet(name: pane.file.name, theirs: theirs, theirsRead: pane.theirsRead, yours: pane.editor.string, deleted: pane.file.note == .deletedWhileTyped, look: look, mono: labels)
         sheet.onChoice = { [weak pane, weak window, weak sheet] choice in
             if let sheet { window?.endSheet(sheet) }
             switch choice {

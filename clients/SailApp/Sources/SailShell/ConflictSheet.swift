@@ -3,9 +3,10 @@ import SailControls
 import SailLook
 
 /// The conflict sheet: the workspace's file and the pane's text side by side, read-only, scrolling
-/// together, opened at the first line that differs, each differing line barred. Keep Mine (in the
-/// error ink: it replaces theirs), Keep Theirs, Cancel; no default, so ⏎ does nothing, and Esc
-/// cancels. A deleted file offers Save Anyway and Discard instead. It writes nothing itself.
+/// together, opened at the first line that differs, each differing line barred in the gutter as the
+/// pane's changed lines are. Keep Mine (in the error ink: it replaces theirs), Keep Theirs, Cancel;
+/// no default, so ⏎ does nothing, and Esc cancels. A deleted file offers Save Anyway and Discard
+/// instead. It writes nothing itself, and follows a change of look while it is up.
 @MainActor
 final class ConflictSheet: NSWindow {
     enum Choice {
@@ -13,24 +14,36 @@ final class ConflictSheet: NSWindow {
     }
 
     var onChoice: @MainActor (Choice) -> Void = { _ in }
-    let theirsView = NSTextView()
-    let yoursView = NSTextView()
-    private(set) var buttons: [SailButton] = []
-    private var syncing = false
+    var look: Look {
+        didSet { if look != oldValue { paint() } }
+    }
 
-    init(name: String, theirs: String, yours: String, deleted: Bool, look: Look, mono: LabelFont) {
+    let theirsView = NSTextView(usingTextLayoutManager: true)
+    let yoursView = NSTextView(usingTextLayoutManager: true)
+    private(set) var buttons: [SailButton] = []
+    private let root = NSView()
+    private let heading: NSTextField
+    private let detail: NSTextField
+    private var heads: [NSTextField] = []
+    private var rulers: [LineNumbers] = []
+    private var scrolls: [QuietScrollView] = []
+    private var syncing = false
+    private let mono: LabelFont
+
+    /// `theirsRead`: when the workspace's text was read, said beside it.
+    init(name: String, theirs: String, theirsRead: Date, yours: String, deleted: Bool, look: Look, mono: LabelFont) {
+        self.look = look
+        self.mono = mono
+        heading = NSTextField(labelWithString: deleted ? "\(name) was deleted on the workspace" : "\(name) changed on the workspace")
+        detail = NSTextField(labelWithString: deleted ? "Save Anyway creates it again; Discard drops what you typed." : "Keep one version. The other is lost; nothing is merged.")
         super.init(contentRect: NSRect(x: 0, y: 0, width: 900, height: 560), styleMask: [.titled], backing: .buffered, defer: true)
-        let root = NSView()
         root.wantsLayer = true
-        root.layer?.backgroundColor = NSColor(Tint(look.surface)).cgColor
         contentView = root
-        let heading = NSTextField(labelWithString: deleted ? "\(name) was deleted on the workspace" : "\(name) changed on the workspace")
         heading.font = .systemFont(ofSize: Look.Step.title3.points, weight: .semibold)
-        let detail = NSTextField(labelWithString: deleted ? "Save Anyway creates it again; Discard drops what you typed." : "Keep one version. The other is lost; nothing is merged.")
-        detail.textColor = NSColor(look.textSecondary)
         let lines = ConflictSheet.differing(theirs, yours)
-        let theirsSide = side("Theirs", note: deleted ? "deleted" : "on the workspace", text: theirs, in: theirsView, barred: lines.theirs, look: look, mono: mono)
-        let yoursSide = side("Yours", note: "unsaved", text: yours, in: yoursView, barred: lines.yours, look: look, mono: mono)
+        let read = DateFormatter.localizedString(from: theirsRead, dateStyle: .none, timeStyle: .short)
+        let theirsSide = side("Theirs", note: deleted ? "deleted" : "on the workspace, \(read)", text: theirs, in: theirsView, barred: lines.theirs)
+        let yoursSide = side("Yours", note: "unsaved", text: yours, in: yoursView, barred: lines.yours)
         let sides = NSStackView(views: [theirsSide, yoursSide])
         sides.distribution = .fillEqually
         sides.spacing = Look.Space.m
@@ -57,42 +70,55 @@ final class ConflictSheet: NSWindow {
             stack.topAnchor.constraint(equalTo: root.topAnchor), stack.bottomAnchor.constraint(equalTo: root.bottomAnchor),
             sides.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40), actions.widthAnchor.constraint(equalTo: sides.widthAnchor),
         ])
-        for view in [theirsView, yoursView] {
-            view.enclosingScrollView?.contentView.postsBoundsChangedNotifications = true
-            NotificationCenter.default.addObserver(self, selector: #selector(scrolled(_:)), name: NSView.boundsDidChangeNotification, object: view.enclosingScrollView?.contentView)
+        for scroll in scrolls {
+            scroll.contentView.postsBoundsChangedNotifications = true
+            NotificationCenter.default.addObserver(self, selector: #selector(scrolled(_:)), name: NSView.boundsDidChangeNotification, object: scroll.contentView)
         }
+        paint()
         let first = min(lines.theirs.first ?? 1, lines.yours.first ?? 1)
         for view in [theirsView, yoursView] { Self.scroll(view, toLine: first) }
     }
 
-    private func side(_ title: String, note: String, text: String, in view: NSTextView, barred: IndexSet, look: Look, mono: LabelFont) -> NSView {
+    private func side(_ title: String, note: String, text: String, in view: NSTextView, barred: IndexSet) -> NSView {
         let head = NSTextField(labelWithString: "\(title)  \(note)")
         head.font = .systemFont(ofSize: Look.Step.callout.points, weight: .semibold)
+        heads.append(head)
         view.isEditable = false
         view.isRichText = false
         view.drawsBackground = false
         view.font = mono.font(12, .regular) as NSFont
-        view.textColor = NSColor(look.text)
         view.string = text
-        let barColour = NSColor(look.info).withAlphaComponent(0.18)
-        let source = text as NSString
-        var location = 0, number = 1
-        while location < source.length {
-            let range = source.lineRange(for: NSRange(location: location, length: 0))
-            if barred.contains(number) { view.textStorage?.addAttribute(.backgroundColor, value: barColour, range: range) }
-            location = NSMaxRange(range)
-            number += 1
-        }
-        let scroll = NSScrollView()
+        view.isHorizontallyResizable = false
+        view.autoresizingMask = [.width]
+        let scroll = QuietScrollView(look: look)
         scroll.documentView = view
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
-        view.autoresizingMask = [.width]
+        let ruler = LineNumbers(scrollView: scroll, orientation: .verticalRuler)
+        ruler.editor = view
+        ruler.font = mono.font(11, .regular) as NSFont
+        ruler.barred = barred
+        scroll.verticalRulerView = ruler
+        scroll.hasVerticalRuler = true
+        scroll.rulersVisible = true
+        rulers.append(ruler)
+        scrolls.append(scroll)
         let box = NSStackView(views: [head, scroll])
         box.orientation = .vertical
         box.alignment = .leading
         scroll.widthAnchor.constraint(equalTo: box.widthAnchor).isActive = true
         return box
+    }
+
+    private func paint() {
+        root.layer?.backgroundColor = NSColor(Tint(look.surface)).cgColor
+        heading.textColor = NSColor(look.text)
+        detail.textColor = NSColor(look.textSecondary)
+        heads.forEach { $0.textColor = NSColor(look.text) }
+        for view in [theirsView, yoursView] { view.textColor = NSColor(look.text) }
+        rulers.forEach { $0.look = look }
+        scrolls.forEach { $0.look = look }
+        buttons.forEach { $0.look = look }
     }
 
     /// The lines that differ on each side, by what the two share at their start and end.
@@ -126,10 +152,9 @@ final class ConflictSheet: NSWindow {
         guard !syncing, let moved = note.object as? NSClipView else { return }
         syncing = true
         defer { syncing = false }
-        for view in [theirsView, yoursView] {
-            guard let clip = view.enclosingScrollView?.contentView, clip !== moved else { continue }
-            clip.scroll(to: moved.bounds.origin)
-            view.enclosingScrollView?.reflectScrolledClipView(clip)
+        for scroll in scrolls where scroll.contentView !== moved {
+            scroll.contentView.scroll(to: moved.bounds.origin)
+            scroll.reflectScrolledClipView(scroll.contentView)
         }
     }
 

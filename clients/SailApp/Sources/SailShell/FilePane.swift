@@ -39,6 +39,9 @@ final class FilePane: NSView, NSTextViewDelegate {
     private var shownWatch: WatchedPath?
 
     let editor: PaneTextView
+    var lineNumbers: LineNumbers {
+        numbers
+    }
     /// Whether the keys were last in its text: so they stay counted while nothing in the window holds
     /// them, until a terminal or the tree takes them.
     private(set) var heldKeysLast = false
@@ -60,6 +63,9 @@ final class FilePane: NSView, NSTextViewDelegate {
     /// Lines of the text that a reload changed, barred until their time is up.
     private(set) var barred: (lines: IndexSet, until: Double)?
     private(set) var updatedAt: Double?
+    /// When the workspace's bytes held for Compare were read: said on the sheet beside them.
+    private(set) var theirsRead = Date()
+    private var shownTheirs = ""
     private var said: String?
     private var applying = false
     var clock: @MainActor () -> Double = { CACurrentMediaTime() }
@@ -430,6 +436,10 @@ final class FilePane: NSView, NSTextViewDelegate {
         scroll.isHidden = sentenceWords != nil
         scroll.alphaValue = file.note == .deleted ? 0.5 : 1
         numbers.barred = barred.flatMap { clock() < $0.until ? $0.lines : nil } ?? IndexSet()
+        if file.theirsDigest != shownTheirs {
+            shownTheirs = file.theirsDigest
+            theirsRead = Date()
+        }
         if watched != shownWatch {
             shownWatch = watched
             onWatched(watched)
@@ -550,26 +560,43 @@ final class LineNumbers: NSRulerView {
         return low + 1
     }
 
-    override func drawHashMarksAndLabels(in _: NSRect) {
-        guard let editor, let manager = editor.textLayoutManager, let content = manager.textContentManager, let scroll = scrollView else { return }
-        NSColor(Tint(look.surface)).setFill()
-        bounds.fill()
+    /// One shown line of the text: its number, where its rows start in the ruler and how tall
+    /// they are together (a wrapped line's every row), and whether it is barred.
+    struct Row: Equatable {
+        let number: Int
+        let y: Double
+        let height: Double
+        let barred: Bool
+    }
+
+    /// The lines shown now, each with its rows' extent: what the ruler draws.
+    var rows: [Row] {
+        guard let editor, let manager = editor.textLayoutManager, let content = manager.textContentManager, let scroll = scrollView else { return [] }
         let text = editor.string as NSString, visible = scroll.contentView.bounds, inset = Double(editor.textContainerInset.height)
-        guard let first = manager.textLayoutFragment(for: CGPoint(x: 0, y: Double(visible.minY) - inset)) else { return }
-        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor(look.textTertiary)]
+        guard let first = manager.textLayoutFragment(for: CGPoint(x: 0, y: Double(visible.minY) - inset)) else { return [] }
+        var rows: [Row] = []
         manager.enumerateTextLayoutFragments(from: first.rangeInElement.location, options: [.ensuresLayout]) { fragment in
             let frame = fragment.layoutFragmentFrame
             guard Double(frame.minY) + inset <= Double(visible.maxY) else { return false }
             let offset = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
             let number = line(of: offset, in: text)
-            let y = Double(frame.minY) + inset - Double(visible.minY)
-            if barred.contains(number) {
-                NSColor(look.info).setFill()
-                NSRect(x: Double(ruleThickness) - 2, y: y, width: 2, height: Double(frame.height)).fill()
-            }
-            let label = "\(number)" as NSString, size = label.size(withAttributes: attributes)
-            label.draw(at: NSPoint(x: Double(ruleThickness) - 8 - Double(size.width), y: y + 1), withAttributes: attributes)
+            rows.append(Row(number: number, y: Double(frame.minY) + inset - Double(visible.minY), height: Double(frame.height), barred: barred.contains(number)))
             return true
+        }
+        return rows
+    }
+
+    override func drawHashMarksAndLabels(in _: NSRect) {
+        NSColor(Tint(look.surface)).setFill()
+        bounds.fill()
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor(look.textTertiary)]
+        for row in rows {
+            if row.barred {
+                NSColor(look.info).setFill()
+                NSRect(x: Double(ruleThickness) - 2, y: row.y, width: 2, height: row.height).fill()
+            }
+            let label = "\(row.number)" as NSString, size = label.size(withAttributes: attributes)
+            label.draw(at: NSPoint(x: Double(ruleThickness) - 8 - Double(size.width), y: row.y + 1), withAttributes: attributes)
         }
     }
 }
