@@ -494,9 +494,7 @@ final class FilePane: NSView, NSTextViewDelegate {
             let buttons = [discard, compare].filter { !$0.isHidden }
             let buttonsWidth = buttons.reduce(0.0) { $0 + Double($1.intrinsicContentSize.width) + 8 }
             let size = Self.measured(note)
-            // The words keep their row whole: where they and the buttons do not fit side by side,
-            // the buttons take a row of their own under them.
-            let split = Double(size.width) + buttonsWidth + 2 * pad > width
+            let split = OneLine.actionsUnder(words: Double(size.width), actions: buttonsWidth, room: width - 2 * pad)
             note.frame = NSRect(x: pad, y: top + (Self.lineHeight - Double(size.height)) / 2, width: split ? width - 2 * pad : max(width - pad - buttonsWidth - pad, 0), height: Double(size.height))
             if split { top += Self.lineHeight }
             var end = width - pad

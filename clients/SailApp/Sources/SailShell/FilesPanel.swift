@@ -721,46 +721,63 @@ final class FilesLineView: NSView {
         }
     }
 
-    /// Where the words go in a line `width` wide: after the mark, before the action.
+    /// The room for the words and the action in a line `width` wide: after the mark.
+    private func room(_ width: Double) -> Double {
+        let mark = markWidth
+        return width - 2 * Self.margin - 2 * Self.inset - (mark > 0 ? mark + Self.gap : 0)
+    }
+
+    /// Whether the action takes a row under the words in a line `width` wide (``OneLine``).
+    private func actionUnder(_ width: Double) -> Bool {
+        guard !button.isHidden else { return false }
+        return OneLine.actionsUnder(words: Double(words.size().width), actions: Double(button.intrinsicContentSize.width) + Self.gap, room: room(width))
+    }
+
+    /// Where the words go in a line `width` wide: after the mark, before the action beside them.
     private func wordsWidth(_ width: Double) -> Double {
-        let mark = markWidth, action = button.isHidden ? 0 : Double(button.intrinsicContentSize.width) + Self.gap
-        return max(width - 2 * Self.margin - 2 * Self.inset - (mark > 0 ? mark + Self.gap : 0) - action, 40)
+        let action = button.isHidden || actionUnder(width) ? 0 : Double(button.intrinsicContentSize.width) + Self.gap
+        return max(room(width) - action, 40)
     }
 
     /// Its height in a panel `width` wide: its words wrapped, with their padding and the gap under it.
     func height(for width: Double) -> Double {
-        let box = words.boundingRect(with: NSSize(width: wordsWidth(width), height: 1000), options: [.usesLineFragmentOrigin])
+        let under = actionUnder(width) ? Self.gap + Double(button.intrinsicContentSize.height) : 0
         // Whole points, so the hairline under it and the rows below start on the pixel grid: words
         // centred on a button's height would end it, and start them, on half a pixel.
-        return ceil(Self.above + max(ceil(Double(box.height)) + wordsTop, firstRow) + Self.below + Look.hairline + Self.under)
+        return ceil(Self.above + max(wordsHeight(width) + wordsTop(width), firstRow(width)) + under + Self.below + Look.hairline + Self.under)
     }
 
-    /// The first row's height: a line of words, or the button's, whichever is taller.
-    private var firstRow: Double {
-        max(Self.points * 1.25, button.isHidden ? 0 : Double(button.intrinsicContentSize.height))
+    private func wordsHeight(_ width: Double) -> Double {
+        ceil(Double(words.boundingRect(with: NSSize(width: wordsWidth(width), height: 1000), options: [.usesLineFragmentOrigin]).height))
+    }
+
+    /// The first row's height: a line of words, or the button's beside them, whichever is taller.
+    private func firstRow(_ width: Double) -> Double {
+        max(Self.points * 1.25, button.isHidden || actionUnder(width) ? 0 : Double(button.intrinsicContentSize.height))
     }
 
     /// How far the words start below the line's top padding: centred on the first row.
-    private var wordsTop: Double {
-        (firstRow - Self.points * 1.25) / 2
+    private func wordsTop(_ width: Double) -> Double {
+        (firstRow(width) - Self.points * 1.25) / 2
     }
 
     override func layout() {
         super.layout()
         let rightToLeft = userInterfaceLayoutDirection == .rightToLeft, width = Double(bounds.width)
-        let firstLine = Self.above + firstRow / 2
+        let firstLine = Self.above + firstRow(width) / 2
         let start = Self.margin + Self.inset
         let side = Double(spinner.intrinsicContentSize.width)
         spinner.frame = NSRect(x: rightToLeft ? width - start - side : start, y: firstLine - side / 2, width: side, height: side)
         let size = button.intrinsicContentSize
-        button.frame = NSRect(x: rightToLeft ? start : width - start - Double(size.width), y: firstLine - Double(size.height) / 2, width: Double(size.width), height: Double(size.height))
+        let y = actionUnder(width) ? Self.above + wordsHeight(width) + Self.gap : firstLine - Double(size.height) / 2
+        button.frame = NSRect(x: rightToLeft ? start : width - start - Double(size.width), y: y, width: Double(size.width), height: Double(size.height))
     }
 
     override func draw(_: NSRect) {
         guard let shown else { return }
         let rightToLeft = userInterfaceLayoutDirection == .rightToLeft, width = Double(bounds.width)
         let start = Self.margin + Self.inset, mark = markWidth
-        let firstLine = Self.above + firstRow / 2
+        let firstLine = Self.above + firstRow(width) / 2
         let tone: Tint? = switch shown.mark {
         case .waiting: Tint(look.info)
         case .bad: Tint(look.error)
@@ -773,7 +790,7 @@ final class FilesLineView: NSView {
         }
         let lead = mark > 0 ? mark + Self.gap : 0, room = wordsWidth(width)
         let x = rightToLeft ? width - start - lead - room : start + lead
-        words.draw(with: NSRect(x: x, y: Self.above + wordsTop, width: room, height: Double(bounds.height)), options: [.usesLineFragmentOrigin])
+        words.draw(with: NSRect(x: x, y: Self.above + wordsTop(width), width: room, height: Double(bounds.height)), options: [.usesLineFragmentOrigin])
         NSColor(look.separator).setFill()
         NSRect(x: Self.margin, y: Double(bounds.height) - Self.under - Look.hairline, width: width - 2 * Self.margin, height: Look.hairline).fill()
     }

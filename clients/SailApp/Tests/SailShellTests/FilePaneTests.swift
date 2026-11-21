@@ -165,6 +165,20 @@ import Testing
         window.attachedSheet.map { window.endSheet($0) }
     }
 
+    /// The one line's rule holds for the tree's line as for the pane's: narrow, its words keep their
+    /// row and Try Again goes under them; wide, beside them.
+    @Test func theTreesLineKeepsItsWordsWholeWithItsActionUnderThem() {
+        func button(at width: Double) -> NSRect {
+            let line = FilesLineView(look: .light)
+            line.show(FilesLine(words: "Can't reach the files.", mark: .bad, action: .tryAgain), starting: false)
+            line.frame = NSRect(x: 0, y: 0, width: width, height: line.height(for: width))
+            line.layoutSubtreeIfNeeded()
+            return line.button.frame
+        }
+        let narrow = button(at: 236), wide = button(at: 600)
+        #expect(narrow.minY > wide.maxY, "narrow, Try Again at \(narrow) is not under the words; wide, at \(wide)")
+    }
+
     /// M14a: a file that is not text is one sentence and Copy Path.
     @Test func aFileThatIsNotTextIsASentence() async throws {
         let (_, _, _, _, pane) = try await Self.opened([0x89, 0x50, 0x4E, 0x47, 0, 1, 2, 3])
