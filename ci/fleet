@@ -1060,8 +1060,21 @@ def content(conn, path):
         raise SystemExit("the read of %s was answered frame %d %r" % (path, kind, payload[:200]))
     _, at = field(payload, 4)
     return field(payload, at)[0]
+def base_of(conn, path):
+    conn.sendall(frame(42, struct.pack(">i", 902) + text(path) + struct.pack(">qq", 0, 20 << 20)))
+    while True:
+        kind, payload = answer(conn)
+        if kind != 52:
+            raise SystemExit("the whole read of %s was answered frame %d %r" % (path, kind, payload[:200]))
+        version, at = field(payload, 4)
+        _, at = field(payload, at)
+        if payload[at] == 1:
+            if payload[at + 1] != 1:
+                raise SystemExit("the read of %s from 0 to its end was not whole" % path)
+            return field(payload, at + 2)[0].decode(), version.decode()
 def send(conn, id, path, base, body):
-    conn.sendall(frame(45, struct.pack(">i", id) + text(path) + text(base) + struct.pack(">q", len(body))))
+    digest, seen = base
+    conn.sendall(frame(45, struct.pack(">i", id) + text(path) + text(digest) + text(seen) + struct.pack(">q", len(body))))
     for offset in range(0, len(body), 65536):
         piece = body[offset:offset + 65536]
         conn.sendall(frame(13, struct.pack(">iq", id, offset) + struct.pack(">i", len(piece)) + piece))
@@ -1072,30 +1085,32 @@ def answered(conn):
         if kind != 35:
             return kind, payload
 notes = "/home/dev/fleet-notes.md"
-send(files, 300, notes, "absent", b"base")
+absent = ("absent", "")
+send(files, 300, notes, absent, b"base")
 kind, payload = answered(files)
 if kind != 56:
     raise SystemExit("a new file was answered frame %d %r" % (kind, payload[:200]))
-written = field(payload, 4)[0].decode()
-if written != version_of(files, notes):
-    raise SystemExit("the version a save answered is not the version the file has: %s" % written)
-send(files, 301, notes, "absent", b"again")
+digest, at = field(payload, 4)
+written = field(payload, at)[0].decode()
+if written != version_of(files, notes) or digest.decode() != hashlib.sha256(b"base").hexdigest():
+    raise SystemExit("a save answered %s and %s, not the content and the version the file has" % (digest, written))
+send(files, 301, notes, absent, b"again")
 kind, payload = answered(files)
 if kind != 55 or b"exists" not in payload:
     raise SystemExit("a new file over a taken name was answered frame %d %r" % (kind, payload[:200]))
-stale = version_of(files, notes)
+stale = base_of(files, notes)
 send(files, 302, notes, stale, b"newer")
 if answered(files)[0] != 56:
     raise SystemExit("a save on its version was not written")
 send(files, 303, notes, stale, b"over a newer one")
 kind, payload = answered(files)
-if kind != 57 or field(payload, 4)[0].decode() != version_of(files, notes) or content(files, notes) != b"newer":
+if kind != 57 or field(payload, 4)[0].decode() != base_of(files, notes)[0] or content(files, notes) != b"newer":
     raise SystemExit("a save on a stale version was answered frame %d %r" % (kind, payload[:200]))
-print("a save makes a new file, never over a taken name, is answered the version it has now, and one on a stale version writes nothing and is told the present one")
+print("a save makes a new file, never over a taken name, is answered the digest and the version it has now, and one on a stale base writes nothing and is told the present digest")
 other, (kind, _) = present(json.load(urllib.request.urlopen(asked, timeout=30))["ticket"])
 if kind != 32:
     raise SystemExit("a second files ticket was not welcomed: frame %d" % kind)
-base = version_of(files, notes)
+base = base_of(files, notes)
 send(files, 304, notes, base, b"from the first window")
 send(other, 304, notes, base, b"from the second window")
 both = sorted([answered(files)[0], answered(other)[0]])
@@ -1114,7 +1129,7 @@ print("a folder is made, a file moved into it and the folder removed, each answe
 body = os.urandom(100000)
 saves = []
 for i in range(20):
-    on = version_of(files, "/home/dev/fleet-blob")
+    on = base_of(files, "/home/dev/fleet-blob")
     started = time.monotonic()
     send(files, 400 + i, "/home/dev/fleet-blob", on, body)
     if answered(files)[0] != 56:

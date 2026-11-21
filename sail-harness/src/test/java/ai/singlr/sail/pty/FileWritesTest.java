@@ -567,6 +567,11 @@ class FileWritesTest {
           FileScripts.BAD_DIGEST, late.send("new".getBytes(StandardCharsets.UTF_8), "go").status());
       assertEquals("kept", Files.readString(file), "nothing written: " + fake);
     }
+    for (var notADigest : List.of("", version(file), base.toUpperCase(java.util.Locale.ROOT))) {
+      var refused = new Save(files, file.toString(), notADigest, "a stat that differs", 3);
+      assertNull(refused.first, "the script itself refuses a base that is no SHA-256");
+      assertEquals(FileScripts.BAD_DIGEST, refused.script.status(), notADigest);
+    }
     assertEquals(List.of(), temporaries(home));
   }
 

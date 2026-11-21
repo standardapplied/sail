@@ -135,9 +135,29 @@ class WorkspaceWritesIT extends AbstractIncusIT {
   }
 
   /** Sends save {@code id} of {@code bytes} as {@code path} on {@code base}, in 64 KiB chunks. */
-  private static void send(SocketChannel channel, int id, String path, String base, byte[] bytes)
+  /** A save's base as a client takes it: a whole read's digest, and the version it read at. */
+  private record Base(String digest, String seen) {
+    static final Base ABSENT = new Base(PtyMessage.ABSENT, "");
+  }
+
+  private static Base baseOf(SocketChannel channel, String path) throws IOException {
+    PtyWire.write(channel, new PtyMessage.FilesRead(901, path, 0, 20L << 20));
+    PtyMessage.FilesData data;
+    do {
+      var answer = next(channel);
+      data = assertInstanceOf(PtyMessage.FilesData.class, answer, () -> "" + answer);
+    } while (!data.eof());
+    assertTrue(data.whole(), "a base is a whole read's");
+    return new Base(data.digest(), data.version());
+  }
+
+  private static PtyMessage.FilesWrite onBase(int id, String path, Base base, long size) {
+    return new PtyMessage.FilesWrite(id, path, base.digest(), base.seen(), size);
+  }
+
+  private static void send(SocketChannel channel, int id, String path, Base base, byte[] bytes)
       throws Exception {
-    PtyWire.write(channel, new PtyMessage.FilesWrite(id, path, base, bytes.length));
+    PtyWire.write(channel, onBase(id, path, base, bytes.length));
     for (var offset = 0; offset < bytes.length; offset += 64 << 10) {
       var end = Math.min(bytes.length, offset + (64 << 10));
       PtyWire.write(
@@ -152,8 +172,8 @@ class WorkspaceWritesIT extends AbstractIncusIT {
    * chunk was sent, as a full disk's does.
    */
   private static PtyMessage saved(
-      SocketChannel channel, int id, String path, String base, byte[] bytes) throws Exception {
-    PtyWire.write(channel, new PtyMessage.FilesWrite(id, path, base, bytes.length));
+      SocketChannel channel, int id, String path, Base base, byte[] bytes) throws Exception {
+    PtyWire.write(channel, onBase(id, path, base, bytes.length));
     var chunk = 64 << 10;
     var acked = 0L;
     for (var offset = 0; offset < bytes.length; offset += chunk) {
@@ -280,7 +300,7 @@ class WorkspaceWritesIT extends AbstractIncusIT {
         try (var mine = open(host, "tok-ana");
             var theirs = open(host, "tok-uday")) {
           var notes = FOLDER + "/notes.md";
-          var base = version(mine, notes);
+          var base = baseOf(mine, notes);
           send(mine, 1, notes, base, "ana's".getBytes(StandardCharsets.UTF_8));
           send(theirs, 1, notes, base, "uday's".getBytes(StandardCharsets.UTF_8));
           var answers = List.of(next(mine), next(theirs));
@@ -294,8 +314,8 @@ class WorkspaceWritesIT extends AbstractIncusIT {
           assertTrue(List.of("ana's", "uday's").contains(kept), kept);
 
           var fresh = FOLDER + "/fresh.md";
-          send(mine, 2, fresh, PtyMessage.ABSENT, "ana's".getBytes(StandardCharsets.UTF_8));
-          send(theirs, 2, fresh, PtyMessage.ABSENT, "uday's".getBytes(StandardCharsets.UTF_8));
+          send(mine, 2, fresh, Base.ABSENT, "ana's".getBytes(StandardCharsets.UTF_8));
+          send(theirs, 2, fresh, Base.ABSENT, "uday's".getBytes(StandardCharsets.UTF_8));
           var made2 = List.of(next(mine), next(theirs));
           assertEquals(
               1,
@@ -313,7 +333,7 @@ class WorkspaceWritesIT extends AbstractIncusIT {
           var hundred = new byte[100_000];
           for (var i = 0; i < 20; i++) {
             random.nextBytes(hundred);
-            var on = version(mine, notes);
+            var on = baseOf(mine, notes);
             var started = System.nanoTime();
             send(mine, 10 + i, notes, on, hundred);
             assertInstanceOf(PtyMessage.FilesWritten.class, next(mine));
@@ -343,12 +363,7 @@ class WorkspaceWritesIT extends AbstractIncusIT {
 
           var persons = FOLDER + "/.sail-save-notes";
           inInstance("printf mine > " + persons + " && touch -d '-10 min' " + persons);
-          send(
-              mine,
-              60,
-              FOLDER + "/after.md",
-              PtyMessage.ABSENT,
-              "x".getBytes(StandardCharsets.UTF_8));
+          send(mine, 60, FOLDER + "/after.md", Base.ABSENT, "x".getBytes(StandardCharsets.UTF_8));
           assertInstanceOf(PtyMessage.FilesWritten.class, next(mine));
           assertEquals(
               "mine", inInstance("cat " + persons), "a person's name of Sail's prefix stays");
@@ -386,7 +401,7 @@ class WorkspaceWritesIT extends AbstractIncusIT {
         try (var cut = open(host, "tok-ana")) {
           var notes = FOLDER + "/notes.md";
           var before = inInstance("sha256sum < " + notes);
-          PtyWire.write(cut, new PtyMessage.FilesWrite(1, notes, version(cut, notes), 1 << 20));
+          PtyWire.write(cut, onBase(1, notes, baseOf(cut, notes), 1 << 20));
           PtyWire.write(cut, new PtyMessage.PutChunk(1, 0, new byte[64 << 10]));
           assertEquals(new PtyMessage.PutAck(1, 64 << 10), PtyWire.read(cut));
           assertTrue(!temporaries().isEmpty(), "the save's temporary, mid-save");
@@ -404,7 +419,7 @@ class WorkspaceWritesIT extends AbstractIncusIT {
           var before = inInstance("sha256sum < " + notes);
           var big = new byte[16 << 20];
           random.nextBytes(big);
-          var answer = saved(full, 1, notes, version(full, notes), big);
+          var answer = saved(full, 1, notes, baseOf(full, notes), big);
           var refused = assertInstanceOf(PtyMessage.FilesRefused.class, answer, () -> "" + answer);
           assertEquals(PtyMessage.FilesRefusal.NO_SPACE, refused.kind(), refused.message());
           assertTrue(
@@ -419,8 +434,7 @@ class WorkspaceWritesIT extends AbstractIncusIT {
 
         try (var stopping = open(host, "tok-ana")) {
           var notes = FOLDER + "/notes.md";
-          PtyWire.write(
-              stopping, new PtyMessage.FilesWrite(1, notes, version(stopping, notes), 1 << 20));
+          PtyWire.write(stopping, onBase(1, notes, baseOf(stopping, notes), 1 << 20));
           PtyWire.write(stopping, new PtyMessage.PutChunk(1, 0, new byte[64 << 10]));
           assertEquals(new PtyMessage.PutAck(1, 64 << 10), PtyWire.read(stopping));
           assertTrue(shell.exec(List.of("incus", "stop", "--force", INSTANCE)).ok());
@@ -446,20 +460,14 @@ class WorkspaceWritesIT extends AbstractIncusIT {
           assertTrue(
               listing.entries().stream().noneMatch(e -> e.name().equals(left)),
               "a listing never shows it");
-          send(
-              after,
-              2,
-              FOLDER + "/next.md",
-              PtyMessage.ABSENT,
-              "x".getBytes(StandardCharsets.UTF_8));
+          send(after, 2, FOLDER + "/next.md", Base.ABSENT, "x".getBytes(StandardCharsets.UTF_8));
           assertInstanceOf(PtyMessage.FilesWritten.class, next(after));
           assertEquals("", temporaries(), "the next save in its folder removed it");
 
           var notes = FOLDER + "/notes.md";
           var before = inInstance("sha256sum < " + notes);
           var bytes = "ana's again".getBytes(StandardCharsets.UTF_8);
-          PtyWire.write(
-              after, new PtyMessage.FilesWrite(3, notes, version(after, notes), bytes.length));
+          PtyWire.write(after, onBase(3, notes, baseOf(after, notes), bytes.length));
           PtyWire.write(after, new PtyMessage.PutChunk(3, 0, bytes));
           assertEquals(new PtyMessage.PutAck(3, bytes.length), PtyWire.read(after));
           assertTrue(
