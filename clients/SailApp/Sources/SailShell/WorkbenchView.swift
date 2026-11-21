@@ -193,12 +193,12 @@ public final class WorkbenchView: NSView {
         }
         model.tabs.forEach { _ = tabView($0.id) }
         prepareFiles()
+        connectFiles()
         for tab in model.tabs {
             let view = tabView(tab.id)
             view.isHidden = tab.id != model.selected
             layout(tab, in: view)
         }
-        connectFiles()
         panes.values.forEach { $0.begin() }
         emptyLabel.isHidden = !model.tabs.isEmpty || !restored
         newTerminal.isHidden = emptyLabel.isHidden

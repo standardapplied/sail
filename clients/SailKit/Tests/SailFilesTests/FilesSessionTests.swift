@@ -102,6 +102,23 @@ import Testing
         #expect(heard.phases.prefix(2) == [.connecting, .connected])
     }
 
+    /// A listing's pages are gathered and sorted once, off the main thread, by the connection's own
+    /// reader: the tree is handed one whole listing in the order it shows.
+    @Test func aListingIsHandedOnWholeAndSorted() async throws {
+        let door = try FakeRunnerDoor()
+        door.setFolder(FileTree.root, (0 ..< 12_000).reversed().map { FileTreeTests.file("f\($0)") } + [FileTreeTests.folder("src")])
+        let session = Self.session(Desk(door))
+        let heard = Heard(session)
+        session.start()
+        defer { session.close() }
+        #expect(await heard.until { heard.admissions == 1 })
+        session.send([.filesList(id: 1, path: FileTree.root)])
+        #expect(await heard.until { heard.frames.contains { if case .filesListing = $0 { true } else { false } } })
+        let listings = heard.frames.compactMap { if case let .filesListing(listing) = $0 { listing } else { nil } }
+        #expect(listings.count == 1 && listings[0].more == false && listings[0].entries.count == 12_001, "\(listings.map { ($0.entries.count, $0.more) })")
+        #expect(listings.first?.entries.prefix(3).map(\.name) == ["src", "f0", "f1"], "not in the order the tree shows")
+    }
+
     @Test func aStopEndsItInTheHostsWordsAndNothingTriesAgain() async throws {
         let door = try FakeRunnerDoor()
         let desk = Desk(door)

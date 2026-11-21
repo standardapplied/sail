@@ -151,6 +151,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     public var entries: [Entry] = [] {
         willSet { kept = chosen }
         didSet {
+            guard !applying else { return }
             reloading = true
             reloadKeepingHover()
             select(kept)
@@ -162,6 +163,44 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     /// The chosen item's id as the old rows had it, taken before they change.
     private var kept: String?
     private var reloading = false
+    private var applying = false
+
+    /// The rows as `new`, changing only what differs, by id: rows gone removed and new ones inserted
+    /// in one update, and only the rows named in `changed` made again, so a listing of thousands that
+    /// adds one entry rebuilds one row. The choice follows its row as the table moves it.
+    public func apply(_ new: [Entry], changed: Set<String>) {
+        let difference = new.map(Self.id).difference(from: entries.map(Self.id))
+        func offsets(_ changes: [CollectionDifference<String?>.Change]) -> IndexSet {
+            IndexSet(changes.map { change in
+                switch change {
+                case let .insert(offset, _, _), let .remove(offset, _, _): offset
+                }
+            })
+        }
+        let removed = offsets(difference.removals), inserted = offsets(difference.insertions)
+        applying = true
+        entries = new
+        applying = false
+        reloading = true
+        beginUpdates()
+        if !removed.isEmpty { removeRows(at: removed, withAnimation: []) }
+        if !inserted.isEmpty { insertRows(at: inserted, withAnimation: []) }
+        endUpdates()
+        let remade = IndexSet(new.indices.filter { Self.id(new[$0]).map(changed.contains) ?? false }.filter { !inserted.contains($0) })
+        if !remade.isEmpty {
+            reloadData(forRowIndexes: remade, columnIndexes: IndexSet(integer: 0))
+            noteHeightOfRows(withIndexesChanged: remade)
+        }
+        reloading = false
+    }
+
+    /// A row's id in an update: its item's, or its head's title.
+    private static func id(_ entry: Entry) -> String? {
+        switch entry {
+        case let .item(item): item.id
+        case let .head(title, _): "\u{0}head\u{0}" + title
+        }
+    }
 
     public init(rowStyle: RowStyle, look: Look, mono: LabelFont) {
         self.rowStyle = rowStyle
@@ -511,10 +550,15 @@ final class HeadCell: NSView {
 /// (or to the trailing inset when it has none), and its actions at the trailing edge: the first
 /// on-row action secondary, or primary with ⏎ while the row is chosen; the rest secondary; ⋯ for
 /// the menu when some action lives only there. Hidden actions are hidden, not only clear, so they
-/// take no click and Tab passes them.
+/// take no click and Tab passes them. A row with nothing at its end (no action, note or accessory,
+/// as a files tree's) is laid out by frames, with no constraint: a row scrolled into or out of a long
+/// list then costs the window's layout engine nothing.
 @MainActor
 final class RowCell: NSView {
     let content: NSView
+    /// Laid out by frames: nothing shown at its end.
+    private let bare: Bool
+    private let insets: (leading: Double, trailing: Double, top: Double)
     let actions = NSStackView()
     /// Its first action shows ⏎ while chosen with the list's keys.
     private let returnKey: Bool
@@ -566,7 +610,14 @@ final class RowCell: NSView {
         } else {
             noteTip = nil
         }
+        let top = rowStyle.hairline ? 1.0 : 0
+        bare = buttons.isEmpty && note == nil && item.accessory == nil
+        insets = (rowStyle.margin + rowStyle.leading, rowStyle.margin + rowStyle.trailing + (item.full ? 0 : actionsColumn ?? 0), top)
         super.init(frame: .zero)
+        if bare {
+            addSubview(content)
+            return
+        }
         actions.setViews(([note, item.accessory].compactMap { $0 } as [NSView]) + buttons, in: .trailing)
         if let note { actions.setCustomSpacing(6 + 4, after: note) }
         actions.spacing = 6
@@ -576,7 +627,7 @@ final class RowCell: NSView {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
-        let top = rowStyle.hairline ? 1.0 : 0, gap = buttons.isEmpty && note == nil ? 0.0 : 8
+        let gap = buttons.isEmpty && note == nil ? 0.0 : 8
         let actionsColumn = item.full ? 0 : actionsColumn
         let stretched = actionsColumn.map { content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(rowStyle.margin + rowStyle.trailing + $0)) }
             ?? content.trailingAnchor.constraint(equalTo: actions.leadingAnchor, constant: -gap)
@@ -593,6 +644,29 @@ final class RowCell: NSView {
     }
 
     private var moreMenu: NSMenu?
+
+    /// A content's own height: its intrinsic one, else what its own constraints give it (a sidebar
+    /// row's 20 pt), else the row's.
+    private static func height(of content: NSView, in room: Double) -> Double {
+        let intrinsic = Double(content.intrinsicContentSize.height)
+        if intrinsic != Double(NSView.noIntrinsicMetric) { return intrinsic }
+        let fitting = Double(content.fittingSize.height)
+        return fitting > 0 ? min(fitting, room) : room
+    }
+
+    /// A bare row's content, from its leading inset to its trailing one (mirrored right to left), its
+    /// own height centred on the row under any hairline.
+    override func layout() {
+        super.layout()
+        guard bare else { return }
+        let height = Self.height(of: content, in: Double(bounds.height) - insets.top)
+        let below = (Double(bounds.height) - insets.top - height) / 2
+        let frame = NSRect(
+            x: userInterfaceLayoutDirection == .rightToLeft ? insets.trailing : insets.leading, y: isFlipped ? insets.top + below : below,
+            width: max(Double(bounds.width) - insets.leading - insets.trailing, 0), height: height
+        )
+        if content.frame != frame { content.frame = frame }
+    }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {

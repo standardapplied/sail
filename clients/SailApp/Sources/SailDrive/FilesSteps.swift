@@ -261,15 +261,21 @@ extension Driver {
         guard await waitForState(10, { self.filesShown?.list.numberOfRows == base.count }) else { return (false, "the panel never showed the root: \(filesShown?.words ?? "")") }
         var opened: [Double] = [], listed: [Double] = [], changed: [Double] = []
         var toOpen: [Double] = [], toAdmitted: [Double] = [], toListing: [Double] = []
+        var worstOpen = 0.0
         for _ in 0 ..< 10 {
             press("s", ["control", "command"])
             guard await waitForState(5, { self.filesShown == nil }) else { return (false, "⌃⌘S did not put the panel away") }
+            mainThread.reset()
             let asked = CACurrentMediaTime()
             press("s", ["control", "command"])
             guard await waitForState(5, { (self.filesShown?.lastDrawn.at ?? 0) > asked && (self.filesShown?.list.numberOfRows ?? 0) > 0 }) else {
                 return (false, "⌃⌘S drew no rows: \(filesShown?.words ?? "no panel")")
             }
             opened.append((filesShown?.lastDrawn.at ?? asked) - asked)
+            if let last = opened.last, last > worstOpen, last * 1000 > 50 {
+                worstOpen = last
+                tellLongestHold("⌃⌘S to the first rows, \(Self.ms(last * 1000)) ms")
+            }
             if let shown = filesShown, let open = shown.openedAt, let admitted = shown.admittedAt, let listing = shown.listingHeard?.at {
                 toOpen.append(open - asked)
                 toAdmitted.append(admitted - open)
@@ -297,7 +303,7 @@ extension Driver {
         mainThread.reset()
         let down = await turnWheel(over: scroll, to: 1), up = await turnWheel(over: scroll, to: 0)
         let scrolled = held()
-        tellLongestHold("scrolling the 5,000 rows")
+        if scrolled > 16 { tellLongestHold("scrolling the 5,000 rows") }
         press("arrowLeft", [])
         _ = await waitForState(5) { self.filesShown?.list.numberOfRows == base.count }
         var names = base
@@ -321,7 +327,7 @@ extension Driver {
         }
         let landed = await waitForState(30) { self.filesShown?.list.numberOfRows == final.count }
         let bursting = held()
-        tellLongestHold("2,000 changes in a burst")
+        if bursting > 16 { tellLongestHold("2,000 changes in a burst") }
         door.setFolder(root, base.map(Self.fileEntry))
         _ = await waitForState(10) { self.filesShown?.list.numberOfRows == base.count }
         let rows = [

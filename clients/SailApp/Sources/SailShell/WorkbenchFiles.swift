@@ -80,12 +80,14 @@ extension WorkbenchView {
         }
     }
 
-    /// Connects each files panel shown in the shown tab and ends every other's connection; what a
-    /// panel holds stays for its next showing.
+    /// Connects the selected tab's files panel when shown and ends every other's connection, before
+    /// the workbench is laid out, so the ticket's round trip runs while the terminals are laid out
+    /// narrower beside it.
     func connectFiles() {
-        for (_, view) in tabViews {
-            guard let panel = view.files else { continue }
-            if view.isHidden || panel.isHidden { panel.close() } else { panel.open() }
+        for tab in model.tabs {
+            guard let panel = tabViews[tab.id]?.files else { continue }
+            let shown = tab.id == model.selected && workspace(of: tab).map { filesShown.contains(Self.key($0.project, $0.name)) } == true
+            if shown { panel.open() } else { panel.close() }
         }
     }
 

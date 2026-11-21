@@ -200,15 +200,19 @@ final class FilesPanel: NSView {
         schedule(after: now)
         let new = tree.newPaths(at: now), marked = new != shownNew
         guard tree.revision != shownRevision || marked else { return }
-        let rows = tree.rows
+        let rows = tree.rows, wasNew = shownNew
         shownRevision = tree.revision
         shownNew = new
         guard rows != shownRows || marked else { return }
         let place = chosenPath.flatMap { path in shownRows.firstIndex { $0.path == path } }
+        let before = Dictionary(shownRows.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+        let changed = Set(rows.filter { row in before[row.path].map { $0 != row } ?? false || wasNew.contains(row.path) != new.contains(row.path) }.map(\.path))
+        let fresh = shownRows.isEmpty
         shownRows = rows
         rowSets += 1
         rebuilding = true
-        scroll.keepingScroll { list.entries = rows.map { .item(item($0, new: new.contains($0.path))) } }
+        let entries = rows.map { SailList.Entry.item(item($0, new: new.contains($0.path))) }
+        scroll.keepingScroll { if fresh { list.entries = entries } else { list.apply(entries, changed: changed) } }
         rebuilding = false
         keepChoice(in: rows, place: place)
         needsLayout = true

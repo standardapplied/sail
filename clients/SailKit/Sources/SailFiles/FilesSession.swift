@@ -6,8 +6,9 @@ import Synchronization
 
 /// A workspace's files connection: through the runner's terminal door with a files ticket, kept up
 /// through drops on the same reconnect waits a terminal rides (``ReconnectWaits``). It says what
-/// happens and hands on every frame the host sends; it decides nothing about the tree (``FileTree``
-/// does), and sends what it is given.
+/// happens and hands on every frame the host sends, a listing's pages gathered and sorted once on its
+/// own reader thread, so the main thread is handed a whole listing in the order it shows; it decides
+/// nothing about the tree (``FileTree`` does), and sends what it is given.
 ///
 /// A files ticket never starts a stopped workspace: one refused as stopped, or a connection the host
 /// ends with its stop's sentence, ends here, said as ``Phase/stopped(_:)``, until the person asks
@@ -231,6 +232,7 @@ public final class FilesSession: Sendable {
             state.withLock { if $0.connection === connection { $0.connection = nil } }
             connection.close()
         }
+        var pages: [Int32: [FileEntry]] = [:]
         while true {
             let frame: Frame?
             do throws(TerminalError) {
@@ -242,6 +244,18 @@ public final class FilesSession: Sendable {
             if case let .refused(refusal) = frame {
                 return Self.ending(refusal) ?? .dropped(refusal.message, attachedFor: ContinuousClock.now - admitted)
             }
+            if case let .filesListing(listing) = frame {
+                let entries = (pages.removeValue(forKey: listing.id) ?? []) + listing.entries
+                guard !listing.more else {
+                    pages[listing.id] = entries
+                    continue
+                }
+                sink.yield(.frame(.filesListing(FileListing(
+                    id: listing.id, version: listing.version, entries: FileTree.sorted(entries), more: false, truncated: listing.truncated
+                ))))
+                continue
+            }
+            if case let .filesRefused(id, _, _) = frame { pages[id] = nil }
             sink.yield(.frame(frame))
         }
     }

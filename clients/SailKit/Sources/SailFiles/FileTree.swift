@@ -319,8 +319,9 @@ public struct FileTree: Sendable {
         }
     }
 
-    /// Folders first, then as Finder sorts names.
-    static func sorted(_ entries: [FileEntry]) -> [FileEntry] {
+    /// Folders first, then as Finder sorts names. The connection's reader sorts each whole listing
+    /// so before the main thread has it; sorted again here, a listing already in order costs one pass.
+    public static func sorted(_ entries: [FileEntry]) -> [FileEntry] {
         entries.sorted { one, other in
             let oneFolder = kind(of: one) == .folder, otherFolder = kind(of: other) == .folder
             if oneFolder != otherFolder { return oneFolder }
