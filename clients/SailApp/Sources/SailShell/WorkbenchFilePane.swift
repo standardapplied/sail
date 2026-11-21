@@ -92,6 +92,8 @@ extension WorkbenchView {
     func placeFilePane(of tab: Tab, in view: TabView, room: CGSize, give: Double) {
         guard let pane = view.filePane else { return }
         let width = Double(room.width), height = Double(room.height), rightToLeft = userInterfaceLayoutDirection == .rightToLeft
+        if pane.userInterfaceLayoutDirection != userInterfaceLayoutDirection { pane.userInterfaceLayoutDirection = userInterfaceLayoutDirection }
+        pane.editor.userInterfaceLayoutDirection = .leftToRight
         guard tab.zoomed == nil else {
             pane.isHidden = true
             view.fileDivider.isHidden = true

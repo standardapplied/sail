@@ -64,6 +64,9 @@ import Testing
         door.setFile(Self.path, Array("theirs\n".utf8))
         #expect(await RunnerTabTests.until(10) { pane.file.note == .changed }, "the change underneath was not said")
         #expect(pane.editor.string == "two\nmine", "an unsaved pane was replaced: \(pane.editor.string)")
+        pane.layoutSubtreeIfNeeded()
+        let line = try #require(pane.subviews.compactMap { $0 as? NSTextField }.first { $0.stringValue == "Changed on the workspace while you typed." })
+        #expect(line.frame.width >= line.attributedStringValue.size().width, "the line's words are cut: \(line.frame.width) pt for \(line.attributedStringValue.size().width)")
         pane.discardPressed()
         #expect(await RunnerTabTests.until(10) { pane.editor.string == "theirs\n" && pane.file.clean && panel.unsaved == nil })
     }
@@ -156,7 +159,9 @@ import Testing
         let painted = Self.colours(in: bench) + (window.attachedSheet?.contentView.map(Self.colours) ?? [])
         let stale = painted.filter { lightOnly.contains($0.1) }
         #expect(stale.isEmpty, "light's colours after the switch to dark: \(stale.map { "\($0.0) \($0.1)" })")
-        #expect(painted.count > 20, "the walk found only \(painted.count) colours")
+        let names = painted.map(\.0)
+        let walked = ["FilePane fill", "PaneTextView ink", "Keep one version"].filter { surface in !names.contains { $0.contains(surface) } }
+        #expect(walked.isEmpty, "the walk never reached \(walked): \(names)")
         window.attachedSheet.map { window.endSheet($0) }
     }
 

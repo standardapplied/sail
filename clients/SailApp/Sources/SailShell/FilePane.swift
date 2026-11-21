@@ -491,15 +491,27 @@ final class FilePane: NSView, NSTextViewDelegate {
         status.frame = NSRect(x: Double(dot.frame.maxX) + 8, y: (Self.titleHeight - Double(statusSize.height)) / 2, width: max(end - Double(dot.frame.maxX) - 16, 0), height: Double(statusSize.height))
         var top = Self.titleHeight
         if !note.isHidden {
+            let buttons = [discard, compare].filter { !$0.isHidden }
+            let buttonsWidth = buttons.reduce(0.0) { $0 + Double($1.intrinsicContentSize.width) + 8 }
+            let size = Self.measured(note)
+            // The words keep their row whole: where they and the buttons do not fit side by side,
+            // the buttons take a row of their own under them.
+            let split = Double(size.width) + buttonsWidth + 2 * pad > width
+            note.frame = NSRect(x: pad, y: top + (Self.lineHeight - Double(size.height)) / 2, width: split ? width - 2 * pad : max(width - pad - buttonsWidth - pad, 0), height: Double(size.height))
+            if split { top += Self.lineHeight }
             var end = width - pad
-            for button in [discard, compare] where !button.isHidden {
+            for button in buttons {
                 let size = button.intrinsicContentSize
                 button.frame = NSRect(x: end - Double(size.width), y: top + (Self.lineHeight - Double(size.height)) / 2, width: Double(size.width), height: Double(size.height))
                 end = Double(button.frame.minX) - 8
             }
-            let size = note.intrinsicContentSize
-            note.frame = NSRect(x: pad, y: top + (Self.lineHeight - Double(size.height)) / 2, width: max(end - pad - 8, 0), height: Double(size.height))
             top += Self.lineHeight
+        }
+        if userInterfaceLayoutDirection == .rightToLeft {
+            for view in [folderLabel, nameLabel, dot, status, showTerminal, close] as [NSView] { view.frame.origin.x = width - view.frame.maxX }
+            for view in [note, compare, discard] as [NSView] { view.frame.origin.x = width - view.frame.maxX }
+            nameLabel.alignment = .right
+            note.alignment = .right
         }
         scroll.frame = NSRect(x: 0, y: top, width: width, height: max(height - top, 0))
         let sentenceSize = sentence.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: max(width - 2 * pad, 0), height: .greatestFiniteMagnitude)) ?? .zero
