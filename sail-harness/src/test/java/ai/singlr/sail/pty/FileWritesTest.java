@@ -254,6 +254,10 @@ class FileWritesTest {
   private final java.util.concurrent.atomic.AtomicBoolean heldProbeFails =
       new java.util.concurrent.atomic.AtomicBoolean();
 
+  /** A script that fails to start, as an exec into an unreachable workspace does; null for none. */
+  private final java.util.concurrent.atomic.AtomicReference<String> unstartable =
+      new java.util.concurrent.atomic.AtomicReference<>();
+
   private FileScripts scripts(UnaryOperator<String> edit, Map<String, String> env) {
     return new FileScripts(
         command -> {
@@ -264,6 +268,9 @@ class FileWritesTest {
               && (inner.get(2).equals(FileScripts.HELD)
                   || inner.get(2).equals(FileScripts.STUCK))) {
             throw new IOException("Error: the holder probe could not start");
+          }
+          if (inner.get(2).equals(unstartable.get())) {
+            throw new IOException("Error: the script could not start");
           }
           inner.set(2, edit.apply(inner.get(2)));
           inner.addAll(0, List.of("python3", "-I", "-c", SOCKETS));
@@ -1378,6 +1385,399 @@ class FileWritesTest {
     for (var process : processes) {
       assertTrue(process.waitFor(5, TimeUnit.SECONDS), "a script ended within 5 s");
     }
+  }
+
+  /** Waits until {@code count} of {@code connection}'s writes wait for their turn, within 5 s. */
+  private static void inLine(FilesConnection connection, int count) {
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (connection.inLine() != count) {
+      if (System.nanoTime() > deadline) {
+        throw new AssertionError(connection.inLine() + " writes wait for their turn, not " + count);
+      }
+      Thread.onSpinWait();
+    }
+  }
+
+  /** Sends save {@code id} of {@code text}, all but its last {@code held} bytes and its end. */
+  private void saveBut(FilesConnection connection, int id, Path file, String text, int held)
+      throws Exception {
+    var bytes = text.getBytes(StandardCharsets.UTF_8);
+    connection.write(
+        new PtyMessage.FilesWrite(id, file.toString(), digest(file), version(file), bytes.length));
+    connection.chunk(new PtyMessage.PutChunk(id, 0, Arrays.copyOf(bytes, bytes.length - held)));
+    assertEquals(new PtyMessage.PutAck(id, bytes.length - held), said.poll(5, TimeUnit.SECONDS));
+  }
+
+  /** Sends the last {@code held} bytes of save {@code id} of {@code text}, and its end. */
+  private static void finish(FilesConnection connection, int id, String text, int held) {
+    var bytes = text.getBytes(StandardCharsets.UTF_8);
+    connection.chunk(
+        new PtyMessage.PutChunk(
+            id, bytes.length - held, Arrays.copyOfRange(bytes, bytes.length - held, bytes.length)));
+    connection.end(new PtyMessage.PutEnd(id, HexFormat.of().parseHex(sha256(bytes))));
+  }
+
+  /**
+   * Writes asked on one connection are applied and answered in the order asked: with the lock held,
+   * a folder made, a file moved into it and the folder removed wait in that order, and once the
+   * lock is free each is done in turn, so the file goes with its folder.
+   */
+  @Test
+  void writesOnOneConnectionAreAppliedAndAnsweredInTheOrderAsked() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var folder = home.resolve("made");
+    var connection = connection(() -> null);
+    lock.lock();
+    try {
+      connection.create(new PtyMessage.FilesCreate(1, folder.toString(), true));
+      connection.move(new PtyMessage.FilesMove(2, file.toString(), folder + "/notes.md"));
+      connection.remove(new PtyMessage.FilesRemove(3, folder.toString()));
+      waitingForTheLock(1);
+      inLine(connection, 2);
+    } finally {
+      lock.unlock();
+    }
+    assertEquals(
+        List.of(
+            new PtyMessage.FilesDone(1), new PtyMessage.FilesDone(2), new PtyMessage.FilesDone(3)),
+        List.of(answer(), answer(), answer()));
+    assertFalse(Files.exists(folder, LinkOption.NOFOLLOW_LINKS));
+    assertFalse(Files.exists(file, LinkOption.NOFOLLOW_LINKS));
+    idle(connection);
+    assertEquals(0, connection.passedAhead(), "no turn is kept once it is behind the line");
+  }
+
+  /** Waits until {@code connection} runs no script, within 5 s. */
+  private static void idle(FilesConnection connection) {
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (connection.scripts() != 0) {
+      assertTrue(System.nanoTime() < deadline, connection.scripts() + " scripts still run");
+      Thread.onSpinWait();
+    }
+  }
+
+  /**
+   * #522's m1: a write waiting for its turn holds none of the connection's scripts: behind a save
+   * paused mid-body, three writes wait their turns while a listing and a stat are answered at once
+   * (F6); once the save is whole, the three follow it in order.
+   */
+  @Test
+  void aWriteWaitingForItsTurnHoldsNoScript() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var connection = connection(() -> null);
+    saveBut(connection, 1, file, "new text", 3);
+    for (var id = 2; id <= 4; id++) {
+      connection.create(new PtyMessage.FilesCreate(id, home + "/after-" + id + ".md", false));
+    }
+    inLine(connection, 3);
+    assertEquals(1, connection.scripts(), "the paused save alone holds a script");
+    connection.list(new PtyMessage.FilesList(5, home.toString()));
+    assertInstanceOf(PtyMessage.FilesListing.class, answer(), "a listing has a script");
+    connection.stat(new PtyMessage.FilesStat(6, file.toString()));
+    assertInstanceOf(PtyMessage.FilesEntry.class, answer(), "and so does a stat");
+
+    finish(connection, 1, "new text", 3);
+    assertInstanceOf(PtyMessage.FilesWritten.class, answer());
+    assertEquals(
+        List.of(
+            new PtyMessage.FilesDone(2), new PtyMessage.FilesDone(3), new PtyMessage.FilesDone(4)),
+        List.of(answer(), answer(), answer()));
+    idle(connection);
+  }
+
+  /**
+   * A write whose turn comes takes the next script free, ahead of requests not yet started: behind
+   * a save paused mid-body, a create waits its turn while slow listings fill the other scripts and
+   * more wait; once the save is whole, the create is answered before the listings still waiting.
+   */
+  @Test
+  void aWriteWhoseTurnComesTakesTheNextScriptAheadOfWaitingRequests() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var connection =
+        connection(
+            running(script -> script.equals(FileScripts.LIST) ? "sleep 0.5\n" + script : script),
+            () -> null);
+    saveBut(connection, 1, file, "new text", 3);
+    connection.create(new PtyMessage.FilesCreate(2, home + "/after.md", false));
+    inLine(connection, 1);
+    for (var id = 10; id < 19; id++) {
+      connection.list(new PtyMessage.FilesList(id, home.toString()));
+    }
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (connection.scripts() != FilesConnection.SCRIPTS) {
+      assertTrue(System.nanoTime() < deadline, "three listings run beside the save");
+      Thread.onSpinWait();
+    }
+    finish(connection, 1, "new text", 3);
+    var order = new java.util.ArrayList<Integer>();
+    while (order.size() < 11) {
+      order.add(
+          switch (answer()) {
+            case PtyMessage.FilesWritten written -> written.id();
+            case PtyMessage.FilesDone done -> done.id();
+            case PtyMessage.FilesListing listing -> listing.id();
+            case PtyMessage other -> throw new AssertionError("answered " + other);
+          });
+    }
+    assertTrue(
+        order.indexOf(2) < order.indexOf(13),
+        "the create is answered before the first listing that waited: " + order);
+    idle(connection);
+  }
+
+  /**
+   * #522's m2: an id reused at its last answer keeps its new request through the old one's end: a
+   * save asked with the stat's id from inside the stat's answer is still under way once the stat's
+   * run has ended, so the same id is refused, and a cancel ends that save.
+   */
+  @Test
+  void anIdReusedAtItsLastAnswerKeepsItsNewRequestThroughTheOldOnesEnd() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var self = new java.util.concurrent.atomic.AtomicReference<FilesConnection>();
+    var reused = new java.util.concurrent.atomic.AtomicBoolean();
+    var connection =
+        new FilesConnection(
+            running(UnaryOperator.identity()),
+            CONTAINER,
+            "dock",
+            message -> {
+              said.add(message);
+              if (message instanceof PtyMessage.FilesEntry && reused.compareAndSet(false, true)) {
+                try {
+                  self.get()
+                      .write(
+                          new PtyMessage.FilesWrite(
+                              7, file.toString(), digest(file), version(file), 3));
+                } catch (IOException | InterruptedException failed) {
+                  throw new AssertionError(failed);
+                }
+              }
+            },
+            () -> null,
+            endedWith::add,
+            new FilesConnection.Writes(
+                lock, saving, () -> null, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND),
+            changes());
+    self.set(connection);
+
+    connection.stat(new PtyMessage.FilesStat(7, file.toString()));
+    assertInstanceOf(PtyMessage.FilesEntry.class, answer());
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (connection.scripts() != 1) {
+      assertTrue(System.nanoTime() < deadline, "the stat's run ends, the save's goes on");
+      Thread.onSpinWait();
+    }
+    connection.stat(new PtyMessage.FilesStat(7, file.toString()));
+    assertEquals(
+        new PtyMessage.FilesRefused(
+            7,
+            PtyMessage.FilesRefusal.FAILED,
+            "Request 7 is under way already, so this one was not started."),
+        answer());
+    connection.cancel(new PtyMessage.FilesCancel(7));
+    idle(connection);
+    assertEquals("kept", Files.readString(file));
+    connection.stat(new PtyMessage.FilesStat(7, file.toString()));
+    assertInstanceOf(PtyMessage.FilesEntry.class, answer(), "free again once cancelled");
+  }
+
+  /**
+   * A later write waits for a save still receiving its bytes, and is answered after it; a read does
+   * not wait for either.
+   */
+  @Test
+  void aLaterWriteWaitsForASaveStillReceivingItsBytesAndAReadDoesNot() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var connection = connection(() -> null);
+    saveBut(connection, 1, file, "new text", 3);
+    connection.create(new PtyMessage.FilesCreate(2, home + "/after.md", false));
+    inLine(connection, 1);
+    connection.list(new PtyMessage.FilesList(3, home.toString()));
+    assertInstanceOf(PtyMessage.FilesListing.class, answer(), "a read waits for no write");
+    assertFalse(Files.exists(home.resolve("after.md")), "the create waits its turn");
+
+    finish(connection, 1, "new text", 3);
+    assertInstanceOf(PtyMessage.FilesWritten.class, answer());
+    assertEquals(new PtyMessage.FilesDone(2), answer());
+  }
+
+  /**
+   * A write passes its turn on once it holds the lock: while it runs, the connection's next write
+   * already waits on the lock, ahead of a later write of another connection.
+   */
+  @Test
+  void aWritePassesItsTurnOnceItHoldsTheLock() throws Exception {
+    var slow =
+        connection(
+            running(script -> script.equals(FileScripts.CREATE) ? "sleep 1\n" + script : script),
+            () -> null);
+    slow.create(new PtyMessage.FilesCreate(1, home + "/one.md", false));
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!lock.isLocked()) {
+      assertTrue(System.nanoTime() < deadline, "the first create holds the lock");
+      Thread.onSpinWait();
+    }
+    slow.create(new PtyMessage.FilesCreate(2, home + "/two.md", false));
+    waitingForTheLock(1);
+    connection(() -> null).create(new PtyMessage.FilesCreate(3, home + "/three.md", false));
+    waitingForTheLock(2);
+    assertEquals(
+        List.of(
+            new PtyMessage.FilesDone(1), new PtyMessage.FilesDone(2), new PtyMessage.FilesDone(3)),
+        List.of(answer(), answer(), answer()));
+  }
+
+  /** A write refused before the lock passes its turn: a save on a stale base, then a create. */
+  @Test
+  void aWriteRefusedBeforeTheLockPassesItsTurn() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var base = digest(file);
+    var seen = version(file);
+    Files.writeString(file, "changed meanwhile");
+    var connection = connection(() -> null);
+    save(connection, 1, file.toString(), base, seen, "new");
+    connection.create(new PtyMessage.FilesCreate(2, home + "/after.md", false));
+    assertInstanceOf(PtyMessage.FilesConflict.class, answer());
+    assertEquals(new PtyMessage.FilesDone(2), answer());
+  }
+
+  /**
+   * A cancelled write passes its turn, whether it held it mid-body or waited for it: the save
+   * cancelled mid-body lets the create after it go, and a create cancelled in line is passed over.
+   */
+  @Test
+  void aCancelledWritePassesItsTurn() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var connection = connection(() -> null);
+    saveBut(connection, 1, file, "new text", 3);
+    connection.create(new PtyMessage.FilesCreate(2, home + "/skipped.md", false));
+    connection.create(new PtyMessage.FilesCreate(3, home + "/after.md", false));
+    inLine(connection, 2);
+    connection.cancel(new PtyMessage.FilesCancel(2));
+    inLine(connection, 1);
+    connection.cancel(new PtyMessage.FilesCancel(1));
+    assertEquals(new PtyMessage.FilesDone(3), answer());
+    assertFalse(Files.exists(home.resolve("skipped.md")));
+    assertEquals("kept", Files.readString(file));
+  }
+
+  /**
+   * A write cancelled while it waits for a script passes its turn: four saves mid-body hold every
+   * script, a create waits in the queue and is cancelled, and once the saves are cancelled the next
+   * create goes.
+   */
+  @Test
+  void aWriteCancelledWhileQueuedPassesItsTurn() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var connection = connection(() -> null);
+    for (var id = 1; id <= FilesConnection.SCRIPTS; id++) {
+      saveBut(connection, id, file, "new text", 3);
+    }
+    connection.create(new PtyMessage.FilesCreate(5, home + "/queued.md", false));
+    connection.cancel(new PtyMessage.FilesCancel(5));
+    for (var id = 1; id <= FilesConnection.SCRIPTS; id++) {
+      connection.cancel(new PtyMessage.FilesCancel(id));
+    }
+    connection.create(new PtyMessage.FilesCreate(6, home + "/after.md", false));
+    assertEquals(new PtyMessage.FilesDone(6), answer());
+    assertFalse(Files.exists(home.resolve("queued.md")));
+  }
+
+  /** A write whose script cannot start passes its turn: the save is refused, the create goes. */
+  @Test
+  void aWriteWhoseScriptCannotStartPassesItsTurn() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var connection = connection(() -> null);
+    unstartable.set(FileScripts.WRITE);
+    try {
+      save(connection, 1, file.toString(), digest(file), version(file), "new");
+      assertEquals(PtyMessage.FilesRefusal.FAILED, ((PtyMessage.FilesRefused) answer()).kind());
+    } finally {
+      unstartable.set(null);
+    }
+    connection.create(new PtyMessage.FilesCreate(2, home + "/after.md", false));
+    assertEquals(new PtyMessage.FilesDone(2), answer());
+  }
+
+  /**
+   * Closing a connection ends every write waiting for its turn, holding nothing: none is left in
+   * line and the workspace's lock is free for another connection.
+   */
+  @Test
+  void closingAConnectionEndsEveryWriteWaitingForItsTurn() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var connection = connection(() -> null);
+    saveBut(connection, 1, file, "new text", 3);
+    connection.create(new PtyMessage.FilesCreate(2, home + "/after.md", false));
+    inLine(connection, 1);
+    connection.close();
+    inLine(connection, 0);
+    connection(() -> null).create(new PtyMessage.FilesCreate(3, home + "/other.md", false));
+    assertEquals(new PtyMessage.FilesDone(3), answer());
+    assertFalse(Files.exists(home.resolve("after.md")));
+  }
+
+  /**
+   * An id is free again the moment its last answer is sent: asked again with the same id from
+   * inside the answer itself, before the run that sent it has ended, the stat is answered each
+   * time; while a listing has frames to come, its id is still under way.
+   */
+  @Test
+  void anIdIsFreeAgainTheMomentItsLastAnswerIsSent() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var big = Files.createDirectory(home.resolve("big"));
+    for (var i = 0; i < 2_000; i++) {
+      Files.writeString(big.resolve(String.format("%04d", i) + "n".repeat(200)), "");
+    }
+    var self = new java.util.concurrent.atomic.AtomicReference<FilesConnection>();
+    var stats = new java.util.concurrent.atomic.AtomicInteger();
+    var listed = new java.util.concurrent.atomic.AtomicBoolean();
+    var connection =
+        new FilesConnection(
+            running(UnaryOperator.identity()),
+            CONTAINER,
+            "dock",
+            message -> {
+              said.add(message);
+              try {
+                if (message instanceof PtyMessage.FilesEntry && stats.incrementAndGet() < 5) {
+                  self.get().stat(new PtyMessage.FilesStat(900, file.toString()));
+                }
+                if (message instanceof PtyMessage.FilesListing listing
+                    && listing.more()
+                    && listed.compareAndSet(false, true)) {
+                  self.get().list(new PtyMessage.FilesList(901, big.toString()));
+                }
+              } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+              }
+            },
+            () -> null,
+            endedWith::add,
+            new FilesConnection.Writes(
+                lock, saving, () -> null, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND),
+            changes());
+    self.set(connection);
+
+    connection.stat(new PtyMessage.FilesStat(900, file.toString()));
+    for (var i = 0; i < 5; i++) {
+      assertInstanceOf(PtyMessage.FilesEntry.class, answer(), "stat " + i);
+    }
+
+    connection.list(new PtyMessage.FilesList(901, big.toString()));
+    var refused = false;
+    var last = false;
+    while (!last) {
+      var next = answer();
+      if (next instanceof PtyMessage.FilesRefused under) {
+        assertEquals(
+            "Request 901 is under way already, so this one was not started.", under.message());
+        refused = true;
+      } else {
+        last = !assertInstanceOf(PtyMessage.FilesListing.class, next).more();
+      }
+    }
+    assertTrue(refused, "a listing with frames to come still holds its id");
   }
 
   /** Waits until {@code count} threads wait for the write lock, within 5 s. */

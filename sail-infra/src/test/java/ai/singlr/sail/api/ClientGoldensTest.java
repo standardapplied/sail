@@ -455,6 +455,11 @@ class ClientGoldensTest {
         frames.stream().map(frame -> frame.get("name").toString()).collect(Collectors.toSet());
     var permitted =
         Arrays.stream(PtyMessage.class.getPermittedSubclasses())
+            .flatMap(
+                type ->
+                    type.isSealed()
+                        ? Arrays.stream(type.getPermittedSubclasses())
+                        : Stream.of(type))
             .map(Class::getSimpleName)
             .collect(Collectors.toSet());
     assertEquals(permitted, sampled, "a sample of every pty frame type");

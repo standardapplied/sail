@@ -627,6 +627,50 @@ class FileChangesTest {
     assertTrue(changes.idle(), "idle once every ask is answered");
   }
 
+  /** A changes ask's id is free again the moment its last frame is sent, as every request's is. */
+  @Test
+  void aChangesAsksIdIsFreeAtItsLastFrame() throws Exception {
+    git(workspace, "init", "-q");
+    var files = scripts(UnaryOperator.identity());
+    var changes = new WorkspaceChanges(files, CONTAINER, WorkspaceChanges.PATIENCE, () -> {});
+    var self = new java.util.concurrent.atomic.AtomicReference<FilesConnection>();
+    var again = new AtomicBoolean();
+    var connection =
+        new FilesConnection(
+            files,
+            CONTAINER,
+            "dock",
+            message -> {
+              said.add(message);
+              if (message instanceof PtyMessage.FilesChangeList list
+                  && !list.more()
+                  && again.compareAndSet(false, true)) {
+                try {
+                  self.get().changes(new PtyMessage.FilesChanges(1));
+                } catch (InterruptedException interrupted) {
+                  Thread.currentThread().interrupt();
+                }
+              }
+            },
+            () -> null,
+            unused -> {},
+            new FilesConnection.Writes(
+                new FilesConnection.WorkspaceLock(),
+                ConcurrentHashMap.newKeySet(),
+                () -> null,
+                FilesConnection.AFTER_GO,
+                FilesConnection.HOLD_BOUND),
+            changes);
+    self.set(connection);
+    connection.changes(new PtyMessage.FilesChanges(1));
+
+    assertInstanceOf(PtyMessage.FilesChangeList.class, answers(Set.of(1)).get(1).getLast());
+    assertInstanceOf(
+        PtyMessage.FilesChangeList.class,
+        answers(Set.of(1)).get(1).getLast(),
+        "asked again with its id from inside its last frame");
+  }
+
   /** A cancelled ask is not answered, and a run with no ask left is not started. */
   @Test
   void aCancelledAskIsNeverAnswered() throws Exception {

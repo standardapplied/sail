@@ -300,17 +300,44 @@ public sealed interface PtyMessage {
   /** Upload {@code id}, its end not yet sent, is abandoned: the host keeps nothing of it. */
   record PutCancel(int id) implements PtyMessage {}
 
+  /**
+   * A frame answering request {@code id}, which says by its own type and flags whether it is the
+   * request's last answer: once it is sent, the id is free again for the client's next request. A
+   * request's id, and its answers', is always the component {@code int id}.
+   */
+  sealed interface Answer extends PtyMessage {
+    int id();
+
+    /** Whether no further frame answers this request. */
+    boolean last();
+  }
+
   /** The host holds {@code received} bytes of upload {@code id}: the client may send more. */
-  record PutAck(int id, long received) implements PtyMessage {}
+  record PutAck(int id, long received) implements Answer {
+    @Override
+    public boolean last() {
+      return false;
+    }
+  }
 
   /** Upload {@code id} is stored at {@code path} in the session's own workspace. */
-  record PutStored(int id, String path) implements PtyMessage {}
+  record PutStored(int id, String path) implements Answer {
+    @Override
+    public boolean last() {
+      return true;
+    }
+  }
 
   /**
    * Upload {@code id} is refused, and nothing of it is kept: why, and the bound it met (0 when it
    * met none). The client words it; the host sends only facts.
    */
-  record PutRefused(int id, PutRefusal kind, long limit) implements PtyMessage {}
+  record PutRefused(int id, PutRefusal kind, long limit) implements Answer {
+    @Override
+    public boolean last() {
+      return true;
+    }
+  }
 
   /** Why an upload was refused. */
   enum PutRefusal {
@@ -382,14 +409,24 @@ public sealed interface PtyMessage {
    */
   record FilesListing(
       int id, String version, List<FileEntry> entries, boolean more, boolean truncated)
-      implements PtyMessage {
+      implements Answer {
     public FilesListing {
       entries = List.copyOf(entries);
+    }
+
+    @Override
+    public boolean last() {
+      return !more;
     }
   }
 
   /** What request {@code id}'s path is, and its version. */
-  record FilesEntry(int id, FileEntry entry, String version) implements PtyMessage {}
+  record FilesEntry(int id, FileEntry entry, String version) implements Answer {
+    @Override
+    public boolean last() {
+      return true;
+    }
+  }
 
   /**
    * The next bytes request {@code id} reads, at the version the file had when the read began;
@@ -398,10 +435,16 @@ public sealed interface PtyMessage {
    * again from the file after sending them and found the same: the read's bytes are the file's at
    * one moment, and the digest is their content version. Blank on every frame before the last.
    * {@code whole}, on the last frame alone, says the read ran from 0 to the file's end, so its
-   * digest is the whole file's: the only one a save takes as its base.
+   * digest is the whole file's: the only one a save takes as its base. The frame with the digest is
+   * the read's last answer.
    */
   record FilesData(int id, String version, byte[] bytes, boolean eof, boolean whole, String digest)
-      implements PtyMessage {}
+      implements Answer {
+    @Override
+    public boolean last() {
+      return !digest.isEmpty();
+    }
+  }
 
   /** These watched paths changed: the client reads them again. */
   record FilesChanged(List<String> paths) implements PtyMessage {
@@ -414,7 +457,12 @@ public sealed interface PtyMessage {
   record FilesTick() implements PtyMessage {}
 
   /** Request {@code id} refused, in a sentence naming the file and the reason. */
-  record FilesRefused(int id, FilesRefusal kind, String message) implements PtyMessage {}
+  record FilesRefused(int id, FilesRefusal kind, String message) implements Answer {
+    @Override
+    public boolean last() {
+      return true;
+    }
+  }
 
   /**
    * Saves {@code size} bytes as file {@code path}, then sent as {@link PutChunk} frames of the same
@@ -444,16 +492,31 @@ public sealed interface PtyMessage {
    * Write {@code id} is the file's whole content now: {@code digest} is its SHA-256, the next
    * save's base, and {@code version} its version after the save.
    */
-  record FilesWritten(int id, String digest, String version) implements PtyMessage {}
+  record FilesWritten(int id, String digest, String version) implements Answer {
+    @Override
+    public boolean last() {
+      return true;
+    }
+  }
 
   /**
    * Write {@code id} wrote nothing: the file's content is {@code digest} now, not the one it was
    * based on, or {@link #ABSENT} when it is gone; the person chooses.
    */
-  record FilesConflict(int id, String digest) implements PtyMessage {}
+  record FilesConflict(int id, String digest) implements Answer {
+    @Override
+    public boolean last() {
+      return true;
+    }
+  }
 
   /** Create, move or remove {@code id} is done. */
-  record FilesDone(int id) implements PtyMessage {}
+  record FilesDone(int id) implements Answer {
+    @Override
+    public boolean last() {
+      return true;
+    }
+  }
 
   /**
    * Asks what differs from {@code HEAD} in each of the workspace's repositories, and what git
@@ -478,10 +541,15 @@ public sealed interface PtyMessage {
       List<String> ignored,
       boolean truncated,
       boolean more)
-      implements PtyMessage {
+      implements Answer {
     public FilesChangeList {
       entries = List.copyOf(entries);
       ignored = List.copyOf(ignored);
+    }
+
+    @Override
+    public boolean last() {
+      return !more;
     }
   }
 
@@ -523,7 +591,12 @@ public sealed interface PtyMessage {
    * The next bytes of request {@code id}'s diff, at most {@link #FILE_CHUNK}; {@code eof} on its
    * last frame. A diff, never a file's content: it carries no version and no digest.
    */
-  record FilesDiffData(int id, byte[] bytes, boolean eof) implements PtyMessage {}
+  record FilesDiffData(int id, byte[] bytes, boolean eof) implements Answer {
+    @Override
+    public boolean last() {
+      return eof;
+    }
+  }
 
   /** The version of a file that is not there: a write's base, or a conflict's present. */
   String ABSENT = "absent";
