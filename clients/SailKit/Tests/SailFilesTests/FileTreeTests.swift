@@ -382,6 +382,19 @@ func + (folder: FileName, rest: String) -> FileName {
         #expect(tree.unsettled == nil, "refusals from before the reconnect were counted")
     }
 
+    /// The file open in the pane is watched beside the folders shown, at the version its pane holds:
+    /// sent once when it opens or its version moves, dropped when it closes.
+    @Test func theOpenFileIsWatchedBesideTheFolders() throws {
+        var tree = try Self.listed([Self.file("tide.ts")])
+        let file = Self.root + "/tide.ts"
+        #expect(Self.watched(tree.watchFile(WatchedPath(path: file, version: "f1"))) == [WatchedPath(path: Self.root, version: "v1"), WatchedPath(path: file, version: "f1")])
+        #expect(tree.watchFile(WatchedPath(path: file, version: "f1")).isEmpty, "an unchanged watch was sent again")
+        #expect(Self.watched(tree.watchFile(nil)) == [WatchedPath(path: Self.root, version: "v1")])
+        tree.disconnected()
+        #expect(tree.watchFile(WatchedPath(path: file, version: "f2")).isEmpty, "a watch was sent with no connection")
+        #expect(Self.watched(tree.admitted())?.contains(WatchedPath(path: file, version: "f2")) == true)
+    }
+
     /// The watch set is sent only when it changed: a refusal that changes nothing sends none.
     @Test func anUnchangedWatchSetIsNotSentAgain() throws {
         var tree = try Self.listed([Self.folder("src")])

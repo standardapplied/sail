@@ -97,6 +97,8 @@ public struct FileTree: Sendable {
     private var batch: Set<Int32> = []
     /// The watch set this connection was last sent.
     private var sent: [WatchedPath]?
+    /// The file open in the pane, watched beside the folders at the version its pane holds.
+    private var file: WatchedPath?
     /// Each folder's latest listing asked: an older one answering after it is not taken.
     private var latest: [FileName: Int32] = [:]
     private var nextID: Int32 = 1
@@ -165,7 +167,14 @@ public struct FileTree: Sendable {
     /// one at the version its listing came at.
     public var watchSet: [WatchedPath] {
         let followed = [Self.root] + recency.suffix(Self.watchCap - 1)
-        return followed.sorted { $0.bytes.lexicographicallyPrecedes($1.bytes) }.compactMap { path in folders[path].map { WatchedPath(path: path, version: $0.version) } }
+        let shown = followed.sorted { $0.bytes.lexicographicallyPrecedes($1.bytes) }.compactMap { path in folders[path].map { WatchedPath(path: path, version: $0.version) } }
+        return shown + [file].compactMap { $0 }
+    }
+
+    /// The file open in the pane, at the version its pane holds, or none: watched from now on.
+    public mutating func watchFile(_ file: WatchedPath?) -> [Frame] {
+        self.file = file
+        return connected ? watch() : []
     }
 
     /// A connection was admitted: the watch set is sent again and every expanded folder listed again.

@@ -72,6 +72,10 @@ public final class FakeRunnerDoor: Sendable {
     /// what each files connection watches.
     private struct Files {
         var folders: [FileName: Folder] = [:]
+        /// Each file's bytes and version.
+        var contents: [FileName: (bytes: [UInt8], version: String)] = [:]
+        /// Every frame a files connection sent, in order: what proves nothing was written unasked.
+        var received: [Frame] = []
         var refusals: [FileName: (kind: FileRefusal, message: String)] = [:]
         var versions = 0
         var watched: [Int32: [WatchedPath]] = [:]
@@ -168,6 +172,28 @@ public final class FakeRunnerDoor: Sendable {
             files.refusals[FileName(path)] = nil
             tellWatchers(of: FileName(path), in: files)
         }
+    }
+
+    /// File `path` now holds `bytes`, at a new version: each files connection watching it is told.
+    public func setFile(_ path: String, _ bytes: [UInt8]) {
+        files.withLock { files in
+            files.versions += 1
+            files.contents[FileName(path)] = (bytes, "v\(files.versions)")
+            tellWatchers(of: FileName(path), in: files)
+        }
+    }
+
+    /// File `path` is gone: a read of it is refused as not found, and its watchers are told.
+    public func removeFile(_ path: String) {
+        files.withLock { files in
+            files.contents[FileName(path)] = nil
+            tellWatchers(of: FileName(path), in: files)
+        }
+    }
+
+    /// Every frame the files connections sent, in order.
+    public var filesReceived: [Frame] {
+        files.withLock { $0.received }
     }
 
     /// Folder `path` is gone: a listing of it is refused as not found, and its watchers are told.
@@ -278,7 +304,20 @@ public final class FakeRunnerDoor: Sendable {
             if let outside = Self.refusal(of: frame, under: ticket, opened: nil) {
                 return answer(.refused(HostRefusal(message: outside, remedy: [])), on: connection)
             }
+            files.withLock { $0.received.append(frame) }
             switch frame {
+            case let .filesRead(id, path, offset, length):
+                guard let file = files.withLock({ $0.contents[path] }) else {
+                    answer(.filesRefused(id: id, kind: .known(.notFound), message: "No file at \(path.shown)."), on: connection)
+                    break
+                }
+                let end = min(file.bytes.count, Int(offset) + Int(min(length, Int64(Int32.max))))
+                var at = Int(offset)
+                repeat {
+                    let next = min(at + 256 * 1024, end)
+                    answer(.filesData(id: id, version: file.version, bytes: Array(file.bytes[min(at, end) ..< next]), eof: next >= file.bytes.count), on: connection)
+                    at = next
+                } while at < end
             case let .filesList(id, path):
                 let wait = files.withLock { files -> DispatchSemaphore? in
                     files.listed.append(path.shown)
@@ -303,7 +342,7 @@ public final class FakeRunnerDoor: Sendable {
             case let .filesWatch(paths):
                 let stale = files.withLock { files -> [FileName] in
                     files.watched[connection] = paths
-                    return paths.filter { files.folders[$0.path]?.version != $0.version && !$0.version.isEmpty }.map(\.path)
+                    return paths.filter { (files.contents[$0.path]?.version ?? files.folders[$0.path]?.version) != $0.version && !$0.version.isEmpty }.map(\.path)
                 }
                 if !stale.isEmpty { answer(.filesChanged(paths: stale), on: connection) }
             default:
