@@ -75,6 +75,8 @@ class SessionLoginTest {
     var started = process.start();
     try (var stdin = started.getOutputStream()) {
       stdin.write(input.getBytes(StandardCharsets.UTF_8));
+    } catch (IOException notTaken) {
+      var unused = notTaken;
     }
     var output = new String(started.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
     assertTrue(started.waitFor(30, TimeUnit.SECONDS), "the script ended");

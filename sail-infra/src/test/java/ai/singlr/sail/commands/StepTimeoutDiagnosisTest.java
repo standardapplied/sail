@@ -213,6 +213,53 @@ class StepTimeoutDiagnosisTest {
     assertFalse(Files.exists(log, LinkOption.NOFOLLOW_LINKS));
   }
 
+  /**
+   * #501's last look: a log that is already there is made owner-only before it is written, however
+   * it was made; one written by an older build, or by hand, at 0644 no longer shows anyone else the
+   * step's processes.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aLogAlreadyThereIsMadeOwnerOnlyBeforeItIsWritten() throws Exception {
+    var dir =
+        Files.createDirectory(
+            tempDir.resolve("sail"),
+            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+    var log = Files.writeString(dir.resolve("init.log"), "an older entry\n");
+    Files.setPosixFilePermissions(log, PosixFilePermissions.fromString("rw-r--r--"));
+
+    diagnosedInto(log);
+
+    assertEquals("rw-------", modeOf(log));
+    assertTrue(readString(log).startsWith("an older entry\n== "), readString(log));
+  }
+
+  /**
+   * #501's last look: a log directory the group or anyone may write is refused, so no one else can
+   * swap the log for a link between its check and its open; nothing is written in it.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aLogDirectoryOthersMayWriteIsRefused() throws Exception {
+    for (var mode : List.of("rwxrwx---", "rwx---rwx")) {
+      var dir = Files.createDirectory(tempDir.resolve("sail-" + mode));
+      Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString(mode));
+      var log = dir.resolve("init.log");
+
+      var sentence = diagnosedInto(log);
+
+      assertTrue(
+          sentence.endsWith(
+              "; this diagnosis could not be written to "
+                  + log
+                  + " ("
+                  + dir
+                  + " may be written by others than its owner)."),
+          sentence);
+      assertFalse(Files.exists(log, LinkOption.NOFOLLOW_LINKS));
+    }
+  }
+
   private String diagnosedInto(Path log) {
     return new StepTimeoutDiagnosis(box, log, BOUND).of(timedOut()).orElseThrow();
   }
