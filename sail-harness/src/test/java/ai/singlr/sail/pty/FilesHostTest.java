@@ -192,15 +192,16 @@ class FilesHostTest {
             throw new IOException("Error: Instance not found");
           }
           var inner = new ArrayList<>(command.subList(command.indexOf("--") + 1, command.size()));
-          var script = inner.get(2);
+          var at = inner.indexOf("-c") + 1;
+          var script = inner.get(at);
           var kind = kindOf(script);
           if (edits.containsKey(kind)) {
-            inner.set(2, edits.get(kind).apply(script));
+            inner.set(at, edits.get(kind).apply(script));
           }
           if (stall.contains(kind)) {
-            inner.set(2, "exec sleep 30");
+            inner.set(at, "exec sleep 30");
           } else if (failing.contains(kind)) {
-            inner.set(2, "exit 1");
+            inner.set(at, "exit 1");
           }
           var process =
               new ProcessBuilder(FileScriptsTest.onASocket(inner))
@@ -736,11 +737,17 @@ class FilesHostTest {
   @Test
   void aConnectionNoFilesTicketAdmittedReadsNoFiles() throws Exception {
     try (var box = unix("")) {
-      PtyWire.write(box, new PtyMessage.FilesList(1, home.toString()));
-      assertEquals(
-          new PtyMessage.Err(
-              "Files are read on a connection a files ticket admitted, and this is not one."),
-          PtyWire.read(box));
+      for (var asked :
+          List.<PtyMessage>of(
+              new PtyMessage.FilesList(1, home.toString()),
+              new PtyMessage.FilesChanges(2),
+              new PtyMessage.FilesDiff(3, home + "/a.md"))) {
+        PtyWire.write(box, asked);
+        assertEquals(
+            new PtyMessage.Err(
+                "Files are read on a connection a files ticket admitted, and this is not one."),
+            PtyWire.read(box));
+      }
     }
     assertEquals(List.of(), commands);
   }
@@ -1320,6 +1327,38 @@ class FilesHostTest {
     var gone = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
     while (host.writeLock("acme", "dock") != null) {
       assertTrue(System.nanoTime() < gone, "the lock outlived the workspace's last connection");
+      Thread.onSpinWait();
+    }
+  }
+
+  /**
+   * Every connection to a workspace asks its changes of one run at a time, which the host drops
+   * with the workspace's last connection: each is answered, here that no repository is there.
+   */
+  @Test
+  void everyConnectionToAWorkspaceAsksItsChangesOfOneRun() throws Exception {
+    var mine = open("tok-mady");
+    var admins = open("tok-root");
+    var refusal =
+        new PtyMessage.FilesRefused(
+            7,
+            PtyMessage.FilesRefusal.NO_REPOSITORY,
+            "No git repository is in " + home + "/workspace, so dock has no changes to show.");
+    for (var channel : List.of(mine, admins)) {
+      PtyWire.write(channel, new PtyMessage.FilesChanges(7));
+    }
+    assertEquals(refusal, next(mine));
+    assertEquals(refusal, next(admins));
+    var runs = host.changeRuns("acme", "dock");
+    PtyWire.write(admins, new PtyMessage.FilesDiff(8, home + "/a.md"));
+    assertEquals(
+        PtyMessage.FilesRefusal.NO_REPOSITORY, ((PtyMessage.FilesRefused) next(admins)).kind());
+    assertTrue(runs != null && runs == host.changeRuns("acme", "dock"), "one run for both");
+    mine.close();
+    admins.close();
+    var gone = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (host.changeRuns("acme", "dock") != null) {
+      assertTrue(System.nanoTime() < gone, "the runs outlived the workspace's last connection");
       Thread.onSpinWait();
     }
   }

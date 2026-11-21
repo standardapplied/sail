@@ -168,6 +168,54 @@ class PtyWireTest {
     assertEquals(stopped, roundTrip(stopped));
   }
 
+  /** A repository's changes, and a diff, cross the wire with every state and their edge values. */
+  @Test
+  void theChangesAndADiffSurviveTheWire() throws Exception {
+    var path = "/home/dev/workspace/a\tb\nc é";
+    assertEquals(
+        new PtyMessage.FilesChanges(Integer.MAX_VALUE),
+        roundTrip(new PtyMessage.FilesChanges(Integer.MAX_VALUE)));
+    var changes = new java.util.ArrayList<PtyMessage.Change>();
+    for (var state : PtyMessage.ChangeState.values()) {
+      changes.add(
+          new PtyMessage.Change(
+              path + state, state, state == PtyMessage.ChangeState.RENAMED ? path : ""));
+    }
+    var list =
+        new PtyMessage.FilesChangeList(
+            3,
+            Long.MAX_VALUE,
+            "/home/dev/workspace",
+            "(detached)",
+            "",
+            changes,
+            List.of("/home/dev/workspace/node_modules", path),
+            true,
+            true);
+    assertEquals(list, roundTrip(list));
+    var empty =
+        new PtyMessage.FilesChangeList(
+            4,
+            0,
+            "/home/dev/workspace/api",
+            "main",
+            "git could not read /home/dev/workspace/api: fatal: bad index",
+            List.of(),
+            List.of(),
+            false,
+            false);
+    assertEquals(empty, roundTrip(empty));
+    assertEquals(new PtyMessage.FilesDiff(5, path), roundTrip(new PtyMessage.FilesDiff(5, path)));
+    var bytes = new byte[PtyMessage.FILE_CHUNK];
+    bytes[0] = (byte) 0xff;
+    var diff = (PtyMessage.FilesDiffData) roundTrip(new PtyMessage.FilesDiffData(6, bytes, true));
+    assertEquals(6, diff.id());
+    assertArrayEquals(bytes, diff.bytes());
+    assertTrue(diff.eof());
+    assertThrows(IOException.class, () -> PtyMessage.ChangeState.of("staged"));
+    assertEquals(PtyMessage.ChangeState.UNTRACKED, PtyMessage.ChangeState.of("untracked"));
+  }
+
   /**
    * Every frame that carries a request's id is classed: a request the client sends, or an answer
    * that says by its own type and flags whether it is the last, so a new frame with an id cannot be
@@ -189,16 +237,31 @@ class PtyWireTest {
             PtyMessage.PutBegin.class,
             PtyMessage.PutChunk.class,
             PtyMessage.PutEnd.class,
-            PtyMessage.PutCancel.class);
+            PtyMessage.PutCancel.class,
+            PtyMessage.FilesChanges.class,
+            PtyMessage.FilesDiff.class);
     var notLastWhenEmpty =
-        java.util.Set.<Class<?>>of(PtyMessage.PutAck.class, PtyMessage.FilesData.class);
+        java.util.Set.<Class<?>>of(
+            PtyMessage.PutAck.class, PtyMessage.FilesData.class, PtyMessage.FilesDiffData.class);
     var answers = 0;
     for (var type : allFrames(PtyMessage.class)) {
       var components = type.getRecordComponents();
-      var hasId =
-          components != null
-              && java.util.Arrays.stream(components)
-                  .anyMatch(c -> c.getName().equals("id") && c.getType() == int.class);
+      var hasId = false;
+      for (var component :
+          components == null ? new java.lang.reflect.RecordComponent[0] : components) {
+        var name = component.getName().toLowerCase(java.util.Locale.ROOT);
+        var integral =
+            List.<Class<?>>of(
+                    int.class, long.class, short.class, byte.class, Integer.class, Long.class)
+                .contains(component.getType());
+        if (integral && (name.equals("id") || name.endsWith("id"))) {
+          assertEquals(
+              "id int",
+              component.getName() + " " + component.getType().getName(),
+              type.getSimpleName() + ": a request's id is always int id");
+          hasId = true;
+        }
+      }
       if (!hasId) {
         continue;
       }
@@ -211,7 +274,11 @@ class PtyWireTest {
       var empty = (PtyMessage.Answer) emptyOf(type);
       assertEquals(!notLastWhenEmpty.contains(type), empty.last(), type.getSimpleName());
     }
-    assertEquals(10, answers, "every answer frame was walked");
+    assertEquals(12, answers, "every answer frame was walked");
+    assertTrue(
+        !new PtyMessage.FilesChangeList(1, 0, "/r", "b", "", List.of(), List.of(), false, true)
+            .last());
+    assertTrue(new PtyMessage.FilesDiffData(1, new byte[0], true).last());
     assertTrue(
         !new PtyMessage.FilesListing(1, "v", List.of(), true, false).last()
             && new PtyMessage.FilesListing(1, "v", List.of(), false, false).last());
@@ -270,7 +337,31 @@ class PtyWireTest {
             new PtyMessage.FilesWatch(List.of(new PtyMessage.Watched(bad, "v"))),
             new PtyMessage.FilesListing(1, "v", List.of(entry), false, false),
             new PtyMessage.FilesEntry(1, entry, "v"),
-            new PtyMessage.FilesChanged(List.of(bad)))) {
+            new PtyMessage.FilesChanged(List.of(bad)),
+            new PtyMessage.FilesChangeList(1, 0, bad, bad, "", List.of(), List.of(), false, false),
+            new PtyMessage.FilesChangeList(
+                1,
+                0,
+                "/r",
+                "b",
+                "",
+                List.of(new PtyMessage.Change(bad, PtyMessage.ChangeState.MODIFIED, "")),
+                List.of(),
+                false,
+                false),
+            new PtyMessage.FilesChangeList(
+                1,
+                0,
+                "/r",
+                "b",
+                "",
+                List.of(new PtyMessage.Change("/r/n", PtyMessage.ChangeState.RENAMED, bad)),
+                List.of(),
+                false,
+                false),
+            new PtyMessage.FilesChangeList(
+                1, 0, "/r", "b", "", List.of(), List.of(bad), false, false),
+            new PtyMessage.FilesDiff(1, bad))) {
       assertEquals(message, roundTrip(message), message.getClass().getSimpleName());
       var bytes = new java.io.ByteArrayOutputStream();
       PtyWire.write(Channels.newChannel(bytes), message);

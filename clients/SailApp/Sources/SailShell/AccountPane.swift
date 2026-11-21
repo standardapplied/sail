@@ -405,12 +405,9 @@ public final class AccountPane: NSView, NSMenuItemValidation, NSTextFieldDelegat
 
     /// The error's mark before a refusal's sentence, as the create row's field draws it.
     private func errorMark(color: NSColor, font: NSFont) -> NSAttributedString {
-        let side = 12.0, ink = Tint(look.error)
+        let side = 12.0
         let mark = NSTextAttachment()
-        mark.image = NSImage(size: NSSize(width: side, height: side), flipped: true) { rect in
-            Draw.icon(.error, in: rect, ink: ink)
-            return true
-        }
+        mark.image = MarkImage.image(.error, side: side, ink: Tint(look.error), scale: Double(window?.backingScaleFactor ?? 2))
         mark.bounds = NSRect(x: 0, y: (Double(font.capHeight) - side) / 2, width: side, height: side)
         let words = NSMutableAttributedString(attachment: mark)
         words.append(NSAttributedString(string: " "))

@@ -211,6 +211,11 @@ final class FilesConnection {
   private final Supplier<PtyMessage.Err> ended;
   private final Consumer<PtyMessage.Err> end;
   private final Writes writes;
+  private final WorkspaceChanges changes;
+  private final Map<Integer, Changing> changing = new HashMap<>();
+  private final List<Changing> answering = new ArrayList<>();
+  private WorkspaceChanges.Answer newest;
+  private boolean sending;
   private final ArrayDeque<Request> reads = new ArrayDeque<>();
   private final ArrayDeque<Request> others = new ArrayDeque<>();
   private final Map<Integer, Running> underWay = new HashMap<>();
@@ -224,13 +229,15 @@ final class FilesConnection {
   private long turn;
   private final TreeSet<Long> passed = new TreeSet<>();
   private int inLine;
+  private int wanting;
   private boolean closed;
   private FileScripts.Script watch;
 
   /**
    * The connection to workspace {@code workspace}, instance {@code container}, answering on {@code
    * reply}: {@code ended} says why the workspace no longer serves it, null while it does, and
-   * {@code end} ends the connection with that; its writes take {@code writes}' lock and gate.
+   * {@code end} ends the connection with that; its writes take {@code writes}' lock and gate, and
+   * its changes are asked of the workspace's one {@code changes}.
    */
   FilesConnection(
       FileScripts files,
@@ -239,7 +246,8 @@ final class FilesConnection {
       Consumer<PtyMessage> reply,
       Supplier<PtyMessage.Err> ended,
       Consumer<PtyMessage.Err> end,
-      Writes writes) {
+      Writes writes,
+      WorkspaceChanges changes) {
     this.files = files;
     this.container = container;
     this.workspace = workspace;
@@ -247,6 +255,7 @@ final class FilesConnection {
     this.ended = ended;
     this.end = end;
     this.writes = writes;
+    this.changes = changes;
   }
 
   void list(PtyMessage.FilesList m) throws InterruptedException {
@@ -308,6 +317,35 @@ final class FilesConnection {
           new Body(m.size()),
           (request, running) -> saved(request, running, m.base(), m.seen()));
     }
+  }
+
+  /**
+   * Asks what changed since {@code HEAD}: answered by the workspace's next changes run, taking no
+   * script of the connection's, but one of its {@link #WAITING} until it is answered.
+   */
+  void changes(PtyMessage.FilesChanges m) throws InterruptedException {
+    Changing waiter;
+    synchronized (this) {
+      while (waiting >= bound() && !closed) {
+        wait();
+      }
+      if (closed) {
+        return;
+      }
+      if (taken(m.id())) {
+        reply.accept(underWay(m.id()));
+        return;
+      }
+      waiter = new Changing(m.id());
+      changing.put(m.id(), waiter);
+      waiting++;
+    }
+    changes.ask(waiter);
+  }
+
+  /** {@code m}'s path's change against {@code HEAD}: one of the connection's scripts, no read. */
+  void diff(PtyMessage.FilesDiff m) throws InterruptedException {
+    submit(m.id(), List.of(m.path()), "diff", false, null, this::diffed);
   }
 
   /** Makes {@code m}'s path anew, a folder or an empty file, never over a name there. */
@@ -407,6 +445,9 @@ final class FilesConnection {
         | others.removeIf(request -> request.id() == m.id())) {
       waiting--;
       bodies.remove(m.id());
+    }
+    if (changing.remove(m.id()) != null) {
+      waiting--;
     }
     if (queued != null) {
       pass(queued.turn());
@@ -533,20 +574,14 @@ final class FilesConnection {
       }
     }
     synchronized (this) {
-      while (waiting >= (hungry > 0 ? WAITING_FOR_A_SAVE : WAITING) && !closed) {
+      while (waiting >= bound() && !closed) {
         wait();
       }
       if (closed) {
         return;
       }
-      if (underWay.containsKey(id)
-          || reads.stream().anyMatch(waits -> waits.id() == id)
-          || others.stream().anyMatch(waits -> waits.id() == id)) {
-        reply.accept(
-            new PtyMessage.FilesRefused(
-                id,
-                FilesRefusal.FAILED,
-                "Request " + id + " is under way already, so this one was not started."));
+      if (taken(id)) {
+        reply.accept(underWay(id));
         return;
       }
       var request =
@@ -561,9 +596,246 @@ final class FilesConnection {
     }
   }
 
+  /** How many requests may wait before the next is read: more while a save waits for its bytes. */
+  private int bound() {
+    return hungry > 0 ? WAITING_FOR_A_SAVE : WAITING;
+  }
+
+  /** Whether request {@code id} is under way or waiting already. */
+  private boolean taken(int id) {
+    return underWay.containsKey(id)
+        || changing.containsKey(id)
+        || reads.stream().anyMatch(waits -> waits.id() == id)
+        || others.stream().anyMatch(waits -> waits.id() == id);
+  }
+
+  private static PtyMessage.FilesRefused underWay(int id) {
+    return new PtyMessage.FilesRefused(
+        id,
+        FilesRefusal.FAILED,
+        "Request " + id + " is under way already, so this one was not started.");
+  }
+
+  /** A changes request waiting for its workspace's next run. */
+  private final class Changing implements WorkspaceChanges.Waiter {
+    final int id;
+
+    Changing(int id) {
+      this.id = id;
+    }
+
+    @Override
+    public boolean gone() {
+      return !waits(this);
+    }
+
+    @Override
+    public void answered(WorkspaceChanges.Answer answer) {
+      deliver(this, answer);
+    }
+  }
+
+  private synchronized boolean waits(Changing waiter) {
+    return !closed && changing.get(waiter.id) == waiter;
+  }
+
+  /**
+   * Sends {@code answer} to {@code waiter} on a thread of the connection's own, never the run's:
+   * every request of the connection still to be sent takes the newest answer, which a run that
+   * started after each of them made.
+   */
+  private void deliver(Changing waiter, WorkspaceChanges.Answer answer) {
+    synchronized (this) {
+      if (!waits(waiter)) {
+        return;
+      }
+      answering.add(waiter);
+      newest = answer;
+      if (sending) {
+        return;
+      }
+      sending = true;
+    }
+    Thread.ofVirtual().name("pty-files-changes-send").start(this::sendChanges);
+  }
+
+  private void sendChanges() {
+    while (true) {
+      List<Changing> these;
+      WorkspaceChanges.Answer answer;
+      synchronized (this) {
+        if (answering.isEmpty() || closed) {
+          answering.clear();
+          sending = false;
+          return;
+        }
+        these = List.copyOf(answering);
+        answering.clear();
+        answer = newest;
+      }
+      these.forEach(waiter -> send(waiter, answer));
+    }
+  }
+
+  /** Sends {@code answer} as request {@code waiter}'s frames, unless it went meanwhile. */
+  private void send(Changing waiter, WorkspaceChanges.Answer answer) {
+    var home = files.home() + "/workspace";
+    try {
+      if (answer.overdue() != null) {
+        unlessGone(
+            waiter,
+            new PtyMessage.FilesRefused(
+                waiter.id,
+                FilesRefusal.FAILED,
+                "What changed in "
+                    + workspace
+                    + " was not said: git did not answer within "
+                    + seconds(answer.overdue())
+                    + " s, so Sail ended it."));
+      } else if (answer.status() == 0) {
+        var parts = answer.parts();
+        for (var i = 0; i < parts.size() && waits(waiter); i++) {
+          var part = parts.get(i);
+          unlessGone(
+              waiter,
+              new PtyMessage.FilesChangeList(
+                  waiter.id,
+                  answer.tookMillis(),
+                  part.root(),
+                  part.branch(),
+                  part.failure().isEmpty()
+                      ? ""
+                      : "git could not read "
+                          + FileNames.shown(part.root())
+                          + ": "
+                          + FileNames.shown(part.failure()),
+                  part.entries(),
+                  part.ignored(),
+                  part.truncated(),
+                  i < parts.size() - 1));
+        }
+      } else if (FileScripts.refusalOf(answer.status()) instanceof FilesRefusal kind) {
+        unlessGone(
+            waiter, new PtyMessage.FilesRefused(waiter.id, kind, sentence(kind, home, "changes")));
+      } else {
+        var why = waits(waiter) ? ended.get() : null;
+        if (why != null) {
+          end.accept(why);
+        } else {
+          unlessGone(
+              waiter,
+              new PtyMessage.FilesRefused(
+                  waiter.id,
+                  FilesRefusal.FAILED,
+                  "Sail could not say what changed in "
+                      + workspace
+                      + (answer.repository() == null
+                          ? ""
+                          : ": git failed in " + FileNames.shown(answer.repository()))
+                      + "."));
+        }
+      }
+    } finally {
+      synchronized (this) {
+        if (changing.remove(waiter.id, waiter)) {
+          waiting--;
+          notifyAll();
+        }
+      }
+    }
+  }
+
+  /**
+   * Sends {@code answer} unless {@code waiter} went meanwhile; its last answer frees its id and its
+   * place among the connection's waiting first, as every request's last answer does.
+   */
+  private void unlessGone(Changing waiter, PtyMessage.Answer answer) {
+    synchronized (this) {
+      if (!waits(waiter)) {
+        return;
+      }
+      if (answer.last()) {
+        changing.remove(waiter.id, waiter);
+        waiting--;
+        notifyAll();
+      }
+    }
+    reply.accept(answer);
+  }
+
+  /**
+   * Answers a diff: frames of at most {@link PtyMessage#FILE_CHUNK}, its last held until its script
+   * says it ended well; a diff past {@link #READ_CAP} is refused once its bytes pass it, and one
+   * not ended within the changes' patience is ended and said so, however much of it was sent.
+   */
+  private void diffed(Request request, Running running) throws IOException {
+    var script = start(request, running, FileScripts.DIFF, Long.toString(READ_CAP));
+    if (script == null) {
+      return;
+    }
+    var overdue = new AtomicBoolean();
+    var bound =
+        CompletableFuture.runAsync(
+            () -> {
+              overdue.set(true);
+              script.end();
+            },
+            CompletableFuture.delayedExecutor(
+                changes.patience().toMillis(), TimeUnit.MILLISECONDS));
+    try {
+      diffed(request, running, script, overdue);
+    } catch (IOException ended) {
+      if (!overdue.get()) {
+        throw ended;
+      }
+    } finally {
+      bound.cancel(false);
+    }
+    if (overdue.get()) {
+      unless(
+          running,
+          new PtyMessage.FilesRefused(
+              request.id(),
+              FilesRefusal.FAILED,
+              "The change to "
+                  + FileNames.shown(request.path())
+                  + " was not shown: git did not answer within "
+                  + seconds(changes.patience())
+                  + " s, so Sail ended it."));
+    }
+  }
+
+  private void diffed(
+      Request request, Running running, FileScripts.Script script, AtomicBoolean overdue)
+      throws IOException {
+    var held = script.bytes(PtyMessage.FILE_CHUNK);
+    var total = (long) held.length;
+    for (var next = script.bytes(PtyMessage.FILE_CHUNK);
+        next.length > 0;
+        next = script.bytes(PtyMessage.FILE_CHUNK)) {
+      total += next.length;
+      if (total > READ_CAP) {
+        script.end();
+        unless(running, refused(request, FilesRefusal.TOO_LARGE));
+        return;
+      }
+      unless(running, new PtyMessage.FilesDiffData(request.id(), held, false));
+      held = next;
+    }
+    var status = script.status();
+    if (overdue.get()) {
+      return;
+    }
+    if (status == 0) {
+      unless(running, new PtyMessage.FilesDiffData(request.id(), held, true));
+    } else {
+      refuse(request, running, status);
+    }
+  }
+
   /** Starts the oldest waiting request that may run, again until none may. */
   private void dispatch() {
-    while (!closed && scripts < SCRIPTS) {
+    while (!closed && scripts + wanting < SCRIPTS) {
       var read = reading < READS ? reads.peekFirst() : null;
       var other = others.peekFirst();
       if (read == null && other == null) {
@@ -600,6 +872,7 @@ final class FilesConnection {
           reading--;
         }
         dispatch();
+        notifyAll();
       }
     }
   }
@@ -607,22 +880,36 @@ final class FilesConnection {
   /**
    * Takes the workspace's write lock for {@code request} once every write the connection asked
    * before it has held it or ended, then passes its turn on; false, holding nothing, when it was
-   * cancelled or the connection closed while it waited.
+   * cancelled or the connection closed while it waited. A write that must wait for its turn gives
+   * its script back meanwhile, so a listing or a stat is never held behind it (F6), and takes the
+   * next one free when its turn comes, ahead of any request not yet started.
    */
   private boolean lockInTurn(Request request, Running running) {
     synchronized (this) {
-      inLine++;
-      try {
-        while (turn != request.turn() && !gone(running)) {
-          wait();
+      if (turn != request.turn()) {
+        scripts--;
+        inLine++;
+        dispatch();
+        try {
+          while (turn != request.turn() && !gone(running)) {
+            wait();
+          }
+          wanting++;
+          try {
+            while (scripts >= SCRIPTS && !gone(running)) {
+              wait();
+            }
+          } finally {
+            wanting--;
+          }
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+        } finally {
+          inLine--;
+          scripts++;
         }
-      } catch (InterruptedException interrupted) {
-        Thread.currentThread().interrupt();
-        return false;
-      } finally {
-        inLine--;
       }
-      if (gone(running)) {
+      if (gone(running) || Thread.currentThread().isInterrupted()) {
         return false;
       }
     }
@@ -648,6 +935,16 @@ final class FilesConnection {
   /** How many writes wait for their turn now. */
   synchronized int inLine() {
     return inLine;
+  }
+
+  /** How many turns were passed ahead of an earlier one still under way. */
+  synchronized int passedAhead() {
+    return passed.size();
+  }
+
+  /** How many scripts the connection runs now. */
+  synchronized int scripts() {
+    return scripts;
   }
 
   /**
@@ -1071,15 +1368,22 @@ final class FilesConnection {
    * renamed before it was, so the file holds either version, and the person reads it again.
    */
   private PtyMessage.FilesRefused overdue(Request request) {
-    var millis = writes.afterGo().toMillis();
     return new PtyMessage.FilesRefused(
         request.id(),
         FilesRefusal.FAILED,
         "Sail could not tell whether "
             + FileNames.shown(request.path())
             + " was saved: its save did not end within "
-            + (millis % 1000 == 0 ? Long.toString(millis / 1000) : Double.toString(millis / 1000.0))
+            + seconds(writes.afterGo())
             + " s and was ended; the file holds its old or its new bytes; read it again.");
+  }
+
+  /**
+   * {@code bound} in seconds as a sentence says them: whole when they are, else with a fraction.
+   */
+  private static String seconds(Duration bound) {
+    var millis = bound.toMillis();
+    return millis % 1000 == 0 ? Long.toString(millis / 1000) : Double.toString(millis / 1000.0);
   }
 
   private PtyMessage.FilesRefused failed(Request request, String why) {
@@ -1325,7 +1629,24 @@ final class FilesConnection {
       case CHANGED -> path + " changed while it was read; read it again.";
       case EXISTS -> path + " exists already, so nothing was replaced.";
       case NO_SPACE -> workspace + "'s disk is full, so " + path + " was not saved.";
-      case TOO_LARGE -> path + " is over the 20 MB Sail reads or saves whole, so it was not saved.";
+      case TOO_LARGE ->
+          "diff".equals(verb)
+              ? "The change to " + path + " is over the 20 MB Sail shows, so it is not shown."
+              : path + " is over the 20 MB Sail reads or saves whole, so it was not saved.";
+      case NO_GIT -> workspace + " has no git, so Sail cannot say what changed there.";
+      case NO_REPOSITORY ->
+          "diff".equals(verb)
+              ? path + " is in no git repository, so it has no change to show."
+              : "No git repository is in "
+                  + path
+                  + ", so "
+                  + workspace
+                  + " has no changes to show.";
+      case BINARY -> path + " is binary, so its change is not shown as text.";
+      case FILTERED ->
+          path
+              + " passes through a filter (Git LFS and its like), so its change is not shown as"
+              + " text; it is still listed as changed.";
       case PARTLY_REMOVED ->
           "Some of " + path + " could not be removed; what is left is still there.";
       case UNSAFE ->
@@ -1354,6 +1675,8 @@ final class FilesConnection {
       waiting = 0;
       notifyAll();
       bodies.clear();
+      changing.clear();
+      answering.clear();
       stopping.addAll(underWay.values());
       if (watch != null) {
         ending.add(watch);

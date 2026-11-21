@@ -76,6 +76,14 @@ public final class FakeRunnerDoor: Sendable {
     /// what each files connection watches.
     private struct Files {
         var folders: [FileName: Folder] = [:]
+        /// Each file's bytes and version.
+        var contents: [FileName: (bytes: [UInt8], version: String)] = [:]
+        /// Every frame a files connection sent, in order: what proves nothing was written unasked.
+        var received: [Frame] = []
+        /// Each save under way: its file, base, and the bytes come so far.
+        var saves: [Int32: (path: FileName, base: String, bytes: [UInt8])] = [:]
+        /// The next save is refused so.
+        var refuseSave: (kind: FileRefusal, message: String)?
         var refusals: [FileName: (kind: FileRefusal, message: String)] = [:]
         var versions = 0
         var watched: [Int32: [WatchedPath]] = [:]
@@ -172,6 +180,44 @@ public final class FakeRunnerDoor: Sendable {
             files.refusals[FileName(path)] = nil
             tellWatchers(of: FileName(path), in: files)
         }
+    }
+
+    /// File `path` now holds `bytes`, at a new version: each files connection watching it is told.
+    public func setFile(_ path: String, _ bytes: [UInt8]) {
+        files.withLock { files in
+            files.versions += 1
+            files.contents[FileName(path)] = (bytes, "v\(files.versions)")
+            tellWatchers(of: FileName(path), in: files)
+        }
+    }
+
+    /// File `path` is gone: a read of it is refused as not found, and its watchers are told.
+    public func removeFile(_ path: String) {
+        files.withLock { files in
+            files.contents[FileName(path)] = nil
+            tellWatchers(of: FileName(path), in: files)
+        }
+    }
+
+    /// The next save is refused as `kind`, in `message`, nothing written.
+    public func refuseNextSave(_ kind: FileRefusal, saying message: String) {
+        files.withLock { $0.refuseSave = (kind, message) }
+    }
+
+    /// File `path`'s bytes as the door holds them now.
+    public func file(_ path: String) -> [UInt8]? {
+        files.withLock { $0.contents[FileName(path)]?.bytes }
+    }
+
+    static func hex(_ bytes: [UInt8]) -> String {
+        var hash = SHA256()
+        hash.update(bytes)
+        return hash.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Every frame the files connections sent, in order.
+    public var filesReceived: [Frame] {
+        files.withLock { $0.received }
     }
 
     /// Folder `path` is gone: a listing of it is refused as not found, and its watchers are told.
@@ -282,7 +328,51 @@ public final class FakeRunnerDoor: Sendable {
             if let outside = Self.refusal(of: frame, under: ticket, opened: nil) {
                 return answer(.refused(HostRefusal(message: outside, remedy: [])), on: connection)
             }
+            files.withLock { $0.received.append(frame) }
             switch frame {
+            case let .filesRead(id, path, offset, length):
+                guard let file = files.withLock({ $0.contents[path] }) else {
+                    answer(.filesRefused(id: id, kind: .known(.notFound), message: "No file at \(path.shown)."), on: connection)
+                    break
+                }
+                let end = min(file.bytes.count, Int(offset) + Int(min(length, Int64(Int32.max))))
+                var at = Int(offset), hash = SHA256()
+                repeat {
+                    let next = min(at + 256 * 1024, end), chunk = Array(file.bytes[min(at, end) ..< next]), last = next >= end
+                    hash.update(chunk)
+                    let digest = last ? hash.finalize().map { String(format: "%02x", $0) }.joined() : ""
+                    answer(.filesData(id: id, version: file.version, bytes: chunk, eof: next >= file.bytes.count, whole: last && offset == 0 && next >= file.bytes.count, digest: digest), on: connection)
+                    at = next
+                } while at < end
+            case let .filesWrite(id, path, base, _, _):
+                if let refusal = files.withLock({ files -> (kind: FileRefusal, message: String)? in
+                    defer { files.refuseSave = nil }
+                    return files.refuseSave
+                }) {
+                    answer(.filesRefused(id: id, kind: .known(refusal.kind), message: refusal.message), on: connection)
+                } else {
+                    files.withLock { $0.saves[id] = (path, base, []) }
+                }
+            case let .putChunk(id, _, bytes):
+                guard let received = files.withLock({ files -> Int? in
+                    guard files.saves[id] != nil else { return nil }
+                    files.saves[id]?.bytes += bytes
+                    return files.saves[id]?.bytes.count
+                }) else { break }
+                answer(.putAck(id: id, received: Int64(received)), on: connection)
+            case let .putCancel(id):
+                files.withLock { _ = $0.saves.removeValue(forKey: id) }
+            case let .putEnd(id, _):
+                guard let save = files.withLock({ $0.saves.removeValue(forKey: id) }) else { break }
+                let outcome = files.withLock { files -> Frame in
+                    let present = files.contents[save.path].map { Self.hex($0.bytes) } ?? "absent"
+                    guard present == save.base else { return .filesConflict(id: id, digest: present) }
+                    files.versions += 1
+                    files.contents[save.path] = (save.bytes, "v\(files.versions)")
+                    tellWatchers(of: save.path, in: files)
+                    return .filesWritten(id: id, digest: Self.hex(save.bytes), version: "v\(files.versions)")
+                }
+                answer(outcome, on: connection)
             case let .filesList(id, path):
                 let wait = files.withLock { files -> DispatchSemaphore? in
                     files.listed.append(path.shown)
@@ -307,7 +397,7 @@ public final class FakeRunnerDoor: Sendable {
             case let .filesWatch(paths):
                 let stale = files.withLock { files -> [FileName] in
                     files.watched[connection] = paths
-                    return paths.filter { files.folders[$0.path]?.version != $0.version && !$0.version.isEmpty }.map(\.path)
+                    return paths.filter { (files.contents[$0.path]?.version ?? files.folders[$0.path]?.version) != $0.version && !$0.version.isEmpty }.map(\.path)
                 }
                 if !stale.isEmpty { answer(.filesChanged(paths: stale), on: connection) }
             default:
@@ -692,7 +782,7 @@ public final class FakeRunnerDoor: Sendable {
         }
         if case .files = ticket {
             switch frame {
-            case .filesList, .filesStat, .filesRead, .filesCancel, .filesWatch: return nil
+            case .filesList, .filesStat, .filesRead, .filesCancel, .filesWatch, .filesWrite, .putChunk, .putEnd, .putCancel, .filesCreate, .filesMove, .filesRemove: return nil
             default: return "This connection's ticket is to read files, and it admits nothing else; ask the API for a ticket for that."
             }
         }

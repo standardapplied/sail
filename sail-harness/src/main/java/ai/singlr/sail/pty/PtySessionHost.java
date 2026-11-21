@@ -224,6 +224,13 @@ public final class PtySessionHost implements AutoCloseable {
    */
   private final Map<String, FilesConnection.WorkspaceLock> writeLocks = new HashMap<>();
 
+  /**
+   * Each workspace's one changes run at a time, shared by its files connections (F12): made with
+   * the first that asks and dropped once no connection to it is left and no run is under way, both
+   * under {@code served}'s monitor.
+   */
+  private final Map<String, WorkspaceChanges> changeRuns = new HashMap<>();
+
   /** The temporaries of every save this host runs, which no lock's stuck check takes for stuck. */
   private final Set<String> saving = ConcurrentHashMap.newKeySet();
 
@@ -948,6 +955,8 @@ public final class PtySessionHost implements AutoCloseable {
             case PtyMessage.FilesCreate m when files != null -> files.connection().create(m);
             case PtyMessage.FilesMove m when files != null -> files.connection().move(m);
             case PtyMessage.FilesRemove m when files != null -> files.connection().remove(m);
+            case PtyMessage.FilesChanges m when files != null -> files.connection().changes(m);
+            case PtyMessage.FilesDiff m when files != null -> files.connection().diff(m);
             case PtyMessage.FilesList m -> reply(channel, NO_FILES);
             case PtyMessage.FilesStat m -> reply(channel, NO_FILES);
             case PtyMessage.FilesRead m -> reply(channel, NO_FILES);
@@ -957,6 +966,8 @@ public final class PtySessionHost implements AutoCloseable {
             case PtyMessage.FilesCreate m -> reply(channel, NO_FILES);
             case PtyMessage.FilesMove m -> reply(channel, NO_FILES);
             case PtyMessage.FilesRemove m -> reply(channel, NO_FILES);
+            case PtyMessage.FilesChanges m -> reply(channel, NO_FILES);
+            case PtyMessage.FilesDiff m -> reply(channel, NO_FILES);
             default -> reply(channel, new PtyMessage.Err("Unexpected client frame."));
           }
         }
@@ -1902,6 +1913,12 @@ public final class PtySessionHost implements AutoCloseable {
       }
       var lock =
           writeLocks.computeIfAbsent(instance, unused -> new FilesConnection.WorkspaceLock());
+      var changes =
+          changeRuns.computeIfAbsent(
+              instance,
+              unused ->
+                  new WorkspaceChanges(
+                      files, instance, WorkspaceChanges.PATIENCE, () -> forgetChanges(instance)));
       var connection =
           new FilesConnection(
               files,
@@ -1915,7 +1932,8 @@ public final class PtySessionHost implements AutoCloseable {
                   saving,
                   () -> filesDecided(project, workspace, who),
                   FilesConnection.AFTER_GO,
-                  FilesConnection.HOLD_BOUND));
+                  FilesConnection.HOLD_BOUND),
+              changes);
       var kept = new Served(project, workspace, who, channel, connection);
       served.add(kept);
       return kept;
@@ -2015,6 +2033,29 @@ public final class PtySessionHost implements AutoCloseable {
                           && s.workspace().equals(files.workspace()))) {
         writeLocks.remove(instance);
       }
+      forgetChanges(instance);
+    }
+  }
+
+  /**
+   * Drops workspace {@code instance}'s changes runs once no connection to it is left and none is
+   * under way, as its last connection goes or its last run ends.
+   */
+  private void forgetChanges(String instance) {
+    synchronized (served) {
+      var changes = changeRuns.get(instance);
+      if (changes != null
+          && changes.idle()
+          && served.stream().noneMatch(s -> (s.project() + "-" + s.workspace()).equals(instance))) {
+        changeRuns.remove(instance);
+      }
+    }
+  }
+
+  /** Workspace {@code workspace} of {@code project}'s changes runs now, null when none. */
+  WorkspaceChanges changeRuns(String project, String workspace) {
+    synchronized (served) {
+      return changeRuns.get(project + "-" + workspace);
     }
   }
 

@@ -4108,10 +4108,10 @@ Incus.
 ticket (`{"action": "files", "project", "workspace"}`) names a workspace, never the project's own
 container, and is decided as an open there (`PtySessionHost.filesRefusal`: the project, then
 `PtyAdmission.files`); a stopped workspace is refused `workspace_stopped` (409) with the remedy
-that starts it, and nothing is started by looking. The connection it admits speaks only frames
-40-44 (`FilesList`, `FilesStat`, `FilesRead`, `FilesCancel`, `FilesWatch`), answered by 50-55
-(`FilesListing`, `FilesEntry`, `FilesData`, `FilesChanged`, `FilesTick`, `FilesRefused`, a kind
-and a sentence naming the file), for that workspace (`PtyTickets.Ticket#refusal`). Two classes, one
+that starts it, and nothing is started by looking. The connection it admits speaks only the files
+frames, 40-49 and 60 (lists, stats, reads, cancels, the watch, the writes, `FilesChanges` and
+`FilesDiff`), answered by 50-59 and 61 (among them `FilesRefused`, a kind and a sentence naming
+the file), for that workspace (`PtyTickets.Ticket#refusal`). Two classes, one
 job each: `FileScripts` is the shell (four bash scripts as constants, their exit statuses, one
 `incus exec` as the dev user each, `UploadCopy.Place.asDev`), `FilesConnection` answers one
 connection's frames.
@@ -4194,13 +4194,51 @@ connection's frames.
   (`.sail-save-`), which a save writes beside its target. A lock serialising writes to a workspace
   across its connections would sit on the host beside `PtySessionHost.served`, keyed by instance
   and handed to each `FilesConnection`.
+- **F12. What changed since `HEAD` (`FilesChanges`, `FilesDiff`; `WorkspaceChanges`).** The
+  workspace's own `git`, as the dev user, run only through one safe invocation (`FileScripts.GIT`:
+  `git_in`, then `safe_git`), so looking runs none of the repository's code: every inherited `GIT_*`
+  dropped; through `GIT_CONFIG_COUNT`, which wins over every config file and reaches any git it
+  starts, no fsmonitor, no transport at all (so a lazy fetch runs no upload-pack, ssh command or
+  credential helper), and every filter the folder's configuration defines given an empty clean,
+  smudge and process; trace2 off; `--no-ext-diff --no-textconv` on every diff. Nothing else git's
+  configuration can name runs for these calls: hooks need an index write, which optional locks
+  forbid; a pager needs a terminal; no call edits, signs, fetches or maintains; and a submodule is a
+  folder no diff takes. Every files script starts on the image's own `PATH` (`FileScripts.SHELL`:
+  `/usr/bin/env PATH=/usr/bin:/bin bash -c`), so no `git`, `stat` or `sha256sum` put earlier on a
+  `PATH` runs; a filter only marked `required` is a filter too. Optional locks are off (`GIT_OPTIONAL_LOCKS=0`), so `git status` never refreshes the
+  index and an agent's `git` never waits for its lock. A repository git refuses is said for it
+  alone (`FilesChangeList.failure`, git's words) and the others answer; a path that passes through
+  a defined filter (Git LFS and its like) is still listed but its diff is refused `filtered`, since
+  its sides would be the filtered and the unfiltered bytes, and one whose stat changed is listed
+  even when its filtered content did not. A copy, where the repository has git find copies, is
+  listed as added. A diff has one shape whatever the repository's diff settings (`a/` and `b/` from
+  the top, no colour, no renames, three lines of context) and is ended at the changes' 30 s however
+  much of it was sent. The repositories are `/home/dev/workspace` and each folder directly
+  under it that is its own top. One `git status --porcelain=v2 -z --branch --untracked-files=all
+  --ignored=matching` each: an ignored folder is one path git never walks, while an untracked
+  folder no rule ignores is walked whole, which is git's own cost. Measured on git 2.43: an
+  ignored `node_modules/` of 50,000 files is one line and status takes 24 ms; `--ignored=traditional`
+  lists all 50,000 in 73 ms. A workspace runs one changes script at a time across every connection
+  to it (`PtySessionHost.changeRuns`, dropped with its last connection once idle): an ask that comes
+  while one runs waits, and every ask waiting is answered by the one next run, made whole (each
+  list cut at 5,000, the answer at 4 MiB of paths, `truncated`) and then sent by each connection
+  on its own thread, so one slow to read holds no other's answer. A run past 30 s is ended and
+  said so. Each `FilesChangeList` frame carries `tookMillis`, by which the client backs off. A
+  diff is `git diff --no-color --no-ext-diff --no-textconv -U3` with literal pathspecs, against
+  git's own empty tree in a repository with no commit, `--no-index` against `/dev/null` for an
+  untracked file, answered as `FilesDiffData`, never `FilesData`, so it carries no version or
+  digest a save could take; a binary change, a side or a diff over 20 MiB, no git and no
+  repository are refused as what they are (exits 60 to 62).
 - **Writes in the order asked.** Writes asked on one connection are applied and answered in the
   order asked; writes on different connections are ordered by the workspace's lock. Each write is
   given a turn when it is asked, waits for it before the lock, and passes it on once it holds the
   lock or ends without it, however it ends (refused, cancelled while running or queued, its script
   unstarted, its connection closed), so no turn is lost. A later write on a connection waits for a
-  save there still receiving its bytes, at most the upload's own idle limit. Reads take no turn: a
-  client that needs a read to follow a write waits for the write's answer.
+  save there still receiving its bytes, at most the upload's own idle limit; while it waits for its
+  turn it holds none of the connection's four scripts, so a listing or a stat is never held behind
+  it (F6), and when its turn comes it takes the next script free, ahead of any request not yet
+  started. Reads take no turn: a client that needs a read to follow a write waits for the write's
+  answer.
 - **An id is free again the moment its last answer is sent.** Every frame that answers a request
   is a `PtyMessage.Answer`, which says by its own type and flags whether it is the last (a listing
   frame with more to come, a read's frame before its digest and an upload's acknowledgement are

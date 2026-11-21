@@ -90,6 +90,25 @@ final class FileScripts {
   /** A save over a file larger than a whole read may be, which never has a whole read's digest. */
   static final int TOO_LARGE = 49;
 
+  /** The changes' and a diff's exit when the workspace has no {@code git}. */
+  static final int NO_GIT = 60;
+
+  /** The changes' exit when the workspace holds no repository, and a diff's for a path in none. */
+  static final int NO_REPOSITORY = 61;
+
+  /** A diff's exit when the change is binary, which git does not show as text. */
+  static final int BINARY = 62;
+
+  /**
+   * How every script starts: bash, and every program it runs, found on the image's own folders
+   * alone, so no program a person put earlier on a {@code PATH} (a {@code git}, a {@code stat}, a
+   * {@code sha256sum}) runs for a look at their files.
+   */
+  static final List<String> SHELL = List.of("/usr/bin/env", "PATH=/usr/bin:/bin", "bash", "-c");
+
+  /** A diff's exit when the path passes through a filter the configuration defines. */
+  static final int FILTERED = 63;
+
   /** The read's exit when the workspace has no {@code sha256sum} to prove what it read with. */
   static final int NO_SHA256 = 27;
 
@@ -383,6 +402,143 @@ final class FileScripts {
       """;
 
   /**
+   * The one way the scripts run git ({@code safe_git}, after {@code git_in} names the folder), so
+   * that looking at a repository runs none of its code. Every {@code GIT_*} variable inherited is
+   * dropped, and the git started is told, through {@code GIT_CONFIG_COUNT}, which wins over every
+   * config file, an included one too, and is inherited by any git it starts: no fsmonitor (its hook
+   * or its daemon); no transport at all ({@code protocol.allow=never}), so a lazy fetch runs no
+   * upload-pack, ssh command or credential helper; and every filter the configuration of that
+   * folder defines (its own, included, global) has an empty clean, smudge and process, which is no
+   * filter. Optional locks are off, so {@code status} writes no index and fires no hook; trace2 is
+   * off; pathspecs are literal. A diff driver's command and text conversion, and an external diff,
+   * are off by {@code --no-ext-diff --no-textconv} on each diff. Nothing else the configuration can
+   * name runs for the calls the scripts make: no pager without a terminal, no editor, no
+   * maintenance, and a submodule is a folder no diff takes. {@code FILTERS} keeps the names of the
+   * filters defined, for a diff to say a path passes through one.
+   */
+  static final String GIT =
+      """
+      for name in $(compgen -e); do case $name in GIT_*) unset "$name" ;; esac; done
+      export GIT_OPTIONAL_LOCKS=0 GIT_LITERAL_PATHSPECS=1
+      export GIT_TRACE2=0 GIT_TRACE2_EVENT=0 GIT_TRACE2_PERF=0
+      SAFE_DIR=. FILTERS=()
+      safe_config() {
+        export "GIT_CONFIG_KEY_$GIT_CONFIG_COUNT=$1" "GIT_CONFIG_VALUE_$GIT_CONFIG_COUNT=$2"
+        GIT_CONFIG_COUNT=$((GIT_CONFIG_COUNT + 1))
+      }
+      git_in() {
+        local key name
+        SAFE_DIR=$1 FILTERS=()
+        for name in $(compgen -e); do case $name in GIT_CONFIG_KEY_*|GIT_CONFIG_VALUE_*) unset "$name" ;; esac; done
+        export GIT_CONFIG_COUNT=0
+        safe_config core.fsmonitor false
+        safe_config protocol.allow never
+        while IFS= read -r -d '' key; do
+          name=${key#filter.} name=${name%.*}
+          FILTERS+=("$name")
+          safe_config "filter.$name.clean" ''
+          safe_config "filter.$name.smudge" ''
+          safe_config "filter.$name.process" ''
+          safe_config "filter.$name.required" false
+        done < <(command git -C "$SAFE_DIR" config --null --name-only --get-regexp '^filter\\..*\\.(clean|smudge|process|required)$' 2>/dev/null)
+      }
+      safe_git() { command git -C "$SAFE_DIR" "$@"; }
+      """;
+
+  /**
+   * What differs from {@code HEAD} in each repository of the workspace: the workspace folder itself
+   * and each folder directly under it whose own top {@code git} says it is, under the home. Each is
+   * said as {@code repo} and its root, then git's own {@code status} in porcelain v2 with NUL ends,
+   * untracked files listed one by one and ignored paths as git matched them, an ignored folder one
+   * path git never walks, then {@code end}; or, for a repository git refuses (a corrupt one, one
+   * another user owns), {@code failed} and the first line git said, and the next repository goes
+   * on. Every field NUL-terminated, git run only as {@link #GIT} runs it, so it runs none of the
+   * repository's code and never takes the index's lock. No git, or no repository, is its own exit.
+   */
+  static final String CHANGES =
+      GIT
+          + """
+          export LC_ALL=C
+          home=$1
+          command -v git > /dev/null || exit 60
+          found=''
+          for dir in "$home/workspace" "$home"/workspace/*/; do
+            dir=${dir%/}
+            [ -d "$dir" ] || continue
+            real=$(realpath -e -- "$dir" 2>/dev/null && echo x) || continue
+            real=${real%?x}
+            case $real/ in "$home"/*) ;; *) continue ;; esac
+            git_in "$real"
+            if top=$(safe_git rev-parse --show-toplevel 2>/dev/null && echo x); then
+              top=${top%?x}
+              [ "$top" = "$real" ] || continue
+              found=1
+              printf 'repo\\0%s\\0' "$top"
+              exec 3>&1
+              if why=$(safe_git status --porcelain=v2 -z --branch --untracked-files=all --ignored=matching --ignore-submodules=dirty 2>&1 1>&3 3>&-); then
+                printf 'end\\0'
+              else
+                printf 'failed\\0%s\\0' "${why%%$'\\n'*}"
+              fi
+              exec 3>&-
+            elif [ -e "$real/.git" ]; then
+              found=1
+              why=$(safe_git rev-parse --show-toplevel 2>&1 > /dev/null)
+              printf 'repo\\0%s\\0failed\\0%s\\0' "$real" "${why%%$'\\n'*}"
+            fi
+          done
+          [ -n "$found" ] || exit 61
+          """;
+
+  /**
+   * The path's change against {@code HEAD} as a unified diff in one shape whatever the repository's
+   * diff settings ({@code a/} and {@code b/}, paths from the top, no colour, no renames, three
+   * lines of context), at most {@code $2} bytes and one more, so a longer one is seen: an untracked
+   * file's against nothing, and against git's empty tree in a repository with no commit yet. The
+   * repository is the one git finds from the nearest folder of the path that still exists, which
+   * must resolve under the home, as its top must. A path that passes through a filter the
+   * configuration defines (Git LFS and its like) is refused, since its sides would be the filtered
+   * and the unfiltered bytes; so is a file larger than {@code $2} on either side, or a binary
+   * change, each before any byte. Git runs only as {@link #GIT} runs it.
+   */
+  static final String DIFF =
+      RESOLVE
+          + GIT
+          + """
+          cap=$2
+          IFS= read -r -d '' path || exit 1
+          command -v git > /dev/null || exit 60
+          folder=${path%/*} rest=${path##*/}
+          until [ -d "$folder" ] || [ "$folder" = "$home" ]; do
+            rest=${folder##*/}/$rest folder=${folder%/*}
+          done
+          resolve "$folder"
+          cd -- "$at" 2>/dev/null || exit 21
+          git_in .
+          top=$(safe_git rev-parse --show-toplevel 2>/dev/null && echo x) || exit 61
+          top=${top%?x}
+          case $top/ in "$home"/*) ;; *) exit 22 ;; esac
+          [ -d "$rest" ] && [ ! -L "$rest" ] && exit 23
+          { IFS= read -r -d '' _; IFS= read -r -d '' _; IFS= read -r -d '' filter; } < <(safe_git check-attr -z filter -- "$rest" 2>/dev/null)
+          for name in "${FILTERS[@]}"; do [ "$name" = "$filter" ] && exit 63; done
+          base=HEAD
+          safe_git rev-parse -q --verify 'HEAD^{commit}' > /dev/null || base=$(safe_git hash-object -t tree /dev/null) || exit 1
+          if { [ -e "$rest" ] || [ -L "$rest" ]; } && ! safe_git ls-files --error-unmatch -- "$rest" > /dev/null 2>&1; then
+            set -- --no-index -- /dev/null "$rest"
+          else
+            [ "$(safe_git cat-file -s "$base:./$rest" 2>/dev/null || echo 0)" -le "$cap" ] || exit 49
+            set -- "$base" -- "$rest"
+          fi
+          if [ -f "$rest" ] && [ ! -L "$rest" ] && [ "$(stat -c %s -- "$rest")" -gt "$cap" ]; then exit 49; fi
+          counted=$(safe_git diff --no-ext-diff --no-textconv --numstat "$@")
+          [ $? -le 1 ] || exit 1
+          case $counted in -$'\\t'-$'\\t'*) exit 62 ;; esac
+          safe_git diff --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ --no-relative --no-renames -U3 --inter-hunk-context=0 "$@" | head -c $((cap + 1))
+          status=${PIPESTATUS[0]}
+          [ "$status" -le 1 ] || [ "$status" -eq 141 ] || exit 1
+          """;
+
+  /**
    * Whether a save of an earlier host, or of this one before its workspace's lock was dropped, is
    * still stuck in the workspace: a process holding open a file of Sail's exact temporary shape
    * under the home ({@code $1}) whose last change is older than {@code $2} seconds, the save bound,
@@ -546,7 +702,8 @@ final class FileScripts {
       String container, String script, List<String> fields, boolean keepOpen, String... args)
       throws IOException {
     var command = new ArrayList<>(place.asDev().apply(container));
-    command.addAll(List.of("bash", "-c", script, "sail-files", home));
+    command.addAll(SHELL);
+    command.addAll(List.of(script, "sail-files", home));
     command.addAll(List.of(args));
     var process = processes.start(command);
     var running = new Script(process);
@@ -582,6 +739,10 @@ final class FileScripts {
       case INTO_ITSELF -> FilesRefusal.UNSAFE;
       case PARTLY_REMOVED -> FilesRefusal.PARTLY_REMOVED;
       case TOO_LARGE -> FilesRefusal.TOO_LARGE;
+      case NO_GIT -> FilesRefusal.NO_GIT;
+      case NO_REPOSITORY -> FilesRefusal.NO_REPOSITORY;
+      case BINARY -> FilesRefusal.BINARY;
+      case FILTERED -> FilesRefusal.FILTERED;
       default -> null;
     };
   }

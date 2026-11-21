@@ -64,6 +64,15 @@ class FileScriptsTest {
 
   /** As {@link #over(Path, List)}, each script run with {@code env} added to its environment. */
   static FileScripts over(Path home, List<List<String>> commands, Map<String, String> env) {
+    return over(home, commands, env, java.util.function.UnaryOperator.identity());
+  }
+
+  /** As {@link #over(Path, List, Map)}, each script first edited by {@code edit}. */
+  static FileScripts over(
+      Path home,
+      List<List<String>> commands,
+      Map<String, String> env,
+      java.util.function.UnaryOperator<String> edit) {
     var place =
         new UploadCopy.Place(
             container -> List.of("incus", "exec", container, "--"),
@@ -80,7 +89,10 @@ class FileScriptsTest {
           if (!command.get(2).equals(CONTAINER)) {
             throw new IOException("Error: Instance not found");
           }
-          var inner = command.subList(command.indexOf("--") + 1, command.size());
+          var inner = new ArrayList<>(command.subList(command.indexOf("--") + 1, command.size()));
+          var at = inner.indexOf("-c") + 1;
+          inner.set(at, edit.apply(inner.get(at)));
+          standIn(inner, env);
           var builder =
               new ProcessBuilder(onASocket(inner)).redirectError(ProcessBuilder.Redirect.DISCARD);
           builder.environment().putAll(env);
@@ -108,6 +120,21 @@ class FileScriptsTest {
           sys.stdout.buffer.flush()
       sys.exit(script.wait())
       """;
+
+  /**
+   * The environment key a test names a folder of stand-in tools by: it takes the place of the
+   * {@code PATH} every script pins ({@link FileScripts#SHELL}), which a plain {@code PATH} cannot.
+   */
+  static final String STAND_IN = "SAIL_TEST_PATH";
+
+  /**
+   * {@code inner}, a script's command, with the pinned {@code PATH} replaced by {@link #STAND_IN}.
+   */
+  static void standIn(List<String> inner, Map<String, String> env) {
+    if (env.containsKey(STAND_IN)) {
+      inner.set(inner.indexOf(FileScripts.SHELL.get(1)), "PATH=" + env.get(STAND_IN));
+    }
+  }
 
   /** {@code command} run with its standard output a socket, as a workspace's script is. */
   static List<String> onASocket(List<String> command) {
@@ -461,7 +488,7 @@ class FileScriptsTest {
             home,
             commands,
             Map.of(
-                "PATH",
+                STAND_IN,
                 bin + ":" + System.getenv("PATH"),
                 "LANG",
                 "de_DE.UTF-8",
@@ -533,7 +560,7 @@ class FileScriptsTest {
     for (var fake : cases.entrySet()) {
       var bin = binWith(fake.getKey());
       var read =
-          over(home, commands, Map.of("PATH", bin.toString()))
+          over(home, commands, Map.of(STAND_IN, bin.toString()))
               .start(CONTAINER, FileScripts.READ, file.toString(), "0", "5");
       while (read.field() != null) {
         continue;

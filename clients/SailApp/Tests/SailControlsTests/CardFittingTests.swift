@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import SailKitTestSupport
 @testable import SailControls
+import SailDesign
 import SailLook
 import Testing
 
@@ -29,6 +30,26 @@ import Testing
         ])
         room.layoutSubtreeIfNeeded()
         return card
+    }
+
+    /// A shown card's mark is drawn there and then, on the main thread, at the screen's scale: its
+    /// layer holds the bitmap, never a drawing handler for AppKit to call later from another thread.
+    @Test func theMarkIsDrawnWhenShownAndNotLeftForLater() throws {
+        for tone in BannerTone.allCases {
+            let card = Self.card(saying: "harbor is still running.", width: 420)
+            card.show("harbor is still running.", tone: tone)
+            let contents = try #require(card.markContents as CFTypeRef?, "the \(tone) card's mark has no contents")
+            #expect(CFGetTypeID(contents) == CGImage.typeID, "the \(tone) card's mark is \(type(of: card.markContents!)), not a bitmap")
+            #expect((contents as! CGImage).width == Int(Banner.mark * 2), "the \(tone) card's mark is not at the scale of 2")
+        }
+    }
+
+    /// A mark made into an image for a run of text is a bitmap already drawn: nothing in it is
+    /// left for AppKit to draw later.
+    @Test func aMarksImageIsDrawnWhenMade() throws {
+        let image = MarkImage.image(.error, side: 12, ink: Tint(Look.light.error), scale: 2)
+        #expect(!image.representations.isEmpty && !image.representations.contains { $0 is NSCustomImageRep }, "\(image.representations)")
+        #expect(image.size == NSSize(width: 12, height: 12))
     }
 
     /// A tab of the longest workspace name the server allows, and a long rename, are cut in the

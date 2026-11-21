@@ -58,8 +58,8 @@ final class PtyTickets {
      * attaches to its session; either then writes, resizes, takes the write token, uploads into the
      * session it attached and detaches, ends its own session while it holds that session's write
      * token, and does nothing else. A files ticket lists, stats, reads, watches, saves (its bytes
-     * sent as an upload's are), makes, moves and removes the files of its workspace, and does
-     * nothing else.
+     * sent as an upload's are), makes, moves and removes the files of its workspace, says what
+     * changed in it since {@code HEAD} and one file's change, and does nothing else.
      */
     @Override
     public PtyMessage.Err refusal(PtyMessage message, String opened, String writing) {
@@ -73,6 +73,8 @@ final class PtyTickets {
                 || message instanceof PtyMessage.FilesCreate
                 || message instanceof PtyMessage.FilesMove
                 || message instanceof PtyMessage.FilesRemove
+                || message instanceof PtyMessage.FilesChanges
+                || message instanceof PtyMessage.FilesDiff
                 || message instanceof PtyMessage.PutChunk
                 || message instanceof PtyMessage.PutEnd
                 || message instanceof PtyMessage.PutCancel

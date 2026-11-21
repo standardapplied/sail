@@ -162,6 +162,14 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     public var onChoose: @MainActor (String?) -> Void = { _ in }
     /// A key the list's owner takes before the list does (a tree's → and ←): true, taken.
     package var onKey: (@MainActor (NSEvent) -> Bool)?
+    /// The list took the keys.
+    package var onFocus: @MainActor () -> Void = {}
+
+    override public func becomeFirstResponder() -> Bool {
+        let taken = super.becomeFirstResponder()
+        if taken { onFocus() }
+        return taken
+    }
     private let mono: LabelFont
 
     /// The rows. A new set keeps the chosen item chosen by its id wherever it now is, and tells
@@ -417,7 +425,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     }
 
     /// Whether a misuse of the list (two items handing it one view) stops the process, as tests,
-    /// debug builds and the drive want; a person's app says it once in the log and goes on safely.
+    /// debug builds and the drive want; a person's app says it once in the log and goes on without
+    /// stopping, a row possibly blank until the next fill.
     package static var stopsOnMisuse = asserting
     private static let asserting: Bool = {
         var on = false
@@ -853,7 +862,8 @@ final class RowCell: NSView {
     }
 
     /// Its content was taken by a row handed the same view: made again from its own item's closure,
-    /// or an empty view when that closure hands back the view taken.
+    /// or, when that closure hands back the view taken, an empty view: the row is blank until the
+    /// next fill.
     private func contentTaken() {
         guard let item else { return }
         let again = item.content

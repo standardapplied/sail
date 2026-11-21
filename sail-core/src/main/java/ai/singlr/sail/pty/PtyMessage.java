@@ -302,7 +302,8 @@ public sealed interface PtyMessage {
 
   /**
    * A frame answering request {@code id}, which says by its own type and flags whether it is the
-   * request's last answer: once it is sent, the id is free again for the client's next request.
+   * request's last answer: once it is sent, the id is free again for the client's next request. A
+   * request's id, and its answers', is always the component {@code int id}.
    */
   sealed interface Answer extends PtyMessage {
     int id();
@@ -517,13 +518,99 @@ public sealed interface PtyMessage {
     }
   }
 
+  /**
+   * Asks what differs from {@code HEAD} in each of the workspace's repositories, and what git
+   * ignores there: {@link FilesChangeList} frames, or a {@link FilesRefused}.
+   */
+  record FilesChanges(int id) implements PtyMessage {}
+
+  /**
+   * Part of request {@code id}'s answer: repository {@code root}, on {@code branch}, the {@code
+   * entries} that differ from its {@code HEAD} and the paths git {@code ignored} there, each path
+   * absolute, an ignored folder one path with nothing beneath it; or, for a repository git refused,
+   * {@code failure}, a sentence with git's own words, and nothing listed. Blank for one git read.
+   * One repository's frames come together, and every repository has one at least; {@code truncated}
+   * says its lists were cut at {@link #CHANGES_CAP}, or at the answer's bytes; {@code more} while
+   * frames of the answer follow. {@code tookMillis}, on every frame, is how long the answer took to
+   * make.
+   */
+  record FilesChangeList(
+      int id,
+      long tookMillis,
+      String root,
+      String branch,
+      String failure,
+      List<Change> entries,
+      List<String> ignored,
+      boolean truncated,
+      boolean more)
+      implements Answer {
+    public FilesChangeList {
+      entries = List.copyOf(entries);
+      ignored = List.copyOf(ignored);
+    }
+
+    @Override
+    public boolean last() {
+      return !more;
+    }
+  }
+
+  /** A path that differs from {@code HEAD}, how, and a rename's {@code from}, blank for others. */
+  record Change(String path, ChangeState state, String from) {}
+
+  /** How a path differs from {@code HEAD}. */
+  enum ChangeState {
+    MODIFIED,
+    ADDED,
+    DELETED,
+    RENAMED,
+    UNTRACKED,
+    CONFLICTED;
+
+    /** The state as the wire names it. */
+    public String wire() {
+      return name().toLowerCase(Locale.ROOT);
+    }
+
+    /** The state {@code wire} names, refused when it names none. */
+    public static ChangeState of(String wire) throws IOException {
+      for (var state : values()) {
+        if (state.wire().equals(wire)) {
+          return state;
+        }
+      }
+      throw new IOException("Corrupt pty frame: a change of state '" + wire + "'.");
+    }
+  }
+
+  /**
+   * Asks for {@code path}'s change against {@code HEAD} as a unified diff: {@link FilesDiffData}
+   * frames, or a {@link FilesRefused}.
+   */
+  record FilesDiff(int id, String path) implements PtyMessage {}
+
+  /**
+   * The next bytes of request {@code id}'s diff, at most {@link #FILE_CHUNK}; {@code eof} on its
+   * last frame. A diff, never a file's content: it carries no version and no digest.
+   */
+  record FilesDiffData(int id, byte[] bytes, boolean eof) implements Answer {
+    @Override
+    public boolean last() {
+      return eof;
+    }
+  }
+
   /** The version of a file that is not there: a write's base, or a conflict's present. */
   String ABSENT = "absent";
 
   /** The most entries a listing carries. */
   int LISTING_CAP = 50_000;
 
-  /** The most bytes one {@link FilesData} frame carries. */
+  /** The most entries, and the most ignored paths, one repository's changes carry. */
+  int CHANGES_CAP = 5_000;
+
+  /** The most bytes one {@link FilesData} or {@link FilesDiffData} frame carries. */
   int FILE_CHUNK = 256 << 10;
 
   /**
@@ -578,6 +665,10 @@ public sealed interface PtyMessage {
     TOO_LARGE,
     PARTLY_REMOVED,
     UNSAFE,
+    NO_GIT,
+    NO_REPOSITORY,
+    BINARY,
+    FILTERED,
     FAILED;
 
     /** The kind as the wire names it. */
