@@ -356,6 +356,8 @@ public final class FakeRunnerDoor: Sendable {
                     return files.saves[id]?.bytes.count
                 }) else { break }
                 answer(.putAck(id: id, received: Int64(received)), on: connection)
+            case let .putCancel(id):
+                files.withLock { _ = $0.saves.removeValue(forKey: id) }
             case let .putEnd(id, _):
                 guard let save = files.withLock({ $0.saves.removeValue(forKey: id) }) else { break }
                 let outcome = files.withLock { files -> Frame in
