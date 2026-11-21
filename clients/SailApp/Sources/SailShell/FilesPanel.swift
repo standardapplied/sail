@@ -452,10 +452,17 @@ final class TreeRowCell: NSView {
         }
     }
 
-    /// A press on a folder's disclosure opens or shuts it; anywhere else chooses the row.
+    /// Whether a press at `point` opens or shuts the folder: inside the disclosure's own 12 pt slot,
+    /// the row's whole height; past it, the press chooses the row.
+    func opens(at point: NSPoint) -> Bool {
+        guard row.kind == .folder else { return false }
+        let indent = Double(row.depth) * RowStyle.indent
+        let x = userInterfaceLayoutDirection == .rightToLeft ? Double(bounds.width) - indent - Self.slot : indent
+        return NSRect(x: x, y: 0, width: Self.slot, height: Double(bounds.height)).contains(point)
+    }
+
     override func mouseDown(with event: NSEvent) {
-        let at = convert(event.locationInWindow, from: nil)
-        guard row.kind == .folder, disclosure.insetBy(dx: -3, dy: -6).contains(at) else { return super.mouseDown(with: event) }
+        guard opens(at: convert(event.locationInWindow, from: nil)) else { return super.mouseDown(with: event) }
         onDisclose()
     }
 }

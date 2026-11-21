@@ -197,8 +197,8 @@ import Testing
         #expect(panel.line.isHidden && panel.scroll.alphaValue == 1, "\(name): the tick did not make it live again")
         panel.heard(.phase(.unreachable("refused")))
         #expect(panel.shownLine?.words == "Can't reach the files." && panel.line.button.title == "Try Again" && !panel.line.button.isHidden)
-        panel.heard(.phase(.stopped("Workspace dock of harbor is stopped.")))
-        #expect(panel.shownLine?.words == "dock is stopped." && panel.line.button.title == "Start", "\(name): stopped offers no Start")
+        panel.heard(.phase(.stopped("Workspace dock of harbor was stopped by ana.")))
+        #expect(panel.shownLine?.words == "Workspace dock of harbor was stopped by ana." && panel.line.button.title == "Start", "\(name): not the stop's own record with Start")
         panel.layoutSubtreeIfNeeded()
         #expect(panel.line.frame.minY >= FilesLineView.top && panel.scroll.frame.minY >= panel.line.frame.maxY, "\(name): the tree is under the line")
         let empty = try Self.played([], look: look)
@@ -207,6 +207,16 @@ import Testing
 
     /// The rows as the third pass draws them: 24 pt, 12 pt further in each level, the disclosure on
     /// folders only, semibold while chosen, with the bar and no fill.
+    /// A press on a row's name chooses it; only a press in the disclosure's own 12 pt slot opens or
+    /// shuts its folder.
+    @Test func onlyTheDisclosuresSlotOpensAFolder() throws {
+        let panel = try Self.played([Self.folder("src")])
+        let cell = try #require(panel.list.view(atColumn: 0, row: 0, makeIfNecessary: true).flatMap(Self.treeCell))
+        cell.frame = NSRect(x: 0, y: 0, width: 200, height: 24)
+        #expect(cell.opens(at: NSPoint(x: 6, y: 12)) && cell.opens(at: NSPoint(x: 6, y: 1)), "the slot does not open the folder")
+        #expect(!cell.opens(at: NSPoint(x: Double(TreeRowCell.slot) + 1, y: 12)) && !cell.opens(at: NSPoint(x: 40, y: 12)), "a press past the slot opens the folder")
+    }
+
     @Test func theRowsAreTheMockups() throws {
         let panel = try Self.played([Self.folder("src"), Self.file("README.md")])
         panel.toggle(Self.root + "/src")

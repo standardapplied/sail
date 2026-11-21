@@ -1,5 +1,6 @@
 import AppKit
 import SailControls
+import SailLook
 import SailFiles
 import SailKitTestSupport
 import SailMeasures
@@ -67,7 +68,7 @@ extension Driver {
         }
         if let name = step.filesClick {
             guard let shown = filesShown, let id = shown.rows.first(where: { $0.name == name && $0.kind != .note })?.path else { return (false, "no row \(name)") }
-            guard await clickRow(id, in: shown.list) else { return (false, "the click on \(name) was not sent") }
+            guard await clickName(id, in: shown) else { return (false, "the click on \(name) was not sent") }
             let chosen = await waitUntil(5) { self.filesShown?.list.chosen == id }
             return (chosen, "chosen: \(filesShown?.list.chosen ?? "nothing")")
         }
@@ -151,6 +152,17 @@ extension Driver {
         return (missed.isEmpty, (missed.isEmpty ? "within every budget" : "missed: \(missed.joined(separator: "; "))") + "; " + said)
     }
 
+    /// Clicks the tree row of `path` on its name, as a person chooses a row, clear of the folder's
+    /// disclosure, which a press in its slot opens instead.
+    private func clickName(_ path: String, in shown: FilesShown) async -> Bool {
+        let list = shown.list
+        list.layoutSubtreeIfNeeded()
+        guard let index = shown.rows.firstIndex(where: { $0.path == path }) else { return false }
+        let rect = list.rect(ofRow: index), depth = Double(shown.rows[index].depth)
+        let name = RowStyle.tree.margin + RowStyle.tree.leading + depth * RowStyle.indent + 12 + 4 + 8
+        return await click(list, at: NSPoint(x: Double(rect.minX) + name, y: Double(rect.midY)))
+    }
+
     /// The window in both looks, then with the workbench and the panel laid out right to left, as a
     /// right-to-left Mac lays them out, in both again.
     private func filesShot(_ name: String) async -> (Bool, String) {
@@ -202,7 +214,7 @@ extension Driver {
         }
         let berths = root + "/berths"
         for _ in 0 ..< 10 {
-            guard let list = filesShown?.list, await clickRow(berths, in: list), await waitUntil(5, { self.filesShown?.list.chosen == berths }) else {
+            guard let shown = filesShown, await clickName(berths, in: shown), await waitUntil(5, { self.filesShown?.list.chosen == berths }) else {
                 return (false, "berths could not be chosen")
             }
             press("arrowRight", [])
@@ -214,7 +226,7 @@ extension Driver {
             press("arrowLeft", [])
             guard await waitUntil(5, { self.filesShown?.list.numberOfRows == base.count }) else { return (false, "← did not shut berths") }
         }
-        guard let list = filesShown?.list, await clickRow(berths, in: list) else { return (false, "berths could not be chosen to scroll") }
+        guard let shown = filesShown, await clickName(berths, in: shown) else { return (false, "berths could not be chosen to scroll") }
         press("arrowRight", [])
         guard await waitUntil(10, { (self.filesShown?.list.numberOfRows ?? 0) >= 5000 + base.count }), let scroll = filesShown?.scroll else { return (false, "berths did not open to scroll") }
         mainThread.reset()
