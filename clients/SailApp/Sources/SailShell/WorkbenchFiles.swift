@@ -181,6 +181,7 @@ extension WorkbenchView {
         set {
             TreeRowCell.measuring = newValue
             SailList.measuring = newValue
+            PanePhases.measuring = newValue
         }
     }
 

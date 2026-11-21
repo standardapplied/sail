@@ -183,7 +183,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
             guard let answer = Self.answer(frame) else { return false }
             if case let .written(id, _, _) = answer, id == upload?.id { upload = nil }
             if case let .conflict(id, _) = answer, id == upload?.id { upload = nil }
-            apply(file.receive(answer))
+            apply(PanePhases.timed("model: an answer taken") { file.receive(answer) })
             return true
         }
     }
@@ -337,7 +337,8 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     /// A key: decided by the text's length, the text read only when its length is back to the base's.
     func textDidChange(_: Notification) {
         guard !applying else { return }
-        apply(file.edited(units: editor.textStorage?.length ?? 0) ?? file.edited(editor.string))
+        let step = PanePhases.timed("model: a key decided") { file.edited(units: editor.textStorage?.length ?? 0) ?? file.edited(editor.string) }
+        apply(step)
     }
 
     /// The ruler forgets its line count from the edited place on.
@@ -413,7 +414,8 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
         guard !slices.isEmpty else { return }
         applying = true
         defer { applying = false }
-        editor.textStorage?.append(NSAttributedString(string: slices.removeFirst(), attributes: textAttributes))
+        let slice = slices.removeFirst()
+        PanePhases.timed("storage: a slice appended") { editor.textStorage?.append(NSAttributedString(string: slice, attributes: textAttributes)) }
     }
 
     /// Keys only once the whole file has arrived and is in the view (F15).
@@ -676,7 +678,11 @@ final class LineNumbers: NSRulerView {
         return rows
     }
 
-    override func drawHashMarksAndLabels(in _: NSRect) {
+    override func drawHashMarksAndLabels(in rect: NSRect) {
+        PanePhases.timed("ruler: drawn") { drawRows(in: rect) }
+    }
+
+    private func drawRows(in _: NSRect) {
         NSColor(Tint(look.surface)).setFill()
         bounds.fill()
         let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor(look.textTertiary)]
@@ -700,5 +706,28 @@ final class PaneTextView: NSTextView {
         let taken = super.becomeFirstResponder()
         if taken { onKeys() }
         return taken
+    }
+}
+
+/// Where the main thread's time goes in a file pane, by phase, while the drive measures: each
+/// phase's total and its longest single span, in seconds.
+@MainActor
+package enum PanePhases {
+    package static var measuring = false
+    package private(set) static var phases: [String: (total: Double, longest: Double)] = [:]
+
+    package static func resetPhases() {
+        phases = [:]
+    }
+
+    /// Runs `work` as phase `name`, timed only while the drive measures.
+    package static func timed<Result>(_ name: String, _ work: () -> Result) -> Result {
+        guard measuring else { return work() }
+        let began = CACurrentMediaTime()
+        defer {
+            let spent = CACurrentMediaTime() - began, held = phases[name] ?? (0, 0)
+            phases[name] = (held.total + spent, max(held.longest, spent))
+        }
+        return work()
     }
 }

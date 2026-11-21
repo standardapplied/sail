@@ -71,6 +71,18 @@ import Testing
         #expect(await RunnerTabTests.until(10) { pane.editor.string == "theirs\n" && pane.file.clean && panel.unsaved == nil })
     }
 
+    /// A newline typed near the top renumbers every line below it.
+    @Test func aTypedNewlineRenumbersTheLinesBelow() async throws {
+        let (_, _, bench, _, pane) = try await Self.opened(Array("one\ntwo\nthree\n".utf8))
+        #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
+        bench.layoutSubtreeIfNeeded()
+        #expect(pane.lineNumbers.rows.map(\.number).prefix(3) == [1, 2, 3])
+        pane.editor.insertText("\n", replacementRange: NSRange(location: 0, length: 0))
+        bench.layoutSubtreeIfNeeded()
+        let rows = pane.lineNumbers.rows
+        #expect(rows.map(\.number).prefix(4) == [1, 2, 3, 4], "after a newline at the top the lines read \(rows.map(\.number))")
+    }
+
     /// A changed line that wraps is barred along every row it takes, its number on its first.
     @Test func aWrappedChangedLineIsBarredAlongEveryRow() async throws {
         let (door, _, bench, _, pane) = try await Self.opened(Array("short\n".utf8))
