@@ -168,11 +168,26 @@ public final class Card: NSView {
         mark.layer?.backgroundColor = NSColor(paint.mark).cgColor
         guard markTone != tone else { return }
         markTone = tone
-        let icon = tone.icon, side = Banner.mark, opaque = paint.mark
-        markShape.contents = NSImage(size: NSSize(width: side, height: side), flipped: true) { box in
+        let icon = tone.icon, scale = window?.backingScaleFactor ?? 2, opaque = paint.mark
+        var box = NSRect(x: 0, y: 0, width: Banner.mark, height: Banner.mark)
+        let image = NSImage(size: box.size, flipped: true) { box in
             Draw.icon(icon, in: box, ink: opaque)
             return true
         }
+        // Drawn now: a layer given the image would call its main-actor handler when it pleases,
+        // and off the main thread that call traps.
+        markShape.contents = image.cgImage(forProposedRect: &box, context: nil, hints: [.ctm: AffineTransform(scale: scale)])
+        markShape.contentsScale = scale
+    }
+
+    override public func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        markTone = nil
+        paint()
+    }
+
+    package var markContents: Any? {
+        markShape.contents
     }
 
     override public func layout() {
