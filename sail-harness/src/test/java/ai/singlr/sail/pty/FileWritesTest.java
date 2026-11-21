@@ -1570,6 +1570,68 @@ class FileWritesTest {
     assertFalse(Files.exists(home.resolve("after.md")));
   }
 
+  /**
+   * An id is free again the moment its last answer is sent: asked again with the same id from
+   * inside the answer itself, before the run that sent it has ended, the stat is answered each
+   * time; while a listing has frames to come, its id is still under way.
+   */
+  @Test
+  void anIdIsFreeAgainTheMomentItsLastAnswerIsSent() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var big = Files.createDirectory(home.resolve("big"));
+    for (var i = 0; i < 2_000; i++) {
+      Files.writeString(big.resolve(String.format("%04d", i) + "n".repeat(200)), "");
+    }
+    var self = new java.util.concurrent.atomic.AtomicReference<FilesConnection>();
+    var stats = new java.util.concurrent.atomic.AtomicInteger();
+    var listed = new java.util.concurrent.atomic.AtomicBoolean();
+    var connection =
+        new FilesConnection(
+            running(UnaryOperator.identity()),
+            CONTAINER,
+            "dock",
+            message -> {
+              said.add(message);
+              try {
+                if (message instanceof PtyMessage.FilesEntry && stats.incrementAndGet() < 5) {
+                  self.get().stat(new PtyMessage.FilesStat(900, file.toString()));
+                }
+                if (message instanceof PtyMessage.FilesListing listing
+                    && listing.more()
+                    && listed.compareAndSet(false, true)) {
+                  self.get().list(new PtyMessage.FilesList(901, big.toString()));
+                }
+              } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+              }
+            },
+            () -> null,
+            endedWith::add,
+            new FilesConnection.Writes(
+                lock, saving, () -> null, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND));
+    self.set(connection);
+
+    connection.stat(new PtyMessage.FilesStat(900, file.toString()));
+    for (var i = 0; i < 5; i++) {
+      assertInstanceOf(PtyMessage.FilesEntry.class, answer(), "stat " + i);
+    }
+
+    connection.list(new PtyMessage.FilesList(901, big.toString()));
+    var refused = false;
+    var last = false;
+    while (!last) {
+      var next = answer();
+      if (next instanceof PtyMessage.FilesRefused under) {
+        assertEquals(
+            "Request 901 is under way already, so this one was not started.", under.message());
+        refused = true;
+      } else {
+        last = !assertInstanceOf(PtyMessage.FilesListing.class, next).more();
+      }
+    }
+    assertTrue(refused, "a listing with frames to come still holds its id");
+  }
+
   /** Waits until {@code count} threads wait for the write lock, within 5 s. */
   private void waitingForTheLock(int count) {
     var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);

@@ -1186,11 +1186,20 @@ final class FilesConnection {
     }
   }
 
-  /** Answers {@code answer} unless the request was cancelled or the connection closed. */
-  private void unless(Running running, PtyMessage answer) {
-    if (!gone(running)) {
-      reply.accept(answer);
+  /**
+   * Answers {@code answer} unless the request was cancelled or the connection closed; its last
+   * answer frees its id first, so the client may ask with that id again the moment it is sent.
+   */
+  private void unless(Running running, PtyMessage.Answer answer) {
+    synchronized (this) {
+      if (gone(running)) {
+        return;
+      }
+      if (answer.last()) {
+        underWay.remove(answer.id(), running);
+      }
     }
+    reply.accept(answer);
   }
 
   private synchronized boolean gone(Running running) {
