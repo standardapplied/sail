@@ -268,3 +268,53 @@ final class DividerLine: NSView {
         last = nil
     }
 }
+
+/// What the drive reads of the selected tab's file pane.
+package struct FilePaneShown {
+    package let view: NSView
+    package let editor: NSTextView
+    package let text: String
+    package let clean: Bool
+    package let editable: Bool
+    package let note: String?
+    package let sentence: String?
+}
+
+extension WorkbenchView {
+    package var filePaneShown: FilePaneShown? {
+        guard let tab = model.selectedTab, let pane = tabViews[tab.id]?.filePane else { return nil }
+        return FilePaneShown(view: pane, editor: pane.editor, text: pane.editor.string, clean: pane.file.clean, editable: pane.editor.isEditable, note: pane.noteWords, sentence: pane.sentenceWords)
+    }
+
+    /// Opens `path` from the selected tab's tree into its file pane, as ⏎ on its row does.
+    package func openFile(at path: String) -> Bool {
+        guard let tab = model.selectedTab, let panel = tabViews[tab.id]?.files else { return false }
+        return panel.openFile(FileName(path))
+    }
+
+    /// The file pane's ×, as pressed: an unsaved pane asks first.
+    package func closeFile() -> Bool {
+        guard let pane = model.selectedTab.flatMap({ tabViews[$0.id]?.filePane }) else { return false }
+        pane.closePressed()
+        return true
+    }
+
+    /// Compare, as its button is pressed on the one line.
+    package func compareFile() -> Bool {
+        guard let pane = model.selectedTab.flatMap({ tabViews[$0.id]?.filePane }), let theirs = pane.file.theirs else { return false }
+        compare(pane, theirs: String(decoding: theirs, as: UTF8.self))
+        return true
+    }
+
+    /// The conflict sheet's actions, as its buttons are titled; none while no sheet is up.
+    package var sheetOffers: [String] {
+        (window?.attachedSheet as? ConflictSheet)?.buttons.map(\.title) ?? []
+    }
+
+    /// Presses the conflict sheet's button titled `title`.
+    package func pressSheet(_ title: String) -> Bool {
+        guard let button = (window?.attachedSheet as? ConflictSheet)?.buttons.first(where: { $0.title == title }) else { return false }
+        button.performClick(nil)
+        return true
+    }
+}

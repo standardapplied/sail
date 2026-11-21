@@ -274,6 +274,16 @@ final class FilePane: NSView, NSTextViewDelegate {
         NSPasteboard.general.setString(file.path.shown, forType: .string)
     }
 
+    /// The one line's words, nil while none shows.
+    var noteWords: String? {
+        note.isHidden ? nil : note.stringValue
+    }
+
+    /// The sentence in place of the text, nil while the text shows.
+    var sentenceWords: String? {
+        sentence.isHidden ? nil : sentence.stringValue
+    }
+
     /// Opens at `line` (1-based): the caret at its start, the line scrolled into view.
     func show(line: Int) {
         let text = editor.string as NSString

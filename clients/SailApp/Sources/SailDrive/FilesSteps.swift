@@ -51,6 +51,7 @@ extension Driver {
 
     func performFiles(_ step: Step) async -> (Bool, String)? {
         WorkbenchView.filesMeasuring = true
+        if let done = await performFile(step) { return done }
         let asks = [step.filesFolder, step.filesRefuse, step.filesNew, step.filesClick, step.filesDoubleClick, step.filesChosen, step.filesButton, step.filesShot].contains { $0 != nil }
             || step.filesRows != nil || step.filesSays != nil || step.filesHold != nil || step.filesTicks != nil || step.filesEnd != nil
             || step.filesDrop != nil || step.filesBudgets != nil || step.filesReconnects != nil || step.filesFlood != nil
@@ -247,6 +248,56 @@ extension Driver {
             try? await Task.sleep(for: .milliseconds(16))
         }
         return (true, "scrolled to \(Int(view.contentView.bounds.minY)) of \(Int(room)) pt in \(frames) frames")
+    }
+
+    /// The file pane's steps: an agent's write, opening from the tree, what it shows, typing, the
+    /// one line, Compare and the sheet.
+    private func performFile(_ step: Step) async -> (Bool, String)? {
+        let pane = { self.workbench.filePaneShown }
+        if let write = step.fileWrite, write.count == 2, let door = GoldenDesk.door {
+            door.setFile(Self.filesPath(write[0]), Array(write[1].utf8))
+            return (true, "\(write[0]) now holds \(write[1].utf8.count) bytes")
+        }
+        if let name = step.fileOpen {
+            guard workbench.openFile(at: Self.filesPath(name)) else { return (false, "no file row \(name) to open") }
+            let opened = await waitForState(step.seconds ?? 10) { pane() != nil }
+            return (opened, "the file pane: \(pane().map { "\($0.text.utf8.count) bytes" } ?? "none")")
+        }
+        if let text = step.fileShows {
+            let shown = await waitForState(step.seconds ?? 10) { pane()?.text == text && pane()?.editable == true }
+            return (shown, "the file pane shows \(pane()?.text.debugDescription ?? "nothing")\(pane()?.editable == true ? "" : ", not yet typed in")")
+        }
+        if let typed = step.fileType {
+            guard let editor = pane()?.editor, editor.isEditable else { return (false, "no file pane to type in") }
+            shell.window.makeFirstResponder(editor)
+            let end = (editor.string as NSString).length
+            editor.insertText(typed, replacementRange: NSRange(location: end, length: 0))
+            return (true, "typed \(typed.debugDescription)")
+        }
+        if let words = step.fileNote {
+            let said = await waitForState(step.seconds ?? 10) { (pane()?.note ?? "") == words }
+            return (said, "the file pane's line says \(pane()?.note ?? "nothing")")
+        }
+        if let unsaved = step.fileUnsaved {
+            let found = await waitForState(step.seconds ?? 10) { pane()?.clean == !unsaved }
+            return (found, "the file pane is \(pane()?.clean == true ? "clean" : "unsaved")")
+        }
+        if let offers = step.fileCompare {
+            guard workbench.compareFile() else { return (false, "no Compare to press: \(pane()?.note ?? "no line")") }
+            let up = await waitForState(step.seconds ?? 5) { self.workbench.sheetOffers == offers }
+            return (up, "the sheet offers \(workbench.sheetOffers)")
+        }
+        if let title = step.fileSheet {
+            guard workbench.pressSheet(title) else { return (false, "the sheet offers no \(title): \(workbench.sheetOffers)") }
+            let gone = await waitForState(step.seconds ?? 5) { self.workbench.sheetOffers.isEmpty }
+            return (gone, "pressed \(title)")
+        }
+        if step.fileClose == true {
+            guard workbench.closeFile() else { return (false, "no file pane to close") }
+            let gone = await waitForState(step.seconds ?? 5) { pane() == nil }
+            return (gone, gone ? "the file pane closed" : "the file pane stayed: \(pane()?.clean == false ? "unsaved" : "clean")")
+        }
+        return nil
     }
 
     /// What the main thread was doing in its longest hold since the heartbeat's reset, as the
