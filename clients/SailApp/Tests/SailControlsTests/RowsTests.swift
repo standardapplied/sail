@@ -240,6 +240,9 @@ import Testing
         list.choose("d")
         list.apply(entries(["a", "a1", "b", "b2", "d"]), changed: [])
         #expect(list.chosen == "d", "the choice did not follow its row")
+        let many = (0 ..< SailList.applied + 1).map { "n\($0)" }
+        list.apply(entries(["a", "a1", "b", "b2", "d"] + many), changed: [])
+        #expect(list.numberOfRows == 5 + many.count && list.chosen == "d", "past its bound apply did not fill the table afresh, keeping the choice")
     }
 
     /// A row with nothing at its end is laid out by frames, with no constraint, its content from its
@@ -256,7 +259,8 @@ import Testing
             cell.userInterfaceLayoutDirection = direction
             cell.needsLayout = true
             cell.layoutSubtreeIfNeeded()
-            #expect(cell.constraints.isEmpty && content.constraints.isEmpty, "\(direction): a bare row carries constraints")
+            let made = cell.constraints.filter { !String(describing: type(of: $0)).contains("Autoresizing") }
+            #expect(made.isEmpty && content.translatesAutoresizingMaskIntoConstraints && cell.actions.superview == nil, "\(direction): a bare row carries constraints of its own: \(made)")
             let inset = RowStyle.tree.margin + RowStyle.tree.leading, end = RowStyle.tree.margin + RowStyle.tree.trailing
             #expect(near(Double(content.frame.minX), direction == .rightToLeft ? end : inset), "\(direction): \(content.frame)")
             #expect(near(Double(content.frame.maxX), Double(cell.bounds.width) - (direction == .rightToLeft ? inset : end)), "\(direction): \(content.frame)")

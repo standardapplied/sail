@@ -214,6 +214,33 @@ extension Driver {
         return true
     }
 
+    /// How long the drive leaves the menu bar between two ⌃⌘S: AppKit sleeps before a menu item's key
+    /// equivalent repeated sooner (NSMENU_IS_THROTTLING_REPEATED_MENU_ITEM_INVOCATIONS, about 50 ms
+    /// on round five's run), which no person pressing it once meets.
+    static let menuRest = 0.6
+
+    /// The rows scrolled end to end as a fast flick scrolls them: a wheel event of 20 rows a frame,
+    /// each frame given its 16 ms to draw before the next, so the main thread's longest hold is the
+    /// app's own drawing, not the drive's wheel events piled into one turn.
+    private func flick(_ view: NSScrollView, to fraction: Double) async -> (Bool, String) {
+        guard let document = view.documentView else { return (false, "the scroll view holds nothing") }
+        let room = Double(document.frame.height) - Double(view.contentSize.height)
+        guard room > 0 else { return (false, "nothing to scroll") }
+        let wanted = room * min(max(fraction, 0), 1), step = 20 * RowStyle.tree.height
+        var frames = 0
+        while abs(Double(view.contentView.bounds.minY) - wanted) > 0.5 {
+            let left = wanted - Double(view.contentView.bounds.minY), before = view.contentView.bounds.minY
+            let delta = Int32((left > 0 ? -min(step, left) : min(step, -left)).rounded(left > 0 ? .down : .up))
+            guard let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0),
+                  let event = NSEvent(cgEvent: wheel) else { return (false, "no scroll-wheel event") }
+            view.scrollWheel(with: event)
+            guard view.contentView.bounds.minY != before else { return (false, "the wheel moved nothing at \(before) of \(room) pt") }
+            frames += 1
+            try? await Task.sleep(for: .milliseconds(16))
+        }
+        return (true, "scrolled to \(Int(view.contentView.bounds.minY)) of \(Int(room)) pt in \(frames) frames")
+    }
+
     /// What the main thread was doing in its longest hold since the heartbeat's reset, as the
     /// sampler saw it: printed, so a hold over its ceiling names its own cause.
     private func tellLongestHold(_ phase: String) {
@@ -265,6 +292,7 @@ extension Driver {
         for _ in 0 ..< 10 {
             press("s", ["control", "command"])
             guard await waitForState(5, { self.filesShown == nil }) else { return (false, "⌃⌘S did not put the panel away") }
+            _ = await waitForState(Self.menuRest) { false }
             mainThread.reset()
             let asked = CACurrentMediaTime()
             press("s", ["control", "command"])
@@ -301,7 +329,7 @@ extension Driver {
         guard await waitForState(10, { (self.filesShown?.list.numberOfRows ?? 0) >= 5000 + base.count }), let scroll = filesShown?.scroll else { return (false, "berths did not open to scroll") }
         _ = mainStacks
         mainThread.reset()
-        let down = await turnWheel(over: scroll, to: 1), up = await turnWheel(over: scroll, to: 0)
+        let down = await flick(scroll, to: 1), up = await flick(scroll, to: 0)
         let scrolled = held()
         if scrolled > 16 { tellLongestHold("scrolling the 5,000 rows") }
         press("arrowLeft", [])

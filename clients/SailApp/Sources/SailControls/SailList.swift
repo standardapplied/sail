@@ -165,6 +165,10 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     private var reloading = false
     private var applying = false
 
+    /// How many rows in or out ``apply(_:changed:)`` moves one by one: past it (a folder of thousands
+    /// opened) the table is filled afresh, which costs it less than inserting each.
+    public static let applied = 200
+
     /// The rows as `new`, changing only what differs, by id: rows gone removed and new ones inserted
     /// in one update, and only the rows named in `changed` made again, so a listing of thousands that
     /// adds one entry rebuilds one row. The choice follows its row as the table moves it.
@@ -178,6 +182,10 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             })
         }
         let removed = offsets(difference.removals), inserted = offsets(difference.insertions)
+        guard removed.count + inserted.count <= Self.applied else {
+            entries = new
+            return
+        }
         applying = true
         entries = new
         applying = false
