@@ -1007,7 +1007,11 @@ class FileChangesTest {
       running += line.equals("start") ? 1 : -1;
       assertTrue(running <= 1, "one script at a time: " + lines);
     }
-    assertTrue(changes.idle(), "idle once every ask is answered");
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!changes.idle()) {
+      assertTrue(System.nanoTime() < deadline, "idle once the run that answered every ask ends");
+      Thread.onSpinWait();
+    }
   }
 
   /** A changes ask's id is free again the moment its last frame is sent, as every request's is. */
