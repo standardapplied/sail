@@ -38,7 +38,10 @@ final class FilePane: NSView, NSTextViewDelegate {
     var onWatched: @MainActor (WatchedPath?) -> Void = { _ in }
     private var shownWatch: WatchedPath?
 
-    let editor: NSTextView
+    let editor: PaneTextView
+    /// Whether the keys were last in its text: so they stay counted while nothing in the window holds
+    /// them, until a terminal or the tree takes them.
+    private(set) var heldKeysLast = false
     let scroll = NSScrollView()
     private let mono: LabelFont
     private let titleBar = NSView()
@@ -66,7 +69,7 @@ final class FilePane: NSView, NSTextViewDelegate {
         self.workspace = workspace
         self.look = look
         self.mono = mono
-        editor = NSTextView(usingTextLayoutManager: true)
+        editor = PaneTextView(usingTextLayoutManager: true)
         close = SailButton(icon: .close, label: "Close", size: .small, look: look, target: nil, action: nil)
         showTerminal = SailButton("Show Terminal", kind: .quiet, size: .small, look: look, target: nil, action: nil)
         compare = SailButton("Compare", kind: .quiet, size: .small, look: look, target: nil, action: nil)
@@ -126,6 +129,15 @@ final class FilePane: NSView, NSTextViewDelegate {
         editor.isHorizontallyResizable = false
         editor.autoresizingMask = [.width]
         editor.delegate = self
+        editor.onKeys = { [weak self] in self?.heldKeysLast = true }
+        editor.onKeysGone = { [weak self] in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, let window = self.window, let holder = window.firstResponder, holder !== window else { return }
+                    if !((holder as? NSView)?.isDescendant(of: self) ?? false) { self.heldKeysLast = false }
+                }
+            }
+        }
         scroll.documentView = editor
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
@@ -555,5 +567,24 @@ final class LineNumbers: NSRulerView {
             label.draw(at: NSPoint(x: Double(ruleThickness) - 8 - Double(size.width), y: y + 1), withAttributes: attributes)
             return true
         }
+    }
+}
+
+/// The pane's text view, telling the pane when it takes the keys and when it gives them up.
+@MainActor
+final class PaneTextView: NSTextView {
+    var onKeys: @MainActor () -> Void = {}
+    var onKeysGone: @MainActor () -> Void = {}
+
+    override func becomeFirstResponder() -> Bool {
+        let taken = super.becomeFirstResponder()
+        if taken { onKeys() }
+        return taken
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let given = super.resignFirstResponder()
+        if given { onKeysGone() }
+        return given
     }
 }

@@ -103,6 +103,27 @@ import Testing
         #expect(bench.model.panes.count == terminals, "a terminal closed")
     }
 
+    /// With nothing in the window holding the keys, ⌘W closes the file if the keys were last in it,
+    /// never a terminal; once a terminal took the keys, the file no longer counts as holding them.
+    @Test func withNothingHoldingTheKeysCommandWClosesTheFileTheyWereLastIn() async throws {
+        let (_, _, bench, _, pane) = try await Self.opened(Array("one\n".utf8))
+        #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
+        let window = try #require(bench.window), terminal = try #require(bench.focused)
+        window.makeFirstResponder(terminal.terminal)
+        window.makeFirstResponder(pane.editor)
+        window.makeFirstResponder(nil)
+        #expect(await RunnerTabTests.until(2) { bench.filePaneHoldingKeys === pane }, "the file the keys were last in does not count as holding them")
+        window.makeFirstResponder(terminal.terminal)
+        window.makeFirstResponder(nil)
+        #expect(await RunnerTabTests.until(2) { bench.filePaneHoldingKeys == nil }, "the file still counts after a terminal took the keys")
+        window.makeFirstResponder(pane.editor)
+        window.makeFirstResponder(nil)
+        let terminals = bench.model.panes.count
+        #expect(await RunnerTabTests.until(2) { bench.filePaneHoldingKeys === pane })
+        bench.closePane(nil)
+        #expect(bench.model.selectedTab.flatMap { bench.tabViews[$0.id]?.filePane } == nil && bench.model.panes.count == terminals, "⌘W with the keys last in the file closed a terminal or left the file")
+    }
+
     /// Hiding the files panel leaves the file open, connected; a zoomed terminal hides the pane
     /// until the zoom ends.
     @Test func hidingTheTreeKeepsTheFileAndAZoomHidesIt() async throws {

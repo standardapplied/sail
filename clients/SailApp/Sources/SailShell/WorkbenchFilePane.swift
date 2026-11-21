@@ -68,11 +68,13 @@ extension WorkbenchView {
         window?.makeFirstResponder(pane.editor)
     }
 
-    /// The selected tab's file pane, when it holds the keys.
+    /// The selected tab's file pane, when it holds the keys, or when nothing in the window does and
+    /// the keys were last in it: ⌘W then closes the file, never a terminal.
     var filePaneHoldingKeys: FilePane? {
-        guard let tab = model.selectedTab, let pane = tabViews[tab.id]?.filePane, !pane.isHidden,
-              let responder = window?.firstResponder as? NSView, responder.isDescendant(of: pane) else { return nil }
-        return pane
+        guard let tab = model.selectedTab, let pane = tabViews[tab.id]?.filePane, !pane.isHidden else { return nil }
+        let holder = window?.firstResponder
+        if let view = holder as? NSView { return view.isDescendant(of: pane) ? pane : nil }
+        return pane.heldKeysLast ? pane : nil
     }
 
     /// How much of the tab's width the file pane and its divider take beside the terminals: none
