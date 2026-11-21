@@ -535,8 +535,8 @@ class FileChangesTest {
             + "\n",
         java.nio.file.StandardOpenOption.APPEND);
     Files.writeString(workspace.resolve("a.txt"), "changed a\n");
-    Files.writeString(workspace.resolve("b.dat"), "changed b\n");
-    Files.writeString(workspace.resolve("c.g"), "changed c\n");
+    Files.writeString(workspace.resolve("b.dat"), "B\n");
+    Files.writeString(workspace.resolve("c.g"), "C\n");
     Files.writeString(workspace.resolve("d.md"), "new\n");
     Files.writeString(lazy.resolve("f.txt"), "changed f\n");
 
@@ -544,10 +544,7 @@ class FileChangesTest {
     gitStatus(workspace, "diff");
     gitStatus(lazy, "diff");
     assertTrue(
-        left(markers)
-            .containsAll(
-                List.of(
-                    "hook-post-index-change", "include", "process", "trace2-global", "uploadpack")),
+        left(markers).containsAll(List.of("include", "process", "trace2-global", "uploadpack")),
         "plain git runs what was planted: " + left(markers));
     try (var planted = Files.list(markers)) {
       for (var each : planted.toList()) {

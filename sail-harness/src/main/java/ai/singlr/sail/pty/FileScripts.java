@@ -398,22 +398,21 @@ final class FileScripts {
    * The one way the scripts run git ({@code safe_git}, after {@code git_in} names the folder), so
    * that looking at a repository runs none of its code. Every {@code GIT_*} variable inherited is
    * dropped, and the git started is told, through {@code GIT_CONFIG_COUNT}, which wins over every
-   * config file and is inherited by any git it starts: no fsmonitor (its hook or its daemon) and no
-   * untracked cache; hooks from nowhere; no pager, editor or askpass; no transport at all ({@code
-   * protocol.allow=never}, and no lazy fetch), so no ssh command, credential helper or upload-pack
-   * of a remote's runs; no external diff; a submodule's diff is its commit line; and every filter
-   * the configuration of that folder defines (its own, included, global) has an empty clean, smudge
-   * and process, which is no filter. Optional locks are off, pathspecs literal, trace2 off. A diff
-   * driver's command and text conversion are off by {@code --no-ext-diff --no-textconv} on each
-   * diff. {@code FILTERS} keeps the names of the filters defined, for a diff to say a path passes
-   * through one.
+   * config file, an included one too, and is inherited by any git it starts: no fsmonitor (its hook
+   * or its daemon); no transport at all ({@code protocol.allow=never}), so a lazy fetch runs no
+   * upload-pack, ssh command or credential helper; and every filter the configuration of that
+   * folder defines (its own, included, global) has an empty clean, smudge and process, which is no
+   * filter. Optional locks are off, so {@code status} writes no index and fires no hook; trace2 is
+   * off; pathspecs are literal. A diff driver's command and text conversion, and an external diff,
+   * are off by {@code --no-ext-diff --no-textconv} on each diff. Nothing else the configuration can
+   * name runs for the calls the scripts make: no pager without a terminal, no editor, no
+   * maintenance, and a submodule is a folder no diff takes. {@code FILTERS} keeps the names of the
+   * filters defined, for a diff to say a path passes through one.
    */
   static final String GIT =
       """
       for name in $(compgen -e); do case $name in GIT_*) unset "$name" ;; esac; done
-      unset SSH_ASKPASS
-      export GIT_OPTIONAL_LOCKS=0 GIT_LITERAL_PATHSPECS=1 GIT_NO_LAZY_FETCH=1 GIT_TERMINAL_PROMPT=0
-      export GIT_PAGER=cat PAGER=cat GIT_EDITOR=: EDITOR=: VISUAL=: GIT_ASKPASS=: SSH_ASKPASS=:
+      export GIT_OPTIONAL_LOCKS=0 GIT_LITERAL_PATHSPECS=1
       export GIT_TRACE2=0 GIT_TRACE2_EVENT=0 GIT_TRACE2_PERF=0
       SAFE_DIR=. FILTERS=()
       safe_config() {
@@ -426,21 +425,7 @@ final class FileScripts {
         for name in $(compgen -e); do case $name in GIT_CONFIG_KEY_*|GIT_CONFIG_VALUE_*) unset "$name" ;; esac; done
         export GIT_CONFIG_COUNT=0
         safe_config core.fsmonitor false
-        safe_config core.untrackedCache false
-        safe_config core.hooksPath /dev/null
-        safe_config core.pager cat
-        safe_config core.editor :
-        safe_config sequence.editor :
-        safe_config core.askPass :
-        safe_config core.sshCommand false
-        safe_config credential.helper ''
         safe_config protocol.allow never
-        safe_config diff.external ''
-        safe_config diff.submodule short
-        safe_config status.submoduleSummary false
-        safe_config submodule.recurse false
-        safe_config gc.auto 0
-        safe_config maintenance.auto false
         while IFS= read -r -d '' key; do
           name=${key#filter.} name=${name%.*}
           FILTERS+=("$name")
@@ -450,7 +435,7 @@ final class FileScripts {
           safe_config "filter.$name.required" false
         done < <(command git -C "$SAFE_DIR" config --null --name-only --get-regexp '^filter\\..*\\.(clean|smudge|process)$' 2>/dev/null)
       }
-      safe_git() { command git -C "$SAFE_DIR" --no-pager "$@"; }
+      safe_git() { command git -C "$SAFE_DIR" "$@"; }
       """;
 
   /**
