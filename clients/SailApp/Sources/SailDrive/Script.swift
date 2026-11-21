@@ -289,6 +289,8 @@ struct Step: Decodable {
     var filesSays: String?
     /// With `filesSays`: the line's words do not end with this.
     var filesSaysNot: String?
+    /// With `filesSays`: the line's words end with this.
+    var filesSaysEnding: String?
     /// The files connection is closed and admitted again within `seconds` of the step's start (10 by
     /// default).
     var filesReconnects: Bool?

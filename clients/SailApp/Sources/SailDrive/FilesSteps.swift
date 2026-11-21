@@ -79,6 +79,7 @@ extension Driver {
             let found = await waitForState(step.seconds ?? 10) {
                 guard let shown = self.filesShown else { return false }
                 if let not = step.filesSaysNot, shown.words?.hasSuffix(not) == true { return false }
+                if let ending = step.filesSaysEnding, shown.words?.hasSuffix(ending) != true { return false }
                 return words.isEmpty ? shown.words == nil : shown.words?.hasPrefix(words) == true
             }
             return (found, "the line says \(filesShown?.words ?? "nothing")")
