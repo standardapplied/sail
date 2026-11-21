@@ -88,19 +88,6 @@ public struct OpenFile: Sendable {
         }
     }
 
-    /// Text given to the view, or taken by it: its UTF-16 length and the SHA-256 of its UTF-8, as
-    /// lowercase hex (the digest the workspace gives a read). The view holds what it was given
-    /// exactly when the two are equal.
-    public struct TextAccount: Equatable, Sendable {
-        public let units: Int
-        public let digest: String
-
-        public init(units: Int, digest: String) {
-            self.units = units
-            self.digest = digest
-        }
-    }
-
     /// What the pane must do now.
     public enum Event: Equatable, Sendable {
         /// The next piece of the file's text, appended as it arrives.
@@ -109,14 +96,12 @@ public struct OpenFile: Sendable {
         case allArrived
         /// The view holds the whole file: it may be typed in.
         case whole
-        /// The view's text is replaced whole, `account` being that text's; `chosen` when the person
-        /// chose it (Keep Theirs, Discard Mine), so they can undo it.
-        case replaced(String, TextAccount, chosen: Bool)
+        /// The view's text is replaced whole, `units` UTF-16 units long; `chosen` when the person chose
+        /// it (Keep Theirs, Discard Mine), so they can undo it.
+        case replaced(String, units: Int, chosen: Bool)
         /// The first read starts again from the file's start: what the view took of it is dropped.
         case restarted
         case saved
-        /// A save asked while one was under way: that one answered, the pane's text is saved now.
-        case saveAgain
         /// A save met a newer file: the sheet shows `theirs` beside the pane's text; `again` when it
         /// was Keep Mine, against a version the file has since moved past.
         case conflict(Theirs, again: Bool)
@@ -166,11 +151,13 @@ public struct OpenFile: Sendable {
     private var arrived = false
     /// Whether any piece of the first read was given to the view.
     private var given = false
-    /// The text the view was last given whole: what it must hold before a key or a save.
-    private var handed: TextAccount?
+    /// The UTF-16 units the view was last given whole: what it must hold before a key or a save.
+    private var handed: Int?
     private var saving: (id: Int32, bytes: [UInt8], why: Write)?
-    /// ⌘S while a save was under way: saved again once that one is answered.
-    private var saveAgain = false
+    /// The text of a ⌘S pressed while a save was under way, as it was at that press: written once
+    /// that save is answered, if it differs from the file then. It lives only as long as that save:
+    /// every way a save ends, but its being written, forgets it.
+    private var remembered: [UInt8]?
     /// A save whose answer never came: the next read decides it (M32); `dropped` when the
     /// connection lost it, which is said.
     private var unanswered: (bytes: [UInt8], dropped: Bool)?
@@ -216,14 +203,15 @@ public struct OpenFile: Sendable {
         if let saving { asks.append(.cancelSave(id: saving.id)) }
         reading = nil
         saving = nil
-        saveAgain = false
+        remembered = nil
         return Step(asks: asks)
     }
 
-    /// The view holds what it took of the first read, `taken` its account: equal to every byte read,
-    /// the file may be typed in, and a change named meanwhile is read now; anything else and it may
-    /// be neither typed in nor saved.
-    public mutating func inView(_ taken: TextAccount) -> Step {
+    /// The view holds what it took of the first read, `taken` UTF-16 units: the whole of what was
+    /// read, the file may be typed in, and a change named meanwhile is read now; anything else and
+    /// it may be neither typed in nor saved. The pane says it took every slice it made, and that
+    /// its storage holds exactly the units it put in.
+    public mutating func inView(_ taken: Int) -> Step {
         guard arrived, !whole, state == .text else { return Step() }
         guard taken == handed else {
             note = .notShownWhole
@@ -285,7 +273,7 @@ public struct OpenFile: Sendable {
         connected = false
         if let saving { unanswered = (saving.bytes, true) }
         saving = nil
-        saveAgain = false
+        remembered = nil
         reading = nil
     }
 
@@ -301,33 +289,33 @@ public struct OpenFile: Sendable {
         return reopen()
     }
 
-    /// ⌘S of the pane's `text`, the view having taken `taken` of what it was given: written only
-    /// while the file is at the digest read (M26, M27), and only while the view holds all it was
-    /// given; a clean pane writes nothing. While a save is under way it is remembered, once, and
-    /// asked again when that one is answered.
-    public mutating func save(_ text: String, taken: TextAccount) -> Step {
+    /// ⌘S of the pane's `text`, the view having taken `taken` UTF-16 units of what it was given:
+    /// written only while the file is at the digest read (M26, M27), and only while the view holds
+    /// all it was given; a clean pane writes nothing. While a save is under way, this text as it is
+    /// now is remembered and written once that save is answered, if it differs from the file then.
+    public mutating func save(_ text: String, taken: Int) -> Step {
         guard state == .text || state == .reading else { return Step() }
         if let words = unwritable(taken) { return Step(events: [.saveRefused(words)]) }
+        _ = edited(text)
         guard saving == nil else {
-            saveAgain = true
+            remembered = Array(text.utf8)
             return Step()
         }
-        _ = edited(text)
-        return clean ? Step() : write(against: digest, seen: version, why: .save)
+        return clean ? Step() : write(Array(text.utf8), against: digest, seen: version, why: .save)
     }
 
     /// Keep Mine: the pane's `text`, written against the version the sheet showed, `shown`.
-    public mutating func keepMine(_ text: String, taken: TextAccount, shown: Theirs) -> Step {
+    public mutating func keepMine(_ text: String, taken: Int, shown: Theirs) -> Step {
         if let words = unwritable(taken) { return Step(events: [.saveRefused(words)]) }
         _ = edited(text)
-        return write(against: shown.digest, seen: shown.version, why: .keepMine)
+        return write(Array(text.utf8), against: shown.digest, seen: shown.version, why: .keepMine)
     }
 
     /// Save Anyway, for a deleted file: the pane's `text`, made anew, never replacing one (M28).
-    public mutating func saveAnyway(_ text: String, taken: TextAccount) -> Step {
+    public mutating func saveAnyway(_ text: String, taken: Int) -> Step {
         if let words = unwritable(taken) { return Step(events: [.saveRefused(words)]) }
         _ = edited(text)
-        return write(against: Self.absent, seen: "", why: .saveAnyway)
+        return write(Array(text.utf8), against: Self.absent, seen: "", why: .saveAnyway)
     }
 
     /// Keep Theirs: the workspace's bytes the sheet showed, `shown`; a newer file is then followed.
@@ -345,9 +333,8 @@ public struct OpenFile: Sendable {
         note = .none
         text = String(decoding: base, as: UTF8.self)
         textStale = false
-        let account = TextAccount(units: baseUnits, digest: digest)
-        handed = account
-        return merge(given, Step(asks: [read(.follow)], events: [.replaced(text, account, chosen: true)]))
+        handed = baseUnits
+        return merge(given, Step(asks: [read(.follow)], events: [.replaced(text, units: baseUnits, chosen: true)]))
     }
 
     /// What the workspace answered.
@@ -369,16 +356,14 @@ public struct OpenFile: Sendable {
             self.version = version
             note = .none
             theirs = nil
-            var step = Step(events: [.saved])
-            if saveAgain {
-                saveAgain = false
-                step.events.append(.saveAgain)
-            }
-            return step
+            let step = Step(events: [.saved])
+            guard let again = remembered else { return step }
+            remembered = nil
+            return again == base ? step : merge(step, write(again, against: digest, seen: version, why: .save))
         case let .conflict(id, digest):
             guard let saved = saving, saved.id == id else { return Step() }
             saving = nil
-            saveAgain = false
+            remembered = nil
             guard digest != Self.absent else {
                 note = .deletedWhileTyped
                 return Step(events: [.gone])
@@ -390,7 +375,7 @@ public struct OpenFile: Sendable {
 
     /// Why a write may not go now, in the person's words; nil when it may. The view must hold all it
     /// was given, `taken` against what the model gave it: the one check every write passes.
-    private func unwritable(_ taken: TextAccount) -> String? {
+    private func unwritable(_ taken: Int) -> String? {
         if note == .notShownWhole { return Self.notShownWhole(name) }
         guard whole else { return "\(name) is still loading. Nothing was saved." }
         guard taken == handed else { return Self.notShownWhole(name) }
@@ -444,7 +429,7 @@ public struct OpenFile: Sendable {
         case .open:
             state = .text
             adopt(held.bytes, digest: digest)
-            handed = TextAccount(units: baseUnits, digest: digest)
+            handed = baseUnits
             arrived = true
             step.events.append(.allArrived)
         case .follow:
@@ -533,19 +518,19 @@ public struct OpenFile: Sendable {
     private mutating func saveRefused(_ kind: Open<FileRefusal>, _ message: String) -> Step {
         guard let saved = saving else { return Step() }
         saving = nil
-        saveAgain = false
+        remembered = nil
         guard kind == .known(.failed) else { return Step(events: [.saveRefused(message)]) }
         unanswered = (saved.bytes, false)
         return Step(asks: [read(.follow)], events: [.saveRefused(message)])
     }
 
-    /// The pane's text written: a save under way is given up first, on the wire.
-    private mutating func write(against base: String, seen: String, why: Write) -> Step {
+    /// `bytes`, the pane's text as the person saved it, written: a save under way is given up
+    /// first, on the wire.
+    private mutating func write(_ bytes: [UInt8], against base: String, seen: String, why: Write) -> Step {
         guard connected else { return Step(events: [.notConnected]) }
         var step = giveUpSaving()
         let id = nextID
         nextID += 1
-        let bytes = Array(text.utf8)
         saving = (id, bytes, why)
         step.asks.append(.write(id: id, path: path, base: base, seen: seen, bytes: bytes))
         return step
@@ -553,9 +538,9 @@ public struct OpenFile: Sendable {
 
     /// The save under way, given up: its upload cancelled, its answer ignored.
     private mutating func giveUpSaving() -> Step {
-        saveAgain = false
         guard let saving else { return Step() }
         self.saving = nil
+        remembered = nil
         return Step(asks: [.cancelSave(id: saving.id)])
     }
 
@@ -576,9 +561,8 @@ public struct OpenFile: Sendable {
         if let version { self.version = version }
         note = .none
         theirs = nil
-        let account = TextAccount(units: baseUnits, digest: digest)
-        handed = account
-        return Step(events: [.replaced(text, account, chosen: chosen)])
+        handed = baseUnits
+        return Step(events: [.replaced(text, units: baseUnits, chosen: chosen)])
     }
 
     private mutating func adopt(_ bytes: [UInt8], digest: String) {

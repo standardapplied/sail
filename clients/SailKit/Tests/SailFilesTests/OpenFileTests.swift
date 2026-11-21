@@ -35,8 +35,8 @@ import Testing
             take(file.open())
         }
 
-        var taken: OpenFile.TextAccount {
-            OpenFile.TextAccount(units: loaded.utf16.count, digest: OpenFileTests.digest(Array(loaded.utf8)))
+        var taken: Int {
+            loaded.utf16.count
         }
 
         mutating func take(_ step: OpenFile.Step) {
@@ -55,8 +55,6 @@ import Testing
                     loaded = ""
                 case .allArrived:
                     if placesAtOnce { place() }
-                case .saveAgain:
-                    save()
                 default: break
                 }
             }
@@ -144,18 +142,16 @@ import Testing
         #expect(pane.file.canType && pane.said.last == .whole)
     }
 
-    /// The one check every write passes: the view holds exactly what it was given, by length and
-    /// digest; anything else writes nothing and says why. A view that took other than it was given
-    /// is never typed in.
+    /// The one check every write passes: the view holds exactly the units it was given; anything
+    /// else writes nothing and says why. A view that took other than it was given is never typed in.
     @Test func aWriteGoesOnlyWhileTheViewHoldsAllItWasGiven() throws {
         var pane = Self.opened("one\n")
         pane.type("mine\n")
-        let broken = OpenFile.TextAccount(units: pane.taken.units - 1, digest: pane.taken.digest)
         let refusal = OpenFile.Event.saveRefused(OpenFile.notShownWhole("tide.ts"))
-        #expect(pane.file.save(pane.text, taken: broken) == OpenFile.Step(events: [refusal]))
-        #expect(pane.file.saveAnyway(pane.text, taken: broken) == OpenFile.Step(events: [refusal]))
+        #expect(pane.file.save(pane.text, taken: pane.taken - 1) == OpenFile.Step(events: [refusal]))
+        #expect(pane.file.saveAnyway(pane.text, taken: pane.taken + 1) == OpenFile.Step(events: [refusal]))
         let theirs = OpenFile.Theirs(bytes: Array("theirs\n".utf8), digest: Self.digest(Array("theirs\n".utf8)), version: "v2")
-        #expect(pane.file.keepMine(pane.text, taken: OpenFile.TextAccount(units: pane.taken.units, digest: "other"), shown: theirs) == OpenFile.Step(events: [refusal]))
+        #expect(pane.file.keepMine(pane.text, taken: -1, shown: theirs) == OpenFile.Step(events: [refusal]))
         var short = Pane(size: 300_000, placesAtOnce: false)
         short.answer([UInt8](repeating: 0x61, count: 300_000))
         short.loaded.removeLast()
@@ -608,6 +604,52 @@ import Testing
         met.take(met.file.receive(.conflict(id: try #require(met.lastWrite).id, digest: "t")))
         met.answer(Array("theirs".utf8), version: "v2")
         #expect(met.writes == 1, "a remembered save went after a conflict")
+    }
+
+    /// N2: the remembered ⌘S writes the text as it was at that ⌘S, not as it is when the first is
+    /// answered: typing on after it stays unsaved, and undoing back past it writes nothing over the
+    /// person's own first save.
+    @Test func aRememberedSaveWritesTheTextOfItsOwnPress() throws {
+        var on = Self.opened("abc")
+        on.type("abcX")
+        on.save()
+        let first = try #require(on.lastWrite)
+        on.type("abcXY")
+        on.save()
+        on.type("abcXYZ")
+        on.take(on.file.receive(.written(id: first.id, digest: Self.digest(first.bytes), version: "v2")))
+        let second = try #require(on.lastWrite)
+        #expect(on.writes == 2 && second.bytes == Array("abcXY".utf8), "the remembered save wrote \(String(decoding: second.bytes, as: UTF8.self))")
+        on.take(on.file.receive(.written(id: second.id, digest: Self.digest(second.bytes), version: "v3")))
+        #expect(!on.file.clean, "the text typed after the second ⌘S was taken as saved")
+        var back = Self.opened("abc")
+        back.type("abcX")
+        back.save()
+        let saved = try #require(back.lastWrite)
+        back.save()
+        back.type("abc")
+        back.take(back.file.receive(.written(id: saved.id, digest: Self.digest(saved.bytes), version: "v2")))
+        #expect(back.writes == 1 && !back.file.clean, "undoing past the second ⌘S wrote the original over the person's first save")
+    }
+
+    /// N3: a conflict forgets the remembered ⌘S: a later save that lands writes nothing remembered
+    /// from before it.
+    @Test func aConflictForgetsTheRememberedSave() throws {
+        var pane = Self.opened("abc")
+        pane.type("abcX")
+        pane.save()
+        let first = try #require(pane.lastWrite)
+        pane.type("abcXY")
+        pane.save()
+        pane.take(pane.file.receive(.conflict(id: first.id, digest: "t")))
+        pane.answer(Array("theirs".utf8), version: "v2")
+        pane.take(pane.file.changed())
+        pane.answer(Array("abc".utf8), version: "v3")
+        pane.type("abcXYZ")
+        pane.save()
+        let third = try #require(pane.lastWrite)
+        pane.take(pane.file.receive(.written(id: third.id, digest: Self.digest(third.bytes), version: "v4")))
+        #expect(pane.writes == 2 && pane.file.clean, "a ⌘S remembered before the conflict was written after it: \(pane.writes) writes")
     }
 
     /// M1: a save given up is cancelled on the wire: by a close, and by a write that replaces it,

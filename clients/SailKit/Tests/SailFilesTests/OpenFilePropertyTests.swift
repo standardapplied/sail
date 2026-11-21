@@ -6,8 +6,10 @@ import Testing
 
 /// The data-loss rule over random interleavings of what a file pane meets: pieces arriving and the
 /// view taking them a slice at a time, keys, the agent's writes and the reads that follow them,
-/// saves and their answers, conflicts and the sheet's choices, connections lost and found. After
-/// every step, whatever was written is exactly the text the person had on screen at that moment,
+/// saves and their answers, conflicts and the sheet's choices, connections lost and found, and the
+/// text view's own undo and redo, which the model hears of only before the next act. After
+/// every step, whatever was written is exactly the text the person had on screen at the ⌘S that
+/// asked for it (at that moment, or at a ⌘S remembered while a save was under way),
 /// against a version they were shown (a whole view of it, or a sheet), or made anew where they were
 /// shown the file was gone; the view's text is replaced, but by the person's choice, only while it
 /// is the base's; and keys are taken only while the view holds every slice.
@@ -33,6 +35,11 @@ import Testing
         /// Digests the person was shown: every whole view, every sheet.
         var shown: Set<String> = []
         var acting = false
+        /// The view at a ⌘S that wrote nothing at once: what a save remembered may write later.
+        var quietPress: [UInt8]?
+        /// An undo or redo the model has not heard of yet: decided before the next act, as the pane
+        /// decides before any answer or action enters.
+        var unseen = false
         /// The model's base as the act under way began: what the view must hold to be replaced.
         var baseBefore = ""
         var broken: [String] = []
@@ -51,8 +58,8 @@ import Testing
             "v\(versions)"
         }
 
-        var taken: OpenFile.TextAccount {
-            OpenFile.TextAccount(units: loaded.utf16.count, digest: OpenFileTests.digest(Array(loaded.utf8)))
+        var taken: Int {
+            loaded.utf16.count
         }
 
         /// Before an act on the model: its base as the act begins.
@@ -66,8 +73,13 @@ import Testing
                 case let .read(id, _): read(id)
                 case let .cancel(id): reads[id] = nil
                 case let .write(id, _, base, _, bytes):
-                    if !acting { broken.append("a write went with no save asked") }
-                    if bytes != Array(view.utf8) { broken.append("wrote \(String(decoding: bytes, as: UTF8.self).debugDescription), the view held \(view.debugDescription)") }
+                    if acting {
+                        if bytes != Array(view.utf8) { broken.append("wrote \(String(decoding: bytes, as: UTF8.self).debugDescription), the view held \(view.debugDescription)") }
+                    } else if bytes == quietPress {
+                        quietPress = nil
+                    } else {
+                        broken.append("wrote \(String(decoding: bytes, as: UTF8.self).debugDescription) with no ⌘S of those bytes asked")
+                    }
                     if !(shown.contains(base) || base == OpenFile.absent && goneShown) { broken.append("wrote against \(base), a version never shown") }
                     if connected { writes[id] = (base, bytes) }
                 case let .cancelSave(id): writes[id] = nil
@@ -105,24 +117,30 @@ import Testing
                         noteBase()
                         take(file.edited(view))
                     }
-                case .saveAgain:
-                    person { $0.file.save($0.view, taken: $0.taken) }
                 case let .conflict(theirs, _):
                     sheet = theirs
                     shown.insert(theirs.digest)
+                    quietPress = nil
                 case .gone:
                     goneShown = true
+                    quietPress = nil
+                case .saveRefused, .notConnected:
+                    quietPress = nil
                 default: break
                 }
             }
         }
 
-        /// An act of the person's: a write may follow it.
-        mutating func person(_ act: (inout World) -> OpenFile.Step) {
+        /// An act of the person's: a write may follow it; a ⌘S that writes nothing at once may be
+        /// remembered, its bytes as they are now.
+        mutating func person(saves: Bool = false, _ act: (inout World) -> OpenFile.Step) {
             acting = true
             baseBefore = file.digest
             let step = act(&self)
+            let wrote = step.asks.contains { if case .write = $0 { true } else { false } }
+            if wrote { quietPress = nil }
             take(step)
+            if saves, !wrote { quietPress = Array(view.utf8) }
             acting = false
         }
 
@@ -208,15 +226,39 @@ import Testing
             take(file.edited(units: view.utf16.count) ?? file.edited(view))
         }
 
+        /// An undo or redo: the view changes and no key tells the model.
+        mutating func undoOrRedo() {
+            guard file.canType else { return }
+            var characters = Array(view)
+            if !characters.isEmpty, random.below(2) == 0 {
+                characters.removeLast()
+            } else {
+                characters.append(random.character())
+            }
+            view = String(characters)
+            unseen = true
+        }
+
+        /// The edit no key told the model of, decided.
+        mutating func decideUnseen() {
+            guard unseen else { return }
+            unseen = false
+            noteBase()
+            take(file.edited(units: view.utf16.count) ?? file.edited(view))
+        }
+
         mutating func step() {
             if file.canType, !slices.isEmpty { broken.append("keys taken while the view still took slices") }
-            switch random.below(16) {
+            let choice = random.below(17)
+            if choice == 16 { return undoOrRedo() }
+            decideUnseen()
+            switch choice {
             case 0, 1: answerOne()
             case 2, 3: placeSlice()
             case 4, 5: key()
             case 6:
                 log.append("save")
-                person { $0.file.save($0.view, taken: $0.taken) }
+                person(saves: true) { $0.file.save($0.view, taken: $0.taken) }
             case 7: agentWrites()
             case 8:
                 if let shown = file.theirs {
@@ -246,6 +288,7 @@ import Testing
                 connected = false
                 reads = [:]
                 writes = [:]
+                quietPress = nil
                 file.disconnected()
             case 14:
                 guard !connected else { break }
