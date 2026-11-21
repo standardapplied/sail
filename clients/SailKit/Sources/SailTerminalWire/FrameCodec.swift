@@ -159,16 +159,16 @@ private extension Frame {
             [.string(refusal.message), .count(refusal.remedy.count)] + refusal.remedy.flatMap(\.fields) + [.string(refusal.code)]
         case let .yieldWorkspace(project, workspace, reason, record):
             [.string(project), .string(workspace), .string(reason), .string(record)]
-        case let .filesList(id, path), let .filesStat(id, path): [.int32(id), .string(path)]
-        case let .filesRead(id, path, offset, length): [.int32(id), .string(path), .int64(offset), .int64(length)]
+        case let .filesList(id, path), let .filesStat(id, path): [.int32(id), .blob(path.bytes)]
+        case let .filesRead(id, path, offset, length): [.int32(id), .blob(path.bytes), .int64(offset), .int64(length)]
         case let .filesCancel(id): [.int32(id)]
-        case let .filesWatch(paths): [.count(paths.count)] + paths.flatMap { [.string($0.path), .string($0.version)] }
+        case let .filesWatch(paths): [.count(paths.count)] + paths.flatMap { [.blob($0.path.bytes), .string($0.version)] }
         case let .filesListing(listing):
             [.int32(listing.id), .string(listing.version), .count(listing.entries.count)]
                 + listing.entries.flatMap(\.fields) + [.bool(listing.more), .bool(listing.truncated)]
         case let .filesEntry(id, entry, version): [.int32(id)] + entry.fields + [.string(version)]
         case let .filesData(id, version, bytes, eof): [.int32(id), .string(version), .blob(bytes), .bool(eof)]
-        case let .filesChanged(paths): [.strings(paths)]
+        case let .filesChanged(paths): [.count(paths.count)] + paths.map { .blob($0.bytes) }
         case let .filesRefused(id, kind, message): [.int32(id), .string(kind.rawValue), .string(message)]
         case .takeWrite, .detach, .replayEnd, .paused, .continued, .accepted, .filesTick: []
         }
@@ -199,7 +199,7 @@ private extension SessionInfo {
 
 private extension FileEntry {
     var fields: [Field] {
-        [.string(name), .string(kind.rawValue), .string(target.rawValue), .int64(size), .int64(mtimeNanos), .int32(mode)]
+        [.blob(name.bytes), .string(kind.rawValue), .string(target.rawValue), .int64(size), .int64(mtimeNanos), .int32(mode)]
     }
 }
 
@@ -291,13 +291,13 @@ private struct Cursor {
         case 30: .accepted
         case 31: .refused(try refusal())
         case 16: .yieldWorkspace(project: try string(), workspace: try string(), reason: try string(), record: try string())
-        case 40: .filesList(id: try int32(), path: try string())
-        case 41: .filesStat(id: try int32(), path: try string())
-        case 42: .filesRead(id: try int32(), path: try string(), offset: try int64(), length: try int64())
+        case 40: .filesList(id: try int32(), path: FileName(try blob()))
+        case 41: .filesStat(id: try int32(), path: FileName(try blob()))
+        case 42: .filesRead(id: try int32(), path: FileName(try blob()), offset: try int64(), length: try int64())
         case 43: .filesCancel(id: try int32())
         case 44:
             .filesWatch(try list { (cursor: inout Cursor) throws(TerminalWireError) in
-                WatchedPath(path: try cursor.string(), version: try cursor.string())
+                WatchedPath(path: FileName(try cursor.blob()), version: try cursor.string())
             })
         case 50:
             .filesListing(FileListing(
@@ -307,7 +307,8 @@ private struct Cursor {
             ))
         case 51: .filesEntry(id: try int32(), entry: try entry(), version: try string())
         case 52: .filesData(id: try int32(), version: try string(), bytes: try blob(), eof: try bool())
-        case 53: .filesChanged(paths: try strings())
+        case 53:
+            .filesChanged(paths: try list { (cursor: inout Cursor) throws(TerminalWireError) in FileName(try cursor.blob()) })
         case 54: .filesTick
         case 55: .filesRefused(id: try int32(), kind: Open(rawValue: try string()), message: try string())
         case let other: throw .unknownType(other)
@@ -323,7 +324,7 @@ private struct Cursor {
 
     private mutating func entry() throws(TerminalWireError) -> FileEntry {
         FileEntry(
-            name: try string(), kind: Open(rawValue: try string()), target: Open(rawValue: try string()),
+            name: FileName(try blob()), kind: Open(rawValue: try string()), target: Open(rawValue: try string()),
             size: try int64(), mtimeNanos: try int64(), mode: try int32()
         )
     }

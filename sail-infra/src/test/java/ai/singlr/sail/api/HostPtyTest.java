@@ -411,6 +411,44 @@ class HostPtyTest {
   }
 
   /**
+   * m1: what the sweep asks of a files connection is the workspace as it is labelled now: ada's own
+   * reads, and once it is re-owned (a run's re-own, a hand-made relabel) for bob, or disowned, no
+   * one's, ada's files are refused there, while an admin still reads them.
+   */
+  @Test
+  void aWorkspacesFilesFollowItsLabelNowAReOwnOrADisownEndingTheirsReading() throws IOException {
+    var ada = new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API));
+    var root = new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API));
+    var labels =
+        List.of(
+            ", \"user.sail.owner\": \"ada\", \"user.sail.owner_id\": \"fde_ada\"",
+            ", \"user.sail.owner\": \"bob\", \"user.sail.owner_id\": \"fde_bob\"",
+            "");
+    var refusals = new ArrayList<String>();
+    for (var label : labels) {
+      var box =
+          new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+              .onOk("incus storage list --format json", TestWorkspaces.POOL)
+              .onOk("incus list ^acme-try$", "[" + acme("try", "Running", label) + "]");
+      var lane = lane(box, new SyncConfig("main", null, "root", "box"));
+      try {
+        lane.admitFiles("acme", "try", ada);
+        refusals.add("read");
+      } catch (Remedied.Io refused) {
+        refusals.add(refused.reason());
+      }
+      lane.admitFiles("acme", "try", root);
+    }
+
+    assertEquals(
+        List.of(
+            "read",
+            "Workspace 'try' belongs to 'bob', not you.",
+            "Workspace 'try' has no owner, so only an admin may enter it."),
+        refusals);
+  }
+
+  /**
    * N1 for files: on a node, its own person reads the files of a workspace labelled for them by id
    * or for no one, never of one labelled for another person of their handle or for a person gone
    * from the node, each refused with its code in a files ticket's own words.

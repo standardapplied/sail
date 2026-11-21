@@ -162,7 +162,19 @@ final class FilesConnection {
         return;
       }
       if (watch == null) {
-        watch = files.start(container, FileScripts.WATCH, null);
+        try {
+          watch = files.start(container, FileScripts.WATCH, null);
+        } catch (IOException unstarted) {
+          var why = ended.get();
+          end.accept(
+              why != null
+                  ? why
+                  : new PtyMessage.Err(
+                      "The watch of "
+                          + workspace
+                          + "'s files could not start; connect again to watch them."));
+          return;
+        }
         var started = watch;
         Thread.ofVirtual().name("pty-files-watch").start(() -> watching(started));
       }
@@ -358,6 +370,15 @@ final class FilesConnection {
     }
   }
 
+  /**
+   * Reads what the file holds from {@code offset}, at most {@code length} bytes, in frames of
+   * {@link PtyMessage#FILE_CHUNK}, its last frame held until the version stat-ed after the bytes is
+   * the one stat-ed before them, read where the bytes the size promised end (fewer bytes, or more,
+   * leave other bytes there, never that version): else the read is answered {@link
+   * FilesRefusal#CHANGED}, and the client, which drops what it had of it, reads again. So the bytes
+   * a read ends with are always the version it names, as far as a version tells one file's states
+   * apart (a rewrite of the same size within one tick of the filesystem's clock is one version).
+   */
   private void readOf(Request request, Running running, long offset, long length)
       throws IOException {
     var script =
@@ -371,26 +392,22 @@ final class FilesConnection {
       refuse(request, running, script.status());
       return;
     }
+    var expected = Math.max(0, Math.min(length, Long.parseLong(size) - offset));
     var total = 0L;
-    var chunk = script.bytes(PtyMessage.FILE_CHUNK);
-    while (true) {
-      total += chunk.length;
-      var next =
-          total < length && chunk.length == PtyMessage.FILE_CHUNK
-              ? script.bytes(PtyMessage.FILE_CHUNK)
-              : new byte[0];
-      if (next.length == 0) {
-        var whole = script.status() == 0;
-        if (!whole) {
-          fail(request, running);
-          return;
-        }
-        var eof = offset + total >= Long.parseLong(size) || total < length;
-        unless(running, new PtyMessage.FilesData(request.id(), version, chunk, eof));
-        return;
-      }
+    var chunk = script.bytes((int) Math.min(PtyMessage.FILE_CHUNK, expected));
+    while (total + chunk.length < expected && chunk.length > 0) {
       unless(running, new PtyMessage.FilesData(request.id(), version, chunk, false));
-      chunk = next;
+      total += chunk.length;
+      chunk = script.bytes((int) Math.min(PtyMessage.FILE_CHUNK, expected - total));
+    }
+    var after = script.field();
+    if (script.status() != 0) {
+      fail(request, running);
+    } else if (!version.equals(after)) {
+      unless(running, refused(request, FilesRefusal.CHANGED));
+    } else {
+      var eof = offset + expected >= Long.parseLong(size);
+      unless(running, new PtyMessage.FilesData(request.id(), version, chunk, eof));
     }
   }
 
@@ -435,8 +452,12 @@ final class FilesConnection {
     return new PtyMessage.FilesRefused(request.id(), kind, sentence(kind, request.path()));
   }
 
-  /** The sentence {@code kind} is said in, naming {@code path} and the workspace. */
-  String sentence(FilesRefusal kind, String path) {
+  /**
+   * The sentence {@code kind} is said in, naming the path, each byte of it that is no UTF-8 shown
+   * as {@code U+FFFD}, and the workspace.
+   */
+  String sentence(FilesRefusal kind, String named) {
+    var path = FileNames.shown(named);
     return switch (kind) {
       case NOT_FOUND -> "No file at " + path + " in " + workspace + ".";
       case NOT_PERMITTED -> "The workspace's user may not open " + path + ".";
@@ -452,6 +473,7 @@ final class FilesConnection {
       case NOT_A_FILE ->
           path + " is not a file (a pipe, a socket or a device), so Sail does not read it.";
       case LOOP -> path + " leads back to itself.";
+      case CHANGED -> path + " changed while it was read; read it again.";
       case FAILED -> "Sail could not read " + path + " in " + workspace + "; nothing was changed.";
     };
   }

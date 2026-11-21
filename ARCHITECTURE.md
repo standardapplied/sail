@@ -3733,6 +3733,9 @@ grant on its own work alone is refused there, since no work is in hand.
   own words): no Access action of its own. An admin therefore reads every file under any person's
   workspace home, harness login and git token included; that is no new reach (an admin's shell
   there reads both), but a file read tells no one, where a terminal says who took the keyboard.
+  The decision is asked again at every sweep of the host, for each files connection's workspace
+  as it is labelled then, as well as for its credential, so a re-own, a disown or a relabel ends
+  a connection its person may no longer enter (F8).
 - Admins are never scoped.
 
 **Whose a resource is.** `Resources` builds each resource from the row in hand, with the project
@@ -4113,13 +4116,24 @@ job each: `FileScripts` is the shell (four bash scripts as constants, their exit
 `incus exec` as the dev user each, `UploadCopy.Place.asDev`), `FilesConnection` answers one
 connection's frames.
 - **F4/F9. Under the home, by standard input.** A path travels on a script's standard input,
-  NUL-terminated, never on a command line or in a log; the host refuses one not lexically under
-  `/home/dev` before running anything, and every script resolves it (`realpath -e`) and refuses one
-  that leaves the home, a link's target included, by its exit status. Nothing is installed in the
-  workspace: the host that speaks the frame sent the script.
+  NUL-terminated, never on a command line or in a log; the host refuses one not under `/home/dev`
+  or not spelled plainly (a `.` or `..` part, an empty one) before running anything, and every
+  script resolves it (`realpath`; the watch each path of its set) and refuses or drops one that
+  leaves the home, a link's target included. The home rule keeps a client where it means to be;
+  the boundary is the dev user's own permissions (every script runs as it, never root), since the
+  workspace's own programs, that same user, can swap a path between a check and its use. Nothing
+  is installed in the workspace: the host that speaks the frame sent the script.
+- **Names are bytes.** A name or path in the files frames is carried as its bytes, whatever they
+  are (`FileNames`: valid UTF-8 as itself, each byte of an invalid sequence as `U+DC80`-`U+DCFF` in
+  Java, `FileName` in SailKit, shown with `U+FFFD`), so a name a listing carried addresses that
+  file and no other, and two names a lossy decoding would merge stay two.
 - **Versions.** A version is one `stat -L` of the resolved file, `dev:ino:size:mtime:ctime`, mtime
   and ctime in ns; opaque to a client. A listing carries its folder's, a stat and a read their
-  file's.
+  file's. A read stats the file again after its bytes and ends with them only when that version
+  and the byte count are the ones it began with; else it is answered `changed` and the client
+  drops what it had of it and reads again, so a read's bytes are always its version's (as far as
+  a version tells states apart: a same-size rewrite within one tick of the filesystem's clock is
+  one version).
 - **F1. The watch.** One loop a connection (`FileScripts.WATCH`), started by its first set, stats
   only the paths of the set every 250 ms and prints those whose version is not the one held, then
   a NUL; it prints a NUL alone each second (`FilesTick`), and ends when its input closes. A set
@@ -4129,9 +4143,12 @@ connection's frames.
 - **F6. Four at once, two reads.** A connection runs at most four scripts, at most two of them
   reads, the rest waiting in the order asked, reads and the others each in their own line, so a
   listing always has a script; past 64 waiting, the connection's next frame waits to be read. A
-  listing is cut at 50,000 entries (`truncated`), a read at 20 MiB, in 256 KiB frames.
+  listing is cut at 50,000 entries (`truncated`), a read at 20 MiB, in 256 KiB frames, its bytes
+  read without waiting (a pipe swapped in mid-read ends it). A workspace holds at most 8 files
+  connections and a person 16, every workspace together: past them a ticket is refused `limited`
+  (429) and a presented one `rate_limited`, in words that say which.
 - **F5. Nothing outlives the connection.** Its end, however it came (a close, a sweep's sever, a
-  stop), closes the loop's input and ends every script's `incus exec`, which ends the process in
+  stop, a handover), closes the loop's input and ends every script's `incus exec`, which ends the process in
   the workspace (incus 7.6: within a second, measured); `WorkspaceFilesIT` finds none of the dev
   user's processes 5 s later.
 - **F7/M35. Endings say why.** A stop or delete of the workspace (`WorkspaceDoors.endTerminals`)
@@ -4139,7 +4156,11 @@ connection's frames.
   files connection to it the stop's record (`Err`, then the connection closes within 5 s whether
   or not its peer reads). A script that fails for no reason of its own asks the workspace again
   (`PtyAdmission.files`): stopped (`workspace_stopped`), gone (`not_found`) or no longer the
-  person's ends the connection in those words; anything else is `failed`, nothing changed.
+  person's ends the connection in those words; anything else is `failed`, nothing changed. Every
+  sweep asks the same of each connection (`recheckFiles`, off the host's lock), coding a person no
+  longer admitted `forbidden`; an outage ends nothing. Files connections do not survive a
+  handover or a stop of the host: each is told "The runner's terminal host is restarting, which
+  ends this connection to dock's files; connect again." (`terminal_unavailable`), and reconnects.
 - **Saves' temporaries.** Listings and the watch leave out names starting `FileScripts.SAVING`
   (`.sail-save-`), which a save writes beside its target. A lock serialising writes to a workspace
   across its connections would sit on the host beside `PtySessionHost.served`, keyed by instance
