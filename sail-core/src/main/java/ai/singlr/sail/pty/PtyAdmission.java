@@ -67,6 +67,16 @@ public interface PtyAdmission {
   }
 
   /**
+   * Throws, with the reason, when {@code who} may not read the files of workspace {@code workspace}
+   * of {@code project}: decided as entering it is ({@link #workspace}), then {@link Stopped} when
+   * it is not running, which nothing here starts. Asked of a files ticket, and again when a script
+   * in it fails for no reason of its own.
+   */
+  default void files(String project, String workspace, PtyIdentity.Person who) throws IOException {
+    workspace(project, workspace, who);
+  }
+
+  /**
    * The stored login {@code agent} starts with in workspace {@code workspace} of {@code project}
    * for {@code who}, empty when it signs in inside; or throws, with the reason and a remedy, when
    * it may not start there: the workspace is not {@code who}'s own (an admin who may enter it opens
@@ -123,6 +133,39 @@ public interface PtyAdmission {
     @Override
     public Remedy remedy() {
       return remedy;
+    }
+  }
+
+  /**
+   * A workspace that is stopped, which a files ticket never starts: its reason and the remedy that
+   * starts it, kept apart, and the code {@link #CODE}.
+   */
+  final class Stopped extends IOException implements Remedied {
+    /** The code a stopped workspace is refused with, as the API's error codes name it. */
+    public static final String CODE = "workspace_stopped";
+
+    private final String reason;
+    private final transient Remedy remedy;
+
+    public Stopped(String reason, Remedy remedy) {
+      super(Remedied.message(reason, remedy));
+      this.reason = reason;
+      this.remedy = remedy;
+    }
+
+    @Override
+    public String reason() {
+      return reason;
+    }
+
+    @Override
+    public Remedy remedy() {
+      return remedy;
+    }
+
+    @Override
+    public String code() {
+      return CODE;
     }
   }
 

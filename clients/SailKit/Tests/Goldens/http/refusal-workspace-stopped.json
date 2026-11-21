@@ -1,0 +1,39 @@
+{
+  "request": {
+    "body": {
+      "action": "files",
+      "project": "harbor",
+      "workspace": "idle"
+    },
+    "method": "POST",
+    "path": "/v1/terminal/tickets"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Start it with: project workspace start harbor idle.",
+        "code": "workspace_stopped",
+        "field_errors": [],
+        "message": "Workspace idle of harbor is stopped, and reading its files does not start it.",
+        "remedy": [
+          {
+            "text": "Start it with: "
+          },
+          {
+            "args": [
+              "harbor",
+              "idle"
+            ],
+            "run": "sail",
+            "verb": "project workspace start"
+          },
+          {
+            "text": "."
+          }
+        ]
+      },
+      "schema_version": 1
+    },
+    "status": 409
+  }
+}

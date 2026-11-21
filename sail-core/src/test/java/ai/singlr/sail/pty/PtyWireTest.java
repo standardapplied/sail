@@ -99,6 +99,100 @@ class PtyWireTest {
   }
 
   @Test
+  void everyFilesFrameSurvivesTheWireWithItsEdgeValues() throws Exception {
+    var path = "/home/dev/workspace/a\tb\nc é";
+    assertEquals(new PtyMessage.FilesList(-1, path), roundTrip(new PtyMessage.FilesList(-1, path)));
+    assertEquals(
+        new PtyMessage.FilesStat(Integer.MAX_VALUE, path),
+        roundTrip(new PtyMessage.FilesStat(Integer.MAX_VALUE, path)));
+    assertEquals(
+        new PtyMessage.FilesRead(3, path, Long.MAX_VALUE, 20L << 20),
+        roundTrip(new PtyMessage.FilesRead(3, path, Long.MAX_VALUE, 20L << 20)));
+    assertEquals(new PtyMessage.FilesCancel(3), roundTrip(new PtyMessage.FilesCancel(3)));
+    var watch =
+        new PtyMessage.FilesWatch(
+            List.of(
+                new PtyMessage.Watched("/home/dev/workspace", "51:9:4096:1.5:1.5"),
+                new PtyMessage.Watched(path, "")));
+    assertEquals(watch, roundTrip(watch));
+    assertEquals(
+        new PtyMessage.FilesWatch(List.of()), roundTrip(new PtyMessage.FilesWatch(List.of())));
+    var entries = new java.util.ArrayList<PtyMessage.FileEntry>();
+    for (var kind : PtyMessage.FileKind.values()) {
+      entries.add(
+          new PtyMessage.FileEntry(
+              "n-" + kind, PtyMessage.FileKind.LINK, kind, Long.MAX_VALUE, -1_500_000_000L, 0777));
+    }
+    var listing = new PtyMessage.FilesListing(4, "51:9:4096:1.5:1.5", entries, true, false);
+    assertEquals(listing, roundTrip(listing));
+    var last = new PtyMessage.FilesListing(4, "v", List.of(), false, true);
+    assertEquals(last, roundTrip(last));
+    var entry =
+        new PtyMessage.FilesEntry(
+            5,
+            new PtyMessage.FileEntry(
+                "dev", PtyMessage.FileKind.FOLDER, PtyMessage.FileKind.NONE, 0, 0, 0755),
+            "v");
+    assertEquals(entry, roundTrip(entry));
+    var bytes = new byte[PtyMessage.FILE_CHUNK];
+    bytes[bytes.length - 1] = (byte) 255;
+    var data = (PtyMessage.FilesData) roundTrip(new PtyMessage.FilesData(6, "v", bytes, true));
+    assertEquals(6, data.id());
+    assertEquals("v", data.version());
+    assertArrayEquals(bytes, data.bytes());
+    assertTrue(data.eof());
+    assertEquals(
+        new PtyMessage.FilesChanged(List.of(path, "/home/dev")),
+        roundTrip(new PtyMessage.FilesChanged(List.of(path, "/home/dev"))));
+    assertInstanceOf(PtyMessage.FilesTick.class, roundTrip(new PtyMessage.FilesTick()));
+    for (var kind : PtyMessage.FilesRefusal.values()) {
+      assertEquals(
+          new PtyMessage.FilesRefused(7, kind, "No file at x."),
+          roundTrip(new PtyMessage.FilesRefused(7, kind, "No file at x.")));
+    }
+    assertEquals(
+        new PtyMessage.YieldWorkspace("acme", "dock", "is being stopped", "was stopped"),
+        roundTrip(
+            new PtyMessage.YieldWorkspace("acme", "dock", "is being stopped", "was stopped")));
+    assertEquals(
+        new PtyMessage.IssueTicket(PtyMessage.TicketAction.FILES, "acme", "sail_x", "dock"),
+        roundTrip(
+            new PtyMessage.IssueTicket(PtyMessage.TicketAction.FILES, "acme", "sail_x", "dock")));
+    var stopped =
+        new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.STOPPED, "dock is stopped.");
+    assertEquals(stopped, roundTrip(stopped));
+  }
+
+  @Test
+  void aFileKindAndAFilesRefusalAreOnesTheWireNamesOrRefused() {
+    var kind = ByteBuffer.allocate(64);
+    kind.putInt(1 + 4 + 4 + 1 + 4 + 4)
+        .put((byte) 51)
+        .putInt(1)
+        .putInt(1)
+        .put((byte) 'n')
+        .putInt(4)
+        .put("rude".getBytes(StandardCharsets.UTF_8))
+        .flip();
+    var refusedKind = assertThrows(IOException.class, () -> PtyWire.read(channelOf(kind)));
+    assertEquals("Corrupt pty frame: a file of kind 'rude'.", refusedKind.getMessage());
+
+    var refusal = ByteBuffer.allocate(64);
+    refusal
+        .putInt(1 + 4 + 4 + 4 + 4)
+        .put((byte) 55)
+        .putInt(3)
+        .putInt(4)
+        .put("rude".getBytes(StandardCharsets.UTF_8))
+        .putInt(0)
+        .flip();
+    var refused = assertThrows(IOException.class, () -> PtyWire.read(channelOf(refusal)));
+    assertEquals("Corrupt pty frame: a files refusal of kind 'rude'.", refused.getMessage());
+    assertEquals("not_a_folder", PtyMessage.FilesRefusal.NOT_A_FOLDER.wire());
+    assertEquals("", PtyMessage.FileKind.NONE.wire());
+  }
+
+  @Test
   void anUploadRefusalIsOneTheWireNamesOrRefused() {
     var unknown = ByteBuffer.allocate(64);
     unknown
@@ -317,7 +411,7 @@ class PtyWireTest {
         .put("shell".getBytes(StandardCharsets.UTF_8));
     unknown.putInt(0).flip();
     assertEquals(
-        "A ticket opens or attaches; 'shell' is neither.",
+        "A ticket opens, attaches or reads files; 'shell' is none of them.",
         assertThrows(IOException.class, () -> PtyWire.read(channelOf(unknown))).getMessage());
   }
 
@@ -396,13 +490,12 @@ class PtyWireTest {
 
     var v2 = Pipe.open();
     var v2Reply = Pipe.open();
-    v2.sink().write(ByteBuffer.wrap("SAILPTY5".getBytes(StandardCharsets.US_ASCII)));
+    v2.sink().write(ByteBuffer.wrap("SAILPTY6".getBytes(StandardCharsets.US_ASCII)));
     var skew =
         assertThrows(IOException.class, () -> PtyWire.handshake(v2.source(), v2Reply.sink()));
     assertTrue(
-        skew.getMessage().contains("v6"),
-        "a v5 peer, whose yield carries no record and whose keyboard frames say no client, is"
-            + " refused by name: "
+        skew.getMessage().contains("v7"),
+        "a v6 peer, which knows no files frames and no files ticket, is refused by name: "
             + skew.getMessage());
   }
 

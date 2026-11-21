@@ -117,6 +117,17 @@ public final class SessionClient implements AutoCloseable {
   }
 
   /**
+   * Ends every live session in workspace {@code workspace} of {@code project}, and every files
+   * connection to it, as {@code ending} says.
+   */
+  public void yieldWorkspace(String project, String workspace, SessionYield.Ending ending)
+      throws IOException {
+    PtyWire.write(
+        channel, new PtyMessage.YieldWorkspace(project, workspace, ending.line(), ending.record()));
+    expectOk("yield");
+  }
+
+  /**
    * What the host at {@code socket} answers a request for a ticket for the holder of {@code
    * credential} to take {@code action} on {@code target} over its TCP listener: a {@link
    * PtyMessage.Ticket} or a {@link PtyMessage.TicketRefused}. The API's door onto the host ({@code

@@ -42,6 +42,7 @@
 6 SyncProvenanceIT
 25 UpgradeE2EIT
 1 WatcherSpawnerIT
+30 WorkspaceFilesIT
 990 WorkspaceIT
 11 WorkspaceSessionsIT
 38 ZfsPoolIT

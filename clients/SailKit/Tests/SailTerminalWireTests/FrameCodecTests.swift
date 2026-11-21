@@ -6,7 +6,7 @@ import Testing
 @Suite struct FrameCodecTests {
     @Test func everyFrameTheHostWritesDecodesAsItsTypeAndEncodesToTheSameBytes() throws {
         let frames = try Goldens.frames()
-        #expect(frames.count == 33)
+        #expect(frames.count == 45)
         for (name, wire) in frames {
             let frame = try FrameCodec.decode(payload: wire.dropFirst(4))
             #expect(messageName(of: frame) == name)
@@ -52,6 +52,36 @@ import Testing
             .command(run: .known(.sail), verb: "sync", args: []),
             .words("'."),
         ]))
+        #expect(frames["YieldWorkspace"] == .yieldWorkspace(
+            project: "harbor", workspace: "dock",
+            reason: "Workspace dock of harbor is being stopped by ana, which ends this terminal.",
+            record: "Workspace dock of harbor was stopped by ana."
+        ))
+        #expect(frames["FilesList"] == .filesList(id: 1, path: "/home/dev/workspace"))
+        #expect(frames["FilesStat"] == .filesStat(id: 2, path: "/home/dev/workspace/App.java"))
+        #expect(frames["FilesRead"] == .filesRead(id: 3, path: "/home/dev/workspace/App.java", offset: 65536, length: 262_144))
+        #expect(frames["FilesCancel"] == .filesCancel(id: 3))
+        #expect(frames["FilesWatch"] == .filesWatch([
+            WatchedPath(path: "/home/dev/workspace", version: "51:9:4096:1.5:1.5"),
+            WatchedPath(path: "/home/dev/workspace/gone.md", version: ""),
+        ]))
+        #expect(frames["FilesListing"] == .filesListing(FileListing(
+            id: 1, version: "51:9:4096:1795210162.152082747:1795210162.152082747",
+            entries: [
+                FileEntry(name: "App.java", kind: .known(.file), target: .known(.none), size: 12, mtimeNanos: 1_795_210_162_152_082_747, mode: 0o644),
+                FileEntry(name: "src", kind: .known(.link), target: .known(.folder), size: 3, mtimeNanos: -1, mode: 0o777),
+            ],
+            more: false, truncated: true
+        )))
+        #expect(frames["FilesEntry"] == .filesEntry(
+            id: 2,
+            entry: FileEntry(name: "App.java", kind: .known(.file), target: .known(.none), size: 12, mtimeNanos: 7, mode: 0o600),
+            version: "51:10:12:7.0:7.0"
+        ))
+        #expect(frames["FilesData"] == .filesData(id: 3, version: "51:10:12:7.0:7.0", bytes: Array("class App {}".utf8), eof: true))
+        #expect(frames["FilesChanged"] == .filesChanged(paths: ["/home/dev/workspace", "/home/dev/workspace/App.java"]))
+        #expect(frames["FilesTick"] == .filesTick)
+        #expect(frames["FilesRefused"] == .filesRefused(id: 4, kind: .known(.loop), message: "/home/dev/workspace/self leads back to itself."))
         #expect(frames["Err"] == .refused(HostRefusal(
             message: "You do not hold the write token.",
             remedy: [
@@ -61,6 +91,13 @@ import Testing
             ],
             code: "login_not_stored"
         )))
+    }
+
+    @Test func theFilesWordsAndTheTicketWordsAreTheHostsInItsOrder() throws {
+        #expect(FileKind.allCases.map(\.rawValue) == (try Goldens.vocabulary("file_kinds")))
+        #expect(FileRefusal.allCases.map(\.rawValue) == (try Goldens.vocabulary("file_refusals")))
+        #expect(TicketAction.allCases.map(\.rawValue) == (try Goldens.vocabulary("ticket_actions")))
+        #expect(TicketRefusal.allCases.map(\.rawValue) == (try Goldens.vocabulary("ticket_refusals")))
     }
 
     @Test func aRefusalWithoutItsRemedyIsTruncatedNotReadAsWords() throws {
@@ -180,7 +217,7 @@ import Testing
     @Test func theHandshakeIsTheHostsMagicAndAnyOtherIsAnotherProtocol() throws {
         #expect(Handshake.magic == (try Goldens.magic()))
         try Handshake.check(peer: Goldens.magic())
-        for other in ["SAILPTY5", "SAILPTY7", "SAIL"] {
+        for other in ["SAILPTY6", "SAILPTY8", "SAIL"] {
             #expect(throws: TerminalWireError.otherProtocol) { try Handshake.check(peer: Array(other.utf8)) }
         }
         #expect(throws: TerminalWireError.otherProtocol) { try Handshake.check(peer: Goldens.magic() + [0x33]) }
@@ -256,6 +293,18 @@ func messageName(of frame: Frame) -> String {
     case .sessions: "Sessions"
     case .accepted: "Ok"
     case .refused: "Err"
+    case .yieldWorkspace: "YieldWorkspace"
+    case .filesList: "FilesList"
+    case .filesStat: "FilesStat"
+    case .filesRead: "FilesRead"
+    case .filesCancel: "FilesCancel"
+    case .filesWatch: "FilesWatch"
+    case .filesListing: "FilesListing"
+    case .filesEntry: "FilesEntry"
+    case .filesData: "FilesData"
+    case .filesChanged: "FilesChanged"
+    case .filesTick: "FilesTick"
+    case .filesRefused: "FilesRefused"
     }
 }
 

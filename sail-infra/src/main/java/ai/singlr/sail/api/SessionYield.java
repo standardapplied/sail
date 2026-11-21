@@ -70,8 +70,8 @@ public interface SessionYield {
   void end(List<String> sessions, Ending ending) throws IOException;
 
   /**
-   * Ends every live session in workspace {@code workspace} of {@code project} as {@code ending}
-   * says. A seam with no host ends nothing.
+   * Ends every live session in workspace {@code workspace} of {@code project}, and every connection
+   * reading its files, as {@code ending} says. A seam with no host ends nothing.
    */
   default void endIn(String project, String workspace, Ending ending) throws IOException {}
 

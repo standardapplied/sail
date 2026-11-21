@@ -47,7 +47,8 @@ Usage:
   ci/fleet inside RUN           apply acme on client and observer; each role at the in-container spec
                                 CLI and at the HTTP API Mast calls; from main, over client's private address,
                                 a ticket from the API opens a session over TCP that echoes a line, and the
-                                same ticket is refused a second time
+                                same ticket is refused a second time; a files ticket for acme's own
+                                container is refused, naming a workspace
   ci/fleet rooms RUN            client opens a room over HTTP; who may post in it at each door, and the
                                 conversation reads the same on every box; no other project's room leaks
   ci/fleet access RUN           the access matrix's rows, at each door that offers them: client comments on
@@ -102,7 +103,9 @@ Usage:
                                 (built once, its time in the report), and there eng creates her own
                                 through main's API, labelled hers by her id, committing as her with
                                 none of main's person's forge token, refused to client and to obs
-                                (a viewer), opened by her ticket over TCP from client, refused a
+                                (a viewer), opened by her ticket over TCP from client, its home listed and
+                                watched by her files ticket (50 listings of 5,000 entries, 50 reads of
+                                256 KiB and 20 changes held to 250, 200 and 600 ms at p95), refused a
                                 delete while a command runs in it, and deleted with force; a second
                                 is created and stopped,
                                 apply --all leaves both and the template alone; with acme's repos set
@@ -867,7 +870,7 @@ inside() {
     http_door "$run" client client 201 POST /v1/specs '{"project":"acme","id":"http-client'"$x"'","title":"over http"}'
   check "$run" "over HTTP, client cannot create a spec in beta" \
     http_door "$run" client client 404 POST /v1/specs '{"project":"beta","id":"http-beta'"$x"'","title":"over http"}'
-  check "$run" "from main, over client's private address, a ticket opens a session over TCP that echoes a line, and is refused a second time" \
+  check "$run" "from main, over client's private address, a ticket opens a session over TCP that echoes a line, and is refused a second time; a files ticket for acme's own container is refused, naming a workspace" \
     direct_terminal "$run" client main client
 }
 
@@ -887,7 +890,7 @@ done
 sudo sail server token revoke "direct-$handle" > /dev/null 2>&1 || true
 sudo sail server token create "direct-$handle" member --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " "'
 
-readonly DIRECT_TERMINAL='import json, socket, struct, sys, urllib.request
+readonly DIRECT_TERMINAL='import json, socket, struct, sys, time, urllib.error, urllib.request
 ip, token = sys.argv[1], sys.stdin.readline().strip()
 workspace = sys.argv[2] if len(sys.argv) > 2 else ""
 def text(value):
@@ -908,8 +911,8 @@ def read(conn):
     return payload[0], payload[1:]
 def present(ticket):
     conn = socket.create_connection((ip, 7072), timeout=30)
-    conn.sendall(b"SAILPTY6")
-    if exactly(conn, 8) != b"SAILPTY6":
+    conn.sendall(b"SAILPTY7")
+    if exactly(conn, 8) != b"SAILPTY7":
         raise SystemExit("not a sail pty host")
     conn.sendall(frame(9, text(ticket)))
     return conn, read(conn)
@@ -937,7 +940,84 @@ print("the session echoed 42-over-tcp over TCP")
 again, (kind, payload) = present(ticket)
 if kind != 31 or b"presented already" not in payload:
     raise SystemExit("the second presentation was not refused as used: frame %d" % kind)
-print("the same ticket, presented again, is refused")'
+print("the same ticket, presented again, is refused")
+asked = urllib.request.Request(
+    "http://%s:7071/v1/terminal/tickets" % ip,
+    data=json.dumps({"action": "files", "project": "acme", "workspace": workspace}).encode(),
+    headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+if not workspace:
+    try:
+        urllib.request.urlopen(asked, timeout=30)
+        raise SystemExit("a files ticket for the project container was issued")
+    except urllib.error.HTTPError as refused:
+        said = refused.read()
+        if refused.code != 422 or b"names a workspace" not in said:
+            raise SystemExit("a files ticket for the container was answered %d %r" % (refused.code, said))
+    print("a files ticket for the project container is refused: it names a workspace")
+    raise SystemExit(0)
+files, (kind, _) = present(json.load(urllib.request.urlopen(asked, timeout=30))["ticket"])
+if kind != 32:
+    raise SystemExit("the files ticket was not welcomed: frame %d" % kind)
+files.sendall(frame(40, struct.pack(">i", 1) + text("/home/dev")))
+kind, payload = read(files)
+if kind != 50 or b"workspace" not in payload:
+    raise SystemExit("the home was not listed: frame %d %r" % (kind, payload[:200]))
+files.sendall(frame(44, struct.pack(">i", 0)))
+kind, _ = read(files)
+if kind != 54:
+    raise SystemExit("the watch did not tick: frame %d" % kind)
+print("a files ticket lists the workspace home over TCP and its watch ticks")
+def typed(seq, command, done):
+    line = command.encode() + b"; echo " + done.encode() + b"-$((40+2))\r"
+    conn.sendall(frame(3, struct.pack(">q", seq) + struct.pack(">i", len(line)) + line))
+    seen = b""
+    while (done + "-42").encode() not in seen:
+        kind, payload = read(conn)
+        if kind == 20:
+            seen += payload[12:]
+def answer(conn):
+    while True:
+        kind, payload = read(conn)
+        if kind != 54:
+            return kind, payload
+def p95(samples):
+    ordered = sorted(samples)
+    return ordered[-(-len(ordered) * 95 // 100) - 1]
+typed(2, "mkdir -p /home/dev/fleet-big && cd /home/dev/fleet-big && for i in $(seq 1 5000); do : > src-$i.java; done; head -c 1048576 /dev/urandom > /home/dev/fleet-blob; cd", "fixture")
+lists, reads, changes = [], [], []
+for i in range(50):
+    started = time.monotonic()
+    files.sendall(frame(40, struct.pack(">i", 100 + i) + text("/home/dev/fleet-big")))
+    frames = 0
+    while True:
+        kind, payload = answer(files)
+        if kind != 50:
+            raise SystemExit("listing %d was answered frame %d %r" % (i, kind, payload[:200]))
+        frames += 1
+        if payload[-2] == 0:
+            break
+    lists.append((time.monotonic() - started) * 1000)
+for i in range(50):
+    started = time.monotonic()
+    files.sendall(frame(42, struct.pack(">i", 200 + i) + text("/home/dev/fleet-blob") + struct.pack(">qq", 0, 262144)))
+    kind, payload = answer(files)
+    if kind != 52:
+        raise SystemExit("read %d was answered frame %d %r" % (i, kind, payload[:200]))
+    reads.append((time.monotonic() - started) * 1000)
+files.sendall(frame(44, struct.pack(">i", 1) + text("/home/dev/fleet-big") + text("")))
+kind, _ = answer(files)
+if kind != 53:
+    raise SystemExit("the watch held missing was answered frame %d" % kind)
+for i in range(20):
+    started = time.monotonic()
+    typed(10 + i, ": > /home/dev/fleet-big/new-%d.txt" % i, "touched%d" % i)
+    kind, payload = answer(files)
+    if kind != 53 or b"fleet-big" not in payload:
+        raise SystemExit("change %d was answered frame %d %r" % (i, kind, payload[:200]))
+    changes.append((time.monotonic() - started) * 1000)
+print("files over TCP from another box, p95: list 5,000 %.0f ms (ceiling 250, %d frame(s)), first 256 KiB %.0f ms (ceiling 200), change to FilesChanged %.0f ms (ceiling 600)" % (p95(lists), frames, p95(reads), p95(changes)))
+if p95(lists) > 250 or p95(reads) > 200 or p95(changes) > 600:
+    raise SystemExit("a files figure is over its ceiling")'
 
 # With "open", opens session NAME in acme's container over a ticket, starts it counting (n-1, n-2,
 # ...), prints the last number it saw and is killed, so the host sees its client vanish unsaid; with "back", waits up to 60 s for
@@ -969,8 +1049,8 @@ def api(method, path, body=None):
     return json.load(urllib.request.urlopen(asked, timeout=30))
 def present(ticket):
     conn = socket.create_connection((ip, 7072), timeout=30)
-    conn.sendall(b"SAILPTY6")
-    if exactly(conn, 8) != b"SAILPTY6":
+    conn.sendall(b"SAILPTY7")
+    if exactly(conn, 8) != b"SAILPTY7":
         raise SystemExit("not a sail pty host")
     conn.sendall(frame(9, text(ticket)))
     kind, payload = read(conn)
@@ -1045,7 +1125,9 @@ sudo sail server token revoke "direct-$handle" > /dev/null 2>&1 || true
 exit $status'
 
 # From box FROM, over box HOST's private address: a ticket HANDLE asks HOST's API for, to open a
-# terminal in acme's container, or in its WORKSPACE, opens a session over TCP that echoes a line.
+# terminal in acme's container, or in its WORKSPACE, opens a session over TCP that echoes a line;
+# then a files ticket for WORKSPACE lists /home/dev there and its watch ticks, and one for the
+# container is refused naming a workspace.
 # HOST's listeners are read first, set for it, and put back as they were after it, whether it passed
 # or not, all with Sail's own commands (host status --json, host config set); HOST's sail-api and
 # pty host restart for each. That is safe only where nothing else uses HOST meanwhile: each group
@@ -1915,7 +1997,7 @@ storage() {
     http_token_door "$run" main client member 403 POST /v1/projects/acme/workspaces/eng-own/stop '' "belongs to 'eng'"
   check "$run" "obs, a viewer, creates no workspace on main" \
     http_token_door "$run" main obs viewer 403 POST /v1/projects/acme/workspaces '{"name":"obs-own"}' read_only_credential
-  check "$run" "from client, eng's ticket for her workspace on main opens a session in it over TCP that echoes a line" \
+  check "$run" "from client, eng's ticket for her workspace on main opens a session in it over TCP that echoes a line, and her files ticket lists its home and its watch ticks; 50 listings of 5,000 entries, 50 reads of 256 KiB and 20 changes from client hold the ceilings (250, 200, 600 ms at p95)" \
     direct_terminal "$run" main client eng eng-own
   check "$run" "a command is left running in eng's workspace, as an open terminal would be" \
     on "$run" main "sudo sh -c 'nohup incus exec acme-eng-own -- sleep 600 > /dev/null 2>&1 &'"

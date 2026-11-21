@@ -99,7 +99,8 @@ class PtyUploadsTest {
             new PtySessionHost.Limits(32, 32, 256, 256),
             PtySessionHost.Handoff.NONE,
             PtySessionHost.Network.NONE,
-            uploads);
+            uploads,
+            FileScripts.ofContainers());
     host.start();
     return host;
   }
