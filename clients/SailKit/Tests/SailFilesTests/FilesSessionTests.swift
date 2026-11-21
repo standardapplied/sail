@@ -85,6 +85,23 @@ import Testing
         Refusal(code: .known(code), message: message)
     }
 
+    /// The API's refusal of a files ticket as the server wrote it in the shared golden `name`.
+    static func refusal(golden name: String) throws -> Refusal {
+        let exchange = try Exchange(name)
+        do throws(SailError) {
+            _ = try Endpoint.terminalTicket(files: "harbor", workspace: "idle").decode(HTTPResponse(status: exchange.status, headers: exchange.headers, body: exchange.body))
+        } catch let .refused(refusal) {
+            return refusal
+        } catch {
+            throw error
+        }
+        throw NoRefusal(golden: name)
+    }
+
+    struct NoRefusal: Error {
+        let golden: String
+    }
+
     @Test func admittedItHandsOnTheListingsAndTicks() async throws {
         let door = try FakeRunnerDoor()
         door.setFolder(FileTree.root, [FileTreeTests.file("README.md")])
@@ -148,12 +165,13 @@ import Testing
     @Test func aStoppedWorkspaceIsNeverStartedByLooking() async throws {
         let door = try FakeRunnerDoor()
         let desk = Desk(door)
-        desk.refuse(Self.refusal(.workspaceStopped, "dock is stopped."))
+        let stopped = try Self.refusal(golden: "refusal-workspace-stopped")
+        desk.refuse(stopped)
         let session = Self.session(desk)
         let heard = Heard(session)
         session.start()
         defer { session.close() }
-        #expect(await heard.until { heard.phases.last == .stopped("dock is stopped.") }, "\(heard.phases)")
+        #expect(await heard.until { heard.phases.last == .stopped("Workspace idle of harbor is stopped, and reading its files does not start it.") }, "\(heard.phases)")
         #expect(desk.requests.count == 1, "a stopped workspace was asked for again")
         desk.refuse(nil)
         session.reconnectNow()
