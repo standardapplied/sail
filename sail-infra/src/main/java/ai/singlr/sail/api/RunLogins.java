@@ -274,7 +274,7 @@ final class RunLogins {
   /** Each kind its harness takes, how to make one, and the command that stores it. */
   static Remedy howToStore(Harness harness) {
     var parts = new ArrayList<Object>();
-    for (var kind : harness.loginKinds()) {
+    for (var kind : harness.offeredKinds()) {
       parts.add(parts.isEmpty() ? "" : " Or: ");
       parts.add(howToReplace(harness, kind, LoginStore.DEFAULT_NAME));
     }
