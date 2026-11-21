@@ -443,19 +443,23 @@ extension Driver {
     /// wait is net of the machine's share of it. Reported: the host's and the app's CPU shares over
     /// the measure's first second; each flood's frames and longest commit gap with what reached
     /// the screen and what was asked for in it; memory; and, after, the same three floods unlimited
-    /// for 2.5 s, judged the same way and never gated.
+    /// for 2.5 s, judged the same way and never gated. Every tab it closes must be gone, its
+    /// terminals' ends confirmed, before it goes on, so no end runs beside a later measure or step.
     private func fourPanes(byMenu: Bool) async -> (Bool, String) {
         let before = Self.footprint
-        let tabsBefore = workbench.model.tabs.count
+        let tabsBefore = Set(workbench.model.tabs.map(\.id))
         _ = mainStacks
         let files = Self.floodFiles
         let stop = "/tmp/sail-drive-flood-stop"
         try? FileManager.default.removeItem(atPath: stop)
         mainThread.reset()
         press("t", ["command"])
-        guard await waitUntil(10, { self.workbench.model.tabs.count == tabsBefore + 1 && self.pane?.session?.state.phase == .attached }) else {
-            return (false, "⌘T made no attached tab: \(arrangementSaid)")
+        let pressed = CACurrentMediaTime()
+        guard await waitUntil(10, { self.workbench.model.selected.map { !tabsBefore.contains($0) } == true && self.pane?.session?.state.phase == .attached }) else {
+            let phase = pane?.session.map { "\($0.state.phase)" } ?? "none"
+            return (false, "⌘T made no attached tab: \(tabsBefore.count) tabs before it, the focused pane's session \(phase); \(arrangementSaid)")
         }
+        print(String(format: "panes4 ⌘T to an attached tab %.1f ms", (CACurrentMediaTime() - pressed) * 1000))
         press("d", ["command"])
         press("d", ["command", "shift"])
         press("arrowLeft", ["command", "option"])
@@ -574,10 +578,11 @@ extension Driver {
             budgets["the look switched 4 times, four panes' scrollback full, \(bound)"] = met
         }
         await unlimitedFloods(floods, start: { generate(Self.paneLoad.lines * 151, every: 0, marker: 3) }, stop: stop)
-        press("w", ["command", "option"])
-        _ = await sheet("Close", asking: "Its 4 terminals will end.", within: 5)
+        let gridClosed = await closeSelectedTab(asking: "Its 4 terminals will end.")
         let splits = await timeSplits(10)
         print("panes4 splits: \(splits.said)")
+        let unclosed = (gridClosed.0 ? [] : [gridClosed.1]) + splits.unclosed
+        budgets["every tab the step closed was gone before it went on" + (unclosed.isEmpty ? "" : ": " + unclosed.joined(separator: "; "))] = unclosed.isEmpty
         budgets["⌘D: our own time to the new pane's first frame <= \(Int(Self.splitOursBound)) ms in every one of ten splits, the worst \(Self.ms(splits.oursWorst)) ms"] =
             splits.oursWorst <= Self.splitOursBound
         budgets["⌘D: the new pane's first drawable waited <= \(Int(Self.splitDrawableBound)) ms at the median of ten splits, \(Self.ms(splits.drawableMedian)) ms (the worst \(Self.ms(splits.drawableWorst)) ms)"] =
@@ -1204,11 +1209,11 @@ extension Driver {
     static let splitDrawableBound = 50.0
 
     private func timeSplits(_ count: Int) async
-        -> (total: Double, ours: Double, said: String, handled: Double, held: Double, oursWorst: Double, drawableMedian: Double, drawableWorst: Double)
+        -> (total: Double, ours: Double, said: String, handled: Double, held: Double, oursWorst: Double, drawableMedian: Double, drawableWorst: Double, unclosed: [String])
     {
         var totals: [Double] = [], ours: [Double] = [], handled: [Double] = [], held: [Double] = [], ownHeld: [Double] = []
         var drawables: [Double] = [], ourOwn: [Double] = []
-        var samples: [String] = []
+        var samples: [String] = [], unclosed: [String] = []
         for _ in 0 ..< count {
             press("t", ["command"])
             _ = await waitUntil(10) { Self.committed(self.pane?.terminal) > 0 }
@@ -1236,15 +1241,29 @@ extension Driver {
             samples.append(String(format: "handled %.1f, first frame %.1f, the first drawable's wait %.1f, own thread %.1f, ours %.1f", handled.last ?? 0, totals.last ?? 0,
                                   drawable, ownHeld.last ?? 0, ourOwn.last ?? 0))
             _ = await waitUntil(5) { made?.session?.state.phase == .attached }
-            press("w", ["command", "option"])
-            _ = await sheet("Close", asking: nil, within: 5)
+            let closed = await closeSelectedTab(asking: nil)
+            if !closed.0 { unclosed.append("split \(totals.count): \(closed.1)") }
         }
         panes4["a thread of the drive's own, held during a split p95 ms"] = Self.p95(ownHeld)
         let sorted = drawables.sorted(), middle = sorted.count / 2
         let median = sorted.isEmpty ? 0 : sorted.count % 2 == 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
         let said = "p95 (the slowest of \(totals.count)) waited \(Self.ms(Self.p95(totals))) ms, the drive's own thread held \(Self.ms(Self.p95(ownHeld))) ms; "
             + "each split in ms: " + samples.joined(separator: " | ")
-        return (Self.p95(totals), Self.p95(ours), said, Self.p95(handled), Self.p95(held), ourOwn.max() ?? 0, median, drawables.max() ?? 0)
+        return (Self.p95(totals), Self.p95(ours), said, Self.p95(handled), Self.p95(held), ourOwn.max() ?? 0, median, drawables.max() ?? 0, unclosed)
+    }
+
+    /// Closes the selected tab by ⌘⌥W, answering its sheet, and waits for the tab to go: the
+    /// workbench keeps a pane until its host confirms the end, so the sheet going says nothing of
+    /// the tab, and a step that goes on at once runs beside that end.
+    private func closeSelectedTab(asking: String?) async -> (Bool, String) {
+        guard let id = workbench.model.selected else { return (false, "no tab was selected to close") }
+        press("w", ["command", "option"])
+        let answered = await sheet("Close", asking: asking, within: 5)
+        let within = Double(Door.endLimit.components.seconds) + 1
+        guard await waitUntil(within, { !self.workbench.model.tabs.contains { $0.id == id } }) else {
+            return (false, "\(answered.1); the tab was still there \(Int(within)) s on: \(arrangementSaid)")
+        }
+        return (true, answered.1)
     }
 
     /// What a split's new view did between ⌘D and its first frame, for a split over 100 ms: its
