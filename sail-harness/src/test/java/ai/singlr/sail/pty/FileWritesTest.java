@@ -872,6 +872,27 @@ class FileWritesTest {
     assertNull(said.poll(), "nothing is answered after the end");
   }
 
+  /**
+   * A save whose script ends mid-body, as a workspace stopped outside Sail ends it, is answered at
+   * once, the workspace asked again, never held until its bytes' idle limit; nothing is written.
+   */
+  @Test
+  void aSaveWhoseScriptEndsMidBodyIsAnsweredAtOnce() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var connection = connection(() -> null);
+    connection.write(new PtyMessage.FilesWrite(1, file.toString(), version(file), 1 << 20));
+    connection.chunk(new PtyMessage.PutChunk(1, 0, new byte[64 << 10]));
+    assertEquals(new PtyMessage.PutAck(1, 64 << 10), said.poll(5, TimeUnit.SECONDS));
+
+    processes.getLast().destroyForcibly();
+
+    var answered = assertInstanceOf(PtyMessage.FilesRefused.class, answer());
+    assertEquals(PtyMessage.FilesRefusal.FAILED, answered.kind());
+    assertEquals(
+        "Sail could not save " + file + " in dock; nothing was changed.", answered.message());
+    assertEquals("kept", Files.readString(file));
+  }
+
   /** A save cancelled mid-body is answered no more, and removes its own temporary. */
   @Test
   void aCancelledSaveIsAnsweredNoMoreAndLeavesNoTemporary() throws Exception {

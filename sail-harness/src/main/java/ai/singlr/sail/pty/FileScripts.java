@@ -483,6 +483,16 @@ final class FileScripts {
       return process.getOutputStream();
     }
 
+    /** Whether it still runs. */
+    boolean alive() {
+      return process.isAlive();
+    }
+
+    /** Runs {@code then} once it has ended, however it ended. */
+    void onEnd(Runnable then) {
+      process.onExit().thenRun(then);
+    }
+
     /**
      * The next NUL-terminated field of its output, null at its end; its first field settles the
      * patience it was given.

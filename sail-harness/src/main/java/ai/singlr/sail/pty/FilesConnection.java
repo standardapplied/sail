@@ -576,9 +576,12 @@ final class FilesConnection {
       unwritten(request, running, script, ready);
       return;
     }
+    script.onEnd(this::wake);
     var sent = 0L;
     try {
-      for (var chunk = next(body, running); chunk != null; chunk = next(body, running)) {
+      for (var chunk = next(body, running, script);
+          chunk != null;
+          chunk = next(body, running, script)) {
         script.input().write(chunk);
         script.input().flush();
         sent += chunk.length;
@@ -633,11 +636,16 @@ final class FilesConnection {
 
   /**
    * The next bytes of {@code body}, waiting at most {@link PtyUploads#IDLE} for them; null once it
-   * is whole, broken, cancelled or closed, or when the client sent nothing for that long.
+   * is whole, broken, cancelled or closed, once its {@code script} has ended (a stop, an exec cut
+   * off), whose status then says why, or when the client sent nothing for that long.
    */
-  private synchronized byte[] next(Body body, Running running) {
+  private synchronized byte[] next(Body body, Running running, FileScripts.Script script) {
     var idle = System.nanoTime() + PtyUploads.IDLE.toNanos();
-    while (body.chunks.isEmpty() && !body.whole() && body.broken == null && !gone(running)) {
+    while (body.chunks.isEmpty()
+        && !body.whole()
+        && body.broken == null
+        && !gone(running)
+        && script.alive()) {
       var left = idle - System.nanoTime();
       if (left <= 0) {
         body.broken = "its bytes stopped coming for " + PtyUploads.IDLE.toMinutes() + " minutes";
@@ -654,7 +662,12 @@ final class FilesConnection {
         hungry--;
       }
     }
-    return body.broken != null || gone(running) ? null : body.chunks.pollFirst();
+    return body.broken != null || gone(running) || !script.alive() ? null : body.chunks.pollFirst();
+  }
+
+  /** Wakes a save waiting for its bytes, as its script's end does. */
+  private synchronized void wake() {
+    notifyAll();
   }
 
   /**
