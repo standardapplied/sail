@@ -130,14 +130,6 @@ final class FilePane: NSView, NSTextViewDelegate {
         editor.autoresizingMask = [.width]
         editor.delegate = self
         editor.onKeys = { [weak self] in self?.heldKeysLast = true }
-        editor.onKeysGone = { [weak self] in
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    guard let self, let window = self.window, let holder = window.firstResponder, holder !== window else { return }
-                    if !((holder as? NSView)?.isDescendant(of: self) ?? false) { self.heldKeysLast = false }
-                }
-            }
-        }
         scroll.documentView = editor
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
@@ -293,6 +285,11 @@ final class FilePane: NSView, NSTextViewDelegate {
     /// The sentence in place of the text, nil while the text shows.
     var sentenceWords: String? {
         sentence.isHidden ? nil : sentence.stringValue
+    }
+
+    /// A terminal or the tree took the keys: the file no longer counts as holding them.
+    func keysTakenElsewhere() {
+        heldKeysLast = false
     }
 
     /// Opens at `line` (1-based): the caret at its start, the line scrolled into view.
@@ -570,21 +567,14 @@ final class LineNumbers: NSRulerView {
     }
 }
 
-/// The pane's text view, telling the pane when it takes the keys and when it gives them up.
+/// The pane's text view, telling the pane when it takes the keys.
 @MainActor
 final class PaneTextView: NSTextView {
     var onKeys: @MainActor () -> Void = {}
-    var onKeysGone: @MainActor () -> Void = {}
 
     override func becomeFirstResponder() -> Bool {
         let taken = super.becomeFirstResponder()
         if taken { onKeys() }
         return taken
-    }
-
-    override func resignFirstResponder() -> Bool {
-        let given = super.resignFirstResponder()
-        if given { onKeysGone() }
-        return given
     }
 }

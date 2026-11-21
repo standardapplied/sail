@@ -162,6 +162,14 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     public var onChoose: @MainActor (String?) -> Void = { _ in }
     /// A key the list's owner takes before the list does (a tree's → and ←): true, taken.
     package var onKey: (@MainActor (NSEvent) -> Bool)?
+    /// The list took the keys.
+    package var onFocus: @MainActor () -> Void = {}
+
+    override public func becomeFirstResponder() -> Bool {
+        let taken = super.becomeFirstResponder()
+        if taken { onFocus() }
+        return taken
+    }
     private let mono: LabelFont
 
     /// The rows. A new set keeps the chosen item chosen by its id wherever it now is, and tells

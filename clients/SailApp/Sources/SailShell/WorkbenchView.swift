@@ -374,6 +374,7 @@ public final class WorkbenchView: NSView {
 
     /// A click made a pane the first responder: the model follows at once, the drawing next turn.
     private func focusClicked(_ id: PaneID) {
+        model.tab(holding: id).flatMap { tabViews[$0.id]?.filePane }?.keysTakenElsewhere()
         guard model.focusedPane?.id != id else { return }
         model.focus(id)
         applySoon()
