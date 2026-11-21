@@ -106,8 +106,10 @@ first post-v1 migration exists, a box carries no database across it: it is reins
 
 1. Main is green, including the integration checks.
 2. Bump the version in the four poms (`pom.xml`, `sail-core`, `sail-harness`, `sail-infra`)
-   and run `ci/changelog X.Y.Z`, which folds `changes/` into `CHANGELOG.md` under `## X.Y.Z`
-   and removes the files, in one commit, `chore: bump version to X.Y.Z`, and tag it `vX.Y.Z`.
+   and run `ci/changelog X.Y.Z` on a full clone, which folds `changes/` into `CHANGELOG.md`
+   under `## X.Y.Z` and removes the files, in one commit, `chore: bump version to X.Y.Z`, and
+   tag it `vX.Y.Z`. `release.yml` refuses a tag whose commit did not fold
+   (`ci/changelog released X.Y.Z`).
 3. Push main and the tag. The tag triggers `release.yml`, which tests nothing again: it waits
    for the commit's own CI run on main and refuses to publish unless it passed, while it builds
    the optimized native images for Linux and macOS, then publishes a GitHub Release with

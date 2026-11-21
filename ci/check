@@ -26,9 +26,8 @@ Usage:
   ci/check min-macos BINARY     fail unless the darwin BINARY's minimum macOS (its Mach-O
                                 LC_BUILD_VERSION) is no newer than the app's LSMinimumSystemVersion
   ci/check changelog [BASE]     fail if the change from BASE (default: where it left origin/main)
-                                adds to CHANGELOG.md: a change's entry is a file of changes/, which
-                                the release folds in with ci/changelog on main, outside any pull
-                                request
+                                edits CHANGELOG.md or leaves an entry the release could not fold
+                                (ci/changelog check)
 EOF
   exit 2
 }
@@ -302,20 +301,9 @@ changed_tests() {
     | paste -sd, -
 }
 
-# A pull request's entry goes in changes/<short-slug>.md, never CHANGELOG.md: every pull request
-# that added to the top of CHANGELOG.md conflicted with every other one open. A change that only
-# removes lines from it passes (moving entries out to changes/ does). The release commit's fold
-# (ci/changelog) is pushed to main directly, never through a pull request, so CI runs this on pull
-# requests only.
+# A pull request's entry is a file of changes/, never an edit of CHANGELOG.md (ci/changelog).
 changelog() {
-  local base=${1:-}
-  [[ -n $base ]] || base=$(git merge-base origin/main HEAD)
-  local added
-  added=$(git diff --numstat "$base" -- CHANGELOG.md | cut -f1)
-  if [[ -n $added && $added != 0 ]]; then
-    echo "ci/check: this change adds to CHANGELOG.md. Put its entry in a file of its own instead, changes/<short-slug>.md, holding its bullets as they would read under the version heading (changes/README.md); the release folds them in with ci/changelog." >&2
-    exit 1
-  fi
+  ci/changelog check "$@"
 }
 
 changed() {
