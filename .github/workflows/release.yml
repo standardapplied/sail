@@ -43,6 +43,23 @@ jobs:
           fi
           echo "CI run $run passed for $GITHUB_SHA."
 
+  # A release ships the changelog its bump commit folded: a tag whose commit still holds changes/
+  # entries, or whose CHANGELOG.md starts at another version, is refused before anything ships, as
+  # its app would carry that other version. Dispatched from a branch, nothing is released to check.
+  folded:
+    name: The bump commit folded its changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        if: github.ref_type == 'tag'
+
+      - name: CHANGELOG.md starts at the tag's version and changes/ holds no entry
+        if: github.ref_type == 'tag'
+        run: ci/changelog released "${GITHUB_REF_NAME#v}"
+
   build:
     strategy:
       fail-fast: false
@@ -125,7 +142,7 @@ jobs:
   # sail-darwin-arm64 the build above made and signed, checked against its published sha256 and its
   # signature first, so the app and the release ship one binary.
   app:
-    needs: [ci-passed, build]
+    needs: [ci-passed, folded, build]
     permissions:
       actions: read
       contents: write
@@ -135,7 +152,7 @@ jobs:
     secrets: inherit
 
   release:
-    needs: [ci-passed, build]
+    needs: [ci-passed, folded, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

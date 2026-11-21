@@ -40,6 +40,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      # A pull request's entry is a file of changes/, never an edit of CHANGELOG.md. The release's
+      # fold into CHANGELOG.md (ci/changelog) is pushed to main, outside any pull request.
+      - name: A change's entry is a file of its own
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: ci/check changelog "$BASE"
+
       - id: diff
         env:
           EVENT: ${{ github.event_name }}

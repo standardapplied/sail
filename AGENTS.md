@@ -145,4 +145,4 @@ tests bite, and the deletion count in the body.
 - Hook scripts drain stdin before anything else, or the hook writer gets `EPIPE`.
 - `gh run view --log` truncates a job's log at about 5,000 lines. The whole log is
   `gh api repos/standardapplied/sail/actions/jobs/<jobId>/logs`.
-- `CHANGELOG.md`: one entry per change, under the top unreleased version heading.
+- A change's entry is one file, `changes/<short-slug>.md` (`changes/README.md`), never an edit of `CHANGELOG.md`, which only the release writes (`ci/changelog`).
