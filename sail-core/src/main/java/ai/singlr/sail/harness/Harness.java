@@ -310,6 +310,14 @@ public interface Harness {
   List<LoginKind> loginKinds();
 
   /**
+   * Its {@link #loginKinds()} in the order a person is shown them: what an app lists and a remedy
+   * names first. The default kind stays the first of {@link #loginKinds()}.
+   */
+  default List<LoginKind> offeredKinds() {
+    return loginKinds();
+  }
+
+  /**
    * Every variable this harness takes a credential from, its kinds' and any that outranks them: a
    * run started with a stored login has each but its own kind's set empty, so no credential its
    * container exports outranks the login the run records.

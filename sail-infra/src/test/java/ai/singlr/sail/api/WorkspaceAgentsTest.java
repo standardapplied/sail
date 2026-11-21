@@ -242,19 +242,20 @@ class WorkspaceAgentsTest {
         List.of(
             Map.of(
                 "kind",
-                "token",
-                "label",
-                "long-lived token",
-                "how",
-                "Run claude setup-token on a machine where Claude Code is signed in"),
-            Map.of(
-                "kind",
                 "api-key",
                 "label",
                 "API key",
                 "how",
-                "Create an API key in the Claude Console")),
-        claude.get("kinds"));
+                "Create an API key in the Claude Console"),
+            Map.of(
+                "kind",
+                "token",
+                "label",
+                "long-lived token",
+                "how",
+                "Run claude setup-token on a machine where Claude Code is signed in")),
+        claude.get("kinds"),
+        "the kinds in the order a person is shown them, an API key first");
     var codex = answer.offer("codex");
     assertEquals(
         refusal(
@@ -302,6 +303,9 @@ class WorkspaceAgentsTest {
         said(noneStored).subList(0, 2));
     assertEquals(true, toms.offer("claude-code").get("inside"));
     assertTrue(noneStored.containsKey("remedy"), "the remedy names the command that stores one");
+    assertTrue(
+        ((String) noneStored.get("action")).startsWith("Create an API key in the Claude Console"),
+        "the remedy names the kinds in the order the route offers them: " + noneStored);
   }
 
   private static List<Object> said(Object refusal) {
