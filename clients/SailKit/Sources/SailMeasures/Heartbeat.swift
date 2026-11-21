@@ -68,4 +68,17 @@ public final class Heartbeat: Sendable {
     public var stalls: Stalls {
         gaps.withLock { $0.stalls }
     }
+
+    /// Waits, at most `limit`, for a tick at or after `time`: a stall is recorded only by the tick
+    /// that ends it, so what held the thread up to `time` is known once one has come. Whether one
+    /// came; a clock that stopped ticking never does. It lets the thread run between looks with
+    /// `pause`, which a millisecond's sleep is.
+    public func ticked(after time: Double, within limit: Duration, pause: () async -> Void = { try? await Task.sleep(for: .milliseconds(1)) }) async -> Bool {
+        let deadline = ContinuousClock.now + limit
+        while lastTick < time {
+            guard ContinuousClock.now < deadline else { return false }
+            await pause()
+        }
+        return true
+    }
 }

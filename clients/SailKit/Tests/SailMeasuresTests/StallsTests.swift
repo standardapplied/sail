@@ -402,3 +402,36 @@ import Testing
     }
 }
 #endif
+
+/// A hold is known only once the tick that ends it has come (``Heartbeat/ticked(after:within:)``).
+@Suite struct HeartbeatTickedTests {
+    final class Clock: Sendable {
+        let now = Mutex(0.0)
+    }
+
+    @Test func aSwitchShorterThanATickIsCoveredOnlyOnceTheNextTickComes() async {
+        let clock = Clock()
+        let beat = Heartbeat { clock.now.withLock { $0 } }
+        clock.now.withLock { $0 = 0.005 }
+        #expect(beat.lastTick < 0.005)
+        #expect(await beat.ticked(after: 0.005, within: .zero) == false)
+        var pauses = 0
+        let covered = await beat.ticked(after: 0.005, within: .seconds(30)) {
+            pauses += 1
+            clock.now.withLock { $0 = 0.010 }
+            beat.tick()
+        }
+        #expect(covered && pauses == 1)
+        #expect(beat.lastTick >= 0.005)
+    }
+
+    @Test func aHoldRunningPastTheSwitchIsRecordedByThatTick() async {
+        let clock = Clock()
+        let beat = Heartbeat { clock.now.withLock { $0 } }
+        clock.now.withLock { $0 = 0.040 }
+        #expect(beat.stalls.longest(in: Span(0.030, 0.035)) == nil)
+        beat.tick()
+        #expect(await beat.ticked(after: 0.035, within: .zero))
+        #expect(beat.stalls.longest(in: Span(0.030, 0.035)) == Span(0, 0.040))
+    }
+}
