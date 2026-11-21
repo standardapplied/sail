@@ -362,4 +362,22 @@ class ShellExecutorTest {
       elsewhere.stop(0);
     }
   }
+
+  /**
+   * A command that ends without taking its input, as a script that refuses before it reads does,
+   * answers with its own exit status and words, never as a broken pipe: more input than a pipe
+   * holds makes the writer meet the closed reader every time.
+   */
+  @Test
+  void aCommandThatEndsBeforeTakingItsInputAnswersWithItsOwnStatus() throws Exception {
+    var result =
+        new ShellExecutor(false)
+            .execWithInput(
+                List.of("sh", "-c", "echo refused >&2; exit 3"),
+                "x".repeat(1 << 20),
+                Duration.ofSeconds(10));
+
+    assertEquals(3, result.exitCode());
+    assertEquals("refused\n", result.stderr());
+  }
 }

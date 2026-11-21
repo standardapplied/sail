@@ -106,9 +106,7 @@ public final class ShellExecutor implements ShellExec {
     }
 
     var process = pb.start();
-    try (var stdin = process.getOutputStream()) {
-      stdin.write(input.getBytes(StandardCharsets.UTF_8));
-    }
+    hand(process, input);
 
     var stdout = new AtomicReference<String>("");
     var stderr = new AtomicReference<String>("");
@@ -129,6 +127,20 @@ public final class ShellExecutor implements ShellExec {
     stdoutThread.join();
     stderrThread.join();
     return new Result(process.exitValue(), stdout.get(), stderr.get());
+  }
+
+  /**
+   * Gives {@code process} its {@code input}. A command that ends, or closes its input, before it
+   * takes all of it, as a script that refuses before it reads does, has refused nothing of Sail's:
+   * its own exit status and words say what happened, so the broken pipe the write then meets is not
+   * raised in their place.
+   */
+  private static void hand(Process process, String input) {
+    try (var stdin = process.getOutputStream()) {
+      stdin.write(input.getBytes(StandardCharsets.UTF_8));
+    } catch (IOException notTaken) {
+      var unused = notTaken;
+    }
   }
 
   /**
