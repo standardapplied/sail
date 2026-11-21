@@ -197,7 +197,8 @@ class WorkspaceWritesIT extends AbstractIncusIT {
   }
 
   private String temporaries() throws Exception {
-    return inInstance("ls -A " + FOLDER + " | grep '^\\.sail-save-' || true");
+    return inInstance(
+        "ls -A " + FOLDER + " | grep -E '^\\.sail-save-[A-Za-z0-9]{10}\\.part$' || true");
   }
 
   /** How many processes in the instance are the dev user's: the files scripts, nothing else. */
