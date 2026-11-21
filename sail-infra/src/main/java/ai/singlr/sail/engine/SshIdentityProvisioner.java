@@ -107,7 +107,8 @@ public final class SshIdentityProvisioner {
   /**
    * Makes {@code home} the account's empty, owner-only home, refusing first, with what is there,
    * anything at {@code home} that is not a directory: {@code install -d} follows a symbolic link
-   * and would give its target to {@code sail}.
+   * and would give its target to {@code sail}. A link, put there to keep the home on another disk,
+   * is told the bind mount that does it safely.
    */
   static Run homeStep(String home) {
     return new Run(
@@ -115,10 +116,13 @@ public final class SshIdentityProvisioner {
         List.of(
             "sh",
             "-c",
-            "if [ -L \"$1\" ]; then what=\"a symbolic link to $(readlink \"$1\")\"; elif [ -e"
-                + " \"$1\" ] && [ ! -d \"$1\" ]; then what=\"a $(stat -c %F \"$1\")\"; fi; if [ -n"
-                + " \"${what:-}\" ]; then echo \"$1 is not a directory but $what, so it cannot be the"
-                + " sail account's home: move it aside and re-run.\" >&2; exit 1; fi; install -d -m"
+            "if [ -L \"$1\" ]; then to=$(readlink \"$1\"); echo \"$1 is not a directory but a"
+                + " symbolic link to $to, which install -d and sshd would follow, so it cannot be"
+                + " the sail account's home. To keep the home in $to, bind-mount it at $1 (mount"
+                + " --bind, or a bind line in /etc/fstab) in place of the link, and re-run.\" >&2;"
+                + " exit 1; fi; if [ -e \"$1\" ] && [ ! -d \"$1\" ]; then echo \"$1 is not a"
+                + " directory but a $(stat -c %F \"$1\"), so it cannot be the sail account's home:"
+                + " move it aside and re-run.\" >&2; exit 1; fi; install -d -m"
                 + " 700 -o "
                 + SAIL_USER
                 + " -g "

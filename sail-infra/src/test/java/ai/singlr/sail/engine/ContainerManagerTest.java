@@ -11,12 +11,20 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
@@ -436,6 +444,198 @@ class ContainerManagerTest {
       assertEquals(
           "Project " + name + " cannot take instance " + name + ": it is " + what + ".",
           refused.reason());
+    }
+  }
+
+  private static final String INFO =
+      """
+      Name: acme
+      Status: STOPPING
+
+      Log:
+
+      lxc acme 20261120193002.104 WARN     conf - conf.c:lxc_map_ids:3621 - newuidmap binary is missing
+      lxc acme 20261120193002.123 ERROR    start - start.c:__lxc_start:2107 - Failed to spawn container "acme"
+      """;
+
+  private static final String JOBS =
+      """
+      JOB UNIT             TYPE STATE
+      812 docker.service   stop running
+      813 shutdown.target  start waiting
+
+      2 jobs listed.
+      """;
+
+  /**
+   * #500's last red and #507's m1: an {@code incus stop} that runs out of time says why, from what
+   * was read at that moment, in the error a person reads: systemd's own state inside the instance,
+   * how many jobs it has queued, and where the rest is; Incus's lines and the units' names, which
+   * that sentence could carry to a node's other members, stay in the owner-only log, Incus's log
+   * cut to its last lines.
+   */
+  @Test
+  void aStopThatTimesOutSaysWhatSystemdAndIncusSaidOfTheInstanceAndRecordsItAll(@TempDir Path dir)
+      throws Exception {
+    var log = dir.resolve("sail/containers.log");
+    var box =
+        new ScriptedShellExecutor()
+            .onOk("incus info --show-log acme", INFO + "lxc filler\n".repeat(200))
+            .on(
+                "incus exec acme -- systemctl is-system-running",
+                new ShellExec.Result(1, "stopping\n", ""))
+            .onOk("incus exec acme -- systemctl list-jobs --no-pager", JOBS);
+
+    var timedOut =
+        assertThrows(
+            CommandTimedOut.class,
+            () -> manager(new TimingOut("incus stop acme", box), log).stop("acme"));
+
+    assertEquals(
+        "Command timed out after 120s: incus stop acme. Just after, systemd in acme said it is"
+            + " stopping, with 2 jobs queued; Incus's log of acme and the rest are in "
+            + log
+            + ".",
+        timedOut.getMessage());
+    assertFalse(timedOut.getMessage().contains("docker.service"), timedOut.getMessage());
+    assertFalse(timedOut.getMessage().contains("lxc "), timedOut.getMessage());
+    var recorded = Files.readString(log);
+    assertTrue(
+        recorded.contains("-- systemd's state in acme: incus exec acme -- systemctl"), recorded);
+    assertTrue(recorded.contains("812 docker.service   stop running"), recorded);
+    assertTrue(
+        recorded.lines().filter(line -> line.equals("lxc filler")).count()
+            == InstanceTimeoutDiagnosis.LOG_LINES,
+        "Incus's log is cut to its last lines");
+    assertEquals(
+        "rw-------",
+        PosixFilePermissions.toString(
+            Files.getPosixFilePermissions(log, LinkOption.NOFOLLOW_LINKS)));
+  }
+
+  /**
+   * A start that runs out of time on an instance that no longer answers a command says so, without
+   * Incus's words, and systemd's jobs are not asked of it; Incus's own log is still read, into a
+   * log whose missing folders are made owner-only (#507's nit: a fresh home has no {@code
+   * ~/.sail}).
+   */
+  @Test
+  void aStartThatTimesOutOnAnInstanceThatNoLongerAnswersSaysSoAndAsksNoJobs(@TempDir Path dir)
+      throws Exception {
+    var log = dir.resolve("absent/logs/containers.log");
+    var box =
+        new ScriptedShellExecutor()
+            .onOk("incus info --show-log acme", INFO)
+            .onFail("incus exec acme --", "Error: Instance is not running");
+
+    var timedOut =
+        assertThrows(
+            CommandTimedOut.class,
+            () -> manager(new TimingOut("incus start acme", box), log).start("acme"));
+
+    assertEquals(
+        "Command timed out after 120s: incus start acme. Just after, acme no longer answered a"
+            + " command; Incus's log of acme and the rest are in "
+            + log
+            + ".",
+        timedOut.getMessage());
+    assertTrue(Files.readString(log).contains("Failed to spawn container"));
+    assertEquals(
+        "rwx------",
+        PosixFilePermissions.toString(
+            Files.getPosixFilePermissions(dir.resolve("absent"), LinkOption.NOFOLLOW_LINKS)));
+    assertTrue(
+        box.invocations().stream().noneMatch(c -> c.contains("list-jobs")),
+        box.invocations().toString());
+  }
+
+  /**
+   * #507's m2: the whole diagnosis, which runs under the workspace's lock, is bounded at its one
+   * budget however many of its questions hang; Incus's log is asked beside systemd, and what was
+   * not answered in time is said so in the log.
+   */
+  @Test
+  void aDiagnosisWhoseQuestionsAllHangEndsWithinItsOneBudget(@TempDir Path dir) throws Exception {
+    var log = dir.resolve("sail/containers.log");
+    var hanging = new Hanging(new ScriptedShellExecutor());
+    var manager =
+        new ContainerManager(
+            new TimingOut("incus stop acme", hanging),
+            new InstanceTimeoutDiagnosis(hanging, log, Duration.ofSeconds(2)));
+
+    var started = System.nanoTime();
+    var timedOut =
+        assertTimeoutPreemptively(
+            Duration.ofSeconds(8),
+            () -> assertThrows(CommandTimedOut.class, () -> manager.stop("acme")));
+
+    assertTrue(
+        System.nanoTime() - started < Duration.ofMillis(3500).toNanos(),
+        "one budget for every question, not one each");
+    assertTrue(
+        timedOut.getMessage().contains("acme no longer answered a command"), timedOut.getMessage());
+    var recorded = Files.readString(log);
+    assertTrue(
+        recorded.contains("-- Incus's log of acme: incus info --show-log acme\ndid not answer"),
+        recorded);
+  }
+
+  /** A start or stop that does not time out asks nothing more of the box. */
+  @Test
+  void aStopThatAnswersIsNotDiagnosed(@TempDir Path dir) throws Exception {
+    var box = new ScriptedShellExecutor().onOk("incus stop acme");
+
+    manager(box, dir.resolve("sail/containers.log")).stop("acme");
+
+    assertEquals(List.of("incus stop acme"), box.invocations());
+    assertFalse(Files.exists(dir.resolve("sail")));
+  }
+
+  private static ContainerManager manager(ShellExec shell, Path log) {
+    return new ContainerManager(
+        shell, new InstanceTimeoutDiagnosis(shell, log, Duration.ofSeconds(5)));
+  }
+
+  /** The box's answers, except that {@code command} runs out of time as Sail's own shell says. */
+  private record TimingOut(String command, ShellExec box) implements ShellExec {
+    @Override
+    public Result exec(List<String> asked)
+        throws IOException, InterruptedException, TimeoutException {
+      if (String.join(" ", asked).equals(command)) {
+        throw new CommandTimedOut("Command timed out after 120s: " + command, "");
+      }
+      return box.exec(asked);
+    }
+
+    @Override
+    public Result exec(List<String> asked, Path workDir, Duration timeout)
+        throws IOException, InterruptedException, TimeoutException {
+      return box.exec(asked, workDir, timeout);
+    }
+
+    @Override
+    public boolean isDryRun() {
+      return false;
+    }
+  }
+
+  /** Every command hangs until the bound it is given. */
+  private record Hanging(ShellExec box) implements ShellExec {
+    @Override
+    public Result exec(List<String> asked)
+        throws IOException, InterruptedException, TimeoutException {
+      return exec(asked, null, Duration.ofSeconds(120));
+    }
+
+    @Override
+    public Result exec(List<String> asked, Path workDir, Duration timeout)
+        throws IOException, InterruptedException, TimeoutException {
+      return new ShellExecutor(false).exec(List.of("sleep", "30"), null, timeout);
+    }
+
+    @Override
+    public boolean isDryRun() {
+      return false;
     }
   }
 }
