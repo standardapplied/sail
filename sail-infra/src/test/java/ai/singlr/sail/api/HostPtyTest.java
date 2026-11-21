@@ -371,9 +371,9 @@ class HostPtyTest {
     var box =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("incus storage list --format json", TestWorkspaces.POOL)
-            .onOk("incus list ^acme-try$", "[" + running + "]")
-            .onOk("incus list ^acme-idle$", "[" + idle + "]")
-            .onOk("incus list ^acme-gone$", "[]");
+            .onOk("incus query /1.0/instances/acme-try", running)
+            .onOk("incus query /1.0/instances/acme-idle", idle)
+            .onFail("incus query /1.0/instances/acme-gone", "Error: Instance not found");
     var lane = lane(box, new SyncConfig("main", null, "root", "box"));
     var ada = new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API));
     var bob = new PtyIdentity.Person(new Actor("bob", Role.MEMBER, Actor.Lane.API));
@@ -408,6 +408,10 @@ class HostPtyTest {
         box.invocations().stream()
             .noneMatch(c -> c.startsWith("incus start") || c.contains("sail-strip")),
         box.invocations().toString());
+    assertTrue(
+        box.invocations().stream().noneMatch(c -> c.startsWith("incus list")),
+        "each decision asks Incus for its one instance, never a list of the box's: "
+            + box.invocations());
   }
 
   /**
@@ -429,7 +433,7 @@ class HostPtyTest {
       var box =
           new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
               .onOk("incus storage list --format json", TestWorkspaces.POOL)
-              .onOk("incus list ^acme-try$", "[" + acme("try", "Running", label) + "]");
+              .onOk("incus query /1.0/instances/acme-try", acme("try", "Running", label));
       var lane = lane(box, new SyncConfig("main", null, "root", "box"));
       try {
         lane.admitFiles("acme", "try", ada);
@@ -469,9 +473,9 @@ class HostPtyTest {
     var box =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("incus storage list --format json", TestWorkspaces.POOL)
-            .onOk("incus list ^acme-old$", "[" + old + "]")
-            .onOk("incus list ^acme-gone$", "[" + gone + "]")
-            .onOk("incus list ^acme-loose$", "[" + loose + "]");
+            .onOk("incus query /1.0/instances/acme-old", old)
+            .onOk("incus query /1.0/instances/acme-gone", gone)
+            .onOk("incus query /1.0/instances/acme-loose", loose);
     var lane = lane(box, new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "ada", "ada-box"));
     var ada = new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API));
     var bob = new PtyIdentity.Person(new Actor("bob", Role.MEMBER, Actor.Lane.API));

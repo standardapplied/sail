@@ -760,11 +760,23 @@ public final class Workspaces {
   public Optional<BoxInstances.Instance> find(String project, String name)
       throws IOException, InterruptedException, TimeoutException {
     return box.lookup(project + "-" + name, Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS))
-        .filter(
-            instance ->
-                instance.kind() instanceof BoxInstances.Workspace(var p, var w, var ready)
-                    && p.equals(project)
-                    && w.equals(name));
+        .filter(instance -> isWorkspace(instance, project, name));
+  }
+
+  /**
+   * As {@link #find}, asked of Incus as that one instance ({@link BoxInstances#one}): its state and
+   * labels as fresh, without the addresses of every instance on the box.
+   */
+  public Optional<BoxInstances.Instance> findOne(String project, String name)
+      throws IOException, InterruptedException, TimeoutException {
+    return box.one(project + "-" + name, Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS))
+        .filter(instance -> isWorkspace(instance, project, name));
+  }
+
+  private static boolean isWorkspace(BoxInstances.Instance instance, String project, String name) {
+    return instance.kind() instanceof BoxInstances.Workspace(var p, var w, var ready)
+        && p.equals(project)
+        && w.equals(name);
   }
 
   private boolean startIfStopped(BoxInstances.Instance found) throws Exception {

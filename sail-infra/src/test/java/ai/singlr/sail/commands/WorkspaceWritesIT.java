@@ -236,6 +236,17 @@ class WorkspaceWritesIT extends AbstractIncusIT {
               List.of("bash", "-c", "mkdir -p " + FOLDER + " && chown -R 1000:1000 /home/dev"));
       assertTrue(prepared.ok(), prepared.stderr());
       inInstance("printf base > " + FOLDER + "/notes.md");
+      var box = new BoxInstances(shell);
+      assertTrue(
+          box.one(INSTANCE, java.time.Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS))
+                  .orElseThrow()
+                  .state()
+              instanceof ai.singlr.sail.engine.ContainerState.Running,
+          "the decision's one-instance query reads the workspace running");
+      assertEquals(
+          java.util.Optional.empty(),
+          box.one(INSTANCE + "-none", java.time.Duration.ofSeconds(BoxInstances.LOOKUP_SECONDS)),
+          "and an instance Incus has not as none, not as an outage");
       var random = new SecureRandom();
       try (var host = startHost(dbPath)) {
         try (var mine = open(host, "tok-ana");

@@ -1101,7 +1101,7 @@ for i in range(20):
     if answered(files)[0] != 56:
         raise SystemExit("checked save %d was not written" % i)
     saves.append((time.monotonic() - started) * 1000)
-print("a checked save of 100 KB over TCP from another box, p95 %.0f ms (budget 120, ceiling 300)" % p95(saves))
+print("a checked save of 100 KB over TCP from another box, p95 %.0f ms (budget 150, ceiling 300)" % p95(saves))
 stats, creates = [], []
 for i in range(20):
     started = time.monotonic()

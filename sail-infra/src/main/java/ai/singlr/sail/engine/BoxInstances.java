@@ -15,12 +15,14 @@ import java.time.format.DateTimeParseException;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Predicate;
+import java.util.regex.Pattern;
 
 /**
  * What every instance on this box is (W10), read from Incus in one {@code incus list} and told from
@@ -278,6 +280,31 @@ public final class BoxInstances {
       throws IOException, InterruptedException, TimeoutException {
     return all().stream().filter(instance -> instance.name().equals(name)).findFirst();
   }
+
+  /**
+   * The instance named {@code name}, asked of Incus as that one instance ({@code incus query
+   * /1.0/instances/<name>}), never as a list of every instance's state: its status, config and
+   * devices, its addresses left out; none when Incus has no such instance, answered within {@code
+   * timeout} or refused with a {@link TimeoutException}.
+   */
+  public Optional<Instance> one(String name, Duration timeout)
+      throws IOException, InterruptedException, TimeoutException {
+    if (!INSTANCE_NAME.matcher(name).matches()) {
+      throw new IOException("'" + name + "' is no instance name Incus could hold.");
+    }
+    var result = shell.exec(List.of("incus", "query", "/1.0/instances/" + name), null, timeout);
+    if (!result.ok()) {
+      if (result.stderr().toLowerCase(Locale.ROOT).contains("not found")) {
+        return Optional.empty();
+      }
+      throw new IOException("incus query failed: " + result.stderr());
+    }
+    return Optional.of(instance(YamlUtil.parseMap(result.stdout())))
+        .filter(instance -> instance.name().equals(name));
+  }
+
+  /** An instance name as Incus allows one: letters, digits and dashes, at most 63. */
+  private static final Pattern INSTANCE_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9-]{0,62}");
 
   /**
    * The instance named {@code name}, asked of Incus by that name alone, which it filters itself,
