@@ -80,13 +80,18 @@ struct Shot {
         URL(filePath: file.path + ".said")
     }
 
+    /// Whether screencapture has finished, without waiting for it.
+    var isTaken: Bool {
+        process.map { !$0.isRunning } ?? FileManager.default.fileExists(atPath: Self.done(file).path)
+    }
+
     /// Returns once the shot is taken, at most ``longest`` later, having printed what
     /// screencapture said, if anything.
     func taken() async {
         let done = Self.done(file)
         let said = Self.said(file)
         let deadline = ContinuousClock.now + Self.longest
-        while ContinuousClock.now < deadline, process?.isRunning ?? !FileManager.default.fileExists(atPath: done.path) {
+        while ContinuousClock.now < deadline, !isTaken {
             try? await Task.sleep(for: .milliseconds(10))
         }
         var text: String

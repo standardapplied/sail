@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import SailControls
 import SailLook
 import SailFiles
@@ -249,6 +250,81 @@ extension Driver {
         return (true, "scrolled to \(Int(view.contentView.bounds.minY)) of \(Int(room)) pt in \(frames) frames")
     }
 
+    /// Window shots taken while the 5,000 rows scroll by the wheel, 20 rows a frame, the scroll going
+    /// on until each is taken: a row shown without its name (blank while its layer rasterizes)
+    /// leaves a band across the tree with no ink taller than the gap between two names. A sample of
+    /// the frames shown, not each one.
+    private func blankRowsWhileScrolling(_ scroll: NSScrollView) async -> (Bool, String) {
+        let window = shell.window, clip = scroll.contentView.convert(scroll.contentView.bounds, to: nil), row = RowStyle.tree.height
+        let directory = FileManager.default.temporaryDirectory.appending(path: "files-blank-rows")
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var down = true, steps = 0, said: [String] = [], bands = 0, shots = 0
+        for index in 0 ..< 8 {
+            let file = directory.appending(path: "\(index).png")
+            try? FileManager.default.removeItem(at: file)
+            guard let shot = Shot.begin(.window(window.windowNumber), to: file) else { return (false, "no shot could be begun") }
+            while !shot.isTaken, steps < 2000 {
+                let room = Double(scroll.documentView?.frame.height ?? 0) - Double(scroll.contentSize.height), at = Double(scroll.contentView.bounds.minY)
+                if down, at >= room - 0.5 { down = false }
+                if !down, at <= 0.5 { down = true }
+                guard let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: Int32(down ? -20 * row : 20 * row), wheel2: 0, wheel3: 0),
+                      let event = NSEvent(cgEvent: wheel) else { return (false, "no scroll-wheel event") }
+                scroll.scrollWheel(with: event)
+                steps += 1
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+            await shot.taken()
+            guard let source = CGImageSourceCreateWithURL(file as CFURL, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return (false, "shot \(index) could not be read") }
+            let scale = Double(image.width) / Double(window.frame.width)
+            guard let blank = Self.longestBlankBand(image, in: NSRect(
+                x: Double(clip.minX) * scale, y: (Double(window.frame.height) - Double(clip.maxY) + row) * scale,
+                width: (Double(clip.width) - 16) * scale, height: (Double(clip.height) - 2 * row) * scale
+            )) else { return (false, "shot \(index) held no tree") }
+            shots += 1
+            bands += Int(Double(clip.height) / row) - 2
+            if blank < 4 * scale { return (false, "shot \(index) shows no gap between two names where the tree is: the check is not looking at the tree") }
+            if blank > 20 * scale { said.append("shot \(index): a band \(Int(blank / scale)) pt tall with no ink") }
+        }
+        let summary = "\(shots) shots taken while scrolling (\(steps) wheel steps), about \(bands) rows looked at"
+        return (said.isEmpty, said.isEmpty ? "\(summary); every row shown had its name" : "\(summary); a row shown without its name: \(said.joined(separator: "; "))")
+    }
+
+    /// The tallest run of pixel rows inside `box` (top-left origin, pixels) with no pixel apart from
+    /// the box's commonest colour by more than 48 in a channel; nil when `box` falls outside.
+    static func longestBlankBand(_ image: CGImage, in box: NSRect) -> Double? {
+        let width = image.width, height = image.height
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4, space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let data = context.data?.assumingMemoryBound(to: UInt8.self) else { return nil }
+        let x0 = max(Int(box.minX), 0), x1 = min(Int(box.maxX), width), y0 = max(Int(box.minY), 0), y1 = min(Int(box.maxY), height)
+        guard x1 - x0 > 8, y1 - y0 > 8 else { return nil }
+        func pixel(_ x: Int, _ y: Int) -> (Int, Int, Int) {
+            let at = (y * width + x) * 4
+            return (Int(data[at]), Int(data[at + 1]), Int(data[at + 2]))
+        }
+        var counts: [Int: Int] = [:]
+        for y in stride(from: y0, to: y1, by: 3) {
+            for x in stride(from: x0, to: x1, by: 3) {
+                let (r, g, b) = pixel(x, y)
+                counts[r << 16 | g << 8 | b, default: 0] += 1
+            }
+        }
+        guard let common = counts.max(by: { $0.value < $1.value })?.key else { return nil }
+        let ground = (common >> 16, common >> 8 & 0xFF, common & 0xFF)
+        var longest = 0, run = 0
+        for y in y0 ..< y1 {
+            let inked = (x0 ..< x1).contains { x in
+                let (r, g, b) = pixel(x, y)
+                return max(abs(r - ground.0), abs(g - ground.1), abs(b - ground.2)) > 48
+            }
+            run = inked ? 0 : run + 1
+            longest = max(longest, run)
+        }
+        return Double(longest)
+    }
+
     /// What the main thread was doing in its longest hold since the heartbeat's reset, as the
     /// sampler saw it: printed, so a hold over its ceiling names its own cause.
     private func tellLongestHold(_ phase: String) {
@@ -337,6 +413,7 @@ extension Driver {
         guard await waitForState(10, { (self.filesShown?.list.numberOfRows ?? 0) >= 5000 + base.count }), let scroll = filesShown?.scroll else { return (false, "berths did not open to scroll") }
         _ = mainStacks
         var scrolls: [Double] = [], scrollsCPU: [Double] = [], scrollTurns: [Double] = [], wheel: [String] = [], scrolledWell = true, drawsPerEntered: [Double] = [], namesPerDraw: [Double] = []
+        let drawsAtStart = filesShown?.draws ?? 0, cpuAtStart = filesShown?.drawCPU.total ?? 0
         for _ in 0 ..< 3 {
             let drawsBefore = filesShown?.draws ?? 0, namesBefore = filesShown?.namesBuilt ?? 0
             mainThread.reset()
@@ -354,6 +431,9 @@ extension Driver {
             drawsPerEntered.append(draws / max(entered, 1))
             namesPerDraw.append(names / max(draws, 1))
         }
+        let drawn = (filesShown?.draws ?? 0) - drawsAtStart, drawCPU = filesShown?.drawCPU ?? (total: 0, most: 0)
+        let perRow = drawn > 0 ? Double(drawCPU.total - cpuAtStart) / Double(drawn) / 1000 : 0
+        let (unblank, blankSaid) = await blankRowsWhileScrolling(scroll)
         press("arrowLeft", [])
         _ = await waitForState(5) { self.filesShown?.list.numberOfRows == base.count }
         var names = base
@@ -400,8 +480,12 @@ extension Driver {
         func tries(_ figures: [Double]) -> String {
             "\(figures.map { Self.ms($0) }) ms (least \(Self.ms(figures.min() ?? 0)), worst \(Self.ms(figures.max() ?? 0)))"
         }
-        print("files, three tries each: scrolling, the main thread's own CPU in its most costly turn \(tries(scrollsCPU)), its longest turn on the wall clock \(tries(scrollTurns)), "
-            + "its longest hold by the heartbeat \(tries(scrolls)); bursts, CPU \(tries(burstsCPU)), longest turn \(tries(burstTurns)), hold \(tries(bursts)); rows taken again from the list's pool \(filesShown?.list.rowsReused ?? 0); "
+        let frame120 = 1000 / 120.0
+        let promotion = "a 120 Hz frame is 8.3 ms: the costliest scroll turn takes \(String(format: "%.1f", scrolled / frame120)) of them, the costliest burst turn \(String(format: "%.1f", bursting / frame120))"
+        let rowCost = "a tree row's draw on the main thread \(String(format: "%.1f", perRow)) µs on average and \(String(format: "%.1f", Double(drawCPU.most) / 1000)) µs at most, over \(drawn) rows drawn in the scrolls, 20 rows entering a turn"
+        let scrolling = "scrolling, the main thread's own CPU in its most costly turn \(tries(scrollsCPU)), its longest turn on the wall clock \(tries(scrollTurns)), its longest hold by the heartbeat \(tries(scrolls))"
+        let burst = "bursts, CPU \(tries(burstsCPU)), longest turn \(tries(burstTurns)), hold \(tries(bursts))"
+        print("files, three tries each: \(scrolling); \(burst); \(promotion); \(rowCost); \(blankSaid); rows taken again from the list's pool \(filesShown?.list.rowsReused ?? 0); "
             + structure.keys.sorted().joined(separator: "; "))
         door.setFolder(root, base.map(Self.fileEntry))
         _ = await waitForState(10) { self.filesShown?.list.numberOfRows == base.count }
@@ -412,7 +496,7 @@ extension Driver {
             ("scrolling the 5,000 rows end to end and back, the least of three: the main thread's own CPU in its most costly turn", scrolled, 8, 16),
             ("2,000 changes in a burst, the least of three: the main thread's own CPU in its most costly turn", bursting, 8, 16),
         ]
-        let missed = rows.filter { $0.1 > $0.3 }.map { "\($0.0) \(Self.ms($0.1)) ms over its \(Int($0.3)) ms ceiling" } + structure.filter { !$0.value }.map(\.key).sorted()
+        let missed = rows.filter { $0.1 > $0.3 }.map { "\($0.0) \(Self.ms($0.1)) ms over its \(Int($0.3)) ms ceiling" } + structure.filter { !$0.value }.map(\.key).sorted() + (unblank ? [] : [blankSaid])
         let over = rows.filter { $0.1 > $0.2 && $0.1 <= $0.3 }.map { "\($0.0) over its \(Int($0.2)) ms budget" }
         let said = rows.map { "\($0.0) \(Self.ms($0.1)) ms (budget \(Int($0.2)), ceiling \(Int($0.3)))" }.joined(separator: "; ")
         func p95(_ samples: [Double]) -> String {
@@ -421,7 +505,7 @@ extension Driver {
         print("files, ⌃⌘S to the first rows split p95: the key to the connection asked \(p95(toOpen)) ms, the ticket and connect to admitted \(p95(toAdmitted)) ms, "
             + "admitted to the root's whole listing heard \(p95(toListing)) ms, of \(toOpen.count) tries")
         print("files figures: \(said); the wheel: \(wheel.joined(separator: ", ")); the bursts landed: \(landed)")
-        let ok = missed.isEmpty && scrolledWell && landed
+        let ok = missed.isEmpty && scrolledWell && landed && unblank
         return (ok, (missed.isEmpty ? "within every ceiling" : "missed: \(missed.joined(separator: "; "))") + (over.isEmpty ? "" : "; \(over.joined(separator: "; "))") + "; " + said)
     }
 }

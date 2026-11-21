@@ -500,6 +500,8 @@ final class TreeRowCell: NSView {
     /// Rows drawn and names built, in all: what the drive holds a scroll's drawing against.
     static private(set) var draws = 0
     static private(set) var namesBuilt = 0
+    /// The main thread's own CPU spent in rows' draws, in all and the most one draw took, in ns.
+    static private(set) var drawCPU: (total: UInt64, most: UInt64) = (0, 0)
     /// Whether the probes above and below count: off in the app, on only while the drive measures.
     package static var measuring = false
 
@@ -511,7 +513,13 @@ final class TreeRowCell: NSView {
     static private(set) var newDrawn: [String: Double] = [:]
 
     override func draw(_: NSRect) {
-        let now = CACurrentMediaTime()
+        let now = CACurrentMediaTime(), began = Self.measuring ? clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) : 0
+        defer {
+            if Self.measuring {
+                let spent = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - began
+                Self.drawCPU = (Self.drawCPU.total + spent, max(Self.drawCPU.most, spent))
+            }
+        }
         if Self.measuring {
             Self.draws += 1
             Self.lastDrawn = (now, row.path.key, new)

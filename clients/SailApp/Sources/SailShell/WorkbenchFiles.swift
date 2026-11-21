@@ -157,6 +157,8 @@ package struct FilesShown {
     /// Tree rows drawn and their names built, in all.
     package let draws: Int
     package let namesBuilt: Int
+    /// The main thread's own CPU in tree rows' draws, in all and the most one took, in ns.
+    package let drawCPU: (total: UInt64, most: UInt64)
 }
 
 extension WorkbenchView {
@@ -171,7 +173,7 @@ extension WorkbenchView {
         return FilesShown(
             list: panel.list, scroll: panel.scroll, button: panel.line.button, words: panel.shownLine?.words, rows: panel.tree.rows, new: Set(panel.shownNew.map(\.key)),
             listingHeard: panel.listingHeard, changeHeard: panel.changeHeard, openedAt: panel.openedAt, admittedAt: panel.admittedAt, lastDrawn: TreeRowCell.lastDrawn, newDrawn: TreeRowCell.newDrawn,
-            draws: TreeRowCell.draws, namesBuilt: TreeRowCell.namesBuilt
+            draws: TreeRowCell.draws, namesBuilt: TreeRowCell.namesBuilt, drawCPU: TreeRowCell.drawCPU
         )
     }
 }
