@@ -136,7 +136,12 @@ class PtyWireTest {
     assertEquals(entry, roundTrip(entry));
     var bytes = new byte[PtyMessage.FILE_CHUNK];
     bytes[bytes.length - 1] = (byte) 255;
-    var data = (PtyMessage.FilesData) roundTrip(new PtyMessage.FilesData(6, "v", bytes, true));
+    var digest = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+    var data =
+        (PtyMessage.FilesData)
+            roundTrip(new PtyMessage.FilesData(6, "v", bytes, true, true, digest));
+    assertTrue(data.whole(), "the last frame says the read was whole");
+    assertEquals(digest, data.digest(), "the last frame carries the read's content digest");
     assertEquals(6, data.id());
     assertEquals("v", data.version());
     assertArrayEquals(bytes, data.bytes());

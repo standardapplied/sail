@@ -372,12 +372,13 @@ final class FilesConnection {
 
   /**
    * Reads what the file holds from {@code offset}, at most {@code length} bytes, in frames of
-   * {@link PtyMessage#FILE_CHUNK}, its last frame held until the version stat-ed after the bytes is
-   * the one stat-ed before them, read where the bytes the size promised end (fewer bytes, or more,
-   * leave other bytes there, never that version): else the read is answered {@link
-   * FilesRefusal#CHANGED}, and the client, which drops what it had of it, reads again. So the bytes
-   * a read ends with are always the version it names, as far as a version tells one file's states
-   * apart (a rewrite of the same size within one tick of the filesystem's clock is one version).
+   * {@link PtyMessage#FILE_CHUNK}, its last frame held until the read's three proofs agree: the
+   * SHA-256 of the bytes it sent is the range's hashed again from the file after them, and the
+   * version stat-ed after is the one stat-ed before, read where the bytes the size promised end
+   * (fewer bytes, or more, leave other bytes there). Then the last frame carries that digest, the
+   * content version of what was read; else the read is answered {@link FilesRefusal#CHANGED}, and
+   * the client, which drops what it had of it, reads again. A read spliced across a write would
+   * need the same splice twice, so no filesystem clock's coarseness lets one through.
    */
   private void readOf(Request request, Running running, long offset, long length)
       throws IOException {
@@ -396,18 +397,24 @@ final class FilesConnection {
     var total = 0L;
     var chunk = script.bytes((int) Math.min(PtyMessage.FILE_CHUNK, expected));
     while (total + chunk.length < expected && chunk.length > 0) {
-      unless(running, new PtyMessage.FilesData(request.id(), version, chunk, false));
+      unless(running, new PtyMessage.FilesData(request.id(), version, chunk, false, false, ""));
       total += chunk.length;
       chunk = script.bytes((int) Math.min(PtyMessage.FILE_CHUNK, expected - total));
     }
+    var sent = script.field();
+    var again = script.field();
     var after = script.field();
     if (script.status() != 0) {
       fail(request, running);
-    } else if (!version.equals(after)) {
+    } else if (sent == null || !sent.equals(again) || !version.equals(after)) {
       unless(running, refused(request, FilesRefusal.CHANGED));
+    } else if (!DIGEST.matcher(sent).matches()) {
+      fail(request, running);
     } else {
       var eof = offset + expected >= Long.parseLong(size);
-      unless(running, new PtyMessage.FilesData(request.id(), version, chunk, eof));
+      unless(
+          running,
+          new PtyMessage.FilesData(request.id(), version, chunk, eof, offset == 0 && eof, sent));
     }
   }
 
@@ -422,8 +429,24 @@ final class FilesConnection {
     return closed || running.cancelled;
   }
 
+  /** A digest as a read's proof must be one: a SHA-256 in lowercase hex, nothing else. */
+  private static final java.util.regex.Pattern DIGEST =
+      java.util.regex.Pattern.compile("[0-9a-f]{64}");
+
   /** {@code request}'s script exited {@code status} unanswered: its own refusal, else a failure. */
   private void refuse(Request request, Running running, int status) {
+    if (status == FileScripts.NO_SHA256) {
+      unless(
+          running,
+          new PtyMessage.FilesRefused(
+              request.id(),
+              FilesRefusal.FAILED,
+              workspace
+                  + " has no sha256sum, so Sail cannot prove what it reads of "
+                  + FileNames.shown(request.path())
+                  + "; nothing was changed."));
+      return;
+    }
     var kind = FileScripts.refusalOf(status);
     if (kind == null) {
       fail(request, running);

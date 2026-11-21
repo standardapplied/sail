@@ -204,7 +204,8 @@ public final class PtyWire {
       case PtyMessage.FilesData m -> {
         out.type(52).i32(m.id()).string(m.version());
         out.bytes(m.bytes());
-        out.bool(m.eof());
+        out.bool(m.eof()).bool(m.whole());
+        out.string(m.digest());
       }
       case PtyMessage.FilesChanged m -> {
         out.type(53).i32(m.paths().size());
@@ -261,8 +262,8 @@ public final class PtyWire {
     return switch (message) {
       case PtyMessage.Output(var seq, var bytes) -> bytes.length + 16;
       case PtyMessage.PutChunk(var id, var offset, var bytes) -> bytes.length + 24;
-      case PtyMessage.FilesData(var id, var version, var bytes, var eof) ->
-          bytes.length + version.length() + 24;
+      case PtyMessage.FilesData(var id, var version, var bytes, var eof, var whole, var digest) ->
+          bytes.length + version.length() + digest.length() + 32;
       case PtyMessage.SessionEnded(var reason) -> reason.length() + 16;
       default -> 512;
     };
@@ -420,7 +421,9 @@ public final class PtyWire {
       case 44 -> watch(in);
       case 50 -> listing(in);
       case 51 -> new PtyMessage.FilesEntry(in.getInt(), entry(in), string(in));
-      case 52 -> new PtyMessage.FilesData(in.getInt(), string(in), bytes(in), in.get() == 1);
+      case 52 ->
+          new PtyMessage.FilesData(
+              in.getInt(), string(in), bytes(in), in.get() == 1, in.get() == 1, string(in));
       case 53 -> new PtyMessage.FilesChanged(names(in));
       case 54 -> new PtyMessage.FilesTick();
       case 55 ->

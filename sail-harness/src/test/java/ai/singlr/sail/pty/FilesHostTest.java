@@ -29,6 +29,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -198,7 +199,9 @@ class FilesHostTest {
             inner.set(2, "exit 1");
           }
           var process =
-              new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+              new ProcessBuilder(FileScriptsTest.onASocket(inner))
+                  .redirectError(ProcessBuilder.Redirect.DISCARD)
+                  .start();
           processes.add(process);
           started.add(kind);
           return process;
@@ -903,65 +906,107 @@ class FilesHostTest {
   }
 
   /** Where a read's bytes have been written and its version is stat-ed again. */
-  private static final String READ_DONE = "status=none || exit 1\n";
+  private static final String READ_DONE = ">&3; } 4>&1 ) || exit 1\n";
+
+  /** The sent bytes' pass of the read script, which a test may split around a writer. */
+  private static final String SENT =
+      "sent=$( { dd if=\"$at\" iflag=skip_bytes,count_bytes,nonblock skip=\"$2\" count=\"$3\""
+          + " bs=262144 status=none |";
+
+  /** The read script's second stat, which a test may make the first's, as a coarse clock would. */
+  private static final String AFTER = "after=$(stat -L --printf ";
 
   /**
-   * m2, racing: a writer rewriting a file in place, a byte longer each time, while it is read over
-   * and over: every read that is answered whole holds one write's bytes alone, and every other is
-   * answered {@code changed}.
+   * A read split at half its bytes: the script tells the test on {@code paused}, a pipe, once it
+   * sent the first half, waits on {@code go}, then sends the rest; and its second stat says the
+   * first's, as two stats inside one write's tick of a coarse clock do.
+   */
+  private void splitRead(Path paused, Path go) throws Exception {
+    for (var pipe : List.of(paused, go)) {
+      assertEquals(0, new ProcessBuilder("mkfifo", pipe.toString()).start().waitFor());
+    }
+    edits.put(
+        "read",
+        script ->
+            script
+                .replace(
+                    SENT,
+                    "sent=$( { { head -c 524288 \"$at\"; printf p > '"
+                        + paused
+                        + "'; read g < '"
+                        + go
+                        + "'; tail -c +524289 \"$at\"; } |")
+                .replaceFirst(
+                    java.util.regex.Pattern.quote(AFTER) + "[^\n]*\n", "after=\\$before\n"));
+  }
+
+  /**
+   * m2 by content: a read spliced across a write, its first half sent before a writer rewrote the
+   * file in place and its rest after, with its two stats equal as a coarse clock makes them, is
+   * answered {@code changed}: the bytes sent hash otherwise than the file after them.
    */
   @Test
-  void aReadRacingAWriterIsWholeOrAnsweredChanged() throws Exception {
-    var file = home.resolve("racing.txt");
-    Files.write(file, new byte[1 << 20]);
-    var writing = new java.util.concurrent.atomic.AtomicBoolean(true);
-    var writer =
-        Thread.ofPlatform()
-            .start(
-                () -> {
-                  try (var channel =
-                      java.nio.channels.FileChannel.open(
-                          file, java.nio.file.StandardOpenOption.WRITE)) {
-                    for (var i = 0; writing.get(); i++) {
-                      var bytes = new byte[(1 << 20) + i];
-                      Arrays.fill(bytes, (byte) (i % 2 == 0 ? 'a' : 'b'));
-                      channel.write(ByteBuffer.wrap(bytes), 0);
-                    }
-                  } catch (IOException stopped) {
-                    var unused = stopped;
-                  }
-                });
-    var whole = 0;
-    var changed = 0;
+  void aReadSplicedAcrossAWriteIsAnsweredChangedThoughItsStatsAgree() throws Exception {
+    var file = Files.write(home.resolve("racing.txt"), filled('a'));
+    var paused = dir.resolve("paused");
+    var go = dir.resolve("go");
+    splitRead(paused, go);
     try (var files = open("tok-mady")) {
-      for (var id = 1; id <= 30; id++) {
-        PtyWire.write(files, new PtyMessage.FilesRead(id, file.toString(), 0, 4L << 20));
-        var read = new java.io.ByteArrayOutputStream();
-        while (true) {
-          var answer = next(files);
-          if (answer instanceof PtyMessage.FilesRefused refused) {
-            assertEquals(PtyMessage.FilesRefusal.CHANGED, refused.kind());
-            changed++;
-            break;
-          }
-          var data = assertInstanceOf(PtyMessage.FilesData.class, answer);
-          read.write(data.bytes());
-          if (data.eof()) {
-            var bytes = read.toByteArray();
-            var first = bytes[0];
-            for (var b : bytes) {
-              assertEquals(first, b, "a read answered whole holds one write's bytes alone");
-            }
-            whole++;
-            break;
-          }
-        }
+      PtyWire.write(files, new PtyMessage.FilesRead(1, file.toString(), 0, 4L << 20));
+      try (var told = Files.newInputStream(paused)) {
+        assertEquals('p', told.read());
       }
-    } finally {
-      writing.set(false);
-      writer.join();
+      try (var channel =
+          java.nio.channels.FileChannel.open(file, java.nio.file.StandardOpenOption.WRITE)) {
+        channel.write(ByteBuffer.wrap(filled('b')), 0);
+      }
+      Files.writeString(go, "g\n");
+      PtyMessage answer;
+      do {
+        answer = next(files);
+      } while (answer instanceof PtyMessage.FilesData data && !data.eof());
+      assertEquals(
+          new PtyMessage.FilesRefused(
+              1,
+              PtyMessage.FilesRefusal.CHANGED,
+              file + " changed while it was read; read it again."),
+          answer,
+          "half of one write and half of the next, answered whole, would be a torn read");
     }
-    assertEquals(30, whole + changed);
+  }
+
+  /** A read no writer touched is answered whole, its last frame carrying its bytes' digest. */
+  @Test
+  void aWholeReadEndsWithTheDigestOfItsBytes() throws Exception {
+    var file = Files.write(home.resolve("still.txt"), filled('a'));
+    var paused = dir.resolve("paused");
+    var go = dir.resolve("go");
+    splitRead(paused, go);
+    try (var files = open("tok-mady")) {
+      PtyWire.write(files, new PtyMessage.FilesRead(1, file.toString(), 0, 4L << 20));
+      try (var told = Files.newInputStream(paused)) {
+        assertEquals('p', told.read());
+      }
+      Files.writeString(go, "g\n");
+      var read = new java.io.ByteArrayOutputStream();
+      PtyMessage.FilesData data;
+      do {
+        data = assertInstanceOf(PtyMessage.FilesData.class, next(files));
+        read.write(data.bytes());
+        assertTrue(data.eof() || data.digest().isEmpty(), "only the last frame says a digest");
+      } while (!data.eof());
+      assertArrayEquals(filled('a'), read.toByteArray());
+      assertEquals(
+          HexFormat.of()
+              .formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(filled('a'))),
+          data.digest());
+    }
+  }
+
+  private static byte[] filled(char c) {
+    var bytes = new byte[1 << 20];
+    Arrays.fill(bytes, (byte) c);
+    return bytes;
   }
 
   /**
@@ -986,5 +1031,89 @@ class FilesHostTest {
     assertEquals(
         List.of("", "The watch of elsewhere's files could not start; connect again to watch them."),
         endedWith(files));
+  }
+
+  /**
+   * Review m1, on the host: digests that are not SHA-256s, even equal ones, never prove a read; a
+   * workspace with no sha256sum is said so.
+   */
+  @Test
+  void aReadWhoseDigestsAreNoSha256IsRefusedAsFailed() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "hello");
+    edits.put(
+        "read",
+        script ->
+            script
+                .replace(SHAPE_CHECK, "")
+                .replace("\"${sent%% *}\" \"${again%% *}\" \"$after\"", "\"\" \"\" \"$after\""));
+    try (var files = open("tok-mady")) {
+      PtyWire.write(files, new PtyMessage.FilesRead(1, file.toString(), 0, 100));
+      assertEquals(
+          new PtyMessage.FilesRefused(
+              1,
+              PtyMessage.FilesRefusal.FAILED,
+              "Sail could not read " + file + " in dock; nothing was changed."),
+          next(files));
+    }
+    edits.put("read", script -> script.replace(SHA256_CHECK, "exit 27\n"));
+    try (var files = open("tok-mady")) {
+      PtyWire.write(files, new PtyMessage.FilesRead(2, file.toString(), 0, 100));
+      assertEquals(
+          new PtyMessage.FilesRefused(
+              2,
+              PtyMessage.FilesRefusal.FAILED,
+              "dock has no sha256sum, so Sail cannot prove what it reads of "
+                  + file
+                  + "; nothing was changed."),
+          next(files));
+    }
+  }
+
+  /** Where the read script checks it has a sha256sum, and that each digest is one. */
+  private static final String SHA256_CHECK = "command -v sha256sum > /dev/null || exit 27\n";
+
+  private static final String SHAPE_CHECK =
+      "[[ ${sent%% *} =~ ^[0-9a-f]{64}$ && ${again%% *} =~ ^[0-9a-f]{64}$ ]] || exit 28\n";
+
+  /** Review nit 2: a read whose {@code dd} fails mid-way is failed, never mislabelled changed. */
+  @Test
+  void aReadWhoseDdFailsIsAnsweredFailed() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "hello");
+    edits.put(
+        "read",
+        script ->
+            script.replace(
+                SENT,
+                SENT.replace("status=none |", "status=none; false; } |")
+                    .replace("sent=$( { dd", "sent=$( { { dd")));
+    try (var files = open("tok-mady")) {
+      PtyWire.write(files, new PtyMessage.FilesRead(1, file.toString(), 0, 100));
+      assertEquals(
+          PtyMessage.FilesRefusal.FAILED,
+          assertInstanceOf(PtyMessage.FilesRefused.class, next(files)).kind());
+    }
+  }
+
+  /** Review nit 1: the last frame says whether the read was whole, from 0 to the file's end. */
+  @Test
+  void theLastFrameSaysWhetherTheReadWasWhole() throws Exception {
+    var file = Files.write(home.resolve("still.txt"), filled('a'));
+    try (var files = open("tok-mady")) {
+      PtyWire.write(files, new PtyMessage.FilesRead(1, file.toString(), 0, 4L << 20));
+      PtyMessage.FilesData data;
+      do {
+        data = assertInstanceOf(PtyMessage.FilesData.class, next(files));
+        assertTrue(data.eof() || !data.whole(), "no frame before the last says whole");
+      } while (!data.eof());
+      assertTrue(data.whole(), "from 0 to the end");
+      PtyWire.write(files, new PtyMessage.FilesRead(2, file.toString(), 10, 4L << 20));
+      do {
+        data = assertInstanceOf(PtyMessage.FilesData.class, next(files));
+      } while (!data.eof());
+      assertFalse(data.whole(), "from 10, to the end, is no whole read");
+      PtyWire.write(files, new PtyMessage.FilesRead(3, file.toString(), 0, 10));
+      data = assertInstanceOf(PtyMessage.FilesData.class, next(files));
+      assertFalse(data.eof() || data.whole(), "the first 10 bytes are not the file");
+    }
   }
 }
