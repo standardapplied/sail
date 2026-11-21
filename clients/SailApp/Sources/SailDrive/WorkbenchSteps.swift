@@ -822,6 +822,15 @@ extension Driver {
     /// How long no pane's screen may change before the switches, so they measure the looks alone,
     /// not a prompt or a flood's tail still arriving.
     static let quietBeforeSwitching = 0.3
+    /// The most the median switch's worst pane may wait to show its change, counted as ours. The
+    /// step's worst pane over all four switches, which no single switch exceeds, was at most 71.2
+    /// ms (median 29.2, p95 55.7) in 166 passing runs of the two four-pane steps, so a healthy
+    /// median sits well under it; a cost every switch pays, as a layer over the panes is, moves the
+    /// median with it, while one busy moment moves one switch.
+    static let lookShownMedian = 80.0
+    /// How long a switch's frames may take to be told presented before its figures are read, the
+    /// figures being cleared for the next switch.
+    static let switchToldWithin = 0.5
 
     /// The look switched `times` times, each the other of the one before, with the four panes'
     /// scrollback full and quiet (the spec `sail-app-a-change-of-look-holds-the-main-thread-briefly`).
@@ -830,15 +839,15 @@ extension Driver {
     /// the step's end; no symbol resolved by switches 2 to 4, between looks already shown
     /// (``SymbolInk/resolutions``); no layout of the workbench's tabs during any switch
     /// (``WorkbenchView/tabLayouts``); each switch after the first held the main thread at most
-    /// ``lookSwitchHold``, counted as ours and clipped to it; no pane waited over 100 ms to show a
-    /// change, net of the machine's share (``flood(_:)``). Reported and not judged: the first
+    /// ``lookSwitchHold``, counted as ours and clipped to it; the median of the four switches' worst
+    /// pane waits to show the change at most ``lookShownMedian``, each net of the machine's share
+    /// (``shownWait(_:hold:)``), with a change shown in every switch, the worst always said. Reported and not judged: the first
     /// switch's hold, every switch's main-thread CPU time, and an empty window's own switches. Nothing of the drive's runs on the main
     /// thread inside a switch: the stacks are described, and every line printed, after the last.
     private func switchLooks(_ grid: [TerminalPane], times: Int, byMenu: Bool) async -> [(String, Bool)] {
         let empty = await emptyWindowSwitches()
         let opened = byMenu ? await openMenu("click") : (true, "")
         let quiet = await settled(grid)
-        grid.forEach { $0.terminal.resetLatency() }
         mainThread.reset()
         ownThread.reset()
         var switches: [(at: Double, setting: Double, took: Double, span: Span)] = []
@@ -847,7 +856,9 @@ extension Driver {
         var resolvedFirst = 0
         let keptBefore = SymbolInk.kept
         let laidOut = workbench.tabLayouts
+        var figures: [[LatencyFigures]] = []
         for index in 0 ..< times {
+            grid.forEach { $0.terminal.resetLatency() }
             let other: NSAppearance.Name = shell.look == .dark ? .aqua : .darkAqua
             let resolved = SymbolInk.resolutions
             let began = ContinuousClock.now
@@ -863,23 +874,33 @@ extension Driver {
             let span = Span(at, CACurrentMediaTime())
             if index > 0 { resolvedLater += SymbolInk.resolutions - resolved } else { resolvedFirst = SymbolInk.resolutions - resolved }
             switches.append((at, setting, (ContinuousClock.now - began) / .milliseconds(1), span))
+            _ = await waitUntil(Self.switchToldWithin) { grid.allSatisfy { $0.terminal.latency.unpresented.isEmpty } }
+            figures.append(grid.map { $0.terminal.latency })
         }
         let layouts = workbench.tabLayouts - laidOut
         let holds = switches.map { heldWithin($0.span) }
         let cpus = switches.map { mainStacks.cpu(in: $0.span) }
+        let waits = figures.indices.map { index in figures[index].map { shownWait($0, hold: holds[index].gap) } }
         for (index, done) in switches.enumerated() {
             let cpu = cpus[index].map { String(format: "%.1f ms", $0) } ?? "not covered by the looks"
+            let untold = figures[index].map(\.unpresented.count).reduce(0, +)
             print(String(format: "look switch %d at %.3f: setting the appearance took %.1f ms on the main thread; the last pane drew it %.1f ms after the switch; ", index + 1, done.at, done.setting, done.took)
-                + "the main thread's longest hold in it, ours, \(Self.ms(holds[index].ours)) ms, its CPU time in it \(cpu)")
+                + "the main thread's longest hold in it, ours, \(Self.ms(holds[index].ours)) ms, its CPU time in it \(cpu); "
+                + "its worst pane waited, ours, \(Self.ms(waits[index].max() ?? 0)) ms to show it (by pane \(waits[index].map { Self.ms($0) }.joined(separator: ", ")) ms)"
+                + (untold == 0 ? "" : "; \(untold) frames not told presented within \(Self.ms(Self.switchToldWithin * 1000)) ms, not judged"))
             if let gap = holds[index].gap {
                 print(String(format: "look switch %d: the main thread's longest hold %.3f–%.3f (%.1f ms)", index + 1, gap.start, gap.end, gap.length * 1000))
                 mainStacks.told(gap, frames: MainStacks.depth).forEach { print("look switch \(index + 1): main thread held: \($0)") }
             }
         }
-        let judged = grid.map { flood($0.terminal.latency) }
-        let worst = judged.max { $0.ours < $1.ours }
-        let changes = grid.map { $0.terminal.latency.changes }
-        let draws = grid.map { $0.terminal.latency.refresh.max }.reduce(0, +)
+        let worstBySwitch = waits.map { $0.max() ?? 0 }
+        let worstSwitch = worstBySwitch.indices.max { worstBySwitch[$0] < worstBySwitch[$1] }
+        let worstPane = worstSwitch.flatMap { index in waits[index].indices.max { waits[index][$0] < waits[index][$1] } }
+        let worstSaid = worstSwitch.flatMap { index in worstPane.map { "switch \(index + 1), pane \(($0) + 1): \(flood(figures[index][$0]).said)" } } ?? "none"
+        let medianWait = Self.median(worstBySwitch)
+        let measured = figures.map { $0.filter { $0.outputToShown.count > 0 }.count }
+        let changes = grid.indices.map { pane in figures.map { $0[pane].changes }.reduce(0, +) }
+        let draws = grid.indices.map { pane in figures.map { $0[pane].refresh.max }.max() ?? 0 }.reduce(0, +)
         var closed = (true, "")
         if byMenu {
             let auto = await clickAppearance(.auto)
@@ -895,7 +916,8 @@ extension Driver {
         let longest = holds.map(\.ours).max() ?? 0
         let later = holds.dropFirst().map(\.ours).max() ?? 0
         let beyond = holds.map { $0.ours - empty.second }
-        panes4["look switched, ours, the worst pane ms"] = worst?.ours ?? 0
+        panes4["look switched, ours, the worst pane ms"] = worstBySwitch.max() ?? 0
+        panes4["look switched, ours, the worst pane, the median switch ms"] = medianWait
         panes4["look switched, the main thread's longest hold, ours ms"] = longest
         panes4["look switched first, the main thread's hold, ours ms (reported, not judged)"] = holds.first?.ours ?? 0
         panes4["look switched first, the main thread's CPU time ms"] = (cpus.first ?? nil) ?? -1
@@ -918,7 +940,8 @@ extension Driver {
         let firstCPU = (cpus.first ?? nil).map { Self.ms($0) } ?? "?"
         let firstSaid = "ours \(firstHold) ms, its CPU time \(firstCPU) ms; \(resolvedFirst) symbol images resolved, \(keptBefore) kept before it"
         let laterSaid = "ours, clipped to each: \(laterHolds) ms; the first, reported: \(firstHold) ms, its CPU time \(firstCPU) ms"
-        let waitSaid = "the worst pane, ours \(Self.ms(worst?.ours ?? 0)) ms: \(worst?.said ?? "none"); the four panes' longest draws summed \(Self.ms(draws)) ms"
+        let waitSaid = "a change shown and measured in \(measured.reduce(0, +)) of \(times * grid.count) panes' switches; the worst pane a switch, ours, \(worstBySwitch.map { Self.ms($0) }.joined(separator: ", ")) ms, the median \(Self.ms(medianWait)) ms; "
+            + "the worst, \(Self.ms(worstBySwitch.max() ?? 0)) ms, \(worstSaid); the four panes' longest draws summed \(Self.ms(draws)) ms"
         return [
             ("1: the four panes quiet before the switches (\(quiet ? quietSaid : "a screen still changing after 5 s"))", quiet),
             ("2: every pane drew every look (\(drewSaid))", drawn == times && changes.allSatisfy { $0 >= times }),
@@ -927,8 +950,21 @@ extension Driver {
             ("5: the first switch held the main thread at most \(Self.ms(Self.firstSwitchHold)) ms and resolved at most one symbol image per one kept (\(firstSaid))",
              (holds.first?.ours ?? 0) <= Self.firstSwitchHold && resolvedFirst <= keptBefore),
             ("6: each switch after the first held the main thread at most \(Self.ms(Self.lookSwitchHold)) ms (\(laterSaid))", later <= Self.lookSwitchHold),
-            ("7: no pane waited over 100 ms to show a change (\(waitSaid))", (worst?.ours ?? 0) <= 100),
+            ("7: the median switch's worst pane waited at most \(Self.ms(Self.lookShownMedian)) ms to show the change (\(waitSaid))", medianWait <= Self.lookShownMedian && measured.allSatisfy { $0 > 0 }),
         ] + (byMenu ? [("8: the user menu opened over the panes, switched each look, chose Auto and closed (\(closed.1))", opened.0 && closed.0)] : [])
+    }
+
+    /// How long a pane waited to show a switch's change, ours, in ms: its longest output to shown
+    /// and the switch's longest main-thread hold, each less the machine's share, as a flood is
+    /// judged (``flood(_:)``).
+    private func shownWait(_ figures: LatencyFigures, hold: Span?) -> Double {
+        let verdict = FloodVerdict.ours(figures, mainHold: hold, tick: Heartbeat.interval, own: ownThread.stalls, main: mainStacks.looks)
+        return max(verdict.shown, verdict.held) * 1000
+    }
+
+    static func median(_ values: [Double]) -> Double {
+        let sorted = values.sorted(), middle = sorted.count / 2
+        return sorted.isEmpty ? 0 : sorted.count % 2 == 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
     }
 
     /// The main thread's longest hold inside `span`, each of its stalls clipped to the span, so one
@@ -1245,8 +1281,7 @@ extension Driver {
             if !closed.0 { unclosed.append("split \(totals.count): \(closed.1)") }
         }
         panes4["a thread of the drive's own, held during a split p95 ms"] = Self.p95(ownHeld)
-        let sorted = drawables.sorted(), middle = sorted.count / 2
-        let median = sorted.isEmpty ? 0 : sorted.count % 2 == 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2
+        let median = Self.median(drawables)
         let said = "p95 (the slowest of \(totals.count)) waited \(Self.ms(Self.p95(totals))) ms, the drive's own thread held \(Self.ms(Self.p95(ownHeld))) ms; "
             + "each split in ms: " + samples.joined(separator: " | ")
         return (Self.p95(totals), Self.p95(ours), said, Self.p95(handled), Self.p95(held), ourOwn.max() ?? 0, median, drawables.max() ?? 0, unclosed)
