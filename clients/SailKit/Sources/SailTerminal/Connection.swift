@@ -199,6 +199,18 @@ extension Frame {
         case .sessions: "Sessions"
         case .accepted: "Accepted"
         case .refused: "Refused"
+        case .yieldWorkspace: "YieldWorkspace"
+        case .filesList: "FilesList"
+        case .filesStat: "FilesStat"
+        case .filesRead: "FilesRead"
+        case .filesCancel: "FilesCancel"
+        case .filesWatch: "FilesWatch"
+        case .filesListing: "FilesListing"
+        case .filesEntry: "FilesEntry"
+        case .filesData: "FilesData"
+        case .filesChanged: "FilesChanged"
+        case .filesTick: "FilesTick"
+        case .filesRefused: "FilesRefused"
         }
     }
 }

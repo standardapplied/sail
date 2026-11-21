@@ -21,8 +21,9 @@ import java.util.Objects;
  * to a session, and the terminal host answers. The host resolves the credential the caller
  * presented here itself, decides the request as it decides that open or attach, and issues the
  * ticket; this door answers it with the address to present it at. A refusal keeps the host's words
- * and its kind: not found is {@code 404}, refused {@code 403}, a cap reached {@code 429}, and a
- * host that cannot serve the request, or cannot be reached, {@code 503}.
+ * and its kind: not found is {@code 404}, refused {@code 403}, a cap reached {@code 429}, a stopped
+ * workspace whose files were asked {@code 409}, and a host that cannot serve the request, or cannot
+ * be reached, {@code 503}.
  */
 public final class TerminalTickets {
 
@@ -62,15 +63,16 @@ public final class TerminalTickets {
 
   /**
    * The ticket {@code request} asks for, {@code {"action": "open", "project": ..., "workspace":
-   * ...}} ({@code workspace} absent, blank or {@code main} for the project's own container) or
-   * {@code {"action": "attach", "session": ...}}, issued to the holder of {@code credential}, the
+   * ...}} ({@code workspace} absent, blank or {@code main} for the project's own container), {@code
+   * {"action": "attach", "session": ...}}, or {@code {"action": "files", "project": ...,
+   * "workspace": ...}}, which names a workspace, issued to the holder of {@code credential}, the
    * credential this request was authenticated by.
    */
   TicketResponse issue(String credential, Map<String, Object> request) {
     var action = action(request);
     var target =
         switch (action) {
-          case OPEN -> {
+          case OPEN, FILES -> {
             var project = text(request, "project");
             NameValidator.requireValidProjectName(project);
             yield project;
@@ -81,7 +83,12 @@ public final class TerminalTickets {
             yield session;
           }
         };
-    var workspace = action == PtyMessage.TicketAction.OPEN ? text(request, "workspace") : null;
+    var workspace = action == PtyMessage.TicketAction.ATTACH ? null : text(request, "workspace");
+    if (action == PtyMessage.TicketAction.FILES && PtyMessage.workspaceOf(workspace).isEmpty()) {
+      throw new IllegalArgumentException(
+          "A files ticket names a workspace of the project: the project's own container has none"
+              + " of a person's files to read.");
+    }
     if (workspace != null && !workspace.isBlank() && !workspace.equals("main")) {
       NameValidator.requireValidWorkspaceName(workspace);
     }
@@ -156,6 +163,7 @@ public final class TerminalTickets {
       case FORBIDDEN -> ErrorCode.FORBIDDEN;
       case LIMITED -> ErrorCode.RATE_LIMITED;
       case UNAVAILABLE -> ErrorCode.TERMINAL_UNAVAILABLE;
+      case STOPPED -> ErrorCode.WORKSPACE_STOPPED;
     };
   }
 

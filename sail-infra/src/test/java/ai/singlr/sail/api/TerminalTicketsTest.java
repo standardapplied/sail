@@ -53,8 +53,54 @@ class TerminalTicketsTest {
             "not_found", "404 not_found the host says",
             "forbidden", "403 forbidden the host says",
             "limited", "429 rate_limited the host says",
-            "unavailable", "503 terminal_unavailable the host says"),
+            "unavailable", "503 terminal_unavailable the host says",
+            "stopped", "409 workspace_stopped the host says"),
         answered);
+  }
+
+  /**
+   * A files ticket names a project and one of its workspaces, passed to the host as asked; the
+   * project's own container, by no name, a blank one or {@code main}, is refused before the host is
+   * asked, and so is an invalid name.
+   */
+  @Test
+  void aFilesTicketNamesAWorkspaceAndTheProjectsOwnContainerIsRefusedFirst() {
+    var asked = new ArrayList<String>();
+    var door =
+        new TerminalTickets(
+            (credential, action, target, workspace) -> {
+              asked.add(action.wire() + " " + target + "/" + workspace);
+              return new PtyMessage.Ticket("tkt");
+            },
+            TERMINAL);
+
+    assertEquals(
+        "tkt",
+        door.issue("cred", Map.of("action", "files", "project", "acme", "workspace", "dock"))
+            .ticket());
+    for (var container :
+        List.<Map<String, Object>>of(
+            Map.of("action", "files", "project", "acme"),
+            Map.of("action", "files", "project", "acme", "workspace", ""),
+            Map.of("action", "files", "project", "acme", "workspace", "main"))) {
+      assertEquals(
+          "A files ticket names a workspace of the project: the project's own container has none"
+              + " of a person's files to read.",
+          assertThrows(IllegalArgumentException.class, () -> door.issue("cred", container))
+              .getMessage());
+    }
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            door.issue(
+                "cred", Map.of("action", "files", "project", "acme", "workspace", "Bad Name")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            door.issue(
+                "cred", Map.of("action", "files", "project", "Bad Project", "workspace", "dock")));
+
+    assertEquals(List.of("files acme/dock"), asked);
   }
 
   @Test

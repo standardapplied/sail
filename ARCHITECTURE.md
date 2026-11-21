@@ -3728,6 +3728,11 @@ grant on its own work alone is refused there, since no work is in hand.
   credentials (`Workspaces.startExisting`, the attach's door), and the session runs there (R15).
   A ticket opens only the project and workspace it was issued for (R16). A personal runner's host
   has no workspaces and refuses one.
+- Reading a workspace's files (a `files` ticket) is entering it, the same decision
+  (`HostLanes.Pty.admitFiles` asks the one `decide` an open asks, N1 on a node included, in its
+  own words): no Access action of its own. An admin therefore reads every file under any person's
+  workspace home, harness login and git token included; that is no new reach (an admin's shell
+  there reads both), but a file read tells no one, where a terminal says who took the keyboard.
 - Admins are never scoped.
 
 **Whose a resource is.** `Resources` builds each resource from the row in hand, with the project
@@ -3980,7 +3985,7 @@ tick, never once each. An accept that fails while the listener stays bound (out 
 passed over after 100 ms and never ends the door. A presented ticket's credential is resolved
 again against the roster. The connection then keeps `TCP_NODELAY` and TCP keepalive (a vanished peer
 found dead within about a minute, its slot, attachment and write token released), speaks the unix
-socket's `SAILPTY6` frames for its ticket's one action on its one target alone (an open ticket
+socket's `SAILPTY7` frames for its ticket's one action on its one target alone (an open ticket
 creates one session in its project and attaches to it), and may end that one session only while it
 holds its write token, so an observer never ends one (`PtyTickets.Ticket#refusal`, the host's
 ownership check still deciding the kill), each frame decided again as on the unix
@@ -4009,7 +4014,7 @@ and keeps it ended, so a client back later says why it ended rather than that it
 entry counts toward no cap and holds its name for no one. A listing asked while the host closes is
 refused, never a short page. Attaching to one is the ticket above.
 
-**Whose keyboard (`PtySession#attach`, `SAILPTY6`).** An `Attach` that asks to write names its
+**Whose keyboard (`PtySession#attach`, `SAILPTY7`).** An `Attach` that asks to write names its
 client, which keeps its name across its own reconnects, and says whether the person asked now
 (`takes`: an open, an explicit attach). A keyboard no client holds goes to one asked now, or to the
 session's opener; anyone else (an admin's restore) watches until it takes it. A keyboard the same
@@ -4095,6 +4100,50 @@ Incus.
   making. No delete follows a link: each checks the root is a directory, not a link, and root's,
   and `rm -r` removes a link as itself, walking by descriptor, so nothing in the container can turn a
   delete outside the uploads; the dev user cannot write the root or swap its own directory.
+
+**A workspace's files, through its terminal door (`FilesConnection`, `FileScripts`).** A `files`
+ticket (`{"action": "files", "project", "workspace"}`) names a workspace, never the project's own
+container, and is decided as an open there (`PtySessionHost.filesRefusal`: the project, then
+`PtyAdmission.files`); a stopped workspace is refused `workspace_stopped` (409) with the remedy
+that starts it, and nothing is started by looking. The connection it admits speaks only frames
+40-44 (`FilesList`, `FilesStat`, `FilesRead`, `FilesCancel`, `FilesWatch`), answered by 50-55
+(`FilesListing`, `FilesEntry`, `FilesData`, `FilesChanged`, `FilesTick`, `FilesRefused`, a kind
+and a sentence naming the file), for that workspace (`PtyTickets.Ticket#refusal`). Two classes, one
+job each: `FileScripts` is the shell (four bash scripts as constants, their exit statuses, one
+`incus exec` as the dev user each, `UploadCopy.Place.asDev`), `FilesConnection` answers one
+connection's frames.
+- **F4/F9. Under the home, by standard input.** A path travels on a script's standard input,
+  NUL-terminated, never on a command line or in a log; the host refuses one not lexically under
+  `/home/dev` before running anything, and every script resolves it (`realpath -e`) and refuses one
+  that leaves the home, a link's target included, by its exit status. Nothing is installed in the
+  workspace: the host that speaks the frame sent the script.
+- **Versions.** A version is one `stat -L` of the resolved file, `dev:ino:size:mtime:ctime`, mtime
+  and ctime in ns; opaque to a client. A listing carries its folder's, a stat and a read their
+  file's.
+- **F1. The watch.** One loop a connection (`FileScripts.WATCH`), started by its first set, stats
+  only the paths of the set every 250 ms and prints those whose version is not the one held, then
+  a NUL; it prints a NUL alone each second (`FilesTick`), and ends when its input closes. A set
+  replaces the last whole, each path from the version the client holds of it, so a change made
+  between a listing and its watch is reported all the same. At most 1,024 paths a set. No
+  inotify, no deltas: a client reads a changed path again.
+- **F6. Four at once, two reads.** A connection runs at most four scripts, at most two of them
+  reads, the rest waiting in the order asked, reads and the others each in their own line, so a
+  listing always has a script; past 64 waiting, the connection's next frame waits to be read. A
+  listing is cut at 50,000 entries (`truncated`), a read at 20 MiB, in 256 KiB frames.
+- **F5. Nothing outlives the connection.** Its end, however it came (a close, a sweep's sever, a
+  stop), closes the loop's input and ends every script's `incus exec`, which ends the process in
+  the workspace (incus 7.6: within a second, measured); `WorkspaceFilesIT` finds none of the dev
+  user's processes 5 s later.
+- **F7/M35. Endings say why.** A stop or delete of the workspace (`WorkspaceDoors.endTerminals`)
+  sends the host one `YieldWorkspace`, which ends the workspace's live sessions and tells every
+  files connection to it the stop's record (`Err`, then the connection closes within 5 s whether
+  or not its peer reads). A script that fails for no reason of its own asks the workspace again
+  (`PtyAdmission.files`): stopped (`workspace_stopped`), gone (`not_found`) or no longer the
+  person's ends the connection in those words; anything else is `failed`, nothing changed.
+- **Saves' temporaries.** Listings and the watch leave out names starting `FileScripts.SAVING`
+  (`.sail-save-`), which a save writes beside its target. A lock serialising writes to a workspace
+  across its connections would sit on the host beside `PtySessionHost.served`, keyed by instance
+  and handed to each `FilesConnection`.
 
 **Where a session opens (`PtySessionHost.folderOf`).** One rule. A session in a container or a
 workspace starts its `incus exec` in `/` on the box and its shell in the instance's own

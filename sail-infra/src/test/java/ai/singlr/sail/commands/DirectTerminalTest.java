@@ -947,7 +947,7 @@ class DirectTerminalTest {
   @Test
   void aRequestNamingNoActionOrNoValidTargetIsRefused() throws Exception {
     assertEquals(
-        "422 invalid_request A ticket opens or attaches; 'shell' is neither.",
+        "422 invalid_request A ticket opens, attaches or reads files; 'shell' is none of them.",
         statusAndError(post(ada, "{\"action\":\"shell\"}")));
     assertEquals(
         "422 invalid_request Invalid project name: ''. Must match [a-z0-9][a-z0-9-]*, max 63"

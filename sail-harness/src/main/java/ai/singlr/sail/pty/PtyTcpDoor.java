@@ -281,7 +281,7 @@ final class PtyTcpDoor implements AutoCloseable {
       return new PtySessionHost.Admission(
           new PtySessionHost.Credential.Holder(ticket.holder()),
           holders.holder(ticket.holder()),
-          ticket::refusal);
+          ticket);
     } catch (IOException refused) {
       refused(refused.getMessage());
       PtySessionHost.reply(channel, PtyMessage.Err.of(refused));

@@ -34,6 +34,12 @@ public interface HostPty {
    */
   void admitWorkspace(String project, String workspace, PtyIdentity.Person who) throws IOException;
 
+  /**
+   * As {@link #admitWorkspace}, for reading its files: {@link PtyAdmission.Stopped} when it is not
+   * running, which nothing starts.
+   */
+  void admitFiles(String project, String workspace, PtyIdentity.Person who) throws IOException;
+
   /** As {@link #admitWorkspace}, then readies it: started when stopped, given its owner's. */
   void enterWorkspace(String project, String workspace, PtyIdentity.Person who) throws IOException;
 

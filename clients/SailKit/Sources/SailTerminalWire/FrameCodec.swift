@@ -1,6 +1,6 @@
 import SailAPI
 
-/// The `SAILPTY6` framing, byte for byte as the host's `PtyWire` writes it: a big-endian `Int32`
+/// The `SAILPTY7` framing, byte for byte as the host's `PtyWire` writes it: a big-endian `Int32`
 /// length, then the payload, a type byte and its fields. Integers are big-endian; strings and byte
 /// blobs are an `Int32` length and the bytes; a list is an `Int32` count and its entries.
 public enum FrameCodec {
@@ -104,6 +104,18 @@ private extension Frame {
         case .putAck: 35
         case .putStored: 36
         case .putRefused: 37
+        case .yieldWorkspace: 16
+        case .filesList: 40
+        case .filesStat: 41
+        case .filesRead: 42
+        case .filesCancel: 43
+        case .filesWatch: 44
+        case .filesListing: 50
+        case .filesEntry: 51
+        case .filesData: 52
+        case .filesChanged: 53
+        case .filesTick: 54
+        case .filesRefused: 55
         }
     }
 
@@ -145,7 +157,20 @@ private extension Frame {
                 + [.count(page.sessions.count)] + page.sessions.flatMap(\.place)
         case let .refused(refusal):
             [.string(refusal.message), .count(refusal.remedy.count)] + refusal.remedy.flatMap(\.fields) + [.string(refusal.code)]
-        case .takeWrite, .detach, .replayEnd, .paused, .continued, .accepted: []
+        case let .yieldWorkspace(project, workspace, reason, record):
+            [.string(project), .string(workspace), .string(reason), .string(record)]
+        case let .filesList(id, path), let .filesStat(id, path): [.int32(id), .string(path)]
+        case let .filesRead(id, path, offset, length): [.int32(id), .string(path), .int64(offset), .int64(length)]
+        case let .filesCancel(id): [.int32(id)]
+        case let .filesWatch(paths): [.count(paths.count)] + paths.flatMap { [.string($0.path), .string($0.version)] }
+        case let .filesListing(listing):
+            [.int32(listing.id), .string(listing.version), .count(listing.entries.count)]
+                + listing.entries.flatMap(\.fields) + [.bool(listing.more), .bool(listing.truncated)]
+        case let .filesEntry(id, entry, version): [.int32(id)] + entry.fields + [.string(version)]
+        case let .filesData(id, version, bytes, eof): [.int32(id), .string(version), .blob(bytes), .bool(eof)]
+        case let .filesChanged(paths): [.strings(paths)]
+        case let .filesRefused(id, kind, message): [.int32(id), .string(kind.rawValue), .string(message)]
+        case .takeWrite, .detach, .replayEnd, .paused, .continued, .accepted, .filesTick: []
         }
     }
 }
@@ -169,6 +194,12 @@ private extension SessionInfo {
     var place: [Field] {
         [.string(project), .string(workspace), .string(opener), .int64(createdAtMillis), .string(endedReason)]
             + agent.fields
+    }
+}
+
+private extension FileEntry {
+    var fields: [Field] {
+        [.string(name), .string(kind.rawValue), .string(target.rawValue), .int64(size), .int64(mtimeNanos), .int32(mode)]
     }
 }
 
@@ -259,6 +290,26 @@ private struct Cursor {
         case 29: .sessions(try page())
         case 30: .accepted
         case 31: .refused(try refusal())
+        case 16: .yieldWorkspace(project: try string(), workspace: try string(), reason: try string(), record: try string())
+        case 40: .filesList(id: try int32(), path: try string())
+        case 41: .filesStat(id: try int32(), path: try string())
+        case 42: .filesRead(id: try int32(), path: try string(), offset: try int64(), length: try int64())
+        case 43: .filesCancel(id: try int32())
+        case 44:
+            .filesWatch(try list { (cursor: inout Cursor) throws(TerminalWireError) in
+                WatchedPath(path: try cursor.string(), version: try cursor.string())
+            })
+        case 50:
+            .filesListing(FileListing(
+                id: try int32(), version: try string(),
+                entries: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.entry() },
+                more: try bool(), truncated: try bool()
+            ))
+        case 51: .filesEntry(id: try int32(), entry: try entry(), version: try string())
+        case 52: .filesData(id: try int32(), version: try string(), bytes: try blob(), eof: try bool())
+        case 53: .filesChanged(paths: try strings())
+        case 54: .filesTick
+        case 55: .filesRefused(id: try int32(), kind: Open(rawValue: try string()), message: try string())
         case let other: throw .unknownType(other)
         }
     }
@@ -267,6 +318,13 @@ private struct Cursor {
         SessionCreate(
             session: try string(), command: try strings(), workingDirectory: try string(), project: try string(),
             room: try string(), size: try size(), workspace: try string(), agent: try agent()
+        )
+    }
+
+    private mutating func entry() throws(TerminalWireError) -> FileEntry {
+        FileEntry(
+            name: try string(), kind: Open(rawValue: try string()), target: Open(rawValue: try string()),
+            size: try int64(), mtimeNanos: try int64(), mode: try int32()
         )
     }
 
