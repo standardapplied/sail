@@ -110,11 +110,30 @@ final class FilesConnection {
    */
   static final class WorkspaceLock extends ReentrantLock {
     private final Object asking = new Object();
+    private final Runnable freed;
     private volatile String held;
     private boolean asked;
 
     WorkspaceLock() {
+      this(() -> {});
+    }
+
+    /**
+     * {@code freed} runs each time a holder lets go of the lock wholly: a save answers before it
+     * lets go, so its workspace's last connection may already be gone, and the host drops the lock
+     * then.
+     */
+    WorkspaceLock(Runnable freed) {
       super(true);
+      this.freed = freed;
+    }
+
+    @Override
+    public void unlock() {
+      super.unlock();
+      if (!isHeldByCurrentThread()) {
+        freed.run();
+      }
     }
 
     /** Whether a save's process that outlived its kill may still be writing in the workspace. */

@@ -1912,7 +1912,8 @@ public final class PtySessionHost implements AutoCloseable {
         throw new FilesFull(full);
       }
       var lock =
-          writeLocks.computeIfAbsent(instance, unused -> new FilesConnection.WorkspaceLock());
+          writeLocks.computeIfAbsent(
+              instance, unused -> new FilesConnection.WorkspaceLock(() -> dropLock(instance)));
       var changes =
           changeRuns.computeIfAbsent(
               instance,
@@ -2013,27 +2014,34 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   /**
-   * Drops {@code files}, closed, from those served. The workspace's write lock is the workspace's,
-   * not its connections': it is dropped with its last connection only while no save holds it or
-   * waits for it, so a save past its go keeps it, and every later connection shares it.
+   * Drops {@code files}, closed, from those served, with what only its workspace's connections
+   * keep.
    */
   private void unserve(Served files) {
     synchronized (served) {
       served.remove(files);
       var instance = files.project() + "-" + files.workspace();
+      dropLock(instance);
+      forgetChanges(instance);
+    }
+  }
+
+  /**
+   * Drops workspace {@code instance}'s write lock once no connection to it is left and no save
+   * holds it, waits for it or may still be writing in the workspace: as its last connection goes,
+   * or as the save that held it past that lets go. The lock is the workspace's, not its
+   * connections', so every connection to it meanwhile shares it.
+   */
+  private void dropLock(String instance) {
+    synchronized (served) {
       var lock = writeLocks.get(instance);
       if (lock != null
           && !lock.isLocked()
           && !lock.hasQueuedThreads()
           && !lock.stuck()
-          && served.stream()
-              .noneMatch(
-                  s ->
-                      s.project().equals(files.project())
-                          && s.workspace().equals(files.workspace()))) {
+          && served.stream().noneMatch(s -> (s.project() + "-" + s.workspace()).equals(instance))) {
         writeLocks.remove(instance);
       }
-      forgetChanges(instance);
     }
   }
 

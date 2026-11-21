@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedied;
@@ -1329,6 +1331,34 @@ class FilesHostTest {
       assertTrue(System.nanoTime() < gone, "the lock outlived the workspace's last connection");
       Thread.onSpinWait();
     }
+  }
+
+  /**
+   * A save that still holds the workspace's write lock as its last connection goes keeps the lock
+   * until it lets go, and the lock goes then: a save answers before it releases the lock, so a
+   * client may close on its answer before the save has let go.
+   */
+  @Test
+  void aLockHeldAsTheLastConnectionGoesGoesWithTheSaveThatHeldIt() throws Exception {
+    var mine = open("tok-mady");
+    var lock = host.writeLock("acme", "dock");
+    lock.lock();
+    try {
+      mine.close();
+      var unserved = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+      while (host.changeRuns("acme", "dock") != null) {
+        assertTrue(
+            System.nanoTime() < unserved, "the workspace's last connection was never dropped");
+        Thread.onSpinWait();
+      }
+      assertSame(
+          lock, host.writeLock("acme", "dock"), "a lock a save holds went with the connection");
+    } finally {
+      lock.unlock();
+    }
+    assertNull(
+        host.writeLock("acme", "dock"),
+        "the lock outlived the save that held it past the last connection");
   }
 
   /**
