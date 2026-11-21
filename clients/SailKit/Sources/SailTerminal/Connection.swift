@@ -6,7 +6,7 @@ import Synchronization
 /// `Hello` sent with the connection's token, the host's `Welcome` read). One thread reads it; any
 /// thread writes, a frame at a time, never interleaved; any thread may close it, which ends a
 /// read or a handshake in progress.
-final class Connection: Sendable {
+package final class Connection: Sendable {
     /// The most input one `Input` frame carries; longer input is split, in order.
     static let inputChunk = 64 * 1024
 
@@ -20,7 +20,7 @@ final class Connection: Sendable {
 
     /// A connection to `address`, made within `timeout` seconds; each later answer is waited for
     /// as long, until ``stream()``.
-    static func connect(to address: HostAddress, timeout: Int) throws(TerminalError) -> Connection {
+    package static func connect(to address: HostAddress, timeout: Int) throws(TerminalError) -> Connection {
         let socket = try Socket.connect(to: address, timeout: timeout)
         socket.setReadTimeout(seconds: timeout)
         return Connection(socket: socket)
@@ -29,7 +29,7 @@ final class Connection: Sendable {
     /// Is admitted with `token`: the boot id of the run of the host that welcomed it. Refused in
     /// the host's words, or as another protocol when the magic differs, a peer that wrote its
     /// magic and left before this one's arrived included: what it wrote is read either way.
-    func admit(token: String) throws(TerminalError) -> String {
+    package func admit(token: String) throws(TerminalError) -> String {
         var unsent: TerminalError?
         do throws(TerminalError) {
             try socket.send(Handshake.magic)
@@ -68,7 +68,7 @@ final class Connection: Sendable {
         }
     }
 
-    func send(_ frame: Frame) throws(TerminalError) {
+    package func send(_ frame: Frame) throws(TerminalError) {
         let bytes = try Self.encoded(frame)
         try writes.withLock { (_: inout ()) throws(TerminalError) in try socket.send(bytes) }
     }
@@ -89,17 +89,17 @@ final class Connection: Sendable {
     }
 
     /// The next frame the host sent, nil at the end of the stream.
-    func next() throws(TerminalError) -> Frame? {
+    package func next() throws(TerminalError) -> Frame? {
         try reading.withLock { (reading: inout Reading) throws(TerminalError) in try reading.next(from: socket) }
     }
 
     /// From now on a read waits as long as the stream is quiet: keepalive finds a dead peer.
-    func stream() {
+    package func stream() {
         socket.setReadTimeout(seconds: nil)
     }
 
     /// Ends the connection; its reader sees the end of the stream.
-    func close() {
+    package func close() {
         socket.shutdown()
     }
 

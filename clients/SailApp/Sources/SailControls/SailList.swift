@@ -58,10 +58,12 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         public let full: Bool
         /// A view after its note among its actions (a spinner).
         public let accessory: NSView?
+        /// Words among the rows that cannot be chosen (a folder's refusal in a tree): the keys pass it.
+        public let inert: Bool
 
         public init(
             id: String, name: String, voice: String, content: @autoclosure @escaping @MainActor () -> NSView, actions: [Action] = [], note: String? = nil, height: Double? = nil,
-            paint: RowPaint? = nil, full: Bool = false, accessory: NSView? = nil
+            paint: RowPaint? = nil, full: Bool = false, accessory: NSView? = nil, inert: Bool = false
         ) {
             self.id = id
             self.name = name
@@ -73,6 +75,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             self.paint = paint
             self.full = full
             self.accessory = accessory
+            self.inert = inert
         }
     }
 
@@ -139,6 +142,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         didSet { if barInset != oldValue { needsDisplay = true; enumerateAvailableRowViews { row, _ in row.needsDisplay = true } } }
     }
     public var onChoose: @MainActor (String?) -> Void = { _ in }
+    /// A key the list's owner takes before the list does (a tree's → and ←): true, taken.
+    package var onKey: (@MainActor (NSEvent) -> Bool)?
     private let mono: LabelFont
 
     /// The rows. A new set keeps the chosen item chosen by its id wherever it now is, and tells
@@ -239,7 +244,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
 
     /// Return, Home, End, or an action's key on the chosen row; false when the key is none of them.
     func act(on event: NSEvent) -> Bool {
-        let items = entries.indices.filter { item(at: $0) != nil }
+        if onKey?(event) == true { return true }
+        let items = entries.indices.filter { item(at: $0).map { !$0.inert } ?? false }
         switch event.keyCode {
         case 115, 119:
             guard let row = event.keyCode == 115 ? items.first : items.last else { return false }
@@ -271,7 +277,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     }
 
     public func tableView(_: NSTableView, shouldSelectRow row: Int) -> Bool {
-        item(at: row) != nil
+        item(at: row).map { !$0.inert } ?? false
     }
 
     public func tableView(_: NSTableView, heightOfRow row: Int) -> CGFloat {

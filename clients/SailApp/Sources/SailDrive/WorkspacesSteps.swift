@@ -172,10 +172,12 @@ actor GoldenDesk: Transport {
     /// that and nothing else.
     static func ticketRequest(_ request: HTTPRequest) -> TicketRequest {
         let asked = (request.body.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
-        guard asked["action"] as? String == "attach" else {
-            return .open(project: asked["project"] as? String ?? "", workspace: asked["workspace"] as? String ?? "")
+        let project = asked["project"] as? String ?? "", workspace = asked["workspace"] as? String ?? ""
+        switch asked["action"] as? String {
+        case "attach": return .attach(session: asked["session"] as? String ?? "")
+        case "files": return .files(project: project, workspace: workspace)
+        default: return .open(project: project, workspace: workspace)
         }
-        return .attach(session: asked["session"] as? String ?? "")
     }
 
     func open(_ request: HTTPRequest) throws(SailError) -> HTTPStream {
@@ -193,6 +195,7 @@ extension Driver {
     }
 
     func performWorkspaces(_ step: Step) async -> (Bool, String)? {
+        if let files = await performFiles(step) { return files }
         let pane = shell.workspaces
         if let pair = step.golden {
             guard pair.count == 2 || pair.count == 3, let seconds = Int(pair.count == 3 ? pair[2] : "0") else {
@@ -527,7 +530,7 @@ extension Driver {
     /// a trackpad's are, sent through the window at the view's middle as a person's are, so the
     /// window's hit-testing routes them. Where AppKit gives the event no window (one made from a
     /// `CGEvent` may carry none), it is handed to the scroll view, and the result says so.
-    private func turnWheel(over view: NSScrollView, to fraction: Double) async -> (Bool, String) {
+    func turnWheel(over view: NSScrollView, to fraction: Double) async -> (Bool, String) {
         guard let window = view.window, let document = view.documentView else { return (false, "the scroll view is not in a window") }
         let room = Double(document.frame.height) - Double(view.contentSize.height)
         guard room > 0 else { return (false, "nothing to scroll: the rows are \(document.frame.height) pt in \(view.contentSize.height) pt") }
@@ -567,7 +570,7 @@ extension Driver {
     }
 
     /// Clicks the row of `id` in `list` near its leading edge, clear of the actions at its end.
-    private func clickRow(_ id: String, in list: SailList) async -> Bool {
+    func clickRow(_ id: String, in list: SailList) async -> Bool {
         list.layoutSubtreeIfNeeded()
         guard let row = Self.row(id, in: list) else { return false }
         let rect = list.rect(ofRow: row)

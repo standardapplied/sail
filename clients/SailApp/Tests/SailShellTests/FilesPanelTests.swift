@@ -1,0 +1,224 @@
+import AppKit
+import Foundation
+import SailAPI
+import SailControls
+import SailFiles
+import SailKitTestSupport
+import SailLook
+@testable import SailShell
+import SailTerminal
+import SailTerminalWire
+import SailWorkbench
+import Testing
+
+/// A workspace's files panel: in the workspace's tab at its leading edge (⌃⌘S, one View item that
+/// says what it will do in front), a plain tree the workspace's files fill and follow over the
+/// runner's door, the one quiet line only when the tree is not the workspace's live truth, and
+/// nothing redrawn by a tick that changes nothing.
+@MainActor @Suite struct FilesPanelTests {
+    static let root = FileTree.root
+
+    static func file(_ name: String) -> FileEntry {
+        FileEntry(name: name, kind: .known(.file), target: .known(.none), size: 1, mtimeNanos: 0, mode: 0o644)
+    }
+
+    static func folder(_ name: String) -> FileEntry {
+        FileEntry(name: name, kind: .known(.folder), target: .known(.none), size: 0, mtimeNanos: 0, mode: 0o755)
+    }
+
+    static func key(_ code: UInt16) throws -> NSEvent {
+        let scalar: UInt16 = switch code {
+        case 123: UInt16(NSLeftArrowFunctionKey)
+        case 124: UInt16(NSRightArrowFunctionKey)
+        case 125: UInt16(NSDownArrowFunctionKey)
+        default: 0x20
+        }
+        let characters = String(Character(try #require(UnicodeScalar(scalar))))
+        return try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: code == 49 ? [] : [.function, .numericPad], timestamp: 0, windowNumber: 0, context: nil,
+            characters: characters, charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code
+        ))
+    }
+
+    /// A shell whose This Mac section holds one tab in workspace dock of harbor, its tickets the
+    /// door's, signed in as uday: its terminal never asked for, its files panel's ready to be.
+    /// Not shown through the rail, whose first showing restores this Mac's tabs in place of these.
+    static func shell(_ door: FakeRunnerDoor, look: Look = .light, width: Double = 1180) throws -> (ShellApp, WorkbenchView) {
+        let shell = try WorkbenchLookTests.shell(look)
+        let bench = shell.thisMac
+        let tickets = DoorTickets(door)
+        bench.signedIn = { ("uday", tickets) }
+        let id = bench.model.newTab(session: "uday-dock-1", place: .workspace(project: "harbor", name: "dock"))
+        bench.makeView(try #require(bench.model.panes[id]), start: .attach, points: 15)
+        bench.setFrameSize(NSSize(width: width, height: 600))
+        bench.apply()
+        return (shell, bench)
+    }
+
+    static func panel(_ bench: WorkbenchView) -> FilesPanel? {
+        bench.model.selectedTab.flatMap { bench.tabViews[$0.id]?.files }
+    }
+
+    static func command(_ shell: ShellApp) -> (title: String, enabled: Bool, reason: String?) {
+        let item = NSMenuItem(title: "", action: #selector(ShellApp.toggleSidebar(_:)), keyEquivalent: "s")
+        let enabled = shell.validateMenuItem(item)
+        return (item.title, enabled, item.toolTip)
+    }
+
+    /// The one View item says what ⌃⌘S will do in front, and is off, with the true reason, where
+    /// it does nothing.
+    @Test func theViewItemSaysWhatItWillDoInEachPlace() throws {
+        let door = try FakeRunnerDoor(person: "uday")
+        let (shell, bench) = try Self.shell(door)
+        shell.select(.thisMac)
+        #expect(Self.command(shell) == ("Show Files", true, nil))
+        shell.toggleSidebar(nil)
+        #expect(Self.command(shell) == ("Hide Files", true, nil), "the item does not say it will hide the files")
+        shell.toggleSidebar(nil)
+        #expect(Self.command(shell) == ("Show Files", true, nil))
+        _ = bench.model.newTab(session: "mac-1", place: .thisMac(folder: "/"))
+        bench.apply()
+        #expect(Self.command(shell) == ("Show Files", false, "Files are for workspaces; this tab is this Mac's."))
+        shell.select(.workspaces)
+        let sidebar = Self.command(shell)
+        #expect(sidebar.title == (shell.workspaces.panel.isHidden ? "Show Sidebar" : "Hide Sidebar") && sidebar.enabled == shell.workspaces.sidebarCommand.enabled)
+        shell.select(.account)
+        #expect(Self.command(shell) == ("Show Sidebar", false, "The account has no sidebar."))
+    }
+
+    /// The panel stands 236 pt at the tab's leading edge and the terminals take the rest; under
+    /// the terminals' least room beside it, at the least window, it floats over them with its shadow.
+    @Test(arguments: [480.0, 560, 720, 1180, 1600])
+    func thePanelStandsAtTheLeadingEdgeAtEveryWidth(_ width: Double) throws {
+        #expect(Double(ShellApp.leastFrame.width) == 480, "the least window moved: the widths here start at it")
+        for direction in [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft] {
+            let door = try FakeRunnerDoor(person: "uday")
+            let (shell, bench) = try Self.shell(door, width: width)
+            bench.userInterfaceLayoutDirection = direction
+            bench.toggleFiles(nil)
+            let panel = try #require(Self.panel(bench), "no panel at \(width)")
+            let tab = try #require(panel.superview)
+            let box = tab.convert(panel.frame, to: bench)
+            let rtl = direction == .rightToLeft
+            #expect(near(Double(box.width), FilesPanel.width) && near(Double(box.height), 600), "\(width) \(direction): \(box)")
+            #expect(near(Double(rtl ? box.maxX : box.minX), rtl ? width : 0), "\(width) \(direction): not at the leading edge: \(box)")
+            let floating = width < FilesPanel.width + WorkbenchView.filesBeside
+            #expect(panel.floating == floating && panel.shadowView.isHidden == !floating, "\(width): floating \(panel.floating)")
+            if let pane = bench.focused {
+                let terminal = pane.superview?.convert(pane.frame, to: bench) ?? .zero
+                let room = floating ? width : width - FilesPanel.width
+                #expect(near(Double(terminal.width), room), "\(width) \(direction): the terminals have \(terminal.width), not \(room)")
+                if !floating {
+                    #expect(near(Double(rtl ? terminal.minX : terminal.maxX), rtl ? 0 : width) && !terminal.intersects(box.insetBy(dx: 1, dy: 1)), "\(width): the terminals under the panel")
+                }
+            }
+            bench.toggleFiles(nil)
+            _ = shell
+            #expect(panel.isHidden && tab.bounds.origin == .zero, "\(width): put away, the panel left the terminals' room moved")
+        }
+    }
+
+    /// The tree is the workspace's: listed over the door, folders first, and when an entry appears in
+    /// a shown folder it is listed again and the new entry is marked new.
+    @Test func theTreeIsTheWorkspacesAndFollowsIt() async throws {
+        let door = try FakeRunnerDoor(person: "uday")
+        door.setFolder(Self.root, [Self.file("README.md"), Self.folder("src")])
+        let (shell, bench) = try Self.shell(door)
+        bench.toggleFiles(nil)
+        let panel = try #require(Self.panel(bench))
+        #expect(await RunnerTabTests.until(10) { panel.list.numberOfRows == 2 }, "rows: \(panel.list.numberOfRows), line: \(panel.shownLine?.words ?? "none")")
+        #expect(panel.tree.rows.map(\.name) == ["src", "README.md"])
+        door.setFolder(Self.root, [Self.file("README.md"), Self.folder("src"), Self.file("tide.ts")])
+        #expect(await RunnerTabTests.until(10) { panel.list.numberOfRows == 3 }, "the new entry never came")
+        let cell = try #require(panel.list.view(atColumn: 0, row: 2, makeIfNecessary: true).flatMap(Self.treeCell))
+        #expect(cell.row.name == "tide.ts" && cell.new, "the new entry is not marked new")
+        #expect(panel.shownLine == nil, "a live tree says \(panel.shownLine?.words ?? "")")
+        bench.toggleFiles(nil)
+        _ = shell
+    }
+
+    static func treeCell(_ view: NSView) -> TreeRowCell? {
+        (view as? TreeRowCell) ?? view.subviews.lazy.compactMap(treeCell).first
+    }
+
+    /// The panel on its own, its connection played by hand: the tree admitted at time 0 and the root
+    /// listed as `entries`.
+    static func played(_ entries: [FileEntry], look: Look = .light, now: @escaping @MainActor () -> Double = { 0 }) throws -> FilesPanel {
+        let mono = try LabelFont(directory: LookTests.fonts)
+        let panel = FilesPanel(project: "harbor", workspace: "dock", tickets: nil, look: look, mono: mono, clock: now)
+        panel.frame = NSRect(x: 0, y: 0, width: FilesPanel.width, height: 600)
+        panel.heard(.phase(.connected))
+        panel.heard(.admitted)
+        panel.heard(.frame(.filesListing(FileListing(id: 1, version: "v1", entries: entries, more: false, truncated: false))))
+        panel.layoutSubtreeIfNeeded()
+        return panel
+    }
+
+    /// → opens a folder and ← shuts it, Space too; ↓ moves among rows as any list's.
+    @Test func theArrowsOpenAndShutAFolder() throws {
+        let panel = try Self.played([Self.folder("src"), Self.file("README.md")])
+        panel.list.choose(Self.root + "/src")
+        panel.list.keyDown(with: try Self.key(124))
+        #expect(panel.tree.expanded.contains(Self.root + "/src"), "→ did not open the folder")
+        panel.heard(.frame(.filesListing(FileListing(id: 2, version: "s1", entries: [Self.file("main.ts")], more: false, truncated: false))))
+        #expect(panel.list.numberOfRows == 3)
+        panel.list.keyDown(with: try Self.key(124))
+        #expect(panel.list.chosen == Self.root + "/src/main.ts", "→ on an open folder did not go into it")
+        panel.list.keyDown(with: try Self.key(123))
+        #expect(panel.list.chosen == Self.root + "/src", "← did not go to the folder holding the row")
+        panel.list.keyDown(with: try Self.key(123))
+        #expect(!panel.tree.expanded.contains(Self.root + "/src") && panel.list.numberOfRows == 2, "← did not shut the folder")
+        panel.list.keyDown(with: try Self.key(49))
+        #expect(panel.tree.expanded.contains(Self.root + "/src"), "Space did not open the folder")
+    }
+
+    /// Calm: a tick, or a beat with nothing changed, makes no row and draws no line.
+    @Test func aTickThatChangesNothingTouchesNoView() throws {
+        let panel = try Self.played((0 ..< 40).map { Self.file("berth-\($0).json") })
+        let sets = panel.rowSets, line = panel.shownLine
+        #expect(sets == 1)
+        for _ in 0 ..< 10 {
+            panel.heard(.frame(.filesTick))
+            panel.refresh()
+        }
+        #expect(panel.rowSets == sets && panel.shownLine == line, "the rows were set \(panel.rowSets - sets) times for ticks")
+    }
+
+    /// Each state is one quiet line at the top, in the design's words, gone when it no longer applies.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func eachStateIsOneQuietLine(_ name: String, _ look: Look) throws {
+        var now = 0.0
+        let panel = try Self.played([Self.file("a.txt")], look: look) { now }
+        #expect(panel.line.isHidden, "\(name): a live tree has a line")
+        now = 2.5
+        panel.refresh()
+        #expect(panel.shownLine?.words.hasPrefix("Not live since ") == true && panel.scroll.alphaValue < 1, "\(name): \(panel.shownLine?.words ?? "no line")")
+        panel.heard(.frame(.filesTick))
+        #expect(panel.line.isHidden && panel.scroll.alphaValue == 1, "\(name): the tick did not make it live again")
+        panel.heard(.phase(.unreachable("refused")))
+        #expect(panel.shownLine?.words == "Can't reach the files." && panel.line.button.title == "Try Again" && !panel.line.button.isHidden)
+        panel.heard(.phase(.stopped("Workspace dock of harbor is stopped.")))
+        #expect(panel.shownLine?.words == "dock is stopped." && panel.line.button.title == "Start", "\(name): stopped offers no Start")
+        panel.layoutSubtreeIfNeeded()
+        #expect(panel.line.frame.minY >= FilesLineView.top && panel.scroll.frame.minY >= panel.line.frame.maxY, "\(name): the tree is under the line")
+        let empty = try Self.played([], look: look)
+        #expect(empty.shownLine?.words == "~/workspace is empty.")
+    }
+
+    /// The rows as the third pass draws them: 24 pt, 12 pt further in each level, the disclosure on
+    /// folders only, semibold while chosen, with the bar and no fill.
+    @Test func theRowsAreTheMockups() throws {
+        let panel = try Self.played([Self.folder("src"), Self.file("README.md")])
+        panel.toggle(Self.root + "/src")
+        panel.heard(.frame(.filesListing(FileListing(id: 2, version: "s1", entries: [Self.file("main.ts")], more: false, truncated: false))))
+        panel.layoutSubtreeIfNeeded()
+        #expect((0 ..< panel.list.numberOfRows).allSatisfy { near(Double(panel.list.rect(ofRow: $0).height), 24) })
+        let cells = try (0 ..< 3).map { try #require(panel.list.view(atColumn: 0, row: $0, makeIfNecessary: true).flatMap(Self.treeCell)) }
+        #expect(cells.map(\.row.name) == ["src", "main.ts", "README.md"])
+        #expect(near(Double(cells[1].disclosure.minX) - Double(cells[0].disclosure.minX), RowStyle.indent), "a level is not 12 pt further in")
+        panel.list.choose(Self.root + "/README.md")
+        let chosen = try #require(panel.list.row(Self.root + "/README.md"))
+        #expect(chosen.paint.bar, "the chosen row has no bar")
+        #expect(cells[2].strong && !cells[0].strong && !cells[1].strong, "only the chosen name is semibold")
+    }
+}

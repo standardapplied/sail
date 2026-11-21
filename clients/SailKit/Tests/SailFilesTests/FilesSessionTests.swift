@@ -1,0 +1,160 @@
+import Foundation
+import SailAPI
+@testable import SailFiles
+import SailKitTestSupport
+@testable import SailTerminal
+import SailTerminalWire
+import Synchronization
+import Testing
+
+/// A workspace's files connection against a played runner door: admitted through a files ticket,
+/// every frame handed on, ended in the host's words when the workspace stops, tried again after a
+/// drop with a new ticket, and never started when the API says the workspace is stopped.
+@Suite(.timeLimit(.minutes(1))) struct FilesSessionTests {
+    /// Tickets from `door`, or refusals as the API words them.
+    final class Desk: TicketSource {
+        let door: FakeRunnerDoor
+        private let refusing = Mutex<Refusal?>(nil)
+        private let asked = Mutex<[TicketRequest]>([])
+
+        init(_ door: FakeRunnerDoor) {
+            self.door = door
+        }
+
+        func refuse(_ refusal: Refusal?) {
+            refusing.withLock { $0 = refusal }
+        }
+
+        var requests: [TicketRequest] {
+            asked.withLock { $0 }
+        }
+
+        func ticket(for request: TicketRequest) async throws(SailError) -> TerminalTicket {
+            asked.withLock { $0.append(request) }
+            if let refusal = refusing.withLock({ $0 }) { throw .refused(refusal) }
+            return door.issue(for: request)
+        }
+    }
+
+    /// The events of `session` read into a list a test waits on.
+    final class Heard: Sendable {
+        private let events = Mutex<[FilesSession.Event]>([])
+        private let changed = Alarm { try await Task.sleep(for: $0) }
+
+        init(_ session: FilesSession) {
+            Task { for await event in session.events { self.heard(event) } }
+        }
+
+        private func heard(_ event: FilesSession.Event) {
+            events.withLock { $0.append(event) }
+            changed.ring()
+        }
+
+        var phases: [FilesSession.Phase] {
+            events.withLock { $0.compactMap { if case let .phase(phase) = $0 { phase } else { nil } } }
+        }
+
+        var admissions: Int {
+            events.withLock { $0.count { if case .admitted = $0 { true } else { false } } }
+        }
+
+        var frames: [Frame] {
+            events.withLock { $0.compactMap { if case let .frame(frame) = $0 { frame } else { nil } } }
+        }
+
+        /// Whether `condition` holds within 10 s, checked at each event.
+        func until(_ condition: @Sendable () -> Bool) async -> Bool {
+            let end = ContinuousClock.now + .seconds(10)
+            while !condition() {
+                let left = end - ContinuousClock.now
+                guard left > .zero else { return false }
+                await changed.wait(left)
+            }
+            return true
+        }
+    }
+
+    static let waits = ReconnectWaits(waits: [.seconds(1), .seconds(2)], patience: .seconds(3))
+
+    /// A session on `desk` whose waits pass at once.
+    static func session(_ desk: Desk) -> FilesSession {
+        FilesSession(project: "harbor", workspace: "dock", door: .runner(desk), waits: waits, timeout: 5) { _ in try Task.checkCancellation() }
+    }
+
+    static func refusal(_ code: ErrorCode, _ message: String) -> Refusal {
+        Refusal(code: .known(code), message: message)
+    }
+
+    @Test func admittedItHandsOnTheListingsAndTicks() async throws {
+        let door = try FakeRunnerDoor()
+        door.setFolder(FileTree.root, [FileTreeTests.file("README.md")])
+        let desk = Desk(door)
+        let session = Self.session(desk)
+        let heard = Heard(session)
+        session.start()
+        defer { session.close() }
+        #expect(await heard.until { heard.admissions == 1 }, "never admitted: \(heard.phases)")
+        #expect(desk.requests == [.files(project: "harbor", workspace: "dock")])
+        session.send([.filesList(id: 1, path: FileTree.root)])
+        #expect(await heard.until { heard.frames.contains { if case .filesListing = $0 { true } else { false } } }, "no listing: \(heard.frames)")
+        door.tickFiles()
+        #expect(await heard.until { heard.frames.contains(.filesTick) }, "the tick was not handed on")
+        #expect(heard.phases.prefix(2) == [.connecting, .connected])
+    }
+
+    @Test func aStopEndsItInTheHostsWordsAndNothingTriesAgain() async throws {
+        let door = try FakeRunnerDoor()
+        let desk = Desk(door)
+        let session = Self.session(desk)
+        let heard = Heard(session)
+        session.start()
+        defer { session.close() }
+        #expect(await heard.until { heard.admissions == 1 })
+        door.endFiles(saying: "Workspace dock of harbor is being stopped by ana.", code: "workspace_stopped")
+        #expect(await heard.until { heard.phases.last == .stopped("Workspace dock of harbor is being stopped by ana.") }, "\(heard.phases)")
+        #expect(desk.requests.count == 1 && heard.admissions == 1, "a stopped workspace was tried again")
+    }
+
+    @Test func aDropIsTriedAgainWithANewTicket() async throws {
+        let door = try FakeRunnerDoor()
+        let desk = Desk(door)
+        let session = Self.session(desk)
+        let heard = Heard(session)
+        session.start()
+        defer { session.close() }
+        #expect(await heard.until { heard.admissions == 1 })
+        door.dropFiles()
+        #expect(await heard.until { heard.admissions == 2 }, "the drop was not ridden out: \(heard.phases)")
+        #expect(desk.requests.count == 2 && heard.phases.contains { if case .reconnecting = $0 { true } else { false } })
+    }
+
+    @Test func aStoppedWorkspaceIsNeverStartedByLooking() async throws {
+        let door = try FakeRunnerDoor()
+        let desk = Desk(door)
+        desk.refuse(Self.refusal(.workspaceStopped, "dock is stopped."))
+        let session = Self.session(desk)
+        let heard = Heard(session)
+        session.start()
+        defer { session.close() }
+        #expect(await heard.until { heard.phases.last == .stopped("dock is stopped.") }, "\(heard.phases)")
+        #expect(desk.requests.count == 1, "a stopped workspace was asked for again")
+        desk.refuse(nil)
+        session.reconnectNow()
+        #expect(await heard.until { heard.admissions == 1 }, "Start, then trying again, did not connect")
+    }
+
+    @Test func pastItsPatienceItStopsTryingUntilAsked() async throws {
+        let door = try FakeRunnerDoor()
+        let desk = Desk(door)
+        desk.refuse(Self.refusal(.terminalUnavailable, "The runner's terminal host is busy."))
+        let session = Self.session(desk)
+        let heard = Heard(session)
+        session.start()
+        defer { session.close() }
+        #expect(await heard.until { heard.phases.contains { if case .unreachable = $0 { true } else { false } } }, "\(heard.phases)")
+        #expect(desk.requests.count == 3, "not one attempt and one per wait before it stopped: \(desk.requests.count)")
+        desk.refuse(nil)
+        session.reconnectNow()
+        #expect(await heard.until { heard.admissions == 1 })
+    }
+}

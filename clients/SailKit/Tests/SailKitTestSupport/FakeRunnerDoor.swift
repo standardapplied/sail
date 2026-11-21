@@ -35,6 +35,10 @@ public final class FakeRunnerDoor: Sendable {
     private let state = Mutex(State())
     private let creates = Mutex(Creates())
     private let killing = Mutex(Killing())
+    private let files = Mutex(Files())
+    /// One frame written at a time on a connection, whichever thread writes it: a watch's tick never
+    /// lands inside a listing.
+    private let writing = Mutex<[Int32: NSLock]>([:])
 
     private struct State {
         var issued = 0
@@ -62,6 +66,26 @@ public final class FakeRunnerDoor: Sendable {
         var losing = false
         var received = 0
         var held: [DispatchSemaphore] = []
+    }
+
+    /// A files ticket's workspace, played: its folders by path, each with its entries and version, and
+    /// what each files connection watches.
+    private struct Files {
+        var folders: [String: Folder] = [:]
+        var refusals: [String: (kind: FileRefusal, message: String)] = [:]
+        var versions = 0
+        var watched: [Int32: [WatchedPath]] = [:]
+        var holding = false
+        var held: [DispatchSemaphore] = []
+        var ticking = true
+        var listed: [String] = []
+        var connections: [Int32] = []
+    }
+
+    struct Folder {
+        var entries: [FileEntry]
+        var version: String
+        var truncated: Bool
     }
 
     /// What this Mac's host does with the Kills it receives.
@@ -109,6 +133,148 @@ public final class FakeRunnerDoor: Sendable {
             return ticket
         }
         return TerminalTicket(ticket: ticket, address: address, expiresAt: Date().addingTimeInterval(30))
+    }
+
+    // MARK: Files
+
+    /// Folder `path` of a files ticket's workspace now holds `entries` (more than 50,000 when
+    /// `truncated`), at a new version: each files connection watching it is told it changed.
+    public func setFolder(_ path: String, _ entries: [FileEntry], truncated: Bool = false) {
+        files.withLock { files in
+            files.versions += 1
+            files.folders[path] = Folder(entries: entries, version: "v\(files.versions)", truncated: truncated)
+            files.refusals[path] = nil
+            tellWatchers(of: path, in: files)
+        }
+    }
+
+    /// Folder `path` is gone: a listing of it is refused as not found, and its watchers are told.
+    public func removeFolder(_ path: String) {
+        files.withLock { files in
+            files.folders[path] = nil
+            tellWatchers(of: path, in: files)
+        }
+    }
+
+    /// Under the files lock, as a socket leaves the list by.
+    private func tellWatchers(of path: String, in files: Files) {
+        files.watched.filter { $0.value.contains { $0.path == path } }.forEach { answer(.filesChanged(paths: [path]), on: $0.key) }
+    }
+
+    /// A listing of folder `path` is refused, in `message`.
+    public func refuseFolder(_ path: String, _ kind: FileRefusal, saying message: String) {
+        files.withLock { $0.refusals[path] = (kind, message) }
+    }
+
+    /// From now on a listing waits, unanswered, until ``releaseListings()``.
+    public func holdListings() {
+        files.withLock { $0.holding = true }
+    }
+
+    public func releaseListings() {
+        let held = files.withLock { files in
+            files.holding = false
+            defer { files.held = [] }
+            return files.held
+        }
+        held.forEach { $0.signal() }
+    }
+
+    /// Whether each files connection's watch says it is live each second.
+    public func tick(_ ticking: Bool) {
+        files.withLock { $0.ticking = ticking }
+    }
+
+    /// Each files connection's watch says it is live now.
+    public func tickFiles() {
+        files.withLock { $0.connections.forEach { answer(.filesTick, on: $0) } }
+    }
+
+    /// The folders listed so far, in order.
+    public var listed: [String] {
+        files.withLock { $0.listed }
+    }
+
+    /// What each live files connection watches.
+    public var watched: [[WatchedPath]] {
+        files.withLock { Array($0.watched.values) }
+    }
+
+    /// Ends every files connection as the host ends one: its refusal with `code` (a stop's
+    /// `workspace_stopped`, say), then the connection closes.
+    public func endFiles(saying message: String, code: String) {
+        files.withLock { files in
+            files.connections.forEach { connection in
+                answer(.refused(HostRefusal(message: message, remedy: [], code: code)), on: connection)
+                shutdown(connection, Int32(SHUT_RDWR))
+            }
+        }
+    }
+
+    /// Drops every files connection with no word, as a network gone does. Under the lock a
+    /// connection leaves the list by, so a socket closed and its number reused is never reached.
+    public func dropFiles() {
+        files.withLock { $0.connections.forEach { shutdown($0, Int32(SHUT_RDWR)) } }
+    }
+
+    /// One files ticket's connection: its listings and its watch, a tick each second while it lives.
+    /// It is a files connection (``dropFiles()`` reaches it) before its welcome, so a test that acts
+    /// on the admission finds it.
+    private func filesServed(_ connection: Int32, _ ticket: TicketRequest) {
+        files.withLock { $0.connections.append(connection) }
+        answer(.welcome(hostBootID: "door-1"), on: connection)
+        let ticks = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "files.ticks"))
+        ticks.schedule(deadline: .now() + 1, repeating: 1)
+        ticks.setEventHandler { [self] in
+            if files.withLock({ $0.ticking }) { answer(.filesTick, on: connection) }
+        }
+        let stopped = DispatchSemaphore(value: 0)
+        ticks.setCancelHandler { stopped.signal() }
+        ticks.resume()
+        defer {
+            ticks.cancel()
+            stopped.wait()
+            files.withLock { files in
+                files.connections.removeAll { $0 == connection }
+                files.watched[connection] = nil
+            }
+        }
+        while let frame = frame(on: connection) {
+            if let outside = Self.refusal(of: frame, under: ticket, opened: nil) {
+                return answer(.refused(HostRefusal(message: outside, remedy: [])), on: connection)
+            }
+            switch frame {
+            case let .filesList(id, path):
+                let wait = files.withLock { files -> DispatchSemaphore? in
+                    files.listed.append(path)
+                    guard files.holding else { return nil }
+                    let semaphore = DispatchSemaphore(value: 0)
+                    files.held.append(semaphore)
+                    return semaphore
+                }
+                wait?.wait()
+                let (folder, refusal) = files.withLock { ($0.folders[path], $0.refusals[path]) }
+                if let refusal {
+                    answer(.filesRefused(id: id, kind: .known(refusal.kind), message: refusal.message), on: connection)
+                } else if let folder {
+                    let pages = stride(from: 0, to: max(folder.entries.count, 1), by: 5000).map { Array(folder.entries[$0 ..< min($0 + 5000, folder.entries.count)]) }
+                    for (index, page) in pages.enumerated() {
+                        let last = index == pages.count - 1
+                        answer(.filesListing(FileListing(id: id, version: folder.version, entries: page, more: !last, truncated: last && folder.truncated)), on: connection)
+                    }
+                } else {
+                    answer(.filesRefused(id: id, kind: .known(.notFound), message: "No folder at \(path)."), on: connection)
+                }
+            case let .filesWatch(paths):
+                let stale = files.withLock { files -> [String] in
+                    files.watched[connection] = paths
+                    return paths.filter { files.folders[$0.path]?.version != $0.version && !$0.version.isEmpty }.map(\.path)
+                }
+                if !stale.isEmpty { answer(.filesChanged(paths: stale), on: connection) }
+            default:
+                break
+            }
+        }
     }
 
     /// From now on a `Create` is made and its answer lost: the door hangs up before it answers, as a
@@ -317,6 +483,7 @@ public final class FakeRunnerDoor: Sendable {
         }
         switch admit(token) {
         case let .success(ticket):
+            if case .files = ticket { return filesServed(connection, ticket) }
             answer(.welcome(hostBootID: "door-1"), on: connection)
             attached(connection, number, ticket)
         case let .failure(refused):
@@ -461,6 +628,13 @@ public final class FakeRunnerDoor: Sendable {
         let own: String? = switch ticket {
         case .open: opened
         case let .attach(session): session
+        case .files: nil
+        }
+        if case .files = ticket {
+            switch frame {
+            case .filesList, .filesStat, .filesRead, .filesCancel, .filesWatch: return nil
+            default: return "This connection's ticket is to read files, and it admits nothing else; ask the API for a ticket for that."
+            }
         }
         let covered = switch frame {
         case let .create(create):
@@ -473,6 +647,7 @@ public final class FakeRunnerDoor: Sendable {
         let scope = switch ticket {
         case let .open(project, workspace): workspace.isEmpty ? "open a session in project '\(project)'" : "open a session in workspace '\(workspace)' of project '\(project)'"
         case let .attach(session): "attach to session '\(session)'"
+        case let .files(project, workspace): "read the files of workspace '\(workspace)' of project '\(project)'"
         }
         return "This connection's ticket is to \(scope), and it admits nothing else; ask the API for a ticket for that."
     }
@@ -506,7 +681,20 @@ public final class FakeRunnerDoor: Sendable {
         #else
         let flags = Int32(MSG_NOSIGNAL)
         #endif
-        _ = bytes.withUnsafeBytes { send(connection, $0.baseAddress, $0.count, flags) }
+        let lock = writing.withLock { locks in
+            if let lock = locks[connection] { return lock }
+            let lock = NSLock()
+            locks[connection] = lock
+            return lock
+        }
+        lock.withLock {
+            var sent = 0
+            while sent < bytes.count {
+                let wrote = bytes.withUnsafeBytes { send(connection, $0.baseAddress! + sent, $0.count - sent, flags) }
+                guard wrote > 0 else { return }
+                sent += wrote
+            }
+        }
     }
 }
 

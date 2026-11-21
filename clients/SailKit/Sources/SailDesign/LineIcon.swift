@@ -3,6 +3,8 @@
 /// shows is the design's, not a system symbol.
 public enum LineIcon: String, CaseIterable, Sendable {
     case refresh, hammer, plus, more, info, warning, error, box, layers, cloudOff
+    /// A folder's disclosure: shut (pointing along the line, mirrored right to left) and open.
+    case right, down
 
     public static let side = 24.0, width = 1.75
 
@@ -50,6 +52,8 @@ public enum LineIcon: String, CaseIterable, Sendable {
                 .arc(Point(6.7, 14.9), radius: 3.61, from: 85.2, to: 265.2), .arc(Point(12.33, 12.23), radius: 6, from: -171.1, to: -21.8),
                 .arc(Point(17, 14.2), radius: 4.3, from: -77.9, to: 87.3), line((17.2, 18.5), (7, 18.5)), line((4, 4), (20, 20)),
             ]
+        case .right: return [line((9, 6), (15, 12), (9, 18))]
+        case .down: return [line((6, 9), (12, 15), (18, 9))]
         case .more: return [.dot(Point(5.5, 12), radius: 1.2), .dot(Point(12, 12), radius: 1.2), .dot(Point(18.5, 12), radius: 1.2)]
         }
     }

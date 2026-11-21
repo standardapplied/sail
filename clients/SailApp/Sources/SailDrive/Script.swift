@@ -275,6 +275,37 @@ struct Step: Decodable {
     var doorEnds: String?
     /// The focused terminal's banner button of this title pressed.
     var pressStatus: String?
+    /// The drive's runner door's workspace folder (a path under `/home/dev/workspace`, "" the root)
+    /// holds these entries from now on, a trailing "/" a folder, its watchers told; with
+    /// `filesCount`, that many files `berth-0000.json` on in its place.
+    var filesFolder: String?
+    var filesEntries: [String]?
+    var filesCount: Int?
+    /// A listing of this folder is refused as not permitted, in the workspace's words.
+    var filesRefuse: String?
+    /// The files panel shows this many rows, within `seconds` (10 by default).
+    var filesRows: Int?
+    /// The files panel's line says words starting with this ("" no line), within `seconds`.
+    var filesSays: String?
+    /// The entry of this name is marked new, within `seconds`.
+    var filesNew: String?
+    /// The files panel's row of this name clicked as a person clicks it.
+    var filesClick: String?
+    /// The files panel's line's button of this title clicked.
+    var filesButton: String?
+    /// The door holds every listing from now on (true) or answers them (false).
+    var filesHold: Bool?
+    /// The door's watch ticks each second (true) or falls silent (false).
+    var filesTicks: Bool?
+    /// The door ends every files connection with this record and code (`workspace_stopped`).
+    var filesEnd: [String]?
+    /// The door drops every files connection with no word.
+    var filesDrop: Bool?
+    /// The window in both looks, then right to left in both, saved as `window/<this>`.
+    var filesShot: String?
+    /// The files panel measured against the spec's figures: opening, a 5,000-entry listing,
+    /// scrolling it, a change, a burst of 2,000.
+    var filesBudgets: Bool?
     /// Sign Out pressed on the account, answered no further: what follows it asks.
     var signOutNow: Bool?
     /// A ticket was asked with these fields (`{"action": "open", "workspace": "dock"}`), within

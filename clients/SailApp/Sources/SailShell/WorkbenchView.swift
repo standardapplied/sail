@@ -30,13 +30,17 @@ public final class WorkbenchView: NSView {
     var onSignIn: @MainActor () -> Void = {}
     /// A runner tab in a workspace attached or went, so what counts its sessions counts again.
     var onRunnerTabs: @MainActor (_ project: String, _ name: String) -> Void = { _, _ in }
+    /// Starts a workspace for its files panel's Start, answering nil once started or what refused it.
+    var startWorkspace: @MainActor (_ project: String, _ name: String) async -> [String]? = { _, _ in ["No one is signed in."] }
 
     var look: Look {
         didSet { paint() }
     }
 
     private let fonts: TerminalFonts
-    private var tabViews: [TabID: TabView] = [:]
+    /// The files panels' words in mono, as every list's.
+    let labels: LabelFont
+    private(set) var tabViews: [TabID: TabView] = [:]
     private var shownSelected: TabID?
     private let banner: Card
     private let emptyLabel = NSTextField(labelWithString: "No terminal is open")
@@ -64,8 +68,9 @@ public final class WorkbenchView: NSView {
         try self.init(fonts: directory, host: host, look: look, defaults: defaults)
     }
 
-    /// Where the arrangement is kept: the app's own defaults, or a test's.
-    private let defaults: UserDefaults
+    /// Where the arrangement is kept, and which workspaces show their files: the app's own defaults,
+    /// or a test's.
+    let defaults: UserDefaults
 
     init(fonts directory: URL, host: LocalHost, look: Look, defaults: UserDefaults = .standard) throws(ShellError) {
         self.look = look
@@ -73,6 +78,7 @@ public final class WorkbenchView: NSView {
         self.defaults = defaults
         do {
             fonts = try TerminalFonts(directory: directory)
+            labels = try LabelFont(directory: directory)
         } catch {
             throw .resources("the terminal's fonts cannot be read: \(error)")
         }
@@ -181,14 +187,18 @@ public final class WorkbenchView: NSView {
         }
         endRenamesLeftBehind()
         for (id, view) in tabViews where !model.tabs.contains(where: { $0.id == id }) {
+            view.files?.close()
             view.removeFromSuperview()
             tabViews[id] = nil
         }
+        model.tabs.forEach { _ = tabView($0.id) }
+        prepareFiles()
         for tab in model.tabs {
             let view = tabView(tab.id)
             view.isHidden = tab.id != model.selected
             layout(tab, in: view)
         }
+        connectFiles()
         panes.values.forEach { $0.begin() }
         emptyLabel.isHidden = !model.tabs.isEmpty || !restored
         newTerminal.isHidden = emptyLabel.isHidden
@@ -244,7 +254,7 @@ public final class WorkbenchView: NSView {
 
     private func layout(_ tab: Tab, in view: TabView) {
         tabLayouts += 1
-        let frames = model.frames(of: tab.id, in: view.bounds.size, scale: scale)
+        let frames = model.frames(of: tab.id, in: placeFiles(of: tab, in: view), scale: scale)
         for id in tab.layout.leaves {
             guard let pane = panes[id] else { continue }
             pane.isHidden = frames.panes[id] == nil
@@ -771,6 +781,7 @@ public final class WorkbenchView: NSView {
         strip.look = look
         panes.values.forEach { $0.look = look }
         tabViews.values.forEach { $0.paint(look) }
+        tabViews.values.forEach { $0.files?.look = look }
     }
 }
 
@@ -790,6 +801,8 @@ extension WorkbenchView: NSMenuItemValidation {
 }
 
 final class TabView: NSView {
+    /// Its workspace's files panel, once shown.
+    var files: FilesPanel?
     var onDrag: @MainActor ([Side], Double) -> Void = { _, _ in }
     var onDragEnded: @MainActor () -> Void = {}
     private var dividers: [DividerView] = []
