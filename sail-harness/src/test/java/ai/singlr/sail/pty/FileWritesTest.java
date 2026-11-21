@@ -472,7 +472,8 @@ class FileWritesTest {
     var fresh = Files.writeString(src.resolve(FileScripts.SAVING + "UnderWay01.part"), "x");
     var held = Files.writeString(src.resolve(FileScripts.SAVING + "HeldOpen01.part"), "x");
     var linked = Files.writeString(src.resolve("linked"), "linked");
-    var link = Files.createSymbolicLink(src.resolve(FileScripts.SAVING + "AsALink01.part"), linked);
+    var link =
+        Files.createSymbolicLink(src.resolve(FileScripts.SAVING + "AsALink001.part"), linked);
     var persons =
         List.of(
             Files.writeString(src.resolve(FileScripts.SAVING + "notes"), "a person's"),
