@@ -755,7 +755,7 @@ public final class FakeRunnerDoor: Sendable {
         }
         if case .files = ticket {
             switch frame {
-            case .filesList, .filesStat, .filesRead, .filesCancel, .filesWatch: return nil
+            case .filesList, .filesStat, .filesRead, .filesCancel, .filesWatch, .filesWrite, .putChunk, .putEnd, .putCancel, .filesCreate, .filesMove, .filesRemove: return nil
             default: return "This connection's ticket is to read files, and it admits nothing else; ask the API for a ticket for that."
             }
         }

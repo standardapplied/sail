@@ -307,6 +307,7 @@
   {"name": "p-m33-typed", "fileType": "// offline\n"},
   {"name": "p-m33-no-tickets", "proxyFails": "POST /v1/terminal/tickets"},
   {"name": "p-m33-the-connection-drops", "filesDrop": true},
+  {"name": "p-m33-reconnecting", "filesSays": "Not live since ", "filesSaysEnding": "Reconnecting.", "seconds": 6},
   {"name": "p-m33-save", "fileSave": true},
   {"name": "p-m33-said", "fileNote": "Not connected to dock. Your changes are kept here."},
   {"name": "p-m33-still-unsaved", "fileUnsaved": true},
