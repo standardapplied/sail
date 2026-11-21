@@ -13,8 +13,9 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 /**
@@ -39,18 +40,40 @@ final class InstanceTimeoutDiagnosis {
 
   private static final String NAME = "containers.log";
 
+  /**
+   * The states {@code systemctl is-system-running} names: the instance's own command answers, and
+   * whoever runs in it can replace it, so nothing else it says is repeated.
+   */
+  private static final Set<String> STATES =
+      Set.of(
+          "initializing",
+          "starting",
+          "running",
+          "degraded",
+          "maintenance",
+          "stopping",
+          "offline",
+          "unknown");
+
   private final TimeoutDiagnosis probes;
   private final Supplier<Path> log;
   private final Duration budget;
+  private final LongSupplier nanos;
 
   InstanceTimeoutDiagnosis(ShellExec shell, Path log, Duration budget) {
-    this(shell, () -> log, budget);
+    this(shell, log, budget, System::nanoTime);
   }
 
-  private InstanceTimeoutDiagnosis(ShellExec shell, Supplier<Path> log, Duration budget) {
+  InstanceTimeoutDiagnosis(ShellExec shell, Path log, Duration budget, LongSupplier nanos) {
+    this(shell, () -> log, budget, nanos);
+  }
+
+  private InstanceTimeoutDiagnosis(
+      ShellExec shell, Supplier<Path> log, Duration budget, LongSupplier nanos) {
     this.probes = new TimeoutDiagnosis(shell, budget);
     this.log = log;
     this.budget = budget;
+    this.nanos = nanos;
   }
 
   /**
@@ -58,7 +81,8 @@ final class InstanceTimeoutDiagnosis {
    * only when a timeout happens.
    */
   static InstanceTimeoutDiagnosis of(ShellExec shell) {
-    return new InstanceTimeoutDiagnosis(shell, InstanceTimeoutDiagnosis::logHere, BUDGET);
+    return new InstanceTimeoutDiagnosis(
+        shell, InstanceTimeoutDiagnosis::logHere, BUDGET, System::nanoTime);
   }
 
   private static Path logHere() {
@@ -73,7 +97,7 @@ final class InstanceTimeoutDiagnosis {
    * the sentence that says why after its own, once the whole of it is in the log.
    */
   CommandTimedOut of(String instance, CommandTimedOut timedOut) throws InterruptedException {
-    var deadline = System.nanoTime() + budget.toNanos();
+    var deadline = nanos.getAsLong() + budget.toNanos();
     var logProbe =
         new Probe("Incus's log of " + instance, List.of("incus", "info", "--show-log", instance));
     var incusLog = new AtomicReference<Answer>();
@@ -89,16 +113,17 @@ final class InstanceTimeoutDiagnosis {
             "systemd's jobs in " + instance,
             List.of("incus", "exec", instance, "--", "systemctl", "list-jobs", "--no-pager"));
     var jobs = state.said() ? probes.ask(jobsProbe, left(deadline)) : null;
-    if (!beside.join(left(deadline))) {
+    var answered = beside.join(left(deadline));
+    if (!answered) {
       beside.interrupt();
     }
     var answers = new LinkedHashMap<Probe, Answer>();
     answers.put(
         logProbe,
-        Objects.requireNonNullElse(
-            incusLog.get(),
-            new Answer(
-                null, "did not answer within the diagnosis's " + budget.toSeconds() + " s")));
+        answered
+            ? incusLog.get()
+            : new Answer(
+                null, "did not answer within the diagnosis's " + budget.toSeconds() + " s"));
     answers.put(stateProbe, state);
     if (jobs != null) {
       answers.put(jobsProbe, jobs);
@@ -122,8 +147,8 @@ final class InstanceTimeoutDiagnosis {
   }
 
   /** What is left of the diagnosis's budget at {@code deadline}, never less than nothing. */
-  private static Duration left(long deadline) {
-    return Duration.ofNanos(Math.max(0, deadline - System.nanoTime()));
+  private Duration left(long deadline) {
+    return Duration.ofNanos(Math.max(0, deadline - nanos.getAsLong()));
   }
 
   /**
@@ -133,7 +158,11 @@ final class InstanceTimeoutDiagnosis {
     if (!state.said()) {
       return instance + " no longer answered a command";
     }
-    var said = "systemd in " + instance + " said it is " + state.result().stdout().strip();
+    var stated = state.result().stdout().strip();
+    var said =
+        "systemd in "
+            + instance
+            + (STATES.contains(stated) ? " said it is " + stated : " gave an unknown state");
     if (jobs == null || !jobs.said()) {
       return said + ", and its jobs could not be read";
     }

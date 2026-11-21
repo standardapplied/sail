@@ -446,4 +446,88 @@ class ShellExecutorTest {
         refused.getMessage());
     assertFalse(refused.getMessage().contains("token-like-input"), refused.getMessage());
   }
+
+  /**
+   * #507's last look, m1: the raise of an untaken input never races the writer: a command that
+   * exits 0 at once without reading is raised every time.
+   */
+  @Test
+  void anUntakenInputIsRaisedEveryTimeNotWhenTheWriterHappensToBeFirst() {
+    for (var time = 0; time < 40; time++) {
+      assertThrows(IOException.class, () -> handed("exit 0", Duration.ofSeconds(10)));
+    }
+  }
+
+  /**
+   * #507's last look, nit 1, and #509's: a command whose own process ends while one it left behind
+   * still holds its pipes is answered within its timeout, by its own exit when the JDK drained its
+   * pipes as it ended, or as a timeout when a reader was already blocked on one; either way no
+   * descriptor of them is held after, though the process it left runs on.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aProcessLeftHoldingThePipesDoesNotOutlastTheTimeoutNorKeepThem() throws Exception {
+    var shell = new ShellExecutor(false);
+    shell.exec(List.of("true"), null, Duration.ofSeconds(10));
+    var before = descriptors();
+
+    for (var time = 0; time < 5; time++) {
+      var started = System.nanoTime();
+      assertTimeoutPreemptively(
+          Duration.ofSeconds(5),
+          () -> {
+            try {
+              assertEquals(
+                  0,
+                  shell
+                      .execWithInput(
+                          List.of("sh", "-c", "sleep 8 & exit 0"), "", Duration.ofMillis(500))
+                      .exitCode(),
+                  "answered by its own exit when the JDK drained its pipes as it ended");
+            } catch (CommandTimedOut heldOpen) {
+              assertFalse(heldOpen.getMessage().isEmpty());
+            }
+          });
+
+      assertTrue(
+          System.nanoTime() - started < Duration.ofMillis(2500).toNanos(), "ended at its timeout");
+      assertEquals(before, descriptors(), "no pipe of the command is held after its timeout");
+    }
+  }
+
+  /** How many descriptors this process holds open. */
+  private static long descriptors() throws IOException {
+    try (var open = Files.list(Path.of("/proc/self/fd"))) {
+      return open.count();
+    }
+  }
+
+  /**
+   * #507's last look, nit 3: a command whose caller is interrupted while it waits is ended with it,
+   * never left running.
+   */
+  @Test
+  void aCommandWhoseCallerIsInterruptedIsEndedWithIt() throws Exception {
+    var marker = "sleep 37.25";
+    Thread.currentThread().interrupt();
+    assertThrows(
+        InterruptedException.class,
+        () ->
+            new ShellExecutor(false)
+                .exec(List.of("sh", "-c", "exec " + marker), null, Duration.ofSeconds(60)));
+    assertFalse(Thread.interrupted(), "the interrupt is the caller's, kept in the exception");
+
+    for (var left :
+        ProcessHandle.current()
+            .descendants()
+            .filter(handle -> handle.info().commandLine().orElse("").contains(marker))
+            .toList()) {
+      assertTrue(
+          left.onExit()
+              .thenApply(ended -> true)
+              .completeOnTimeout(false, 5, TimeUnit.SECONDS)
+              .get(),
+          "the interrupted command was ended");
+    }
+  }
 }
