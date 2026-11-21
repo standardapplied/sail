@@ -104,7 +104,8 @@ Usage:
                                 through main's API, labelled hers by her id, committing as her with
                                 none of main's person's forge token, refused to client and to obs
                                 (a viewer), opened by her ticket over TCP from client, its home listed and
-                                watched by her files ticket, refused a
+                                watched by her files ticket (50 listings of 5,000 entries, 50 reads of
+                                256 KiB and 20 changes held to 250, 200 and 600 ms at p95), refused a
                                 delete while a command runs in it, and deleted with force; a second
                                 is created and stopped,
                                 apply --all leaves both and the template alone; with acme's repos set
@@ -889,7 +890,7 @@ done
 sudo sail server token revoke "direct-$handle" > /dev/null 2>&1 || true
 sudo sail server token create "direct-$handle" member --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " "'
 
-readonly DIRECT_TERMINAL='import json, socket, struct, sys, urllib.error, urllib.request
+readonly DIRECT_TERMINAL='import json, socket, struct, sys, time, urllib.error, urllib.request
 ip, token = sys.argv[1], sys.stdin.readline().strip()
 workspace = sys.argv[2] if len(sys.argv) > 2 else ""
 def text(value):
@@ -965,7 +966,58 @@ files.sendall(frame(44, struct.pack(">i", 0)))
 kind, _ = read(files)
 if kind != 54:
     raise SystemExit("the watch did not tick: frame %d" % kind)
-print("a files ticket lists the workspace home over TCP and its watch ticks")'
+print("a files ticket lists the workspace home over TCP and its watch ticks")
+def typed(seq, command, done):
+    line = command.encode() + b"; echo " + done.encode() + b"-$((40+2))\r"
+    conn.sendall(frame(3, struct.pack(">q", seq) + struct.pack(">i", len(line)) + line))
+    seen = b""
+    while (done + "-42").encode() not in seen:
+        kind, payload = read(conn)
+        if kind == 20:
+            seen += payload[12:]
+def answer(conn):
+    while True:
+        kind, payload = read(conn)
+        if kind != 54:
+            return kind, payload
+def p95(samples):
+    ordered = sorted(samples)
+    return ordered[-(-len(ordered) * 95 // 100) - 1]
+typed(2, "mkdir -p /home/dev/fleet-big && cd /home/dev/fleet-big && for i in $(seq 1 5000); do : > src-$i.java; done; head -c 1048576 /dev/urandom > /home/dev/fleet-blob; cd", "fixture")
+lists, reads, changes = [], [], []
+for i in range(50):
+    started = time.monotonic()
+    files.sendall(frame(40, struct.pack(">i", 100 + i) + text("/home/dev/fleet-big")))
+    frames = 0
+    while True:
+        kind, payload = answer(files)
+        if kind != 50:
+            raise SystemExit("listing %d was answered frame %d %r" % (i, kind, payload[:200]))
+        frames += 1
+        if payload[-2] == 0:
+            break
+    lists.append((time.monotonic() - started) * 1000)
+for i in range(50):
+    started = time.monotonic()
+    files.sendall(frame(42, struct.pack(">i", 200 + i) + text("/home/dev/fleet-blob") + struct.pack(">qq", 0, 262144)))
+    kind, payload = answer(files)
+    if kind != 52:
+        raise SystemExit("read %d was answered frame %d %r" % (i, kind, payload[:200]))
+    reads.append((time.monotonic() - started) * 1000)
+files.sendall(frame(44, struct.pack(">i", 1) + text("/home/dev/fleet-big") + text("")))
+kind, _ = answer(files)
+if kind != 53:
+    raise SystemExit("the watch held missing was answered frame %d" % kind)
+for i in range(20):
+    started = time.monotonic()
+    typed(10 + i, ": > /home/dev/fleet-big/new-%d.txt" % i, "touched%d" % i)
+    kind, payload = answer(files)
+    if kind != 53 or b"fleet-big" not in payload:
+        raise SystemExit("change %d was answered frame %d %r" % (i, kind, payload[:200]))
+    changes.append((time.monotonic() - started) * 1000)
+print("files over TCP from another box, p95: list 5,000 %.0f ms (ceiling 250, %d frame(s)), first 256 KiB %.0f ms (ceiling 200), change to FilesChanged %.0f ms (ceiling 600)" % (p95(lists), frames, p95(reads), p95(changes)))
+if p95(lists) > 250 or p95(reads) > 200 or p95(changes) > 600:
+    raise SystemExit("a files figure is over its ceiling")'
 
 # With "open", opens session NAME in acme's container over a ticket, starts it counting (n-1, n-2,
 # ...), prints the last number it saw and is killed, so the host sees its client vanish unsaid; with "back", waits up to 60 s for
@@ -1945,7 +1997,7 @@ storage() {
     http_token_door "$run" main client member 403 POST /v1/projects/acme/workspaces/eng-own/stop '' "belongs to 'eng'"
   check "$run" "obs, a viewer, creates no workspace on main" \
     http_token_door "$run" main obs viewer 403 POST /v1/projects/acme/workspaces '{"name":"obs-own"}' read_only_credential
-  check "$run" "from client, eng's ticket for her workspace on main opens a session in it over TCP that echoes a line, and her files ticket lists its home and its watch ticks" \
+  check "$run" "from client, eng's ticket for her workspace on main opens a session in it over TCP that echoes a line, and her files ticket lists its home and its watch ticks; 50 listings of 5,000 entries, 50 reads of 256 KiB and 20 changes from client hold the ceilings (250, 200, 600 ms at p95)" \
     direct_terminal "$run" main client eng eng-own
   check "$run" "a command is left running in eng's workspace, as an open terminal would be" \
     on "$run" main "sudo sh -c 'nohup incus exec acme-eng-own -- sleep 600 > /dev/null 2>&1 &'"

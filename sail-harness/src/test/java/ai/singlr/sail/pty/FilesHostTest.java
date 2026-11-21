@@ -392,6 +392,33 @@ class FilesHostTest {
     }
   }
 
+  /**
+   * A listing costs one exec, whatever the folder holds: three listings of 5,000 entries run three
+   * list scripts and nothing else, no exec per entry, each answered by one set of frames of its
+   * own.
+   */
+  @Test
+  void aListingIsOneExecWhateverItsFolderHolds() throws Exception {
+    var big = Files.createDirectory(home.resolve("big"));
+    for (var i = 0; i < 5_000; i++) {
+      Files.createFile(big.resolve("src-" + i + ".java"));
+    }
+    try (var files = open("tok-mady")) {
+      for (var id = 1; id <= 3; id++) {
+        PtyWire.write(files, new PtyMessage.FilesList(id, big.toString()));
+        var count = 0;
+        PtyMessage.FilesListing listing;
+        do {
+          listing = assertInstanceOf(PtyMessage.FilesListing.class, next(files));
+          assertEquals(id, listing.id());
+          count += listing.entries().size();
+        } while (listing.more());
+        assertEquals(5_000, count);
+      }
+    }
+    assertEquals(List.of("list", "list", "list"), List.copyOf(started));
+  }
+
   @Test
   void aFolderPastFiftyThousandIsListedInFramesAndCutSayingSo() throws Exception {
     var big = Files.createDirectory(home.resolve("big"));
