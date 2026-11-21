@@ -14,6 +14,7 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.engine.ContainerExec;
+import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.HostToken;
@@ -409,7 +410,32 @@ final class HostLanes {
     @Override
     public void admitWorkspace(String project, String workspace, PtyIdentity.Person who)
         throws IOException {
-      decide(project, workspace, found(project, workspace), who);
+      decide(project, workspace, found(project, workspace), who, WorkspaceDoors.TERMINAL);
+    }
+
+    /**
+     * Admits {@code who} to the files of workspace {@code workspace} of {@code project} as entering
+     * it is decided ({@link #admitWorkspace}, N1 on a node included), in the act's own words, and
+     * refuses it {@link PtyAdmission.Stopped} unless it is running: nothing here starts it.
+     */
+    @Override
+    public void admitFiles(String project, String workspace, PtyIdentity.Person who)
+        throws IOException {
+      var found = found(project, workspace);
+      decide(project, workspace, found, who, WorkspaceDoors.FILES);
+      if (!(found.state() instanceof ContainerState.Running)) {
+        throw new PtyAdmission.Stopped(
+            "Workspace "
+                + workspace
+                + " of "
+                + project
+                + " is stopped, and reading its files does"
+                + " not start it.",
+            Remedy.of(
+                "Start it with: ",
+                Remedy.sail("project workspace start", project, workspace),
+                "."));
+      }
     }
 
     /**
@@ -529,7 +555,7 @@ final class HostLanes {
             workspace,
             owners,
             found -> {
-              decide(project, workspace, found, who);
+              decide(project, workspace, found, who, WorkspaceDoors.TERMINAL);
               Workspaces.goneOwner(found, owners)
                   .ifPresent(
                       gone -> {
@@ -566,14 +592,17 @@ final class HostLanes {
      * decides, the node's own person keeping what nobody owns on a node.
      */
     private void decide(
-        String project, String workspace, BoxInstances.Instance found, PtyIdentity.Person who)
+        String project,
+        String workspace,
+        BoxInstances.Instance found,
+        PtyIdentity.Person who,
+        String act)
         throws IOException {
       var keeper = roles.nodeFde().orElse(null);
       var another =
           keeper == null
               ? Optional.<ApiException>empty()
-              : WorkspaceDoors.labelledForAnother(
-                  project, workspace, found, owners, WorkspaceDoors.TERMINAL, true);
+              : WorkspaceDoors.labelledForAnother(project, workspace, found, owners, act, true);
       var refused =
           Actor.call(
               who.actor(),

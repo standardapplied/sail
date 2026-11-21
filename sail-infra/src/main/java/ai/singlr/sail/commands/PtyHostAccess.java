@@ -92,6 +92,13 @@ final class PtyHostAccess implements PtyIdentity.Resolver, PtyIdentity.Holders, 
   }
 
   @Override
+  public void files(String project, String workspace, PtyIdentity.Person who) throws IOException {
+    try (var opened = operations.get()) {
+      opened.pty().admitFiles(project, workspace, who);
+    }
+  }
+
+  @Override
   public void enter(String project, String workspace, PtyIdentity.Person who) throws IOException {
     try (var opened = operations.get()) {
       opened.pty().enterWorkspace(project, workspace, who);

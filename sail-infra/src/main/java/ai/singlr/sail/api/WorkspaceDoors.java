@@ -329,6 +329,7 @@ public final class WorkspaceDoors {
   static final String DELETED = "it is not deleted";
   public static final String TERMINAL = "no terminal opens in it";
   static final String AGENT = "no agent starts in it";
+  public static final String FILES = "its files are not read";
 
   /**
    * Refuses the bound actor workspace {@code found} unless they may enter it; and on a node (N1),

@@ -294,6 +294,14 @@ class AccessDoorsBaselineTest {
               "ask what can start in " + which,
               ops -> node.workspaceAgents("acme", name),
               theNodes));
+      doors.add(
+          new Door(
+              "decide a files ticket for " + which,
+              ops -> {
+                node.pty().admitFiles("acme", name, new PtyIdentity.Person(Actor.current()));
+                return "admitted";
+              },
+              theNodes));
     }
   }
 
@@ -399,6 +407,12 @@ class AccessDoorsBaselineTest {
               }
 
               @Override
+              public void files(String project, String workspace, PtyIdentity.Person who)
+                  throws IOException {
+                pty.admitFiles(project, workspace, who);
+              }
+
+              @Override
               public java.util.Optional<ai.singlr.sail.store.LoginStore.Login> agent(
                   String project, String workspace, PtyMessage.Agent agent, PtyIdentity.Person who)
                   throws IOException {
@@ -493,6 +507,22 @@ class AccessDoorsBaselineTest {
                               Map.of("action", "open", "project", "acme", "workspace", workspace))),
                   null));
         }
+        for (var workspace : List.of("try", "spare", "loose", "ghost")) {
+          var label =
+              asker.getKey()
+                  + " asks a ticket to read the files of workspace "
+                  + workspace
+                  + " of acme";
+          corpus.put(
+              label,
+              answer(
+                  new Door(
+                      label,
+                      ops ->
+                          readFiles(
+                              door, host.tcpAddress().orElseThrow(), asker.getValue(), workspace)),
+                  null));
+        }
         for (var workspace : List.of("main", "try")) {
           var label = asker.getKey() + " lists the sessions in workspace " + workspace + " of acme";
           corpus.put(
@@ -579,6 +609,25 @@ class AccessDoorsBaselineTest {
         case PtyMessage.Err err -> throw Remedied.io(err.reason(), err.remedy());
         case PtyMessage other -> throw new IOException("the host answered " + other);
       };
+    }
+  }
+
+  /**
+   * A files ticket to {@code workspace} of acme, asked and presented as an app does, so it holds no
+   * place among the asker's unpresented tickets: welcomed, or refused in the host's words.
+   */
+  private static String readFiles(
+      TerminalTickets door, InetSocketAddress host, String credential, String workspace)
+      throws IOException {
+    var ticket =
+        door.issue(credential, Map.of("action", "files", "project", "acme", "workspace", workspace))
+            .ticket();
+    try (var channel = java.nio.channels.SocketChannel.open(host)) {
+      ai.singlr.sail.pty.PtyWire.handshake(channel, channel);
+      ai.singlr.sail.pty.PtyWire.write(channel, new PtyMessage.Hello(ticket));
+      return ai.singlr.sail.pty.PtyWire.read(channel) instanceof PtyMessage.Welcome
+          ? "welcomed"
+          : "not welcomed";
     }
   }
 

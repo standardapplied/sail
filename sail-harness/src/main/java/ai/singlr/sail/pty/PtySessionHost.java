@@ -43,7 +43,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
@@ -204,6 +206,7 @@ public final class PtySessionHost implements AutoCloseable {
   private final PtyAdmission admission;
   private final PtyEvents events;
   private final PtyUploads uploads;
+  private final FileScripts files;
   private final String version;
   private final Limits limits;
   private final Handoff handoff;
@@ -212,6 +215,7 @@ public final class PtySessionHost implements AutoCloseable {
   private final Optional<PtyTcpDoor> door;
   private final Map<String, PtySession> sessions = new ConcurrentHashMap<>();
   private final Set<Admitted> admitted = ConcurrentHashMap.newKeySet();
+  private final Set<Served> served = ConcurrentHashMap.newKeySet();
   private volatile String bootId = "";
   private final AtomicInteger connections = new AtomicInteger();
   private volatile ServerSocketChannel server;
@@ -219,6 +223,13 @@ public final class PtySessionHost implements AutoCloseable {
   private volatile boolean closed;
 
   private record Admitted(SocketChannel channel, Credential credential, PtyIdentity who) {}
+
+  /** A files connection to workspace {@code workspace} of {@code project}, on {@code channel}. */
+  private record Served(
+      String project, String workspace, SocketChannel channel, FilesConnection connection) {}
+
+  /** How long a files connection being ended may take to hear why before it is closed anyway. */
+  static final Duration TOLD = Duration.ofSeconds(5);
 
   /**
    * What a connection's principal is resolved again from at every sweep: the token its unix {@code
@@ -343,7 +354,8 @@ public final class PtySessionHost implements AutoCloseable {
         limits,
         handoff,
         network,
-        PtyUploads.intoContainers());
+        PtyUploads.intoContainers(),
+        FileScripts.ofContainers());
   }
 
   PtySessionHost(
@@ -357,8 +369,10 @@ public final class PtySessionHost implements AutoCloseable {
       Limits limits,
       Handoff handoff,
       Network network,
-      PtyUploads uploads) {
+      PtyUploads uploads,
+      FileScripts files) {
     this.uploads = uploads;
+    this.files = files;
     this.socketPath = socketPath;
     this.sessionsDir = sessionsDir;
     this.journalCapacity = journalCapacity;
@@ -724,6 +738,7 @@ public final class PtySessionHost implements AutoCloseable {
     Consumer<PtyMessage> replies = msg -> reply(channel, msg);
     var me = new Admitted(channel, admission.credential(), who);
     admitted.add(me);
+    var files = filesOf(channel, admission);
     try {
       try {
         reply(channel, new PtyMessage.Welcome(bootId));
@@ -737,6 +752,7 @@ public final class PtySessionHost implements AutoCloseable {
           }
           if (who instanceof PtyIdentity.Dispatch
               && !(message instanceof PtyMessage.Yield)
+              && !(message instanceof PtyMessage.YieldWorkspace)
               && !(message instanceof PtyMessage.ListSessions)) {
             reply(
                 channel,
@@ -875,6 +891,22 @@ public final class PtySessionHost implements AutoCloseable {
                     who instanceof PtyIdentity.Dispatch
                         ? yieldSession(m.session(), m.reason(), m.record())
                         : new PtyMessage.Err("Yield requires host dispatch authority."));
+            case PtyMessage.YieldWorkspace m ->
+                reply(
+                    channel,
+                    who instanceof PtyIdentity.Dispatch
+                        ? yieldWorkspace(m)
+                        : new PtyMessage.Err("Yield requires host dispatch authority."));
+            case PtyMessage.FilesList m when files != null -> files.connection().list(m);
+            case PtyMessage.FilesStat m when files != null -> files.connection().stat(m);
+            case PtyMessage.FilesRead m when files != null -> files.connection().read(m);
+            case PtyMessage.FilesCancel m when files != null -> files.connection().cancel(m);
+            case PtyMessage.FilesWatch m when files != null -> files.connection().watch(m);
+            case PtyMessage.FilesList m -> reply(channel, NO_FILES);
+            case PtyMessage.FilesStat m -> reply(channel, NO_FILES);
+            case PtyMessage.FilesRead m -> reply(channel, NO_FILES);
+            case PtyMessage.FilesCancel m -> reply(channel, NO_FILES);
+            case PtyMessage.FilesWatch m -> reply(channel, NO_FILES);
             default -> reply(channel, new PtyMessage.Err("Unexpected client frame."));
           }
         }
@@ -884,7 +916,13 @@ public final class PtySessionHost implements AutoCloseable {
       }
     } catch (IOException disconnected) {
       var unused = disconnected;
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
     } finally {
+      if (files != null) {
+        served.remove(files);
+        files.connection().close();
+      }
       uploads.discard(upload);
       if (attached != null) {
         attached.detach(subscriberId);
@@ -967,6 +1005,15 @@ public final class PtySessionHost implements AutoCloseable {
           }
         }
         case ATTACH -> NameValidator.requireValidSessionName(target);
+        case FILES -> {
+          NameValidator.requireValidProjectName(target);
+          if (request.workspace().isBlank()) {
+            throw new IllegalArgumentException(
+                "A files ticket names a workspace of the project: the project's own container"
+                    + " has none of a person's files to read.");
+          }
+          NameValidator.requireValidWorkspaceName(request.workspace());
+        }
       }
     } catch (IllegalArgumentException bad) {
       return new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.INVALID, PtyMessage.Err.of(bad));
@@ -980,6 +1027,7 @@ public final class PtySessionHost implements AutoCloseable {
         switch (request.action()) {
           case OPEN -> openRefusal(target, request.workspace(), who);
           case ATTACH -> attachRefusal(target, sessions.get(target), who);
+          case FILES -> filesRefusal(target, request.workspace(), who);
         };
     if (refused != null) {
       return refused.ticketAnswer(target);
@@ -1508,11 +1556,34 @@ public final class PtySessionHost implements AutoCloseable {
    * it is not theirs and they are no admin, unavailable when the store cannot answer.
    */
   private Refusal workspaceRefusal(String project, String workspace, PtyIdentity.Person who) {
+    return workspaceRefusal(project, workspace, who, admission::workspace);
+  }
+
+  /**
+   * Why {@code who} may not read the files of workspace {@code workspace} of {@code project}: the
+   * project as an open's, then the workspace as entering it is ({@link PtyAdmission#files}), and
+   * stopped when it is not running, which nothing here starts.
+   */
+  private Refusal filesRefusal(String project, String workspace, PtyIdentity.Person who) {
+    var unheld = projectRefusal(project, who);
+    return unheld != null ? unheld : workspaceRefusal(project, workspace, who, admission::files);
+  }
+
+  /** A workspace decision of {@link PtyAdmission}'s, asked of {@code who} in a workspace. */
+  @FunctionalInterface
+  private interface WorkspaceCheck {
+    void admit(String project, String workspace, PtyIdentity.Person who) throws IOException;
+  }
+
+  private Refusal workspaceRefusal(
+      String project, String workspace, PtyIdentity.Person who, WorkspaceCheck check) {
     try {
-      admission.workspace(project, workspace, who);
+      check.admit(project, workspace, who);
       return null;
     } catch (PtyAdmission.Absent absent) {
       return new Refusal(PtyMessage.TicketRefusal.NOT_FOUND, PtyMessage.Err.of(absent), false);
+    } catch (PtyAdmission.Stopped stopped) {
+      return new Refusal(PtyMessage.TicketRefusal.STOPPED, PtyMessage.Err.of(stopped), false);
     } catch (IOException refused) {
       log("refused", who.fde(), project + "/" + workspace, "not their workspace");
       return told(refused, PtyMessage.TicketRefusal.FORBIDDEN, who, project + "/" + workspace);
@@ -1671,6 +1742,101 @@ public final class PtySessionHost implements AutoCloseable {
     session.end(reason, record);
     deleteFiles(SessionFiles.in(sessionsDir, name), session.ownerFde(), name);
     return new PtyMessage.Ok();
+  }
+
+  /**
+   * Ends every live session in the workspace {@code m} names, each as {@link #yieldSession} ends
+   * one, and every files connection to it, each told {@code m}'s record: one pass under the host's
+   * lock, so a session that lives there when it is asked does not outlive it.
+   */
+  private synchronized PtyMessage yieldWorkspace(PtyMessage.YieldWorkspace m) {
+    if (closed) {
+      return SHUTTING_DOWN;
+    }
+    sessions.forEach(
+        (name, session) -> {
+          if (session.live()
+              && session.origin().project().equals(m.project())
+              && session.origin().workspace().equals(m.workspace())) {
+            session.end(m.reason(), m.record());
+            deleteFiles(SessionFiles.in(sessionsDir, name), session.ownerFde(), name);
+          }
+        });
+    for (var files : served) {
+      if (files.project().equals(m.project()) && files.workspace().equals(m.workspace())) {
+        endFiles(files.channel(), new PtyMessage.Err(m.record()));
+      }
+    }
+    return new PtyMessage.Ok();
+  }
+
+  /** What a files frame hears on a connection no files ticket admitted. */
+  private static final PtyMessage.Err NO_FILES =
+      new PtyMessage.Err(
+          "Files are read on a connection a files ticket admitted, and this is not one.");
+
+  /**
+   * The files connection a files ticket admits on {@code channel}, kept among those {@link
+   * #yieldWorkspace} ends; null for any other connection.
+   */
+  private Served filesOf(SocketChannel channel, Admission admission) {
+    if (!(admission.bound() instanceof PtyTickets.Ticket ticket
+        && ticket.action() == PtyMessage.TicketAction.FILES
+        && admission.who() instanceof PtyIdentity.Person who)) {
+      return null;
+    }
+    var project = ticket.target();
+    var workspace = ticket.workspace();
+    var connection =
+        new FilesConnection(
+            files,
+            project + "-" + workspace,
+            workspace,
+            message -> reply(channel, message),
+            () -> filesEnded(project, workspace, who),
+            err -> endFiles(channel, err));
+    var kept = new Served(project, workspace, channel, connection);
+    served.add(kept);
+    return kept;
+  }
+
+  /**
+   * Why workspace {@code workspace} of {@code project} no longer serves {@code who}'s files, asked
+   * as its ticket was: gone, stopped, or no longer theirs to enter; null when it still does, or
+   * when the runner cannot say, which is an outage and no reason to end the connection.
+   */
+  private PtyMessage.Err filesEnded(String project, String workspace, PtyIdentity.Person who) {
+    try {
+      admission.files(project, workspace, who);
+      return null;
+    } catch (PtyAdmission.Absent absent) {
+      return new PtyMessage.Err(absent.reason(), absent.remedy(), "not_found");
+    } catch (PtyAdmission.Unavailable unavailable) {
+      log("files-check-failed", who.fde(), project + "/" + workspace, unavailable.toString());
+      return null;
+    } catch (IOException refused) {
+      return PtyMessage.Err.of(refused);
+    } catch (RuntimeException unavailable) {
+      log("files-check-failed", who.fde(), project + "/" + workspace, unavailable.toString());
+      return null;
+    }
+  }
+
+  /**
+   * Ends the files connection on {@code channel}, telling it {@code why} first: on a thread of its
+   * own, the channel closed within {@link #TOLD} whether or not its peer reads.
+   */
+  private static void endFiles(SocketChannel channel, PtyMessage.Err why) {
+    CompletableFuture.runAsync(
+        () -> closeQuietly(channel),
+        CompletableFuture.delayedExecutor(TOLD.toMillis(), TimeUnit.MILLISECONDS));
+    Thread.ofVirtual()
+        .name("pty-files-end")
+        .start(
+            () -> {
+              reply(channel, why);
+              closeQuietly(channel);
+            });
   }
 
   private void remove(String name, PtySession session) {

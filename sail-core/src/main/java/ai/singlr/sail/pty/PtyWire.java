@@ -23,7 +23,7 @@ import java.util.List;
  */
 public final class PtyWire {
 
-  static final byte[] MAGIC = "SAILPTY6".getBytes(StandardCharsets.US_ASCII);
+  static final byte[] MAGIC = "SAILPTY7".getBytes(StandardCharsets.US_ASCII);
   static final int MAX_FRAME = 1 << 20;
 
   private PtyWire() {}
@@ -34,7 +34,7 @@ public final class PtyWire {
     var peer = ByteBuffer.allocate(MAGIC.length);
     readFully(in, peer);
     if (!ByteBuffer.wrap(MAGIC).equals(peer.flip())) {
-      throw new IOException("Peer is not speaking sail pty protocol v6; refusing the connection.");
+      throw new IOException("Peer is not speaking sail pty protocol v7; refusing the connection.");
     }
   }
 
@@ -179,8 +179,74 @@ public final class PtyWire {
         out.string(m.code());
       }
       case PtyMessage.Welcome m -> out.type(32).string(m.hostBootId());
+      case PtyMessage.YieldWorkspace m ->
+          out.type(16)
+              .string(m.project())
+              .string(m.workspace())
+              .string(m.reason())
+              .string(m.record());
+      case PtyMessage.FilesList m -> out.type(40).i32(m.id()).string(m.path());
+      case PtyMessage.FilesStat m -> out.type(41).i32(m.id()).string(m.path());
+      case PtyMessage.FilesRead m ->
+          out.type(42).i32(m.id()).string(m.path()).i64(m.offset()).i64(m.length());
+      case PtyMessage.FilesCancel m -> out.type(43).i32(m.id());
+      case PtyMessage.FilesWatch m -> {
+        out.type(44).i32(m.paths().size());
+        m.paths().forEach(watched -> out.string(watched.path()).string(watched.version()));
+      }
+      case PtyMessage.FilesListing m -> {
+        out.type(50).i32(m.id()).string(m.version()).i32(m.entries().size());
+        m.entries().forEach(entry -> encodeEntry(out, entry));
+        out.bool(m.more()).bool(m.truncated());
+      }
+      case PtyMessage.FilesEntry m ->
+          encodeEntry(out.type(51).i32(m.id()), m.entry()).string(m.version());
+      case PtyMessage.FilesData m -> {
+        out.type(52).i32(m.id()).string(m.version());
+        out.bytes(m.bytes());
+        out.bool(m.eof());
+      }
+      case PtyMessage.FilesChanged m -> out.type(53).stringList(m.paths());
+      case PtyMessage.FilesTick m -> out.type(54);
+      case PtyMessage.FilesRefused m ->
+          out.type(55).i32(m.id()).string(m.kind().wire()).string(m.message());
     }
     return out.finish();
+  }
+
+  private static Writer encodeEntry(Writer out, PtyMessage.FileEntry entry) {
+    out.string(entry.name()).string(entry.kind().wire()).string(entry.target().wire());
+    return out.i64(entry.size()).i64(entry.mtimeNanos()).i32(entry.mode());
+  }
+
+  private static PtyMessage.FileEntry entry(ByteBuffer in) throws IOException {
+    return new PtyMessage.FileEntry(
+        string(in),
+        PtyMessage.FileKind.of(string(in)),
+        PtyMessage.FileKind.of(string(in)),
+        in.getLong(),
+        in.getLong(),
+        in.getInt());
+  }
+
+  private static PtyMessage.FilesWatch watch(ByteBuffer in) throws IOException {
+    var count = bounded(in);
+    var paths = new ArrayList<PtyMessage.Watched>(count);
+    for (var i = 0; i < count; i++) {
+      paths.add(new PtyMessage.Watched(string(in), string(in)));
+    }
+    return new PtyMessage.FilesWatch(paths);
+  }
+
+  private static PtyMessage.FilesListing listing(ByteBuffer in) throws IOException {
+    var id = in.getInt();
+    var version = string(in);
+    var count = bounded(in);
+    var entries = new ArrayList<PtyMessage.FileEntry>(count);
+    for (var i = 0; i < count; i++) {
+      entries.add(entry(in));
+    }
+    return new PtyMessage.FilesListing(id, version, entries, in.get() == 1, in.get() == 1);
   }
 
   /**
@@ -192,6 +258,8 @@ public final class PtyWire {
     return switch (message) {
       case PtyMessage.Output(var seq, var bytes) -> bytes.length + 16;
       case PtyMessage.PutChunk(var id, var offset, var bytes) -> bytes.length + 24;
+      case PtyMessage.FilesData(var id, var version, var bytes, var eof) ->
+          bytes.length + version.length() + 24;
       case PtyMessage.SessionEnded(var reason) -> reason.length() + 16;
       default -> 512;
     };
@@ -341,6 +409,20 @@ public final class PtyWire {
       case 30 -> new PtyMessage.Ok();
       case 31 -> decodeErr(in);
       case 32 -> new PtyMessage.Welcome(string(in));
+      case 16 -> new PtyMessage.YieldWorkspace(string(in), string(in), string(in), string(in));
+      case 40 -> new PtyMessage.FilesList(in.getInt(), string(in));
+      case 41 -> new PtyMessage.FilesStat(in.getInt(), string(in));
+      case 42 -> new PtyMessage.FilesRead(in.getInt(), string(in), in.getLong(), in.getLong());
+      case 43 -> new PtyMessage.FilesCancel(in.getInt());
+      case 44 -> watch(in);
+      case 50 -> listing(in);
+      case 51 -> new PtyMessage.FilesEntry(in.getInt(), entry(in), string(in));
+      case 52 -> new PtyMessage.FilesData(in.getInt(), string(in), bytes(in), in.get() == 1);
+      case 53 -> new PtyMessage.FilesChanged(stringList(in));
+      case 54 -> new PtyMessage.FilesTick();
+      case 55 ->
+          new PtyMessage.FilesRefused(
+              in.getInt(), PtyMessage.FilesRefusal.of(string(in)), string(in));
       default -> throw new IOException("Unknown pty frame type " + type + ".");
     };
   }

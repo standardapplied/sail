@@ -34,7 +34,8 @@ final class PtyTickets {
    * for an open (blank for the project's own container), for the credential whose hash is {@code
    * holder}.
    */
-  record Ticket(PtyMessage.TicketAction action, String target, String holder, String workspace) {
+  record Ticket(PtyMessage.TicketAction action, String target, String holder, String workspace)
+      implements PtySessionHost.Bound {
 
     Ticket {
       workspace = Objects.toString(workspace, "");
@@ -56,9 +57,25 @@ final class PtyTickets {
      * ticket creates one session in its project and attaches to that session; an attach ticket
      * attaches to its session; either then writes, resizes, takes the write token, uploads into the
      * session it attached and detaches, ends its own session while it holds that session's write
-     * token, and does nothing else.
+     * token, and does nothing else. A files ticket lists, stats, reads and watches the files of its
+     * workspace, and does nothing else.
      */
-    PtyMessage.Err refusal(PtyMessage message, String opened, String writing) {
+    @Override
+    public PtyMessage.Err refusal(PtyMessage message, String opened, String writing) {
+      if (action == PtyMessage.TicketAction.FILES) {
+        return message instanceof PtyMessage.FilesList
+                || message instanceof PtyMessage.FilesStat
+                || message instanceof PtyMessage.FilesRead
+                || message instanceof PtyMessage.FilesCancel
+                || message instanceof PtyMessage.FilesWatch
+            ? null
+            : new PtyMessage.Err(
+                "This connection's ticket is to read the files of workspace '"
+                    + workspace
+                    + "' of project '"
+                    + target
+                    + "', and it admits nothing else; ask the API for a ticket for that.");
+      }
       var opens = action == PtyMessage.TicketAction.OPEN;
       var own = opens ? opened : target;
       if (message instanceof PtyMessage.Kill m

@@ -1,6 +1,6 @@
 import SailAPI
 
-/// One message of the `SAILPTY6` terminal protocol, in either direction: the host's `PtyMessage`.
+/// One message of the `SAILPTY7` terminal protocol, in either direction: the host's `PtyMessage`.
 /// The client sends the requests and receives the notifications; both are modelled so every frame
 /// round-trips through ``FrameCodec``.
 public enum Frame: Equatable, Sendable {
@@ -49,6 +49,31 @@ public enum Frame: Equatable, Sendable {
     case putStored(id: Int32, path: String)
     /// Upload `id` refused: its kind and the bound it met, zero when none; the client words it.
     case putRefused(id: Int32, kind: Open<UploadRefusal.Kind>, limit: Int64)
+    /// Ends every live session in workspace `workspace` of `project`, and every files connection to
+    /// it; only the host's dispatch authority sends it.
+    case yieldWorkspace(project: String, workspace: String, reason: String, record: String)
+    /// Lists folder `path` of a files ticket's workspace: ``filesListing(_:)`` frames, or ``filesRefused(id:kind:message:)``.
+    case filesList(id: Int32, path: String)
+    /// What `path` is: ``filesEntry(id:entry:version:)``, or a refusal.
+    case filesStat(id: Int32, path: String)
+    /// At most `length` bytes of file `path` from `offset`: ``filesData(id:version:bytes:eof:)`` frames of at
+    /// most 256 KiB, or a refusal.
+    case filesRead(id: Int32, path: String, offset: Int64, length: Int64)
+    /// Ends request `id`, under way or waiting; nothing more is answered for it.
+    case filesCancel(id: Int32)
+    /// Replaces the connection's whole watch set, each path from the version this client holds of it.
+    case filesWatch([WatchedPath])
+    case filesListing(FileListing)
+    case filesEntry(id: Int32, entry: FileEntry, version: String)
+    /// The next bytes request `id` reads, at the version the file had when the read began; `eof` on the
+    /// last frame when it reached the file's end.
+    case filesData(id: Int32, version: String, bytes: [UInt8], eof: Bool)
+    /// These watched paths changed: read them again.
+    case filesChanged(paths: [String])
+    /// The watch is live: said each second it runs.
+    case filesTick
+    /// Request `id` refused, in a sentence naming the file and the reason.
+    case filesRefused(id: Int32, kind: Open<FileRefusal>, message: String)
     case output(lastInputSequence: Int64, bytes: [UInt8])
     /// What follows until ``replayEnd`` is the session's journal replayed; `safe` says whether it
     /// starts on a clean terminal boundary.
@@ -72,6 +97,8 @@ public enum TicketAction: String, CaseIterable, Sendable {
     case open
     /// Attach to a session.
     case attach
+    /// Read the files of a workspace.
+    case files
 }
 
 /// What kind of refusal a ticket request met; the API answers each with its own status.
@@ -81,6 +108,81 @@ public enum TicketRefusal: String, CaseIterable, Sendable {
     case forbidden
     case limited
     case unavailable
+    /// The workspace whose files were asked is stopped, and nothing starts it for them.
+    case stopped
+}
+
+/// What an entry of a folder is, and what a link leads to; ``none`` is no link's target.
+public enum FileKind: String, CaseIterable, Sendable {
+    case none = ""
+    case file
+    case folder
+    case link
+    /// A pipe, a socket or a device.
+    case other
+    case missing
+    case loop
+}
+
+/// Why a files request was refused.
+public enum FileRefusal: String, CaseIterable, Sendable {
+    case notFound = "not_found"
+    case notPermitted = "not_permitted"
+    case outsideHome = "outside_home"
+    case isFolder = "is_folder"
+    case notAFolder = "not_a_folder"
+    case notAFile = "not_a_file"
+    case loop
+    case failed
+}
+
+/// One entry of a folder: its own size, its modification time in nanoseconds since the epoch, and its
+/// permission bits; `target` is what a link leads to, ``FileKind/none`` for any other entry.
+public struct FileEntry: Equatable, Sendable {
+    public var name: String
+    public var kind: Open<FileKind>
+    public var target: Open<FileKind>
+    public var size: Int64
+    public var mtimeNanos: Int64
+    public var mode: Int32
+
+    public init(name: String, kind: Open<FileKind>, target: Open<FileKind>, size: Int64, mtimeNanos: Int64, mode: Int32) {
+        self.name = name
+        self.kind = kind
+        self.target = target
+        self.size = size
+        self.mtimeNanos = mtimeNanos
+        self.mode = mode
+    }
+}
+
+/// A watched path and the opaque version this client holds of it, empty for one it holds as missing.
+public struct WatchedPath: Equatable, Sendable {
+    public var path: String
+    public var version: String
+
+    public init(path: String, version: String) {
+        self.path = path
+        self.version = version
+    }
+}
+
+/// Entries of the folder request `id` lists, at `version`, in no order: `more` while frames of it follow,
+/// and on its last frame `truncated` when the folder holds more than 50,000 entries.
+public struct FileListing: Equatable, Sendable {
+    public var id: Int32
+    public var version: String
+    public var entries: [FileEntry]
+    public var more: Bool
+    public var truncated: Bool
+
+    public init(id: Int32, version: String, entries: [FileEntry], more: Bool, truncated: Bool) {
+        self.id = id
+        self.version = version
+        self.entries = entries
+        self.more = more
+        self.truncated = truncated
+    }
 }
 
 public struct TerminalSize: Equatable, Sendable {
