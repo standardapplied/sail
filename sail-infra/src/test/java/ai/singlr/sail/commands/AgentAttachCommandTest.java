@@ -854,6 +854,35 @@ class AgentAttachCommandTest {
     assertEquals(List.of(), refusedSaid.lines(), "a refused attach announces nothing");
   }
 
+  /**
+   * #507's nit: a resumed host session is refused when its place is not running before it says it
+   * resumes, and says so once it is.
+   */
+  @Test
+  void aResumedHostSessionSaysItResumesOnlyOnceItsPlaceRuns() throws Exception {
+    var place = RunPlace.of("acme", null);
+    var said = new ArrayList<String>();
+    var stopped =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk(
+                "incus list ^acme$",
+                "[{\"name\": \"acme\", \"status\": \"Stopped\", \"type\": \"container\","
+                    + " \"config\": {}}]");
+    var running =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk(
+                "incus list ^acme$",
+                "[{\"name\": \"acme\", \"status\": \"Running\", \"type\": \"container\","
+                    + " \"config\": {}}]");
+
+    assertThrows(
+        Exception.class,
+        () -> AgentAttachCommand.resumeIn(place, stopped, () -> said.add("stopped")));
+    AgentAttachCommand.resumeIn(place, running, () -> said.add("running"));
+
+    assertEquals(List.of("running"), said);
+  }
+
   /** What an attach says while it reaches its place, in order, told against the box it reaches. */
   private static class Said implements AgentAttachCommand.Reaching {
     private final List<String> lines = new ArrayList<>();

@@ -363,21 +363,87 @@ class ShellExecutorTest {
     }
   }
 
+  /** More input than a pipe holds, so a write that is not taken meets it every time. */
+  private static final String MIB = "token-like-input-".repeat((1 << 20) / 17 + 1);
+
+  private static ShellExec.Result handed(String script, Duration timeout) throws Exception {
+    return assertTimeoutPreemptively(
+        timeout.plusSeconds(5),
+        () -> new ShellExecutor(false).execWithInput(List.of("sh", "-c", script), MIB, timeout));
+  }
+
   /**
    * A command that ends without taking its input, as a script that refuses before it reads does,
-   * answers with its own exit status and words, never as a broken pipe: more input than a pipe
-   * holds makes the writer meet the closed reader every time.
+   * answers with its own exit status and words, never as a broken pipe.
    */
   @Test
   void aCommandThatEndsBeforeTakingItsInputAnswersWithItsOwnStatus() throws Exception {
-    var result =
-        new ShellExecutor(false)
-            .execWithInput(
-                List.of("sh", "-c", "echo refused >&2; exit 3"),
-                "x".repeat(1 << 20),
-                Duration.ofSeconds(10));
+    var result = handed("echo refused >&2; exit 3", Duration.ofSeconds(10));
 
     assertEquals(3, result.exitCode());
     assertEquals("refused\n", result.stderr());
+  }
+
+  /**
+   * #507's M1: a command that never reads its input and never exits is ended at its own timeout,
+   * the input's write ended with it, and neither the timeout nor anything else says the input.
+   */
+  @Test
+  void aCommandThatNeverReadsNorExitsTimesOutAtItsBoundAndSaysNothingOfItsInput() {
+    var started = System.nanoTime();
+    var timedOut =
+        assertThrows(CommandTimedOut.class, () -> handed("exec sleep 30", Duration.ofSeconds(1)));
+
+    assertTrue(
+        System.nanoTime() - started < Duration.ofSeconds(4).toNanos(),
+        "ended at its bound, not when the command would have");
+    assertFalse(timedOut.getMessage().contains("token-like-input"), timedOut.getMessage());
+  }
+
+  /** A command that writes back all it reads neither deadlocks nor loses a byte. */
+  @Test
+  void aCommandThatEchoesItsInputBackGivesItAllBackWithoutADeadlock() throws Exception {
+    var result = handed("cat", Duration.ofSeconds(20));
+
+    assertEquals(0, result.exitCode());
+    assertEquals(MIB, result.stdout());
+  }
+
+  /** A command that reads its input slowly, after a pause, still takes all of it. */
+  @Test
+  void aCommandThatReadsItsInputSlowlyTakesAllOfIt() throws Exception {
+    var result = handed("sleep 1; wc -c", Duration.ofSeconds(20));
+
+    assertEquals(0, result.exitCode());
+    assertEquals(String.valueOf(MIB.length()), result.stdout().strip());
+  }
+
+  /** A command that writes much more than a pipe holds before it reads is read meanwhile. */
+  @Test
+  void aCommandThatWritesALotBeforeItReadsIsReadMeanwhile() throws Exception {
+    var result =
+        handed("head -c 4194304 /dev/zero | tr '\\0' x; wc -c >&2", Duration.ofSeconds(20));
+
+    assertEquals(0, result.exitCode());
+    assertEquals(4194304, result.stdout().length());
+    assertEquals(String.valueOf(MIB.length()), result.stderr().strip());
+  }
+
+  /**
+   * A command that says it succeeded without taking all it was given did not do what it was asked:
+   * that is raised, naming the command and never the input.
+   */
+  @Test
+  void aCommandThatExitsZeroWithoutTakingItsInputIsRaisedWithoutTheInput() {
+    var refused =
+        assertThrows(
+            IOException.class, () -> handed("head -c 10 > /dev/null", Duration.ofSeconds(10)));
+
+    assertTrue(
+        refused
+            .getMessage()
+            .startsWith("sh -c head -c 10 > /dev/null exited 0 without taking all of its input"),
+        refused.getMessage());
+    assertFalse(refused.getMessage().contains("token-like-input"), refused.getMessage());
   }
 }

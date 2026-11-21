@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -59,10 +60,23 @@ public final class TimeoutDiagnosis {
 
   /** {@code probe}'s answer, within its bound. */
   public Answer ask(Probe probe) {
+    return ask(probe, bound);
+  }
+
+  /** {@code probe}'s answer, within {@code within}; not asked when nothing of it is left. */
+  public Answer ask(Probe probe, Duration within) {
+    if (within.isZero() || within.isNegative()) {
+      return new Answer(null, "not asked: the diagnosis's time was spent");
+    }
     try {
-      return new Answer(shell.exec(probe.command(), null, bound), null);
+      return new Answer(shell.exec(probe.command(), null, within), null);
     } catch (TimeoutException e) {
-      return new Answer(null, "did not answer within " + bound.toSeconds() + " s");
+      return new Answer(
+          null,
+          "did not answer within "
+              + (within.toMillis() % 1000 == 0
+                  ? within.toSeconds() + " s"
+                  : within.toMillis() + " ms"));
     } catch (IOException e) {
       return new Answer(null, "could not run: " + e.getMessage());
     } catch (InterruptedException e) {
@@ -106,7 +120,8 @@ public final class TimeoutDiagnosis {
                 StandardOpenOption.WRITE,
                 LinkOption.NOFOLLOW_LINKS),
             PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))) {
-      Files.setPosixFilePermissions(log, PosixFilePermissions.fromString("rw-------"));
+      Files.getFileAttributeView(log, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS)
+          .setPermissions(PosixFilePermissions.fromString("rw-------"));
       out.write(ByteBuffer.wrap(entry.toString().getBytes(StandardCharsets.UTF_8)));
     }
   }
@@ -127,6 +142,12 @@ public final class TimeoutDiagnosis {
    * open.
    */
   private static void requireOwnDirectory(Path dir) throws IOException {
+    var parent = dir.getParent();
+    if (parent != null && Files.notExists(parent, LinkOption.NOFOLLOW_LINKS)) {
+      Files.createDirectories(
+          parent,
+          PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+    }
     if (Files.notExists(dir, LinkOption.NOFOLLOW_LINKS)) {
       Files.createDirectory(
           dir, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));

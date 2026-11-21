@@ -181,8 +181,7 @@ public final class AgentAttachCommand implements Runnable {
       throw new IllegalStateException(
           "Attaching needs an interactive terminal to open session '" + plan.session() + "'.");
     }
-    requireRunning(place, new ShellExecutor(false));
-    announceResume(run, harness, sessionId, plan);
+    resumeIn(place, new ShellExecutor(false), () -> announceResume(run, harness, sessionId, plan));
     if (member) {
       endMember(run, operator);
     }
@@ -593,6 +592,15 @@ public final class AgentAttachCommand implements Runnable {
       System.err.println(
           Ansi.AUTO.string("  @|yellow ⚠|@ Agent session exited with code " + exitCode));
     }
+  }
+
+  /**
+   * Refuses a resumed host session in {@code place} unless it runs, as {@code shell} finds it, and
+   * only then {@code says} that it resumes, so a refusal is never announced first.
+   */
+  static void resumeIn(RunPlace place, ShellExec shell, Runnable says) throws Exception {
+    requireRunning(place, shell);
+    says.run();
   }
 
   private static void requireRunning(RunPlace place, ShellExec shell) throws Exception {

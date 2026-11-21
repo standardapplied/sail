@@ -35,6 +35,9 @@ public final class ShellExecutor implements ShellExec {
   private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(3);
   private static final AtomicInteger LISTING_SCOPES = new AtomicInteger();
 
+  /** How long a timed-out command's writer may take to end once the command is killed. */
+  private static final Duration WRITER_GRACE = Duration.ofSeconds(5);
+
   private final boolean dryRun;
   private final Duration defaultTimeout;
 
@@ -106,40 +109,52 @@ public final class ShellExecutor implements ShellExec {
     }
 
     var process = pb.start();
-    hand(process, input);
-
     var stdout = new AtomicReference<String>("");
     var stderr = new AtomicReference<String>("");
     var stdoutThread =
         Thread.ofVirtual().start(() -> stdout.set(readFully(process.getInputStream())));
     var stderrThread =
         Thread.ofVirtual().start(() -> stderr.set(readFully(process.getErrorStream())));
+    var notTaken = new AtomicReference<IOException>();
+    var writer = Thread.ofVirtual().start(() -> notTaken.set(hand(process, input)));
 
     var finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
     if (!finished) {
       var processes = listOnTimeout && LISTING_SCOPES.get() > 0 ? processesOf(process) : "";
       destroyWithDescendants(process);
+      writer.join(WRITER_GRACE);
       throw new CommandTimedOut(
           "Command timed out after " + timeout.toSeconds() + "s: " + String.join(" ", command),
           processes);
     }
 
+    writer.join();
     stdoutThread.join();
     stderrThread.join();
-    return new Result(process.exitValue(), stdout.get(), stderr.get());
+    var status = process.exitValue();
+    if (status == 0 && notTaken.get() != null) {
+      throw new IOException(
+          String.join(" ", command)
+              + " exited 0 without taking all of its input ("
+              + notTaken.get().getMessage()
+              + ")");
+    }
+    return new Result(status, stdout.get(), stderr.get());
   }
 
   /**
-   * Gives {@code process} its {@code input}. A command that ends, or closes its input, before it
-   * takes all of it, as a script that refuses before it reads does, has refused nothing of Sail's:
-   * its own exit status and words say what happened, so the broken pipe the write then meets is not
-   * raised in their place.
+   * Gives {@code process} its {@code input} and closes it, on the writer's own thread while the
+   * readers drain its output, so neither a command that writes back as it reads nor one that never
+   * reads can hold the caller past its timeout. Answers why the write did not finish, the command's
+   * input closed before it took all of it, or null: a command that then fails says why itself, and
+   * one that exits 0 had not taken what it was given. Never the input itself.
    */
-  private static void hand(Process process, String input) {
+  private static IOException hand(Process process, String input) {
     try (var stdin = process.getOutputStream()) {
       stdin.write(input.getBytes(StandardCharsets.UTF_8));
+      return null;
     } catch (IOException notTaken) {
-      var unused = notTaken;
+      return notTaken;
     }
   }
 
