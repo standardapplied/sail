@@ -383,7 +383,17 @@ class WorkspaceWritesIT extends AbstractIncusIT {
           PtyWire.write(stopping, new PtyMessage.PutChunk(1, 0, new byte[64 << 10]));
           assertEquals(new PtyMessage.PutAck(1, 64 << 10), PtyWire.read(stopping));
           assertTrue(shell.exec(List.of("incus", "stop", "--force", INSTANCE)).ok());
-          assertEquals(-1, drain(stopping), "a stop ends the connection");
+          var cut = next(stopping);
+          System.out.println("a save cut by a stop outside Sail is answered " + cut);
+          assertTrue(
+              cut instanceof PtyMessage.FilesRefused refused
+                      && refused.kind() == PtyMessage.FilesRefusal.FAILED
+                      && refused.message().endsWith("nothing was changed.")
+                  || cut instanceof PtyMessage.Err stopped
+                      && stopped.code().equals("workspace_stopped"),
+              "refused as failed while Incus still said running, the next sweep ending the"
+                  + " connection, or ended at once as stopped: "
+                  + cut);
         }
         assertTrue(shell.exec(List.of("incus", "start", INSTANCE)).ok());
         var left = temporaries();
