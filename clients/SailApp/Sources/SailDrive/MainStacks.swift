@@ -419,6 +419,11 @@ final class MainStacks: @unchecked Sendable {
         lock.withLock { dense }
     }
 
+    /// When the last look was taken.
+    var lastLook: Double? {
+        lock.withLock { dense.last?.time }
+    }
+
     /// The main thread's CPU time, in ms, used inside `span`: from the last look at or before its
     /// start to the first at or after its end; nil when the looks do not cover it.
     func cpu(in span: Span) -> Double? {
