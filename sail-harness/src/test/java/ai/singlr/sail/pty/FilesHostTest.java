@@ -87,6 +87,10 @@ class FilesHostTest {
   private final LinkedBlockingQueue<String> started = new LinkedBlockingQueue<>();
 
   private final List<Process> processes = new CopyOnWriteArrayList<>();
+
+  /** The save scripts among {@link #processes}, in the order started. */
+  private final List<Process> saves = new CopyOnWriteArrayList<>();
+
   private final List<List<String>> commands = new CopyOnWriteArrayList<>();
 
   private final PtyIdentity.Resolver resolver =
@@ -203,6 +207,9 @@ class FilesHostTest {
                   .redirectError(ProcessBuilder.Redirect.DISCARD)
                   .start();
           processes.add(process);
+          if (kind.equals("write")) {
+            saves.add(process);
+          }
           started.add(kind);
           return process;
         },
@@ -1232,7 +1239,7 @@ class FilesHostTest {
     saveOn(first, 1, file, base, "first's");
     hold.reached();
     var lock = host.writeLock("acme", "dock");
-    var script = processes.getLast();
+    var script = saves.getLast();
 
     first.close();
     assertFalse(
@@ -1352,6 +1359,44 @@ class FilesHostTest {
     while (host.changeRuns("acme", "dock") != null) {
       assertTrue(System.nanoTime() < gone, "the runs outlived the workspace's last connection");
       Thread.onSpinWait();
+    }
+  }
+
+  /**
+   * Round 3's nit 3: a stuck save outlives every connection to its workspace: once all of them are
+   * dropped, the next connection's writes are still refused, naming the temporary, until nothing
+   * holds it.
+   */
+  @Test
+  void aStuckSaveOutlivesEveryConnectionToItsWorkspace() throws Exception {
+    var old = Files.writeString(home.resolve(FileScripts.SAVING + "Stuck00001.part"), "x");
+    Files.setLastModifiedTime(
+        old, java.nio.file.attribute.FileTime.from(java.time.Instant.now().minusSeconds(60)));
+    var holder = new ProcessBuilder("sleep", "30").redirectInput(old.toFile()).start();
+    var refusal =
+        "A save in dock has not ended since Sail ended it: a process there still holds "
+            + old
+            + "; when it ends, or once that file is removed, writes resume. Nothing was changed.";
+    try {
+      var first = open("tok-mady");
+      PtyWire.write(first, new PtyMessage.FilesCreate(1, home + "/made.md", false));
+      assertEquals(
+          new PtyMessage.FilesRefused(1, PtyMessage.FilesRefusal.FAILED, refusal), next(first));
+      first.close();
+
+      var next = open("tok-mady");
+      PtyWire.write(next, new PtyMessage.FilesCreate(2, home + "/made.md", false));
+      assertEquals(
+          new PtyMessage.FilesRefused(2, PtyMessage.FilesRefusal.FAILED, refusal),
+          next(next),
+          "still refused once every connection was dropped");
+      holder.destroyForcibly();
+      assertTrue(holder.waitFor(5, TimeUnit.SECONDS));
+      PtyWire.write(next, new PtyMessage.FilesCreate(3, home + "/made.md", false));
+      assertEquals(new PtyMessage.FilesDone(3), next(next), "and free once nothing holds it");
+      next.close();
+    } finally {
+      holder.destroyForcibly();
     }
   }
 

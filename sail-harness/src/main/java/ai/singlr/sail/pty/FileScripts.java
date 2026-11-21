@@ -377,15 +377,15 @@ final class FileScripts {
 
   /**
    * Whether a save's temporary, the path read on standard input, is still held open by a process in
-   * the workspace: {@code 50} when one holds it, {@code 0} when none does or it is gone. A save
-   * holds its temporary open from its copy to its rename, so a save whose process outlived its kill
-   * (one a hung disk holds) is seen by this, however long it lasts.
+   * the workspace: {@code 50} when one holds it, {@code 0} when none does or it is gone, since a
+   * removed file's descriptor reads as {@code <path> (deleted)}, which never matches. A save holds
+   * its temporary open from its copy to its rename, so a save whose process outlived its kill (one
+   * a hung disk holds) is seen by this, however long it lasts.
    */
   static final String HELD =
       """
       export LC_ALL=C
       IFS= read -r -d '' held || exit 1
-      [ -e "$held" ] || exit 0
       pattern=$(printf '%s' "$held" | sed 's/[][*?\\\\]/\\\\&/g')
       [ -n "$(find /proc/[0-9]*/fd -lname "$pattern" 2>/dev/null | head -n 1)" ] && exit 50
       exit 0
@@ -466,6 +466,32 @@ final class FileScripts {
           status=${PIPESTATUS[0]}
           [ "$status" -le 1 ] || [ "$status" -eq 141 ] || exit 1
           """;
+
+  /**
+   * Whether a save of an earlier host, or of this one before its workspace's lock was dropped, is
+   * still stuck in the workspace: a process holding open a file of Sail's exact temporary shape
+   * under the home ({@code $1}) whose last change is older than {@code $2} seconds, the save bound,
+   * and which is none of the temporaries read on standard input, those of the saves this host runs.
+   * Prints that temporary, NUL-terminated, and exits {@code 50}; else exits {@code 0}. One {@code
+   * find} over every process's descriptors, as the sweep's.
+   */
+  static final String STUCK =
+      """
+      export LC_ALL=C
+      home=$1 bound=$2 now=$(date +%%s)
+      declare -A mine=()
+      while IFS= read -r -d '' running; do mine["$running"]=1; done
+      while IFS= read -r -d '' held; do
+        case $held in "$home"/*) ;; *) continue ;; esac
+        [ -z "${mine["$held"]+x}" ] || continue
+        changed=$(stat -c %%Y -- "$held" 2>/dev/null) || continue
+        [ $((now - changed)) -gt "$bound" ] || continue
+        printf '%%s\\0' "$held"
+        exit 50
+      done < <(find /proc/[0-9]*/fd -lname '*/%1$s' -printf '%%l\\0' 2>/dev/null)
+      exit 0
+      """
+          .formatted(TEMPORARY_SHAPE);
 
   /** {@link #HELD}'s answer when a process still holds the temporary open. */
   static final int STILL_HELD = 50;

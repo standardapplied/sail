@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -23,9 +24,12 @@ import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -246,12 +250,21 @@ class FileWritesTest {
    * first, with {@code env} in its environment and sockets for its input and output ({@link
    * #SOCKETS}); every command and process kept.
    */
+  /** Whether the holder probe fails to start, as an exec into an unreachable workspace does. */
+  private final java.util.concurrent.atomic.AtomicBoolean heldProbeFails =
+      new java.util.concurrent.atomic.AtomicBoolean();
+
   private FileScripts scripts(UnaryOperator<String> edit, Map<String, String> env) {
     return new FileScripts(
         command -> {
           commands.add(List.copyOf(command));
           var inner =
               new java.util.ArrayList<>(command.subList(command.indexOf("--") + 1, command.size()));
+          if (heldProbeFails.get()
+              && (inner.get(2).equals(FileScripts.HELD)
+                  || inner.get(2).equals(FileScripts.STUCK))) {
+            throw new IOException("Error: the holder probe could not start");
+          }
           inner.set(2, edit.apply(inner.get(2)));
           inner.addAll(0, List.of("python3", "-I", "-c", SOCKETS));
           var builder = new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD);
@@ -744,6 +757,7 @@ class FileWritesTest {
             endedWith::add,
             new FilesConnection.Writes(
                 lock,
+                saving,
                 () -> null,
                 java.time.Duration.ofMillis(300),
                 java.time.Duration.ofMillis(500)),
@@ -752,21 +766,192 @@ class FileWritesTest {
     assertEquals(PtyMessage.FilesRefusal.FAILED, ((PtyMessage.FilesRefused) answer()).kind());
     var holder = ProcessHandle.of(Long.parseLong(Files.readString(pidfile).strip())).orElseThrow();
     try {
+      var temporary = home.resolve(temporaries(home).getFirst());
       outliving.create(new PtyMessage.FilesCreate(2, home + "/other.md", false));
       assertEquals(
-          new PtyMessage.FilesRefused(
-              2,
-              PtyMessage.FilesRefusal.FAILED,
-              "A save in dock has not ended since Sail ended it, and a process there still holds"
-                  + " it, so no file there is changed until it has; nothing was changed."),
-          answer());
+          new PtyMessage.FilesRefused(2, PtyMessage.FilesRefusal.FAILED, stuck(temporary)),
+          answer(),
+          "nit 1: the refusal names the temporary and the way out");
       assertFalse(Files.exists(home.resolve("other.md")));
+
+      Files.delete(temporary);
+      outliving.create(new PtyMessage.FilesCreate(3, home + "/other.md", false));
+      assertEquals(
+          new PtyMessage.FilesDone(3), answer(), "once its temporary is removed, writes go on");
+      assertEquals("kept", Files.readString(file));
     } finally {
       holder.destroyForcibly();
     }
-    assertTrue(holder.onExit().get(5, TimeUnit.SECONDS) != null);
-    outliving.create(new PtyMessage.FilesCreate(3, home + "/other.md", false));
-    assertEquals(new PtyMessage.FilesDone(3), answer(), "once nothing holds it, writes go on");
+  }
+
+  /** The refusal a stuck save's {@code temporary} gives every write in dock. */
+  private static String stuck(Path temporary) {
+    return "A save in dock has not ended since Sail ended it: a process there still holds "
+        + temporary
+        + "; when it ends, or once that file is removed, writes resume. Nothing was changed.";
+  }
+
+  /** A process holding {@code file} open, as a save's process a hung disk holds would. */
+  private static Process holding(Path file) throws IOException {
+    return new ProcessBuilder("sleep", "30").redirectInput(file.toFile()).start();
+  }
+
+  /**
+   * Round 3's nit 2: a stuck save is found in the workspace, not only in the host's memory: a fresh
+   * lock's first write asks the workspace whether any process holds a temporary of Sail's exact
+   * shape older than the save bound, so a restarted host does not forget one. A held temporary
+   * younger than the bound is a save under way, not stuck. Nit 4: a holder probe that cannot run
+   * counts as held.
+   */
+  @Test
+  void aStuckSaveIsFoundInTheWorkspaceAndAProbeThatCannotRunCountsAsHeld() throws Exception {
+    var young = Files.writeString(home.resolve(FileScripts.SAVING + "UnderWay01.part"), "x");
+    var youngHolder = holding(young);
+    try {
+      var fresh = connection(() -> null);
+      fresh.create(new PtyMessage.FilesCreate(1, home + "/a.md", false));
+      assertEquals(new PtyMessage.FilesDone(1), answer(), "a save under way is not stuck");
+    } finally {
+      youngHolder.destroyForcibly();
+    }
+
+    var old = Files.writeString(home.resolve(FileScripts.SAVING + "Stuck00001.part"), "x");
+    Files.setLastModifiedTime(old, FileTime.from(Instant.now().minusSeconds(60)));
+    var holder = holding(old);
+    try {
+      var restarted =
+          new FilesConnection(
+              running(UnaryOperator.identity()),
+              CONTAINER,
+              "dock",
+              said::add,
+              () -> null,
+              endedWith::add,
+              new FilesConnection.Writes(
+                  new FilesConnection.WorkspaceLock(),
+                  saving,
+                  () -> null,
+                  FilesConnection.AFTER_GO,
+                  FilesConnection.HOLD_BOUND),
+              changes());
+      restarted.create(new PtyMessage.FilesCreate(2, home + "/b.md", false));
+      assertEquals(
+          new PtyMessage.FilesRefused(2, PtyMessage.FilesRefusal.FAILED, stuck(old)),
+          answer(),
+          "a fresh lock asks the workspace and finds it");
+
+      heldProbeFails.set(true);
+      holder.destroyForcibly();
+      assertTrue(holder.onExit().get(5, TimeUnit.SECONDS) != null);
+      restarted.create(new PtyMessage.FilesCreate(3, home + "/b.md", false));
+      assertEquals(
+          new PtyMessage.FilesRefused(3, PtyMessage.FilesRefusal.FAILED, stuck(old)),
+          answer(),
+          "nit 4: a probe that cannot run counts as held");
+      heldProbeFails.set(false);
+      restarted.create(new PtyMessage.FilesCreate(4, home + "/b.md", false));
+      assertEquals(new PtyMessage.FilesDone(4), answer(), "asked again, and free");
+    } finally {
+      heldProbeFails.set(false);
+      holder.destroyForcibly();
+    }
+    assertTrue(Files.exists(home.resolve("b.md")), "made once the workspace was free");
+  }
+
+  /** A lock's first write is refused when the workspace cannot be asked about a stuck save. */
+  @Test
+  void aWriteIsRefusedWhenTheWorkspaceCannotBeAskedAboutAStuckSave() throws Exception {
+    var connection = connection(() -> null);
+    heldProbeFails.set(true);
+    try {
+      connection.create(new PtyMessage.FilesCreate(1, home + "/a.md", false));
+      assertEquals(
+          new PtyMessage.FilesRefused(
+              1,
+              PtyMessage.FilesRefusal.FAILED,
+              "Sail could not ask whether a save in dock is still ending, so nothing was changed;"
+                  + " try again."),
+          answer());
+      assertFalse(Files.exists(home.resolve("a.md")));
+      var file = Files.writeString(home.resolve("notes.md"), "kept");
+      save(connection, 3, file.toString(), digest(file), version(file), "new");
+      assertEquals(
+          PtyMessage.FilesRefusal.FAILED,
+          assertInstanceOf(PtyMessage.FilesRefused.class, answer()).kind(),
+          "a save is refused as well, before its script starts");
+      assertEquals("kept", Files.readString(file));
+      assertEquals(List.of(), temporaries(home));
+    } finally {
+      heldProbeFails.set(false);
+    }
+    connection.create(new PtyMessage.FilesCreate(2, home + "/a.md", false));
+    assertEquals(new PtyMessage.FilesDone(2), answer(), "asked again at the next write");
+  }
+
+  /**
+   * #520's m1: a save paused mid-body past the save bound is under way, never stuck. Its lock was
+   * asked before its script started, so a create beside it on that lock is made even where the
+   * host's saves are not left out; a lock made anew leaves out the saves this host runs; and the
+   * paused save completes.
+   */
+  @Test
+  void aSavePausedMidBodyPastTheBoundIsNeverTakenForAStuckOne() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var paused = connection(() -> null);
+    var bytes = "new text".getBytes(StandardCharsets.UTF_8);
+    paused.write(
+        new PtyMessage.FilesWrite(1, file.toString(), digest(file), version(file), bytes.length));
+    paused.chunk(new PtyMessage.PutChunk(1, 0, Arrays.copyOf(bytes, 3)));
+    assertEquals(new PtyMessage.PutAck(1, 3), said.poll(5, TimeUnit.SECONDS));
+    var temporary = home.resolve(temporaries(home).getFirst());
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!heldOpen(temporary)) {
+      assertTrue(System.nanoTime() < deadline, "the save's copy holds its temporary open");
+      Thread.onSpinWait();
+    }
+    Files.setLastModifiedTime(temporary, FileTime.from(Instant.now().minusSeconds(60)));
+
+    connection(lock, ConcurrentHashMap.newKeySet())
+        .create(new PtyMessage.FilesCreate(2, home + "/beside.md", false));
+    assertEquals(new PtyMessage.FilesDone(2), answer(), "the lock was asked before the save ran");
+
+    connection(new FilesConnection.WorkspaceLock(), saving)
+        .create(new PtyMessage.FilesCreate(3, home + "/anew.md", false));
+    assertEquals(new PtyMessage.FilesDone(3), answer(), "a new lock leaves out the host's saves");
+
+    paused.chunk(new PtyMessage.PutChunk(1, 3, Arrays.copyOfRange(bytes, 3, bytes.length)));
+    paused.end(new PtyMessage.PutEnd(1, HexFormat.of().parseHex(sha256(bytes))));
+    assertInstanceOf(PtyMessage.FilesWritten.class, answer(), "the paused save completes");
+    assertEquals("new text", Files.readString(file));
+    deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!saving.isEmpty()) {
+      assertTrue(
+          System.nanoTime() < deadline, "a save's temporary is the host's until its exec ends");
+      Thread.onSpinWait();
+    }
+  }
+
+  /**
+   * Removing a stuck save's temporary is safe: the save's rename then fails on a missing source,
+   * and the file stays as it was.
+   */
+  @Test
+  void aSaveWhoseTemporaryWasRemovedRenamesNothing() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var bytes = "mine".getBytes(StandardCharsets.UTF_8);
+    var save = new Save(files, file.toString(), digest(file), version(file), bytes.length);
+    save.script.input().write(bytes);
+    save.script.input().flush();
+    assertEquals("copied", save.script.field());
+    save.script.field();
+    Files.delete(Path.of(save.temporary));
+    save.script.input().write(FileScripts.nul("go"));
+    save.script.input().close();
+    while (save.script.field() != null) {
+      continue;
+    }
+    assertNotEquals(0, save.script.status(), "nothing renamed");
+    assertEquals("kept", Files.readString(file));
   }
 
   /**
@@ -858,7 +1043,11 @@ class FileWritesTest {
             () -> null,
             endedWith::add,
             new FilesConnection.Writes(
-                lock, () -> null, java.time.Duration.ofMillis(300), FilesConnection.HOLD_BOUND),
+                lock,
+                saving,
+                () -> null,
+                java.time.Duration.ofMillis(300),
+                FilesConnection.HOLD_BOUND),
             changes());
 
     save(hung, 1, file.toString(), digest(file), version(file), "new");
@@ -1097,6 +1286,7 @@ class FileWritesTest {
 
   private final List<PtyMessage.Err> endedWith = new CopyOnWriteArrayList<>();
   private final FilesConnection.WorkspaceLock lock = new FilesConnection.WorkspaceLock();
+  private final Set<String> saving = ConcurrentHashMap.newKeySet();
 
   /** A changes run of its own, which no write test asks. */
   private WorkspaceChanges changes() {
@@ -1112,6 +1302,38 @@ class FileWritesTest {
     return connection(running(UnaryOperator.identity()), gate);
   }
 
+  /** Whether a process here holds {@code file} open, as the stuck check finds one. */
+  private static boolean heldOpen(Path file) throws IOException {
+    try (var processes = Files.newDirectoryStream(Path.of("/proc"), "[0-9]*")) {
+      for (var process : processes) {
+        try (var descriptors = Files.newDirectoryStream(process.resolve("fd"))) {
+          for (var descriptor : descriptors) {
+            if (file.equals(Files.readSymbolicLink(descriptor))) {
+              return true;
+            }
+          }
+        } catch (IOException gone) {
+          var unused = gone;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** A connection on write lock {@code on}, beside a host running the saves {@code runs} holds. */
+  private FilesConnection connection(FilesConnection.WorkspaceLock on, Set<String> runs) {
+    return new FilesConnection(
+        running(UnaryOperator.identity()),
+        CONTAINER,
+        "dock",
+        said::add,
+        () -> null,
+        endedWith::add,
+        new FilesConnection.Writes(
+            on, runs, () -> null, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND),
+        changes());
+  }
+
   private FilesConnection connection(FileScripts with, FilesConnection.Gate gate) {
     return new FilesConnection(
         with,
@@ -1124,7 +1346,7 @@ class FileWritesTest {
         () -> null,
         endedWith::add,
         new FilesConnection.Writes(
-            lock, gate, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND),
+            lock, saving, gate, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND),
         changes());
   }
 
@@ -1308,14 +1530,14 @@ class FileWritesTest {
             });
 
     save(refusing, 1, file.toString(), digest(file), version(file), "new");
+    awaitEnded(1);
     refusing.create(new PtyMessage.FilesCreate(2, home + "/made", false));
     refusing.remove(new PtyMessage.FilesRemove(3, file.toString()));
     awaitEnded(3);
     assertEquals(List.of(refusal, refusal, refusal), endedWith);
-    assertEquals(
-        java.util.Set.of("true 1", "true 0"),
-        java.util.Set.copyOf(asked),
-        "asked under the lock, a save once its temporary holds its bytes");
+    assertEquals(3, asked.size(), "asked once for each write");
+    assertTrue(asked.stream().allMatch(seen -> seen.startsWith("true ")), "always under the lock");
+    assertEquals("true 1", asked.getFirst(), "a save's once its temporary holds its bytes");
     everyScriptEnds();
     assertEquals("base", Files.readString(file));
     assertFalse(Files.exists(home.resolve("made")));
