@@ -332,7 +332,7 @@ final class FileScripts {
               .formatted(VERSION)
           + TEMPORARY
           + """
-          printf 'ready\\0'
+          printf 'ready\\0%%s\\0' "$tmp"
           if ! head -c "$size" > "$tmp" 2>/dev/null; then
             free=$(df -B1 --output=avail -- "$dir" 2>/dev/null | tail -n 1 | tr -d ' ')
             printf '%%s\\0' "${free:-0}"
@@ -345,21 +345,45 @@ final class FileScripts {
           printf 'copied\\0%%s\\0' "$copied"
           IFS= read -r -d '' word && [ "$word" = go ] || exit 43
           if [ "$base" = absent ]; then
-            chmod -- "$(printf %%03o $((0666 & ~0$(umask))))" "$tmp" || exit 1
+            chmod -- "$(printf %%03o $((0666 & ~0$(umask))))" "$tmp" || { [ -d "$dir" ] || exit 46; exit 1; }
             ln -T -- "$tmp" "$at" 2>/dev/null || { there "$at" && exit 40; [ -d "$dir" ] || exit 46; exit 1; }
             rm -f -- "$tmp"
           else
-            [ -e "$at" ] || { printf 'absent\\0'; exit 41; }
+            hashed=$(stat -L --printf '%1$s' -- "$at" 2>/dev/null) || { printf 'absent\\0'; exit 41; }
             found=$(content_digest "$at") || exit 48
             [ "$found" = "$base" ] || { printf '%%s\\0' "$found"; exit 41; }
             [ -w "$at" ] || exit 21
             chmod --reference="$at" -- "$tmp" || exit 1
+            if [ "$(stat -L --printf '%1$s' -- "$at" 2>/dev/null)" != "$hashed" ]; then
+              found=$(content_digest "$at") || { printf 'absent\\0'; exit 41; }
+              printf '%%s\\0' "$found"
+              exit 41
+            fi
             mv -fT -- "$tmp" "$at" || exit 1
           fi
           sync -- "$dir" 2>/dev/null
           stat -L --printf '%1$s\\0' -- "$at" 2>/dev/null || printf 'absent\\0'
           """
               .formatted(VERSION);
+
+  /**
+   * Whether a save's temporary, the path read on standard input, is still held open by a process in
+   * the workspace: {@code 50} when one holds it, {@code 0} when none does or it is gone. A save
+   * holds its temporary open from its copy to its rename, so a save whose process outlived its kill
+   * (one a hung disk holds) is seen by this, however long it lasts.
+   */
+  static final String HELD =
+      """
+      export LC_ALL=C
+      IFS= read -r -d '' held || exit 1
+      [ -e "$held" ] || exit 0
+      pattern=$(printf '%s' "$held" | sed 's/[][*?\\\\]/\\\\&/g')
+      [ -n "$(find /proc/[0-9]*/fd -lname "$pattern" 2>/dev/null | head -n 1)" ] && exit 50
+      exit 0
+      """;
+
+  /** {@link #HELD}'s answer when a process still holds the temporary open. */
+  static final int STILL_HELD = 50;
 
   /**
    * Makes the path anew, a folder when the kind read after it is {@code folder}, else an empty file
@@ -564,13 +588,12 @@ final class FileScripts {
     }
 
     /**
-     * Ends its process now and waits for it, then {@link #GRACE} more, as long as Incus takes to
-     * end the process in the workspace once its {@code incus exec} has gone.
+     * Ends its {@code incus exec} now and waits for it to exit. Whether the process in the
+     * workspace has ended too is a question for {@link #HELD}.
      */
-    void killAndAwait() throws InterruptedException {
+    void kill() throws InterruptedException {
       process.destroyForcibly();
       process.waitFor();
-      Thread.sleep(GRACE);
     }
 
     /** Runs {@code then} once it has ended, however it ended. */

@@ -29,7 +29,6 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -90,6 +89,7 @@ class FileWritesTest {
   private final class Save {
     final FileScripts.Script script;
     final String first;
+    final String temporary;
 
     Save(FileScripts with, String path, String base, String seen, long size) throws IOException {
       script =
@@ -102,6 +102,7 @@ class FileWritesTest {
               "" + FilesConnection.READ_CAP);
       started.add(script);
       first = script.field();
+      temporary = "ready".equals(first) ? script.field() : null;
     }
 
     /** Sends {@code bytes}, reads {@code copied} and its digest, and answers {@code word}. */
@@ -227,8 +228,17 @@ class FileWritesTest {
       sys.exit(code if code >= 0 else 128 - code)
       """;
 
+  /** The scripts run here, each edited by {@code edit}, which must change the script it edits. */
   private FileScripts edited(UnaryOperator<String> edit) {
-    return scripts(edit, Map.of());
+    return scripts(
+        script -> {
+          var changed = edit.apply(script);
+          if (changed.equals(script)) {
+            throw new AssertionError("the edit matched nothing in the script it was to change");
+          }
+          return changed;
+        },
+        Map.of());
   }
 
   /**
@@ -461,6 +471,8 @@ class FileWritesTest {
     var stale = Files.writeString(src.resolve(FileScripts.SAVING + "Killed0001.part"), "x");
     var fresh = Files.writeString(src.resolve(FileScripts.SAVING + "UnderWay01.part"), "x");
     var held = Files.writeString(src.resolve(FileScripts.SAVING + "HeldOpen01.part"), "x");
+    var linked = Files.writeString(src.resolve("linked"), "linked");
+    var link = Files.createSymbolicLink(src.resolve(FileScripts.SAVING + "AsALink01.part"), linked);
     var persons =
         List.of(
             Files.writeString(src.resolve(FileScripts.SAVING + "notes"), "a person's"),
@@ -474,6 +486,10 @@ class FileWritesTest {
     for (var person : persons) {
       Files.setLastModifiedTime(person, old);
     }
+    assertEquals(
+        0,
+        new ProcessBuilder("touch", "-h", "-d", "-10 min", link.toString()).start().waitFor(),
+        "the link itself older than the patience");
     var holder = new ProcessBuilder("sleep", "30").redirectInput(held.toFile()).start();
     try {
       assertEquals(
@@ -485,6 +501,8 @@ class FileWritesTest {
     assertFalse(Files.exists(stale), "older than the patience and held by no one");
     assertTrue(Files.exists(fresh), "a write under way keeps its temporary");
     assertTrue(Files.exists(held), "a temporary a process holds open stays");
+    assertTrue(Files.isSymbolicLink(link), "nit 1: a link of the exact shape is never swept");
+    assertEquals("linked", Files.readString(linked), "nor what it leads to");
     for (var person : persons) {
       assertTrue(
           Files.exists(person), "m3: a name of Sail's prefix but not its shape stays: " + person);
@@ -697,6 +715,130 @@ class FileWritesTest {
     assertFalse(Files.exists(mount.resolve("a.md")));
   }
 
+  /**
+   * Review 2's m1: a save whose script outlives its kill (here a process it started, as one a hung
+   * disk holds) keeps its temporary open, and the host checks that, not a grace: until nothing
+   * holds it, no write in the workspace is made, each refused in a true sentence; once it is gone,
+   * writes go on.
+   */
+  @Test
+  void aSaveWhoseProcessOutlivesItsKillHoldsTheWorkspacesWritesUntilItIsGone() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var pidfile = dir.resolve("holder.pid");
+    var outliving =
+        new FilesConnection(
+            running(
+                script ->
+                    script.replace(
+                        "IFS= read -r -d '' word && [ \"$word\" = go ] || exit 43",
+                        "IFS= read -r -d '' word && [ \"$word\" = go ] || exit 43\n"
+                            + "setsid sh -c 'echo $$ > \"$2\"; exec 7< \"$1\"; exec sleep 30' holder"
+                            + " \"$tmp\" '"
+                            + pidfile
+                            + "' < /dev/null > /dev/null 2>&1 &\nexec sleep 30")),
+            CONTAINER,
+            "dock",
+            said::add,
+            () -> null,
+            endedWith::add,
+            new FilesConnection.Writes(
+                lock,
+                () -> null,
+                java.time.Duration.ofMillis(300),
+                java.time.Duration.ofMillis(500)));
+    save(outliving, 1, file.toString(), digest(file), version(file), "new");
+    assertEquals(PtyMessage.FilesRefusal.FAILED, ((PtyMessage.FilesRefused) answer()).kind());
+    var holder = ProcessHandle.of(Long.parseLong(Files.readString(pidfile).strip())).orElseThrow();
+    try {
+      outliving.create(new PtyMessage.FilesCreate(2, home + "/other.md", false));
+      assertEquals(
+          new PtyMessage.FilesRefused(
+              2,
+              PtyMessage.FilesRefusal.FAILED,
+              "A save in dock has not ended since Sail ended it, and a process there still holds"
+                  + " it, so no file there is changed until it has; nothing was changed."),
+          answer());
+      assertFalse(Files.exists(home.resolve("other.md")));
+    } finally {
+      holder.destroyForcibly();
+    }
+    assertTrue(holder.onExit().get(5, TimeUnit.SECONDS) != null);
+    outliving.create(new PtyMessage.FilesCreate(3, home + "/other.md", false));
+    assertEquals(new PtyMessage.FilesDone(3), answer(), "once nothing holds it, writes go on");
+  }
+
+  /**
+   * Review 2's m2: a change made after the hash and before the rename, by a writer outside Sail, is
+   * caught by a stat taken before the hash and again before the rename: a conflict, nothing
+   * replaced.
+   */
+  @Test
+  void aChangeBetweenTheHashAndTheRenameIsAConflict() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "base");
+    var at = dir.resolve("at-rename");
+    var release = dir.resolve("release");
+    assertEquals(0, new ProcessBuilder("mkfifo", release.toString()).start().waitFor());
+    var held =
+        edited(
+            script ->
+                script.replace(
+                    "  [ -w \"$at\" ] || exit 21\n  chmod --reference",
+                    "  : > '"
+                        + at
+                        + "'; read -r _ < '"
+                        + release
+                        + "'\n"
+                        + "  [ -w \"$at\" ] || exit 21\n  chmod --reference"));
+    var bytes = "mine".getBytes(StandardCharsets.UTF_8);
+    var save = new Save(held, file.toString(), digest(file), version(file), bytes.length);
+    save.script.input().write(bytes);
+    save.script.input().flush();
+    assertEquals("copied", save.script.field());
+    save.script.field();
+    save.script.input().write(FileScripts.nul("go"));
+    save.script.input().close();
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!Files.exists(at)) {
+      assertTrue(System.nanoTime() < deadline, "the save hashed the file and stands at its rename");
+      Thread.onSpinWait();
+    }
+    Files.writeString(file, "BASE");
+    Files.writeString(release, "go\n");
+
+    assertEquals(digest(file), save.script.field(), "the present content's digest");
+    assertEquals(FileScripts.CONFLICT, save.script.status());
+    assertEquals("BASE", Files.readString(file), "the outside writer's change stays");
+  }
+
+  /** Review 2's nit 2: a new file whose folder went before its link is said gone, not taken. */
+  @Test
+  void aNewFileWhoseFolderWentBeforeItsLinkIsSaidGone() throws Exception {
+    var folder = Files.createDirectory(home.resolve("going"));
+    var bytes = "mine".getBytes(StandardCharsets.UTF_8);
+    var save = new Save(files, folder + "/new.md", PtyMessage.ABSENT, "", bytes.length);
+    save.script.input().write(bytes);
+    save.script.input().flush();
+    assertEquals("copied", save.script.field());
+    save.script.field();
+    assertEquals(0, new ProcessBuilder("rm", "-rf", folder.toString()).start().waitFor());
+    save.script.input().write(FileScripts.nul("go"));
+    save.script.input().close();
+    assertNull(save.script.field());
+    assertEquals(FileScripts.FOLDER_GONE, save.script.status(), "gone before the temporary's mode");
+
+    var later = Files.createDirectory(home.resolve("going-later"));
+    var goneAtTheLink =
+        edited(
+            script ->
+                script.replace(
+                    "ln -T -- \"$tmp\" \"$at\"", "rm -rf -- \"$dir\"; ln -T -- \"$tmp\" \"$at\""));
+    var linked = new Save(goneAtTheLink, later + "/new.md", PtyMessage.ABSENT, "", bytes.length);
+    assertEquals(
+        FileScripts.FOLDER_GONE,
+        linked.send(bytes, "go").status(),
+        "gone between the mode and the link: said gone, never taken");
+  }
+
   /** m2: a save's script past its go is bounded: past it, killed, the lock freed only once dead. */
   @Test
   void aSavePastItsGoIsBoundedAndItsLockFreedOnlyOnceItsScriptIsDead() throws Exception {
@@ -707,13 +849,14 @@ class FileWritesTest {
                 script ->
                     script.replace(
                         "IFS= read -r -d '' word && [ \"$word\" = go ] || exit 43",
-                        "IFS= read -r -d '' word && [ \"$word\" = go ] || exit 43\nsleep 30")),
+                        "IFS= read -r -d '' word && [ \"$word\" = go ] || exit 43\nexec sleep 30")),
             CONTAINER,
             "dock",
             said::add,
             () -> null,
             endedWith::add,
-            new FilesConnection.Writes(lock, () -> null, java.time.Duration.ofMillis(300)));
+            new FilesConnection.Writes(
+                lock, () -> null, java.time.Duration.ofMillis(300), FilesConnection.HOLD_BOUND));
 
     save(hung, 1, file.toString(), digest(file), version(file), "new");
 
@@ -950,7 +1093,7 @@ class FileWritesTest {
   private final List<PtyMessage> heard = new CopyOnWriteArrayList<>();
 
   private final List<PtyMessage.Err> endedWith = new CopyOnWriteArrayList<>();
-  private final ReentrantLock lock = new ReentrantLock(true);
+  private final FilesConnection.WorkspaceLock lock = new FilesConnection.WorkspaceLock();
 
   private FileScripts running(UnaryOperator<String> edit) {
     return scripts(edit, Map.of());
@@ -971,7 +1114,8 @@ class FileWritesTest {
         },
         () -> null,
         endedWith::add,
-        new FilesConnection.Writes(lock, gate, FilesConnection.AFTER_GO));
+        new FilesConnection.Writes(
+            lock, gate, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND));
   }
 
   /** Sends save {@code id} of {@code text} over {@code path} on {@code base}, bytes and end. */

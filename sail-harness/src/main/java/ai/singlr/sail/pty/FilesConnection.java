@@ -85,9 +85,38 @@ final class FilesConnection {
 
   /**
    * What a connection's writes are given: the workspace's write lock, shared by every connection to
-   * it and fair, so writes wait in order; and the workspace's decision for this person.
+   * it and fair, so writes wait in order; the workspace's decision for this person; how long a save
+   * may run after its go; and how long its process is waited for once it is ended.
    */
-  record Writes(ReentrantLock lock, Gate gate, Duration afterGo) {}
+  record Writes(WorkspaceLock lock, Gate gate, Duration afterGo, Duration holdBound) {}
+
+  /**
+   * A workspace's write lock, which also remembers a save whose process outlived its kill: while
+   * {@code held} names that save's temporary and a process in the workspace still holds it open, no
+   * write in the workspace is made. The whole workspace, not that file alone: another path can name
+   * the same file through a link, so no path can be said safe from that process's rename.
+   */
+  static final class WorkspaceLock extends ReentrantLock {
+    private volatile String held;
+
+    WorkspaceLock() {
+      super(true);
+    }
+
+    /** Whether a save's process that outlived its kill may still be writing in the workspace. */
+    boolean stuck() {
+      return held != null;
+    }
+  }
+
+  /**
+   * How long an ended save's process is waited for, asked every {@link #PROBE_EVERY}: Incus ends a
+   * workspace's process within about 1 s of its {@code incus exec} going, so only a process the
+   * workspace's disk holds outlasts this.
+   */
+  static final Duration HOLD_BOUND = Duration.ofSeconds(5);
+
+  private static final Duration PROBE_EVERY = Duration.ofMillis(250);
 
   /**
    * How long a save's script may run after its go: well above hashing and renaming 20 MiB under the
@@ -602,7 +631,8 @@ final class FilesConnection {
       return;
     }
     var ready = script.field();
-    if (!"ready".equals(ready)) {
+    var temporary = "ready".equals(ready) ? script.field() : null;
+    if (temporary == null) {
       unwritten(request, running, script, ready);
       return;
     }
@@ -669,9 +699,13 @@ final class FilesConnection {
       bound.cancel(false);
       if (!answered.compareAndSet(false, true)) {
         try {
-          script.killAndAwait();
+          script.kill();
+          if (!released(temporary, writes.holdBound())) {
+            writes.lock().held = temporary;
+          }
         } catch (InterruptedException interrupted) {
           Thread.currentThread().interrupt();
+          writes.lock().held = temporary;
         }
         unless(running, overdue(request));
         return;
@@ -793,6 +827,31 @@ final class FilesConnection {
    * as failed; either way {@code script}, when there is one, is cut and writes nothing.
    */
   private boolean allowed(Request request, Running running, FileScripts.Script script) {
+    var held = writes.lock().held;
+    if (held != null) {
+      try {
+        if (released(held, Duration.ZERO)) {
+          writes.lock().held = null;
+        }
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+      }
+    }
+    if (writes.lock().stuck()) {
+      if (script != null) {
+        script.cut();
+      }
+      unless(
+          running,
+          new PtyMessage.FilesRefused(
+              request.id(),
+              FilesRefusal.FAILED,
+              "A save in "
+                  + workspace
+                  + " has not ended since Sail ended it, and a process there still holds it, so"
+                  + " no file there is changed until it has; nothing was changed."));
+      return false;
+    }
     PtyMessage.Err refusal;
     try {
       refusal = writes.gate().refusal();
@@ -822,6 +881,36 @@ final class FilesConnection {
   }
 
   /** Request {@code request} refused as failed: its path, as shown, then {@code why}. */
+  /**
+   * Whether no process in the workspace holds the save's {@code temporary} open, asked by {@link
+   * FileScripts#HELD} now and every {@link #PROBE_EVERY} until {@code bound} has passed: a probe
+   * that cannot be asked counts as held, since nothing then says the process is gone.
+   */
+  private boolean released(String temporary, Duration bound) throws InterruptedException {
+    var deadline = System.nanoTime() + bound.toNanos();
+    while (true) {
+      if (probe(temporary) == 0) {
+        return true;
+      }
+      if (System.nanoTime() >= deadline) {
+        return false;
+      }
+      Thread.sleep(PROBE_EVERY);
+    }
+  }
+
+  private int probe(String temporary) {
+    try {
+      var held = files.start(container, FileScripts.HELD, List.of(temporary), false);
+      while (held.field() != null) {
+        continue;
+      }
+      return held.status();
+    } catch (IOException unasked) {
+      return FileScripts.STILL_HELD;
+    }
+  }
+
   /**
    * A save whose script did not end within {@link Writes#afterGo} and was ended: it may have
    * renamed before it was, so the file holds either version, and the person reads it again.

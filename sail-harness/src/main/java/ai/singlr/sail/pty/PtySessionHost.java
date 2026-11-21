@@ -48,7 +48,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
@@ -223,7 +222,7 @@ public final class PtySessionHost implements AutoCloseable {
    * (F2): made with the workspace's first connection and dropped with its last, both under {@code
    * served}'s monitor.
    */
-  private final Map<String, ReentrantLock> writeLocks = new HashMap<>();
+  private final Map<String, FilesConnection.WorkspaceLock> writeLocks = new HashMap<>();
 
   private volatile String bootId = "";
   private final AtomicInteger connections = new AtomicInteger();
@@ -1898,7 +1897,8 @@ public final class PtySessionHost implements AutoCloseable {
       if (full != null) {
         throw new FilesFull(full);
       }
-      var lock = writeLocks.computeIfAbsent(instance, unused -> new ReentrantLock(true));
+      var lock =
+          writeLocks.computeIfAbsent(instance, unused -> new FilesConnection.WorkspaceLock());
       var connection =
           new FilesConnection(
               files,
@@ -1908,7 +1908,10 @@ public final class PtySessionHost implements AutoCloseable {
               () -> filesEnded(project, workspace, who),
               err -> endFiles(channel, err),
               new FilesConnection.Writes(
-                  lock, () -> filesDecided(project, workspace, who), FilesConnection.AFTER_GO));
+                  lock,
+                  () -> filesDecided(project, workspace, who),
+                  FilesConnection.AFTER_GO,
+                  FilesConnection.HOLD_BOUND));
       var kept = new Served(project, workspace, who, channel, connection);
       served.add(kept);
       return kept;
@@ -1981,7 +1984,7 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   /** The write lock workspace {@code workspace} of {@code project} has now, null when none. */
-  ReentrantLock writeLock(String project, String workspace) {
+  FilesConnection.WorkspaceLock writeLock(String project, String workspace) {
     synchronized (served) {
       return writeLocks.get(project + "-" + workspace);
     }
@@ -2000,6 +2003,7 @@ public final class PtySessionHost implements AutoCloseable {
       if (lock != null
           && !lock.isLocked()
           && !lock.hasQueuedThreads()
+          && !lock.stuck()
           && served.stream()
               .noneMatch(
                   s ->
