@@ -30,7 +30,7 @@ import Testing
         let create = try #require(door.create(of: "app-agent"))
         #expect(create.command.isEmpty && create.workspace == "dock")
         #expect(create.agent == SessionAgent(harness: "claude-code", mode: "plan", inside: false))
-        #expect(door.listing.sessions.first?.agent == RunnerAgent(harness: "claude-code", mode: "plan", login: "stored"))
+        #expect(door.listing.sessions.first?.agent == RunnerAgent(harness: "claude-code", display: "Claude Code", mode: "plan", login: "stored"))
         session.close()
     }
 

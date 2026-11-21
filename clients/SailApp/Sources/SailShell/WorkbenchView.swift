@@ -498,7 +498,7 @@ public final class WorkbenchView: NSView {
         }
         guard !theirs.isEmpty else { return openTab(in: place) }
         let size = points
-        theirs.forEach { open(model.newTab(session: $0.name, place: place), start: .attach, points: size) }
+        theirs.forEach { open(model.newTab(session: $0.name, place: place, agent: $0.agent?.start), start: .attach, points: size) }
     }
 
     private func openTab(in place: Place) {

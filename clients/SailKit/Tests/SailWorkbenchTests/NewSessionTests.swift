@@ -156,6 +156,11 @@ import Testing
         #expect(NewSessionWords.line(claude) == "login “work” · API key")
     }
 
+    @Test func aListedAgentSessionIsTheStartItWasSoItsTabIsTitledByItsHarness() {
+        let listed = RunnerAgent(harness: "codex", display: "Codex CLI", mode: "full-access", login: "inside")
+        #expect(listed.start == AgentStart(harness: "codex", display: "Codex CLI", mode: "full-access", inside: true))
+    }
+
     @Test func anAgentTabIsTitledByItsHarnessAndWorkspaceAndKeepsItAcrossALaunch() throws {
         var bench = Workbench()
         let start = AgentStart(harness: "claude-code", display: "Claude Code", mode: "default")

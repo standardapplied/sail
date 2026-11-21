@@ -400,6 +400,9 @@ public final class FakeRunnerDoor: Sendable {
         }
     }
 
+    /// The harnesses' names as the server's sessions listing gives them.
+    static let displays = ["claude-code": "Claude Code", "codex": "Codex CLI"]
+
     /// The sessions the API lists for its person, newest first: every one it holds, and every one it
     /// ended on its own, in that end's words.
     public var listing: RunnerSessions {
@@ -408,7 +411,7 @@ public final class FakeRunnerDoor: Sendable {
             let sessions = state.made.enumerated().reversed().compactMap { index, name -> RunnerSession? in
                 let live = state.live.contains(name)
                 guard live || state.ended[name] != nil else { return nil }
-                let agent = made[name].flatMap { $0.agent.isNone ? nil : RunnerAgent(harness: $0.agent.harness, mode: $0.agent.mode, login: $0.agent.inside ? "inside" : "stored") }
+                let agent = made[name].flatMap { $0.agent.isNone ? nil : RunnerAgent(harness: $0.agent.harness, display: Self.displays[$0.agent.harness] ?? $0.agent.harness, mode: $0.agent.mode, login: $0.agent.inside ? "inside" : "stored") }
                 return RunnerSession(
                     name: name, live: live, attached: state.attached[name]?.count ?? 0, writer: "", opener: person ?? "",
                     command: [], agent: agent, createdAt: Date(timeIntervalSince1970: Double(index)), endedReason: state.ended[name]

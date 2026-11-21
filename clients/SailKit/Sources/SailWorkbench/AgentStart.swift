@@ -24,6 +24,13 @@ public struct AgentStart: Hashable, Codable, Sendable {
     }
 }
 
+extension RunnerAgent {
+    /// The start a listed agent session was, so a tab attached to it is titled by its harness.
+    public var start: AgentStart {
+        AgentStart(harness: harness, display: display, mode: mode, inside: login == "inside")
+    }
+}
+
 /// What a person last started, per harness the mode, and the last start whole, which the row's
 /// menu names and starts again without the panel. Kept by the app between launches.
 public struct ModeMemory: Codable, Equatable, Sendable {
