@@ -477,6 +477,15 @@ final class ClaudeCode implements Harness {
   }
 
   /**
+   * An API key first: the commands Claude Code runs inherit an API key and not a subscription's
+   * token, so an agent that runs {@code claude} or calls the API itself needs the key.
+   */
+  @Override
+  public List<LoginKind> offeredKinds() {
+    return loginKinds().reversed();
+  }
+
+  /**
    * Its kinds' variables and {@code ANTHROPIC_AUTH_TOKEN}, a gateway's token, which outranks both.
    * Claude Code takes an empty variable as unset.
    */

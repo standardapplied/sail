@@ -9,6 +9,7 @@
       "sessions": [
         {
           "agent": {
+            "display": "Claude Code",
             "harness": "claude-code",
             "login": "stored",
             "mode": "default"
