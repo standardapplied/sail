@@ -5,28 +5,20 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.common.PrivateDirectory;
 import ai.singlr.sail.engine.CommandTimedOut;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
+import ai.singlr.sail.engine.TimeoutDiagnosis;
+import ai.singlr.sail.engine.TimeoutDiagnosis.Answer;
+import ai.singlr.sail.engine.TimeoutDiagnosis.Probe;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
-import java.nio.file.attribute.PosixFileAttributes;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /**
@@ -71,27 +63,16 @@ final class StepTimeoutDiagnosis {
           't', "stopped by a debugger",
           'Z', "exited but not yet reaped");
 
-  private final ShellExec probes;
+  private final TimeoutDiagnosis probes;
   private final Path log;
-  private final Duration bound;
 
   StepTimeoutDiagnosis(ShellExec probes, Path log, Duration bound) {
-    this.probes = probes;
+    this.probes = new TimeoutDiagnosis(probes, bound);
     this.log = log;
-    this.bound = bound;
   }
 
   static StepTimeoutDiagnosis here() {
     return new StepTimeoutDiagnosis(new ShellExecutor(false), LOG, PROBE_BOUND);
-  }
-
-  private record Probe(String title, List<String> command) {}
-
-  /** What one probe answered: its result, or why there is none. */
-  private record Answer(ShellExec.Result result, String failure) {
-    String text() {
-      return result == null ? failure + "\n" : result.stdout() + result.stderr();
-    }
   }
 
   /**
@@ -109,7 +90,7 @@ final class StepTimeoutDiagnosis {
 
   private String diagnose(CommandTimedOut timedOut) {
     var answers = new LinkedHashMap<Probe, Answer>();
-    PROBES.forEach(probe -> answers.put(probe, ask(probe)));
+    PROBES.forEach(probe -> answers.put(probe, probes.ask(probe)));
     var sentence =
         "At the timeout "
             + stepState(timedOut.processes())
@@ -120,28 +101,15 @@ final class StepTimeoutDiagnosis {
             + " and "
             + userdbd(answers.get(USERDBD_STATE));
     try {
-      record(timedOut, answers);
+      TimeoutDiagnosis.record(log, timedOut, answers);
       return sentence + "; the step's processes and this box's file locks are in " + log + ".";
     } catch (IOException e) {
-      return sentence + "; this diagnosis could not be written to " + log + " (" + reason(e) + ").";
-    }
-  }
-
-  /** What went wrong: the message sail wrote, or the exception itself when it names only a path. */
-  private static String reason(IOException e) {
-    return e.getClass() == IOException.class ? e.getMessage() : e.toString();
-  }
-
-  private Answer ask(Probe probe) {
-    try {
-      return new Answer(probes.exec(probe.command(), null, bound), null);
-    } catch (TimeoutException e) {
-      return new Answer(null, "did not answer within " + bound.toSeconds() + " s");
-    } catch (IOException e) {
-      return new Answer(null, "could not run: " + e.getMessage());
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      return new Answer(null, "interrupted");
+      return sentence
+          + "; this diagnosis could not be written to "
+          + log
+          + " ("
+          + TimeoutDiagnosis.reason(e)
+          + ").";
     }
   }
 
@@ -194,64 +162,5 @@ final class StepTimeoutDiagnosis {
     }
     var state = answer.result().stdout().strip();
     return USERDBD + " was " + (state.isEmpty() ? "of unknown state" : state);
-  }
-
-  private void record(CommandTimedOut timedOut, Map<Probe, Answer> answers) throws IOException {
-    var entry = new StringBuilder();
-    entry
-        .append("== ")
-        .append(DateTimeUtils.format(DateTimeUtils.now()))
-        .append(' ')
-        .append(timedOut.getMessage())
-        .append('\n');
-    entry.append("-- the step's processes at the timeout\n").append(timedOut.processes());
-    answers.forEach(
-        (probe, answer) ->
-            entry
-                .append("-- ")
-                .append(probe.title())
-                .append(": ")
-                .append(String.join(" ", probe.command()))
-                .append('\n')
-                .append(answer.text()));
-    requireOwnDirectory(log.getParent());
-    try (var out =
-        Files.newByteChannel(
-            log,
-            Set.of(
-                StandardOpenOption.CREATE,
-                StandardOpenOption.APPEND,
-                StandardOpenOption.WRITE,
-                LinkOption.NOFOLLOW_LINKS),
-            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))) {
-      out.write(ByteBuffer.wrap(entry.toString().getBytes(StandardCharsets.UTF_8)));
-    }
-  }
-
-  /**
-   * The log's directory, made owner-only when it is not there, and refused unless it is a
-   * directory, not a link, owned by the account writing it (root, for init; on a system without
-   * {@code /proc} its owner is not checked): {@code /var/log} is writable by the {@code syslog}
-   * group, which could otherwise plant a link that root writes through.
-   */
-  private static void requireOwnDirectory(Path dir) throws IOException {
-    if (Files.notExists(dir, LinkOption.NOFOLLOW_LINKS)) {
-      Files.createDirectory(
-          dir, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
-    }
-    var attributes =
-        Files.readAttributes(dir, PosixFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-    if (attributes.isSymbolicLink()) {
-      throw new IOException(dir + " is a symbolic link, not a directory");
-    }
-    if (!attributes.isDirectory()) {
-      throw new IOException(dir + " is not a directory");
-    }
-    var self = PrivateDirectory.ProcessOwner.current();
-    var owner = (int) Files.getAttribute(dir, "unix:uid", LinkOption.NOFOLLOW_LINKS);
-    if (self.isPresent() && owner != self.get().uid()) {
-      throw new IOException(
-          dir + " is owned by " + attributes.owner().getName() + ", not by this account");
-    }
   }
 }

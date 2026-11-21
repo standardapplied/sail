@@ -76,7 +76,13 @@ class SshIdentityProvisionerTest {
                 home
                     + " is not a directory but a symbolic link to "
                     + elsewhere
-                    + ", so it cannot be the sail account's home: move it aside and re-run."),
+                    + ", which install -d and sshd would follow, so it cannot be the sail account's"
+                    + " home. To keep the home in "
+                    + elsewhere
+                    + ", bind-mount it at "
+                    + home
+                    + " (mount --bind, or a bind line in /etc/fstab) in place of the link, and"
+                    + " re-run."),
         result.stderr());
     assertEquals(
         "rwxr-xr-x", PosixFilePermissions.toString(Files.getPosixFilePermissions(elsewhere)));
