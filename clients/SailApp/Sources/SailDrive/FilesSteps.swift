@@ -288,10 +288,25 @@ extension Driver {
             return (up, "the sheet offers \(workbench.sheetOffers)")
         }
         if let title = step.fileSheet {
+            let pressed = workbench.sheetUp
             guard workbench.pressSheet(title) else { return (false, "the sheet offers no \(title): \(workbench.sheetOffers)") }
-            let gone = await waitForState(step.seconds ?? 5) { self.workbench.sheetOffers.isEmpty }
+            let gone = await waitForState(step.seconds ?? 5) { self.workbench.sheetUp !== pressed }
             return (gone, "pressed \(title)")
         }
+        if let heading = step.fileSheetSays {
+            let says = await waitForState(step.seconds ?? 5) { self.workbench.sheetHeading == heading }
+            return (says, "the sheet says \(workbench.sheetHeading ?? "nothing, none is up")")
+        }
+        if let text = step.fileTheirs {
+            let held = await waitForState(step.seconds ?? 10) { pane()?.theirs == text }
+            return (held, "the file pane holds for Compare \(pane()?.theirs?.debugDescription ?? "nothing")")
+        }
+        if let holds = step.fileHolds, holds.count == 2, let door = GoldenDesk.door {
+            let path = Self.filesPath(holds[0]), wanted = Array(holds[1].utf8)
+            let held = await waitForState(step.seconds ?? 10) { door.file(path) == wanted }
+            return (held, "\(holds[0]) holds \(door.file(path).map { String(decoding: $0, as: UTF8.self).debugDescription } ?? "nothing")")
+        }
+        if step.fileSaveWhileLoading == true, let door = GoldenDesk.door { return await fileSaveWhileLoading(door) }
         if step.fileSave == true {
             guard workbench.saveFile() else { return (false, "no file pane to save") }
             return (true, "⌘S")
@@ -316,6 +331,35 @@ extension Driver {
             return (gone, gone ? "the file pane closed" : "the file pane stayed: \(pane()?.clean == false ? "unsaved" : "clean")")
         }
         return nil
+    }
+
+    /// B1: a 4 MB file opened, and ⌘S pressed while the view still takes it a slice a turn: the
+    /// save refuses in words, nothing goes on the wire and the workspace's file stays whole; once
+    /// in, it is typed in, still as it was. The pane closed after, the root as it was.
+    private func fileSaveWhileLoading(_ door: FakeRunnerDoor) async -> (Bool, String) {
+        let pane = { self.workbench.filePaneShown }, name = "slow.ts", path = Self.filesPath(name)
+        let line = "export const tide = \"" + String(repeating: "~", count: 90) + "\";\n"
+        let slow = Array(String(repeating: line, count: 4 * 1024 * 1024 / line.utf8.count).utf8)
+        door.setFolder(Self.filesRoot, ["slow.ts", "src/", "README.md", "Package.swift"].map(Self.fileEntry))
+        door.setFile(path, slow)
+        defer { door.setFolder(Self.filesRoot, ["src/", "README.md", "Package.swift"].map(Self.fileEntry)) }
+        guard await waitForState(10, { self.filesShown?.rows.contains { $0.name == name } == true }) else { return (false, "the root never listed \(name)") }
+        let writes = { door.filesReceived.filter { if case .filesWrite = $0 { true } else { false } }.count }, before = writes()
+        guard workbench.openFile(at: path) else { return (false, "no row \(name) to open") }
+        guard await waitForState(10, { (pane()?.text.isEmpty == false) && pane()?.editable == false }) else {
+            return (false, "\(name) was never seen loading: \(pane().map { "\($0.text.utf8.count) bytes, editable \($0.editable)" } ?? "no pane")")
+        }
+        let shownWhenSaved = pane()?.text.utf8.count ?? 0
+        guard workbench.saveFile() else { return (false, "no file pane to save") }
+        let words = "\(name) is still loading. Nothing was saved."
+        let refused = pane()?.note == words
+        guard await waitForState(10, { pane()?.editable == true }) else { return (false, "\(name) was never whole") }
+        let whole = pane()?.text.utf8.count ?? 0
+        guard await waitForState(1, { writes() > before }) == false else { return (false, "⌘S while loading put a write on the wire") }
+        let kept = door.file(path) == slow
+        guard workbench.closeFile(), await waitForState(5, { pane() == nil }) else { return (false, "\(name) did not close") }
+        let said = "⌘S with \(shownWhenSaved) of \(slow.count) bytes in the view: the line said \(refused ? words.debugDescription : "something else"); whole after: \(whole) bytes; the workspace's file \(kept ? "unchanged" : "changed")"
+        return (refused && kept && whole == slow.count, said)
     }
 
     /// The look switched to dark and back with the file open beside the terminal: nothing over the

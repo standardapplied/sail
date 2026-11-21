@@ -337,8 +337,17 @@ struct Step: Decodable {
     var fileUnsaved: Bool?
     /// Compare pressed: the conflict sheet is up with these actions.
     var fileCompare: [String]?
-    /// The conflict sheet's button of this title pressed: the sheet goes.
+    /// The conflict sheet's button of this title pressed: that sheet goes (another may come).
     var fileSheet: String?
+    /// The conflict sheet up says this as its heading, within `seconds`.
+    var fileSheetSays: String?
+    /// The workspace's bytes the file pane holds for Compare are this text, within `seconds`.
+    var fileTheirs: String?
+    /// The workspace's file `[name, text]` holds exactly this text, within `seconds`.
+    var fileHolds: [String]?
+    /// A 4 MB file opened, ⌘S pressed while the view still takes it: the save refuses in words and
+    /// writes nothing, and the file is typed in once whole, still as it was.
+    var fileSaveWhileLoading: Bool?
     /// The file pane closed, as its × is pressed: a clean pane closes at once.
     var fileClose: Bool?
     /// ⌘S in the file pane.

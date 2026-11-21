@@ -222,7 +222,7 @@ final class Driver {
     /// that answer it. Any other step begun under a sheet fails at once, saying which is up, rather
     /// than every step after failing under it.
     static let underASheet: Set<String> = [
-        "confirm", "sheet", "asking", "sheetShows", "answeredWhileSheetShows", "sheetClick", "fileSheet", "fileSheetUp", "fileCompare", "fileSave",
+        "confirm", "sheet", "asking", "sheetShows", "answeredWhileSheetShows", "sheetClick", "fileSheet", "fileSheetUp", "fileSheetSays", "fileCompare", "fileSave", "fileWrite", "fileTheirs", "fileHolds",
         "filesShot", "shot", "shotScreen", "deletesAsked", "questionsWaiting", "releaseAnswers", "relistAs", "golden", "proxyFails",
         "press", "modifiers", "menuItem", "contextMenu", "choose", "arrangement", "at", "fontPoints", "items", "seconds", "name",
     ]
