@@ -457,6 +457,8 @@ extension Driver {
         let rows: [(String, Double, Double, Double)] = [
             ("a 5 MB file chosen to its first screen drawn p95", p95(first), 60, 150),
             ("the same file to typing possible p95", p95(typing), 400, 1000),
+            // The costliest load turn is CoreText shaping glyphs and the layer's draw, not the 32 KiB
+            // slice appended (1.5 ms at most): halving the slice did not lower its p95 (#525).
             ("loading it: the main thread's own CPU in its costliest turn, the least of three", (holds.min() ?? .infinity) * 1000, 8, 16),
             ("a key typed in a 5 MB file to its glyph drawn, the least of three", (keys.min() ?? .infinity) * 1000, 8, 16),
             ("a clean pane's change to the new text drawn p95", p95(changes), 80, 200),
