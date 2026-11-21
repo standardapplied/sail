@@ -70,6 +70,7 @@ import Testing
             entries: [
                 FileEntry(name: "App.java", kind: .known(.file), target: .known(.none), size: 12, mtimeNanos: 1_795_210_162_152_082_747, mode: 0o644),
                 FileEntry(name: "src", kind: .known(.link), target: .known(.folder), size: 3, mtimeNanos: -1, mode: 0o777),
+                FileEntry(name: FileName([0x62, 0x61, 0x64, 0xFF, 0x6E]), kind: .known(.file), target: .known(.none), size: 4, mtimeNanos: 7, mode: 0o600),
             ],
             more: false, truncated: true
         )))
@@ -91,6 +92,22 @@ import Testing
             ],
             code: "login_not_stored"
         )))
+    }
+
+    /// A name that is not UTF-8 is kept as its bytes, so it addresses its own file, and is shown with
+    /// the replacement character; a request for it sends those bytes back.
+    @Test func aNameThatIsNotUTF8IsItsBytesAndShownReplaced() throws {
+        guard case let .filesListing(listing) = try decoded(try golden("FilesListing")) else {
+            Issue.record("no listing")
+            return
+        }
+        let bad = try #require(listing.entries.last?.name)
+        #expect(bad.bytes == [0x62, 0x61, 0x64, 0xFF, 0x6E])
+        #expect(bad.shown == "bad\u{FFFD}n")
+        let asked = try FrameCodec.encode(.filesStat(id: 9, path: bad))
+        #expect(Array(asked.suffix(5)) == [0x62, 0x61, 0x64, 0xFF, 0x6E], "the bytes, not the replacement")
+        #expect(try decoded(asked) == .filesStat(id: 9, path: bad))
+        #expect(FileName([0x62, 0xFF]) != FileName([0x62, 0xFE]), "two bad names stay two")
     }
 
     @Test func theFilesWordsAndTheTicketWordsAreTheHostsInItsOrder() throws {

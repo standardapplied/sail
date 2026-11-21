@@ -303,6 +303,7 @@
     "not_a_folder",
     "not_a_file",
     "loop",
+    "changed",
     "failed"
   ],
   "member_modes": [
