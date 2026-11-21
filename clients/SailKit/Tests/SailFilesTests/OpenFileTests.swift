@@ -632,6 +632,64 @@ import Testing
         #expect(back.writes == 1 && !back.file.clean, "undoing past the second ⌘S wrote the original over the person's first save")
     }
 
+    /// Every way a save ends without being written.
+    enum SaveEnd: String, CaseIterable {
+        case refusal, disconnect, close, givenUp, conflict
+    }
+
+    /// A ⌘S remembered while a save is under way is forgotten however that save ends unwritten: a
+    /// later save the person makes, once answered, writes nothing remembered from before.
+    @Test(arguments: SaveEnd.allCases)
+    func aSaveEndedUnwrittenForgetsTheRememberedSave(_ end: SaveEnd) throws {
+        var pane = Self.opened("abc")
+        pane.type("abcX")
+        pane.save()
+        let first = try #require(pane.lastWrite)
+        pane.type("A")
+        pane.save()
+        switch end {
+        case .refusal:
+            pane.take(pane.file.receive(.refused(id: first.id, kind: Open(rawValue: "no_space"), message: "dock's disk is full. Nothing was changed.")))
+        case .disconnect:
+            pane.file.disconnected()
+            pane.take(pane.file.admitted())
+            pane.answer(Array("abc".utf8), version: "v1")
+        case .close:
+            pane.take(pane.file.close())
+        case .givenUp:
+            pane.type("K")
+            pane.take(pane.file.keepMine(pane.text, taken: pane.taken, shown: OpenFile.Theirs(bytes: Array("abc".utf8), digest: Self.digest(Array("abc".utf8)), version: "v1")))
+            let replacing = try #require(pane.lastWrite)
+            pane.take(pane.file.receive(.written(id: replacing.id, digest: Self.digest(replacing.bytes), version: "v2")))
+        case .conflict:
+            pane.take(pane.file.receive(.conflict(id: first.id, digest: "t")))
+            pane.answer(Array("theirs".utf8), version: "v2")
+            pane.take(pane.file.changed())
+            pane.answer(Array("abc".utf8), version: "v3")
+        }
+        let before = pane.writes
+        pane.type("B")
+        pane.save()
+        let later = try #require(pane.lastWrite)
+        #expect(pane.writes == before + 1 && later.bytes == Array("B".utf8), "\(end): the later save did not write B")
+        pane.take(pane.file.receive(.written(id: later.id, digest: Self.digest(later.bytes), version: "v9")))
+        #expect(pane.writes == before + 1 && pane.file.clean, "\(end): something was written after the later save: \(String(decoding: pane.lastWrite?.bytes ?? [], as: UTF8.self))")
+        #expect(!pane.asked.contains { if case let .write(_, _, _, _, bytes) = $0 { bytes == Array("A".utf8) } else { false } }, "\(end): the ⌘S remembered as \"A\" was written after its save ended unwritten")
+    }
+
+    /// A save after a clean pane followed a change writes against what it followed to: the view's
+    /// units are handed over with the text that replaced it.
+    @Test func aSaveAfterAFollowWrites() throws {
+        var pane = Self.opened("one\n")
+        pane.take(pane.file.changed())
+        pane.answer(Array("two lines\n".utf8), version: "v2")
+        #expect(pane.text == "two lines\n" && pane.file.clean)
+        pane.type("two lines!\n")
+        pane.save()
+        let write = try #require(pane.lastWrite, "a save after a follow wrote nothing: \(pane.said.last.map { "\($0)" } ?? "")")
+        #expect(write.bytes == Array("two lines!\n".utf8) && write.base == Self.digest(Array("two lines\n".utf8)))
+    }
+
     /// N3: a conflict forgets the remembered ⌘S: a later save that lands writes nothing remembered
     /// from before it.
     @Test func aConflictForgetsTheRememberedSave() throws {
