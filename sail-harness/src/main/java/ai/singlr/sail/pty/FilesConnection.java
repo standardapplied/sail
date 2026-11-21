@@ -23,12 +23,13 @@ import java.util.function.Supplier;
  * One files connection's requests answered in its workspace's container, by {@link FileScripts}: at
  * most {@link #SCRIPTS} scripts at once, at most {@link #READS} of them reads, so a listing always
  * has one (F6); the rest wait in order, reads and the others each in their own line, and are never
- * refused; past {@link #WAITING} the connection's next request waits to be read. The watch is one
- * loop for the connection, started by its first watch set. A script that fails for no reason of its
- * own has the workspace asked again ({@code ended}): one stopped, gone or no longer the person's
- * ends the connection in those words; else the request is refused as failed. {@link #close} ends
- * every script and the loop at once, however the connection ended (F5), a write by closing its
- * input so it removes its own temporary.
+ * refused; past {@link #WAITING} the connection's next request waits to be read, unless a save of
+ * the connection waits for its bytes, which come after it ({@link #WAITING_FOR_A_SAVE}). The watch
+ * is one loop for the connection, started by its first watch set. A script that fails for no reason
+ * of its own has the workspace asked again ({@code ended}): one stopped, gone or no longer the
+ * person's ends the connection in those words; else the request is refused as failed. {@link
+ * #close} ends every script and the loop at once, however the connection ended (F5), a write by
+ * closing its input so it removes its own temporary.
  *
  * <p>A write (a save, a create, a move, a remove) takes the workspace's write lock, which every
  * connection to the workspace shares, and asks the workspace's decision again under it before it
@@ -40,6 +41,13 @@ final class FilesConnection {
   static final int SCRIPTS = 4;
   static final int READS = 2;
   static final int WAITING = 64;
+
+  /**
+   * The most requests that wait while a save of the connection waits for its bytes: its chunks come
+   * after them on the wire, so the next request is read past {@link #WAITING}, never held there,
+   * until this many wait.
+   */
+  static final int WAITING_FOR_A_SAVE = 2 * WAITING;
 
   /** The most paths one watch set holds. */
   static final int WATCHED = 1_024;
@@ -149,6 +157,7 @@ final class FilesConnection {
   private int scripts;
   private int reading;
   private int waiting;
+  private int hungry;
   private long asked;
   private boolean closed;
   private FileScripts.Script watch;
@@ -450,7 +459,7 @@ final class FilesConnection {
       }
     }
     synchronized (this) {
-      while (waiting >= WAITING && !closed) {
+      while (waiting >= (hungry > 0 ? WAITING_FOR_A_SAVE : WAITING) && !closed) {
         wait();
       }
       if (closed) {
@@ -634,11 +643,15 @@ final class FilesConnection {
         body.broken = "its bytes stopped coming for " + PtyUploads.IDLE.toMinutes() + " minutes";
         return null;
       }
+      hungry++;
+      notifyAll();
       try {
         TimeUnit.NANOSECONDS.timedWait(this, left);
       } catch (InterruptedException interrupted) {
         Thread.currentThread().interrupt();
         body.broken = "the host ended it";
+      } finally {
+        hungry--;
       }
     }
     return body.broken != null || gone(running) ? null : body.chunks.pollFirst();

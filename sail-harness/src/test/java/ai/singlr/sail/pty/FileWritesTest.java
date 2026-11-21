@@ -721,6 +721,58 @@ class FileWritesTest {
     assertEquals(List.of(), temporaries(home));
   }
 
+  /**
+   * A save's chunks are no requests: with its connection's other scripts busy and 64 requests
+   * waiting, the requests sent between its chunks are read past the bound, so its next chunk is
+   * read and the save completes, never stalled until its idle limit.
+   */
+  @Test
+  void aSaveCompletesWhileSixtyFourRequestsWaitOnItsConnection() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "base");
+    var busy = Files.createDirectory(home.resolve("busy"));
+    var connection =
+        connection(
+            running(script -> script.equals(FileScripts.LIST) ? "exec sleep 30" : script),
+            () -> null);
+    var chunk = 64 << 10;
+    var bytes = new byte[3 * chunk];
+    new java.util.Random(7).nextBytes(bytes);
+    var reader =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try {
+                    connection.write(
+                        new PtyMessage.FilesWrite(1, file.toString(), version(file), bytes.length));
+                    connection.chunk(
+                        new PtyMessage.PutChunk(
+                            1, 0, java.util.Arrays.copyOfRange(bytes, 0, chunk)));
+                    connection.chunk(
+                        new PtyMessage.PutChunk(
+                            1, chunk, java.util.Arrays.copyOfRange(bytes, chunk, 2 * chunk)));
+                    for (var i = 0; i < 3 + FilesConnection.WAITING + 1; i++) {
+                      connection.list(new PtyMessage.FilesList(100 + i, busy.toString()));
+                    }
+                    connection.chunk(
+                        new PtyMessage.PutChunk(
+                            1,
+                            2 * chunk,
+                            java.util.Arrays.copyOfRange(bytes, 2 * chunk, 3 * chunk)));
+                    connection.end(
+                        new PtyMessage.PutEnd(1, HexFormat.of().parseHex(sha256(bytes))));
+                  } catch (InterruptedException | IOException interrupted) {
+                    throw new AssertionError(interrupted);
+                  }
+                });
+
+    assertTrue(
+        reader.join(java.time.Duration.ofSeconds(10)),
+        "the request past the bound was read, and the save's last chunk after it");
+    assertInstanceOf(PtyMessage.FilesWritten.class, answer());
+    assertArrayEquals(bytes, Files.readAllBytes(file));
+    connection.close();
+  }
+
   /** A save's bytes stream in without the lock: it is held only from the go to the version. */
   @Test
   void aSavesBytesAreCopiedWhileAnotherHoldsTheLock() throws Exception {
