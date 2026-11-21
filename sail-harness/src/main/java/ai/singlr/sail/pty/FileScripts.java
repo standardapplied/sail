@@ -87,6 +87,9 @@ final class FileScripts {
    */
   static final int BAD_DIGEST = 48;
 
+  /** A save over a file larger than a whole read may be, which never has a whole read's digest. */
+  static final int TOO_LARGE = 49;
+
   /** The read's exit when the workspace has no {@code sha256sum} to prove what it read with. */
   static final int NO_SHA256 = 27;
 
@@ -276,36 +279,54 @@ final class FileScripts {
           .formatted(SAVING, TEMPORARY_SHAPE);
 
   /**
-   * Saves {@code $2} bytes of standard input as the path, read with its base: made anew where no
-   * name is when the base is {@code absent}, else written over the file the path resolves to, which
-   * must be a file. It makes its temporary in the target's folder ({@link #TEMPORARY}), says {@code
-   * ready}, copies the bytes into it and syncs them, says {@code copied} and their SHA-256, then
-   * waits for the host's {@code go}: anything else, or fewer bytes, writes nothing. On {@code go}
-   * it compares the file's version with the base (printing the present version, or absent, for a
-   * conflict), refuses a file the dev user may not write, keeps its mode, and renames over it in
-   * one call, or links the new name in one call that fails when the name was taken meanwhile; then
-   * prints the version the file has now. A full disk prints the bytes free.
+   * Saves {@code $2} bytes of standard input as the path, read with its base and the {@code stat}
+   * version the client read at: made anew where no name is when the base is {@code absent}, else
+   * written over the file the path resolves to, which must be a file the dev user may write, of at
+   * most {@code $3} bytes. The base is the SHA-256 of the whole file as the client read it. A
+   * pre-check before any byte can only refuse: when the file's {@code stat} is not the one read at,
+   * the file is hashed, and a digest other than the base is a conflict answered at once. It makes
+   * its temporary in the target's folder ({@link #TEMPORARY}), says {@code ready}, copies the bytes
+   * into it, syncs them and holds it open, says {@code copied} and their digest, then waits for the
+   * host's {@code go}: anything else, or fewer bytes, writes nothing. On {@code go}, under the
+   * host's lock, it hashes the whole target and compares that digest with the base (printing the
+   * present digest, or absent, for a conflict), refuses a file the dev user may not write, keeps
+   * its mode, and renames over it in one call, or links the new name in one call that fails when
+   * the name was taken meanwhile; then syncs the folder and prints the version the file has now.
+   * Every digest is a SHA-256 in lowercase hex, or nothing is written. A full disk prints the bytes
+   * free.
    */
   static final String WRITE =
       RESOLVE
           + """
-          size=$2
+          size=$2 cap=$3
           IFS= read -r -d '' path || exit 1
           IFS= read -r -d '' base || exit 1
+          IFS= read -r -d '' seen || exit 1
+          content_digest() {
+            local found
+            found=$(sha256sum < "$1" 2>/dev/null | cut -c1-64)
+            [[ $found =~ ^[0-9a-f]{64}$ ]] || return 1
+            printf '%%s' "$found"
+          }
           if [ "$base" = absent ]; then
             resolve_parent "$path"
             there "$target" && exit 40
             at=$target
           else
+            [[ $base =~ ^[0-9a-f]{64}$ ]] || exit 48
             resolve_parent "$path"
             [ -e "$target" ] || { printf 'absent\\0'; exit 41; }
             resolve "$path"
             [ -d "$at" ] && exit 23
             [ -f "$at" ] || exit 25
             [ -w "$at" ] || exit 21
+            [ "$(stat -L -c %%s -- "$at")" -le "$cap" ] || exit 49
             dir=${at%%/*}
-            now=$(stat -L --printf '%s' -- "$at") || exit 1
-            [ "$now" = "$base" ] || { printf '%%s\\0' "$now"; exit 41; }
+            now=$(stat -L --printf '%1$s' -- "$at") || exit 1
+            if [ "$now" != "$seen" ]; then
+              found=$(content_digest "$at") || exit 48
+              [ "$found" = "$base" ] || { printf '%%s\\0' "$found"; exit 41; }
+            fi
           fi
           """
               .formatted(VERSION)
@@ -320,15 +341,17 @@ final class FileScripts {
           [ "$(stat -c %%s -- "$tmp")" = "$size" ] || exit 43
           sync -- "$tmp" 2>/dev/null || exit 1
           exec 5< "$tmp"
-          printf 'copied\\0%%s\\0' "$(sha256sum < "$tmp" | cut -c1-64)"
+          copied=$(content_digest "$tmp") || exit 48
+          printf 'copied\\0%%s\\0' "$copied"
           IFS= read -r -d '' word && [ "$word" = go ] || exit 43
           if [ "$base" = absent ]; then
             chmod -- "$(printf %%03o $((0666 & ~0$(umask))))" "$tmp" || exit 1
             ln -T -- "$tmp" "$at" 2>/dev/null || { there "$at" && exit 40; [ -d "$dir" ] || exit 46; exit 1; }
             rm -f -- "$tmp"
           else
-            now=$(stat -L --printf '%1$s' -- "$at" 2>/dev/null) || { printf 'absent\\0'; exit 41; }
-            [ "$now" = "$base" ] || { printf '%%s\\0' "$now"; exit 41; }
+            [ -e "$at" ] || { printf 'absent\\0'; exit 41; }
+            found=$(content_digest "$at") || exit 48
+            [ "$found" = "$base" ] || { printf '%%s\\0' "$found"; exit 41; }
             [ -w "$at" ] || exit 21
             chmod --reference="$at" -- "$tmp" || exit 1
             mv -fT -- "$tmp" "$at" || exit 1
@@ -508,6 +531,7 @@ final class FileScripts {
       case EXISTS -> FilesRefusal.EXISTS;
       case INTO_ITSELF -> FilesRefusal.UNSAFE;
       case PARTLY_REMOVED -> FilesRefusal.PARTLY_REMOVED;
+      case TOO_LARGE -> FilesRefusal.TOO_LARGE;
       default -> null;
     };
   }

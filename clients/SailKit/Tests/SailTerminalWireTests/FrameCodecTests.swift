@@ -86,12 +86,12 @@ import Testing
         #expect(frames["FilesChanged"] == .filesChanged(paths: ["/home/dev/workspace", "/home/dev/workspace/App.java"]))
         #expect(frames["FilesTick"] == .filesTick)
         #expect(frames["FilesRefused"] == .filesRefused(id: 4, kind: .known(.loop), message: "/home/dev/workspace/self leads back to itself."))
-        #expect(frames["FilesWrite"] == .filesWrite(id: 5, path: "/home/dev/workspace/App.java", base: "51:10:12:7.0:7.0", size: 13))
+        #expect(frames["FilesWrite"] == .filesWrite(id: 5, path: "/home/dev/workspace/App.java", base: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", seen: "51:10:12:7.0:7.0", size: 13))
         #expect(frames["FilesCreate"] == .filesCreate(id: 6, path: "/home/dev/workspace/notes", folder: true))
         #expect(frames["FilesMove"] == .filesMove(id: 7, from: "/home/dev/workspace/a.md", to: "/home/dev/workspace/b.md"))
         #expect(frames["FilesRemove"] == .filesRemove(id: 8, path: "/home/dev/workspace/old"))
-        #expect(frames["FilesWritten"] == .filesWritten(id: 5, version: "51:11:13:8.0:8.0"))
-        #expect(frames["FilesConflict"] == .filesConflict(id: 5, version: "absent"))
+        #expect(frames["FilesWritten"] == .filesWritten(id: 5, digest: "a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447", version: "51:11:13:8.0:8.0"))
+        #expect(frames["FilesConflict"] == .filesConflict(id: 5, digest: "absent"))
         #expect(frames["FilesDone"] == .filesDone(id: 6))
         #expect(frames["Err"] == .refused(HostRefusal(
             message: "You do not hold the write token.",

@@ -215,12 +215,13 @@ public final class PtyWire {
       case PtyMessage.FilesRefused m ->
           out.type(55).i32(m.id()).string(m.kind().wire()).string(m.message());
       case PtyMessage.FilesWrite m ->
-          out.type(45).i32(m.id()).name(m.path()).string(m.base()).i64(m.size());
+          out.type(45).i32(m.id()).name(m.path()).string(m.base()).string(m.seen()).i64(m.size());
       case PtyMessage.FilesCreate m -> out.type(46).i32(m.id()).name(m.path()).bool(m.folder());
       case PtyMessage.FilesMove m -> out.type(47).i32(m.id()).name(m.from()).name(m.to());
       case PtyMessage.FilesRemove m -> out.type(48).i32(m.id()).name(m.path());
-      case PtyMessage.FilesWritten m -> out.type(56).i32(m.id()).string(m.version());
-      case PtyMessage.FilesConflict m -> out.type(57).i32(m.id()).string(m.version());
+      case PtyMessage.FilesWritten m ->
+          out.type(56).i32(m.id()).string(m.digest()).string(m.version());
+      case PtyMessage.FilesConflict m -> out.type(57).i32(m.id()).string(m.digest());
       case PtyMessage.FilesDone m -> out.type(58).i32(m.id());
     }
     return out.finish();
@@ -437,11 +438,12 @@ public final class PtyWire {
       case 55 ->
           new PtyMessage.FilesRefused(
               in.getInt(), PtyMessage.FilesRefusal.of(string(in)), string(in));
-      case 45 -> new PtyMessage.FilesWrite(in.getInt(), name(in), string(in), in.getLong());
+      case 45 ->
+          new PtyMessage.FilesWrite(in.getInt(), name(in), string(in), string(in), in.getLong());
       case 46 -> new PtyMessage.FilesCreate(in.getInt(), name(in), in.get() == 1);
       case 47 -> new PtyMessage.FilesMove(in.getInt(), name(in), name(in));
       case 48 -> new PtyMessage.FilesRemove(in.getInt(), name(in));
-      case 56 -> new PtyMessage.FilesWritten(in.getInt(), string(in));
+      case 56 -> new PtyMessage.FilesWritten(in.getInt(), string(in), string(in));
       case 57 -> new PtyMessage.FilesConflict(in.getInt(), string(in));
       case 58 -> new PtyMessage.FilesDone(in.getInt());
       default -> throw new IOException("Unknown pty frame type " + type + ".");

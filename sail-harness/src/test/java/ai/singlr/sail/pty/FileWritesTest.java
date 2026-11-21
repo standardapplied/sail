@@ -91,8 +91,15 @@ class FileWritesTest {
     final FileScripts.Script script;
     final String first;
 
-    Save(FileScripts with, String path, String base, long size) throws IOException {
-      script = with.start(CONTAINER, FileScripts.WRITE, List.of(path, base), true, "" + size);
+    Save(FileScripts with, String path, String base, String seen, long size) throws IOException {
+      script =
+          with.start(
+              CONTAINER,
+              FileScripts.WRITE,
+              List.of(path, base, seen),
+              true,
+              "" + size,
+              "" + FilesConnection.READ_CAP);
       started.add(script);
       first = script.field();
     }
@@ -121,13 +128,13 @@ class FileWritesTest {
     }
   }
 
-  private Saved save(Path path, String base, String text) throws IOException {
-    return save(path.toString(), base, text);
+  private Saved save(Path path, String base, String seen, String text) throws IOException {
+    return save(path.toString(), base, seen, text);
   }
 
-  private Saved save(String path, String base, String text) throws IOException {
+  private Saved save(String path, String base, String seen, String text) throws IOException {
     var bytes = text.getBytes(StandardCharsets.UTF_8);
-    var save = new Save(files, path, base, bytes.length);
+    var save = new Save(files, path, base, seen, bytes.length);
     if (!"ready".equals(save.first)) {
       return new Saved(save.first == null ? List.of() : List.of(save.first), save.script.status());
     }
@@ -144,6 +151,11 @@ class FileWritesTest {
 
   private String version(Path path) throws IOException {
     return version(path.toString());
+  }
+
+  /** The SHA-256 of what {@code path} holds now, as a whole read gives it: a save's base. */
+  private static String digest(Path path) throws IOException {
+    return sha256(Files.readAllBytes(path));
   }
 
   private String version(String path) throws IOException {
@@ -264,7 +276,7 @@ class FileWritesTest {
     Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-r-----"));
     var inode = Files.getAttribute(file, "unix:ino");
 
-    var saved = save(file, version(file), "new words");
+    var saved = save(file, digest(file), version(file), "new words");
 
     assertEquals(0, saved.status());
     assertEquals("new words", Files.readString(file));
@@ -273,7 +285,14 @@ class FileWritesTest {
         inode.equals(Files.getAttribute(file, "unix:ino")), "renamed over, never rewritten");
     assertEquals(version(file), saved.last(), "the version after the rename and the mode");
     assertEquals(
-        0, save(file, saved.last(), "newer words").status(), "so the next save is no conflict");
+        0,
+        save(
+                file,
+                sha256("new words".getBytes(StandardCharsets.UTF_8)),
+                saved.last(),
+                "newer words")
+            .status(),
+        "so the next save, on the digest it saved and the version it answered, is no conflict");
     assertEquals("newer words", Files.readString(file));
     assertEquals(List.of(), temporaries(home));
   }
@@ -284,7 +303,7 @@ class FileWritesTest {
     var target = Files.writeString(src.resolve("App.java"), "class App {}");
     var link = Files.createSymbolicLink(home.resolve("App.java"), target);
 
-    assertEquals(0, save(link, version(link), "class App { }").status());
+    assertEquals(0, save(link, digest(link), version(link), "class App { }").status());
 
     assertTrue(Files.isSymbolicLink(link));
     assertEquals("class App { }", Files.readString(target));
@@ -294,16 +313,17 @@ class FileWritesTest {
   @Test
   void aSaveOnAStaleVersionWritesNothingAndSaysThePresentOneOrAbsent() throws Exception {
     var file = Files.writeString(home.resolve("notes.md"), "mine");
-    var base = version(file);
+    var base = digest(file);
+    var seen = version(file);
     Files.writeString(file, "an agent's");
 
-    var stale = save(file, base, "mine, edited");
+    var stale = save(file, base, seen, "mine, edited");
     assertEquals(FileScripts.CONFLICT, stale.status());
-    assertEquals(List.of(version(file)), stale.said());
+    assertEquals(List.of(digest(file)), stale.said(), "the present content's digest");
     assertEquals("an agent's", Files.readString(file));
 
     Files.delete(file);
-    var gone = save(file, base, "mine, edited");
+    var gone = save(file, base, seen, "mine, edited");
     assertEquals(FileScripts.CONFLICT, gone.status());
     assertEquals(List.of("absent"), gone.said());
     assertFalse(Files.exists(file), "a save on a version never makes the file again");
@@ -314,7 +334,7 @@ class FileWritesTest {
   void aChangeBetweenTheCopyAndTheGoIsAConflictAndTheChangeStays() throws Exception {
     var file = Files.writeString(home.resolve("notes.md"), "mine");
     var bytes = "mine, edited".getBytes(StandardCharsets.UTF_8);
-    var save = new Save(files, file.toString(), version(file), bytes.length);
+    var save = new Save(files, file.toString(), digest(file), version(file), bytes.length);
     assertEquals("ready", save.first);
     save.script.input().write(bytes);
     save.script.input().flush();
@@ -325,7 +345,7 @@ class FileWritesTest {
     save.script.input().write(FileScripts.nul("go"));
     save.script.input().close();
 
-    assertEquals(version(file), save.script.field());
+    assertEquals(digest(file), save.script.field(), "the present content's digest");
     assertEquals(FileScripts.CONFLICT, save.script.status());
     assertEquals("an agent's", Files.readString(file));
     assertEquals(List.of(), temporaries(home));
@@ -336,7 +356,7 @@ class FileWritesTest {
     var file = Files.writeString(home.resolve("locked.md"), "kept");
     Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("r--r--r--"));
 
-    var saved = save(file, version(file), "replaced");
+    var saved = save(file, digest(file), version(file), "replaced");
 
     assertEquals(FileScripts.NOT_PERMITTED, saved.status());
     assertEquals("kept", Files.readString(file));
@@ -346,7 +366,7 @@ class FileWritesTest {
   @Test
   void aNewFileTakesItsNameOnlyWhileNoNameIsThere() throws Exception {
     var fresh = home.resolve("fresh.md");
-    var saved = save(fresh, PtyMessage.ABSENT, "first");
+    var saved = save(fresh, PtyMessage.ABSENT, "", "first");
     assertEquals(0, saved.status());
     assertEquals("first", Files.readString(fresh));
     assertEquals(version(fresh), saved.last());
@@ -362,18 +382,19 @@ class FileWritesTest {
         (int) Files.getAttribute(fresh, "unix:mode") & 0777,
         "a new file's mode is the umask's, never the temporary's 0600");
 
-    assertEquals(FileScripts.EXISTS, save(fresh, PtyMessage.ABSENT, "second").status());
+    assertEquals(FileScripts.EXISTS, save(fresh, PtyMessage.ABSENT, "", "second").status());
     assertEquals("first", Files.readString(fresh));
     Files.createDirectory(home.resolve("folder"));
-    assertEquals(FileScripts.EXISTS, save(home.resolve("folder"), PtyMessage.ABSENT, "x").status());
+    assertEquals(
+        FileScripts.EXISTS, save(home.resolve("folder"), PtyMessage.ABSENT, "", "x").status());
     Files.createSymbolicLink(home.resolve("dangling"), home.resolve("nowhere"));
     assertEquals(
-        FileScripts.EXISTS, save(home.resolve("dangling"), PtyMessage.ABSENT, "x").status());
+        FileScripts.EXISTS, save(home.resolve("dangling"), PtyMessage.ABSENT, "", "x").status());
     assertFalse(Files.exists(home.resolve("nowhere")), "a dangling link is never followed");
 
     var raced = home.resolve("raced.md");
     var bytes = "mine".getBytes(StandardCharsets.UTF_8);
-    var save = new Save(files, raced.toString(), PtyMessage.ABSENT, bytes.length);
+    var save = new Save(files, raced.toString(), PtyMessage.ABSENT, "", bytes.length);
     save.script.input().write(bytes);
     save.script.input().flush();
     assertEquals("copied", save.script.field());
@@ -386,7 +407,7 @@ class FileWritesTest {
     assertEquals("theirs", Files.readString(raced));
 
     var folder = home.resolve("raced-folder");
-    var into = new Save(files, folder.toString(), PtyMessage.ABSENT, bytes.length);
+    var into = new Save(files, folder.toString(), PtyMessage.ABSENT, "", bytes.length);
     into.script.input().write(bytes);
     into.script.input().flush();
     assertEquals("copied", into.script.field());
@@ -406,7 +427,7 @@ class FileWritesTest {
   void aSaveCutShortOrToldNoGoWritesNothingAndLeavesNoTemporary() throws Exception {
     var file = Files.writeString(home.resolve("notes.md"), "kept");
 
-    var short_ = new Save(files, file.toString(), version(file), 10);
+    var short_ = new Save(files, file.toString(), digest(file), version(file), 10);
     short_.script.input().write("12345".getBytes(StandardCharsets.UTF_8));
     short_.script.input().close();
     assertNull(short_.script.field());
@@ -415,12 +436,16 @@ class FileWritesTest {
     var bytes = "replaced".getBytes(StandardCharsets.UTF_8);
     assertEquals(
         FileScripts.UNWRITTEN,
-        new Save(files, file.toString(), version(file), bytes.length).send(bytes, "no").status());
+        new Save(files, file.toString(), digest(file), version(file), bytes.length)
+            .send(bytes, "no")
+            .status());
     assertEquals(
         FileScripts.UNWRITTEN,
-        new Save(files, file.toString(), version(file), bytes.length).send(bytes, null).status());
+        new Save(files, file.toString(), digest(file), version(file), bytes.length)
+            .send(bytes, null)
+            .status());
 
-    var cut = new Save(files, file.toString(), version(file), 1 << 20);
+    var cut = new Save(files, file.toString(), digest(file), version(file), 1 << 20);
     cut.script.input().write(new byte[4096]);
     cut.script.input().flush();
     cut.script.cut();
@@ -451,7 +476,8 @@ class FileWritesTest {
     }
     var holder = new ProcessBuilder("sleep", "30").redirectInput(held.toFile()).start();
     try {
-      assertEquals(0, save(src.resolve("App.java"), PtyMessage.ABSENT, "class App {}").status());
+      assertEquals(
+          0, save(src.resolve("App.java"), PtyMessage.ABSENT, "", "class App {}").status());
     } finally {
       holder.destroyForcibly();
     }
@@ -481,7 +507,7 @@ class FileWritesTest {
    */
   @Test
   void aWaitingSavesTemporaryIsNeverSweptByAnotherSave() throws Exception {
-    var waiting = new Save(files, home + "/first.md", PtyMessage.ABSENT, 5);
+    var waiting = new Save(files, home + "/first.md", PtyMessage.ABSENT, "", 5);
     waiting.script.input().write("first".getBytes(StandardCharsets.UTF_8));
     waiting.script.input().flush();
     assertEquals("copied", waiting.script.field());
@@ -489,7 +515,7 @@ class FileWritesTest {
     var temporary = home.resolve(temporaries(home).getFirst());
     Files.setLastModifiedTime(temporary, FileTime.from(Instant.now().minusSeconds(600)));
 
-    assertEquals(0, save(home.resolve("second.md"), PtyMessage.ABSENT, "second").status());
+    assertEquals(0, save(home.resolve("second.md"), PtyMessage.ABSENT, "", "second").status());
     assertTrue(Files.exists(temporary), "held open by the waiting save, so not swept");
 
     waiting.script.input().write(FileScripts.nul("go"));
@@ -499,13 +525,125 @@ class FileWritesTest {
     assertEquals("first", Files.readString(home.resolve("first.md")));
   }
 
+  /** A {@code bin} of this machine's programs with {@code sha256sum} as {@code fake}, or none. */
+  private Path binWith(String fake) throws Exception {
+    var bin =
+        Files.createDirectories(dir.resolve("bin-" + (fake == null ? "none" : fake.hashCode())));
+    for (var from : List.of(Path.of("/usr/bin"), Path.of("/bin"))) {
+      try (var programs = Files.list(from)) {
+        for (var program : programs.toList()) {
+          var to = bin.resolve(program.getFileName());
+          if (!program.getFileName().toString().equals("sha256sum")
+              && !Files.exists(to, LinkOption.NOFOLLOW_LINKS)) {
+            Files.createSymbolicLink(to, program);
+          }
+        }
+      }
+    }
+    if (fake != null) {
+      var sha = Files.writeString(bin.resolve("sha256sum"), "#!/bin/sh\n" + fake + "\n");
+      Files.setPosixFilePermissions(sha, PosixFilePermissions.fromString("rwx------"));
+    }
+    return bin;
+  }
+
+  /**
+   * Digest rule 1: every digest a save computes is 64 lowercase hex, or nothing is written: with no
+   * {@code sha256sum}, or one that prints nothing or no SHA-256, two digests never agree.
+   */
+  @Test
+  void aSaveIsDecidedOnlyByGenuineDigests() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var base = digest(file);
+    for (var fake :
+        java.util.Arrays.asList(null, "cat > /dev/null", "cat > /dev/null; echo 'zzzz  -'")) {
+      var broken = scripts(UnaryOperator.identity(), Map.of("PATH", binWith(fake).toString()));
+      var early = new Save(broken, file.toString(), base, "a stat that differs", 3);
+      assertNull(early.first, "sha256sum " + fake + ": no digest, no ready");
+      assertEquals(FileScripts.BAD_DIGEST, early.script.status(), "sha256sum: " + fake);
+      var late = new Save(broken, file.toString(), base, version(file), 3);
+      assertEquals("ready", late.first);
+      assertEquals(
+          FileScripts.BAD_DIGEST, late.send("new".getBytes(StandardCharsets.UTF_8), "go").status());
+      assertEquals("kept", Files.readString(file), "nothing written: " + fake);
+    }
+    assertEquals(List.of(), temporaries(home));
+  }
+
+  /**
+   * Digest rule 2: after its go, a save hashes the target WHOLE, so a change anywhere in it, of the
+   * same size, is a conflict; and a change that leaves the bytes as they were (a {@code touch}) is
+   * none, before its bytes or after its go.
+   */
+  @Test
+  void aSaveComparesTheWholeTargetsContentNotItsStat() throws Exception {
+    var bytes = new byte[300_000];
+    java.util.Arrays.fill(bytes, (byte) 'a');
+    var file = Files.write(home.resolve("big.txt"), bytes);
+    var base = digest(file);
+    var save = new Save(files, file.toString(), base, version(file), 3);
+    save.script.input().write("new".getBytes(StandardCharsets.UTF_8));
+    save.script.input().flush();
+    assertEquals("copied", save.script.field());
+    save.script.field();
+    bytes[bytes.length - 1] = 'b';
+    Files.write(file, bytes);
+    save.script.input().write(FileScripts.nul("go"));
+    save.script.input().close();
+    assertEquals(digest(file), save.script.field(), "its last byte changed: a conflict");
+    assertEquals(FileScripts.CONFLICT, save.script.status());
+
+    var touched = Files.writeString(home.resolve("touched.md"), "same");
+    var read = digest(touched);
+    var seen = version(touched);
+    Files.setLastModifiedTime(touched, FileTime.from(Instant.now().plusSeconds(60)));
+    assertEquals(0, save(touched, read, seen, "after a touch").status(), "the bytes are as read");
+    assertEquals("after a touch", Files.readString(touched));
+  }
+
+  /**
+   * Digest rule 3: a base from a ranged read is no whole file's digest, so the compare refuses it
+   * as a conflict and never writes over the file.
+   */
+  @Test
+  void aBaseFromARangedReadIsAConflictNeverAnOverwrite() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "0123456789");
+    var ranged = sha256("012".getBytes(StandardCharsets.UTF_8));
+
+    var saved = save(file, ranged, version(file), "mine");
+    assertEquals(FileScripts.CONFLICT, saved.status());
+    var late = save(file, ranged, "a stat that differs", "mine");
+    assertEquals(FileScripts.CONFLICT, late.status());
+    assertEquals("0123456789", Files.readString(file));
+  }
+
+  /**
+   * Digest rule 4: a file over 20 MiB can never have a whole read's digest, so it is never saved:
+   * refused before any of its bytes, before it is hashed.
+   */
+  @Test
+  void aTargetOverTwentyMebibytesIsRefusedBeforeItsBytes() throws Exception {
+    var file = home.resolve("huge.bin");
+    try (var huge =
+        java.nio.channels.FileChannel.open(
+            file,
+            java.nio.file.StandardOpenOption.CREATE_NEW,
+            java.nio.file.StandardOpenOption.WRITE)) {
+      huge.truncate(FilesConnection.READ_CAP + 1);
+      huge.write(java.nio.ByteBuffer.wrap(new byte[] {1}), FilesConnection.READ_CAP);
+    }
+    var save = new Save(files, file.toString(), sha256(new byte[0]), "a stat that differs", 3);
+    assertNull(save.first, "no ready");
+    assertEquals(FileScripts.TOO_LARGE, save.script.status());
+  }
+
   /** m4: a target the dev user may not write is refused before any of its bytes are taken. */
   @Test
   void aTargetTheUserMayNotWriteIsRefusedBeforeItsBytes() throws Exception {
     var file = Files.writeString(home.resolve("locked.md"), "kept");
     Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("r--r--r--"));
 
-    var save = new Save(files, file.toString(), version(file), 1 << 20);
+    var save = new Save(files, file.toString(), digest(file), version(file), 1 << 20);
 
     assertNull(save.first, "no ready: refused before its bytes");
     assertEquals(FileScripts.NOT_PERMITTED, save.script.status());
@@ -572,7 +710,7 @@ class FileWritesTest {
             endedWith::add,
             new FilesConnection.Writes(lock, () -> null, java.time.Duration.ofMillis(300)));
 
-    save(hung, 1, file.toString(), version(file), "new");
+    save(hung, 1, file.toString(), digest(file), version(file), "new");
 
     var failed = assertInstanceOf(PtyMessage.FilesRefused.class, answer());
     assertEquals(PtyMessage.FilesRefusal.FAILED, failed.kind());
@@ -593,7 +731,7 @@ class FileWritesTest {
   @Test
   void aListingNeverShowsASavesTemporary() throws Exception {
     var file = Files.writeString(home.resolve("notes.md"), "kept");
-    var save = new Save(files, file.toString(), version(file), 4);
+    var save = new Save(files, file.toString(), digest(file), version(file), 4);
     assertEquals("ready", save.first);
     assertEquals(1, temporaries(home).size(), "the temporary is there, beside the file");
 
@@ -614,8 +752,10 @@ class FileWritesTest {
     assertEquals(0, new ProcessBuilder("mkfifo", pipe.toString()).start().waitFor());
     var folder = Files.createDirectory(home.resolve("folder"));
 
-    assertEquals(FileScripts.NOT_A_FILE, save(pipe, version(pipe), "x").status());
-    assertEquals(FileScripts.IS_FOLDER, save(folder, version(folder), "x").status());
+    assertEquals(
+        FileScripts.NOT_A_FILE, save(pipe, sha256(new byte[0]), version(pipe), "x").status());
+    assertEquals(
+        FileScripts.IS_FOLDER, save(folder, sha256(new byte[0]), version(folder), "x").status());
   }
 
   @Test
@@ -733,7 +873,10 @@ class FileWritesTest {
     var removed = shellMade(src, new byte[] {'b', 'a', 'd', (byte) 0xfe, 'n'});
     var lookalike = shellMade(src, "bad\uFFFDn".getBytes(StandardCharsets.UTF_8));
 
-    assertEquals(0, save(saved, version(saved), "saved").status());
+    assertEquals(
+        0,
+        save(saved, sha256("body".getBytes(StandardCharsets.UTF_8)), version(saved), "saved")
+            .status());
     assertEquals(0, run(FileScripts.MOVE, saved, src + "/renamed"));
     assertEquals(0, run(FileScripts.REMOVE, removed));
 
@@ -774,7 +917,7 @@ class FileWritesTest {
   @Test
   void noPathNameOrByteOfASaveReachesACommandLine() throws Exception {
     var file = Files.writeString(home.resolve("secret-plan.md"), "old");
-    save(file, version(file), "the secret body");
+    save(file, digest(file), version(file), "the secret body");
     run(FileScripts.CREATE, home + "/secret-new", "file");
     run(FileScripts.MOVE, home + "/secret-new", home + "/secret-moved");
     run(FileScripts.REMOVE, home + "/secret-moved");
@@ -828,10 +971,10 @@ class FileWritesTest {
 
   /** Sends save {@code id} of {@code text} over {@code path} on {@code base}, bytes and end. */
   private static void save(
-      FilesConnection connection, int id, String path, String base, String text)
+      FilesConnection connection, int id, String path, String base, String seen, String text)
       throws InterruptedException {
     var bytes = text.getBytes(StandardCharsets.UTF_8);
-    connection.write(new PtyMessage.FilesWrite(id, path, base, bytes.length));
+    connection.write(new PtyMessage.FilesWrite(id, path, base, seen, bytes.length));
     connection.chunk(new PtyMessage.PutChunk(id, 0, bytes));
     connection.end(new PtyMessage.PutEnd(id, HexFormat.of().parseHex(sha256(bytes))));
   }
@@ -871,14 +1014,15 @@ class FileWritesTest {
   @Test
   void twoSavesOnOneBaseThroughTheLockWriteExactlyOne() throws Exception {
     var file = Files.writeString(home.resolve("notes.md"), "base");
-    var base = version(file);
+    var base = digest(file);
+    var seen = version(file);
     var mine = connection(() -> null);
     var theirs = connection(() -> null);
 
     lock.lock();
     try {
-      save(mine, 1, file.toString(), base, "mine");
-      save(theirs, 2, file.toString(), base, "theirs");
+      save(mine, 1, file.toString(), base, seen, "mine");
+      save(theirs, 2, file.toString(), base, seen, "theirs");
       waitingForTheLock(2);
     } finally {
       lock.unlock();
@@ -895,7 +1039,7 @@ class FileWritesTest {
                 .filter(PtyMessage.FilesConflict.class::isInstance)
                 .findFirst()
                 .orElseThrow();
-    assertEquals(version(file), lost.version(), "the loser is told the winner's version");
+    assertEquals(digest(file), lost.digest(), "the loser is told the winner's content");
     assertTrue(List.of("mine", "theirs").contains(Files.readString(file)));
     everyScriptEnds();
     assertEquals(List.of(), temporaries(home));
@@ -923,7 +1067,8 @@ class FileWritesTest {
                 () -> {
                   try {
                     connection.write(
-                        new PtyMessage.FilesWrite(1, file.toString(), version(file), bytes.length));
+                        new PtyMessage.FilesWrite(
+                            1, file.toString(), digest(file), version(file), bytes.length));
                     connection.chunk(
                         new PtyMessage.PutChunk(
                             1, 0, java.util.Arrays.copyOfRange(bytes, 0, chunk)));
@@ -953,6 +1098,20 @@ class FileWritesTest {
     connection.close();
   }
 
+  /** A save is answered the new content's digest, the next save's base, and its stat after. */
+  @Test
+  void aSaveIsAnsweredItsNewContentsDigestAndItsStat() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "base");
+    var connection = connection(() -> null);
+    save(connection, 1, file.toString(), digest(file), version(file), "new words");
+
+    var written = assertInstanceOf(PtyMessage.FilesWritten.class, answer());
+    assertEquals(digest(file), written.digest());
+    assertEquals(version(file), written.version());
+    save(connection, 2, file.toString(), written.digest(), written.version(), "newer");
+    assertInstanceOf(PtyMessage.FilesWritten.class, answer(), "the next save on it is written");
+  }
+
   /** A save's bytes stream in without the lock: it is held only from the go to the version. */
   @Test
   void aSavesBytesAreCopiedWhileAnotherHoldsTheLock() throws Exception {
@@ -960,7 +1119,7 @@ class FileWritesTest {
     var connection = connection(() -> null);
     lock.lock();
     try {
-      save(connection, 1, file.toString(), version(file), "new");
+      save(connection, 1, file.toString(), digest(file), version(file), "new");
       assertEquals(new PtyMessage.PutAck(1, 3), said.poll(5, TimeUnit.SECONDS));
       waitingForTheLock(1);
       assertEquals("base", Files.readString(file), "nothing written before its go");
@@ -989,7 +1148,7 @@ class FileWritesTest {
               return refusal;
             });
 
-    save(refusing, 1, file.toString(), version(file), "new");
+    save(refusing, 1, file.toString(), digest(file), version(file), "new");
     refusing.create(new PtyMessage.FilesCreate(2, home + "/made", false));
     refusing.remove(new PtyMessage.FilesRemove(3, file.toString()));
     awaitEnded(3);
@@ -1009,7 +1168,7 @@ class FileWritesTest {
             () -> {
               throw new IOException("incus list failed");
             });
-    save(unasked, 4, file.toString(), version(file), "new");
+    save(unasked, 4, file.toString(), digest(file), version(file), "new");
     var failed = assertInstanceOf(PtyMessage.FilesRefused.class, answer());
     assertEquals(PtyMessage.FilesRefusal.FAILED, failed.kind());
     assertEquals(
@@ -1039,7 +1198,8 @@ class FileWritesTest {
   void aConnectionThatEndsMidSaveLeavesTheFileAndNoTemporary() throws Exception {
     var file = Files.writeString(home.resolve("notes.md"), "kept");
     var connection = connection(() -> null);
-    connection.write(new PtyMessage.FilesWrite(1, file.toString(), version(file), 1 << 20));
+    connection.write(
+        new PtyMessage.FilesWrite(1, file.toString(), digest(file), version(file), 1 << 20));
     connection.chunk(new PtyMessage.PutChunk(1, 0, new byte[64 << 10]));
     assertEquals(new PtyMessage.PutAck(1, 64 << 10), said.poll(5, TimeUnit.SECONDS));
     assertEquals(1, temporaries(home).size());
@@ -1060,7 +1220,8 @@ class FileWritesTest {
   void aSaveWhoseScriptEndsMidBodyIsAnsweredAtOnce() throws Exception {
     var file = Files.writeString(home.resolve("notes.md"), "kept");
     var connection = connection(() -> null);
-    connection.write(new PtyMessage.FilesWrite(1, file.toString(), version(file), 1 << 20));
+    connection.write(
+        new PtyMessage.FilesWrite(1, file.toString(), digest(file), version(file), 1 << 20));
     connection.chunk(new PtyMessage.PutChunk(1, 0, new byte[64 << 10]));
     assertEquals(new PtyMessage.PutAck(1, 64 << 10), said.poll(5, TimeUnit.SECONDS));
 
@@ -1078,7 +1239,8 @@ class FileWritesTest {
   void aCancelledSaveIsAnsweredNoMoreAndLeavesNoTemporary() throws Exception {
     var file = Files.writeString(home.resolve("notes.md"), "kept");
     var connection = connection(() -> null);
-    connection.write(new PtyMessage.FilesWrite(1, file.toString(), version(file), 1 << 20));
+    connection.write(
+        new PtyMessage.FilesWrite(1, file.toString(), digest(file), version(file), 1 << 20));
     connection.chunk(new PtyMessage.PutChunk(1, 0, new byte[64 << 10]));
     assertEquals(new PtyMessage.PutAck(1, 64 << 10), said.poll(5, TimeUnit.SECONDS));
 
@@ -1101,7 +1263,7 @@ class FileWritesTest {
     var file = Files.writeString(home.resolve("notes.md"), "kept");
     var connection = connection(() -> null);
 
-    connection.write(new PtyMessage.FilesWrite(1, file.toString(), version(file), 3));
+    connection.write(new PtyMessage.FilesWrite(1, file.toString(), digest(file), version(file), 3));
     connection.chunk(new PtyMessage.PutChunk(1, 0, "new".getBytes(StandardCharsets.UTF_8)));
     connection.end(new PtyMessage.PutEnd(1, new byte[32]));
     assertEquals(
@@ -1111,7 +1273,7 @@ class FileWritesTest {
             file + " was not saved: the bytes Sail received are not the bytes sent."),
         answer());
 
-    connection.write(new PtyMessage.FilesWrite(2, file.toString(), version(file), 6));
+    connection.write(new PtyMessage.FilesWrite(2, file.toString(), digest(file), version(file), 6));
     connection.chunk(new PtyMessage.PutChunk(2, 3, "new".getBytes(StandardCharsets.UTF_8)));
     assertEquals(
         new PtyMessage.FilesRefused(
@@ -1121,20 +1283,32 @@ class FileWritesTest {
                 + " was not saved: its bytes did not arrive in order and within its size; nothing"
                 + " was changed."),
         answer());
-    connection.write(new PtyMessage.FilesWrite(3, file.toString(), version(file), 2));
+    connection.write(new PtyMessage.FilesWrite(3, file.toString(), digest(file), version(file), 2));
     connection.chunk(new PtyMessage.PutChunk(3, 0, "new".getBytes(StandardCharsets.UTF_8)));
     assertEquals(PtyMessage.FilesRefusal.FAILED, ((PtyMessage.FilesRefused) answer()).kind());
     everyScriptEnds();
-    var base = version(file);
+    var base = digest(file);
+    var seen = version(file);
     var scripts = processes.size();
 
     connection.write(
-        new PtyMessage.FilesWrite(4, file.toString(), base, FilesConnection.READ_CAP + 1));
+        new PtyMessage.FilesWrite(4, file.toString(), base, "", FilesConnection.READ_CAP + 1));
     assertEquals(PtyMessage.FilesRefusal.TOO_LARGE, ((PtyMessage.FilesRefused) answer()).kind());
+    for (var notADigest : List.of(seen, "", base.toUpperCase(java.util.Locale.ROOT), base + "0")) {
+      connection.write(new PtyMessage.FilesWrite(9, file.toString(), notADigest, seen, 1));
+      assertEquals(
+          new PtyMessage.FilesRefused(
+              9,
+              PtyMessage.FilesRefusal.FAILED,
+              "A save names the content it was based on: the SHA-256 of a whole read, in lowercase"
+                  + " hex, or absent."),
+          answer(),
+          "digest rule 1: " + notADigest);
+    }
     var bad = home + "/" + FileNames.decode(new byte[] {'b', (byte) 0xff});
     for (var name :
         List.of(bad, home + "/two\nlines", home + "/" + FileScripts.SAVING + "Abcdef0123.part")) {
-      connection.write(new PtyMessage.FilesWrite(5, name, PtyMessage.ABSENT, 1));
+      connection.write(new PtyMessage.FilesWrite(5, name, PtyMessage.ABSENT, "", 1));
       var unsafe = (PtyMessage.FilesRefused) answer();
       assertEquals(PtyMessage.FilesRefusal.UNSAFE, unsafe.kind(), name);
       assertEquals(
@@ -1160,20 +1334,21 @@ class FileWritesTest {
   @Test
   void aSaveEndedUnwrittenSaysWhyAndAMoveNamesTheTakenName() throws Exception {
     var file = Files.writeString(home.resolve("notes.md"), "kept");
-    var base = version(file);
+    var base = digest(file);
+    var seen = version(file);
     Files.writeString(file, "theirs");
     var connection = connection(() -> null);
-    save(connection, 1, file.toString(), base, "mine");
-    assertEquals(new PtyMessage.FilesConflict(1, version(file)), answer());
+    save(connection, 1, file.toString(), base, seen, "mine");
+    assertEquals(new PtyMessage.FilesConflict(1, digest(file)), answer());
     assertEquals(
-        List.of(new PtyMessage.FilesConflict(1, version(file))),
+        List.of(new PtyMessage.FilesConflict(1, digest(file))),
         heard,
         "a stale base is told before any byte is taken");
 
     var full =
         connection(
             running(script -> script.replace("head -c \"$size\" > \"$tmp\"", "false")), () -> null);
-    save(full, 2, file.toString(), version(file), "mine");
+    save(full, 2, file.toString(), digest(file), version(file), "mine");
     var refused = (PtyMessage.FilesRefused) answer();
     assertEquals(PtyMessage.FilesRefusal.NO_SPACE, refused.kind());
     assertEquals(
@@ -1181,7 +1356,7 @@ class FileWritesTest {
         refused.message(),
         "nit 3: a disk that shows room is full by its quota, and no number is said");
 
-    save(connection, 3, file.toString(), PtyMessage.ABSENT, "mine");
+    save(connection, 3, file.toString(), PtyMessage.ABSENT, "", "mine");
     assertEquals(
         new PtyMessage.FilesRefused(
             3, PtyMessage.FilesRefusal.EXISTS, file + " exists already, so nothing was replaced."),

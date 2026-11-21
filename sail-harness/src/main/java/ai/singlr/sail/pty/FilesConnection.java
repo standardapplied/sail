@@ -238,9 +238,14 @@ final class FilesConnection {
     var why =
         m.size() < 0
             ? "A save carries 0 bytes or more."
-            : m.base().isBlank() || m.base().indexOf('\0') >= 0
-                ? "A save names the version it was based on, or " + PtyMessage.ABSENT + "."
-                : null;
+            : !m.base().equals(PtyMessage.ABSENT) && !DIGEST.matcher(m.base()).matches()
+                ? "A save names the content it was based on: the SHA-256 of a whole read, in"
+                    + " lowercase hex, or "
+                    + PtyMessage.ABSENT
+                    + "."
+                : m.seen().indexOf('\0') >= 0
+                    ? "A save names the version it read its base at, which holds no NUL."
+                    : null;
     if (why != null) {
       reply.accept(new PtyMessage.FilesRefused(m.id(), FilesRefusal.FAILED, why));
     } else if (m.size() > READ_CAP) {
@@ -254,7 +259,7 @@ final class FilesConnection {
           "save",
           false,
           new Body(m.size()),
-          (request, running) -> saved(request, running, m.base()));
+          (request, running) -> saved(request, running, m.base(), m.seen()));
     }
   }
 
@@ -582,10 +587,17 @@ final class FilesConnection {
    * the client sent, the lock taken and the decision asked again before {@code go}. Anything else
    * cuts the script, which writes nothing.
    */
-  private void saved(Request request, Running running, String base) throws IOException {
+  private void saved(Request request, Running running, String base, String seen)
+      throws IOException {
     var body = request.body();
     var script =
-        start(running, FileScripts.WRITE, List.of(request.path(), base), true, "" + body.size);
+        start(
+            running,
+            FileScripts.WRITE,
+            List.of(request.path(), base, seen),
+            true,
+            "" + body.size,
+            "" + READ_CAP);
     if (script == null) {
       return;
     }
@@ -624,7 +636,8 @@ final class FilesConnection {
       unwritten(request, running, script, copied);
       return;
     }
-    if (!HexFormat.of().formatHex(body.sha256).equals(script.field())) {
+    var digest = script.field();
+    if (!HexFormat.of().formatHex(body.sha256).equals(digest)) {
       script.cut();
       unless(
           running,
@@ -664,7 +677,7 @@ final class FilesConnection {
         return;
       }
       if (status == 0 && version != null) {
-        unless(running, new PtyMessage.FilesWritten(request.id(), version));
+        unless(running, new PtyMessage.FilesWritten(request.id(), digest, version));
       } else if (status == FileScripts.CONFLICT && version != null) {
         unless(running, new PtyMessage.FilesConflict(request.id(), version));
       } else {
@@ -946,6 +959,19 @@ final class FilesConnection {
 
   /** {@code request}'s script exited {@code status} unanswered: its own refusal, else a failure. */
   private void refuse(Request request, Running running, int status) {
+    if (status == FileScripts.BAD_DIGEST) {
+      unless(
+          running,
+          new PtyMessage.FilesRefused(
+              request.id(),
+              FilesRefusal.FAILED,
+              "Sail could not check "
+                  + FileNames.shown(request.path())
+                  + "'s content in "
+                  + workspace
+                  + ": its digest is no SHA-256; nothing was changed."));
+      return;
+    }
     if (status == FileScripts.NO_SHA256) {
       unless(
           running,
@@ -1042,7 +1068,7 @@ final class FilesConnection {
       case CHANGED -> path + " changed while it was read; read it again.";
       case EXISTS -> path + " exists already, so nothing was replaced.";
       case NO_SPACE -> workspace + "'s disk is full, so " + path + " was not saved.";
-      case TOO_LARGE -> path + " is over the 20 MB a save carries, so it was not saved.";
+      case TOO_LARGE -> path + " is over the 20 MB Sail reads or saves whole, so it was not saved.";
       case PARTLY_REMOVED ->
           "Some of " + path + " could not be removed; what is left is still there.";
       case UNSAFE ->

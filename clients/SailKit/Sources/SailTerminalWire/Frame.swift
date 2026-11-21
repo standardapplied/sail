@@ -79,19 +79,22 @@ public enum Frame: Equatable, Sendable {
     /// Request `id` refused, in a sentence naming the file and the reason.
     case filesRefused(id: Int32, kind: Open<FileRefusal>, message: String)
     /// Saves `size` bytes as file `path`, sent after it as ``putChunk(id:offset:bytes:)`` frames and a
-    /// ``putEnd(id:sha256:)``: written over the file only while it is at version `base`, or made anew
-    /// only while nothing is named `path` when `base` is `"absent"`.
-    case filesWrite(id: Int32, path: FileName, base: String, size: Int64)
+    /// ``putEnd(id:sha256:)``: written over the file only while its whole content is still `base`,
+    /// the SHA-256 (lowercase hex) a whole read of it answered, or made anew only while nothing is
+    /// named `path` when `base` is `"absent"`. `seen` is the version that read answered, blank with
+    /// `"absent"`: it lets a save refuse early, never accept.
+    case filesWrite(id: Int32, path: FileName, base: String, seen: String, size: Int64)
     /// Makes `path` anew, a folder when `folder`, else an empty file.
     case filesCreate(id: Int32, path: FileName, folder: Bool)
     /// Moves `from` to `to`, never over a name already there.
     case filesMove(id: Int32, from: FileName, to: FileName)
     /// Removes `path`, a folder with all it holds.
     case filesRemove(id: Int32, path: FileName)
-    /// Write `id` is the file's whole content now, at `version`.
-    case filesWritten(id: Int32, version: String)
-    /// Write `id` wrote nothing: the file is at `version` now, `"absent"` when it is gone.
-    case filesConflict(id: Int32, version: String)
+    /// Write `id` is the file's whole content now: `digest` is its SHA-256, the next save's base,
+    /// and `version` its version after the save.
+    case filesWritten(id: Int32, digest: String, version: String)
+    /// Write `id` wrote nothing: the file's content is `digest` now, `"absent"` when it is gone.
+    case filesConflict(id: Int32, digest: String)
     /// Create, move or remove `id` is done.
     case filesDone(id: Int32)
     case output(lastInputSequence: Int64, bytes: [UInt8])

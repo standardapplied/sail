@@ -1056,6 +1056,25 @@ class FilesHostTest {
     return assertInstanceOf(PtyMessage.FilesEntry.class, next(channel)).version();
   }
 
+  /** A save's base as a client takes it: the digest of a whole read, and the version it read at. */
+  private record Base(String digest, String seen) {}
+
+  private static Base baseOf(SocketChannel channel, Path path) throws IOException {
+    PtyWire.write(
+        channel, new PtyMessage.FilesRead(98, path.toString(), 0, FilesConnection.READ_CAP));
+    PtyMessage.FilesData data;
+    do {
+      data = assertInstanceOf(PtyMessage.FilesData.class, next(channel));
+    } while (!data.eof());
+    assertTrue(data.whole(), "a base is a whole read's");
+    return new Base(data.digest(), data.version());
+  }
+
+  /** Save {@code id} of {@code size} bytes over {@code file} on {@code base}. */
+  private static PtyMessage.FilesWrite onBase(int id, Path file, Base base, long size) {
+    return new PtyMessage.FilesWrite(id, file.toString(), base.digest(), base.seen(), size);
+  }
+
   /**
    * A files ticket's connection changes its workspace's files: a save's bytes travel as an
    * upload's, each acknowledged, and it is answered the version the file has now; a create, a move
@@ -1066,14 +1085,13 @@ class FilesHostTest {
     var file = Files.writeString(home.resolve("notes.md"), "old");
     try (var files = open("tok-mady")) {
       var bytes = "new words".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-      PtyWire.write(
-          files,
-          new PtyMessage.FilesWrite(1, file.toString(), versionOf(files, file), bytes.length));
+      PtyWire.write(files, onBase(1, file, baseOf(files, file), bytes.length));
       PtyWire.write(files, new PtyMessage.PutChunk(1, 0, bytes));
       PtyWire.write(files, new PtyMessage.PutEnd(1, sha256(bytes)));
       assertEquals(new PtyMessage.PutAck(1, bytes.length), next(files));
       var written = assertInstanceOf(PtyMessage.FilesWritten.class, next(files));
       assertEquals(versionOf(files, file), written.version());
+      assertEquals(baseOf(files, file).digest(), written.digest(), "the new content's digest");
       assertEquals("new words", Files.readString(file));
 
       PtyWire.write(files, new PtyMessage.FilesCreate(2, home + "/docs", true));
@@ -1087,7 +1105,7 @@ class FilesHostTest {
     try (var box = unix("")) {
       for (var change :
           List.<PtyMessage>of(
-              new PtyMessage.FilesWrite(1, home + "/x", PtyMessage.ABSENT, 0),
+              new PtyMessage.FilesWrite(1, home + "/x", PtyMessage.ABSENT, "", 0),
               new PtyMessage.FilesCreate(1, home + "/x", false),
               new PtyMessage.FilesMove(1, home + "/x", home + "/y"),
               new PtyMessage.FilesRemove(1, home + "/x"))) {
@@ -1110,7 +1128,7 @@ class FilesHostTest {
     var file = Files.writeString(home.resolve("notes.md"), "kept");
     var bytes = "mine".getBytes(java.nio.charset.StandardCharsets.UTF_8);
     var files = open("tok-mady");
-    PtyWire.write(files, new PtyMessage.FilesWrite(1, file.toString(), versionOf(files, file), 4));
+    PtyWire.write(files, onBase(1, file, baseOf(files, file), 4));
     PtyWire.write(files, new PtyMessage.PutChunk(1, 0, bytes));
     assertEquals(new PtyMessage.PutAck(1, 4), next(files));
     brokenNow.add("dock");
@@ -1121,7 +1139,7 @@ class FilesHostTest {
     assertEquals("kept", Files.readString(file), "an outage writes nothing");
     brokenNow.remove("dock");
 
-    PtyWire.write(files, new PtyMessage.FilesWrite(2, file.toString(), versionOf(files, file), 4));
+    PtyWire.write(files, onBase(2, file, baseOf(files, file), 4));
     PtyWire.write(files, new PtyMessage.PutChunk(2, 0, bytes));
     assertEquals(new PtyMessage.PutAck(2, 4), next(files), "and ends nothing");
     relabelled.add("dock");
@@ -1176,10 +1194,10 @@ class FilesHostTest {
   }
 
   /** Sends save {@code id} of {@code text} on {@code base}, and reads its acknowledgement. */
-  private static void saveOn(SocketChannel channel, int id, Path file, String base, String text)
+  private static void saveOn(SocketChannel channel, int id, Path file, Base base, String text)
       throws Exception {
     var bytes = text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-    PtyWire.write(channel, new PtyMessage.FilesWrite(id, file.toString(), base, bytes.length));
+    PtyWire.write(channel, onBase(id, file, base, bytes.length));
     PtyWire.write(channel, new PtyMessage.PutChunk(id, 0, bytes));
     PtyWire.write(channel, new PtyMessage.PutEnd(id, sha256(bytes)));
     assertEquals(new PtyMessage.PutAck(id, bytes.length), next(channel));
@@ -1204,7 +1222,7 @@ class FilesHostTest {
     var hold = new Hold();
     var staying = open("tok-root");
     var first = open("tok-mady");
-    var base = versionOf(first, file);
+    var base = baseOf(first, file);
     saveOn(first, 1, file, base, "first's");
     hold.reached();
     var lock = host.writeLock("acme", "dock");
@@ -1235,7 +1253,7 @@ class FilesHostTest {
     var file = Files.writeString(home.resolve("notes.md"), "base");
     var hold = new Hold();
     var last = open("tok-mady");
-    var base = versionOf(last, file);
+    var base = baseOf(last, file);
     saveOn(last, 1, file, base, "first's");
     hold.reached();
     var lock = host.writeLock("acme", "dock");
@@ -1263,12 +1281,12 @@ class FilesHostTest {
     var bytes = "mine".getBytes(java.nio.charset.StandardCharsets.UTF_8);
     var mine = open("tok-mady");
     var admins = open("tok-root");
-    var base = versionOf(mine, file);
+    var base = baseOf(mine, file);
     var lock = host.writeLock("acme", "dock");
     lock.lock();
     try {
       for (var channel : List.of(mine, admins)) {
-        PtyWire.write(channel, new PtyMessage.FilesWrite(1, file.toString(), base, 4));
+        PtyWire.write(channel, onBase(1, file, base, 4));
         PtyWire.write(channel, new PtyMessage.PutChunk(1, 0, bytes));
         PtyWire.write(channel, new PtyMessage.PutEnd(1, sha256(bytes)));
         assertEquals(new PtyMessage.PutAck(1, 4), next(channel));
@@ -1304,8 +1322,7 @@ class FilesHostTest {
   void closingTheConnectionMidSaveLeavesTheFileAndNoTemporary() throws Exception {
     var file = Files.writeString(home.resolve("notes.md"), "kept");
     var files = open("tok-mady");
-    PtyWire.write(
-        files, new PtyMessage.FilesWrite(1, file.toString(), versionOf(files, file), 1 << 20));
+    PtyWire.write(files, onBase(1, file, baseOf(files, file), 1 << 20));
     PtyWire.write(files, new PtyMessage.PutChunk(1, 0, new byte[64 << 10]));
     assertEquals(new PtyMessage.PutAck(1, 64 << 10), next(files));
 

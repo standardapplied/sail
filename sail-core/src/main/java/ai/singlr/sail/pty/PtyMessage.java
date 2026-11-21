@@ -419,11 +419,15 @@ public sealed interface PtyMessage {
   /**
    * Saves {@code size} bytes as file {@code path}, then sent as {@link PutChunk} frames of the same
    * {@code id}, a window of two unacknowledged ({@link PutAck}), and a {@link PutEnd} with their
-   * SHA-256: written over the file only while it is still at version {@code base}, or made anew
-   * only while no name {@code path} exists when {@code base} is {@link #ABSENT}. Answered {@link
-   * FilesWritten}, {@link FilesConflict} or {@link FilesRefused}; cancelled by {@link FilesCancel}.
+   * SHA-256: written over the file only while its whole content is still {@code base}, the SHA-256
+   * in lowercase hex a whole read of it answered ({@link FilesData#digest}), or made anew only
+   * while no name {@code path} exists when {@code base} is {@link #ABSENT}. {@code seen} is the
+   * version that read answered, which lets a save refuse early, never accept; blank with {@link
+   * #ABSENT}. Answered {@link FilesWritten}, {@link FilesConflict} or {@link FilesRefused};
+   * cancelled by {@link FilesCancel}.
    */
-  record FilesWrite(int id, String path, String base, long size) implements PtyMessage {}
+  record FilesWrite(int id, String path, String base, String seen, long size)
+      implements PtyMessage {}
 
   /**
    * Makes {@code path} anew, a folder when {@code folder}, else an empty file: {@link FilesDone}.
@@ -436,14 +440,17 @@ public sealed interface PtyMessage {
   /** Removes {@code path}, a folder with all it holds: {@link FilesDone}. */
   record FilesRemove(int id, String path) implements PtyMessage {}
 
-  /** Write {@code id} is the file's whole content now, at {@code version}. */
-  record FilesWritten(int id, String version) implements PtyMessage {}
+  /**
+   * Write {@code id} is the file's whole content now: {@code digest} is its SHA-256, the next
+   * save's base, and {@code version} its version after the save.
+   */
+  record FilesWritten(int id, String digest, String version) implements PtyMessage {}
 
   /**
-   * Write {@code id} wrote nothing: the file is at {@code version} now, not the one it was based
-   * on, or {@link #ABSENT} when it is gone; the person chooses.
+   * Write {@code id} wrote nothing: the file's content is {@code digest} now, not the one it was
+   * based on, or {@link #ABSENT} when it is gone; the person chooses.
    */
-  record FilesConflict(int id, String version) implements PtyMessage {}
+  record FilesConflict(int id, String digest) implements PtyMessage {}
 
   /** Create, move or remove {@code id} is done. */
   record FilesDone(int id) implements PtyMessage {}
