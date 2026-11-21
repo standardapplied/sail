@@ -8,8 +8,10 @@ import SailTerminalWire
 /// Every change is a fresh listing: a folder the watch names is listed again whole and replaces the
 /// one held, and the rows keep the person's selection, expansion and scroll by path. The watch set is
 /// what is shown: every expanded folder, at the version its listing came at; collapsing a folder, or
-/// its leaving its parent, drops it and what was expanded under it. A tree that has heard no tick for
-/// ``silence`` is not live until a fresh listing arrives.
+/// its leaving its parent, drops it and what was expanded under it. A folder that changed while it was
+/// listed is asked again at the next tick, so one that never stops changing is asked once a tick and
+/// holds back nothing else. A tree is live once a tick or a listing comes after admission, and not
+/// once it has heard none for ``silence``.
 ///
 /// Nothing here speaks to a connection: each change answers the frames to send, and the caller sends
 /// them, so the whole of it is tested on its own.
@@ -77,9 +79,17 @@ public struct FileTree: Sendable {
     public private(set) var connected = false
     /// When the last tick, or the last listing, was heard, in the caller's seconds.
     public private(set) var heard: Double?
+    /// Whether a tick or a listing has come since this connection was admitted.
+    private var heardSinceAdmission = false
     private var pending: [Int32: Pending] = [:]
     /// Folders listed again while a listing of them is under way: listed once more after it.
     private var again: Set<FileName> = []
+    /// Folders that changed while they were listed: asked again at the next tick.
+    private var atTick: Set<FileName> = []
+    /// The listings an admission asked: the watch waits for the last of them, then goes once.
+    private var batch: Set<Int32> = []
+    /// The watch set this connection was last sent.
+    private var sent: [WatchedPath]?
     /// Each folder's latest listing asked: an older one answering after it is not taken.
     private var latest: [FileName: Int32] = [:]
     private var nextID: Int32 = 1
@@ -100,7 +110,7 @@ public struct FileTree: Sendable {
     /// Whether the tree is the workspace's truth: admitted, and a tick or a listing heard within
     /// ``silence`` of `now`.
     public func isLive(at now: Double) -> Bool {
-        guard connected, let heard else { return false }
+        guard connected, heardSinceAdmission, let heard else { return false }
         return now - heard <= Self.silence
     }
 
@@ -139,12 +149,17 @@ public struct FileTree: Sendable {
     }
 
     /// A connection was admitted: the watch set is sent again and every expanded folder listed again.
-    public mutating func connected(at now: Double) -> [Frame] {
+    public mutating func admitted() -> [Frame] {
         connected = true
-        heard = now
+        heardSinceAdmission = false
         pending = [:]
         again = []
-        return [.filesWatch(watchSet)] + expanded.sorted { $0.bytes.lexicographicallyPrecedes($1.bytes) }.map { list($0) }
+        atTick = []
+        sent = nil
+        let watch = self.watch()
+        let listings = expanded.sorted { $0.bytes.lexicographicallyPrecedes($1.bytes) }.map { list($0) }
+        batch = Set(pending.keys)
+        return watch + listings
     }
 
     /// The connection ended: what is held stays, and is not live.
@@ -152,6 +167,8 @@ public struct FileTree: Sendable {
         connected = false
         pending = [:]
         again = []
+        atTick = []
+        batch = []
     }
 
     /// Expands folder `path`: listed when it is not held, and watched.
@@ -182,7 +199,7 @@ public struct FileTree: Sendable {
     public mutating func collapse(_ path: FileName) -> [Frame] {
         guard path != Self.root, expanded.contains(path) else { return [] }
         drop(path)
-        return connected ? [.filesWatch(watchSet)] : []
+        return connected ? watch() : []
     }
 
     /// What frame `frame` from the host asks of the tree, heard at `now`: listings gathered and held,
@@ -190,16 +207,12 @@ public struct FileTree: Sendable {
     public mutating func receive(_ frame: Frame, at now: Double) -> [Frame] {
         switch frame {
         case .filesTick:
-            heard = now
-            return []
+            hear(at: now)
+            let due = atTick
+            atTick = []
+            return relist(due)
         case let .filesChanged(paths):
-            return paths.filter { expanded.contains($0) }.flatMap { path -> [Frame] in
-                if pending.values.contains(where: { $0.path == path }) {
-                    again.insert(path)
-                    return []
-                }
-                return [list(path)]
-            }
+            return relist(Set(paths))
         case let .filesListing(listing):
             guard var held = pending[listing.id] else { return [] }
             held.entries += listing.entries
@@ -208,15 +221,18 @@ public struct FileTree: Sendable {
                 return []
             }
             pending[listing.id] = nil
-            heard = now
+            hear(at: now)
             guard latest[held.path] == listing.id else { return batchDone() }
             lastListed = held.path
             return took(Folder(entries: Self.sorted(held.entries), version: listing.version, truncated: listing.truncated), for: held.path, at: now)
         case let .filesRefused(id, kind, message):
             guard let held = pending.removeValue(forKey: id) else { return [] }
-            heard = now
+            hear(at: now)
             guard latest[held.path] == id, expanded.contains(held.path) else { return batchDone() }
-            if kind == .known(.changed) { return [list(held.path)] }
+            if kind == .known(.changed) {
+                atTick.insert(held.path)
+                return batchDone()
+            }
             refusals[held.path] = message
             folders[held.path] = nil
             revision += 1
@@ -285,10 +301,36 @@ public struct FileTree: Sendable {
         return relisted(path) + batchDone()
     }
 
-    /// The watch set, once the last listing of a batch has answered: a reconnect of many folders sends
-    /// it once, not with each.
-    private func batchDone() -> [Frame] {
-        pending.isEmpty ? [.filesWatch(watchSet)] : []
+    private mutating func hear(at now: Double) {
+        heard = now
+        heardSinceAdmission = true
+    }
+
+    /// Lists each expanded folder of `paths` again, or once more after the listing under way.
+    private mutating func relist(_ paths: Set<FileName>) -> [Frame] {
+        paths.filter { expanded.contains($0) }.sorted { $0.bytes.lexicographicallyPrecedes($1.bytes) }.flatMap { path -> [Frame] in
+            if pending.values.contains(where: { $0.path == path }) {
+                again.insert(path)
+                return []
+            }
+            return [list(path)]
+        }
+    }
+
+    /// The watch set when it changed: after a listing taken, except while an admission's listings
+    /// are still answering, after whose last it goes once; a reconnect of many folders sends it
+    /// once, not with each, and no folder still being listed holds it back past its admission.
+    private mutating func batchDone() -> [Frame] {
+        batch = batch.filter { pending[$0] != nil }
+        return batch.isEmpty ? watch() : []
+    }
+
+    /// The watch set, unless this connection already holds it as it is.
+    private mutating func watch() -> [Frame] {
+        let paths = watchSet
+        guard paths != sent else { return [] }
+        sent = paths
+        return [.filesWatch(paths)]
     }
 
     /// A folder changed while it was being listed is listed once more.
@@ -305,6 +347,7 @@ public struct FileTree: Sendable {
             folders[child] = nil
             refusals[child] = nil
             again.remove(child)
+            atTick.remove(child)
         }
     }
 

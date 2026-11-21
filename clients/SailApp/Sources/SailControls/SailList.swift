@@ -191,11 +191,42 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     /// whose cost grows with the rows times the changes (98 ms for a 5,000-row folder, round six).
     public static let applied = 200
 
+    /// The id of the row holding an inline edit (a rename, a new file's name), nil for none.
+    /// ``apply(_:changed:)`` never remakes it: rows go and come around it, however many, and its
+    /// own change waits until this is set back to nil, which remakes it then. A row that moves
+    /// among the rows or leaves them goes with its edit, and this is nil again.
+    public var editing: String? {
+        didSet {
+            guard oldValue != editing, let oldValue, editedChanged else { return }
+            editedChanged = false
+            guard let row = entries.firstIndex(where: { Self.id($0) == oldValue }) else { return }
+            reloading = true
+            beginUpdates()
+            removeRows(at: IndexSet(integer: row), withAnimation: [])
+            insertRows(at: IndexSet(integer: row), withAnimation: [])
+            endUpdates()
+            reloading = false
+        }
+    }
+
+    /// Whether the edited row's item changed while it was being edited.
+    private var editedChanged = false
+
+    /// The edited row moved or left, and its edit with it: nothing is remade for it.
+    private func editGone() {
+        editedChanged = false
+        editing = nil
+    }
+
     /// The rows as `new`, changing only what differs, by id: rows gone removed and new ones inserted
     /// in one update, and only the rows named in `changed` made again, so a listing of thousands that
-    /// adds one entry rebuilds one row. The choice follows its row as the table moves it.
+    /// adds one entry rebuilds one row. The choice follows its row as the table moves it, and the
+    /// hovered row stays hovered when it is made again. The row being edited (``editing``) is never
+    /// made again, and the rows are never filled afresh around it.
     public func apply(_ new: [Entry], changed: Set<String>) {
-        guard abs(new.count - entries.count) <= Self.applied else {
+        let held = editing.flatMap { id in new.contains { Self.id($0) == id } ? id : nil }
+        if editing != nil, held == nil { editGone() }
+        guard held != nil || abs(new.count - entries.count) <= Self.applied else {
             entries = new
             return
         }
@@ -208,15 +239,23 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             })
         }
         var removed = offsets(difference.removals), inserted = offsets(difference.insertions)
-        guard removed.count + inserted.count <= Self.applied else {
+        guard held != nil || removed.count + inserted.count <= Self.applied else {
             entries = new
             return
         }
+        if let held, difference.removals.contains(where: { if case let .remove(_, id, _) = $0 { id == held } else { false } }) {
+            editGone()
+        }
+        var remade = changed
+        if let held = editing, remade.remove(held) != nil { editedChanged = true }
+        let hovered = rows(in: visibleRect).toRange().flatMap { visible in
+            visible.first { (rowView(atRow: $0, makeIfNecessary: false) as? SailRowView)?.hovered == true }
+        }.flatMap { item(at: $0)?.id }
         // A changed row goes out and comes back whole, its row view with it: a row view holds its
         // item (what VoiceOver hears of it, how it is painted), which only remaking it renews.
         let old = entries
-        removed.formUnion(IndexSet(old.indices.filter { Self.id(old[$0]).map(changed.contains) ?? false }))
-        inserted.formUnion(IndexSet(new.indices.filter { Self.id(new[$0]).map(changed.contains) ?? false }))
+        removed.formUnion(IndexSet(old.indices.filter { Self.id(old[$0]).map(remade.contains) ?? false }))
+        inserted.formUnion(IndexSet(new.indices.filter { Self.id(new[$0]).map(remade.contains) ?? false }))
         applying = true
         entries = new
         applying = false
@@ -227,6 +266,9 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         endUpdates()
         appliedRows += inserted.count
         reloading = false
+        if let hovered, remade.contains(hovered), let row = entries.firstIndex(where: { Self.id($0) == hovered }) {
+            (rowView(atRow: row, makeIfNecessary: true) as? SailRowView)?.hovered = true
+        }
     }
 
     /// A row's id in an update: its item's, or its head's title.
@@ -444,6 +486,14 @@ final class SailRowView: NSTableRowView {
         wantsLayer = true
         canDrawSubviewsIntoLayer = true
         configure(look: look, item: item, first: first)
+    }
+
+    /// Its layer rasterizes what is drawn into it off the main thread: glyph rendering was the
+    /// scroll's costly turn once the row's words shared its layer.
+    override func makeBackingLayer() -> CALayer {
+        let layer = super.makeBackingLayer()
+        layer.drawsAsynchronously = true
+        return layer
     }
 
     /// Made over whole for `item`, as a reused row is: not hovered, its progress line only when its

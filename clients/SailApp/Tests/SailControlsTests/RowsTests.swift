@@ -116,6 +116,64 @@ import Testing
     /// N2: where the card's edge is drawn over the list's leading edge (the left panel, in dark), the
     /// chosen row's bar starts a hairline in, read at 2x: the edge's point holds no bar, the two
     /// after it are the bar, its outer end still square; mirrored right to left.
+    static func plain(_ id: String, _ name: String) -> SailList.Entry {
+        .item(SailList.Item(id: id, name: name, voice: name, content: NSTextField(labelWithString: name)))
+    }
+
+    /// A row holding an inline edit (a rename, a new file's name) is never remade: rows go and come
+    /// around it, past a fill's count too, and its own change waits for the edit's end, which
+    /// remakes it.
+    @Test func aRowBeingEditedIsNeverRemade() throws {
+        let list = SailList(rowStyle: .list, look: .light, mono: try ControlsTests.mono())
+        list.entries = [Self.plain("a", "a"), Self.plain("b", "b"), Self.plain("c", "c")]
+        list.frame = NSRect(x: 0, y: 0, width: 440, height: 400)
+        let (window, _) = Self.shown(list)
+        defer { window.orderOut(nil) }
+        list.layoutSubtreeIfNeeded()
+        let cell = try #require(list.view(atColumn: 0, row: 1, makeIfNecessary: true)), row = try #require(list.rowView(atRow: 1, makeIfNecessary: true))
+        list.editing = "b"
+        let many = (0 ..< 300).map { Self.plain("n\($0)", "n\($0)") }
+        list.apply([Self.plain("new", "new"), Self.plain("a", "a"), Self.plain("b", "b renamed")] + many, changed: ["b"])
+        list.layoutSubtreeIfNeeded()
+        #expect(list.view(atColumn: 0, row: 2, makeIfNecessary: true) === cell && list.rowView(atRow: 2, makeIfNecessary: true) === row, "the edited row was remade")
+        #expect(list.editing == "b")
+        list.editing = nil
+        list.layoutSubtreeIfNeeded()
+        let after = try #require(list.rowView(atRow: 2, makeIfNecessary: true) as? SailRowView)
+        #expect(after !== row && after.item?.name == "b renamed", "its change waited past the edit's end: \(after.item?.name ?? "none")")
+    }
+
+    /// A row's layer, which its cell and words are drawn into, is rasterized off the main thread.
+    @Test func aRowIsRasterizedOffTheMainThread() throws {
+        let list = try Self.list(.list, look: .light, counts: Counts())
+        #expect(try Self.row(list, 1).layer?.drawsAsynchronously == true)
+    }
+
+    /// A row that leaves the list leaves its edit with it.
+    @Test func anEditedRowThatLeavesEndsTheEdit() throws {
+        let list = SailList(rowStyle: .list, look: .light, mono: try ControlsTests.mono())
+        list.entries = [Self.plain("a", "a"), Self.plain("b", "b")]
+        list.editing = "b"
+        list.apply([Self.plain("a", "a")], changed: [])
+        #expect(list.editing == nil)
+    }
+
+    /// The hovered row, remade because it changed, is still hovered.
+    @Test func aRemadeRowKeepsItsHover() throws {
+        let list = SailList(rowStyle: .list, look: .light, mono: try ControlsTests.mono())
+        list.entries = [Self.plain("a", "a"), Self.plain("b", "b")]
+        list.frame = NSRect(x: 0, y: 0, width: 440, height: 200)
+        let (window, _) = Self.shown(list)
+        defer { window.orderOut(nil) }
+        list.layoutSubtreeIfNeeded()
+        let before = try #require(list.rowView(atRow: 0, makeIfNecessary: true) as? SailRowView)
+        before.hovered = true
+        list.apply([Self.plain("a", "a changed"), Self.plain("b", "b")], changed: ["a"])
+        list.layoutSubtreeIfNeeded()
+        let after = try #require(list.rowView(atRow: 0, makeIfNecessary: true) as? SailRowView)
+        #expect(after !== before && after.hovered, "the hover was lost with the row it was on")
+    }
+
     /// What a row places by arithmetic lands on whole pixels of its window, as Auto Layout placed
     /// it: a note centred a fraction of a pixel off is drawn re-sampled, not as it was.
     @Test(arguments: [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft])

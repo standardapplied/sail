@@ -173,6 +173,21 @@ import Testing
         #expect(desk.requests.count == 3, "a capped connection was asked for again on its own: \(desk.requests.count)")
     }
 
+    /// The host ending an admitted connection as `rate_limited` is the cap, said in its words with
+    /// Try Again, not tried again on its own.
+    @Test func theHostsOwnRateLimitedEndingIsLimited() async throws {
+        let door = try FakeRunnerDoor()
+        let desk = Desk(door)
+        let session = Self.session(desk)
+        let heard = Heard(session)
+        session.start()
+        defer { session.close() }
+        #expect(await heard.until { heard.admissions == 1 })
+        door.endFiles(saying: "You have 16 files connections open; close one to open another.", code: "rate_limited")
+        #expect(await heard.until { heard.phases.last == .limited("You have 16 files connections open; close one to open another.") }, "\(heard.phases)")
+        #expect(desk.requests.count == 1, "a capped connection was asked for again on its own: \(desk.requests.count)")
+    }
+
     @Test func aStopEndsItInTheHostsWordsAndNothingTriesAgain() async throws {
         let door = try FakeRunnerDoor()
         let desk = Desk(door)

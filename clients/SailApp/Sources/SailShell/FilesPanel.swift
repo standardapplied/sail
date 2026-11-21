@@ -165,7 +165,7 @@ final class FilesPanel: NSView {
             if phase == .connected { startRefusal = nil }
         case .admitted:
             admittedAt = CACurrentMediaTime()
-            send(tree.connected(at: now))
+            send(tree.admitted())
         case let .frame(frame):
             send(tree.receive(frame, at: now))
             if TreeRowCell.measuring, frame.isWholeListing, let path = tree.lastListed { listingHeard = (path.key, CACurrentMediaTime()) }
