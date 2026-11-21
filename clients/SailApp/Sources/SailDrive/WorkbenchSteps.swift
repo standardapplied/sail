@@ -842,6 +842,10 @@ extension Driver {
     /// How long a switch's frames may take to be told presented before its figures are read, the
     /// figures being cleared for the next switch.
     static let switchToldWithin = 0.5
+    /// How long the switches' holds wait for the main thread's clock to tick after the last of them
+    /// ends: a hold is known only once the tick that ends it has come, and a switch shorter than
+    /// the clock's 10 ms has often ended before the next.
+    static let tickedWithin = Duration.seconds(1)
 
     /// The look switched `times` times, each the other of the one before, with the four panes'
     /// scrollback full and quiet (the spec `sail-app-a-change-of-look-holds-the-main-thread-briefly`).
@@ -897,6 +901,7 @@ extension Driver {
         }
         overWatch.stop()
         let layouts = workbench.tabLayouts - laidOut
+        _ = await mainThread.ticked(after: switches.last?.span.end ?? 0, within: Self.tickedWithin)
         let holds = switches.map { heldWithin($0.span) }
         let cpus = switches.map { mainStacks.cpu(in: $0.span) }
         let waits = figures.indices.map { index in figures[index].map { shownWait($0, hold: holds[index].gap) } }
