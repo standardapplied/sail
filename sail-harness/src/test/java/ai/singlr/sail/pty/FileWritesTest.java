@@ -264,15 +264,17 @@ class FileWritesTest {
           commands.add(List.copyOf(command));
           var inner =
               new java.util.ArrayList<>(command.subList(command.indexOf("--") + 1, command.size()));
+          var at = inner.indexOf("-c") + 1;
           if (heldProbeFails.get()
-              && (inner.get(2).equals(FileScripts.HELD)
-                  || inner.get(2).equals(FileScripts.STUCK))) {
+              && (inner.get(at).equals(FileScripts.HELD)
+                  || inner.get(at).equals(FileScripts.STUCK))) {
             throw new IOException("Error: the holder probe could not start");
           }
-          if (inner.get(2).equals(unstartable.get())) {
+          if (inner.get(at).equals(unstartable.get())) {
             throw new IOException("Error: the script could not start");
           }
-          inner.set(2, edit.apply(inner.get(2)));
+          inner.set(at, edit.apply(inner.get(at)));
+          FileScriptsTest.standIn(inner, env);
           inner.addAll(0, List.of("python3", "-I", "-c", SOCKETS));
           var builder = new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD);
           builder.environment().putAll(env);
@@ -596,7 +598,9 @@ class FileWritesTest {
     var base = digest(file);
     for (var fake :
         java.util.Arrays.asList(null, "cat > /dev/null", "cat > /dev/null; echo 'zzzz  -'")) {
-      var broken = scripts(UnaryOperator.identity(), Map.of("PATH", binWith(fake).toString()));
+      var broken =
+          scripts(
+              UnaryOperator.identity(), Map.of(FileScriptsTest.STAND_IN, binWith(fake).toString()));
       var early = new Save(broken, file.toString(), base, "a stat that differs", 3);
       assertNull(early.first, "sha256sum " + fake + ": no digest, no ready");
       assertEquals(FileScripts.BAD_DIGEST, early.script.status(), "sha256sum: " + fake);
@@ -728,7 +732,9 @@ class FileWritesTest {
             .formatted(mount));
     Files.setPosixFilePermissions(fake, PosixFilePermissions.fromString("rwx------"));
     var otherDisk =
-        scripts(UnaryOperator.identity(), Map.of("PATH", bin + ":" + System.getenv("PATH")));
+        scripts(
+            UnaryOperator.identity(),
+            Map.of(FileScriptsTest.STAND_IN, bin + ":" + System.getenv("PATH")));
     var a = Files.writeString(home.resolve("a.md"), "a");
     assertEquals(
         FileScripts.OTHER_DISK, run(otherDisk, FileScripts.MOVE, a.toString(), mount + "/a.md"));
@@ -1272,14 +1278,15 @@ class FileWritesTest {
     for (var command : commands) {
       assertTrue(command.stream().noneMatch(arg -> arg.contains("secret")), command.toString());
     }
-    assertArrayEquals(
-        new String[] {"sail-files", home.toString(), "15"},
+    var argv =
         commands.stream()
             .filter(command -> command.contains(FileScripts.WRITE))
             .findFirst()
-            .orElseThrow()
-            .subList(9, 12)
-            .toArray(String[]::new),
+            .orElseThrow();
+    var after = argv.indexOf(FileScripts.WRITE) + 1;
+    assertArrayEquals(
+        new String[] {"sail-files", home.toString(), "15"},
+        argv.subList(after, after + 3).toArray(String[]::new),
         "a save's argv holds its size alone");
   }
 

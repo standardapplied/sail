@@ -99,6 +99,13 @@ final class FileScripts {
   /** A diff's exit when the change is binary, which git does not show as text. */
   static final int BINARY = 62;
 
+  /**
+   * How every script starts: bash, and every program it runs, found on the image's own folders
+   * alone, so no program a person put earlier on a {@code PATH} (a {@code git}, a {@code stat}, a
+   * {@code sha256sum}) runs for a look at their files.
+   */
+  static final List<String> SHELL = List.of("/usr/bin/env", "PATH=/usr/bin:/bin", "bash", "-c");
+
   /** A diff's exit when the path passes through a filter the configuration defines. */
   static final int FILTERED = 63;
 
@@ -433,7 +440,7 @@ final class FileScripts {
           safe_config "filter.$name.smudge" ''
           safe_config "filter.$name.process" ''
           safe_config "filter.$name.required" false
-        done < <(command git -C "$SAFE_DIR" config --null --name-only --get-regexp '^filter\\..*\\.(clean|smudge|process)$' 2>/dev/null)
+        done < <(command git -C "$SAFE_DIR" config --null --name-only --get-regexp '^filter\\..*\\.(clean|smudge|process|required)$' 2>/dev/null)
       }
       safe_git() { command git -C "$SAFE_DIR" "$@"; }
       """;
@@ -695,7 +702,8 @@ final class FileScripts {
       String container, String script, List<String> fields, boolean keepOpen, String... args)
       throws IOException {
     var command = new ArrayList<>(place.asDev().apply(container));
-    command.addAll(List.of("bash", "-c", script, "sail-files", home));
+    command.addAll(SHELL);
+    command.addAll(List.of(script, "sail-files", home));
     command.addAll(List.of(args));
     var process = processes.start(command);
     var running = new Script(process);

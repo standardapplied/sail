@@ -299,18 +299,13 @@ class FileChangesTest {
     Files.writeString(workspace.resolve("plain.md"), "x");
     assertEquals(FileScripts.NO_REPOSITORY, asked().status());
 
-    var bin = Files.createDirectory(dir.resolve("bin"));
-    for (var tool : List.of("bash", "python3")) {
-      Files.createSymbolicLink(bin.resolve(tool), Path.of("/usr/bin", tool).toRealPath());
-    }
-    var gitless = new HashMap<>(env);
-    gitless.put("PATH", bin.toString());
     var withoutGit =
-        new WorkspaceChanges(
-            FileScriptsTest.over(home, commands, gitless),
-            CONTAINER,
-            WorkspaceChanges.PATIENCE,
-            () -> {});
+        changes(
+            script ->
+                script.equals(FileScripts.CHANGES)
+                    ? script.replace("command -v git ", "command -v sail-no-such-git ")
+                    : script,
+            WorkspaceChanges.PATIENCE);
     git(workspace, "init", "-q");
     assertEquals(FileScripts.NO_GIT, asked(withoutGit).status());
   }
@@ -457,6 +452,7 @@ class FileChangesTest {
     Files.writeString(workspace.resolve("a.txt"), "a\n");
     Files.writeString(workspace.resolve("b.dat"), "b\n");
     Files.writeString(workspace.resolve("c.g"), "c\n");
+    Files.writeString(workspace.resolve("r.rcy"), "r\n");
     git(workspace, "add", ".");
     git(workspace, "commit", "-qm", "base");
     var lazy = Files.createDirectory(workspace.resolve("lazy"));
@@ -477,7 +473,9 @@ class FileChangesTest {
       git(lazy, "config", kv.get(0), kv.get(1));
     }
 
-    Files.writeString(workspace.resolve(".gitattributes"), "*.txt diff=evil\n*.dat filter=evil\n");
+    Files.writeString(
+        workspace.resolve(".gitattributes"),
+        "*.txt diff=evil\n*.dat filter=evil\n*.rcy filter=racy\n");
     var included =
         Files.writeString(
             dir.resolve("included"), "[core]\n\tfsmonitor = " + marker(markers, "include") + "\n");
@@ -518,6 +516,7 @@ class FileChangesTest {
             List.of("gpg.program", marker(markers, "gpg").toString()),
             List.of("alias.status", "!" + marker(markers, "alias")),
             List.of("diff.submodule", "log"),
+            List.of("filter.racy.clean", marker(markers, "racyclean").toString()),
             List.of("include.path", included.toString()))) {
       git(workspace, "config", kv.get(0), kv.get(1));
     }
@@ -552,7 +551,33 @@ class FileChangesTest {
       }
     }
 
+    var racy = workspace.resolve("r.rcy");
+    var index = workspace.resolve(".git/index");
+    Files.writeString(racy, "R\n");
+    Files.setLastModifiedTime(racy, Files.getLastModifiedTime(index));
+
+    var shims = Files.createDirectory(dir.resolve("shims"));
+    for (var tool : List.of("git", "stat", "sha256sum", "realpath", "find", "bash")) {
+      var shim =
+          Files.writeString(
+              shims.resolve(tool),
+              "#!/bin/sh\n: > '"
+                  + markers
+                  + "/shim-"
+                  + tool
+                  + "'\nexec /usr/bin/"
+                  + tool
+                  + " \"$@\"\n");
+      Files.setPosixFilePermissions(
+          shim, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+    }
+    var proof = new ProcessBuilder("sh", "-c", "git --version > /dev/null");
+    proof.environment().put("PATH", shims + ":/usr/bin:/bin");
+    assertEquals(0, proof.start().waitFor());
+    assertEquals(List.of("shim-git"), left(markers), "a shim earlier on PATH runs for plain git");
+    Files.delete(markers.resolve("shim-git"));
     var poisoned = new HashMap<>(env);
+    poisoned.put("PATH", shims + ":/usr/bin:/bin");
     poisoned.put("GIT_EXTERNAL_DIFF", marker(markers, "envexternal").toString());
     poisoned.put("GIT_PAGER", marker(markers, "envpager").toString());
     poisoned.put("PAGER", marker(markers, "envpager2").toString());
@@ -584,6 +609,12 @@ class FileChangesTest {
     assertEquals(FileScripts.FILTERED, diff(sail, workspace.resolve("c.g"), 1 << 20).status());
     assertEquals(0, diff(sail, workspace.resolve("d.md"), 1 << 20).status());
     diff(sail, lazy.resolve("f.txt"), 1 << 20);
+    var read =
+        sail.start(CONTAINER, FileScripts.READ, workspace.resolve("a.txt").toString(), "0", "100");
+    while (read.field() != null) {
+      continue;
+    }
+    assertEquals(0, read.status(), "a read, with its stat and its digests");
 
     assertEquals(List.of(), left(markers), "nothing planted ran");
   }
@@ -635,19 +666,27 @@ class FileChangesTest {
   @Test
   void aFileThatPassesThroughAFilterIsListedAndItsDiffSaysWhy() throws Exception {
     git(workspace, "init", "-q");
-    Files.writeString(workspace.resolve(".gitattributes"), "*.bin filter=lfs\n*.raw filter=none\n");
+    Files.writeString(
+        workspace.resolve(".gitattributes"),
+        "*.bin filter=lfs\n*.raw filter=none\n*.req filter=req\n");
     var bin = Files.writeString(workspace.resolve("big.bin"), "pointer\n");
     var raw = Files.writeString(workspace.resolve("plain.raw"), "raw\n");
+    var required = Files.writeString(workspace.resolve("only.req"), "req\n");
     git(workspace, "add", ".");
     git(workspace, "commit", "-qm", "base");
     git(workspace, "config", "filter.lfs.clean", "cat");
     git(workspace, "config", "filter.lfs.smudge", "cat");
+    git(workspace, "config", "filter.req.required", "true");
     Files.writeString(bin, "content\n");
     Files.writeString(raw, "raw changed\n");
+    Files.writeString(required, "req changed\n");
 
     assertEquals(
-        Set.of(workspace + "/big.bin", workspace + "/plain.raw"), entries(asked()).keySet());
+        Set.of(workspace + "/big.bin", workspace + "/plain.raw", workspace + "/only.req"),
+        entries(asked()).keySet());
     assertEquals(FileScripts.FILTERED, diff(bin, 1 << 20).status());
+    assertEquals(
+        FileScripts.FILTERED, diff(required, 1 << 20).status(), "a filter that is only required");
     assertTrue(text(diff(raw, 1 << 20)).contains("+raw changed\n"));
 
     var files = scripts(UnaryOperator.identity());

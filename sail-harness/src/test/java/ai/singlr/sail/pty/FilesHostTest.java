@@ -192,15 +192,16 @@ class FilesHostTest {
             throw new IOException("Error: Instance not found");
           }
           var inner = new ArrayList<>(command.subList(command.indexOf("--") + 1, command.size()));
-          var script = inner.get(2);
+          var at = inner.indexOf("-c") + 1;
+          var script = inner.get(at);
           var kind = kindOf(script);
           if (edits.containsKey(kind)) {
-            inner.set(2, edits.get(kind).apply(script));
+            inner.set(at, edits.get(kind).apply(script));
           }
           if (stall.contains(kind)) {
-            inner.set(2, "exec sleep 30");
+            inner.set(at, "exec sleep 30");
           } else if (failing.contains(kind)) {
-            inner.set(2, "exit 1");
+            inner.set(at, "exit 1");
           }
           var process =
               new ProcessBuilder(FileScriptsTest.onASocket(inner))
