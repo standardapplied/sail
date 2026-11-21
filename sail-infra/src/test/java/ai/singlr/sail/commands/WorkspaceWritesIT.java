@@ -13,6 +13,7 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.BoxInstances;
+import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.IncusStorage;
 import ai.singlr.sail.engine.PoolSource;
 import ai.singlr.sail.identity.Actor;
@@ -318,19 +319,7 @@ class WorkspaceWritesIT extends AbstractIncusIT {
 
         var usage = rootUsage();
         var quota = (usage >> 20) + 8;
-        assertTrue(
-            shell
-                .exec(
-                    List.of(
-                        "incus",
-                        "config",
-                        "device",
-                        "override",
-                        INSTANCE,
-                        "root",
-                        "size=" + quota + "MiB"))
-                .ok(),
-            "a quota just above the workspace's contents");
+        new ContainerManager(shell).setDiskQuota(INSTANCE, quota + "MiB");
         try (var full = open(host, "tok-ana")) {
           var notes = FOLDER + "/notes.md";
           var before = inInstance("sha256sum < " + notes);
@@ -345,10 +334,9 @@ class WorkspaceWritesIT extends AbstractIncusIT {
           assertEquals(before, inInstance("sha256sum < " + notes), "the old file, byte for byte");
           assertEquals("", temporaries(), "no temporary on a full disk");
         }
-        assertTrue(
-            shell
-                .exec(List.of("incus", "config", "device", "unset", INSTANCE, "root", "size"))
-                .ok());
+        var unset =
+            shell.exec(List.of("incus", "config", "device", "unset", INSTANCE, "root", "size"));
+        assertTrue(unset.ok(), "the quota is lifted: " + unset.stderr());
 
         try (var stopping = open(host, "tok-ana")) {
           var notes = FOLDER + "/notes.md";
