@@ -98,6 +98,7 @@ final class FilesConnection {
    */
   static final class WorkspaceLock extends ReentrantLock {
     private volatile String held;
+    private volatile boolean asked;
 
     WorkspaceLock() {
       super(true);
@@ -827,6 +828,25 @@ final class FilesConnection {
    * as failed; either way {@code script}, when there is one, is cut and writes nothing.
    */
   private boolean allowed(Request request, Running running, FileScripts.Script script) {
+    if (!writes.lock().asked) {
+      try {
+        writes.lock().held = stuckIn();
+        writes.lock().asked = true;
+      } catch (IOException unasked) {
+        if (script != null) {
+          script.cut();
+        }
+        unless(
+            running,
+            new PtyMessage.FilesRefused(
+                request.id(),
+                FilesRefusal.FAILED,
+                "Sail could not ask whether a save in "
+                    + workspace
+                    + " is still ending, so nothing was changed; try again."));
+        return false;
+      }
+    }
     var held = writes.lock().held;
     if (held != null) {
       try {
@@ -848,8 +868,10 @@ final class FilesConnection {
               FilesRefusal.FAILED,
               "A save in "
                   + workspace
-                  + " has not ended since Sail ended it, and a process there still holds it, so"
-                  + " no file there is changed until it has; nothing was changed."));
+                  + " has not ended since Sail ended it: a process there still holds "
+                  + FileNames.shown(writes.lock().held)
+                  + "; when it ends, or once that file is removed, writes resume. Nothing was"
+                  + " changed."));
       return false;
     }
     PtyMessage.Err refusal;
@@ -897,6 +919,29 @@ final class FilesConnection {
       }
       Thread.sleep(PROBE_EVERY);
     }
+  }
+
+  /**
+   * A stuck save's temporary the workspace holds, asked by {@link FileScripts#STUCK} at a lock's
+   * first write, so a host that started since, or a lock made anew, does not forget it; null when
+   * there is none. Throws when the workspace cannot be asked.
+   */
+  private String stuckIn() throws IOException {
+    var stuck =
+        files.start(
+            container, FileScripts.STUCK, List.of(), false, "" + writes.afterGo().toSeconds());
+    var held = stuck.field();
+    while (stuck.field() != null) {
+      continue;
+    }
+    var status = stuck.status();
+    if (status == FileScripts.STILL_HELD && held != null) {
+      return held;
+    }
+    if (status != 0) {
+      throw new IOException("the stuck probe exited " + status);
+    }
+    return null;
   }
 
   private int probe(String temporary) {
