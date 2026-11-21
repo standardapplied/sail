@@ -580,7 +580,8 @@ final class RowCell: NSView {
     /// Laid out by frames: nothing shown at its end.
     private let bare: Bool
     private let insets: (leading: Double, trailing: Double, top: Double)
-    let actions = NSStackView()
+    /// Made only for a row with something at its end: a bare row, scrolled in by the score, makes none.
+    lazy var actions = NSStackView()
     /// Its first action shows ⏎ while chosen with the list's keys.
     private let returnKey: Bool
     private let first: SailButton?
@@ -697,6 +698,7 @@ final class RowCell: NSView {
     /// The actions shown (over 120 ms, at once while motion is reduced) or gone; the primary loud
     /// while the row is chosen, and Return its key (shown as ⏎) only while the list holds the keys.
     func show(_ shown: Bool, chosen: Bool, keys: Bool) {
+        guard !bare else { return }
         if let first {
             let kind: ButtonKind = chosen ? .primary : .secondary, key = chosen && keys && returnKey ? "\r" : ""
             if first.kind != kind { first.kind = kind }

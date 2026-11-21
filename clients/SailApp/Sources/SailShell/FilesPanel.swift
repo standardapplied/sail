@@ -466,10 +466,15 @@ final class TreeRowCell: NSView {
     /// The name's attributes, made once for each weight and ink and kept as Foundation holds them: a
     /// row scrolled into a long tree draws its name without building them (round six's scroll stacks
     /// spent its hold hashing a new attribute dictionary per row).
-    private static var inked: [String: [NSAttributedString.Key: Any]] = [:]
+    private static var inked: [Inked: [NSAttributedString.Key: Any]] = [:]
+
+    private struct Inked: Hashable {
+        let strong: Bool
+        let ink: Tint
+    }
 
     private static func attributes(strong: Bool, ink: Tint) -> [NSAttributedString.Key: Any] {
-        let key = "\(strong) \(ink)"
+        let key = Inked(strong: strong, ink: ink)
         if let made = inked[key] { return made }
         let style = NSMutableParagraphStyle()
         style.lineBreakMode = .byTruncatingTail
