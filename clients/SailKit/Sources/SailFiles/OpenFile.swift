@@ -23,8 +23,9 @@ public struct OpenFile: Sendable {
         /// The whole file, from its start.
         case read(id: Int32, path: FileName)
         case cancel(id: Int32)
-        /// `bytes` as the file, only while it is at digest `base` (``absent``: while nothing is there).
-        case write(id: Int32, path: FileName, base: String, bytes: [UInt8])
+        /// `bytes` as the file, only while it is at digest `base` (``absent``: while nothing is there);
+        /// `seen` the version that base was read at, which lets the host refuse early.
+        case write(id: Int32, path: FileName, base: String, seen: String, bytes: [UInt8])
     }
 
     /// What the workspace answers.
@@ -33,10 +34,10 @@ public struct OpenFile: Sendable {
         /// it ran from the file's start to its end.
         case data(id: Int32, version: String, bytes: [UInt8], eof: Bool, whole: Bool, digest: String)
         case refused(id: Int32, kind: Open<FileRefusal>, message: String)
-        /// Write `id` is the file now, at digest `version`.
-        case written(id: Int32, version: String)
-        /// Write `id` wrote nothing: the file is at digest `version`, ``absent`` when gone.
-        case conflict(id: Int32, version: String)
+        /// Write `id` is the file now, at `digest`, its version `version`.
+        case written(id: Int32, digest: String, version: String)
+        /// Write `id` wrote nothing: the file is at `digest`, ``absent`` when gone.
+        case conflict(id: Int32, digest: String)
     }
 
     /// What the pane shows.
@@ -102,6 +103,8 @@ public struct OpenFile: Sendable {
     public private(set) var theirs: [UInt8]?
     /// The digest of ``theirs``: the version the conflict sheet shows.
     public private(set) var theirsDigest = ""
+    /// The version ``theirs`` was read at.
+    private var theirsVersion = ""
     private var base: [UInt8] = []
     private var baseUnits = 0
     private var text = ""
@@ -196,17 +199,17 @@ public struct OpenFile: Sendable {
     /// ⌘S: the pane's bytes, written only while the file is at the digest read (M26, M27); a clean
     /// pane holds the bytes it read, and writes nothing.
     public mutating func save() -> Step {
-        clean ? Step() : write(against: digest)
+        clean ? Step() : write(against: digest, seen: version)
     }
 
     /// Keep Mine: the pane's bytes, written against the version the sheet showed.
     public mutating func keepMine() -> Step {
-        write(against: theirsDigest)
+        write(against: theirsDigest, seen: theirsVersion)
     }
 
     /// Save Anyway, for a deleted file: made anew, never replacing one (M28).
     public mutating func saveAnyway() -> Step {
-        write(against: Self.absent)
+        write(against: Self.absent, seen: "")
     }
 
     /// Keep Theirs: the workspace's bytes, as the sheet showed them.
@@ -236,16 +239,17 @@ public struct OpenFile: Sendable {
             guard let held = reading, held.id == id else { return Step() }
             reading = nil
             return readRefused(kind, message, held.why)
-        case let .written(id, version):
+        case let .written(id, digest, version):
             guard let saved = saving, saved.id == id else { return Step() }
             saving = nil
-            adopt(saved.bytes, digest: version)
+            adopt(saved.bytes, digest: digest)
+            self.version = version
             note = .none
             return Step(events: [.saved])
-        case let .conflict(id, version):
+        case let .conflict(id, digest):
             guard saving?.id == id else { return Step() }
             saving = nil
-            guard version != Self.absent else {
+            guard digest != Self.absent else {
                 note = .deletedWhileTyped
                 return Step(events: [.gone])
             }
@@ -303,6 +307,7 @@ public struct OpenFile: Sendable {
         case .compare:
             theirs = held.bytes
             theirsDigest = digest
+            theirsVersion = version
             if !clean, held.bytes != base { note = .changed }
             step.events.append(.conflict(theirs: String(decoding: held.bytes, as: UTF8.self)))
         }
@@ -328,6 +333,7 @@ public struct OpenFile: Sendable {
         if clean { return take(bytes, digest: digest) }
         theirs = bytes
         theirsDigest = digest
+        theirsVersion = version
         note = .changed
         return Step()
     }
@@ -369,14 +375,14 @@ public struct OpenFile: Sendable {
         return Step(asks: [read(.follow)], events: [.saveRefused(message)])
     }
 
-    private mutating func write(against base: String) -> Step {
+    private mutating func write(against base: String, seen: String) -> Step {
         guard canType else { return Step() }
         guard connected else { return Step(events: [.notConnected]) }
         let id = nextID
         nextID += 1
         let bytes = Array(text.utf8)
         saving = (id, bytes)
-        return Step(asks: [.write(id: id, path: path, base: base, bytes: bytes)])
+        return Step(asks: [.write(id: id, path: path, base: base, seen: seen, bytes: bytes)])
     }
 
     /// The workspace's bytes become the pane's text and its base: it is clean and follows again.

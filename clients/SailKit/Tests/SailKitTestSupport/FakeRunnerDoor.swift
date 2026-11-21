@@ -76,6 +76,10 @@ public final class FakeRunnerDoor: Sendable {
         var contents: [FileName: (bytes: [UInt8], version: String)] = [:]
         /// Every frame a files connection sent, in order: what proves nothing was written unasked.
         var received: [Frame] = []
+        /// Each save under way: its file, base, and the bytes come so far.
+        var saves: [Int32: (path: FileName, base: String, bytes: [UInt8])] = [:]
+        /// The next save is refused so.
+        var refuseSave: (kind: FileRefusal, message: String)?
         var refusals: [FileName: (kind: FileRefusal, message: String)] = [:]
         var versions = 0
         var watched: [Int32: [WatchedPath]] = [:]
@@ -189,6 +193,22 @@ public final class FakeRunnerDoor: Sendable {
             files.contents[FileName(path)] = nil
             tellWatchers(of: FileName(path), in: files)
         }
+    }
+
+    /// The next save is refused as `kind`, in `message`, nothing written.
+    public func refuseNextSave(_ kind: FileRefusal, saying message: String) {
+        files.withLock { $0.refuseSave = (kind, message) }
+    }
+
+    /// File `path`'s bytes as the door holds them now.
+    public func file(_ path: String) -> [UInt8]? {
+        files.withLock { $0.contents[FileName(path)]?.bytes }
+    }
+
+    static func hex(_ bytes: [UInt8]) -> String {
+        var hash = SHA256()
+        hash.update(bytes)
+        return hash.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     /// Every frame the files connections sent, in order.
@@ -320,6 +340,33 @@ public final class FakeRunnerDoor: Sendable {
                     answer(.filesData(id: id, version: file.version, bytes: chunk, eof: next >= file.bytes.count, whole: last && offset == 0 && next >= file.bytes.count, digest: digest), on: connection)
                     at = next
                 } while at < end
+            case let .filesWrite(id, path, base, _, _):
+                if let refusal = files.withLock({ files -> (kind: FileRefusal, message: String)? in
+                    defer { files.refuseSave = nil }
+                    return files.refuseSave
+                }) {
+                    answer(.filesRefused(id: id, kind: .known(refusal.kind), message: refusal.message), on: connection)
+                } else {
+                    files.withLock { $0.saves[id] = (path, base, []) }
+                }
+            case let .putChunk(id, _, bytes):
+                guard let received = files.withLock({ files -> Int? in
+                    guard files.saves[id] != nil else { return nil }
+                    files.saves[id]?.bytes += bytes
+                    return files.saves[id]?.bytes.count
+                }) else { break }
+                answer(.putAck(id: id, received: Int64(received)), on: connection)
+            case let .putEnd(id, _):
+                guard let save = files.withLock({ $0.saves.removeValue(forKey: id) }) else { break }
+                let outcome = files.withLock { files -> Frame in
+                    let present = files.contents[save.path].map { Self.hex($0.bytes) } ?? "absent"
+                    guard present == save.base else { return .filesConflict(id: id, digest: present) }
+                    files.versions += 1
+                    files.contents[save.path] = (save.bytes, "v\(files.versions)")
+                    tellWatchers(of: save.path, in: files)
+                    return .filesWritten(id: id, digest: Self.hex(save.bytes), version: "v\(files.versions)")
+                }
+                answer(outcome, on: connection)
             case let .filesList(id, path):
                 let wait = files.withLock { files -> DispatchSemaphore? in
                     files.listed.append(path.shown)

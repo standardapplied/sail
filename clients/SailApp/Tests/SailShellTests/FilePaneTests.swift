@@ -234,6 +234,43 @@ import Testing
         #expect(narrow.minY >= wide.minY + 12, "narrow, Try Again at \(narrow) is not a row under the words; wide, at \(wide)")
     }
 
+    /// M26: ⌘S writes the pane's text whole against the digest read; the dot goes from the title
+    /// and the row, and the pane follows again.
+    @Test func aSaveWritesTheTextAndTheDotGoes() async throws {
+        let (door, _, _, panel, pane) = try await Self.opened(Array("one\n".utf8))
+        #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
+        pane.editor.insertText("saved ", replacementRange: NSRange(location: 0, length: 0))
+        pane.saveDocument(nil)
+        #expect(await RunnerTabTests.until(10) { door.file(Self.path) == Array("saved one\n".utf8) && pane.file.clean && panel.unsaved == nil },
+                "the door holds \(door.file(Self.path).map { String(decoding: $0, as: UTF8.self) } ?? "nothing"), the pane \(pane.file.clean ? "clean" : "unsaved")")
+    }
+
+    /// M27: ⌘S over a newer file writes nothing and brings up the sheet; Keep Mine then writes the
+    /// pane's text against the version the sheet showed.
+    @Test func aSaveOverANewerFileShowsTheSheetAndKeepMineWrites() async throws {
+        let (door, _, bench, _, pane) = try await Self.opened(Array("one\n".utf8))
+        #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
+        pane.editor.insertText("mine ", replacementRange: NSRange(location: 0, length: 0))
+        door.setFile(Self.path, Array("theirs\n".utf8))
+        #expect(await RunnerTabTests.until(10) { pane.file.note == .changed })
+        pane.saveDocument(nil)
+        #expect(await RunnerTabTests.until(10) { bench.sheetOffers == ["Cancel", "Keep Theirs", "Keep Mine"] }, "no sheet after a save over a newer file")
+        #expect(door.file(Self.path) == Array("theirs\n".utf8), "the save wrote over the newer file")
+        #expect(bench.pressSheet("Keep Mine"))
+        #expect(await RunnerTabTests.until(10) { door.file(Self.path) == Array("mine one\n".utf8) && pane.file.clean }, "Keep Mine did not write the pane's text")
+    }
+
+    /// M29: a save refused for a full disk says so in the host's words; the dot stays.
+    @Test func aSaveRefusedIsSaidAndTheDotStays() async throws {
+        let (door, _, _, panel, pane) = try await Self.opened(Array("one\n".utf8))
+        #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
+        pane.editor.insertText("x", replacementRange: NSRange(location: 0, length: 0))
+        door.refuseNextSave(.noSpace, saying: "dock's disk is full (12 KB free). Nothing was changed.")
+        pane.saveDocument(nil)
+        #expect(await RunnerTabTests.until(10) { pane.noteWords == "dock's disk is full (12 KB free). Nothing was changed." }, "said: \(pane.noteWords ?? "nothing")")
+        #expect(!pane.file.clean && panel.unsaved == FileName(Self.path) && door.file(Self.path) == Array("one\n".utf8))
+    }
+
     /// M14a: a file that is not text is one sentence and Copy Path.
     @Test func aFileThatIsNotTextIsASentence() async throws {
         let (_, _, _, _, pane) = try await Self.opened([0x89, 0x50, 0x4E, 0x47, 0, 1, 2, 3])

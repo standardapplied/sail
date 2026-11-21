@@ -47,7 +47,7 @@ import Testing
         }
 
         var lastWrite: (id: Int32, base: String, bytes: [UInt8])? {
-            asked.reversed().lazy.compactMap { if case let .write(id, _, base, bytes) = $0 { (id, base, bytes) } else { nil } }.first
+            asked.reversed().lazy.compactMap { if case let .write(id, _, base, _, bytes) = $0 { (id, base, bytes) } else { nil } }.first
         }
 
         /// The workspace answers the last read with `bytes`, in chunks of `chunk`.
@@ -169,7 +169,7 @@ import Testing
             if !pane.file.clean { return "a character typed and deleted is not clean" }
         }
         pane.type(text + "x")
-        guard case let .write(_, _, base, written)? = pane.file.save().asks.first else { return "a save after an edit wrote nothing" }
+        guard case let .write(_, _, base, _, written)? = pane.file.save().asks.first else { return "a save after an edit wrote nothing" }
         return written == bytes + Array("x".utf8) && base == OpenFileTests.digest(bytes) ? nil : "the bytes saved are not the bytes read and the edit"
     }
 
@@ -200,7 +200,7 @@ import Testing
         pane.type(text)
         #expect(pane.file.clean, "a character typed and deleted is not clean")
         pane.type(text + "x")
-        guard case let .write(_, _, base, written)? = pane.file.save().asks.first else {
+        guard case let .write(_, _, base, _, written)? = pane.file.save().asks.first else {
             Issue.record("a save after an edit wrote nothing")
             return
         }
@@ -342,7 +342,7 @@ import Testing
         let write = try #require(pane.lastWrite)
         #expect(write.base == Self.digest(Array("one\n".utf8)) && write.bytes == Array("one\ntwo\n".utf8))
         pane.type("one\ntwo\nthree\n")
-        pane.take(pane.file.receive(.written(id: write.id, version: "s1")))
+        pane.take(pane.file.receive(.written(id: write.id, digest: "s1", version: "w-" + "s1")))
         #expect(!pane.file.clean && pane.file.digest == "s1", "typed during the save, yet clean")
         pane.type("one\ntwo\n")
         #expect(pane.file.clean)
@@ -355,13 +355,13 @@ import Testing
         pane.type("mine\n")
         pane.take(pane.file.save())
         let first = try #require(pane.lastWrite)
-        pane.take(pane.file.receive(.conflict(id: first.id, version: "t1")))
+        pane.take(pane.file.receive(.conflict(id: first.id, digest: "t1")))
         pane.answer(Array("theirs\n".utf8), version: "v2")
         #expect(pane.said.contains(.conflict(theirs: "theirs\n")) && pane.text == "mine\n" && !pane.file.clean)
         pane.take(pane.file.keepMine())
         let again = try #require(pane.lastWrite)
         #expect(again.base == Self.digest(Array("theirs\n".utf8)) && again.bytes == Array("mine\n".utf8), "Keep Mine did not save against the version shown")
-        pane.take(pane.file.receive(.conflict(id: again.id, version: "t2")))
+        pane.take(pane.file.receive(.conflict(id: again.id, digest: "t2")))
         pane.answer(Array("third\n".utf8), version: "v3")
         #expect(pane.said.last == .conflict(theirs: "third\n"))
         pane.take(pane.file.keepTheirs())
@@ -405,13 +405,36 @@ import Testing
         #expect(failed.file.clean && failed.said.contains(.saved))
     }
 
+    /// A save tells the host the version its base was read at; Keep Mine the version of what the
+    /// sheet showed; Save Anyway none; a save's answer makes its digest and version the next base.
+    @Test func aSaveCarriesTheVersionItsBaseWasReadAt() throws {
+        var pane = Self.opened("one\n")
+        pane.type("mine\n")
+        pane.take(pane.file.save())
+        guard case let .write(first, _, _, seen, _)? = pane.asked.last else {
+            Issue.record("no write")
+            return
+        }
+        #expect(seen == "v1")
+        pane.take(pane.file.receive(.conflict(id: first, digest: "t1")))
+        pane.answer(Array("theirs\n".utf8), version: "v2")
+        pane.take(pane.file.keepMine())
+        guard case let .write(again, _, base, mine, _)? = pane.asked.last else {
+            Issue.record("Keep Mine wrote nothing")
+            return
+        }
+        #expect(base == Self.digest(Array("theirs\n".utf8)) && mine == "v2", "Keep Mine said \(mine) for what the sheet showed at v2")
+        pane.take(pane.file.receive(.written(id: again, digest: "s1", version: "v3")))
+        #expect(pane.file.digest == "s1" && pane.file.version == "v3" && pane.file.clean)
+    }
+
     /// M28: a save meeting a deleted file writes nothing and says so; Save Anyway makes it anew,
     /// never replacing.
     @Test func aSaveOfADeletedFileAsksBeforeMakingItAnew() throws {
         var pane = Self.opened("one\n")
         pane.type("mine\n")
         pane.take(pane.file.save())
-        pane.take(pane.file.receive(.conflict(id: try #require(pane.lastWrite).id, version: OpenFile.absent)))
+        pane.take(pane.file.receive(.conflict(id: try #require(pane.lastWrite).id, digest: OpenFile.absent)))
         #expect(pane.file.note == .deletedWhileTyped && pane.said.last == .gone)
         pane.take(pane.file.saveAnyway())
         #expect(pane.lastWrite?.base == OpenFile.absent && pane.lastWrite?.bytes == Array("mine\n".utf8))

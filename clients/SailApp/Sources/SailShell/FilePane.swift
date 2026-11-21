@@ -173,8 +173,13 @@ final class FilePane: NSView, NSTextViewDelegate {
         case .filesTick:
             apply(file.tick())
             return false
+        case let .putAck(id, received) where id == upload?.id:
+            send(upload?.acked(received) ?? [])
+            return true
         default:
             guard let answer = Self.answer(frame) else { return false }
+            if case let .written(id, _, _) = answer, id == upload?.id { upload = nil }
+            if case let .conflict(id, _) = answer, id == upload?.id { upload = nil }
             apply(file.receive(answer))
             return true
         }
@@ -194,12 +199,20 @@ final class FilePane: NSView, NSTextViewDelegate {
         file.version.isEmpty ? nil : WatchedPath(path: file.path, version: file.version)
     }
 
-    static func frames(_ asks: [OpenFile.Ask]) -> [Frame] {
-        asks.compactMap { ask in
+    /// The save on the wire, while its bytes are being sent.
+    private var upload: FileUpload?
+
+    /// What the model asks, as frames: a write becomes its upload's first frames.
+    private func frames(_ asks: [OpenFile.Ask]) -> [Frame] {
+        asks.flatMap { ask -> [Frame] in
             switch ask {
-            case let .read(id, path): .filesRead(id: id, path: path, offset: 0, length: OpenFile.limit + 1)
-            case let .cancel(id): .filesCancel(id: id)
-            case .write: nil
+            case let .read(id, path): return [.filesRead(id: id, path: path, offset: 0, length: OpenFile.limit + 1)]
+            case let .cancel(id): return [.filesCancel(id: id)]
+            case let .write(id, path, base, seen, bytes):
+                var upload = FileUpload(id: id, path: path, base: base, seen: seen, bytes: bytes)
+                let first = upload.start()
+                self.upload = upload
+                return first
             }
         }
     }
@@ -208,6 +221,8 @@ final class FilePane: NSView, NSTextViewDelegate {
         switch frame {
         case let .filesData(id, version, bytes, eof, whole, digest): .data(id: id, version: version, bytes: bytes, eof: eof, whole: whole, digest: digest)
         case let .filesRefused(id, kind, message): .refused(id: id, kind: kind, message: message)
+        case let .filesWritten(id, digest, version): .written(id: id, digest: digest, version: version)
+        case let .filesConflict(id, digest): .conflict(id: id, digest: digest)
         default: nil
         }
     }
@@ -254,7 +269,7 @@ final class FilePane: NSView, NSTextViewDelegate {
     private var afterSave: (@MainActor () -> Void)?
 
     func finishClosing() {
-        send(Self.frames(file.close().asks))
+        send(frames(file.close().asks))
         onClose()
     }
 
@@ -324,7 +339,7 @@ final class FilePane: NSView, NSTextViewDelegate {
     // MARK: What it shows
 
     private func apply(_ step: OpenFile.Step) {
-        send(Self.frames(step.asks))
+        send(frames(step.asks))
         for event in step.events {
             switch event {
             case let .arrived(piece): append(piece)
@@ -341,7 +356,9 @@ final class FilePane: NSView, NSTextViewDelegate {
             case let .conflict(theirs):
                 afterSave = nil
                 onCompare(theirs)
-            case .gone: afterSave = nil
+            case .gone:
+                afterSave = nil
+                onCompare("")
             case let .saveRefused(words):
                 afterSave = nil
                 said = words
