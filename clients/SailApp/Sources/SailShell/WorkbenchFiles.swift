@@ -90,7 +90,8 @@ extension WorkbenchView {
         let onScreen = !filesAway && !isHidden && window?.isMiniaturized != true
         for tab in model.tabs {
             guard let panel = tabViews[tab.id]?.files else { continue }
-            let shown = onScreen && tab.id == model.selected && workspace(of: tab).map { filesShown.contains(Self.key($0.project, $0.name)) } == true
+            let wanted = tabViews[tab.id]?.filePane != nil || workspace(of: tab).map { filesShown.contains(Self.key($0.project, $0.name)) } == true
+            let shown = onScreen && tab.id == model.selected && wanted
             if shown { panel.open() } else { panel.close() }
         }
     }
@@ -99,28 +100,36 @@ extension WorkbenchView {
     /// as it runs inside the workbench's layout. Beside them the tab view's bounds start at the
     /// panel's far edge, so the terminals' frames, the dividers and a drag on them stay in the
     /// workbench's own coordinates.
-    func placeFiles(of tab: Tab, in view: TabView) -> CGSize {
-        let size = view.bounds.size
+    func placeFiles(of tab: Tab, in view: TabView, trailing: Double = 0) -> CGSize {
+        let size = view.bounds.size, rightToLeft = userInterfaceLayoutDirection == .rightToLeft
+        let room = CGSize(width: max(Double(size.width) - trailing, 0), height: Double(size.height))
         guard let (project, name) = workspace(of: tab), filesShown.contains(Self.key(project, name)), let panel = view.files else {
             if let panel = view.files, !panel.isHidden {
                 panel.isHidden = true
                 panel.shadowView.isHidden = true
             }
-            if view.bounds.origin != .zero { view.setBoundsOrigin(.zero) }
-            return size
+            let shift = rightToLeft ? -trailing : 0
+            if Double(view.bounds.origin.x) != shift { view.setBoundsOrigin(NSPoint(x: shift, y: 0)) }
+            return room
         }
-        let rightToLeft = userInterfaceLayoutDirection == .rightToLeft
         let width = FilesPanel.width, floating = Double(size.width) < width + Self.filesBeside
         panel.floating = floating
         if panel.isHidden { panel.isHidden = false }
         if panel.shadowView.isHidden == floating { panel.shadowView.isHidden = !floating }
-        let shift = floating || rightToLeft ? 0 : -width
+        let shift = rightToLeft ? -trailing : floating ? 0 : -width
         if Double(view.bounds.origin.x) != shift { view.setBoundsOrigin(NSPoint(x: shift, y: 0)) }
-        let x = rightToLeft ? Double(size.width) - width : shift
+        let x = rightToLeft ? Double(size.width) - trailing - width : shift
         let frame = NSRect(x: x, y: 0, width: width, height: Double(size.height))
         if panel.frame != frame { panel.frame = frame }
         if panel.shadowView.frame != frame { panel.shadowView.frame = frame }
-        return floating ? size : CGSize(width: max(Double(size.width) - width, 0), height: Double(size.height))
+        return floating ? room : CGSize(width: max(Double(room.width) - width, 0), height: Double(size.height))
+    }
+
+    /// How wide the files panel stands beside the terminals in `tab`: none when hidden or floating.
+    func filesBesideWidth(of tab: Tab, in view: TabView) -> Double {
+        guard let (project, name) = workspace(of: tab), filesShown.contains(Self.key(project, name)), view.files != nil,
+              Double(view.bounds.width) >= FilesPanel.width + Self.filesBeside else { return 0 }
+        return FilesPanel.width
     }
 
     @discardableResult
@@ -130,6 +139,9 @@ extension WorkbenchView {
         let panel = FilesPanel(project: project, workspace: name, tickets: tickets, look: look, mono: labels)
         panel.onStart = { [weak self] project, name in await self?.startWorkspace(project, name) }
         panel.onDismiss = { [weak self] in self?.dismissFloatingFiles() }
+        panel.onOpenFile = { [weak self, weak view] path, entry in
+            if let view { self?.openFile(path, entry, in: view) }
+        }
         panel.isHidden = true
         view.addSubview(panel.shadowView)
         view.addSubview(panel)

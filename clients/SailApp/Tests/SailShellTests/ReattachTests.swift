@@ -465,7 +465,8 @@ import Testing
         #expect(bench.model.panes.count == before, "nothing opened under another person")
     }
 
-    /// R1: quitting detaches the runner's terminals and asks nothing; the runner keeps them.
+    /// R1: quitting detaches the runner's terminals and asks nothing of them; the runner keeps them.
+    /// With no file pane holding unsaved text it goes at once.
     @Test func quittingEndsNothingOnTheRunner() async throws {
         let (local, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
         defer { local.stop(); runner.stop() }
@@ -473,7 +474,7 @@ import Testing
         bench.openWorkspace(project: "harbor", name: "dock")
         #expect(await RunnerTabTests.until(10) { Self.runnerSessions(bench).count == 1 })
         #expect(await Self.attached(bench))
-        #expect(!ShellApp.instancesRespond(to: #selector(NSApplicationDelegate.applicationShouldTerminate(_:))), "a quit asks nothing")
+        #expect(bench.unsavedFilePanes.isEmpty, "a quit with no unsaved file would ask")
         bench.detachAll()
         #expect(runner.sessions == Self.runnerSessions(bench) && runner.kills.isEmpty)
     }

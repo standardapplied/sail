@@ -323,6 +323,24 @@ struct Step: Decodable {
     /// The tab's terminal floods at the panes4 load while the panel beside it is open and its tree
     /// changes: the flood judged as each panes4 flood is, and each change to the screen.
     var filesFlood: Bool?
+    /// File `[name, text]` under the workspace's root now holds `text`: written as an agent would.
+    var fileWrite: [String]?
+    /// The file `name` under the root opened from the tree into the tab's file pane.
+    var fileOpen: String?
+    /// The file pane shows exactly this text, typed in once whole, within `seconds`.
+    var fileShows: String?
+    /// Typed at the end of the file pane's text.
+    var fileType: String?
+    /// The file pane's one line says this ("" none), within `seconds`.
+    var fileNote: String?
+    /// The file pane is unsaved (true) or clean (false).
+    var fileUnsaved: Bool?
+    /// Compare pressed: the conflict sheet is up with these actions.
+    var fileCompare: [String]?
+    /// The conflict sheet's button of this title pressed: the sheet goes.
+    var fileSheet: String?
+    /// The file pane closed, as its × is pressed: a clean pane closes at once.
+    var fileClose: Bool?
     /// Sign Out pressed on the account, answered no further: what follows it asks.
     var signOutNow: Bool?
     /// A ticket was asked with these fields (`{"action": "open", "workspace": "dock"}`), within

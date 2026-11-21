@@ -602,13 +602,14 @@ import Testing
     }
 
     /// W2 and scenario 33: the workbench adds a pane's view in one place, `TabView.addPane`,
-    /// called once, when the pane is made; nothing else it adds is a pane.
+    /// called once, when the pane is made; nothing else it adds is a pane (the tab view's divider
+    /// before its file pane is a divider).
     @Test func aPanesViewIsAddedOnlyToItsTabsView() throws {
         let file = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appending(path: "Sources/SailShell/WorkbenchView.swift")
         let source = try String(contentsOf: file, encoding: .utf8)
         let added = source.matches(of: /addSubview\((\w+)/).map { String($0.output.1) }
-        #expect(Set(added) == ["room", "empty", "banner", "pane", "divider"], "\(added)")
+        #expect(Set(added) == ["room", "empty", "banner", "pane", "divider", "fileDivider"], "\(added)")
         #expect(added.filter { $0 == "pane" }.count == 1)
         #expect(source.matches(of: /\.addPane\(/).count == 1, "a pane's view is added again somewhere")
         #expect(source.contains("func addPane(_ pane: TerminalPane) {\n        addSubview(pane, positioned: .below, relativeTo: dividers.first)"))

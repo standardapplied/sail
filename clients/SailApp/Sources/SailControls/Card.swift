@@ -6,7 +6,9 @@ import SailLook
 /// the quiet surface and a warning or an error in its tone; its words in callout ink, a primary
 /// action and at most one secondary beside it, the primary answering Return while it shows unless
 /// Return belongs to what the card is over. At most 420 pt wide, padded as a banner, its mark
-/// mirrored right to left.
+/// mirrored right to left. It lies over a terminal, so a change of look only gives its layers new
+/// colours (fill, edge, the mark's ink) and never a bitmap: nothing over the panes is painted
+/// again while the look switches.
 @MainActor
 public final class Card: NSView {
     public static let width = 420.0
@@ -35,6 +37,10 @@ public final class Card: NSView {
     }
 
     private let message = NSTextField(wrappingLabelWithString: "")
+    /// The mark: its layer the ink, masked by the tone's icon, drawn once for each tone shown.
+    private let mark = NSView()
+    private let markShape = CALayer()
+    private var markTone: BannerTone?
     private let primary: SailButton
     private let secondary: SailButton
     /// The actions' row, taking no room when the card offers none.
@@ -53,6 +59,13 @@ public final class Card: NSView {
         secondary = SailButton("", kind: .secondary, look: look, target: nil, action: nil)
         actions = NSStackView(views: [primary, secondary])
         super.init(frame: .zero)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .never
+        layer?.cornerRadius = Look.contentRadius
+        layer?.borderWidth = 1
+        mark.wantsLayer = true
+        mark.layer?.mask = markShape
+        addSubview(mark)
         message.font = .systemFont(ofSize: Look.Step.callout.points)
         primary.target = self
         primary.action = #selector(actPrimary)
@@ -100,6 +113,7 @@ public final class Card: NSView {
         primary.isDefault = returns
         message.stringValue = text
         self.tone = tone
+        paint()
         primaryHandler = handler
         secondaryHandler = secondHandler
         primary.isHidden = button == nil
@@ -109,7 +123,6 @@ public final class Card: NSView {
         actions.isHidden = button == nil && second == nil
         setAccessibilityLabel(text)
         isHidden = false
-        needsDisplay = true
         // Laid out now, its buttons framed in the turn it shows, not at the next display.
         (superview ?? self).layoutSubtreeIfNeeded()
     }
@@ -143,12 +156,36 @@ public final class Card: NSView {
         return true
     }
 
+    /// Its colours for the look and tone: the layers' alone, no bitmap; the mark's icon drawn only
+    /// when the tone changes, never at a change of look.
     private func paint() {
         message.textColor = NSColor(look.text)
         primary.look = look
         secondary.look = look
-        needsDisplay = true
+        let paint = bannerPaint
+        layer?.backgroundColor = NSColor(Tint(paint.fill)).cgColor
+        layer?.borderColor = NSColor(paint.edge).cgColor
+        mark.layer?.backgroundColor = NSColor(paint.mark).cgColor
+        guard markTone != tone else { return }
+        markTone = tone
+        let icon = tone.icon, side = Banner.mark, opaque = paint.mark
+        markShape.contents = NSImage(size: NSSize(width: side, height: side), flipped: true) { box in
+            Draw.icon(icon, in: box, ink: opaque)
+            return true
+        }
     }
+
+    override public func layout() {
+        super.layout()
+        mark.frame = markBox
+        markShape.frame = mark.bounds
+    }
+
+    override public var wantsUpdateLayer: Bool {
+        true
+    }
+
+    override public func updateLayer() {}
 
     /// The mark's box, at the top of the leading edge.
     var markBox: NSRect {
@@ -160,12 +197,6 @@ public final class Card: NSView {
     /// Information quiet on the paper; a warning or an error in its tone.
     package var bannerPaint: BannerPaint {
         tone == .info ? BannerPaint(quiet: look) : BannerPaint(tone, look: look)
-    }
-
-    override public func draw(_: NSRect) {
-        let paint = bannerPaint
-        Draw.box(bounds, radius: Look.contentRadius, fill: Tint(paint.fill), edge: paint.edge)
-        Draw.icon(tone.icon, in: markBox, ink: paint.mark)
     }
 
     @objc private func actPrimary() {
