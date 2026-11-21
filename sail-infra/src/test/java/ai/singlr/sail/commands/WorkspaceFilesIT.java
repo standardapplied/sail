@@ -303,7 +303,8 @@ class WorkspaceFilesIT extends AbstractIncusIT {
           var whole = new ArrayList<Long>();
           for (var i = 0; i < 10; i++) {
             var started = System.nanoTime();
-            PtyWire.write(files, new PtyMessage.FilesRead(400 + i, "/home/dev/twenty", 0, 20L << 20));
+            PtyWire.write(
+                files, new PtyMessage.FilesRead(400 + i, "/home/dev/twenty", 0, 20L << 20));
             var sha = java.security.MessageDigest.getInstance("SHA-256");
             PtyMessage.FilesData data;
             do {
