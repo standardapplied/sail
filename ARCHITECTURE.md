@@ -4142,6 +4142,18 @@ connection's frames.
   from 0 that reaches the file's end hashes the whole file, which is the only base a save takes:
   a base from any shorter range differs from the whole file's digest the save compares, so it can
   cost a needless conflict, never an overwrite.
+  The evidence, a tight in-place writer against stat, read, stat, 2,000 reads a run
+  (`files1-tools/torn_probe.py` in the PR's report):
+
+  | Filesystem | reads torn with both stats equal | of those, a second digest differs |
+  |---|---|---|
+  | ext4, a devbox (4 runs) | 634, 681, 271, 807 | 634, 681, 266, 806 |
+  | ext4, a GCP runner's root (2 runs) | 33, 51 | 33, 51 |
+  | ZFS, a GCP file pool (3 runs) | 0, 0, 0 | none to differ |
+
+  A script's bytes go out on a descriptor duplicated from its output, never reopened by a path
+  such as `/dev/fd/3`: `incus exec` gives a script a socket for its output, which Linux will not
+  open again, and every script test runs on one (`FileScriptsTest.onASocket`).
 - **F1. The watch.** One loop a connection (`FileScripts.WATCH`), started by its first set, stats
   only the paths of the set every 250 ms and prints those whose version is not the one held, then
   a NUL; it prints a NUL alone each second (`FilesTick`), and ends when its input closes. A set
