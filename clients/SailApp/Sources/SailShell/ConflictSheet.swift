@@ -4,9 +4,10 @@ import SailLook
 
 /// The conflict sheet: the workspace's file and the pane's text side by side, read-only, scrolling
 /// together, opened at the first line that differs, each differing line barred in the gutter as the
-/// pane's changed lines are. Keep Mine (in the error ink: it replaces theirs), Keep Theirs, Cancel;
-/// no default, so ⏎ does nothing, and Esc cancels. A deleted file offers Save Anyway and Discard
-/// instead. It writes nothing itself, and follows a change of look while it is up.
+/// pane's changed lines are. Keep Mine (in the error ink, outlined: it replaces theirs), Keep Theirs,
+/// Cancel, all three outlined, none filled: no default, so ⏎ does nothing, and Esc cancels. A deleted
+/// file offers Save Anyway and Discard instead. A file that changed again after Keep Mine says so. It
+/// writes nothing itself, and follows a change of look while it is up.
 @MainActor
 final class ConflictSheet: NSWindow {
     enum Choice {
@@ -30,26 +31,29 @@ final class ConflictSheet: NSWindow {
     private var syncing = false
     private let mono: LabelFont
 
-    /// `theirsRead`: when the workspace's text was read, said beside it.
-    init(name: String, theirs: String, theirsRead: Date, yours: String, deleted: Bool, look: Look, mono: LabelFont) {
+    /// `theirsRead`: when the workspace's text was read, said beside it; `again` when Keep Mine met
+    /// a newer file than the last sheet showed.
+    init(name: String, theirs: String, theirsRead: Date, yours: String, deleted: Bool, again: Bool = false, look: Look, mono: LabelFont) {
         self.look = look
         self.mono = mono
-        heading = NSTextField(labelWithString: deleted ? "\(name) was deleted on the workspace" : "\(name) changed on the workspace")
-        detail = NSTextField(labelWithString: deleted ? "Save Anyway creates it again; Discard drops what you typed." : "Keep one version. The other is lost; nothing is merged.")
+        heading = NSTextField(labelWithString: deleted ? "\(name) was deleted on the workspace" : again ? "\(name) changed again on the workspace" : "\(name) changed on the workspace")
+        detail = NSTextField(labelWithString: deleted ? "Save Anyway creates it again; Discard drops what you typed."
+            : again ? "It changed again while you compared; this is what it holds now. Keep one version. The other is lost; nothing is merged."
+            : "Keep one version. The other is lost; nothing is merged.")
         super.init(contentRect: NSRect(x: 0, y: 0, width: 900, height: 560), styleMask: [.titled], backing: .buffered, defer: true)
         root.wantsLayer = true
         contentView = root
         heading.font = .systemFont(ofSize: Look.Step.title3.points, weight: .semibold)
-        let lines = ConflictSheet.differing(theirs, yours)
+        let lines = FilePane.differing(theirs, yours)
         let read = DateFormatter.localizedString(from: theirsRead, dateStyle: .none, timeStyle: .short)
-        let theirsSide = side("Theirs", note: deleted ? "deleted" : "on the workspace, \(read)", text: theirs, in: theirsView, barred: lines.theirs)
-        let yoursSide = side("Yours", note: "unsaved", text: yours, in: yoursView, barred: lines.yours)
+        let theirsSide = side("Theirs", note: deleted ? "deleted" : "on the workspace, \(read)", text: theirs, in: theirsView, barred: lines.one)
+        let yoursSide = side("Yours", note: "unsaved", text: yours, in: yoursView, barred: lines.other)
         let sides = NSStackView(views: [theirsSide, yoursSide])
         sides.distribution = .fillEqually
         sides.spacing = Look.Space.m
         let titles: [(String, ButtonKind, Choice)] = deleted
-            ? [("Cancel", .secondary, .cancel), ("Discard", .secondary, .discard), ("Save Anyway", .destructive, .saveAnyway)]
-            : [("Cancel", .secondary, .cancel), ("Keep Theirs", .secondary, .keepTheirs), ("Keep Mine", .destructive, .keepMine)]
+            ? [("Cancel", .secondary, .cancel), ("Discard", .secondary, .discard), ("Save Anyway", .destructiveQuiet, .saveAnyway)]
+            : [("Cancel", .secondary, .cancel), ("Keep Theirs", .secondary, .keepTheirs), ("Keep Mine", .destructiveQuiet, .keepMine)]
         buttons = titles.map { title, kind, choice in
             let button = SailButton(title, kind: kind, look: look, target: self, action: #selector(chosen(_:)))
             button.tag = [Choice.keepMine, .keepTheirs, .saveAnyway, .discard, .cancel].firstIndex(of: choice) ?? 4
@@ -75,8 +79,13 @@ final class ConflictSheet: NSWindow {
             NotificationCenter.default.addObserver(self, selector: #selector(scrolled(_:)), name: NSView.boundsDidChangeNotification, object: scroll.contentView)
         }
         paint()
-        let first = min(lines.theirs.first ?? 1, lines.yours.first ?? 1)
+        let first = min(lines.one.first ?? 1, lines.other.first ?? 1)
         for view in [theirsView, yoursView] { Self.scroll(view, toLine: first) }
+    }
+
+    /// The heading's words.
+    var headingWords: String {
+        heading.stringValue
     }
 
     private func side(_ title: String, note: String, text: String, in view: NSTextView, barred: IndexSet) -> NSView {
@@ -119,23 +128,6 @@ final class ConflictSheet: NSWindow {
         rulers.forEach { $0.look = look }
         scrolls.forEach { $0.look = look }
         buttons.forEach { $0.look = look }
-    }
-
-    /// The lines that differ on each side, by what the two share at their start and end.
-    static func differing(_ theirs: String, _ yours: String) -> (theirs: IndexSet, yours: IndexSet) {
-        let one = theirs.components(separatedBy: "\n"), other = yours.components(separatedBy: "\n")
-        var head = 0
-        while head < min(one.count, other.count), one[head] == other[head] {
-            head += 1
-        }
-        var tail = 0
-        while tail < min(one.count, other.count) - head, one[one.count - 1 - tail] == other[other.count - 1 - tail] {
-            tail += 1
-        }
-        func lines(_ count: Int) -> IndexSet {
-            head < count - tail ? IndexSet(integersIn: (head + 1) ... (count - tail)) : IndexSet()
-        }
-        return (lines(one.count), lines(other.count))
     }
 
     static func scroll(_ view: NSTextView, toLine line: Int) {

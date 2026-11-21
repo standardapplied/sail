@@ -44,6 +44,14 @@ import Testing
         }
     }
 
+    /// A mark made into an image for a run of text is a bitmap already drawn: nothing in it is
+    /// left for AppKit to draw later.
+    @Test func aMarksImageIsDrawnWhenMade() throws {
+        let image = MarkImage.image(.error, side: 12, ink: Tint(Look.light.error), scale: 2)
+        #expect(!image.representations.isEmpty && !image.representations.contains { $0 is NSCustomImageRep }, "\(image.representations)")
+        #expect(image.size == NSSize(width: 12, height: 12))
+    }
+
     /// A tab of the longest workspace name the server allows, and a long rename, are cut in the
     /// middle so the card keeps to two lines (60 pt) at each width.
     @Test(arguments: widths)

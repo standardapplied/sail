@@ -168,15 +168,8 @@ public final class Card: NSView {
         mark.layer?.backgroundColor = NSColor(paint.mark).cgColor
         guard markTone != tone else { return }
         markTone = tone
-        let icon = tone.icon, scale = window?.backingScaleFactor ?? 2, opaque = paint.mark
-        var box = NSRect(x: 0, y: 0, width: Banner.mark, height: Banner.mark)
-        let image = NSImage(size: box.size, flipped: true) { box in
-            Draw.icon(icon, in: box, ink: opaque)
-            return true
-        }
-        // Drawn now: a layer given the image would call its main-actor handler when it pleases,
-        // and off the main thread that call traps.
-        markShape.contents = image.cgImage(forProposedRect: &box, context: nil, hints: [.ctm: AffineTransform(scale: scale)])
+        let scale = window?.backingScaleFactor ?? 2
+        markShape.contents = MarkImage.bitmap(tone.icon, side: Banner.mark, ink: paint.mark, scale: scale)
         markShape.contentsScale = scale
     }
 

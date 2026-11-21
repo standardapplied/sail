@@ -27,10 +27,10 @@ extension WorkbenchView {
         guard let panel = view.files else { return }
         if let pane = view.filePane {
             if pane.file.path == path { return focusFilePane(in: view) }
-            return pane.askToLeave { [weak self, weak view, weak pane] in
+            return pane.askToLeave(then: { [weak self, weak view, weak pane] in
                 pane?.finishClosing()
                 if let view { self?.openFile(path, entry, in: view) }
-            }
+            })
         }
         let pane = FilePane(path: path, entry: entry, workspace: panel.workspace, look: look, mono: labels)
         pane.wantsLayer = true
@@ -48,9 +48,9 @@ extension WorkbenchView {
             self?.apply()
             if let terminal = self?.focused { self?.window?.makeFirstResponder(terminal.terminal) }
         }
-        pane.onCompare = { [weak self, weak pane] theirs in
+        pane.onCompare = { [weak self, weak pane] theirs, again in
             guard let self, let pane else { return }
-            self.compare(pane, theirs: theirs)
+            self.compare(pane, theirs: theirs, again: again)
         }
         panel.filePane = pane
         view.addSubview(pane)
@@ -202,16 +202,17 @@ extension WorkbenchView {
         model.tabs.compactMap { tab in tabViews[tab.id]?.filePane.flatMap { $0.file.clean ? nil : (tab.id, $0) } }
     }
 
-    /// The conflict sheet over the window: theirs and the pane's text side by side; Keep Mine, Keep
-    /// Theirs, Cancel, with no default (M27, M48).
-    func compare(_ pane: FilePane, theirs: String) {
+    /// The conflict sheet over the window: `theirs` and the pane's text side by side; Keep Mine,
+    /// Keep Theirs, Cancel, with no default (M27, M48). Its choices act on the version it shows,
+    /// whatever the workspace read while it was up; nil `theirs` is a deleted file.
+    func compare(_ pane: FilePane, theirs: OpenFile.Theirs?, again: Bool) {
         guard let window else { return }
-        let sheet = ConflictSheet(name: pane.file.name, theirs: theirs, theirsRead: pane.theirsRead, yours: pane.editor.string, deleted: pane.file.note == .deletedWhileTyped, look: look, mono: labels)
+        let sheet = ConflictSheet(name: pane.file.name, theirs: theirs?.text ?? "", theirsRead: pane.theirsRead, yours: pane.editor.string, deleted: theirs == nil, again: again, look: look, mono: labels)
         sheet.onChoice = { [weak pane, weak window, weak sheet] choice in
             if let sheet { window?.endSheet(sheet) }
             switch choice {
-            case .keepMine: pane?.keepMine()
-            case .keepTheirs: pane?.keepTheirs()
+            case .keepMine: if let theirs { pane?.keepMine(against: theirs) }
+            case .keepTheirs: if let theirs { pane?.keepTheirs(theirs) }
             case .saveAnyway: pane?.saveAnyway()
             case .discard: pane?.discardPressed()
             case .cancel: break
@@ -282,12 +283,14 @@ package struct FilePaneShown {
     package let editable: Bool
     package let note: String?
     package let sentence: String?
+    /// The workspace's bytes the pane holds for Compare, as text.
+    package let theirs: String?
 }
 
 extension WorkbenchView {
     package var filePaneShown: FilePaneShown? {
         guard let tab = model.selectedTab, let pane = tabViews[tab.id]?.filePane else { return nil }
-        return FilePaneShown(view: pane, editor: pane.editor, text: pane.editor.string, clean: pane.file.clean, editable: pane.editor.isEditable, note: pane.noteWords, sentence: pane.sentenceWords)
+        return FilePaneShown(view: pane, editor: pane.editor, text: pane.editor.string, clean: pane.file.clean, editable: pane.editor.isEditable, note: pane.noteWords, sentence: pane.sentenceWords, theirs: pane.file.theirs?.text)
     }
 
     /// Opens `path` from the selected tab's tree into its file pane, as ⏎ on its row does.
@@ -319,13 +322,23 @@ extension WorkbenchView {
     /// Compare, as its button is pressed on the one line.
     package func compareFile() -> Bool {
         guard let pane = model.selectedTab.flatMap({ tabViews[$0.id]?.filePane }), let theirs = pane.file.theirs else { return false }
-        compare(pane, theirs: String(decoding: theirs, as: UTF8.self))
+        compare(pane, theirs: theirs, again: false)
         return true
     }
 
     /// The conflict sheet's actions, as its buttons are titled; none while no sheet is up.
     package var sheetOffers: [String] {
         (window?.attachedSheet as? ConflictSheet)?.buttons.map(\.title) ?? []
+    }
+
+    /// The conflict sheet's heading, nil while none is up.
+    package var sheetHeading: String? {
+        (window?.attachedSheet as? ConflictSheet)?.headingWords
+    }
+
+    /// The sheet up over the window: a new one is another object.
+    package var sheetUp: NSWindow? {
+        window?.attachedSheet
     }
 
     /// Presses the conflict sheet's button titled `title`.

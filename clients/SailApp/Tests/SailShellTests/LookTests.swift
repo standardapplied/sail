@@ -85,6 +85,26 @@ import Testing
         #expect(read >= 19)
     }
 
+    /// An image is drawn when it is made, through the one way a mark becomes an image: an image
+    /// left holding a drawing handler is drawn when and where AppKit pleases, and a main-actor
+    /// handler called off the main thread traps.
+    @Test func noSourceLeavesAnImageToBeDrawnLater() throws {
+        let sources = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "Sources")
+        var read = 0
+        for target in ["SailLook", "SailShell", "SailAccount", "Sail", "SailTerminalView", "SailRenderer", "SailControls"] {
+            let directory = sources.appending(path: target)
+            for name in try FileManager.default.contentsOfDirectory(atPath: directory.path) where name.hasSuffix(".swift") && name != "MarkImage.swift" {
+                let text = try String(contentsOf: directory.appending(path: name), encoding: .utf8)
+                read += 1
+                for word in ["flipped: true) {", "flipped: false) {", "drawingHandler:"] {
+                    #expect(!text.contains(word), "\(target)/\(name) leaves an image to be drawn later (\(word)); draw it with MarkImage")
+                }
+            }
+        }
+        #expect(read >= 19)
+    }
+
     @Test func theTitleFontIsThePinnedNewsreaderMedium() throws {
         let fonts = Self.fonts
         let pins = [
