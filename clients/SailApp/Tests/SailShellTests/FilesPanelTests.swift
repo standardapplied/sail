@@ -209,6 +209,11 @@ import Testing
         #expect(rows.map { $0.accessibilitySubrole() } == [.outlineRow, .outlineRow, .outlineRow])
         #expect(rows.map { $0.accessibilityDisclosureLevel() } == [0, 1, 0], "\(rows.map { $0.accessibilityDisclosureLevel() })")
         #expect(rows[0].isAccessibilityExpanded() && !rows[2].isAccessibilityExpanded() && rows[0].accessibilityLabel() == "src, folder, expanded")
+        panel.toggle(FileName(Self.root + "/src"))
+        panel.layoutSubtreeIfNeeded()
+        let shut = try #require(panel.list.rowView(atRow: 0, makeIfNecessary: true))
+        #expect(!shut.isAccessibilityExpanded() && shut.accessibilityLabel() == "src, folder, collapsed",
+                "after an open and a shut, the row view holds a stale item: \(shut.accessibilityLabel() ?? "nothing")")
     }
 
     /// The line's action is the library's button in every state that has one: no system button, no
