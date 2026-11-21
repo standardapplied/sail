@@ -168,6 +168,94 @@ class PtyWireTest {
     assertEquals(stopped, roundTrip(stopped));
   }
 
+  /**
+   * Every frame that carries a request's id is classed: a request the client sends, or an answer
+   * that says by its own type and flags whether it is the last, so a new frame with an id cannot be
+   * added unclassed. An answer made of empty values is the last unless it is an acknowledgement or
+   * a read's frame without its digest; a listing with more to come is not.
+   */
+  @Test
+  void everyFrameWithAnIdIsARequestOrAnAnswerThatSaysWhetherItIsTheLast() throws Exception {
+    var requests =
+        java.util.Set.<Class<?>>of(
+            PtyMessage.FilesList.class,
+            PtyMessage.FilesStat.class,
+            PtyMessage.FilesRead.class,
+            PtyMessage.FilesCancel.class,
+            PtyMessage.FilesWrite.class,
+            PtyMessage.FilesCreate.class,
+            PtyMessage.FilesMove.class,
+            PtyMessage.FilesRemove.class,
+            PtyMessage.PutBegin.class,
+            PtyMessage.PutChunk.class,
+            PtyMessage.PutEnd.class,
+            PtyMessage.PutCancel.class);
+    var notLastWhenEmpty =
+        java.util.Set.<Class<?>>of(PtyMessage.PutAck.class, PtyMessage.FilesData.class);
+    var answers = 0;
+    for (var type : allFrames(PtyMessage.class)) {
+      var components = type.getRecordComponents();
+      var hasId =
+          components != null
+              && java.util.Arrays.stream(components)
+                  .anyMatch(c -> c.getName().equals("id") && c.getType() == int.class);
+      if (!hasId) {
+        continue;
+      }
+      if (!PtyMessage.Answer.class.isAssignableFrom(type)) {
+        assertTrue(
+            requests.contains(type), type.getSimpleName() + " is neither request nor answer");
+        continue;
+      }
+      answers++;
+      var empty = (PtyMessage.Answer) emptyOf(type);
+      assertEquals(!notLastWhenEmpty.contains(type), empty.last(), type.getSimpleName());
+    }
+    assertEquals(10, answers, "every answer frame was walked");
+    assertTrue(
+        !new PtyMessage.FilesListing(1, "v", List.of(), true, false).last()
+            && new PtyMessage.FilesListing(1, "v", List.of(), false, false).last());
+    assertTrue(new PtyMessage.FilesData(1, "v", new byte[0], false, false, "d").last());
+  }
+
+  private static List<Class<?>> allFrames(Class<?> sealed) {
+    var all = new java.util.ArrayList<Class<?>>();
+    for (var type : sealed.getPermittedSubclasses()) {
+      if (type.isSealed()) {
+        all.addAll(allFrames(type));
+      } else {
+        all.add(type);
+      }
+    }
+    return all;
+  }
+
+  /** A record of {@code type} made of empty values: zeros, falses, blanks, empty lists, nulls. */
+  private static Object emptyOf(Class<?> type) throws Exception {
+    var components = type.getRecordComponents();
+    var types = new Class<?>[components.length];
+    var values = new Object[components.length];
+    for (var i = 0; i < components.length; i++) {
+      var kind = components[i].getType();
+      types[i] = kind;
+      values[i] =
+          kind == int.class
+              ? 0
+              : kind == long.class
+                  ? 0L
+                  : kind == boolean.class
+                      ? false
+                      : kind == String.class
+                          ? ""
+                          : kind == List.class
+                              ? List.of()
+                              : kind == byte[].class
+                                  ? new byte[0]
+                                  : kind.isEnum() ? kind.getEnumConstants()[0] : null;
+    }
+    return type.getDeclaredConstructor(types).newInstance(values);
+  }
+
   /** m3: a name that is not UTF-8 crosses the wire as its bytes, in every files frame. */
   @Test
   void aNameThatIsNotUtf8CrossesTheWireAsItsBytes() throws Exception {
