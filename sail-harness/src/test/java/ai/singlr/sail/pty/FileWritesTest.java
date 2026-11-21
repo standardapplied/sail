@@ -24,9 +24,12 @@ import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -754,6 +757,7 @@ class FileWritesTest {
             endedWith::add,
             new FilesConnection.Writes(
                 lock,
+                saving,
                 () -> null,
                 java.time.Duration.ofMillis(300),
                 java.time.Duration.ofMillis(500)));
@@ -824,6 +828,7 @@ class FileWritesTest {
               endedWith::add,
               new FilesConnection.Writes(
                   new FilesConnection.WorkspaceLock(),
+                  saving,
                   () -> null,
                   FilesConnection.AFTER_GO,
                   FilesConnection.HOLD_BOUND));
@@ -871,6 +876,44 @@ class FileWritesTest {
     }
     connection.create(new PtyMessage.FilesCreate(2, home + "/a.md", false));
     assertEquals(new PtyMessage.FilesDone(2), answer(), "asked again at the next write");
+  }
+
+  /**
+   * #520's m1: a save paused mid-body past the save bound is under way, never stuck. Its lock was
+   * asked before its script started, so a create beside it on that lock is made even where the
+   * host's saves are not left out; a lock made anew leaves out the saves this host runs; and the
+   * paused save completes.
+   */
+  @Test
+  void aSavePausedMidBodyPastTheBoundIsNeverTakenForAStuckOne() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var paused = connection(() -> null);
+    var bytes = "new text".getBytes(StandardCharsets.UTF_8);
+    paused.write(
+        new PtyMessage.FilesWrite(1, file.toString(), digest(file), version(file), bytes.length));
+    paused.chunk(new PtyMessage.PutChunk(1, 0, Arrays.copyOf(bytes, 3)));
+    assertEquals(new PtyMessage.PutAck(1, 3), said.poll(5, TimeUnit.SECONDS));
+    var temporary = home.resolve(temporaries(home).getFirst());
+    Files.setLastModifiedTime(temporary, FileTime.from(Instant.now().minusSeconds(60)));
+
+    connection(lock, ConcurrentHashMap.newKeySet())
+        .create(new PtyMessage.FilesCreate(2, home + "/beside.md", false));
+    assertEquals(new PtyMessage.FilesDone(2), answer(), "the lock was asked before the save ran");
+
+    connection(new FilesConnection.WorkspaceLock(), saving)
+        .create(new PtyMessage.FilesCreate(3, home + "/anew.md", false));
+    assertEquals(new PtyMessage.FilesDone(3), answer(), "a new lock leaves out the host's saves");
+
+    paused.chunk(new PtyMessage.PutChunk(1, 3, Arrays.copyOfRange(bytes, 3, bytes.length)));
+    paused.end(new PtyMessage.PutEnd(1, HexFormat.of().parseHex(sha256(bytes))));
+    assertInstanceOf(PtyMessage.FilesWritten.class, answer(), "the paused save completes");
+    assertEquals("new text", Files.readString(file));
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!saving.isEmpty()) {
+      assertTrue(
+          System.nanoTime() < deadline, "a save's temporary is the host's until its exec ends");
+      Thread.onSpinWait();
+    }
   }
 
   /**
@@ -985,7 +1028,11 @@ class FileWritesTest {
             () -> null,
             endedWith::add,
             new FilesConnection.Writes(
-                lock, () -> null, java.time.Duration.ofMillis(300), FilesConnection.HOLD_BOUND));
+                lock,
+                saving,
+                () -> null,
+                java.time.Duration.ofMillis(300),
+                FilesConnection.HOLD_BOUND));
 
     save(hung, 1, file.toString(), digest(file), version(file), "new");
 
@@ -1223,6 +1270,7 @@ class FileWritesTest {
 
   private final List<PtyMessage.Err> endedWith = new CopyOnWriteArrayList<>();
   private final FilesConnection.WorkspaceLock lock = new FilesConnection.WorkspaceLock();
+  private final Set<String> saving = ConcurrentHashMap.newKeySet();
 
   private FileScripts running(UnaryOperator<String> edit) {
     return scripts(edit, Map.of());
@@ -1230,6 +1278,19 @@ class FileWritesTest {
 
   private FilesConnection connection(FilesConnection.Gate gate) {
     return connection(running(UnaryOperator.identity()), gate);
+  }
+
+  /** A connection on write lock {@code on}, beside a host running the saves {@code runs} holds. */
+  private FilesConnection connection(FilesConnection.WorkspaceLock on, Set<String> runs) {
+    return new FilesConnection(
+        running(UnaryOperator.identity()),
+        CONTAINER,
+        "dock",
+        said::add,
+        () -> null,
+        endedWith::add,
+        new FilesConnection.Writes(
+            on, runs, () -> null, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND));
   }
 
   private FilesConnection connection(FileScripts with, FilesConnection.Gate gate) {
@@ -1244,7 +1305,7 @@ class FileWritesTest {
         () -> null,
         endedWith::add,
         new FilesConnection.Writes(
-            lock, gate, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND));
+            lock, saving, gate, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND));
   }
 
   /** Sends save {@code id} of {@code text} over {@code path} on {@code base}, bytes and end. */
@@ -1427,6 +1488,7 @@ class FileWritesTest {
             });
 
     save(refusing, 1, file.toString(), digest(file), version(file), "new");
+    awaitEnded(1);
     refusing.create(new PtyMessage.FilesCreate(2, home + "/made", false));
     refusing.remove(new PtyMessage.FilesRemove(3, file.toString()));
     awaitEnded(3);

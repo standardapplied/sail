@@ -386,16 +386,19 @@ final class FileScripts {
    * Whether a save of an earlier host, or of this one before its workspace's lock was dropped, is
    * still stuck in the workspace: a process holding open a file of Sail's exact temporary shape
    * under the home ({@code $1}) whose last change is older than {@code $2} seconds, the save bound,
-   * which no save under way can be. Prints that temporary, NUL-terminated, and exits {@code 50};
-   * else exits {@code 0}. One {@code find} over every process's descriptors, as the sweep's.
+   * and which is none of the temporaries read on standard input, those of the saves this host runs.
+   * Prints that temporary, NUL-terminated, and exits {@code 50}; else exits {@code 0}. One {@code
+   * find} over every process's descriptors, as the sweep's.
    */
   static final String STUCK =
       """
       export LC_ALL=C
       home=$1 bound=$2 now=$(date +%%s)
+      declare -A mine=()
+      while IFS= read -r -d '' running; do mine["$running"]=1; done
       while IFS= read -r -d '' held; do
         case $held in "$home"/*) ;; *) continue ;; esac
-        case ${held##*/} in %1$s) ;; *) continue ;; esac
+        [ -z "${mine["$held"]+x}" ] || continue
         changed=$(stat -c %%Y -- "$held" 2>/dev/null) || continue
         [ $((now - changed)) -gt "$bound" ] || continue
         printf '%%s\\0' "$held"
