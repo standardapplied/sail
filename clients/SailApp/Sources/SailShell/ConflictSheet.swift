@@ -26,7 +26,7 @@ final class ConflictSheet: NSWindow {
         contentView = root
         let heading = NSTextField(labelWithString: deleted ? "\(name) was deleted on the workspace" : "\(name) changed on the workspace")
         heading.font = .systemFont(ofSize: Look.Step.title3.points, weight: .semibold)
-        let detail = NSTextField(labelWithString: deleted ? "Save Anyway makes it anew; Discard drops what you typed." : "Keep one version. The other is lost; nothing is merged.")
+        let detail = NSTextField(labelWithString: deleted ? "Save Anyway creates it again; Discard drops what you typed." : "Keep one version. The other is lost; nothing is merged.")
         detail.textColor = NSColor(look.textSecondary)
         let lines = ConflictSheet.differing(theirs, yours)
         let theirsSide = side("Theirs", note: deleted ? "deleted" : "on the workspace", text: theirs, in: theirsView, barred: lines.theirs, look: look, mono: mono)
