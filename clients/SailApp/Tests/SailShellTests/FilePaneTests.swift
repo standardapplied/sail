@@ -499,6 +499,26 @@ import Testing
         #expect(await RunnerTabTests.until(5) { pane.editor.string == "one\n" && pane.file.clean && panel.unsaved == nil }, "after ⌘Z: \(pane.editor.string.debugDescription), \(pane.file.clean ? "clean" : "unsaved")")
     }
 
+    /// N1: an undo or redo the text view tells no delegate of is decided before any answer enters:
+    /// redone typing met in the same turn by the workspace's newer text is unsaved, and only says
+    /// the file changed, never replaced.
+    @Test func aRedoMetByAnAnswerInTheSameTurnIsNeverReplaced() async throws {
+        let (_, _, _, _, pane) = try await Self.opened(Array("one\n".utf8))
+        #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
+        let sent = Self.watchSends(pane)
+        pane.editor.insertText("mine ", replacementRange: NSRange(location: 0, length: 0))
+        pane.editor.undoManager?.undo()
+        #expect(await RunnerTabTests.until(5) { pane.editor.string == "one\n" && pane.file.clean })
+        _ = pane.takes(.filesChanged(paths: [FileName(Self.path)]))
+        let id = try #require(sent().compactMap { if case let .filesRead(id, _, _, _) = $0 { id } else { nil } }.last, "no follow read was asked")
+        pane.editor.undoManager?.redo()
+        let theirs = Array("theirs\n".utf8)
+        var hash = SHA256()
+        hash.update(theirs)
+        _ = pane.takes(.filesData(id: id, version: "v9", bytes: theirs, eof: true, whole: true, digest: hash.finalize().map { String(format: "%02x", $0) }.joined()))
+        #expect(pane.editor.string == "mine one\n" && !pane.file.clean && pane.file.note == .changed, "the redone typing became \(pane.editor.string.debugDescription), \(pane.file.clean ? "clean" : "unsaved")")
+    }
+
     /// Half of a character (a lone surrogate) is never saved as U+FFFD: the save says where it is
     /// and writes nothing.
     @Test func halfACharacterIsNeverSavedAsAnother() async throws {

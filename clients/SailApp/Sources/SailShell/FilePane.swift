@@ -2,7 +2,6 @@ import AppKit
 import SailControls
 import SailFiles
 import SailLook
-import SailTerminal
 import SailTerminalWire
 
 /// A workspace's file, open beside its terminals: typed in at once once whole (no mode), written
@@ -70,11 +69,13 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     private var shownTheirs = ""
     /// What a save said (a refusal, not connected): kept until a save or a newer word on the file.
     private var said: String?
-    /// What the view took of the text the model gave it: what every write is checked against.
-    private var taken = Taken()
-    /// The slices put in the view so far, and one to lose, as a broken slicing would: tests break
-    /// the slicing so, to prove a view missing text is never typed in or saved.
-    private var slicesPlaced = 0
+    /// The UTF-16 units the view took of the text the model gave it, the keys apart: what every
+    /// write is checked against.
+    private var taken = 0
+    /// The slices made of the arriving text, those dealt to the view and those it took; and one to
+    /// lose, as a broken slicing would: tests break the slicing so, to prove a view missing text is
+    /// never typed in or saved.
+    private var slicesMade = 0, slicesDealt = 0, slicesTaken = 0
     var losesSlice: Int?
     private var shownNote = OpenFile.Note.none
     private var applying = false
@@ -171,7 +172,25 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
 
     /// Begins reading the file.
     func open() {
-        apply(file.open())
+        act { $0.open() }
+    }
+
+    /// The one door every answer and action passes to the model by: an edit the text view told no
+    /// delegate of (its own undo and redo) is decided first, so nothing reads "clean" before it.
+    private func act(_ step: (inout OpenFile) -> OpenFile.Step) {
+        settleEdits()
+        apply(step(&file))
+    }
+
+    /// An edit no `textDidChange` reported, decided now.
+    private func settleEdits() {
+        if editedUnseen { decideEdit() }
+    }
+
+    /// Whether its text is unsaved, any edit not yet decided decided first.
+    var unsaved: Bool {
+        settleEdits()
+        return !file.clean
     }
 
     /// The frames this pane's requests are answered by, the watch's word on its file and its ticks:
@@ -179,10 +198,10 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     func takes(_ frame: Frame) -> Bool {
         switch frame {
         case let .filesChanged(paths):
-            if paths.contains(file.path) { apply(file.changed()) }
+            if paths.contains(file.path) { act { $0.changed() } }
             return false
         case .filesTick:
-            apply(file.tick())
+            act { $0.tick() }
             return false
         case let .putAck(id, received) where id == upload?.id:
             send(upload?.acked(received) ?? [])
@@ -192,18 +211,19 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
             if case let .written(id, _, _) = answer, id == upload?.id { upload = nil }
             if case let .conflict(id, _) = answer, id == upload?.id { upload = nil }
             if case let .refused(id, _, _) = answer, id == upload?.id { upload = nil }
-            apply(PanePhases.timed("model: an answer taken") { file.receive(answer) })
+            act { file in PanePhases.timed("model: an answer taken") { file.receive(answer) } }
             return true
         }
     }
 
     func admitted() {
-        apply(file.admitted())
+        act { $0.admitted() }
     }
 
     /// The connection ended: the host lets go of an upload with it, and a close question's Save
     /// waiting on an answer is told it will not come.
     func disconnected() {
+        settleEdits()
         file.disconnected()
         upload = nil
         abandonLeaving()
@@ -253,7 +273,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     /// again once that one is answered.
     @objc func saveDocument(_: Any?) {
         guard let text = textToWrite() else { return }
-        apply(file.save(text, taken: taken.account))
+        act { [taken] in $0.save(text, taken: taken) }
         if file.clean { finishLeaving() }
     }
 
@@ -304,7 +324,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     /// land (a conflict, a refusal, no connection, the connection lost), which cancels what was
     /// asked (M52).
     func askToLeave(then leave: @escaping @MainActor () -> Void, otherwise: @escaping @MainActor () -> Void = {}) {
-        guard !file.clean, let window else { return leave() }
+        guard unsaved, let window else { return leave() }
         let alert = NSAlert()
         alert.messageText = "Save the changes to \(file.name)?"
         alert.informativeText = "If you don't, what you typed is lost."
@@ -357,23 +377,23 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     }
 
     @objc func discardPressed() {
-        apply(file.discardMine())
+        act { $0.discardMine() }
     }
 
     /// Keep Theirs: the workspace's bytes the sheet showed.
     func keepTheirs(_ shown: OpenFile.Theirs) {
-        apply(file.keepTheirs(shown))
+        act { $0.keepTheirs(shown) }
     }
 
     /// Keep Mine: the pane's text, against the version the sheet showed.
     func keepMine(against shown: OpenFile.Theirs) {
         guard let text = textToWrite() else { return }
-        apply(file.keepMine(text, taken: taken.account, shown: shown))
+        act { [taken] in $0.keepMine(text, taken: taken, shown: shown) }
     }
 
     func saveAnyway() {
         guard let text = textToWrite() else { return }
-        apply(file.saveAnyway(text, taken: taken.account))
+        act { [taken] in $0.saveAnyway(text, taken: taken) }
     }
 
     @objc private func copyPathPressed() {
@@ -463,14 +483,12 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
             case .whole:
                 editor.isEditable = true
                 numbers.invalidate()
-            case let .replaced(text, account, chosen): replace(with: text, account, undoable: chosen)
+            case let .replaced(text, units, chosen): replace(with: text, units: units, undoable: chosen)
             case .restarted: restart()
             case .saved:
                 said = nil
                 if !file.clean { apply(file.edited(editor.string)) }
                 finishLeaving()
-            case .saveAgain:
-                if let text = textToWrite() { apply(file.save(text, taken: taken.account)) }
             case let .conflict(theirs, again):
                 abandonLeaving()
                 readTime(of: theirs)
@@ -505,6 +523,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
         while at < text.length {
             let range = text.rangeOfComposedCharacterSequences(for: NSRange(location: at, length: min(Self.slice, text.length - at)))
             slices.append(text.substring(with: range))
+            slicesMade += 1
             at = NSMaxRange(range)
         }
         if editor.textStorage?.length == 0 { appendSlice() }
@@ -526,37 +545,41 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
         applying = true
         defer { applying = false }
         let slice = slices.removeFirst()
-        slicesPlaced += 1
-        guard slicesPlaced != losesSlice else { return }
+        slicesDealt += 1
+        guard slicesDealt != losesSlice else { return }
         PanePhases.timed("storage: a slice appended") { editor.textStorage?.append(NSAttributedString(string: slice, attributes: textAttributes)) }
-        PanePhases.timed("view: a slice counted") { taken.add(slice) }
+        slicesTaken += 1
+        taken += (slice as NSString).length
     }
 
-    /// The view holds every slice: the model is told what it took, its account checked against the
-    /// storage's own length, and keys are taken once the model finds it the whole file (F15).
+    /// The view holds every slice: the model is told the units it took, and keys are taken once
+    /// they are the whole file's (F15). Every slice made must have been taken, and the storage must
+    /// hold exactly the units put in it, or the model is told of none, so a slice lost and another
+    /// doubled cannot cancel out.
     private func editableWhenIn() {
         guard allArrived, slices.isEmpty, !file.whole else { return }
-        let held = editor.textStorage?.length ?? 0, account = taken.account
-        apply(file.inView(account.units == held ? account : OpenFile.TextAccount(units: held, digest: "")))
+        let whole = slicesTaken == slicesMade && taken == editor.textStorage?.length ?? 0
+        act { [taken] in $0.inView(whole ? taken : -1) }
     }
 
     /// The first read starts again: the view drops what it took of it.
     private func restart() {
         slices = []
         allArrived = false
-        taken = Taken()
-        slicesPlaced = 0
+        taken = 0
+        (slicesMade, slicesDealt, slicesTaken) = (0, 0, 0)
         applying = true
         editor.textStorage?.setAttributedString(NSAttributedString())
         applying = false
         editor.isEditable = false
     }
 
-    /// The workspace's text replaces the pane's, `account` that text's: queued slices dropped, the
-    /// first visible line and the selection kept where their lines survive, the lines that differ
-    /// barred for ten seconds, "Updated just now" for three. One the person chose can be undone.
-    private func replace(with text: String, _ account: OpenFile.TextAccount, undoable: Bool) {
+    /// The workspace's text replaces the pane's, `units` UTF-16 units long: queued slices dropped,
+    /// the first visible line and the selection kept where their lines survive, the lines that
+    /// differ barred for ten seconds, "Updated just now" for three. One the person chose can be undone.
+    private func replace(with text: String, units: Int, undoable: Bool) {
         slices = []
+        (slicesMade, slicesDealt, slicesTaken) = (0, 0, 0)
         let old = editor.string, top = firstVisibleLine, selection = editor.selectedRange()
         let storage = editor.textStorage, all = NSRange(location: 0, length: storage?.length ?? 0), new = NSAttributedString(string: text, attributes: textAttributes)
         applying = true
@@ -568,8 +591,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
             editor.undoManager?.removeAllActions()
         }
         applying = false
-        let held = storage?.length ?? 0
-        taken = Taken(whole: held == account.units ? account : OpenFile.TextAccount(units: held, digest: ""))
+        taken = storage?.length == units ? units : -1
         let length = (text as NSString).length
         editor.setSelectedRange(NSRange(location: min(selection.location, length), length: min(selection.length, max(length - selection.location, 0))))
         show(line: top)
@@ -855,24 +877,6 @@ final class PaneTextView: NSTextView {
         let taken = super.becomeFirstResponder()
         if taken { onKeys() }
         return taken
-    }
-}
-
-/// What a view took of the text it was given, slice by slice or whole: counted from what is put in
-/// the view, so a slice lost is a difference the model finds.
-private struct Taken {
-    var units = 0
-    var hash = SHA256()
-    var whole: OpenFile.TextAccount?
-
-    var account: OpenFile.TextAccount {
-        let copy = hash
-        return whole ?? OpenFile.TextAccount(units: units, digest: copy.finalize().map { String(format: "%02x", $0) }.joined())
-    }
-
-    mutating func add(_ slice: String) {
-        units += slice.utf16.count
-        hash.update(slice.utf8)
     }
 }
 

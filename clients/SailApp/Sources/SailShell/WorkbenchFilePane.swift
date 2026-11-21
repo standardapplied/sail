@@ -199,7 +199,7 @@ extension WorkbenchView {
 
     /// The unsaved file panes, each with its tab: what quitting asks about, one at a time.
     var unsavedFilePanes: [(TabID, FilePane)] {
-        model.tabs.compactMap { tab in tabViews[tab.id]?.filePane.flatMap { $0.file.clean ? nil : (tab.id, $0) } }
+        model.tabs.compactMap { tab in tabViews[tab.id]?.filePane.flatMap { $0.unsaved ? (tab.id, $0) : nil } }
     }
 
     /// The conflict sheet over the window: `theirs` and the pane's text side by side; Keep Mine,
