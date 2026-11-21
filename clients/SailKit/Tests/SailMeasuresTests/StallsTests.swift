@@ -289,6 +289,21 @@ import Testing
         #expect(beat.longest == 0)
         #expect(beat.lastTick == 200)
     }
+
+    /// Beside each gap's wall-clock length, the ticking thread's own CPU time in it: what another
+    /// process's preemption cannot inflate. The longest is kept; a reset starts again.
+    @Test func ticksRecordTheThreadsOwnCPUInEachTurn() {
+        let time = Mutex(100.0), cpu = Mutex(5.0)
+        let beat = Heartbeat(now: { time.withLock { $0 } }, cpu: { cpu.withLock { $0 } })
+        for (now, used) in [(100.01, 5.001), (100.08, 5.004), (100.09, 5.013)] {
+            time.withLock { $0 = now }
+            cpu.withLock { $0 = used }
+            beat.tick()
+        }
+        #expect(abs(beat.longest - 70) < 1e-6 && abs(beat.longestCPU - 9) < 1e-6, "wall \(beat.longest), cpu \(beat.longestCPU)")
+        beat.reset()
+        #expect(beat.longestCPU == 0)
+    }
 }
 
 /// A gated figure's verdict names it first, and a series' p95 tail is counted by nearest rank.

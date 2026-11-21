@@ -228,32 +228,32 @@ import Testing
         let (window, _) = Self.shown(list)
         defer { window.orderOut(nil) }
         list.choose("c")
-        let kept = try Self.row(list, 3).view(atColumn: 0) as? NSView
-        let remade = try Self.row(list, 1).view(atColumn: 0) as? NSView
+        let kept = (try Self.row(list, 3).view(atColumn: 0) as? RowCell)?.content
+        let remade = (try Self.row(list, 1).view(atColumn: 0) as? RowCell)?.content
         let made = list.rowsMade
         list.apply(entries(["a", "b", "b2", "d"]), changed: ["b"])
         #expect(list.entries.count == 4 && list.chosen == nil, "c went and the choice stayed on a row: \(list.chosen ?? "nothing")")
-        let keptNow = try Self.row(list, 3).view(atColumn: 0) as? NSView, remadeNow = try Self.row(list, 1).view(atColumn: 0) as? NSView
+        let keptNow = (try Self.row(list, 3).view(atColumn: 0) as? RowCell)?.content, remadeNow = (try Self.row(list, 1).view(atColumn: 0) as? RowCell)?.content
         #expect(kept != nil && keptNow === kept, "d's row was made again with nothing changed in it")
-        #expect(remadeNow !== remade, "b, named changed, was not made again")
+        #expect(remadeNow !== remade, "b, named changed, was not made over with its content again")
         #expect(list.rowsMade - made <= 2, "made \(list.rowsMade - made) rows for one inserted and one changed, not only those")
         list.choose("d")
         list.apply(entries(["a", "a1", "b", "b2", "d"]), changed: [])
         #expect(list.chosen == "d", "the choice did not follow its row")
-        let first = try Self.row(list, 0).view(atColumn: 0) as? NSView
+        let first = (try Self.row(list, 0).view(atColumn: 0) as? RowCell)?.content
         let bound = (0 ..< SailList.applied).map { "n\($0)" }
         list.apply(entries(["a", "a1", "b", "b2", "d"] + bound), changed: [])
-        let atBound = try Self.row(list, 0).view(atColumn: 0) as? NSView
+        let atBound = (try Self.row(list, 0).view(atColumn: 0) as? RowCell)?.content
         #expect(list.numberOfRows == 5 + bound.count && atBound === first, "at its bound apply made the rows again")
         let past = (0 ..< SailList.applied + 1).map { "m\($0)" }
         list.apply(entries(["a", "a1", "b", "b2", "d"] + past), changed: [])
         #expect(list.numberOfRows == 5 + past.count && list.chosen == "d", "past its bound apply did not fill the table afresh, keeping the choice")
-        let pastBound = try Self.row(list, 0).view(atColumn: 0) as? NSView
+        let pastBound = (try Self.row(list, 0).view(atColumn: 0) as? RowCell)?.content
         #expect(pastBound !== first, "past its bound the rows were not made afresh")
     }
 
-    /// A row with nothing at its end is laid out by frames, with no constraint, its content from its
-    /// leading inset to its trailing one, mirrored right to left.
+    /// A row is laid out by frames, with no constraint of its own, its content from its leading inset
+    /// to its trailing one, mirrored right to left.
     @Test func aBareRowIsLaidOutByFramesWithNoConstraint() throws {
         for direction in [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft] {
             let list = SailList(rowStyle: .tree, look: .light, mono: try ControlsTests.mono())
@@ -267,10 +267,56 @@ import Testing
             cell.needsLayout = true
             cell.layoutSubtreeIfNeeded()
             let made = cell.constraints.filter { !String(describing: type(of: $0)).contains("Autoresizing") }
-            #expect(made.isEmpty && content.translatesAutoresizingMaskIntoConstraints && cell.actions.superview == nil, "\(direction): a bare row carries constraints of its own: \(made)")
+            #expect(made.isEmpty && content.translatesAutoresizingMaskIntoConstraints && cell.actions.views.isEmpty, "\(direction): a bare row carries constraints of its own: \(made)")
             let inset = RowStyle.tree.margin + RowStyle.tree.leading, end = RowStyle.tree.margin + RowStyle.tree.trailing
             #expect(near(Double(content.frame.minX), direction == .rightToLeft ? end : inset), "\(direction): \(content.frame)")
             #expect(near(Double(content.frame.maxX), Double(cell.bounds.width) - (direction == .rightToLeft ? inset : end)), "\(direction): \(content.frame)")
+        }
+    }
+
+    /// A row scrolled out refused, chosen and hovered, with actions and a note, leaves nothing in the
+    /// views a plain row then takes: not hovered, not refused, no actions, no note or its tooltip, the
+    /// plain row's own content and words, laid out its way; in both looks and right to left.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func aReusedRowKeepsNothingOfTheRowBefore(_ name: String, _ look: Look) throws {
+        for direction in [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft] {
+            let list = SailList(rowStyle: .list, look: look, mono: try ControlsTests.mono())
+            list.userInterfaceLayoutDirection = direction
+            let marked = SailList.Item(
+                id: "r0", name: "r0", voice: "r0, refused", content: NSView(), actions: [SailList.Action("Open") {}, SailList.Action("Delete", onRow: false, destructive: true) {}],
+                note: "The workspace's user may not open it.", paint: .refused
+            )
+            let plain = (1 ..< 80).map { SailList.Item(id: "r\($0)", name: "r\($0)", voice: "r\($0)", content: NSView()) }
+            list.entries = ([marked] + plain).map { .item($0) }
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+            scroll.documentView = list
+            list.frame = NSRect(x: 0, y: 0, width: 400, height: Double(list.rect(ofRow: 79).maxY))
+            let (window, _) = ControlsTests.window(holding: scroll, on: NSColor(Tint(look.canvas)))
+            defer { window.orderOut(nil) }
+            list.choose("r0")
+            let row = try Self.row(list, 0)
+            row.hovered = true
+            let cell = try #require(row.view(atColumn: 0) as? RowCell)
+            #expect(!cell.actions.views.isEmpty && cell.noteTip != nil, "\(name) \(direction): the marked row is not marked")
+            list.scrollRowToVisible(79)
+            list.layoutSubtreeIfNeeded()
+            #expect(list.rowsReused > 0, "\(name) \(direction): no row was reused")
+            let visible = list.rows(in: list.visibleRect)
+            for index in visible.lowerBound ..< visible.upperBound {
+                let view = try Self.row(list, index)
+                let reused = try #require(view.view(atColumn: 0) as? RowCell)
+                let voice = "r\(index)"
+                #expect(!view.hovered && !view.paint.bar && view.item?.paint == nil, "\(name) \(direction): row \(index) kept the old row's state")
+                #expect(reused.actions.views.isEmpty && reused.noteTip == nil, "\(name) \(direction): row \(index) kept the old row's actions or note")
+                #expect(view.accessibilityLabel() == voice && view.accessibilityCustomActions()?.isEmpty != false, "\(name) \(direction): row \(index) says \(view.accessibilityLabel() ?? "nothing")")
+                #expect(view.userInterfaceLayoutDirection == direction && reused.userInterfaceLayoutDirection == direction, "\(name) \(direction): row \(index) is laid out the other way")
+                reused.layoutSubtreeIfNeeded()
+                let inset = RowStyle.list.margin + RowStyle.list.leading, end = RowStyle.list.margin + RowStyle.list.trailing
+                let start = direction == .rightToLeft ? end : inset
+                #expect(near(Double(reused.content.frame.minX), start) && near(Double(reused.content.frame.width), Double(reused.bounds.width) - inset - end),
+                        "\(name) \(direction): row \(index)'s content at \(reused.content.frame)")
+            }
+            #expect(list.rowsMade - list.rowsReused <= visible.length + 4, "\(name) \(direction): made \(list.rowsMade - list.rowsReused) new rows for a screenful of \(visible.length)")
         }
     }
 

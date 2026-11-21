@@ -335,13 +335,14 @@ extension Driver {
         press("arrowRight", [])
         guard await waitForState(10, { (self.filesShown?.list.numberOfRows ?? 0) >= 5000 + base.count }), let scroll = filesShown?.scroll else { return (false, "berths did not open to scroll") }
         _ = mainStacks
-        var scrolls: [Double] = [], wheel: [String] = [], scrolledWell = true, drawsPerEntered: [Double] = [], namesPerDraw: [Double] = []
+        var scrolls: [Double] = [], scrollsCPU: [Double] = [], wheel: [String] = [], scrolledWell = true, drawsPerEntered: [Double] = [], namesPerDraw: [Double] = []
         for _ in 0 ..< 3 {
             let drawsBefore = filesShown?.draws ?? 0, namesBefore = filesShown?.namesBuilt ?? 0
             mainThread.reset()
             let down = await flick(scroll, to: 1), up = await flick(scroll, to: 0)
             scrolls.append(held())
-            if held() > 16 { tellLongestHold("scrolling the 5,000 rows") }
+            scrollsCPU.append(mainThread.longestCPU)
+            if mainThread.longestCPU > 16 { tellLongestHold("scrolling the 5,000 rows") }
             scrolledWell = scrolledWell && down.0 && up.0
             wheel += [down.1, up.1]
             let visible = Double(scroll.contentSize.height) / RowStyle.tree.height
@@ -363,7 +364,7 @@ extension Driver {
             }
             changed.append(drawn - heard)
         }
-        var bursts: [Double] = [], landed = true, burstFills = 0, burstMade = 0, burstAllowed = 0
+        var bursts: [Double] = [], burstsCPU: [Double] = [], landed = true, burstFills = 0, burstMade = 0, burstAllowed = 0
         for round in 0 ..< 3 {
             door.setFolder(root, names.map(Self.fileEntry))
             _ = await waitForState(10) { self.filesShown?.list.numberOfRows == names.count }
@@ -377,12 +378,13 @@ extension Driver {
             }
             landed = await waitForState(30) { self.filesShown?.list.numberOfRows == final.count } && landed
             bursts.append(held())
-            if held() > 16 { tellLongestHold("2,000 changes in a burst") }
+            burstsCPU.append(mainThread.longestCPU)
+            if mainThread.longestCPU > 16 { tellLongestHold("2,000 changes in a burst") }
             burstFills += (list?.fills ?? 0) - fills
             burstMade += (list?.rowsMade ?? 0) - made
             burstAllowed += (list?.appliedRows ?? 0) - allowed
         }
-        let scrolled = scrolls.min() ?? .infinity, bursting = bursts.min() ?? .infinity
+        let scrolled = scrollsCPU.min() ?? .infinity, bursting = burstsCPU.min() ?? .infinity
         let screenful = Int((Double(filesShown?.scroll.contentSize.height ?? 0) / RowStyle.tree.height).rounded(.up)) + 1
         let structure = [
             "the bursts made \(burstMade) row views for \(burstAllowed) rows inserted or changed and \(burstFills) fills of a screenful (\(screenful)) each (no more allowed)":
@@ -390,25 +392,22 @@ extension Driver {
             "each scroll drew at most \(String(format: "%.2f", drawsPerEntered.max() ?? 0)) rows per row that entered view (at most 1.1 allowed)": (drawsPerEntered.max() ?? .infinity) <= 1.1,
             "each scroll built at most \(String(format: "%.2f", namesPerDraw.max() ?? 0)) names per row drawn (at most 1 allowed)": (namesPerDraw.max() ?? .infinity) <= 1,
         ]
-        print("files, three tries each: scrolling holds \(scrolls.map { Self.ms($0) }) ms (least \(Self.ms(scrolled)), worst \(Self.ms(scrolls.max() ?? 0))); "
-            + "bursts \(bursts.map { Self.ms($0) }) ms (least \(Self.ms(bursting)), worst \(Self.ms(bursts.max() ?? 0))); " + structure.keys.sorted().joined(separator: "; "))
+        print("files, three tries each: scrolling, the main thread's own CPU in its longest turn \(scrollsCPU.map { Self.ms($0) }) ms (least \(Self.ms(scrolled))), "
+            + "its wall-clock hold \(scrolls.map { Self.ms($0) }) ms (least \(Self.ms(scrolls.min() ?? 0)), worst \(Self.ms(scrolls.max() ?? 0))); "
+            + "bursts, CPU \(burstsCPU.map { Self.ms($0) }) ms (least \(Self.ms(bursting))), wall-clock \(bursts.map { Self.ms($0) }) ms (least \(Self.ms(bursts.min() ?? 0)), worst \(Self.ms(bursts.max() ?? 0))); rows taken again from the list's pool \(filesShown?.list.rowsReused ?? 0); "
+            + structure.keys.sorted().joined(separator: "; "))
         door.setFolder(root, base.map(Self.fileEntry))
         _ = await waitForState(10) { self.filesShown?.list.numberOfRows == base.count }
         let rows = [
             ("⌃⌘S to the first rows drawn p95", Percentiles(milliseconds: opened.map { $0 * 1000 }).p95, 50.0, 120.0),
             ("a 5,000-entry listing heard to its rows drawn p95", Percentiles(milliseconds: listed.map { $0 * 1000 }).p95, 60, 150),
             ("a change heard to the new row and its cue drawn p95", Percentiles(milliseconds: changed.map { $0 * 1000 }).p95, 50, 120),
-        ]
-        // The two holds are reported, not gated, until the shared list stops making a row view for each
-        // row that enters (its next PR): the structural gates hold what this PR controls.
-        let reported = [
-            ("scrolling the 5,000 rows end to end and back, the least of three: the main thread's longest hold", scrolled, 8.0, 16.0),
-            ("2,000 changes in a burst, the least of three: the main thread's longest hold", bursting, 8, 16),
+            ("scrolling the 5,000 rows end to end and back, the least of three: the main thread's own CPU in its longest turn", scrolled, 8, 16),
+            ("2,000 changes in a burst, the least of three: the main thread's own CPU in its longest turn", bursting, 8, 16),
         ]
         let missed = rows.filter { $0.1 > $0.3 }.map { "\($0.0) \(Self.ms($0.1)) ms over its \(Int($0.3)) ms ceiling" } + structure.filter { !$0.value }.map(\.key).sorted()
         let over = rows.filter { $0.1 > $0.2 && $0.1 <= $0.3 }.map { "\($0.0) over its \(Int($0.2)) ms budget" }
-        let said = (rows.map { "\($0.0) \(Self.ms($0.1)) ms (budget \(Int($0.2)), ceiling \(Int($0.3)))" }
-            + reported.map { "\($0.0) \(Self.ms($0.1)) ms (budget \(Int($0.2)), ceiling \(Int($0.3)), reported, not gated)" }).joined(separator: "; ")
+        let said = rows.map { "\($0.0) \(Self.ms($0.1)) ms (budget \(Int($0.2)), ceiling \(Int($0.3)))" }.joined(separator: "; ")
         func p95(_ samples: [Double]) -> String {
             Self.ms(Percentiles(milliseconds: samples.map { $0 * 1000 }).p95)
         }

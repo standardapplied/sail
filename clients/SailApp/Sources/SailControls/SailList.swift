@@ -365,8 +365,23 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         item(at: row)?.name
     }
 
+    /// The identifiers a row view and an item's cell are kept by for the next row that enters view.
+    static let rowID = NSUserInterfaceItemIdentifier("sail.row"), cellID = NSUserInterfaceItemIdentifier("sail.cell")
+
+    /// Of the rows made (``rowsMade``: each item's cell filled), those whose cell was taken again
+    /// from the table's own pool, made over whole, rather than made new.
+    package private(set) var rowsReused = 0
+
     public func tableView(_: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-        SailRowView(rowStyle: rowStyle, look: look, item: item(at: row), first: row == 0)
+        if let view = makeView(withIdentifier: Self.rowID, owner: nil) as? SailRowView {
+            view.userInterfaceLayoutDirection = userInterfaceLayoutDirection
+            view.configure(look: look, item: item(at: row), first: row == 0)
+            return view
+        }
+        let view = SailRowView(rowStyle: rowStyle, look: look, item: item(at: row), first: row == 0)
+        view.identifier = Self.rowID
+        view.userInterfaceLayoutDirection = userInterfaceLayoutDirection
+        return view
     }
 
     public func tableView(_: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
@@ -377,7 +392,17 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             return HeadCell(title, count: count, leading: leading, look: look, mono: mono, hairline: rowStyle.hairline && row > 0)
         case let .item(item):
             rowsMade += 1
-            return RowCell(item, rowStyle: rowStyle, actionsColumn: actionsColumn, returnKey: returnKeyShown, look: look, mono: mono)
+            if let cell = makeView(withIdentifier: Self.cellID, owner: nil) as? RowCell {
+                rowsReused += 1
+                cell.userInterfaceLayoutDirection = userInterfaceLayoutDirection
+                cell.configure(item, actionsColumn: actionsColumn, returnKey: returnKeyShown, look: look)
+                (cell.superview as? SailRowView)?.refresh()
+                return cell
+            }
+            let cell = RowCell(item, rowStyle: rowStyle, actionsColumn: actionsColumn, returnKey: returnKeyShown, look: look, mono: mono)
+            cell.identifier = Self.cellID
+            cell.userInterfaceLayoutDirection = userInterfaceLayoutDirection
+            return cell
         }
     }
 
@@ -392,9 +417,9 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
 @MainActor
 final class SailRowView: NSTableRowView {
     let rowStyle: RowStyle
-    let look: Look
-    let item: SailList.Item?
-    private let first: Bool
+    private(set) var look: Look
+    private(set) var item: SailList.Item?
+    private var first: Bool
     private var hoverArea: NSTrackingArea?
     /// The progress line along its foot, when its paint asks for one.
     private(set) var line: ProgressLine?
@@ -414,24 +439,39 @@ final class SailRowView: NSTableRowView {
         self.item = item
         self.first = first
         super.init(frame: .zero)
-        guard let item else { return }
-        if item.paint?.progress == true {
+        // One layer a row, its cell and words drawn into it: each layer more is display and commit
+        // work for every row that scrolls in (the round's sampled stacks spent the hold there).
+        wantsLayer = true
+        canDrawSubviewsIntoLayer = true
+        configure(look: look, item: item, first: first)
+    }
+
+    /// Made over whole for `item`, as a reused row is: not hovered, its progress line only when its
+    /// paint asks, what VoiceOver reads and offers.
+    func configure(look: Look, item: SailList.Item?, first: Bool) {
+        self.look = look
+        self.item = item
+        self.first = first
+        hovered = false
+        line?.removeFromSuperview()
+        line = nil
+        if item?.paint?.progress == true {
             let line = ProgressLine(look: look)
             addSubview(line)
             self.line = line
         }
-        setAccessibilityLabel(item.voice)
-        if let outline = item.outline {
-            setAccessibilitySubrole(.outlineRow)
-            setAccessibilityDisclosureLevel(outline.level)
-        }
-        setAccessibilityCustomActions(item.actions.map { action in
+        setAccessibilityLabel(item?.voice)
+        setAccessibilitySubrole(item?.outline == nil ? nil : .outlineRow)
+        setAccessibilityDisclosureLevel(item?.outline?.level ?? 0)
+        setAccessibilityCustomActions(item?.actions.map { action in
             let run = Run(action)
             return NSAccessibilityCustomAction(name: action.title) {
                 MainActor.assumeIsolated { run.go(nil) }
                 return true
             }
         })
+        refresh()
+        needsLayout = true
     }
 
     @available(*, unavailable)
@@ -479,7 +519,7 @@ final class SailRowView: NSTableRowView {
 
     /// The table sets a new row's state before the row holds its cell, when asking for the cell
     /// throws; the cell's arrival refreshes the row again.
-    private func refresh() {
+    func refresh() {
         let paint = self.paint
         if numberOfColumns > 0, let cell = view(atColumn: 0) as? RowCell {
             cell.show(paint.actions, chosen: isSelected, keys: isEmphasized)
@@ -596,48 +636,71 @@ final class HeadCell: NSView {
     }
 }
 
-/// An item's cell: what the item shows, from the row's leading inset and stretched to its actions
-/// (or to the trailing inset when it has none), and its actions at the trailing edge: the first
-/// on-row action secondary, or primary with ⏎ while the row is chosen; the rest secondary; ⋯ for
-/// the menu when some action lives only there. Hidden actions are hidden, not only clear, so they
-/// take no click and Tab passes them. A row with nothing at its end (no action, note or accessory,
-/// as a files tree's) is laid out by frames, with no constraint: a row scrolled into or out of a long
-/// list then costs the window's layout engine nothing.
+/// An item's cell: what the item shows, from the row's leading inset to its actions (or to the
+/// trailing inset when it has none), and its actions at the trailing edge: the first on-row action
+/// secondary, or primary with ⏎ while the row is chosen; the rest secondary; ⋯ for the menu when some
+/// action lives only there. Hidden actions are hidden, not only clear, so they take no click and Tab
+/// passes them. Everything is placed by arithmetic, no constraint: a row scrolled into or out of a
+/// long list costs the window's layout engine nothing. A cell is reused for the next row that enters
+/// view, made over whole by ``configure(_:actionsColumn:returnKey:look:)``.
 @MainActor
 final class RowCell: NSView {
-    let content: NSView
-    /// Laid out by frames: nothing shown at its end.
-    private let bare: Bool
-    private let insets: (leading: Double, trailing: Double, top: Double)
-    /// Made only for a row with something at its end: a bare row, scrolled in by the score, makes none.
-    lazy var actions = NSStackView()
+    private(set) var content = NSView()
+    let actions = RowActions()
+    private let rowStyle: RowStyle
+    private let mono: LabelFont
     /// Its first action shows ⏎ while chosen with the list's keys.
-    private let returnKey: Bool
-    private let first: SailButton?
-    private let runs: [Run]
+    private var returnKey = true
+    private var first: SailButton?
+    private var runs: [Run] = []
     private var shown = false
+    private var moreMenu: NSMenu?
+    /// What it keeps clear at its trailing end for every row's actions, nil none; 0 for a full row.
+    private var column: Double?
+    /// The gap between the content and the actions: 8 pt with buttons or a note, else none.
+    private var gap = 0.0
     /// The note in full on hover while it is cut short (a tracking area does not keep its owner).
-    let noteTip: Tooltip?
+    private(set) var noteTip: Tooltip?
 
-    init(_ item: SailList.Item, rowStyle: RowStyle, actionsColumn: Double?, returnKey: Bool = true, look: Look, mono: LabelFont) {
+    init(rowStyle: RowStyle, mono: LabelFont) {
+        self.rowStyle = rowStyle
+        self.mono = mono
+        super.init(frame: .zero)
+        addSubview(content)
+        addSubview(actions)
+    }
+
+    convenience init(_ item: SailList.Item, rowStyle: RowStyle, actionsColumn: Double?, returnKey: Bool = true, look: Look, mono: LabelFont) {
+        self.init(rowStyle: rowStyle, mono: mono)
+        configure(item, actionsColumn: actionsColumn, returnKey: returnKey, look: look)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    /// Made over whole for `item`: its content, its actions, note and tooltip, the actions put away.
+    func configure(_ item: SailList.Item, actionsColumn: Double?, returnKey: Bool, look: Look) {
         self.returnKey = returnKey
+        content.removeFromSuperview()
         content = item.content
-        let runs = item.actions.map { Run($0) }
-        self.runs = runs
+        addSubview(content, positioned: .below, relativeTo: actions)
+        runs = item.actions.map { Run($0) }
         var buttons: [SailButton] = []
         let onRow = runs.filter { $0.action.onRow }
+        first = nil
         if let primary = onRow.first {
             let first = SailButton(primary.action.title, kind: .secondary, size: .small, look: look, target: primary, action: #selector(Run.go(_:)))
             if returnKey { first.shortcut("\r", mono: mono) }
             first.keyEquivalent = ""
             self.first = first
             buttons.append(first)
-        } else {
-            first = nil
         }
         for other in onRow.dropFirst() {
             buttons.append(SailButton(other.action.title, kind: .secondary, size: .small, look: look, target: other, action: #selector(Run.go(_:))))
         }
+        moreMenu = nil
         if rowStyle != .sidebar, runs.contains(where: { !$0.action.onRow }) {
             let more = SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil)
             buttons.append(more)
@@ -650,51 +713,22 @@ final class RowCell: NSView {
             let label = NSTextField(labelWithAttributedString: Draw.text(words, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary).cut(.byTruncatingTail))
             label.lineBreakMode = .byTruncatingTail
             label.maximumNumberOfLines = 1
-            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             return label
         }
+        noteTip = nil
         if let note, let words = item.note {
             let tip = Tooltip(words, look: look, mono: nil)
             tip.onlyWhenCut = true
             tip.attach(to: note, saying: words)
             noteTip = tip
-        } else {
-            noteTip = nil
         }
-        let top = rowStyle.hairline ? 1.0 : 0
-        bare = buttons.isEmpty && note == nil && item.accessory == nil
-        insets = (rowStyle.margin + rowStyle.leading, rowStyle.margin + rowStyle.trailing + (item.full ? 0 : actionsColumn ?? 0), top)
-        super.init(frame: .zero)
-        if bare {
-            addSubview(content)
-            return
-        }
-        actions.setViews(([note, item.accessory].compactMap { $0 } as [NSView]) + buttons, in: .trailing)
-        if let note { actions.setCustomSpacing(6 + 4, after: note) }
-        actions.spacing = 6
-        actions.alphaValue = 0
-        actions.isHidden = true
-        for view in [content, actions] as [NSView] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(view)
-        }
-        let gap = buttons.isEmpty && note == nil ? 0.0 : 8
-        let actionsColumn = item.full ? 0 : actionsColumn
-        let stretched = actionsColumn.map { content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(rowStyle.margin + rowStyle.trailing + $0)) }
-            ?? content.trailingAnchor.constraint(equalTo: actions.leadingAnchor, constant: -gap)
-        stretched.priority = actionsColumn == nil ? .defaultHigh : .required
-        NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: rowStyle.margin + rowStyle.leading),
-            actionsColumn == nil ? content.trailingAnchor.constraint(lessThanOrEqualTo: actions.leadingAnchor, constant: -gap) : actions.widthAnchor.constraint(lessThanOrEqualToConstant: actionsColumn ?? 0),
-            stretched,
-            content.centerYAnchor.constraint(equalTo: centerYAnchor, constant: top / 2),
-            actions.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(rowStyle.margin + rowStyle.trailing)),
-            actions.centerYAnchor.constraint(equalTo: centerYAnchor, constant: top / 2),
-        ])
+        actions.set(([note, item.accessory].compactMap { $0 } as [NSView]) + buttons, note: note)
+        gap = buttons.isEmpty && note == nil ? 0 : 8
+        column = item.full ? 0 : actionsColumn
+        shown = true
         show(false, chosen: false, keys: false)
+        needsLayout = true
     }
-
-    private var moreMenu: NSMenu?
 
     /// A content's own height: its intrinsic one, else what its own constraints give it (a sidebar
     /// row's 20 pt), else the row's.
@@ -705,29 +739,30 @@ final class RowCell: NSView {
         return fitting > 0 ? min(fitting, room) : room
     }
 
-    /// A bare row's content, from its leading inset to its trailing one (mirrored right to left), its
-    /// own height centred on the row under any hairline.
+    /// The content from the row's leading inset, its own height centred on the row under any
+    /// hairline; the actions at the trailing inset, as wide as they fit (under a column, at most the
+    /// column, the note giving way first); the content up to the actions less the gap, or up to the
+    /// column. Mirrored right to left.
     override func layout() {
         super.layout()
-        guard bare else { return }
-        let height = Self.height(of: content, in: Double(bounds.height) - insets.top)
-        let below = (Double(bounds.height) - insets.top - height) / 2
-        let frame = NSRect(
-            x: userInterfaceLayoutDirection == .rightToLeft ? insets.trailing : insets.leading, y: isFlipped ? insets.top + below : below,
-            width: max(Double(bounds.width) - insets.leading - insets.trailing, 0), height: height
-        )
-        if content.frame != frame { content.frame = frame }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
+        let width = Double(bounds.width), top = rowStyle.hairline ? 1.0 : 0, room = Double(bounds.height) - top
+        let leading = rowStyle.margin + rowStyle.leading, trailing = rowStyle.margin + rowStyle.trailing
+        let actionsWidth = column.map { min(actions.fittingWidth, $0) } ?? actions.fittingWidth
+        let contentEnd = column.map { width - trailing - $0 } ?? width - trailing - actionsWidth - gap
+        let contentHeight = Self.height(of: content, in: room), actionsHeight = actions.fittingHeight
+        func place(_ view: NSView, from start: Double, width: Double, height: Double) {
+            let x = userInterfaceLayoutDirection == .rightToLeft ? Double(bounds.width) - start - width : start
+            let below = (room - height) / 2
+            let frame = NSRect(x: x, y: isFlipped ? top + below : below, width: max(width, 0), height: height)
+            if view.frame != frame { view.frame = frame }
+        }
+        place(content, from: leading, width: contentEnd - leading, height: contentHeight)
+        place(actions, from: width - trailing - actionsWidth, width: actionsWidth, height: actionsHeight)
     }
 
     /// The actions shown (over 120 ms, at once while motion is reduced) or gone; the primary loud
     /// while the row is chosen, and Return its key (shown as ⏎) only while the list holds the keys.
     func show(_ shown: Bool, chosen: Bool, keys: Bool) {
-        guard !bare else { return }
         if let first {
             let kind: ButtonKind = chosen ? .primary : .secondary, key = chosen && keys && returnKey ? "\r" : ""
             if first.kind != kind { first.kind = kind }
@@ -752,8 +787,63 @@ final class RowCell: NSView {
             }
         }
     }
+}
 
-    /// Every action of a row, as its ⋯ and its right-click show them.
+/// A row's actions, as a trailing stack lays them out but by arithmetic: each view at its own
+/// alignment width and height, 6 pt apart (10 after a note), centred, packed to the trailing end; a
+/// note gives up width first when the actions are given less than they fit. Mirrored right to left.
+@MainActor
+final class RowActions: NSView {
+    static let spacing = 6.0, afterNote = 10.0
+
+    private(set) var views: [NSView] = []
+    private var note: NSView?
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    func set(_ views: [NSView], note: NSView?) {
+        self.views.forEach { $0.removeFromSuperview() }
+        self.views = views
+        self.note = note
+        views.forEach { addSubview($0) }
+        needsLayout = true
+    }
+
+    private func size(of view: NSView) -> NSSize {
+        let intrinsic = view.intrinsicContentSize
+        return NSSize(width: max(intrinsic.width, 0), height: max(intrinsic.height, 0))
+    }
+
+    private func spacing(after view: NSView) -> Double {
+        view === note ? Self.afterNote : Self.spacing
+    }
+
+    var fittingWidth: Double {
+        views.enumerated().reduce(0) { total, pair in
+            total + Double(size(of: pair.element).width) + (pair.offset < views.count - 1 ? spacing(after: pair.element) : 0)
+        }
+    }
+
+    var fittingHeight: Double {
+        views.map { Double(size(of: $0).height) }.max() ?? 0
+    }
+
+    override func layout() {
+        super.layout()
+        let shortfall = max(fittingWidth - Double(bounds.width), 0), height = Double(bounds.height)
+        var end = Double(bounds.width)
+        for (index, view) in views.enumerated().reversed() {
+            var size = size(of: view)
+            if view === note { size.width = max(Double(size.width) - shortfall, 0) }
+            let alignment = NSRect(x: end - Double(size.width), y: (height - Double(size.height)) / 2, width: Double(size.width), height: Double(size.height))
+            var frame = view.frame(forAlignmentRect: alignment)
+            if userInterfaceLayoutDirection == .rightToLeft { frame.origin.x = bounds.width - frame.maxX }
+            if view.frame != frame { view.frame = frame }
+            end = Double(alignment.minX) - (index > 0 ? spacing(after: views[index - 1]) : 0)
+        }
+    }
 }
 
 /// A row's menu, its actions in order with a separator before each group: a destructive one

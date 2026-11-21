@@ -9,11 +9,23 @@ import Synchronization
 public final class Heartbeat: Sendable {
     public static let interval = 0.01
     private let now: @Sendable () -> Double
+    private let cpu: @Sendable () -> Double
     private let gaps: Mutex<(last: Double, longest: Double, stalls: Stalls)>
+    /// The ticking thread's CPU clock at the last tick, and the most it ran between two ticks.
+    private let used: Mutex<(last: Double, longest: Double)>
 
-    init(now: @escaping @Sendable () -> Double) {
+    init(now: @escaping @Sendable () -> Double, cpu: @escaping @Sendable () -> Double = Heartbeat.threadCPU) {
         self.now = now
+        self.cpu = cpu
         gaps = Mutex((now(), 0, Stalls(tick: Self.interval)))
+        used = Mutex((cpu(), 0))
+    }
+
+    /// The calling thread's own CPU time so far, in seconds.
+    public static func threadCPU() -> Double {
+        var spec = timespec()
+        clock_gettime(CLOCK_THREAD_CPUTIME_ID, &spec)
+        return Double(spec.tv_sec) + Double(spec.tv_nsec) / 1e9
     }
 
     /// Ticked by the main run loop in every mode.
@@ -42,6 +54,11 @@ public final class Heartbeat: Sendable {
     }
 
     func tick() {
+        let ran = cpu()
+        used.withLock { used in
+            used.longest = max(used.longest, ran - used.last)
+            used.last = ran
+        }
         let time = now()
         gaps.withLock { gaps in
             gaps.stalls.record(Span(gaps.last, time))
@@ -51,13 +68,20 @@ public final class Heartbeat: Sendable {
     }
 
     public func reset() {
-        let time = now()
+        let time = now(), ran = cpu()
+        used.withLock { $0 = (ran, 0) }
         gaps.withLock { $0 = (time, 0, Stalls(tick: Self.interval)) }
     }
 
     /// When it last ticked.
     public var lastTick: Double {
         gaps.withLock { $0.last }
+    }
+
+    /// The most CPU time the ticking thread ran between two ticks, in milliseconds: its longest
+    /// turn's own work, which preemption by another process does not lengthen.
+    public var longestCPU: Double {
+        used.withLock { $0.longest } * 1000
     }
 
     /// The longest gap in milliseconds.
