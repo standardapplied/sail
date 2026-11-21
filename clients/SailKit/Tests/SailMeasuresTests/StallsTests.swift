@@ -439,6 +439,25 @@ import Testing
         #expect(turns.longest == 0 && turns.longestCPU == 0)
     }
 
+    /// The costliest turn is split where Core Animation's commit begins: its CPU before the commit,
+    /// and the rest, the commit's; a turn with no commit is all before it.
+    @Test func theCostliestTurnIsSplitAtItsCommit() {
+        let time = Mutex(0.0), cpu = Mutex(0.0)
+        let turns = Turns(now: { time.withLock { $0 } }, cpu: { cpu.withLock { $0 } })
+        func at(_ now: Double, _ used: Double, _ edge: () -> Void) {
+            time.withLock { $0 = now }
+            cpu.withLock { $0 = used }
+            edge()
+        }
+        at(0.000, 0.000, turns.woke); at(0.004, 0.003, turns.committing); at(0.010, 0.009, turns.slept)
+        at(0.100, 0.009, turns.woke); at(0.105, 0.011, turns.committing); at(0.130, 0.029, turns.slept)
+        at(0.200, 0.029, turns.woke); at(0.207, 0.036, turns.slept)
+        #expect(abs(turns.longestCPU - 20) < 1e-6 && abs(turns.costliestBeforeCommit - 2) < 1e-6, "cpu \(turns.longestCPU), before its commit \(turns.costliestBeforeCommit)")
+        turns.reset()
+        at(1.000, 1.000, turns.woke); at(1.009, 1.008, turns.slept)
+        #expect(abs(turns.longestCPU - 8) < 1e-6 && abs(turns.costliestBeforeCommit - 8) < 1e-6, "a turn with no commit is all before it: \(turns.costliestBeforeCommit)")
+    }
+
     /// A woken turn runs through its loop's next start of an iteration to its sleep; a loop that
     /// goes round again without sleeping (its sources still pending) starts a turn there, so a
     /// main queue fed without pause is many turns, each answering input, not one.

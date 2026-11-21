@@ -144,14 +144,6 @@ import Testing
         #expect(after.item?.name == "b renamed" && (list.view(atColumn: 0, row: 2, makeIfNecessary: true) as? RowCell)?.content !== content, "its change waited past the edit's end: \(after.item?.name ?? "none")")
     }
 
-    /// A row's layer, which its cell and words are drawn into, is rasterized off the main thread.
-    @Test func aRowIsRasterizedOffTheMainThread() throws {
-        let list = try Self.list(.list, look: .light, counts: Counts())
-        let (window, _) = Self.shown(list)
-        defer { window.orderOut(nil) }
-        #expect(try Self.row(list, 1).layer?.drawsAsynchronously == true)
-    }
-
     /// A row that leaves the list leaves its edit with it.
     @Test func anEditedRowThatLeavesEndsTheEdit() throws {
         let list = SailList(rowStyle: .list, look: .light, mono: try ControlsTests.mono())

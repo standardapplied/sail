@@ -413,8 +413,25 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     /// Of the rows made (``rowsMade``: each item's cell filled), those whose cell was taken again
     /// from the table's own pool, made over whole, rather than made new.
     package private(set) var rowsReused = 0
+    /// The main thread's own CPU spent making rows, row views and cells, made new or made over,
+    /// counted only while ``measuring``: what the drive splits a scroll's turn by.
+    package private(set) var madeCPU: (rows: Int, nanoseconds: UInt64) = (0, 0)
+    /// Whether ``madeCPU`` counts: off in the app, on only while the drive measures.
+    package static var measuring = false
+
+    private func made<View>(_ make: () -> View) -> View {
+        guard Self.measuring else { return make() }
+        let began = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+        let view = make()
+        madeCPU = (madeCPU.rows + 1, madeCPU.nanoseconds + clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - began)
+        return view
+    }
 
     public func tableView(_: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        made { rowView(for: row) }
+    }
+
+    private func rowView(for row: Int) -> NSTableRowView {
         if let view = makeView(withIdentifier: Self.rowID, owner: nil) as? SailRowView {
             view.userInterfaceLayoutDirection = userInterfaceLayoutDirection
             view.configure(look: look, item: item(at: row), first: row == 0)
@@ -427,6 +444,10 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     }
 
     public func tableView(_: NSTableView, viewFor _: NSTableColumn?, row: Int) -> NSView? {
+        made { cell(for: row) }
+    }
+
+    private func cell(for row: Int) -> NSView? {
         guard entries.indices.contains(row) else { return nil }
         switch entries[row] {
         case let .head(title, count):
@@ -486,14 +507,6 @@ final class SailRowView: NSTableRowView {
         wantsLayer = true
         canDrawSubviewsIntoLayer = true
         configure(look: look, item: item, first: first)
-    }
-
-    /// Its layer rasterizes what is drawn into it off the main thread: glyph rendering was the
-    /// scroll's costly turn once the row's words shared its layer.
-    override func makeBackingLayer() -> CALayer {
-        let layer = super.makeBackingLayer()
-        layer.drawsAsynchronously = true
-        return layer
     }
 
     /// Made over whole for `item`, as a reused row is: not hovered, its progress line only when its

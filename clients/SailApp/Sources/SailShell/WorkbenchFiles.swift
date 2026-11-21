@@ -162,10 +162,14 @@ package struct FilesShown {
 }
 
 extension WorkbenchView {
-    /// Whether the tree rows count their drawing for the drive: off in the app.
+    /// Whether the tree rows count their drawing, and the lists their making, for the drive: off in
+    /// the app.
     package static var filesMeasuring: Bool {
         get { TreeRowCell.measuring }
-        set { TreeRowCell.measuring = newValue }
+        set {
+            TreeRowCell.measuring = newValue
+            SailList.measuring = newValue
+        }
     }
 
     package var filesOnScreen: FilesShown? {

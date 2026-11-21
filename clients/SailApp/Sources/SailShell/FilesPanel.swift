@@ -679,7 +679,9 @@ final class FilesLineView: NSView {
     /// Its height in a panel `width` wide: its words wrapped, with their padding and the gap under it.
     func height(for width: Double) -> Double {
         let box = words.boundingRect(with: NSSize(width: wordsWidth(width), height: 1000), options: [.usesLineFragmentOrigin])
-        return Self.above + max(ceil(Double(box.height)) + wordsTop, firstRow) + Self.below + Look.hairline + Self.under
+        // Whole points, so the hairline under it and the rows below start on the pixel grid: words
+        // centred on a button's height would end it, and start them, on half a pixel.
+        return ceil(Self.above + max(ceil(Double(box.height)) + wordsTop, firstRow) + Self.below + Look.hairline + Self.under)
     }
 
     /// The first row's height: a line of words, or the button's, whichever is taller.
