@@ -26,6 +26,8 @@ public struct FileTree: Sendable {
     public static let newFor = 10.0
     /// How many paths a watch holds: past it, the root and the folders expanded most recently.
     public static let watchCap = 1024
+    /// How many listings of a folder refused as changed in a row make it unsettled, said as such.
+    public static let unsettledAfter = 3
     /// What a folder holding more than the host lists says.
     public static func truncatedNote(_ shown: Int) -> String {
         "This folder has more than \(shown.formatted()) entries; Sail shows \(shown.formatted()) of them."
@@ -84,8 +86,13 @@ public struct FileTree: Sendable {
     private var pending: [Int32: Pending] = [:]
     /// Folders listed again while a listing of them is under way: listed once more after it.
     private var again: Set<FileName> = []
-    /// Folders that changed while they were listed: asked again at the next tick.
+    /// Folders that changed while they were listed: asked again at the next tick, and no sooner
+    /// however often the host names them meanwhile.
     private var atTick: Set<FileName> = []
+    /// How many listings of each folder were refused as changed since one was taken.
+    private var refusedInARow: [FileName: Int] = [:]
+    /// When each folder's listing shown was taken.
+    private var listedAt: [FileName: Double] = [:]
     /// The listings an admission asked: the watch waits for the last of them, then goes once.
     private var batch: Set<Int32> = []
     /// The watch set this connection was last sent.
@@ -136,6 +143,19 @@ public struct FileTree: Sendable {
         folders[Self.root] != nil || refusals[Self.root] != nil
     }
 
+    /// The first folder, by path, whose listings were refused as changed ``unsettledAfter`` times in
+    /// a row, with when the listing shown of it was taken, if one was.
+    public var unsettled: (path: FileName, shownAsOf: Double?)? {
+        refusedInARow.filter { $0.value >= Self.unsettledAfter && expanded.contains($0.key) }.keys
+            .min { $0.bytes.lexicographicallyPrecedes($1.bytes) }
+            .map { ($0, listedAt[$0]) }
+    }
+
+    /// How a folder is named to a person: under the root by its path there, the root by its name.
+    public static func shownName(of path: FileName) -> String {
+        path == root ? rootName : FileName(Array(path.bytes.dropFirst(root.bytes.count + 1))).shown
+    }
+
     /// Whether every expanded folder is followed live: false past ``watchCap``.
     public var followsAll: Bool {
         expanded.count <= Self.watchCap
@@ -155,6 +175,7 @@ public struct FileTree: Sendable {
         pending = [:]
         again = []
         atTick = []
+        refusedInARow = [:]
         sent = nil
         let watch = self.watch()
         let listings = expanded.sorted { $0.bytes.lexicographicallyPrecedes($1.bytes) }.map { list($0) }
@@ -212,7 +233,7 @@ public struct FileTree: Sendable {
             atTick = []
             return relist(due)
         case let .filesChanged(paths):
-            return relist(Set(paths))
+            return relist(Set(paths).subtracting(atTick))
         case let .filesListing(listing):
             guard var held = pending[listing.id] else { return [] }
             held.entries += listing.entries
@@ -231,6 +252,7 @@ public struct FileTree: Sendable {
             guard latest[held.path] == id, expanded.contains(held.path) else { return batchDone() }
             if kind == .known(.changed) {
                 atTick.insert(held.path)
+                refusedInARow[held.path, default: 0] += 1
                 return batchDone()
             }
             refusals[held.path] = message
@@ -293,6 +315,8 @@ public struct FileTree: Sendable {
         }
         folders[path] = folder
         refusals[path] = nil
+        refusedInARow[path] = nil
+        listedAt[path] = now
         revision += 1
         let shown = Set(folder.entries.filter { Self.kind(of: $0) == .folder }.map { path.appending($0.name) })
         for child in expanded where Self.parent(of: child) == path && !shown.contains(child) {
@@ -348,6 +372,8 @@ public struct FileTree: Sendable {
             refusals[child] = nil
             again.remove(child)
             atTick.remove(child)
+            refusedInARow[child] = nil
+            listedAt[child] = nil
         }
     }
 

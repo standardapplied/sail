@@ -347,7 +347,7 @@ extension Driver {
             scrollsCPU.append(mainTurns.longestCPU)
             scrollTurns.append(mainTurns.longest)
             scrollsBeforeCommit.append(mainTurns.costliestBeforeCommit)
-            if mainTurns.longestCPU > 24 { tellLongestHold("scrolling the 5,000 rows") }
+            if max(mainTurns.longestCPU, mainTurns.longest) > 24 { tellLongestHold("scrolling the 5,000 rows") }
             scrolledWell = scrolledWell && down.0 && up.0
             wheel += [down.1, up.1]
             let visible = Double(scroll.contentSize.height) / RowStyle.tree.height
@@ -390,12 +390,13 @@ extension Driver {
             bursts.append(held())
             burstsCPU.append(mainTurns.longestCPU)
             burstTurns.append(mainTurns.longest)
-            if mainTurns.longestCPU > 24 { tellLongestHold("2,000 changes in a burst") }
+            if max(mainTurns.longestCPU, mainTurns.longest) > 24 { tellLongestHold("2,000 changes in a burst") }
             burstFills += (list?.fills ?? 0) - fills
             burstMade += (list?.rowsMade ?? 0) - made
             burstAllowed += (list?.appliedRows ?? 0) - allowed
         }
         let scrolled = scrollsCPU.min() ?? .infinity, bursting = burstsCPU.min() ?? .infinity
+        let scrolledWall = scrollTurns.min() ?? .infinity, burstingWall = burstTurns.min() ?? .infinity
         let screenful = Int((Double(filesShown?.scroll.contentSize.height ?? 0) / RowStyle.tree.height).rounded(.up)) + 1
         let structure = [
             "the bursts made \(burstMade) row views for \(burstAllowed) rows inserted or changed and \(burstFills) fills of a screenful (\(screenful)) each (no more allowed)":
@@ -424,6 +425,8 @@ extension Driver {
             ("a change heard to the new row and its cue drawn p95", Percentiles(milliseconds: changed.map { $0 * 1000 }).p95, 50, 120),
             ("scrolling the 5,000 rows end to end and back, the least of three: the main thread's own CPU in its most costly turn", scrolled, 16, 24),
             ("2,000 changes in a burst, the least of three: the main thread's own CPU in its most costly turn", bursting, 16, 24),
+            ("scrolling the 5,000 rows end to end and back, the least of three: the main thread's longest turn on the wall clock", scrolledWall, 16, 24),
+            ("2,000 changes in a burst, the least of three: the main thread's longest turn on the wall clock", burstingWall, 16, 24),
         ]
         let missed = rows.filter { $0.1 > $0.3 }.map { "\($0.0) \(Self.ms($0.1)) ms over its \(Int($0.3)) ms ceiling" } + structure.filter { !$0.value }.map(\.key).sorted()
         let over = rows.filter { $0.1 > $0.2 && $0.1 <= $0.3 }.map { "\($0.0) over its \(Int($0.2)) ms budget" }

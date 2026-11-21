@@ -109,6 +109,22 @@ import Testing
         #expect(Self.line(try Self.listed([]), .connected, at: 0) == FilesLine(words: "~/workspace is empty.", mark: .none))
     }
 
+    /// A folder that never settles says so, with when what is shown of it was listed, rather than
+    /// showing an old listing as live; the tree is not dimmed, as the rest of it is live.
+    @Test func aFolderThatNeverSettlesSaysSo() throws {
+        var tree = try Self.listed([FileTreeTests.folder("node_modules")], at: 100)
+        let modules = Self.root + "/node_modules"
+        var asked = try #require(FileTreeTests.id(listing: modules, in: tree.expand(modules)))
+        _ = tree.receive(.filesListing(FileListing(id: asked, version: "m1", entries: [], more: false, truncated: false)), at: 100)
+        asked = try #require(FileTreeTests.id(listing: modules, in: tree.receive(.filesChanged(paths: [modules]), at: 101)))
+        for tick in 1 ... FileTree.unsettledAfter {
+            _ = tree.receive(.filesRefused(id: asked, kind: .known(.changed), message: "node_modules changed while it was listed."), at: 101 + Double(tick) - 0.5)
+            let next = tree.receive(.filesTick, at: 101 + Double(tick))
+            if tick < FileTree.unsettledAfter { asked = try #require(FileTreeTests.id(listing: modules, in: next)) }
+        }
+        #expect(Self.line(tree, .connected, at: 104.2) == FilesLine(words: "node_modules keeps changing; shown as of 100s.", mark: .waiting))
+    }
+
     @Test func goneRefusedAndARefusedRootAreSaidInTheirOwnWords() throws {
         #expect(Self.line(FileTree(), .gone("Workspace dock of harbor no longer exists."), at: 0) == FilesLine(words: "Workspace dock of harbor no longer exists.", mark: .bad, dims: true))
         #expect(Self.line(FileTree(), .refused(["You may not read dock.", "Ask its owner."]), at: 0) == FilesLine(words: "You may not read dock. Ask its owner.", mark: .bad, dims: true), "a refused tree is not dimmed")

@@ -98,6 +98,9 @@ public struct FilesLine: Equatable, Sendable {
         } else if !tree.isLive(at: now) {
             let trying = phase == .connecting || { if case .reconnecting = phase { true } else { false } }()
             self.init(words: "Not live since \(time(tree.heard ?? tree.opened)).\(trying ? " Reconnecting." : "")", mark: .waiting, dims: true)
+        } else if let unsettled = tree.unsettled {
+            let name = FileTree.shownName(of: unsettled.path)
+            self.init(words: unsettled.shownAsOf.map { "\(name) keeps changing; shown as of \(time($0))." } ?? "\(name) keeps changing.", mark: .waiting)
         } else if tree.folders[FileTree.root]?.entries.isEmpty == true {
             self.init(words: "\(FileTree.rootName) is empty.", mark: .none)
         } else if !tree.followsAll {

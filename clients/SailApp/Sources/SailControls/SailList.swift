@@ -125,6 +125,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     /// does not know the pointer is over it until the pointer moves. While the app is active the
     /// row is found where the pointer is; otherwise the row hovered before is hovered again.
     private func reloadKeepingHover() {
+        if editing != nil { editGone() }
         let hovered = (0 ..< numberOfRows).first { (rowView(atRow: $0, makeIfNecessary: false) as? SailRowView)?.hovered == true }.flatMap { item(at: $0)?.id }
         Tooltip.putAway()
         reloadData()
@@ -189,12 +190,16 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     /// draw against a fill's 21 ms, while a watch's change moves a few rows; 200 sits between, the
     /// exact crossing unmeasured. Counts apart by more are filled before any difference is taken,
     /// whose cost grows with the rows times the changes (98 ms for a 5,000-row folder, round six).
+    /// While a row is being edited (``editing``) nothing is filled, so a change of any size goes row
+    /// by row: 5,000 rows that way cost the 188 ms above against a fill's 21 ms, paid only while an
+    /// edit lasts.
     public static let applied = 200
 
     /// The id of the row holding an inline edit (a rename, a new file's name), nil for none.
     /// ``apply(_:changed:)`` never remakes it: rows go and come around it, however many, and its
     /// own change waits until this is set back to nil, which remakes it then. A row that moves
-    /// among the rows or leaves them goes with its edit, and this is nil again.
+    /// among the rows or leaves them goes with its edit, and this is nil again; so does every row at
+    /// a fill (new ``entries``, a look or direction changed), which ends the edit and sets this nil.
     public var editing: String? {
         didSet {
             guard oldValue != editing, let oldValue, editedChanged else { return }
@@ -266,7 +271,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         endUpdates()
         appliedRows += inserted.count
         reloading = false
-        if let hovered, remade.contains(hovered), let row = entries.firstIndex(where: { Self.id($0) == hovered }) {
+        if let hovered, remade.contains(hovered), let row = entries.firstIndex(where: { Self.id($0) == hovered }),
+           let point = pointerNow, rect(ofRow: row).contains(convert(point, from: nil)) {
             (rowView(atRow: row, makeIfNecessary: true) as? SailRowView)?.hovered = true
         }
     }
@@ -405,6 +411,16 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
 
     public func tableView(_: NSTableView, typeSelectStringFor _: NSTableColumn?, row: Int) -> String? {
         item(at: row)?.name
+    }
+
+    /// The ids of rows on screen whose cell no longer holds the content its item gave it: a row
+    /// gone blank.
+    package var blankRows: [String] {
+        let visible = rows(in: visibleRect)
+        return (visible.lowerBound ..< visible.upperBound).compactMap { row in
+            guard let cell = view(atColumn: 0, row: row, makeIfNecessary: false) as? RowCell else { return nil }
+            return cell.content.superview === cell ? nil : cell.itemID ?? "row \(row)"
+        }
     }
 
     /// The identifiers a row view and an item's cell are kept by for the next row that enters view.
@@ -709,6 +725,8 @@ final class HeadCell: NSView {
 @MainActor
 final class RowCell: NSView {
     private(set) var content = NSView()
+    /// The item it shows: an item's content belongs to its one row.
+    private(set) var itemID: String?
     let actions = RowActions()
     private let rowStyle: RowStyle
     private let mono: LabelFont
@@ -730,6 +748,9 @@ final class RowCell: NSView {
         self.mono = mono
         super.init(frame: .zero)
         addSubview(content)
+        // A layer of their own under the row's one: their 120 ms fade is the layer's opacity, not
+        // the whole row drawn again every frame of it.
+        actions.wantsLayer = true
         addSubview(actions)
     }
 
@@ -746,8 +767,13 @@ final class RowCell: NSView {
     /// Made over whole for `item`: its content, its actions, note and tooltip, the actions put away.
     func configure(_ item: SailList.Item, actionsColumn: Double?, returnKey: Bool, look: Look) {
         self.returnKey = returnKey
-        content.removeFromSuperview()
-        content = item.content
+        let given = item.content
+        if let holder = given.superview as? RowCell, holder !== self, holder.itemID != item.id {
+            preconditionFailure("SailList: \(item.id)'s content is shown by \(holder.itemID ?? "another") row too; build each item's content inside its closure")
+        }
+        if content !== given, content.superview === self { content.removeFromSuperview() }
+        content = given
+        itemID = item.id
         addSubview(content, positioned: .below, relativeTo: actions)
         runs = item.actions.map { Run($0) }
         var buttons: [SailButton] = []
@@ -778,6 +804,7 @@ final class RowCell: NSView {
             label.maximumNumberOfLines = 1
             return label
         }
+        noteTip?.hide()
         noteTip = nil
         if let note, let words = item.note {
             let tip = Tooltip(words, look: look, mono: nil)
@@ -788,7 +815,11 @@ final class RowCell: NSView {
         actions.set(([note, item.accessory].compactMap { $0 } as [NSView]) + buttons, note: note)
         gap = buttons.isEmpty && note == nil ? 0 : 8
         column = item.full ? 0 : actionsColumn
-        shown = true
+        // Put away at once: a row made over for another enters view with its actions away, never
+        // fading out the new row's actions as it scrolls in.
+        shown = false
+        actions.alphaValue = 0
+        actions.isHidden = true
         show(false, chosen: false, keys: false)
         needsLayout = true
     }
@@ -866,8 +897,10 @@ final class RowActions: NSView {
         true
     }
 
+    /// Its views as `views`: a view of its last that another row now shows (an item's accessory
+    /// shown again through another cell) is left there.
     func set(_ views: [NSView], note: NSView?) {
-        self.views.forEach { $0.removeFromSuperview() }
+        self.views.filter { $0.superview === self }.forEach { $0.removeFromSuperview() }
         self.views = views
         self.note = note
         views.forEach { addSubview($0) }

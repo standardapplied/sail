@@ -144,6 +144,19 @@ import Testing
         #expect(after.item?.name == "b renamed" && (list.view(atColumn: 0, row: 2, makeIfNecessary: true) as? RowCell)?.content !== content, "its change waited past the edit's end: \(after.item?.name ?? "none")")
     }
 
+    /// A fill (new rows, a look changed) remakes every row: an edit under way ends, and `editing`
+    /// names no row.
+    @Test func aFillEndsAnEditCleanly() throws {
+        let list = SailList(rowStyle: .list, look: .light, mono: try ControlsTests.mono())
+        list.entries = [Self.plain("a", "a"), Self.plain("b", "b")]
+        list.editing = "b"
+        list.look = .dark
+        #expect(list.editing == nil, "a look change left editing naming a row it remade")
+        list.editing = "b"
+        list.entries = [Self.plain("a", "a"), Self.plain("b", "b")]
+        #expect(list.editing == nil, "a fill left editing naming a row it remade")
+    }
+
     /// A row that leaves the list leaves its edit with it.
     @Test func anEditedRowThatLeavesEndsTheEdit() throws {
         let list = SailList(rowStyle: .list, look: .light, mono: try ControlsTests.mono())
@@ -153,7 +166,8 @@ import Testing
         #expect(list.editing == nil)
     }
 
-    /// The hovered row, remade because it changed, is still hovered.
+    /// The hovered row, remade because it changed, is still hovered while the pointer is still over
+    /// it; one that rows inserted above moved from under the pointer is not.
     @Test func aRemadeRowKeepsItsHover() throws {
         let list = SailList(rowStyle: .list, look: .light, mono: try ControlsTests.mono())
         list.entries = [Self.plain("a", "a"), Self.plain("b", "b")]
@@ -161,12 +175,18 @@ import Testing
         let (window, _) = Self.shown(list)
         defer { window.orderOut(nil) }
         list.layoutSubtreeIfNeeded()
+        let overFirst = list.convert(NSPoint(x: 20, y: list.rect(ofRow: 0).midY), to: nil)
+        list.pointer = { overFirst }
         let before = try #require(list.rowView(atRow: 0, makeIfNecessary: true) as? SailRowView)
         before.hovered = true
         list.apply([Self.plain("a", "a changed"), Self.plain("b", "b")], changed: ["a"])
         list.layoutSubtreeIfNeeded()
         let after = try #require(list.rowView(atRow: 0, makeIfNecessary: true) as? SailRowView)
         #expect(after.item?.name == "a changed" && after.hovered, "the hover was lost with the row it was on: \(after.item?.name ?? "none"), hovered \(after.hovered)")
+        list.apply([Self.plain("new", "new"), Self.plain("a", "a changed again"), Self.plain("b", "b")], changed: ["a"])
+        list.layoutSubtreeIfNeeded()
+        let moved = try #require(list.rowView(atRow: 1, makeIfNecessary: true) as? SailRowView)
+        #expect(moved.item?.name == "a changed again" && !moved.hovered, "a row moved from under the pointer was marked hovered")
     }
 
     /// What a row places by arithmetic lands on whole pixels of its window, as Auto Layout placed
@@ -394,6 +414,169 @@ import Testing
             }
             #expect(list.rowsMade - list.rowsReused <= visible.length + 4, "\(name) \(direction): made \(list.rowsMade - list.rowsReused) new rows for a screenful of \(visible.length)")
         }
+    }
+
+    /// An item whose content and accessory are one view each, as the sidebar's rows and the
+    /// creating row are: shown again through another pooled cell, the view moves there, and the
+    /// cell it left, made over for another row, leaves it where it now is.
+    @Test func aViewShownAgainThroughAnotherCellStaysThere() throws {
+        let mono = try ControlsTests.mono(), view = NSView(), spinner = NSView(frame: NSRect(x: 0, y: 0, width: 12, height: 12))
+        let creating = SailList.Item(id: "r", name: "r", voice: "r", content: view, accessory: spinner)
+        let other = SailList.Item(id: "s", name: "s", voice: "s", content: NSView())
+        let left = RowCell(creating, rowStyle: .list, actionsColumn: nil, look: .light, mono: mono)
+        let now = RowCell(other, rowStyle: .list, actionsColumn: nil, look: .light, mono: mono)
+        now.configure(creating, actionsColumn: nil, returnKey: true, look: .light)
+        #expect(view.superview === now && spinner.superview === now.actions)
+        left.configure(other, actionsColumn: nil, returnKey: true, look: .light)
+        #expect(view.superview === now && spinner.superview === now.actions, "the row showing it lost its content or spinner to the cell it left")
+    }
+
+    /// In the real list: sidebar rows each holding one view of their own, scrolled out and back
+    /// three times, every row on screen still shows its own.
+    @Test func sidebarRowsScrolledOutAndBackKeepTheirViews() throws {
+        let list = SailList(rowStyle: .sidebar, look: .light, mono: try ControlsTests.mono())
+        let views = (0 ..< 60).map { _ in NSView() }
+        list.entries = views.indices.map { index in
+            let view = views[index]
+            return .item(SailList.Item(id: "p\(index)", name: "p\(index)", voice: "p\(index)", content: view))
+        }
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 260, height: 180))
+        scroll.documentView = list
+        list.frame = NSRect(x: 0, y: 0, width: 260, height: Double(list.rect(ofRow: 59).maxY))
+        let (window, _) = ControlsTests.window(holding: scroll, on: NSColor(Tint(Look.light.canvas)))
+        defer { window.orderOut(nil) }
+        for round in 0 ..< 3 {
+            for target in [59, 0, 30, 5] {
+                list.scrollRowToVisible(target)
+                list.layoutSubtreeIfNeeded()
+                let visible = list.rows(in: list.visibleRect)
+                for index in visible.lowerBound ..< visible.upperBound {
+                    let cell = list.view(atColumn: 0, row: index, makeIfNecessary: true)
+                    #expect(views[index].superview === cell, "round \(round), at \(target): row \(index) went blank")
+                }
+            }
+        }
+        #expect(list.rowsReused > 0, "no row was reused")
+    }
+
+    /// Two items handing the list one view are two rows showing it: the list stops the process,
+    /// saying so, rather than blanking one.
+    @Test func twoItemsSharingAViewStopTheProcess() async {
+        await #expect(processExitsWith: .failure) {
+            await MainActor.run {
+                guard let mono = try? ControlsTests.mono() else { return }
+                let shared = NSView()
+                let one = RowCell(SailList.Item(id: "a", name: "a", voice: "a", content: shared), rowStyle: .list, actionsColumn: nil, look: .light, mono: mono)
+                _ = RowCell(SailList.Item(id: "b", name: "b", voice: "b", content: shared), rowStyle: .list, actionsColumn: nil, look: .light, mono: mono)
+                _ = one
+            }
+        }
+    }
+
+    /// Every kind of row a list holds, by what its item carries.
+    static func kinds() -> [(String, SailList.Entry)] {
+        let accessory = { NSView(frame: NSRect(x: 0, y: 0, width: 12, height: 12)) }
+        let actions = [SailList.Action("Open") {}, SailList.Action("Copy Name", key: "c", modifiers: .command, onRow: false) {}]
+        return [
+            ("plain", .item(SailList.Item(id: "k", name: "plain", voice: "plain", content: NSTextField(labelWithString: "plain")))),
+            ("actions, note, accessory", .item(SailList.Item(id: "k", name: "full", voice: "full, running", content: NSTextField(labelWithString: "full"), actions: actions, note: "about 3 s", accessory: accessory()))),
+            ("refused", .item(SailList.Item(id: "k", name: "refused", voice: "refused", content: NSTextField(labelWithString: "refused"), actions: actions, note: "The workspace's user may not open it.", paint: .refused))),
+            ("creating", .item(SailList.Item(id: "k", name: "creating", voice: "creating", content: NSTextField(labelWithString: "creating"), note: "about 3 s", paint: .creating, accessory: accessory()))),
+            ("create row", .item(SailList.Item(id: "k", name: "", voice: "A new workspace's name", content: NSView(frame: NSRect(x: 0, y: 0, width: 200, height: 40)), height: 88, paint: .naming, full: true))),
+            ("tree", .item(SailList.Item(id: "k", name: "src", voice: "src, folder, expanded", content: NSTextField(labelWithString: "src"), outline: SailList.Outline(level: 2, expanded: true)))),
+            ("inert", .item(SailList.Item(id: "k", name: "note", voice: "note", content: NSTextField(labelWithString: "note"), inert: true))),
+            ("head", .head("Yours", count: 3)),
+        ]
+    }
+
+    /// What a value holds, field by field, with views by kind, state, frame and what they hold, and
+    /// other objects by kind: two rows alike read alike, whatever their views' addresses.
+    static func shape(_ value: Any, depth: Int = 0) -> String {
+        guard depth < 8 else { return "…" }
+        if let view = value as? NSView {
+            let held = view.subviews.map { shape($0, depth: depth + 1) }.joined(separator: ", ")
+            return "\(type(of: view))(hidden \(view.isHidden), alpha \(view.alphaValue), frame \(view.frame), [\(held)])"
+        }
+        if let menu = value as? NSMenu { return "NSMenu[\(menu.items.map(\.title).joined(separator: ", "))]" }
+        if value is NSObject { return "\(type(of: value))" }
+        let mirror = Mirror(reflecting: value)
+        if mirror.displayStyle == .optional { return mirror.children.first.map { shape($0.value, depth: depth) } ?? "nil" }
+        guard !mirror.children.isEmpty else { return String(describing: value) }
+        return "\(type(of: value))(" + mirror.children.map { "\($0.label ?? "_"): \(shape($0.value, depth: depth + 1))" }.joined(separator: ", ") + ")"
+    }
+
+    /// A row view's and its cell's every stored property, and what VoiceOver hears of the row.
+    static func fields(_ view: NSTableRowView, _ cell: NSView?) -> [String] {
+        var fields = Mirror(reflecting: view).children.map { "row \($0.label ?? "_"): \(shape($0.value))" }
+        fields += cell.map { cell in Mirror(reflecting: cell).children.map { "cell \($0.label ?? "_"): \(shape($0.value))" } } ?? []
+        fields.append("voice \(view.accessibilityLabel() ?? "nil"), \(view.accessibilitySubrole()?.rawValue ?? "nil"), level \(view.accessibilityDisclosureLevel()), expanded \(view.isAccessibilityExpanded()), actions \(view.accessibilityCustomActions()?.map(\.name) ?? [])")
+        return fields
+    }
+
+    /// A row of every kind made over for every other kind is, field by field, the row made fresh
+    /// for it: a stored property `configure` forgets to renew fails here without being named.
+    @Test func aRowOfEveryKindMadeOverForAnotherIsAFreshOne() throws {
+        let mono = try ControlsTests.mono(), kinds = Self.kinds()
+        func shown(_ entry: SailList.Entry) -> (SailList, TestWindow) {
+            let list = SailList(rowStyle: .list, look: .light, mono: mono)
+            list.entries = [entry]
+            list.frame = NSRect(x: 0, y: 0, width: 440, height: 200)
+            let (window, _) = Self.shown(list)
+            list.layoutSubtreeIfNeeded()
+            return (list, window)
+        }
+        func row(_ list: SailList) throws -> [String] {
+            let view = try #require(list.rowView(atRow: 0, makeIfNecessary: true))
+            let cell = list.view(atColumn: 0, row: 0, makeIfNecessary: true)
+            view.layoutSubtreeIfNeeded()
+            cell?.layoutSubtreeIfNeeded()
+            return Self.fields(view, cell)
+        }
+        for (name, entry) in kinds {
+            let (fresh, freshWindow) = shown(entry)
+            defer { freshWindow.orderOut(nil) }
+            let want = try row(fresh)
+            for (before, earlier) in kinds where before != name {
+                let (list, window) = shown(earlier)
+                defer { window.orderOut(nil) }
+                let reused = list.rowsReused
+                list.entries = [entry]
+                list.layoutSubtreeIfNeeded()
+                let got = try row(list)
+                if case .item = entry, case .item = earlier { #expect(list.rowsReused > reused, "\(before) to \(name): the cell was not reused") }
+                for (wanted, made) in zip(want, got) where wanted != made {
+                    Issue.record("\(before) made over as \(name) differs from a fresh \(name):\n  fresh:  \(wanted)\n  reused: \(made)")
+                }
+                #expect(want.count == got.count)
+            }
+        }
+    }
+
+    /// A row's actions fade on a layer of their own, apart from the one its cell and words share.
+    @Test func aRowsActionsFadeOnALayerOfTheirOwn() throws {
+        let list = try Self.list(.list, look: .light, counts: Counts())
+        let (window, _) = Self.shown(list)
+        defer { window.orderOut(nil) }
+        let row = try Self.row(list, 1)
+        let cell = try #require(row.view(atColumn: 0) as? RowCell)
+        #expect(cell.actions.wantsLayer && cell.actions.layer != nil && cell.actions.layer !== row.layer)
+    }
+
+    /// A row made over for another puts away its note's tooltip, shown while it was hovered.
+    @Test func aRowMadeOverPutsAwayItsNotesTooltip() throws {
+        let list = SailList(rowStyle: .list, look: .light, mono: try ControlsTests.mono())
+        list.entries = [.item(SailList.Item(id: "a", name: "a", voice: "a", content: NSTextField(labelWithString: "a"), actions: [SailList.Action("Open") {}], note: "The workspace's user may not open it."))]
+        list.frame = NSRect(x: 0, y: 0, width: 440, height: 120)
+        let (window, _) = Self.shown(list)
+        defer { window.orderOut(nil) }
+        list.layoutSubtreeIfNeeded()
+        let cell = try #require(list.view(atColumn: 0, row: 0, makeIfNecessary: true) as? RowCell)
+        let tip = try #require(cell.noteTip)
+        tip.onlyWhenCut = false
+        tip.show()
+        #expect(tip.isShown, "the note's tooltip did not show")
+        cell.configure(SailList.Item(id: "b", name: "b", voice: "b", content: NSTextField(labelWithString: "b")), actionsColumn: nil, returnKey: true, look: .light)
+        #expect(!tip.isShown, "the old note's tooltip stayed on screen over another row")
     }
 
     /// A row with no actions, as every sidebar row is, opens no menu on a right-click.
