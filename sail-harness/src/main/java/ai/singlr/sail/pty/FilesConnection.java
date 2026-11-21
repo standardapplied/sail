@@ -119,9 +119,9 @@ final class FilesConnection {
     }
 
     /**
-     * {@code freed} runs each time a holder lets go of the lock wholly: a save answers before it
-     * lets go, so its workspace's last connection may already be gone, and the host drops the lock
-     * then.
+     * {@code freed} runs each time a holder lets go of the lock wholly, after it has, so it runs
+     * under no lock of the workspace's: a save answers before it lets go, so its workspace's last
+     * connection may already be gone, and the host drops the lock then.
      */
     WorkspaceLock(Runnable freed) {
       super(true);

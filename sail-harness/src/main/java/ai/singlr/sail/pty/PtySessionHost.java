@@ -219,15 +219,15 @@ public final class PtySessionHost implements AutoCloseable {
 
   /**
    * Each served workspace's write lock, by its instance, which every files connection to it shares
-   * (F2): made with the workspace's first connection and dropped with its last, both under {@code
-   * served}'s monitor.
+   * (F2): made with the workspace's first connection and dropped by {@link #forget} once its last
+   * is gone and no save holds it, both under {@code served}'s monitor.
    */
   private final Map<String, FilesConnection.WorkspaceLock> writeLocks = new HashMap<>();
 
   /**
    * Each workspace's one changes run at a time, shared by its files connections (F12): made with
-   * the first that asks and dropped once no connection to it is left and no run is under way, both
-   * under {@code served}'s monitor.
+   * the workspace's first connection and dropped by {@link #forget} once its last is gone and no
+   * run is under way, both under {@code served}'s monitor.
    */
   private final Map<String, WorkspaceChanges> changeRuns = new HashMap<>();
 
@@ -1913,13 +1913,13 @@ public final class PtySessionHost implements AutoCloseable {
       }
       var lock =
           writeLocks.computeIfAbsent(
-              instance, unused -> new FilesConnection.WorkspaceLock(() -> dropLock(instance)));
+              instance, unused -> new FilesConnection.WorkspaceLock(() -> forget(instance)));
       var changes =
           changeRuns.computeIfAbsent(
               instance,
               unused ->
                   new WorkspaceChanges(
-                      files, instance, WorkspaceChanges.PATIENCE, () -> forgetChanges(instance)));
+                      files, instance, WorkspaceChanges.PATIENCE, () -> forget(instance)));
       var connection =
           new FilesConnection(
               files,
@@ -2013,48 +2013,34 @@ public final class PtySessionHost implements AutoCloseable {
     }
   }
 
-  /**
-   * Drops {@code files}, closed, from those served, with what only its workspace's connections
-   * keep.
-   */
+  /** Drops {@code files}, closed, from those served, and what its workspace no longer uses. */
   private void unserve(Served files) {
     synchronized (served) {
       served.remove(files);
-      var instance = files.project() + "-" + files.workspace();
-      dropLock(instance);
-      forgetChanges(instance);
+      forget(files.project() + "-" + files.workspace());
     }
   }
 
   /**
-   * Drops workspace {@code instance}'s write lock once no connection to it is left and no save
-   * holds it, waits for it or may still be writing in the workspace: as its last connection goes,
-   * or as the save that held it past that lets go. The lock is the workspace's, not its
-   * connections', so every connection to it meanwhile shares it.
+   * Drops what workspace {@code instance}'s connections share once no connection to it is left and
+   * each is idle: its write lock once no save holds it or waits for it, its changes runs once none
+   * is under way. One rule, asked as the workspace's last connection goes, as its lock's last
+   * holder lets go (a save answers before it does, so its client may already have gone), and as its
+   * last run ends; meanwhile every connection to the workspace shares both. A lock dropped while a
+   * save there is stuck loses nothing: the next lock asks the workspace before its first write
+   * ({@link FilesConnection}), and finds the stuck save again.
    */
-  private void dropLock(String instance) {
+  private void forget(String instance) {
     synchronized (served) {
+      if (served.stream().anyMatch(s -> (s.project() + "-" + s.workspace()).equals(instance))) {
+        return;
+      }
       var lock = writeLocks.get(instance);
-      if (lock != null
-          && !lock.isLocked()
-          && !lock.hasQueuedThreads()
-          && !lock.stuck()
-          && served.stream().noneMatch(s -> (s.project() + "-" + s.workspace()).equals(instance))) {
+      if (lock != null && !lock.isLocked() && !lock.hasQueuedThreads()) {
         writeLocks.remove(instance);
       }
-    }
-  }
-
-  /**
-   * Drops workspace {@code instance}'s changes runs once no connection to it is left and none is
-   * under way, as its last connection goes or its last run ends.
-   */
-  private void forgetChanges(String instance) {
-    synchronized (served) {
       var changes = changeRuns.get(instance);
-      if (changes != null
-          && changes.idle()
-          && served.stream().noneMatch(s -> (s.project() + "-" + s.workspace()).equals(instance))) {
+      if (changes != null && changes.idle()) {
         changeRuns.remove(instance);
       }
     }

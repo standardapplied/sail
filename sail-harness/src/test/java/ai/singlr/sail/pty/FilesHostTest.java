@@ -233,6 +233,9 @@ class FilesHostTest {
     if (script.equals(FileScripts.WRITE)) {
       return "write";
     }
+    if (script.equals(FileScripts.CHANGES)) {
+      return "changes";
+    }
     return script.equals(FileScripts.WATCH) ? "watch" : "other";
   }
 
@@ -1359,6 +1362,35 @@ class FilesHostTest {
     assertNull(
         host.writeLock("acme", "dock"),
         "the lock outlived the save that held it past the last connection");
+  }
+
+  /**
+   * A changes run under way as the workspace's last connection goes is kept until it ends, and goes
+   * then, by the one rule the lock goes by: never two runs for one workspace, none kept for good.
+   */
+  @Test
+  void aChangesRunUnderWayAsTheLastConnectionGoesGoesWhenItEnds() throws Exception {
+    edits.put("changes", script -> "sleep 2\n" + script);
+    var mine = open("tok-mady");
+    PtyWire.write(mine, new PtyMessage.FilesChanges(1));
+    var asked = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (host.changeRuns("acme", "dock") == null || host.changeRuns("acme", "dock").idle()) {
+      assertTrue(System.nanoTime() < asked, "the run never started");
+      Thread.onSpinWait();
+    }
+    var runs = host.changeRuns("acme", "dock");
+    mine.close();
+    var unserved = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (host.writeLock("acme", "dock") != null) {
+      assertTrue(System.nanoTime() < unserved, "the workspace's last connection was never dropped");
+      Thread.onSpinWait();
+    }
+    assertSame(runs, host.changeRuns("acme", "dock"), "a run under way went with the connection");
+    var ended = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+    while (host.changeRuns("acme", "dock") != null) {
+      assertTrue(System.nanoTime() < ended, "the run outlived its end past the last connection");
+      Thread.onSpinWait();
+    }
   }
 
   /**
