@@ -224,6 +224,9 @@ public final class PtySessionHost implements AutoCloseable {
    */
   private final Map<String, FilesConnection.WorkspaceLock> writeLocks = new HashMap<>();
 
+  /** The temporaries of every save this host runs, which no lock's stuck check takes for stuck. */
+  private final Set<String> saving = ConcurrentHashMap.newKeySet();
+
   private volatile String bootId = "";
   private final AtomicInteger connections = new AtomicInteger();
   private volatile ServerSocketChannel server;
@@ -1909,6 +1912,7 @@ public final class PtySessionHost implements AutoCloseable {
               err -> endFiles(channel, err),
               new FilesConnection.Writes(
                   lock,
+                  saving,
                   () -> filesDecided(project, workspace, who),
                   FilesConnection.AFTER_GO,
                   FilesConnection.HOLD_BOUND));

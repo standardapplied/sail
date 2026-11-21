@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -85,10 +86,13 @@ final class FilesConnection {
 
   /**
    * What a connection's writes are given: the workspace's write lock, shared by every connection to
-   * it and fair, so writes wait in order; the workspace's decision for this person; how long a save
-   * may run after its go; and how long its process is waited for once it is ended.
+   * it and fair, so writes wait in order; the temporaries of every save the host runs, each as
+   * {@link #saving} keys it, from its {@code ready} until its {@code incus exec} ends; the
+   * workspace's decision for this person; how long a save may run after its go; and how long its
+   * process is waited for once it is ended.
    */
-  record Writes(WorkspaceLock lock, Gate gate, Duration afterGo, Duration holdBound) {}
+  record Writes(
+      WorkspaceLock lock, Set<String> saving, Gate gate, Duration afterGo, Duration holdBound) {}
 
   /**
    * A workspace's write lock, which also remembers a save whose process outlived its kill: while
@@ -97,7 +101,9 @@ final class FilesConnection {
    * the same file through a link, so no path can be said safe from that process's rename.
    */
   static final class WorkspaceLock extends ReentrantLock {
+    private final Object asking = new Object();
     private volatile String held;
+    private boolean asked;
 
     WorkspaceLock() {
       super(true);
@@ -618,6 +624,9 @@ final class FilesConnection {
    */
   private void saved(Request request, Running running, String base, String seen)
       throws IOException {
+    if (!askedOnce(request, running)) {
+      return;
+    }
     var body = request.body();
     var script =
         start(
@@ -636,7 +645,13 @@ final class FilesConnection {
       unwritten(request, running, script, ready);
       return;
     }
-    script.onEnd(this::wake);
+    var mine = saving(temporary);
+    writes.saving().add(mine);
+    script.onEnd(
+        () -> {
+          writes.saving().remove(mine);
+          wake();
+        });
     var sent = 0L;
     try {
       for (var chunk = next(body, running, script);
@@ -798,6 +813,9 @@ final class FilesConnection {
    */
   private void changed(Request request, Running running, String script, List<String> fields)
       throws IOException {
+    if (!askedOnce(request, running)) {
+      return;
+    }
     writes.lock().lock();
     try {
       if (!allowed(request, running, null)) {
@@ -848,8 +866,10 @@ final class FilesConnection {
               FilesRefusal.FAILED,
               "A save in "
                   + workspace
-                  + " has not ended since Sail ended it, and a process there still holds it, so"
-                  + " no file there is changed until it has; nothing was changed."));
+                  + " has not ended since Sail ended it: a process there still holds "
+                  + FileNames.shown(writes.lock().held)
+                  + "; when it ends, or once that file is removed, writes resume. Nothing was"
+                  + " changed."));
       return false;
     }
     PtyMessage.Err refusal;
@@ -880,7 +900,42 @@ final class FilesConnection {
     return true;
   }
 
-  /** Request {@code request} refused as failed: its path, as shown, then {@code why}. */
+  /**
+   * Whether the workspace was asked for a save stuck there ({@link #stuckIn}), once for its lock
+   * and before that lock's first write starts its script: every other write waits for the answer,
+   * so no save of this lock has a temporary yet, and the saves this host runs on any lock are left
+   * out, so what it finds was left by an earlier host or lock. A workspace that cannot be asked
+   * refuses the write, and the next write asks again.
+   */
+  private boolean askedOnce(Request request, Running running) {
+    var lock = writes.lock();
+    synchronized (lock.asking) {
+      if (lock.asked) {
+        return true;
+      }
+      try {
+        lock.held = stuckIn();
+        lock.asked = true;
+        return true;
+      } catch (IOException unasked) {
+        unless(
+            running,
+            new PtyMessage.FilesRefused(
+                request.id(),
+                FilesRefusal.FAILED,
+                "Sail could not ask whether a save in "
+                    + workspace
+                    + " is still ending, so nothing was changed; try again."));
+        return false;
+      }
+    }
+  }
+
+  /** A save's {@code temporary} as {@link Writes#saving} holds it: its container's, then it. */
+  private String saving(String temporary) {
+    return container + "\0" + temporary;
+  }
+
   /**
    * Whether no process in the workspace holds the save's {@code temporary} open, asked by {@link
    * FileScripts#HELD} now and every {@link #PROBE_EVERY} until {@code bound} has passed: a probe
@@ -897,6 +952,36 @@ final class FilesConnection {
       }
       Thread.sleep(PROBE_EVERY);
     }
+  }
+
+  /**
+   * A stuck save's temporary the workspace holds, asked by {@link FileScripts#STUCK} before a
+   * lock's first write, so a host that started since, or a lock made anew, does not forget it, and
+   * none of the saves this host runs there; null when there is none. Throws when the workspace
+   * cannot be asked.
+   */
+  private String stuckIn() throws IOException {
+    var mine = saving("");
+    var running =
+        writes.saving().stream()
+            .filter(saving -> saving.startsWith(mine))
+            .map(saving -> saving.substring(mine.length()))
+            .toList();
+    var stuck =
+        files.start(
+            container, FileScripts.STUCK, running, false, "" + writes.afterGo().toSeconds());
+    var held = stuck.field();
+    while (stuck.field() != null) {
+      continue;
+    }
+    var status = stuck.status();
+    if (status == FileScripts.STILL_HELD && held != null) {
+      return held;
+    }
+    if (status != 0) {
+      throw new IOException("the stuck probe exited " + status);
+    }
+    return null;
   }
 
   private int probe(String temporary) {
