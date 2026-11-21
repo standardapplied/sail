@@ -871,6 +871,14 @@ class FileWritesTest {
                   + " try again."),
           answer());
       assertFalse(Files.exists(home.resolve("a.md")));
+      var file = Files.writeString(home.resolve("notes.md"), "kept");
+      save(connection, 3, file.toString(), digest(file), version(file), "new");
+      assertEquals(
+          PtyMessage.FilesRefusal.FAILED,
+          assertInstanceOf(PtyMessage.FilesRefused.class, answer()).kind(),
+          "a save is refused as well, before its script starts");
+      assertEquals("kept", Files.readString(file));
+      assertEquals(List.of(), temporaries(home));
     } finally {
       heldProbeFails.set(false);
     }
@@ -894,6 +902,11 @@ class FileWritesTest {
     paused.chunk(new PtyMessage.PutChunk(1, 0, Arrays.copyOf(bytes, 3)));
     assertEquals(new PtyMessage.PutAck(1, 3), said.poll(5, TimeUnit.SECONDS));
     var temporary = home.resolve(temporaries(home).getFirst());
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!heldOpen(temporary)) {
+      assertTrue(System.nanoTime() < deadline, "the save's copy holds its temporary open");
+      Thread.onSpinWait();
+    }
     Files.setLastModifiedTime(temporary, FileTime.from(Instant.now().minusSeconds(60)));
 
     connection(lock, ConcurrentHashMap.newKeySet())
@@ -908,7 +921,7 @@ class FileWritesTest {
     paused.end(new PtyMessage.PutEnd(1, HexFormat.of().parseHex(sha256(bytes))));
     assertInstanceOf(PtyMessage.FilesWritten.class, answer(), "the paused save completes");
     assertEquals("new text", Files.readString(file));
-    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
     while (!saving.isEmpty()) {
       assertTrue(
           System.nanoTime() < deadline, "a save's temporary is the host's until its exec ends");
@@ -1278,6 +1291,24 @@ class FileWritesTest {
 
   private FilesConnection connection(FilesConnection.Gate gate) {
     return connection(running(UnaryOperator.identity()), gate);
+  }
+
+  /** Whether a process here holds {@code file} open, as the stuck check finds one. */
+  private static boolean heldOpen(Path file) throws IOException {
+    try (var processes = Files.newDirectoryStream(Path.of("/proc"), "[0-9]*")) {
+      for (var process : processes) {
+        try (var descriptors = Files.newDirectoryStream(process.resolve("fd"))) {
+          for (var descriptor : descriptors) {
+            if (file.equals(Files.readSymbolicLink(descriptor))) {
+              return true;
+            }
+          }
+        } catch (IOException gone) {
+          var unused = gone;
+        }
+      }
+    }
+    return false;
   }
 
   /** A connection on write lock {@code on}, beside a host running the saves {@code runs} holds. */
