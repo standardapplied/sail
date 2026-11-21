@@ -207,11 +207,16 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
                 }
             })
         }
-        let removed = offsets(difference.removals), inserted = offsets(difference.insertions)
+        var removed = offsets(difference.removals), inserted = offsets(difference.insertions)
         guard removed.count + inserted.count <= Self.applied else {
             entries = new
             return
         }
+        // A changed row goes out and comes back whole, its row view with it: a row view holds its
+        // item (what VoiceOver hears of it, how it is painted), which only remaking it renews.
+        let old = entries
+        removed.formUnion(IndexSet(old.indices.filter { Self.id(old[$0]).map(changed.contains) ?? false }))
+        inserted.formUnion(IndexSet(new.indices.filter { Self.id(new[$0]).map(changed.contains) ?? false }))
         applying = true
         entries = new
         applying = false
@@ -220,12 +225,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         if !removed.isEmpty { removeRows(at: removed, withAnimation: []) }
         if !inserted.isEmpty { insertRows(at: inserted, withAnimation: []) }
         endUpdates()
-        let remade = IndexSet(new.indices.filter { Self.id(new[$0]).map(changed.contains) ?? false }.filter { !inserted.contains($0) })
-        appliedRows += inserted.count + remade.count
-        if !remade.isEmpty {
-            reloadData(forRowIndexes: remade, columnIndexes: IndexSet(integer: 0))
-            noteHeightOfRows(withIndexesChanged: remade)
-        }
+        appliedRows += inserted.count
         reloading = false
     }
 
