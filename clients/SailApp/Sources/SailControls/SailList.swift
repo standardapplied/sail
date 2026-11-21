@@ -417,7 +417,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     }
 
     /// Whether a misuse of the list (two items handing it one view) stops the process, as tests,
-    /// debug builds and the drive want; a person's app says it once in the log and goes on safely.
+    /// debug builds and the drive want; a person's app says it once in the log and goes on without
+    /// stopping, a row possibly blank until the next fill.
     package static var stopsOnMisuse = asserting
     private static let asserting: Bool = {
         var on = false
@@ -853,7 +854,8 @@ final class RowCell: NSView {
     }
 
     /// Its content was taken by a row handed the same view: made again from its own item's closure,
-    /// or an empty view when that closure hands back the view taken.
+    /// or, when that closure hands back the view taken, an empty view: the row is blank until the
+    /// next fill.
     private func contentTaken() {
         guard let item else { return }
         let again = item.content

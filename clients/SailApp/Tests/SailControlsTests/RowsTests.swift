@@ -587,8 +587,8 @@ import Testing
     }
 
     /// In a person's app two items handing the list one view do not stop it: the view stays with
-    /// the row that asked last, and the other row's cell is made again from its own closure, or
-    /// holds an empty view when that closure hands back the same one.
+    /// the row that asked last, and the other row's cell is made again from its own closure, or,
+    /// when that closure hands back the same one, holds an empty view: blank until the next fill.
     @Test func inAPersonsAppTwoItemsSharingAViewGoOnSafely() throws {
         let mono = try ControlsTests.mono()
         SailList.stopsOnMisuse = false
@@ -1024,9 +1024,13 @@ import Testing
                 #expect(hit === button || hit?.isDescendant(of: button) == true, "\(name): a click at \(point) on \(button.title) reaches \(String(describing: hit))")
             }
         }
+        // Its fill and edge are its layer's colours, not a drawing: a change of look paints nothing
+        // over the panes, so they are read from the layer.
         let paint = BannerPaint(.warning, look: look)
-        let fill = ControlsTests.colour(card, on: canvas, at: NSPoint(x: 6, y: Double(card.frame.height) / 2), scale: 2)
-        #expect(ControlsTests.tells(fill, ControlsTests.swatch(canvas, [NSColor(Tint(paint.fill))], scale: 2), from: ControlsTests.swatch(canvas, [NSColor(Tint(look.surface))], scale: 2)), "\(name): the fill is \(fill)")
+        #expect(card.layer?.backgroundColor == NSColor(Tint(paint.fill)).cgColor && card.layer?.borderColor == NSColor(paint.edge).cgColor && card.layer?.borderWidth == 1,
+                "\(name): the fill or edge is not the warning's")
+        #expect(NSColor(Tint(paint.fill)).cgColor != NSColor(Tint(look.surface)).cgColor)
+        _ = canvas
         card.userInterfaceLayoutDirection = .rightToLeft
         #expect(abs(Double(card.bounds.width - card.markBox.maxX) - Banner.padding.leading) < 0.5, "\(name): right to left, the mark is at \(card.markBox)")
         card.hide()

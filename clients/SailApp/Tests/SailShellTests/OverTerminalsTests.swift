@@ -195,6 +195,28 @@ import Testing
         watch.stop()
     }
 
+    /// The pane's own card is excepted from covering it only because a change of look paints it
+    /// nothing: its layers take new colours, and no bitmap, through both looks and back.
+    @Test func aChangeOfLookGivesTheCardNewColoursAndNoBitmap() {
+        let bench = Bench(.dark)
+        let card = Card(look: .dark)
+        card.show("This terminal ended.", tone: .warning, button: "Open a New One")
+        card.frame = NSRect(x: 40, y: 200, width: 347, height: 120)
+        bench.panes[0].addSubview(card)
+        card.layoutSubtreeIfNeeded()
+        card.displayIfNeeded()
+        let watch = PaintWatch()
+        watch.watch(OverTerminals.largeLayers(over: bench.terminals[0], of: bench.panes[0], in: bench.root) + [card.layer].compactMap { $0 } + card.subviews.compactMap(\.layer))
+        let dark = card.layer?.backgroundColor
+        card.look = .light
+        card.displayIfNeeded()
+        #expect(card.layer?.backgroundColor != dark && card.layer?.backgroundColor == NSColor(Tint(BannerPaint(.warning, look: .light).fill)).cgColor)
+        card.look = .dark
+        card.displayIfNeeded()
+        #expect(watch.paints == 0, "a change of look gave the card's layers \(watch.paints) bitmaps")
+        watch.stop()
+    }
+
     @Test func anotherPanesCardIsNoException() {
         let bench = Bench(.dark)
         let card = Card(look: .dark)
