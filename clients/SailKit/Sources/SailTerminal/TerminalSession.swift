@@ -19,11 +19,11 @@ import Synchronization
 public final class TerminalSession: Sendable {
     /// The waits before each reconnect after a drop; one more failure in a row and a local door's
     /// session parks.
-    public static let retryWaits: [Duration] = [.milliseconds(500), .seconds(1), .seconds(2), .seconds(4), .seconds(8)]
+    public static let retryWaits = ReconnectWaits.standard.waits
     /// How long a runner's door waits in all before it parks: past ``retryWaits`` it goes on at their
     /// cap, so a network that is gone for well under a minute, as on a train or a moved laptop, is
     /// ridden out.
-    public static let runnerPatience = Duration.seconds(60)
+    public static let runnerPatience = ReconnectWaits.standard.patience
     /// How long a ticket never presented is asked again for the next attempt instead of a new one:
     /// well inside its life (``PtyMessage``'s 30 s), so it is still good when presented.
     public static let unpresentedReuse = Duration.seconds(20)
@@ -63,7 +63,7 @@ public final class TerminalSession: Sendable {
     private let after: HoldTick.After
     private let timeout: Int
     private let stableAfter: Duration
-    private let patience: Duration
+    private let waits: ReconnectWaits
     private let eventSink: AsyncStream<SessionEvent>.Continuation
     private let screenListener = Relay<ContinuousClock.Instant>()
     private let reader = Mutex<QualityOfService?>(nil)
@@ -177,7 +177,8 @@ public final class TerminalSession: Sendable {
         patience: Duration = TerminalSession.runnerPatience
     ) {
         self.door = door
-        self.patience = if case .runner = door { patience } else { .zero }
+        let runner = if case .runner = door { true } else { false }
+        waits = ReconnectWaits(waits: Self.retryWaits, patience: runner ? patience : .zero)
         self.screen = screen
         self.timeout = timeout
         self.stableAfter = stableAfter
@@ -500,13 +501,13 @@ public final class TerminalSession: Sendable {
         var reason = ""
         while !Task.isCancelled {
             if !first {
-                if failures >= Self.retryWaits.count, waited >= patience {
+                if waits.parks(after: failures, waited: waited) {
                     setPhase(.parked(reason: reason))
                     await alarm.wait(nil)
                     failures = 0
                     waited = .zero
                 } else {
-                    let wait = Self.retryWaits[min(failures, Self.retryWaits.count - 1)]
+                    let wait = waits.wait(after: failures)
                     setPhase(.reconnecting(attempt: failures + 1))
                     await alarm.wait(wait)
                     waited += wait

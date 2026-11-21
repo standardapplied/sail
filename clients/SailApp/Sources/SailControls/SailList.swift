@@ -58,10 +58,14 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         public let full: Bool
         /// A view after its note among its actions (a spinner).
         public let accessory: NSView?
+        /// Words among the rows that cannot be chosen (a folder's refusal in a tree): the keys pass it.
+        public let inert: Bool
+        /// Its place in a tree, as VoiceOver hears an outline's row: how deep, and open or shut.
+        public let outline: Outline?
 
         public init(
             id: String, name: String, voice: String, content: @autoclosure @escaping @MainActor () -> NSView, actions: [Action] = [], note: String? = nil, height: Double? = nil,
-            paint: RowPaint? = nil, full: Bool = false, accessory: NSView? = nil
+            paint: RowPaint? = nil, full: Bool = false, accessory: NSView? = nil, inert: Bool = false, outline: Outline? = nil
         ) {
             self.id = id
             self.name = name
@@ -73,6 +77,19 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             self.paint = paint
             self.full = full
             self.accessory = accessory
+            self.inert = inert
+            self.outline = outline
+        }
+    }
+
+    /// A tree row's depth (0 at the top) and whether it is an open folder, a shut one, or no folder.
+    public struct Outline: Equatable {
+        public let level: Int
+        public let expanded: Bool?
+
+        public init(level: Int, expanded: Bool?) {
+            self.level = level
+            self.expanded = expanded
         }
     }
 
@@ -139,6 +156,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         didSet { if barInset != oldValue { needsDisplay = true; enumerateAvailableRowViews { row, _ in row.needsDisplay = true } } }
     }
     public var onChoose: @MainActor (String?) -> Void = { _ in }
+    /// A key the list's owner takes before the list does (a tree's → and ←): true, taken.
+    package var onKey: (@MainActor (NSEvent) -> Bool)?
     private let mono: LabelFont
 
     /// The rows. A new set keeps the chosen item chosen by its id wherever it now is, and tells
@@ -146,6 +165,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     public var entries: [Entry] = [] {
         willSet { kept = chosen }
         didSet {
+            guard !applying else { return }
+            fills += 1
             reloading = true
             reloadKeepingHover()
             select(kept)
@@ -157,6 +178,64 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     /// The chosen item's id as the old rows had it, taken before they change.
     private var kept: String?
     private var reloading = false
+    private var applying = false
+    /// Times the rows were filled afresh, and rows `apply` inserted or made again: what the drive
+    /// holds the rows made against, so only changed rows are ever made.
+    package private(set) var fills = 0
+    package private(set) var appliedRows = 0
+
+    /// How many rows in or out ``apply(_:changed:)`` moves one by one: past it the table is filled
+    /// afresh. Measured on the drive (#508, round five): 5,000 rows inserted one by one took 188 ms to
+    /// draw against a fill's 21 ms, while a watch's change moves a few rows; 200 sits between, the
+    /// exact crossing unmeasured. Counts apart by more are filled before any difference is taken,
+    /// whose cost grows with the rows times the changes (98 ms for a 5,000-row folder, round six).
+    public static let applied = 200
+
+    /// The rows as `new`, changing only what differs, by id: rows gone removed and new ones inserted
+    /// in one update, and only the rows named in `changed` made again, so a listing of thousands that
+    /// adds one entry rebuilds one row. The choice follows its row as the table moves it.
+    public func apply(_ new: [Entry], changed: Set<String>) {
+        guard abs(new.count - entries.count) <= Self.applied else {
+            entries = new
+            return
+        }
+        let difference = new.map(Self.id).difference(from: entries.map(Self.id))
+        func offsets(_ changes: [CollectionDifference<String?>.Change]) -> IndexSet {
+            IndexSet(changes.map { change in
+                switch change {
+                case let .insert(offset, _, _), let .remove(offset, _, _): offset
+                }
+            })
+        }
+        var removed = offsets(difference.removals), inserted = offsets(difference.insertions)
+        guard removed.count + inserted.count <= Self.applied else {
+            entries = new
+            return
+        }
+        // A changed row goes out and comes back whole, its row view with it: a row view holds its
+        // item (what VoiceOver hears of it, how it is painted), which only remaking it renews.
+        let old = entries
+        removed.formUnion(IndexSet(old.indices.filter { Self.id(old[$0]).map(changed.contains) ?? false }))
+        inserted.formUnion(IndexSet(new.indices.filter { Self.id(new[$0]).map(changed.contains) ?? false }))
+        applying = true
+        entries = new
+        applying = false
+        reloading = true
+        beginUpdates()
+        if !removed.isEmpty { removeRows(at: removed, withAnimation: []) }
+        if !inserted.isEmpty { insertRows(at: inserted, withAnimation: []) }
+        endUpdates()
+        appliedRows += inserted.count
+        reloading = false
+    }
+
+    /// A row's id in an update: its item's, or its head's title.
+    private static func id(_ entry: Entry) -> String? {
+        switch entry {
+        case let .item(item): item.id
+        case let .head(title, _): "\u{0}head\u{0}" + title
+        }
+    }
 
     public init(rowStyle: RowStyle, look: Look, mono: LabelFont) {
         self.rowStyle = rowStyle
@@ -177,6 +256,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         gridStyleMask = []
         dataSource = self
         delegate = self
+        if rowStyle == .tree { setAccessibilityRole(.outline) }
     }
 
     @available(*, unavailable)
@@ -239,7 +319,8 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
 
     /// Return, Home, End, or an action's key on the chosen row; false when the key is none of them.
     func act(on event: NSEvent) -> Bool {
-        let items = entries.indices.filter { item(at: $0) != nil }
+        if onKey?(event) == true { return true }
+        let items = entries.indices.filter { item(at: $0).map { !$0.inert } ?? false }
         switch event.keyCode {
         case 115, 119:
             guard let row = event.keyCode == 115 ? items.first : items.last else { return false }
@@ -271,7 +352,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     }
 
     public func tableView(_: NSTableView, shouldSelectRow row: Int) -> Bool {
-        item(at: row) != nil
+        item(at: row).map { !$0.inert } ?? false
     }
 
     public func tableView(_: NSTableView, heightOfRow row: Int) -> CGFloat {
@@ -340,6 +421,10 @@ final class SailRowView: NSTableRowView {
             self.line = line
         }
         setAccessibilityLabel(item.voice)
+        if let outline = item.outline {
+            setAccessibilitySubrole(.outlineRow)
+            setAccessibilityDisclosureLevel(outline.level)
+        }
         setAccessibilityCustomActions(item.actions.map { action in
             let run = Run(action)
             return NSAccessibilityCustomAction(name: action.title) {
@@ -352,6 +437,16 @@ final class SailRowView: NSTableRowView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
+    }
+
+    /// A tree row is open or shut as its item says: a table's row answers false on its own, so the
+    /// row says it.
+    override func isAccessibilityExpanded() -> Bool {
+        item?.outline?.expanded ?? false
+    }
+
+    override func isAccessibilityDisclosed() -> Bool {
+        item?.outline?.expanded ?? false
     }
 
     var paint: RowPaint {
@@ -505,11 +600,17 @@ final class HeadCell: NSView {
 /// (or to the trailing inset when it has none), and its actions at the trailing edge: the first
 /// on-row action secondary, or primary with ⏎ while the row is chosen; the rest secondary; ⋯ for
 /// the menu when some action lives only there. Hidden actions are hidden, not only clear, so they
-/// take no click and Tab passes them.
+/// take no click and Tab passes them. A row with nothing at its end (no action, note or accessory,
+/// as a files tree's) is laid out by frames, with no constraint: a row scrolled into or out of a long
+/// list then costs the window's layout engine nothing.
 @MainActor
 final class RowCell: NSView {
     let content: NSView
-    let actions = NSStackView()
+    /// Laid out by frames: nothing shown at its end.
+    private let bare: Bool
+    private let insets: (leading: Double, trailing: Double, top: Double)
+    /// Made only for a row with something at its end: a bare row, scrolled in by the score, makes none.
+    lazy var actions = NSStackView()
     /// Its first action shows ⏎ while chosen with the list's keys.
     private let returnKey: Bool
     private let first: SailButton?
@@ -560,7 +661,14 @@ final class RowCell: NSView {
         } else {
             noteTip = nil
         }
+        let top = rowStyle.hairline ? 1.0 : 0
+        bare = buttons.isEmpty && note == nil && item.accessory == nil
+        insets = (rowStyle.margin + rowStyle.leading, rowStyle.margin + rowStyle.trailing + (item.full ? 0 : actionsColumn ?? 0), top)
         super.init(frame: .zero)
+        if bare {
+            addSubview(content)
+            return
+        }
         actions.setViews(([note, item.accessory].compactMap { $0 } as [NSView]) + buttons, in: .trailing)
         if let note { actions.setCustomSpacing(6 + 4, after: note) }
         actions.spacing = 6
@@ -570,7 +678,7 @@ final class RowCell: NSView {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
-        let top = rowStyle.hairline ? 1.0 : 0, gap = buttons.isEmpty && note == nil ? 0.0 : 8
+        let gap = buttons.isEmpty && note == nil ? 0.0 : 8
         let actionsColumn = item.full ? 0 : actionsColumn
         let stretched = actionsColumn.map { content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -(rowStyle.margin + rowStyle.trailing + $0)) }
             ?? content.trailingAnchor.constraint(equalTo: actions.leadingAnchor, constant: -gap)
@@ -588,6 +696,29 @@ final class RowCell: NSView {
 
     private var moreMenu: NSMenu?
 
+    /// A content's own height: its intrinsic one, else what its own constraints give it (a sidebar
+    /// row's 20 pt), else the row's.
+    private static func height(of content: NSView, in room: Double) -> Double {
+        let intrinsic = Double(content.intrinsicContentSize.height)
+        if intrinsic != Double(NSView.noIntrinsicMetric) { return intrinsic }
+        let fitting = Double(content.fittingSize.height)
+        return fitting > 0 ? min(fitting, room) : room
+    }
+
+    /// A bare row's content, from its leading inset to its trailing one (mirrored right to left), its
+    /// own height centred on the row under any hairline.
+    override func layout() {
+        super.layout()
+        guard bare else { return }
+        let height = Self.height(of: content, in: Double(bounds.height) - insets.top)
+        let below = (Double(bounds.height) - insets.top - height) / 2
+        let frame = NSRect(
+            x: userInterfaceLayoutDirection == .rightToLeft ? insets.trailing : insets.leading, y: isFlipped ? insets.top + below : below,
+            width: max(Double(bounds.width) - insets.leading - insets.trailing, 0), height: height
+        )
+        if content.frame != frame { content.frame = frame }
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
@@ -596,6 +727,7 @@ final class RowCell: NSView {
     /// The actions shown (over 120 ms, at once while motion is reduced) or gone; the primary loud
     /// while the row is chosen, and Return its key (shown as ⏎) only while the list holds the keys.
     func show(_ shown: Bool, chosen: Bool, keys: Bool) {
+        guard !bare else { return }
         if let first {
             let kind: ButtonKind = chosen ? .primary : .secondary, key = chosen && keys && returnKey ? "\r" : ""
             if first.kind != kind { first.kind = kind }

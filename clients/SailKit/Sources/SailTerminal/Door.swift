@@ -10,7 +10,7 @@ public enum Door: Sendable {
 
     /// Where the next connection for `request` goes and the token it presents. A ticket is asked
     /// here, every time, and presented once.
-    func entry(for request: TicketRequest) async throws(TerminalError) -> (address: HostAddress, token: String) {
+    package func entry(for request: TicketRequest) async throws(TerminalError) -> (address: HostAddress, token: String) {
         switch self {
         case let .local(address):
             return (address, "")
@@ -31,10 +31,11 @@ public enum Door: Sendable {
 }
 
 /// What a ticket is asked for: to open a session in a project's workspace (blank for the project's
-/// own container), or to attach to one.
+/// own container), to attach to one, or to read a workspace's files.
 public enum TicketRequest: Equatable, Sendable {
     case open(project: String, workspace: String)
     case attach(session: String)
+    case files(project: String, workspace: String)
 }
 
 /// Whoever hands out terminal tickets: the control plane, for its caller.
@@ -57,6 +58,7 @@ extension SailClient: TicketSource {
         switch request {
         case let .open(project, workspace): try await send(.terminalTicket(open: project, workspace: workspace))
         case let .attach(session): try await send(.terminalTicket(attach: session))
+        case let .files(project, workspace): try await send(.terminalTicket(files: project, workspace: workspace))
         }
     }
 
