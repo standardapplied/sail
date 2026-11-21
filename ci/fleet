@@ -1102,6 +1102,30 @@ for i in range(20):
         raise SystemExit("checked save %d was not written" % i)
     saves.append((time.monotonic() - started) * 1000)
 print("a checked save of 100 KB over TCP from another box, p95 %.0f ms (budget 120, ceiling 300)" % p95(saves))
+stats, creates = [], []
+for i in range(20):
+    started = time.monotonic()
+    version_of(files, "/home/dev/fleet-blob")
+    stats.append((time.monotonic() - started) * 1000)
+for i in range(20):
+    started = time.monotonic()
+    files.sendall(frame(46, struct.pack(">i", 500 + i) + text("/home/dev/fleet-made-%d" % i) + b"\x00"))
+    if answered(files)[0] != 58:
+        raise SystemExit("create %d was not done" % i)
+    creates.append((time.monotonic() - started) * 1000)
+def session_said(seq, command, done):
+    line = command.encode() + b"; echo " + done.encode() + b"-$((40+2))\r"
+    conn.sendall(frame(3, struct.pack(">q", seq) + struct.pack(">i", len(line)) + line))
+    seen = b""
+    while (done + "-42").encode() not in seen:
+        kind, payload = read(conn)
+        if kind == 20:
+            seen += payload[12:]
+    return seen.decode(errors="replace")
+work = session_said(40, "head -c 100000 /dev/urandom > /home/dev/fleet-src; w=$(for i in $(seq 20); do s=$(date +%s%N); t=$(mktemp /home/dev/.sail-save-probeXXXXXXXX); head -c 100000 < /home/dev/fleet-src > $t; sync $t; sha256sum < $t > /dev/null; chmod --reference=/home/dev/fleet-src $t; mv -fT $t /home/dev/fleet-probe; e=$(date +%s%N); echo $(( (e - s) / 1000000 )); done | sort -n | sed -n 19p); echo work-p95=$w-ms", "probed")
+import re
+found = re.findall(r"work-p95=([0-9]+)-ms", work)
+print("where a checked save of 100 KB goes, p95 from client: a stat, one exec and no decision, %.0f ms; a create, the decision asked under the lock then one exec, %.0f ms; a save %.0f ms; the work of the save script itself in the workspace (temporary, copy, sync, digest, mode, rename) %s ms" % (p95(stats), p95(creates), p95(saves), found[-1] if found else "?"))
 if p95(saves) > 300:
     raise SystemExit("the save figure is over its ceiling")'
 

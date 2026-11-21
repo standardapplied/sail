@@ -279,10 +279,25 @@ class WorkspaceWritesIT extends AbstractIncusIT {
             assertInstanceOf(PtyMessage.FilesWritten.class, next(mine));
             saves.add((System.nanoTime() - started) / 1_000_000);
           }
+          var stats = new ArrayList<Long>();
+          var creates = new ArrayList<Long>();
+          for (var i = 0; i < 20; i++) {
+            var started = System.nanoTime();
+            version(mine, notes);
+            stats.add((System.nanoTime() - started) / 1_000_000);
+          }
+          for (var i = 0; i < 20; i++) {
+            var started = System.nanoTime();
+            PtyWire.write(mine, new PtyMessage.FilesCreate(50 + i, FOLDER + "/made-" + i, false));
+            assertEquals(new PtyMessage.FilesDone(50 + i), next(mine));
+            creates.add((System.nanoTime() - started) / 1_000_000);
+          }
           System.out.printf(
               "a checked save of 100 KB over incus exec, host side: p95 %d ms (gated on GCP at"
-                  + " 300 ms; here at %d ms)%n",
-              p95(saves), SAVE_BOUND_MS);
+                  + " 300 ms; here at %d ms); where it goes, p95: a stat, one exec and no"
+                  + " decision, %d ms; a create, the decision asked under the lock then one exec,"
+                  + " %d ms%n",
+              p95(saves), SAVE_BOUND_MS, p95(stats), p95(creates));
           assertTrue(p95(saves) <= SAVE_BOUND_MS, "save p95 " + p95(saves) + " ms");
           assertEquals("", temporaries());
         }
@@ -383,8 +398,10 @@ class WorkspaceWritesIT extends AbstractIncusIT {
                   .ok());
           PtyWire.write(after, new PtyMessage.PutEnd(3, sha256(bytes)));
           var ended = assertInstanceOf(PtyMessage.Err.class, next(after));
-          assertEquals("Workspace 'w' belongs to 'ben', not you.", ended.reason());
-          assertTrue(!ended.code().isBlank(), "coded, so the app tells it apart");
+          assertEquals(
+              List.of("forbidden", "Workspace 'w' belongs to 'ben', not you."),
+              List.of(ended.code(), ended.reason()),
+              "the code the contract names, in the decision's words");
           assertEquals(-1, drain(after));
           awaitNoScripts();
           assertEquals(before, inInstance("sha256sum < " + notes), "a relabel writes nothing");
