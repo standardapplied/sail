@@ -424,8 +424,6 @@ final class SailRowView: NSTableRowView {
         if let outline = item.outline {
             setAccessibilitySubrole(.outlineRow)
             setAccessibilityDisclosureLevel(outline.level)
-            setAccessibilityDisclosed(outline.expanded ?? false)
-            setAccessibilityExpanded(outline.expanded ?? false)
         }
         setAccessibilityCustomActions(item.actions.map { action in
             let run = Run(action)
@@ -439,6 +437,16 @@ final class SailRowView: NSTableRowView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
+    }
+
+    /// A tree row is open or shut as its item says: a table's row answers false on its own, so the
+    /// row says it.
+    override func isAccessibilityExpanded() -> Bool {
+        item?.outline?.expanded ?? false
+    }
+
+    override func isAccessibilityDisclosed() -> Bool {
+        item?.outline?.expanded ?? false
     }
 
     var paint: RowPaint {
