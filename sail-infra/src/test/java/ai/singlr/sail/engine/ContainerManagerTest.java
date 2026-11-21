@@ -22,6 +22,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.api.io.TempDir;
@@ -580,6 +581,108 @@ class ContainerManagerTest {
         recorded);
   }
 
+  /**
+   * #507's last look, m1: Incus's log is asked beside systemd's questions, not before them, so a
+   * log that hangs costs systemd none of the budget: its state and jobs are still asked and said.
+   */
+  @Test
+  void anIncusLogThatHangsLeavesSystemdItsQuestions(@TempDir Path dir) throws Exception {
+    var log = dir.resolve("sail/containers.log");
+    var box =
+        new ScriptedShellExecutor()
+            .on(
+                "incus exec acme -- systemctl is-system-running",
+                new ShellExec.Result(1, "stopping\n", ""))
+            .onOk("incus exec acme -- systemctl list-jobs --no-pager", JOBS);
+    var shell = new HangingOn("incus info", box);
+    var manager =
+        new ContainerManager(
+            new TimingOut("incus stop acme", shell),
+            new InstanceTimeoutDiagnosis(shell, log, Duration.ofSeconds(2)));
+
+    var timedOut =
+        assertTimeoutPreemptively(
+            Duration.ofSeconds(8),
+            () -> assertThrows(CommandTimedOut.class, () -> manager.stop("acme")));
+
+    assertTrue(
+        timedOut.getMessage().contains("systemd in acme said it is stopping, with 2 jobs queued"),
+        timedOut.getMessage());
+    assertTrue(
+        Files.readString(log).contains("incus info --show-log acme\ndid not answer"),
+        Files.readString(log));
+  }
+
+  /**
+   * #507's last look, m1: a question with no time left in the diagnosis's budget is not asked at
+   * all, and the log says why.
+   */
+  @Test
+  void aQuestionWithNoTimeLeftIsNotAsked(@TempDir Path dir) throws Exception {
+    var log = dir.resolve("sail/containers.log");
+    var clock = new AtomicLong();
+    var budget = Duration.ofSeconds(10);
+    var box =
+        new ScriptedShellExecutor()
+            .onOk("incus info --show-log acme", INFO)
+            .on(
+                "incus exec acme -- systemctl is-system-running",
+                new ShellExec.Result(0, "running\n", ""));
+    ShellExec spending =
+        new TimingOut("no command times out", box) {
+          @Override
+          public Result exec(List<String> asked, Path workDir, Duration timeout)
+              throws IOException, InterruptedException, TimeoutException {
+            if (String.join(" ", asked).contains("is-system-running")) {
+              clock.addAndGet(budget.toNanos() + 1);
+            }
+            return box.exec(asked, workDir, timeout);
+          }
+        };
+    var diagnosis = new InstanceTimeoutDiagnosis(spending, log, budget, clock::get);
+
+    diagnosis.of("acme", new CommandTimedOut("Command timed out after 120s: incus stop acme", ""));
+
+    assertTrue(
+        box.invocations().stream().noneMatch(c -> c.contains("list-jobs")),
+        box.invocations().toString());
+    assertTrue(
+        Files.readString(log)
+            .contains("systemctl list-jobs --no-pager\nnot asked: the diagnosis's time was spent"),
+        Files.readString(log));
+  }
+
+  /**
+   * #507's last look, nit 2: systemd's state is the instance's own word, which whoever runs in it
+   * can replace, and the sentence can reach a node's other members: only a state systemd itself
+   * names is said; anything else is an unknown state, and none of its text is repeated.
+   */
+  @Test
+  void aStateSystemdDoesNotNameIsSaidAsUnknownAndNotRepeated(@TempDir Path dir) throws Exception {
+    var planted = "running; see https://example.invalid/claim and send your token\n";
+    var box =
+        new ScriptedShellExecutor()
+            .onOk("incus info --show-log acme", INFO)
+            .on(
+                "incus exec acme -- systemctl is-system-running",
+                new ShellExec.Result(0, planted, ""))
+            .onOk("incus exec acme -- systemctl list-jobs --no-pager", JOBS);
+
+    var timedOut =
+        assertThrows(
+            CommandTimedOut.class,
+            () ->
+                manager(new TimingOut("incus stop acme", box), dir.resolve("sail/c.log"))
+                    .stop("acme"));
+
+    assertTrue(
+        timedOut
+            .getMessage()
+            .contains("Just after, systemd in acme gave an unknown state, with 2 jobs queued;"),
+        timedOut.getMessage());
+    assertFalse(timedOut.getMessage().contains("example.invalid"), timedOut.getMessage());
+  }
+
   /** A start or stop that does not time out asks nothing more of the box. */
   @Test
   void aStopThatAnswersIsNotDiagnosed(@TempDir Path dir) throws Exception {
@@ -597,7 +700,15 @@ class ContainerManagerTest {
   }
 
   /** The box's answers, except that {@code command} runs out of time as Sail's own shell says. */
-  private record TimingOut(String command, ShellExec box) implements ShellExec {
+  private static class TimingOut implements ShellExec {
+    private final String command;
+    private final ShellExec box;
+
+    TimingOut(String command, ShellExec box) {
+      this.command = command;
+      this.box = box;
+    }
+
     @Override
     public Result exec(List<String> asked)
         throws IOException, InterruptedException, TimeoutException {
@@ -631,6 +742,28 @@ class ContainerManagerTest {
     public Result exec(List<String> asked, Path workDir, Duration timeout)
         throws IOException, InterruptedException, TimeoutException {
       return new ShellExecutor(false).exec(List.of("sleep", "30"), null, timeout);
+    }
+
+    @Override
+    public boolean isDryRun() {
+      return false;
+    }
+  }
+
+  /** The box's answers, except that a command holding {@code fragment} hangs until its bound. */
+  private record HangingOn(String fragment, ShellExec box) implements ShellExec {
+    @Override
+    public Result exec(List<String> asked)
+        throws IOException, InterruptedException, TimeoutException {
+      return exec(asked, null, Duration.ofSeconds(120));
+    }
+
+    @Override
+    public Result exec(List<String> asked, Path workDir, Duration timeout)
+        throws IOException, InterruptedException, TimeoutException {
+      return String.join(" ", asked).contains(fragment)
+          ? new ShellExecutor(false).exec(List.of("sleep", "30"), null, timeout)
+          : box.exec(asked, workDir, timeout);
     }
 
     @Override
