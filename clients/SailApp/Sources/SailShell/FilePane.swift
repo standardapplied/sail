@@ -220,8 +220,7 @@ final class FilePane: NSView, NSTextViewDelegate {
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Discard")
         alert.addButton(withTitle: "Cancel")
-        alert.buttons.forEach { $0.keyEquivalent = "" }
-        alert.buttons[2].keyEquivalent = "\u{1b}"
+        alert.buttons[0].keyEquivalent = ""
         alert.beginSheetModal(for: window) { [weak self] answer in
             MainActor.assumeIsolated {
                 guard let self else { return }

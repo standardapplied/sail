@@ -13,13 +13,21 @@ import Testing
 /// a save; ⌘W closes the file, never a terminal; the keys move to it as between panes.
 @MainActor @Suite(.serialized) struct FilePaneTests {
     static let path = FilesPanelTests.root + "/tide.ts"
+    /// The windows the tests' workbenches are in, kept while the suite runs.
+    static var windows: [NSWindow] = []
 
-    /// A shell with the files panel shown over a door holding `tide.ts` as `text`, the file opened.
+    /// A shell with the files panel shown over a door holding `tide.ts` as `text`, the file opened;
+    /// the workbench in a window of its own, so the keys have somewhere to be.
     static func opened(_ text: [UInt8], width: Double = 1180) async throws -> (FakeRunnerDoor, ShellApp, WorkbenchView, FilesPanel, FilePane) {
         let door = try FakeRunnerDoor(person: "uday")
         door.setFolder(FilesPanelTests.root, [FileEntry(name: "tide.ts", kind: .known(.file), target: .known(.none), size: Int64(text.count), mtimeNanos: 0, mode: 0o100644)])
         door.setFile(path, text)
         let (shell, bench) = try FilesPanelTests.shell(door, width: width)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        bench.removeFromSuperview()
+        window.contentView = bench
+        windows.append(window)
+        bench.setFrameSize(NSSize(width: width, height: 600))
         bench.toggleFiles(nil)
         let panel = try #require(FilesPanelTests.panel(bench))
         #expect(await RunnerTabTests.until(10) { panel.list.numberOfRows == 1 }, "the tree never listed tide.ts")
@@ -104,9 +112,11 @@ import Testing
         bench.layoutSubtreeIfNeeded()
         #expect(panel.isHidden && !pane.isHidden && pane.superview != nil, "hiding the tree closed the file")
         #expect(await RunnerTabTests.until(10) { door.filesConnections == 1 }, "the file's connection ended with the tree")
+        bench.splitRight(nil)
+        #expect(bench.model.selectedTab?.layout.leaves.count == 2, "the terminal did not split")
         bench.zoomSplit(nil)
         bench.layoutSubtreeIfNeeded()
-        #expect(pane.isHidden, "a zoomed terminal left the pane shown")
+        #expect(bench.model.selectedTab?.zoomed != nil && pane.isHidden, "a zoomed terminal left the pane shown")
         bench.zoomSplit(nil)
         bench.layoutSubtreeIfNeeded()
         #expect(!pane.isHidden)

@@ -558,6 +558,7 @@ import Testing
                 (list.rowView(atRow: 0, makeIfNecessary: true) as? SailRowView)?.hovered = true
                 let reused = list.rowsReused
                 list.entries = [entry]
+                list.choose("k")
                 list.layoutSubtreeIfNeeded()
                 let got = try row(list)
                 if case .item = entry, case .item = earlier { #expect(list.rowsReused > reused, "\(said): \(before) to \(name): the cell was not reused") }
