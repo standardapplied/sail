@@ -2023,12 +2023,14 @@ public final class PtySessionHost implements AutoCloseable {
 
   /**
    * Drops what workspace {@code instance}'s connections share once no connection to it is left and
-   * each is idle: its write lock once no save holds it or waits for it, its changes runs once none
-   * is under way. One rule, asked as the workspace's last connection goes, as its lock's last
-   * holder lets go (a save answers before it does, so its client may already have gone), and as its
-   * last run ends; meanwhile every connection to the workspace shares both. A lock dropped while a
-   * save there is stuck loses nothing: the next lock asks the workspace before its first write
-   * ({@link FilesConnection}), and finds the stuck save again.
+   * each is idle: its write lock once no save holds it, its changes runs once none is under way. A
+   * write waiting for the lock is a connection's, so none waits once no connection is left, and one
+   * of a closed connection that takes a dropped lock is refused under it before it changes
+   * anything. One rule, asked as the workspace's last connection goes, as its lock's last holder
+   * lets go (a save answers before it does, so its client may already have gone), and as its last
+   * run ends; meanwhile every connection to the workspace shares both. A lock dropped while a save
+   * there is stuck loses nothing: the next lock asks the workspace before its first write ({@link
+   * FilesConnection}), and finds the stuck save again.
    */
   private void forget(String instance) {
     synchronized (served) {
@@ -2036,7 +2038,7 @@ public final class PtySessionHost implements AutoCloseable {
         return;
       }
       var lock = writeLocks.get(instance);
-      if (lock != null && !lock.isLocked() && !lock.hasQueuedThreads()) {
+      if (lock != null && !lock.isLocked()) {
         writeLocks.remove(instance);
       }
       var changes = changeRuns.get(instance);

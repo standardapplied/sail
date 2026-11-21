@@ -297,7 +297,10 @@ class FileWritesTest {
   /** Every script here reads and writes sockets, as under {@code incus exec}, never pipes. */
   @Test
   void everyScriptHereHasSocketsForItsInputAndOutput() throws Exception {
-    var probed = edited(script -> "[ -S /proc/self/fd/0 ] && [ -S /proc/self/fd/1 ] || exit 9");
+    var probed =
+        edited(
+            script ->
+                "IFS= read -r -d '' _; [ -S /proc/self/fd/0 ] && [ -S /proc/self/fd/1 ] || exit 9");
     assertEquals(0, run(probed, FileScripts.REMOVE, home + "/none"));
   }
 

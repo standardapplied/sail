@@ -1370,7 +1370,8 @@ class FilesHostTest {
    */
   @Test
   void aChangesRunUnderWayAsTheLastConnectionGoesGoesWhenItEnds() throws Exception {
-    edits.put("changes", script -> "sleep 2\n" + script);
+    var go = dir.resolve("go");
+    edits.put("changes", script -> "until [ -e '" + go + "' ]; do sleep 0.05; done\n" + script);
     var mine = open("tok-mady");
     PtyWire.write(mine, new PtyMessage.FilesChanges(1));
     var asked = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
@@ -1386,6 +1387,7 @@ class FilesHostTest {
       Thread.onSpinWait();
     }
     assertSame(runs, host.changeRuns("acme", "dock"), "a run under way went with the connection");
+    Files.writeString(go, "");
     var ended = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
     while (host.changeRuns("acme", "dock") != null) {
       assertTrue(System.nanoTime() < ended, "the run outlived its end past the last connection");

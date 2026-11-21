@@ -119,9 +119,9 @@ final class FilesConnection {
     }
 
     /**
-     * {@code freed} runs each time a holder lets go of the lock wholly, after it has, so it runs
-     * under no lock of the workspace's: a save answers before it lets go, so its workspace's last
-     * connection may already be gone, and the host drops the lock then.
+     * {@code freed} runs each time a holder lets go of the lock, after it has, so it runs under no
+     * lock of the workspace's: a save answers before it lets go, so its workspace's last connection
+     * may already be gone, and the host drops the lock then if nothing holds it.
      */
     WorkspaceLock(Runnable freed) {
       super(true);
@@ -131,9 +131,7 @@ final class FilesConnection {
     @Override
     public void unlock() {
       super.unlock();
-      if (!isHeldByCurrentThread()) {
-        freed.run();
-      }
+      freed.run();
     }
 
     /** Whether a save's process that outlived its kill may still be writing in the workspace. */
