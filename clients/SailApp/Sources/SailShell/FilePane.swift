@@ -515,7 +515,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     /// holds the main thread for its whole append; the first goes in at once, for the first screen.
     private var slices: [String] = []
     private var allArrived = false
-    private static let slice = 16 * 1024
+    private static let slice = 32 * 1024
 
     private func append(_ piece: String) {
         let text = piece as NSString
