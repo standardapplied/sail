@@ -519,6 +519,22 @@ import Testing
         #expect(pane.editor.string == "mine one\n" && !pane.file.clean && pane.file.note == .changed, "the redone typing became \(pane.editor.string.debugDescription), \(pane.file.clean ? "clean" : "unsaved")")
     }
 
+    /// Closing the tab reads the pane's text as unsaved through its one door: a redo the text view
+    /// told no delegate of, then the tab closed in the same turn, asks first.
+    @Test func closingATabAfterAnUnreportedRedoAsks() async throws {
+        let (_, _, bench, _, pane) = try await Self.opened(Array("one\n".utf8))
+        #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
+        pane.editor.insertText("mine ", replacementRange: NSRange(location: 0, length: 0))
+        pane.editor.undoManager?.undo()
+        #expect(await RunnerTabTests.until(5) { pane.editor.string == "one\n" && pane.file.clean })
+        let window = try #require(pane.window)
+        pane.editor.undoManager?.redo()
+        bench.closeTab(nil)
+        #expect(window.attachedSheet != nil, "the tab closed over redone, unsaved text without asking")
+        #expect(bench.model.selectedTab.flatMap { bench.tabViews[$0.id]?.filePane } === pane)
+        window.attachedSheet.map { window.endSheet($0, returnCode: .alertThirdButtonReturn) }
+    }
+
     /// Half of a character (a lone surrogate) is never saved as U+FFFD: the save says where it is
     /// and writes nothing.
     @Test func halfACharacterIsNeverSavedAsAnother() async throws {
