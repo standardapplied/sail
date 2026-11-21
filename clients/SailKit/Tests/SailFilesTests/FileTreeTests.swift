@@ -382,6 +382,13 @@ func + (folder: FileName, rest: String) -> FileName {
         #expect(tree.unsettled == nil, "refusals from before the reconnect were counted")
     }
 
+    /// An entry shown is found by its path, as its folder listed it; one not shown is not.
+    @Test func anEntryShownIsFoundByItsPath() {
+        let tree = try? Self.listed([Self.file("tide.ts"), Self.folder("src")])
+        #expect(tree?.entry(at: Self.root + "/tide.ts") == Self.file("tide.ts"))
+        #expect(tree?.entry(at: Self.root + "/gone.ts") == nil && tree?.entry(at: Self.root) == nil)
+    }
+
     /// The file open in the pane is watched beside the folders shown, at the version its pane holds:
     /// sent once when it opens or its version moves, dropped when it closes.
     @Test func theOpenFileIsWatchedBesideTheFolders() throws {

@@ -28,6 +28,17 @@ final class FilesPanel: NSView {
     var onDismiss: @MainActor () -> Void = {}
     /// Starts the workspace, answering nil once started or what refused it.
     var onStart: @MainActor (_ project: String, _ name: String) async -> [String]? = { _, _ in nil }
+    /// A file row opened (⏎, a double click): the tab's file pane shows it.
+    var onOpenFile: @MainActor (FileName, FileEntry) -> Void = { _, _ in }
+    /// The tab's file pane, which speaks over this connection: its requests' answers, the watch's
+    /// word on its file, the ticks, admissions and drops reach it here.
+    weak var filePane: FilePane?
+    /// The file whose pane holds unsaved text: its row carries the dot.
+    var unsaved: FileName? {
+        didSet { if unsaved != oldValue { shownRevision = nil; refresh() } }
+    }
+
+    private var shownUnsaved: FileName?
 
     package let list: SailList
     package let scroll: QuietScrollView
@@ -161,12 +172,18 @@ final class FilesPanel: NSView {
         switch event {
         case let .phase(phase):
             self.phase = phase
-            if phase != .connected { tree.disconnected() }
+            if phase != .connected {
+                tree.disconnected()
+                filePane?.disconnected()
+            }
             if phase == .connected { startRefusal = nil }
         case .admitted:
             admittedAt = CACurrentMediaTime()
+            send(tree.watchFile(filePane?.watched))
             send(tree.admitted())
+            filePane?.admitted()
         case let .frame(frame):
+            if filePane?.takes(frame) == true { break }
             send(tree.receive(frame, at: now))
             if TreeRowCell.measuring, frame.isWholeListing, let path = tree.lastListed { listingHeard = (path.key, CACurrentMediaTime()) }
             if case let .filesChanged(paths) = frame {
@@ -179,8 +196,18 @@ final class FilesPanel: NSView {
 
     /// What the tree asks of the host, sent on the connection admitted now, if any: the tree has
     /// taken its own change either way.
-    private func send(_ frames: [Frame]) {
+    func send(_ frames: [Frame]) {
         session?.send(frames)
+    }
+
+    /// The open file watched at `watched`, or none.
+    func watchFile(_ watched: WatchedPath?) {
+        send(tree.watchFile(watched))
+    }
+
+    /// Whether a connection is up or being made: what a file pane opening needs.
+    var connected: Bool {
+        session != nil
     }
 
     // MARK: What it shows
@@ -198,7 +225,7 @@ final class FilesPanel: NSView {
             needsLayout = true
         }
         schedule(after: now)
-        let new = tree.newPaths(at: now), marked = new != shownNew
+        let new = tree.newPaths(at: now), marked = new != shownNew || unsaved != shownUnsaved
         guard tree.revision != shownRevision || marked else { return }
         let rows = tree.rows, wasNew = shownNew
         shownRevision = tree.revision
@@ -206,7 +233,9 @@ final class FilesPanel: NSView {
         guard rows != shownRows || marked else { return }
         let place = chosenPath.flatMap { path in shownRows.firstIndex { $0.path == path } }
         let before = Dictionary(shownRows.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
-        let changed = Set(rows.filter { row in before[row.path].map { $0 != row } ?? false || wasNew.contains(row.path) != new.contains(row.path) }.map(\.path))
+        let dotted = Set([unsaved, shownUnsaved].compactMap { $0 })
+        shownUnsaved = unsaved
+        let changed = Set(rows.filter { row in before[row.path].map { $0 != row } ?? false || wasNew.contains(row.path) != new.contains(row.path) || dotted.contains(row.path) }.map(\.path))
         let fresh = shownRows.isEmpty
         shownRows = rows
         rowSets += 1
@@ -270,9 +299,10 @@ final class FilesPanel: NSView {
         case .other: "special file"
         default: "file"
         }
+        let dotted = row.path == unsaved
         return SailList.Item(
-            id: row.path.key, name: row.name, voice: new ? "\(row.name), \(kind), new" : "\(row.name), \(kind)",
-            content: TreeRowCell(row, new: new, height: RowStyle.tree.height, direction: direction, look: look) { [weak self] in self?.toggle(row.path) },
+            id: row.path.key, name: row.name, voice: "\(row.name), \(kind)\(new ? ", new" : "")\(dotted ? ", unsaved" : "")",
+            content: TreeRowCell(row, new: new, unsaved: dotted, height: RowStyle.tree.height, direction: direction, look: look) { [weak self] in self?.toggle(row.path) },
             outline: SailList.Outline(level: row.depth, expanded: row.kind == .folder ? row.expanded : nil)
         )
     }
@@ -288,7 +318,15 @@ final class FilesPanel: NSView {
 
     @objc private func doubleClicked(_: Any?) {
         guard list.clickedRow >= 0, let path = chosenPath else { return }
-        toggle(path)
+        if !openFile(path) { toggle(path) }
+    }
+
+    /// Opens a file's row in the tab's file pane; false for a folder, a note or a broken link.
+    @discardableResult
+    func openFile(_ path: FileName) -> Bool {
+        guard let row = tree.rows.first(where: { $0.path == path }), row.kind == .file || row.kind == .other, let entry = tree.entry(at: path) else { return false }
+        onOpenFile(path, entry)
+        return true
     }
 
     /// → opens a shut folder or goes into an open one; ← shuts an open folder or goes to the folder
@@ -318,6 +356,8 @@ final class FilesPanel: NSView {
         case 49 where row.kind == .folder || row.kind == .brokenLink:
             toggle(path)
             return true
+        case 36, 76:
+            return openFile(path)
         default:
             return false
         }
@@ -414,18 +454,21 @@ final class FilesPanel: NSView {
 /// a folder (its refusal, or that it holds more than is shown) is 12 pt `textTertiary`, wrapped.
 @MainActor
 final class TreeRowCell: NSView {
-    static let slot = 12.0, triangle = 11.0, gap = 4.0, fresh = 5.0, notePoints = Look.Step.footnote.points
+    static let slot = 12.0, triangle = 11.0, gap = 4.0, fresh = 5.0, dot = 6.0, notePoints = Look.Step.footnote.points
 
     let row: FileTree.Row
     let new: Bool
+    /// Its file's pane holds unsaved text: a 6 pt ink dot after the name.
+    let unsaved: Bool
     private let height: Double
     private let look: Look
     private let onDisclose: @MainActor () -> Void
     private(set) var strong = false
 
-    init(_ row: FileTree.Row, new: Bool, height: Double, direction: NSUserInterfaceLayoutDirection, look: Look, onDisclose: @escaping @MainActor () -> Void = {}) {
+    init(_ row: FileTree.Row, new: Bool, unsaved: Bool = false, height: Double, direction: NSUserInterfaceLayoutDirection, look: Look, onDisclose: @escaping @MainActor () -> Void = {}) {
         self.row = row
         self.new = new
+        self.unsaved = unsaved
         self.height = height
         self.look = look
         self.onDisclose = onDisclose
@@ -554,17 +597,24 @@ final class TreeRowCell: NSView {
                 Draw.icon(row.expanded ? .down : .right, in: rect, ink: look.textTertiary)
             }
         }
-        let name = self.name, freshRoom = new ? Self.gap + Self.fresh : 0
+        let name = self.name, freshRoom = (new ? Self.gap + Self.fresh : 0) + (unsaved ? Self.gap + Self.dot : 0)
         let room = max(width - start - freshRoom, 0), drawn = min(Double(name.size().width), room)
         let points = Look.Step.callout.points
         let baseline = TextLine.baseline(top: (Double(bounds.height) - points) / 2, points: points, lineHeight: points)
         let x = rightToLeft ? width - start - drawn : start
         let font = name.length > 0 ? name.attribute(.font, at: 0, effectiveRange: nil) as? NSFont : nil
         name.draw(with: NSRect(x: x, y: baseline - Double(font?.ascender ?? 0), width: drawn, height: points * 1.5), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        var after = rightToLeft ? x : x + drawn
         if new {
-            let at = rightToLeft ? x - Self.gap - Self.fresh : x + drawn + Self.gap
+            let at = rightToLeft ? after - Self.gap - Self.fresh : after + Self.gap
             NSColor(Tint(look.info)).setFill()
             NSRect(x: at, y: (Double(bounds.height) - Self.fresh) / 2, width: Self.fresh, height: Self.fresh).fill()
+            after = rightToLeft ? at : at + Self.fresh
+        }
+        if unsaved {
+            let at = rightToLeft ? after - Self.gap - Self.dot : after + Self.gap
+            NSColor(look.text).setFill()
+            NSBezierPath(ovalIn: NSRect(x: at, y: (Double(bounds.height) - Self.dot) / 2, width: Self.dot, height: Self.dot)).fill()
         }
     }
 

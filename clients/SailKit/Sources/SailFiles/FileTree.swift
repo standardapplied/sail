@@ -307,6 +307,12 @@ public struct FileTree: Sendable {
         return rows
     }
 
+    /// The entry at `path`, as its folder's listing shown holds it.
+    public func entry(at path: FileName) -> FileEntry? {
+        guard let parent = Self.parent(of: path) else { return nil }
+        return folders[parent]?.entries.first { parent.appending($0.name) == path }
+    }
+
     /// The folder holding `path`, nil for the root.
     public static func parent(of path: FileName) -> FileName? {
         guard path != root, let slash = path.bytes.lastIndex(of: 0x2F) else { return nil }

@@ -27,6 +27,9 @@ final class FilePane: NSView, NSTextViewDelegate {
     var onUnsaved: @MainActor (Bool) -> Void = { _ in }
     /// The conflict sheet: theirs beside the pane's text.
     var onCompare: @MainActor (_ theirs: String) -> Void = { _ in }
+    /// The version the watch is to hold the file at moved.
+    var onWatched: @MainActor (WatchedPath?) -> Void = { _ in }
+    private var shownWatch: WatchedPath?
 
     let editor: NSTextView
     let scroll = NSScrollView()
@@ -191,7 +194,14 @@ final class FilePane: NSView, NSTextViewDelegate {
 
     /// Closing: an unsaved pane asks Save, Discard, Cancel first.
     @objc func closePressed() {
-        guard !file.clean, let window else { return finishClosing() }
+        askToLeave { [weak self] in self?.finishClosing() }
+    }
+
+    /// Before the pane's text is left (closed, another file opened into it, its tab closed, the app
+    /// quit): an unsaved pane asks Save, Discard, Cancel, Save being the checked save; a conflict or a
+    /// refusal cancels what was asked (M52).
+    func askToLeave(then leave: @escaping @MainActor () -> Void) {
+        guard !file.clean, let window else { return leave() }
         let alert = NSAlert()
         alert.messageText = "Save the changes to \(file.name)?"
         alert.informativeText = "If you don't, what you typed is lost."
@@ -204,17 +214,20 @@ final class FilePane: NSView, NSTextViewDelegate {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 switch answer {
-                case .alertFirstButtonReturn: self.closeAfterSave = true; self.saveDocument(nil)
-                case .alertSecondButtonReturn: self.finishClosing()
+                case .alertFirstButtonReturn:
+                    self.afterSave = leave
+                    self.saveDocument(nil)
+                case .alertSecondButtonReturn: leave()
                 default: break
                 }
             }
         }
     }
 
-    private var closeAfterSave = false
+    /// What waits on the save a close question began: left only once it is saved.
+    private var afterSave: (@MainActor () -> Void)?
 
-    private func finishClosing() {
+    func finishClosing() {
         send(Self.frames(file.close().asks))
         onClose()
     }
@@ -276,16 +289,19 @@ final class FilePane: NSView, NSTextViewDelegate {
             case let .replaced(text): replace(with: text)
             case .saved:
                 said = nil
-                if closeAfterSave { finishClosing() }
+                if let leave = afterSave {
+                    afterSave = nil
+                    leave()
+                }
             case let .conflict(theirs):
-                closeAfterSave = false
+                afterSave = nil
                 onCompare(theirs)
-            case .gone: closeAfterSave = false
+            case .gone: afterSave = nil
             case let .saveRefused(words):
-                closeAfterSave = false
+                afterSave = nil
                 said = words
             case .notConnected:
-                closeAfterSave = false
+                afterSave = nil
                 said = "Not connected to \(workspace). Your changes are kept here."
             }
         }
@@ -380,6 +396,10 @@ final class FilePane: NSView, NSTextViewDelegate {
         scroll.isHidden = sentenceWords != nil
         scroll.alphaValue = file.note == .deleted ? 0.5 : 1
         numbers.barred = barred.flatMap { clock() < $0.until ? $0.lines : nil } ?? IndexSet()
+        if watched != shownWatch {
+            shownWatch = watched
+            onWatched(watched)
+        }
         needsLayout = true
     }
 
