@@ -1161,7 +1161,54 @@ import re
 found = re.findall(r"work-p95=([0-9]+)-ms", work)
 print("where a checked save of 100 KB goes, p95 from client: a stat, one exec and no decision, %.0f ms; a create, the decision asked under the lock then one exec, %.0f ms; a save %.0f ms; the work of the save script itself in the workspace (temporary, copy, sync, digest, mode, rename) %s ms" % (p95(stats), p95(creates), p95(saves), found[-1] if found else "?"))
 if p95(saves) > 300:
-    raise SystemExit("the save figure is over its ceiling")'
+    raise SystemExit("the save figure is over its ceiling")
+typed(60, "mkdir -p /home/dev/workspace/fleet-cost && cd /home/dev/workspace/fleet-cost && git init -q && for d in $(seq 1 100); do mkdir -p src/d$d && for f in $(seq 1 200); do echo $f > src/d$d/f$f.txt; done; done && seq 1 2000 | sed s/^/line-/ > big.txt && git add -A && git -c user.name=fleet -c user.email=fleet@fleet commit -qm base && for i in $(seq 1 10); do echo x >> src/d1/f$i.txt; done && sed -i s/^line-1000$/line-changed/ big.txt; cd", "costed")
+def asked_changes(i):
+    started = time.monotonic()
+    files.sendall(frame(49, struct.pack(">i", 700 + i)))
+    said = []
+    while True:
+        kind, payload = answer(files)
+        if kind != 59:
+            raise SystemExit("changes %d were answered frame %d %r" % (i, kind, payload[:200]))
+        said.append(payload)
+        if payload[-1] == 0:
+            break
+    return (time.monotonic() - started) * 1000, b"".join(said)
+def costed(figures):
+    took = []
+    for i in range(20):
+        millis, said = asked_changes(len(figures) * 100 + i)
+        took.append(millis)
+    figures.append(p95(took))
+    return said
+figures = []
+said = costed(figures)
+changed = said.count(b"/fleet-cost/src/d1/f")
+if changed != 10:
+    raise SystemExit("the changes named %d of the 10 changed files" % changed)
+typed(61, "cd /home/dev/workspace/fleet-cost && mkdir -p node_modules/pkg && cd node_modules/pkg && seq 1 50000 | sed s/^/m/ | xargs touch && cd ../.. && echo node_modules/ > .gitignore; cd", "ignored")
+said = costed(figures)
+if said.count(b"/fleet-cost/node_modules") != 1 or b"/fleet-cost/node_modules/" in said:
+    raise SystemExit("the ignored folder was not named once, alone")
+diffs = []
+for i in range(20):
+    started = time.monotonic()
+    files.sendall(frame(60, struct.pack(">i", 900 + i) + text("/home/dev/workspace/fleet-cost/big.txt")))
+    shown = b""
+    while True:
+        kind, payload = answer(files)
+        if kind != 61:
+            raise SystemExit("diff %d was answered frame %d %r" % (i, kind, payload[:200]))
+        shown += payload[8:-1]
+        if payload[-1] == 1:
+            break
+    diffs.append((time.monotonic() - started) * 1000)
+if b"-line-1000\n+line-changed\n" not in shown:
+    raise SystemExit("the diff was not the change: %r" % shown[:400])
+print("changes over TCP from another box, p95: 20,000 tracked files with 10 changed %.0f ms (budget 250, ceiling 800), beside an ignored folder of 50,000 files %.0f ms (budget 250, ceiling 800), the diff of one file of 2,000 lines %.0f ms (budget 100, ceiling 300)" % (figures[0], figures[1], p95(diffs)))
+if figures[0] > 800 or figures[1] > 800 or p95(diffs) > 300:
+    raise SystemExit("a changes figure is over its ceiling")'
 
 # With "open", opens session NAME in acme's container over a ticket, starts it counting (n-1, n-2,
 # ...), prints the last number it saw and is killed, so the host sees its client vanish unsaid; with "back", waits up to 60 s for
@@ -2141,7 +2188,7 @@ storage() {
     http_token_door "$run" main client member 403 POST /v1/projects/acme/workspaces/eng-own/stop '' "belongs to 'eng'"
   check "$run" "obs, a viewer, creates no workspace on main" \
     http_token_door "$run" main obs viewer 403 POST /v1/projects/acme/workspaces '{"name":"obs-own"}' read_only_credential
-  check "$run" "from client, eng's ticket for her workspace on main opens a session in it over TCP that echoes a line, and her files ticket lists its home and its watch ticks; 50 listings of 5,000 entries, 50 reads of 256 KiB and 20 changes from client hold the ceilings (250, 200, 600 ms at p95); a save makes a file, never over a taken name or a newer version, two saves on one base from two connections write one, a folder is made, moved into and removed, and 20 checked saves of 100 KB hold 300 ms at p95" \
+  check "$run" "from client, eng's ticket for her workspace on main opens a session in it over TCP that echoes a line, and her files ticket lists its home and its watch ticks; 50 listings of 5,000 entries, 50 reads of 256 KiB and 20 changes from client hold the ceilings (250, 200, 600 ms at p95); a save makes a file, never over a taken name or a newer version, two saves on one base from two connections write one, a folder is made, moved into and removed, and 20 checked saves of 100 KB hold 300 ms at p95; what changed in 20,000 tracked files, and beside an ignored folder of 50,000, holds 800 ms, and a diff of 2,000 lines 300 ms, at p95, the ignored folder named once" \
     direct_terminal "$run" main client eng eng-own
   check "$run" "a command is left running in eng's workspace, as an open terminal would be" \
     on "$run" main "sudo sh -c 'nohup incus exec acme-eng-own -- sleep 600 > /dev/null 2>&1 &'"
