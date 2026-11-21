@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# The release's fold: every changes/*.md (but README.md) under a new '## VERSION' at the top of
+# CHANGELOG.md, in the order the files were added (the date of the commit that added each, oldest
+# first; a file no commit holds yet comes last; a tie goes by name), then the files are removed.
+# Nothing is written until every file has been read as an entry.
+
+readonly CHANGELOG=CHANGELOG.md
+readonly CHANGES=changes
+readonly NOT_YET_COMMITTED=99999999999
+section=""
+folded=""
+
+usage() {
+  echo "Usage: ci/changelog VERSION    fold changes/*.md into CHANGELOG.md under '## VERSION'" >&2
+  exit 2
+}
+
+added_at() {
+  local seconds
+  seconds=$(git log --diff-filter=A --format=%ct -- "$1" 2> /dev/null | tail -1)
+  echo "${seconds:-$NOT_YET_COMMITTED}"
+}
+
+entries() {
+  local file
+  for file in "$CHANGES"/*.md; do
+    [[ -f $file && $(basename "$file") != README.md ]] || continue
+    printf '%s\t%s\n' "$(added_at "$file")" "$file"
+  done | sort -t "$(printf '\t')" -k1,1n -k2,2 | cut -f2
+}
+
+# The file's lines from its first that is not blank to its last that is not.
+bullets_of() {
+  awk 'NF { for (; pending > 0; pending--) print ""; print; started = 1; next }
+       started { pending++ }' "$1"
+}
+
+fold() {
+  local version=$1 files file count=0
+  [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    echo "ci/changelog: '$version' is no version: give X.Y.Z, e.g. 0.75.0." >&2
+    exit 2
+  }
+  [[ -f $CHANGELOG ]] || { echo "ci/changelog: there is no $CHANGELOG to fold into." >&2; exit 1; }
+  if grep -qxF "## $version" "$CHANGELOG"; then
+    echo "ci/changelog: $CHANGELOG already has '## $version'; a version is folded once." >&2
+    exit 1
+  fi
+  files=$(entries)
+  if [[ -z $files ]]; then
+    echo "ci/changelog: $CHANGES/ holds no entry to fold into $version: each change adds $CHANGES/<short-slug>.md." >&2
+    exit 1
+  fi
+  section=$(mktemp)
+  folded=$(mktemp)
+  trap 'rm -f "$section" "$folded"' EXIT
+  printf '## %s\n\n' "$version" > "$section"
+  while IFS= read -r file; do
+    if [[ $(grep -m1 . "$file" || true) != "- "* ]]; then
+      echo "ci/changelog: $file is no entry: its first line must start a bullet, '- **…** …'." >&2
+      exit 1
+    fi
+    bullets_of "$file" >> "$section"
+    count=$((count + 1))
+  done <<< "$files"
+  printf '\n' >> "$section"
+  awk -v section="$section" '
+    !done && /^## / { while ((getline line < section) > 0) print line; done = 1 }
+    { print }
+    END { if (!done) { print ""; while ((getline line < section) > 0) print line } }
+  ' "$CHANGELOG" > "$folded"
+  cat "$folded" > "$CHANGELOG"
+  while IFS= read -r file; do
+    rm "$file"
+  done <<< "$files"
+  echo "ci/changelog: folded $count files of $CHANGES/ into '## $version' in $CHANGELOG and removed them."
+}
+
+[[ $# == 1 ]] || usage
+fold "$1"
