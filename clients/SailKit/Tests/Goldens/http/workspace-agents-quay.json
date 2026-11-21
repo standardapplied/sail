@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/projects/harbor/workspaces/quay/agents"
+  },
+  "response": {
+    "body": {
+      "offered": [],
+      "owner": "ana",
+      "project": "harbor",
+      "refusal": {
+        "action": "Open a shell in it, or start the agent in a workspace of your own.",
+        "code": "not_your_workspace",
+        "field_errors": [],
+        "message": "quay is ana's workspace, so an agent starts in it only as ana, with ana's login."
+      },
+      "running": true,
+      "schema_version": 1,
+      "workspace": "quay"
+    },
+    "status": 200
+  }
+}

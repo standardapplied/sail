@@ -430,6 +430,7 @@ class ClientGoldensTest {
           workspace("new", "Running", "uday", box.idOf("uday")));
       box.record(http, "workspaces-made", "GET", workspaces, dana, null);
       box.recordAgents(http, ana, dana);
+      box.recordDriveAgents(http);
       box.recordTemplates(
           http, dana, box.session("ike", "Ike", "ike@example.com", Role.ADMIN), ana, vik);
 
@@ -1567,6 +1568,68 @@ class ClientGoldensTest {
           ana,
           null);
       Acting.system(() -> new ProjectStore(db).upsert(HARBOR));
+    }
+
+    /**
+     * Records what can start in the drive's own workspaces of harbor, as uday asks, so the app's
+     * New Session frames name the rows they open from: dock, uday's and running, with a Claude Code
+     * login and a Codex login; pier, uday's and stopped; quay, ana's; dock with no Claude Code
+     * login stored, then with harbor installing Claude Code alone; and pier once its person is
+     * gone.
+     */
+    void recordDriveAgents(Map<String, String> goldens) throws Exception {
+      var uday = new AuthSessionStore(db).create(idOf("uday"), Duration.ofMinutes(30)).token();
+      holders.put(uday, "uday");
+      installs("claude-code, codex");
+      var claude = Harnesses.of("claude-code");
+      var codex = Harnesses.of("codex");
+      var logins = new FdeStore(db).logins();
+      var udayId = idOf("uday");
+      logins.store(udayId, claude, "default", "api-key", "sk-ant-api03-golden-uday-default");
+      logins.store(udayId, codex, "work", "api-key", "sk-proj-golden-uday-work");
+      incus
+          .onOk(
+              "incus list ^harbor-dock$", "[" + workspace("dock", "Running", "uday", udayId) + "]")
+          .onOk(
+              "incus list ^harbor-pier$", "[" + workspace("pier", "Stopped", "uday", udayId) + "]")
+          .onOk(
+              "incus list ^harbor-quay$",
+              "[" + workspace("quay", "Running", "ana", idOf("ana")) + "]");
+      var agents = "/v1/projects/" + PROJECT + "/workspaces/%s/agents";
+      record(goldens, "workspace-agents-dock", "GET", agents.formatted("dock"), uday, null);
+      record(goldens, "workspace-agents-pier", "GET", agents.formatted("pier"), uday, null);
+      record(goldens, "workspace-agents-quay", "GET", agents.formatted("quay"), uday, null);
+      logins.remove(udayId, claude, "default");
+      record(
+          goldens, "workspace-agents-dock-no-login", "GET", agents.formatted("dock"), uday, null);
+      logins.store(udayId, claude, "default", "api-key", "sk-ant-api03-golden-uday-default");
+      installs("claude-code");
+      record(
+          goldens,
+          "workspace-agents-dock-not-installed",
+          "GET",
+          agents.formatted("dock"),
+          uday,
+          null);
+      incus.onOk(
+          "incus list ^harbor-pier$", "[" + workspace("pier", "Stopped", "ben", "fde_ben") + "]");
+      record(
+          goldens, "workspace-agents-pier-owner-gone", "GET", agents.formatted("pier"), uday, null);
+      logins.remove(udayId, claude, "default");
+      logins.remove(udayId, codex, "work");
+      Acting.system(() -> new ProjectStore(db).upsert(HARBOR));
+    }
+
+    /** Defines harbor with its agent installation alone, installing {@code harnesses}. */
+    private void installs(String harnesses) {
+      Acting.system(
+          () ->
+              new ProjectStore(db)
+                  .upsert(
+                      TestDefinitions.yaml(
+                          "name: harbor\nagent:\n  type: claude-code\n  install: ["
+                              + harnesses
+                              + "]\n")));
     }
 
     private Path recordOf(String project) {

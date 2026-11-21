@@ -1,0 +1,104 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/projects/harbor/workspaces/dock/agents"
+  },
+  "response": {
+    "body": {
+      "offered": [
+        {
+          "display": "Claude Code",
+          "harness": "claude-code",
+          "inside": true,
+          "kinds": [
+            {
+              "how": "Create an API key in the Claude Console",
+              "kind": "api-key",
+              "label": "API key"
+            },
+            {
+              "how": "Run claude setup-token on a machine where Claude Code is signed in",
+              "kind": "token",
+              "label": "long-lived token"
+            }
+          ],
+          "login": {
+            "kind": "api-key",
+            "name": "default"
+          },
+          "mode_default": "default",
+          "modes": [
+            {
+              "about": "Starts as Claude Code starts by itself: the project's default mode, else Auto where it is available, else Manual.",
+              "label": "Claude Code's own",
+              "mode": "default"
+            },
+            {
+              "about": "Asks before edits, shell commands and network actions.",
+              "label": "Manual",
+              "mode": "manual"
+            },
+            {
+              "about": "Makes file edits and common filesystem commands without asking.",
+              "label": "Accept edits",
+              "mode": "acceptEdits"
+            },
+            {
+              "about": "Researches and proposes changes, and edits nothing until you approve the plan.",
+              "label": "Plan",
+              "mode": "plan"
+            },
+            {
+              "about": "Runs everything, with a classifier reviewing each action first; Manual where auto is not available.",
+              "label": "Auto",
+              "mode": "auto"
+            },
+            {
+              "about": "Refuses anything that would ask, and runs only what is approved beforehand.",
+              "label": "Don't ask",
+              "mode": "dontAsk"
+            },
+            {
+              "about": "Skips every permission prompt and safety check.",
+              "label": "Bypass permissions",
+              "mode": "bypassPermissions"
+            }
+          ]
+        },
+        {
+          "display": "Codex CLI",
+          "harness": "codex",
+          "inside": false,
+          "kinds": [
+            {
+              "how": "Create an API key at platform.openai.com/api-keys",
+              "kind": "api-key",
+              "label": "API key"
+            }
+          ],
+          "mode_default": "full-access",
+          "modes": [
+            {
+              "about": "Runs every command without asking and outside Codex's sandbox.",
+              "label": "Full access",
+              "mode": "full-access"
+            }
+          ],
+          "note": "Sail starts Codex CLI in a workspace with full access, running every command without asking and without its sandbox: that sandbox, bubblewrap, cannot start in a workspace's container.",
+          "refusal": {
+            "action": "An admin adds codex to harbor's agent install list and builds its template again.",
+            "code": "harness_not_installed",
+            "field_errors": [],
+            "message": "Codex CLI is not installed in harbor's workspaces; its agent installation lists Claude Code."
+          }
+        }
+      ],
+      "owner": "uday",
+      "project": "harbor",
+      "running": true,
+      "schema_version": 1,
+      "workspace": "dock"
+    },
+    "status": 200
+  }
+}

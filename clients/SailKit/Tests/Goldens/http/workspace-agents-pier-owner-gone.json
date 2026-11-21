@@ -1,0 +1,39 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/projects/harbor/workspaces/pier/agents"
+  },
+  "response": {
+    "body": {
+      "offered": [],
+      "project": "harbor",
+      "refusal": {
+        "action": "Delete it meanwhile with: project workspace delete harbor pier --force.",
+        "code": "owner_gone",
+        "field_errors": [],
+        "message": "pier is ben's workspace, and ben is no longer active here, so no agent starts in it until the box's pass leaves it nobody's.",
+        "remedy": [
+          {
+            "text": "Delete it meanwhile with: "
+          },
+          {
+            "args": [
+              "harbor",
+              "pier",
+              "--force"
+            ],
+            "run": "sail",
+            "verb": "project workspace delete"
+          },
+          {
+            "text": "."
+          }
+        ]
+      },
+      "running": false,
+      "schema_version": 1,
+      "workspace": "pier"
+    },
+    "status": 200
+  }
+}

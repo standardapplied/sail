@@ -283,6 +283,29 @@ class TerminalTicketsTest {
             .get("agent"));
   }
 
+  /** A session of a harness this binary does not know is listed under the harness's own name. */
+  @Test
+  void anAgentOfAnUnknownHarnessIsListedUnderItsOwnName() {
+    var unknown =
+        new PtyMessage.SessionInfo(
+            "app-u",
+            "i-u",
+            true,
+            0,
+            "",
+            "",
+            List.of("tide"),
+            "acme",
+            "try",
+            "ana",
+            1L,
+            "",
+            new PtyMessage.Agent("tide-cli", "default", true));
+    assertEquals(
+        Map.of("harness", "tide-cli", "display", "tide-cli", "mode", "default", "login", "inside"),
+        WorkspaceSessionsResponse.Session.of(unknown).toMap().get("agent"));
+  }
+
   private static List<String> names(WorkspaceSessionsResponse listed) {
     return listed.sessions().stream().map(s -> s.name()).toList();
   }
