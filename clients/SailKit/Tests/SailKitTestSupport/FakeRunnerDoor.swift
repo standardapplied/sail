@@ -312,10 +312,12 @@ public final class FakeRunnerDoor: Sendable {
                     break
                 }
                 let end = min(file.bytes.count, Int(offset) + Int(min(length, Int64(Int32.max))))
-                var at = Int(offset)
+                var at = Int(offset), hash = SHA256()
                 repeat {
-                    let next = min(at + 256 * 1024, end)
-                    answer(.filesData(id: id, version: file.version, bytes: Array(file.bytes[min(at, end) ..< next]), eof: next >= file.bytes.count), on: connection)
+                    let next = min(at + 256 * 1024, end), chunk = Array(file.bytes[min(at, end) ..< next]), last = next >= end
+                    hash.update(chunk)
+                    let digest = last ? hash.finalize().map { String(format: "%02x", $0) }.joined() : ""
+                    answer(.filesData(id: id, version: file.version, bytes: chunk, eof: next >= file.bytes.count, whole: last && offset == 0 && next >= file.bytes.count, digest: digest), on: connection)
                     at = next
                 } while at < end
             case let .filesList(id, path):

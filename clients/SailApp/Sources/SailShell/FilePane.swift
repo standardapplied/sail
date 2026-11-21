@@ -203,7 +203,7 @@ final class FilePane: NSView, NSTextViewDelegate {
 
     static func answer(_ frame: Frame) -> OpenFile.Answer? {
         switch frame {
-        case let .filesData(id, version, bytes, eof): .data(id: id, version: version, bytes: bytes, eof: eof, whole: eof, digest: "")
+        case let .filesData(id, version, bytes, eof, whole, digest): .data(id: id, version: version, bytes: bytes, eof: eof, whole: whole, digest: digest)
         case let .filesRefused(id, kind, message): .refused(id: id, kind: kind, message: message)
         default: nil
         }

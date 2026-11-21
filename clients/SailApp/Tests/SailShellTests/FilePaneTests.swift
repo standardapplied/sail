@@ -4,6 +4,7 @@ import SailFiles
 import SailKitTestSupport
 import SailLook
 @testable import SailShell
+import SailTerminal
 import SailTerminalWire
 import SailWorkbench
 import Testing
@@ -43,6 +44,9 @@ import Testing
         let terminal = try #require(bench.focused)
         #expect(pane.frame.minX >= terminal.frame.maxX && pane.frame.width >= WorkbenchView.filePaneLeast, "the pane at \(pane.frame) is not beside the terminal at \(terminal.frame)")
         #expect(pane.file.clean)
+        var hash = SHA256()
+        hash.update(Array("one\ntwo\n".utf8))
+        #expect(pane.file.digest == hash.finalize().map { String(format: "%02x", $0) }.joined(), "the base is not the read's digest: \(pane.file.digest)")
     }
 
     /// F14: clean, the workspace's change is shown; typed in, the dot is on the title and the row,
