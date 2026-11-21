@@ -108,6 +108,8 @@ public struct OpenFile: Sendable {
     private var base: [UInt8] = []
     private var baseUnits = 0
     private var text = ""
+    /// Whether the pane was typed in since `text` was last given.
+    private var textStale = false
     private var reading: (id: Int32, why: Why, bytes: [UInt8], shown: Int)?
     private var saving: (id: Int32, bytes: [UInt8])?
     /// A save whose answer never came: the next read decides it (M32).
@@ -152,11 +154,23 @@ public struct OpenFile: Sendable {
         return Step(asks: reading.map { [.cancel(id: $0.id)] } ?? [])
     }
 
+    /// The pane's text is now `units` UTF-16 units long, the text itself not read: a length other
+    /// than the base's is unsaved for certain, decided here; nil for the base's own length, which
+    /// only the text decides (``edited(_:)``). A key in a large file costs no copy of its text.
+    public mutating func edited(units: Int) -> Step? {
+        guard canType else { return Step() }
+        guard units != baseUnits else { return nil }
+        clean = false
+        textStale = true
+        return Step()
+    }
+
     /// The pane's text is now `text`: clean exactly when its bytes are the base's. Back to clean
     /// with the workspace's newer bytes known, it takes them and follows again (M50).
     public mutating func edited(_ text: String) -> Step {
         guard canType else { return Step() }
         self.text = text
+        textStale = false
         clean = equalsBase(text)
         guard clean else { return Step() }
         if note == .changed, let theirs { return take(theirs, digest: theirsDigest) }
@@ -196,20 +210,23 @@ public struct OpenFile: Sendable {
         return Step(asks: [read(whole ? .follow : .open)])
     }
 
-    /// ⌘S: the pane's bytes, written only while the file is at the digest read (M26, M27); a clean
-    /// pane holds the bytes it read, and writes nothing.
-    public mutating func save() -> Step {
-        clean ? Step() : write(against: digest, seen: version)
+    /// ⌘S of the pane's `text`, written only while the file is at the digest read (M26, M27); a
+    /// clean pane holds the bytes it read, and writes nothing.
+    public mutating func save(_ text: String) -> Step {
+        _ = edited(text)
+        return clean ? Step() : write(against: digest, seen: version)
     }
 
-    /// Keep Mine: the pane's bytes, written against the version the sheet showed.
-    public mutating func keepMine() -> Step {
-        write(against: theirsDigest, seen: theirsVersion)
+    /// Keep Mine: the pane's `text`, written against the version the sheet showed.
+    public mutating func keepMine(_ text: String) -> Step {
+        _ = edited(text)
+        return write(against: theirsDigest, seen: theirsVersion)
     }
 
-    /// Save Anyway, for a deleted file: made anew, never replacing one (M28).
-    public mutating func saveAnyway() -> Step {
-        write(against: Self.absent, seen: "")
+    /// Save Anyway, for a deleted file: the pane's `text`, made anew, never replacing one (M28).
+    public mutating func saveAnyway(_ text: String) -> Step {
+        _ = edited(text)
+        return write(against: Self.absent, seen: "")
     }
 
     /// Keep Theirs: the workspace's bytes, as the sheet showed them.
@@ -224,6 +241,7 @@ public struct OpenFile: Sendable {
         clean = true
         note = .none
         text = String(decoding: base, as: UTF8.self)
+        textStale = false
         return Step(asks: [read(.follow)], events: [.replaced(text)])
     }
 
@@ -389,6 +407,7 @@ public struct OpenFile: Sendable {
     private mutating func take(_ bytes: [UInt8], digest: String) -> Step {
         state = .text
         text = String(decoding: bytes, as: UTF8.self)
+        textStale = false
         adopt(bytes, digest: digest)
         note = .none
         theirs = nil
@@ -400,7 +419,7 @@ public struct OpenFile: Sendable {
         self.digest = digest
         baseUnits = String(decoding: bytes, as: UTF8.self).utf16.count
         if !whole { text = String(decoding: bytes, as: UTF8.self) }
-        clean = equalsBase(text)
+        clean = !textStale && equalsBase(text)
         if clean { theirs = nil }
     }
 

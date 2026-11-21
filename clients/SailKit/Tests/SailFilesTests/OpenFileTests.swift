@@ -140,6 +140,16 @@ import Testing
         #expect(!pane.file.clean, "a decomposed é compared equal to the composed one read")
     }
 
+    /// A key that changes the text's length is unsaved for certain, with no text read; the same
+    /// length as the base needs the text, and the model says so.
+    @Test func aKeyThatChangesTheLengthIsDecidedWithoutTheText() {
+        var pane = Self.opened("one\n")
+        #expect(pane.file.edited(units: 5) == OpenFile.Step() && !pane.file.clean)
+        #expect(pane.file.edited(units: 4) == nil, "the base's length was decided without the text")
+        pane.type("one\n")
+        #expect(pane.file.clean)
+    }
+
     /// M54: CRLF, a BOM, mixed endings and no final newline come back byte for byte.
     @Test func whatIsReadIsWhatIsSavedByteForByte() throws {
         let read: [UInt8] = [0xEF, 0xBB, 0xBF] + Array("one\r\ntwo\nthree\r\nno newline".utf8)
@@ -149,7 +159,7 @@ import Testing
         pane.type(text + "x")
         pane.type(text)
         pane.type(text + "y")
-        pane.take(pane.file.save())
+        pane.take(pane.file.save(pane.text))
         let write = try #require(pane.lastWrite)
         #expect(write.bytes == read + Array("y".utf8) && write.base == Self.digest(read))
     }
@@ -161,7 +171,7 @@ import Testing
         pane.answer(bytes, chunk: chunk)
         guard pane.file.canType else { return nil }
         if !pane.text.utf8.elementsEqual(bytes) { return "the text shown is not the bytes read" }
-        if !pane.file.save().asks.isEmpty { return "a save with no edit wrote" }
+        if !pane.file.save(pane.text).asks.isEmpty { return "a save with no edit wrote" }
         let text = pane.text, middle = text.index(text.startIndex, offsetBy: text.count / 2)
         for typed in [text + "x", String(text[..<middle]) + "x" + String(text[middle...])] {
             pane.type(typed)
@@ -169,7 +179,7 @@ import Testing
             if !pane.file.clean { return "a character typed and deleted is not clean" }
         }
         pane.type(text + "x")
-        guard case let .write(_, _, base, _, written)? = pane.file.save().asks.first else { return "a save after an edit wrote nothing" }
+        guard case let .write(_, _, base, _, written)? = pane.file.save(pane.text).asks.first else { return "a save after an edit wrote nothing" }
         return written == bytes + Array("x".utf8) && base == OpenFileTests.digest(bytes) ? nil : "the bytes saved are not the bytes read and the edit"
     }
 
@@ -194,13 +204,13 @@ import Testing
         var pane = Pane(size: bytes.count)
         pane.answer(bytes)
         #expect(pane.file.canType && pane.text.utf8.count == bytes.count)
-        #expect(pane.file.save().asks.isEmpty, "a save with no edit wrote")
+        #expect(pane.file.save(pane.text).asks.isEmpty, "a save with no edit wrote")
         let text = pane.text
         pane.type(text + "x")
         pane.type(text)
         #expect(pane.file.clean, "a character typed and deleted is not clean")
         pane.type(text + "x")
-        guard case let .write(_, _, base, _, written)? = pane.file.save().asks.first else {
+        guard case let .write(_, _, base, _, written)? = pane.file.save(pane.text).asks.first else {
             Issue.record("a save after an edit wrote nothing")
             return
         }
@@ -338,7 +348,7 @@ import Testing
     @Test func aSaveOnAMatchingBase() throws {
         var pane = Self.opened("one\n")
         pane.type("one\ntwo\n")
-        pane.take(pane.file.save())
+        pane.take(pane.file.save(pane.text))
         let write = try #require(pane.lastWrite)
         #expect(write.base == Self.digest(Array("one\n".utf8)) && write.bytes == Array("one\ntwo\n".utf8))
         pane.type("one\ntwo\nthree\n")
@@ -353,12 +363,12 @@ import Testing
     @Test func aSaveOverANewerFileWritesNothingAndShowsBoth() throws {
         var pane = Self.opened("one\n")
         pane.type("mine\n")
-        pane.take(pane.file.save())
+        pane.take(pane.file.save(pane.text))
         let first = try #require(pane.lastWrite)
         pane.take(pane.file.receive(.conflict(id: first.id, digest: "t1")))
         pane.answer(Array("theirs\n".utf8), version: "v2")
         #expect(pane.said.contains(.conflict(theirs: "theirs\n")) && pane.text == "mine\n" && !pane.file.clean)
-        pane.take(pane.file.keepMine())
+        pane.take(pane.file.keepMine(pane.text))
         let again = try #require(pane.lastWrite)
         #expect(again.base == Self.digest(Array("theirs\n".utf8)) && again.bytes == Array("mine\n".utf8), "Keep Mine did not save against the version shown")
         pane.take(pane.file.receive(.conflict(id: again.id, digest: "t2")))
@@ -373,14 +383,14 @@ import Testing
     @Test func aLostAnswerIsDecidedByTheNextRead() throws {
         var saved = Self.opened("one\n")
         saved.type("mine\n")
-        saved.take(saved.file.save())
+        saved.take(saved.file.save(saved.text))
         saved.file.disconnected()
         saved.take(saved.file.admitted())
         saved.answer(Array("mine\n".utf8), version: "v2")
         #expect(saved.file.clean && saved.file.note == .none && saved.said.contains(.saved))
         var lost = Self.opened("one\n")
         lost.type("mine\n")
-        lost.take(lost.file.save())
+        lost.take(lost.file.save(lost.text))
         lost.file.disconnected()
         lost.take(lost.file.admitted())
         lost.answer(Array("theirs\n".utf8), version: "v2")
@@ -392,12 +402,12 @@ import Testing
     @Test func aSaveRefusedIsSaidAndAFailedOneIsReadAgain() throws {
         var full = Self.opened("one\n")
         full.type("mine\n")
-        full.take(full.file.save())
+        full.take(full.file.save(full.text))
         full.take(full.file.receive(.refused(id: try #require(full.lastWrite).id, kind: Open(rawValue: "no_space"), message: "dock's disk is full (12 KB free). Nothing was changed.")))
         #expect(full.said.last == .saveRefused("dock's disk is full (12 KB free). Nothing was changed.") && !full.file.clean)
         var failed = Self.opened("one\n")
         failed.type("mine\n")
-        failed.take(failed.file.save())
+        failed.take(failed.file.save(failed.text))
         let reads = failed.asked.count
         failed.take(failed.file.receive(.refused(id: try #require(failed.lastWrite).id, kind: .known(.failed), message: "Sail could not tell whether tide.ts was saved; read it again.")))
         #expect(failed.asked.count == reads + 1, "a save of unknown outcome was not read again")
@@ -410,7 +420,7 @@ import Testing
     @Test func aSaveCarriesTheVersionItsBaseWasReadAt() throws {
         var pane = Self.opened("one\n")
         pane.type("mine\n")
-        pane.take(pane.file.save())
+        pane.take(pane.file.save(pane.text))
         guard case let .write(first, _, _, seen, _)? = pane.asked.last else {
             Issue.record("no write")
             return
@@ -418,7 +428,7 @@ import Testing
         #expect(seen == "v1")
         pane.take(pane.file.receive(.conflict(id: first, digest: "t1")))
         pane.answer(Array("theirs\n".utf8), version: "v2")
-        pane.take(pane.file.keepMine())
+        pane.take(pane.file.keepMine(pane.text))
         guard case let .write(again, _, base, mine, _)? = pane.asked.last else {
             Issue.record("Keep Mine wrote nothing")
             return
@@ -433,10 +443,10 @@ import Testing
     @Test func aSaveOfADeletedFileAsksBeforeMakingItAnew() throws {
         var pane = Self.opened("one\n")
         pane.type("mine\n")
-        pane.take(pane.file.save())
+        pane.take(pane.file.save(pane.text))
         pane.take(pane.file.receive(.conflict(id: try #require(pane.lastWrite).id, digest: OpenFile.absent)))
         #expect(pane.file.note == .deletedWhileTyped && pane.said.last == .gone)
-        pane.take(pane.file.saveAnyway())
+        pane.take(pane.file.saveAnyway(pane.text))
         #expect(pane.lastWrite?.base == OpenFile.absent && pane.lastWrite?.bytes == Array("mine\n".utf8))
     }
 
@@ -446,7 +456,7 @@ import Testing
         var pane = Pane(size: 300_000)
         let id = try #require(pane.lastRead)
         pane.take(pane.file.receive(.data(id: id, version: "v1", bytes: [UInt8](repeating: 0x61, count: 262_144), eof: false, whole: false, digest: "")))
-        pane.take(pane.file.save())
+        pane.take(pane.file.save(pane.text))
         pane.take(pane.file.edited("typed early"))
         #expect(pane.file.clean, "a key was taken before the file was whole")
         pane.answer([UInt8](repeating: 0x61, count: 300_000))
@@ -465,7 +475,7 @@ import Testing
         var pane = Self.opened("one\n")
         pane.type("mine\n")
         pane.file.disconnected()
-        let step = pane.file.save()
+        let step = pane.file.save(pane.text)
         #expect(step.asks.isEmpty && step.events == [.notConnected] && !pane.file.clean)
     }
 }

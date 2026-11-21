@@ -10,7 +10,7 @@ import SailTerminalWire
 /// folder quiet, with a 6 pt dot while unsaved; under it the one line when the file changed or went
 /// underneath; then the text, or the sentence saying why there is none.
 @MainActor
-final class FilePane: NSView, NSTextViewDelegate {
+final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     static let titleHeight = 30.0, lineHeight = 30.0, points = 12.0, barFor = 10.0, updatedFor = 3.0
 
     private(set) var file: OpenFile
@@ -142,6 +142,7 @@ final class FilePane: NSView, NSTextViewDelegate {
         editor.isHorizontallyResizable = false
         editor.autoresizingMask = [.width]
         editor.delegate = self
+        editor.textStorage?.delegate = self
         editor.onKeys = { [weak self] in self?.heldKeysLast = true }
         scroll.documentView = editor
         scroll.hasVerticalScroller = true
@@ -233,7 +234,7 @@ final class FilePane: NSView, NSTextViewDelegate {
 
     /// ⌘S: the checked save; not connected, it says so and writes nothing.
     @objc func saveDocument(_: Any?) {
-        apply(file.save())
+        apply(file.save(editor.string))
     }
 
     /// Closing: an unsaved pane asks Save, Discard, Cancel first.
@@ -293,11 +294,11 @@ final class FilePane: NSView, NSTextViewDelegate {
     }
 
     func keepMine() {
-        apply(file.keepMine())
+        apply(file.keepMine(editor.string))
     }
 
     func saveAnyway() {
-        apply(file.saveAnyway())
+        apply(file.saveAnyway(editor.string))
     }
 
     @objc private func copyPathPressed() {
@@ -333,9 +334,17 @@ final class FilePane: NSView, NSTextViewDelegate {
         editor.scrollRangeToVisible(NSRange(location: location, length: 0))
     }
 
+    /// A key: decided by the text's length, the text read only when its length is back to the base's.
     func textDidChange(_: Notification) {
         guard !applying else { return }
-        apply(file.edited(editor.string))
+        apply(file.edited(units: editor.textStorage?.length ?? 0) ?? file.edited(editor.string))
+    }
+
+    /// The ruler forgets its line count from the edited place on.
+    nonisolated func textStorage(_: NSTextStorage, didProcessEditing mask: NSTextStorageEditActions, range: NSRange, changeInLength _: Int) {
+        guard mask.contains(.editedCharacters) else { return }
+        let location = range.location
+        MainActor.assumeIsolated { numbers.forget(from: location) }
     }
 
     // MARK: What it shows
@@ -346,8 +355,8 @@ final class FilePane: NSView, NSTextViewDelegate {
             switch event {
             case let .arrived(piece): append(piece)
             case .whole:
-                editor.isEditable = true
-                numbers.invalidate()
+                wholeArrived = true
+                editableWhenIn()
             case let .replaced(text): replace(with: text)
             case .saved:
                 said = nil
@@ -372,10 +381,45 @@ final class FilePane: NSView, NSTextViewDelegate {
         show()
     }
 
+    /// Text arrived but not yet in the view, in slices: one slice a turn, so a 256 KiB chunk never
+    /// holds the main thread for its whole append; the first goes in at once, for the first screen.
+    private var slices: [String] = []
+    private var wholeArrived = false
+    private static let slice = 32 * 1024
+
     private func append(_ piece: String) {
+        let text = piece as NSString
+        var at = 0
+        while at < text.length {
+            let range = text.rangeOfComposedCharacterSequences(for: NSRange(location: at, length: min(Self.slice, text.length - at)))
+            slices.append(text.substring(with: range))
+            at = NSMaxRange(range)
+        }
+        if editor.textStorage?.length == 0 { appendSlice() }
+        scheduleSlice()
+    }
+
+    private func scheduleSlice() {
+        guard !slices.isEmpty else { return editableWhenIn() }
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                self?.appendSlice()
+                self?.scheduleSlice()
+            }
+        }
+    }
+
+    private func appendSlice() {
+        guard !slices.isEmpty else { return }
         applying = true
         defer { applying = false }
-        editor.textStorage?.append(NSAttributedString(string: piece, attributes: textAttributes))
+        editor.textStorage?.append(NSAttributedString(string: slices.removeFirst(), attributes: textAttributes))
+    }
+
+    /// Keys only once the whole file has arrived and is in the view (F15).
+    private func editableWhenIn() {
+        guard wholeArrived, slices.isEmpty, !editor.isEditable, file.canType else { return }
+        editor.isEditable = true
         numbers.invalidate()
     }
 
@@ -579,6 +623,15 @@ final class LineNumbers: NSRulerView {
     func invalidate() {
         starts = [0]
         counted = 0
+        needsDisplay = true
+    }
+
+    /// The text changed at `location`: the lines counted before it stand, the rest are counted again.
+    func forget(from location: Int) {
+        while starts.count > 1, let last = starts.last, last > location {
+            starts.removeLast()
+        }
+        counted = min(counted, starts.last ?? 0)
         needsDisplay = true
     }
 
