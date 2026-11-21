@@ -291,6 +291,8 @@ struct Step: Decodable {
     var filesNew: String?
     /// The files panel's row of this name clicked as a person clicks it.
     var filesClick: String?
+    /// The files panel's row of this name double-clicked on its name as a person does.
+    var filesDoubleClick: String?
     /// The files panel's line's button of this title clicked.
     var filesButton: String?
     /// The door holds every listing from now on (true) or answers them (false).
