@@ -64,6 +64,8 @@ class CiChangesTest {
     "clients/SailApp/App.swift, pull_request, false, false, true",
     "clients/SailApp/App.swift CHANGELOG.md, pull_request, false, false, true",
     "ARCHITECTURE.md CHANGELOG.md, pull_request, false, false, false",
+    "changes/a-change.md, pull_request, false, false, false",
+    "clients/SailApp/App.swift changes/a-change.md, pull_request, false, false, true",
     ".github/workflows/clients.yml, pull_request, false, false, true",
     "clients/SailKit/Kit.swift, pull_request, false, true, true",
     "clients/SailKit/Kit.swift clients/SailApp/App.swift, pull_request, false, true, true",

@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# A change's entry is a file of changes/, and only the release writes CHANGELOG.md.
+#
+# ci/changelog VERSION folds every changes/*.md (but README.md) under a new '## VERSION' at the
+# top of CHANGELOG.md, in the order the files were added: the date of the commit that added each,
+# oldest first (so the fold needs the full history: in a shallow clone every file ties), a file no
+# commit holds yet last, a tie by name; renaming a file re-dates it. The files are then removed.
+# Nothing is written until every file has been read as an entry.
+#
+# ci/changelog check [BASE], for a pull request (ci/check changelog): refuses a change from BASE
+# (default: where it left origin/main) that edits CHANGELOG.md, and a changes/ folder holding
+# anything the fold would refuse. A base that has no changes/README.md yet is not held to it.
+#
+# ci/changelog released VERSION, for a release tag: refuses unless the tagged commit folded, its
+# changes/ holding no entry and CHANGELOG.md's first version being VERSION.
+
+readonly CHANGELOG=CHANGELOG.md
+readonly CHANGES=changes
+readonly README=$CHANGES/README.md
+readonly NOT_YET_COMMITTED=99999999999
+section=""
+folded=""
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  ci/changelog VERSION             fold changes/*.md into CHANGELOG.md under '## VERSION'
+  ci/changelog check [BASE]        refuse a change that edits CHANGELOG.md or a malformed entry
+  ci/changelog released VERSION    refuse a release tag whose commit did not fold
+EOF
+  exit 2
+}
+
+refuse() {
+  echo "ci/changelog: $1" >&2
+  exit 1
+}
+
+require_version() {
+  [[ $1 =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    echo "ci/changelog: '$1' is no version: give X.Y.Z, e.g. 0.75.0." >&2
+    exit 2
+  }
+}
+
+added_at() {
+  local seconds
+  seconds=$(git log --diff-filter=A --format=%ct -- "$1" 2> /dev/null | tail -1)
+  echo "${seconds:-$NOT_YET_COMMITTED}"
+}
+
+entries() {
+  local file
+  for file in "$CHANGES"/*.md; do
+    [[ -f $file && $file != "$README" ]] || continue
+    printf '%s\t%s\n' "$(added_at "$file")" "$file"
+  done | sort -t "$(printf '\t')" -k1,1n -k2,2 | cut -f2
+}
+
+# Every entry is a file directly in changes/, named *.md, whose first line that is not blank starts
+# a bullet, with Unix line ends.
+require_entries() {
+  local stray file
+  [[ -d $CHANGES ]] || return 0
+  stray=$(find "$CHANGES" -mindepth 1 -maxdepth 1 \( ! -type f -o ! -name '*.md' \) -print -quit)
+  [[ -z $stray ]] || refuse "$stray is not an entry file: $CHANGES/ holds only <short-slug>.md files, directly in it."
+  for file in "$CHANGES"/*.md; do
+    [[ -f $file && $file != "$README" ]] || continue
+    if grep -q "$(printf '\r')" "$file"; then
+      refuse "$file has Windows line ends (CRLF): save it with LF only."
+    fi
+    [[ $(grep -m1 . "$file" || true) == "- "* ]] ||
+      refuse "$file is no entry: its first line must start a bullet, '- **…** …'."
+  done
+}
+
+# The file's lines from its first that is not blank to its last that is not.
+bullets_of() {
+  awk 'NF { for (; pending > 0; pending--) print ""; print; started = 1; next }
+       started { pending++ }' "$1"
+}
+
+fold() {
+  local version=$1 files file count=0
+  require_version "$version"
+  [[ -f $CHANGELOG ]] || refuse "there is no $CHANGELOG to fold into."
+  grep -qxF "## $version" "$CHANGELOG" && refuse "$CHANGELOG already has '## $version'; a version is folded once."
+  require_entries
+  files=$(entries)
+  [[ -n $files ]] || refuse "$CHANGES/ holds no entry to fold into $version: each change adds $CHANGES/<short-slug>.md."
+  section=$(mktemp)
+  folded=$(mktemp)
+  trap 'rm -f "$section" "$folded"' EXIT
+  printf '## %s\n\n' "$version" > "$section"
+  while IFS= read -r file; do
+    bullets_of "$file" >> "$section"
+    count=$((count + 1))
+  done <<< "$files"
+  printf '\n' >> "$section"
+  awk -v section="$section" '
+    !done && /^## / { while ((getline line < section) > 0) print line; done = 1 }
+    { print }
+    END { if (!done) { print ""; while ((getline line < section) > 0) print line } }
+  ' "$CHANGELOG" > "$folded"
+  cat "$folded" > "$CHANGELOG"
+  while IFS= read -r file; do
+    rm "$file"
+  done <<< "$files"
+  echo "ci/changelog: folded $count files of $CHANGES/ into '## $version' in $CHANGELOG and removed them."
+}
+
+check() {
+  local base=${1:-}
+  [[ -n $base ]] || base=$(git merge-base origin/main HEAD)
+  git cat-file -e "$base:$README" 2> /dev/null || return 0
+  git diff --quiet "$base" -- "$CHANGELOG" ||
+    refuse "this change edits $CHANGELOG, which only the release writes. Put its entry in a file of its own instead, $CHANGES/<short-slug>.md, holding its bullets as they would read under the version heading ($README)."
+  require_entries
+}
+
+released() {
+  local version=$1 left first
+  require_version "$version"
+  left=$(entries | grep -c . || true)
+  if [[ $left != 0 ]]; then
+    [[ $left == 1 ]] && left="1 entry" || left="$left entries"
+    refuse "$CHANGES/ still holds $left, so $version's bump commit did not fold them: run 'ci/changelog $version' in the version bump's commit, then tag that commit."
+  fi
+  first=$(awk '/^## / { print $2; exit }' "$CHANGELOG")
+  [[ $first == "$version" ]] ||
+    refuse "$CHANGELOG's first version is ${first:-none}, not $version: run 'ci/changelog $version' in the version bump's commit, then tag that commit."
+  echo "ci/changelog: $CHANGELOG's first version is $version and $CHANGES/ holds no entry."
+}
+
+case ${1:-} in
+  check) shift; [[ $# -le 1 ]] || usage; check "$@" ;;
+  released) [[ $# == 2 ]] || usage; released "$2" ;;
+  "" | -*) usage ;;
+  *) [[ $# == 1 ]] || usage; fold "$1" ;;
+esac
