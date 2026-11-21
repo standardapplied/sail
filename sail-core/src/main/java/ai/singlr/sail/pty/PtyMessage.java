@@ -410,6 +410,41 @@ public sealed interface PtyMessage {
   /** Request {@code id} refused, in a sentence naming the file and the reason. */
   record FilesRefused(int id, FilesRefusal kind, String message) implements PtyMessage {}
 
+  /**
+   * Saves {@code size} bytes as file {@code path}, then sent as {@link PutChunk} frames of the same
+   * {@code id}, a window of two unacknowledged ({@link PutAck}), and a {@link PutEnd} with their
+   * SHA-256: written over the file only while it is still at version {@code base}, or made anew
+   * only while no name {@code path} exists when {@code base} is {@link #ABSENT}. Answered {@link
+   * FilesWritten}, {@link FilesConflict} or {@link FilesRefused}; cancelled by {@link FilesCancel}.
+   */
+  record FilesWrite(int id, String path, String base, long size) implements PtyMessage {}
+
+  /**
+   * Makes {@code path} anew, a folder when {@code folder}, else an empty file: {@link FilesDone}.
+   */
+  record FilesCreate(int id, String path, boolean folder) implements PtyMessage {}
+
+  /** Moves {@code from} to {@code to}, never over a name already there: {@link FilesDone}. */
+  record FilesMove(int id, String from, String to) implements PtyMessage {}
+
+  /** Removes {@code path}, a folder with all it holds: {@link FilesDone}. */
+  record FilesRemove(int id, String path) implements PtyMessage {}
+
+  /** Write {@code id} is the file's whole content now, at {@code version}. */
+  record FilesWritten(int id, String version) implements PtyMessage {}
+
+  /**
+   * Write {@code id} wrote nothing: the file is at {@code version} now, not the one it was based
+   * on, or {@link #ABSENT} when it is gone; the person chooses.
+   */
+  record FilesConflict(int id, String version) implements PtyMessage {}
+
+  /** Create, move or remove {@code id} is done. */
+  record FilesDone(int id) implements PtyMessage {}
+
+  /** The version of a file that is not there: a write's base, or a conflict's present. */
+  String ABSENT = "absent";
+
   /** The most entries a listing carries. */
   int LISTING_CAP = 50_000;
 
@@ -463,6 +498,11 @@ public sealed interface PtyMessage {
     NOT_A_FILE,
     LOOP,
     CHANGED,
+    EXISTS,
+    NO_SPACE,
+    TOO_LARGE,
+    PARTLY_REMOVED,
+    UNSAFE,
     FAILED;
 
     /** The kind as the wire names it. */

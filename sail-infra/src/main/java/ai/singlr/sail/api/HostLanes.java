@@ -429,8 +429,8 @@ final class HostLanes {
                 + workspace
                 + " of "
                 + project
-                + " is stopped, and reading its files does"
-                + " not start it.",
+                + " is stopped, and reading or changing its"
+                + " files does not start it.",
             Remedy.of(
                 "Start it with: ",
                 Remedy.sail("project workspace start", project, workspace),

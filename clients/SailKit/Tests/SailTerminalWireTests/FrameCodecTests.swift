@@ -6,7 +6,7 @@ import Testing
 @Suite struct FrameCodecTests {
     @Test func everyFrameTheHostWritesDecodesAsItsTypeAndEncodesToTheSameBytes() throws {
         let frames = try Goldens.frames()
-        #expect(frames.count == 45)
+        #expect(frames.count == 52)
         for (name, wire) in frames {
             let frame = try FrameCodec.decode(payload: wire.dropFirst(4))
             #expect(messageName(of: frame) == name)
@@ -83,6 +83,13 @@ import Testing
         #expect(frames["FilesChanged"] == .filesChanged(paths: ["/home/dev/workspace", "/home/dev/workspace/App.java"]))
         #expect(frames["FilesTick"] == .filesTick)
         #expect(frames["FilesRefused"] == .filesRefused(id: 4, kind: .known(.loop), message: "/home/dev/workspace/self leads back to itself."))
+        #expect(frames["FilesWrite"] == .filesWrite(id: 5, path: "/home/dev/workspace/App.java", base: "51:10:12:7.0:7.0", size: 13))
+        #expect(frames["FilesCreate"] == .filesCreate(id: 6, path: "/home/dev/workspace/notes", folder: true))
+        #expect(frames["FilesMove"] == .filesMove(id: 7, from: "/home/dev/workspace/a.md", to: "/home/dev/workspace/b.md"))
+        #expect(frames["FilesRemove"] == .filesRemove(id: 8, path: "/home/dev/workspace/old"))
+        #expect(frames["FilesWritten"] == .filesWritten(id: 5, version: "51:11:13:8.0:8.0"))
+        #expect(frames["FilesConflict"] == .filesConflict(id: 5, version: "absent"))
+        #expect(frames["FilesDone"] == .filesDone(id: 6))
         #expect(frames["Err"] == .refused(HostRefusal(
             message: "You do not hold the write token.",
             remedy: [
@@ -322,6 +329,13 @@ func messageName(of frame: Frame) -> String {
     case .filesChanged: "FilesChanged"
     case .filesTick: "FilesTick"
     case .filesRefused: "FilesRefused"
+    case .filesWrite: "FilesWrite"
+    case .filesCreate: "FilesCreate"
+    case .filesMove: "FilesMove"
+    case .filesRemove: "FilesRemove"
+    case .filesWritten: "FilesWritten"
+    case .filesConflict: "FilesConflict"
+    case .filesDone: "FilesDone"
     }
 }
 

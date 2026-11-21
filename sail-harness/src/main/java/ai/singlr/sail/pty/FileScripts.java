@@ -12,6 +12,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -35,6 +36,9 @@ final class FileScripts {
    */
   static final String SAVING = ".sail-save-";
 
+  /** How long a cut write has to remove its temporary before its process is ended. */
+  static final Duration GRACE = Duration.ofSeconds(2);
+
   /** Exit statuses of the scripts that refuse, each one {@link FilesRefusal}. */
   static final int NOT_FOUND = 20;
 
@@ -44,6 +48,21 @@ final class FileScripts {
   static final int NOT_A_FOLDER = 24;
   static final int NOT_A_FILE = 25;
   static final int LOOP = 26;
+  static final int EXISTS = 27;
+
+  /** A save's base is not the file's version now: the present one, or absent, was printed. */
+  static final int CONFLICT = 28;
+
+  /** The disk filled: the bytes free on it were printed. */
+  static final int NO_SPACE = 29;
+
+  /** A save's bytes came short, or the host said no go: nothing was written. */
+  static final int UNWRITTEN = 30;
+
+  /** A folder moved into itself or a folder it holds. */
+  static final int INTO_ITSELF = 31;
+
+  static final int PARTLY_REMOVED = 32;
 
   /** One version, as every script and the watch write it. */
   static final String VERSION = "%d:%i:%s:%.9Y:%.9Z";
@@ -136,9 +155,10 @@ final class FileScripts {
   /**
    * The watch loop: reads watch sets from standard input, each path then the version the client
    * holds of it, NUL-terminated, a set ended by an empty path, and replaces its set with each, a
-   * save's temporary and any path that resolves outside the home ({@code $1}) left out. Every 250
-   * ms it stats the set once and prints each path whose version is not the one last held,
-   * NUL-terminated, then a NUL; once a second it prints a NUL alone. It ends when its input closes.
+   * save's temporary left out, and any path that resolves outside the home ({@code $1}) left out
+   * and printed after a {@code -}, NUL-terminated, so the client is told. Every 250 ms it stats the
+   * set once and prints each path whose version is not the one last held, NUL-terminated, then a
+   * NUL; once a second it prints a NUL alone. It ends when its input closes.
    */
   static final String WATCH =
       """
@@ -156,6 +176,7 @@ final class FileScripts {
             case ${name##*/}:$at/ in
               '%s'*) ;;
               *:"$home"/*) next+=("$name") given[$name]=$token ;;
+              *) printf -- '-%%s\\0' "$name" ;;
             esac
             want=path
           elif [ -n "$token" ]; then
@@ -194,6 +215,148 @@ final class FileScripts {
       done
       """
           .formatted(SAVING, VERSION);
+
+  /**
+   * The temporary a write makes in folder {@code $dir} as {@code tmp}, removed at the script's
+   * exit, after removing the folder's temporaries left more than two minutes ago that no process
+   * holds open, a killed script's or a stopped workspace's.
+   */
+  private static final String TEMPORARY =
+      """
+      for old in "$dir"/'%1$s'*; do
+        [ -f "$old" ] && [ ! -L "$old" ] || continue
+        [ -n "$(find "$old" -maxdepth 0 -mmin +2 2>/dev/null)" ] || continue
+        pattern=$(printf '%%s' "$old" | sed 's/[][*?\\\\]/\\\\&/g')
+        [ -n "$(find /proc/[0-9]*/fd -lname "$pattern" 2>/dev/null | head -n 1)" ] || rm -f -- "$old"
+      done
+      tmp=$(mktemp --suffix=.part -- "$dir/%1$sXXXXXXXXXX" 2>/dev/null) || exit 21
+      trap 'rm -f -- "$tmp"' EXIT
+      """
+          .formatted(SAVING);
+
+  /**
+   * Saves {@code $2} bytes of standard input as the path, read with its base: made anew where no
+   * name is when the base is {@code absent}, else written over the file the path resolves to, which
+   * must be a file. It makes its temporary in the target's folder ({@link #TEMPORARY}), says {@code
+   * ready}, copies the bytes into it and syncs them, says {@code copied} and their SHA-256, then
+   * waits for the host's {@code go}: anything else, or fewer bytes, writes nothing. On {@code go}
+   * it compares the file's version with the base (printing the present version, or absent, for a
+   * conflict), refuses a file the dev user may not write, keeps its mode, and renames over it in
+   * one call, or links the new name in one call that fails when the name was taken meanwhile; then
+   * prints the version the file has now. A full disk prints the bytes free.
+   */
+  static final String WRITE =
+      RESOLVE
+          + """
+          size=$2
+          IFS= read -r -d '' path || exit 1
+          IFS= read -r -d '' base || exit 1
+          if [ "$base" = absent ]; then
+            resolve_parent "$path"
+            there "$target" && exit 27
+            at=$target
+          else
+            resolve_parent "$path"
+            [ -e "$target" ] || { printf 'absent\\0'; exit 28; }
+            resolve "$path"
+            [ -d "$at" ] && exit 23
+            [ -f "$at" ] || exit 25
+            dir=${at%%/*}
+            now=$(stat -L --printf '%s' -- "$at") || exit 1
+            [ "$now" = "$base" ] || { printf '%%s\\0' "$now"; exit 28; }
+          fi
+          """
+              .formatted(VERSION)
+          + TEMPORARY
+          + """
+          printf 'ready\\0'
+          if ! head -c "$size" > "$tmp" 2>/dev/null; then
+            free=$(df -B1 --output=avail -- "$dir" 2>/dev/null | tail -n 1 | tr -d ' ')
+            printf '%%s\\0' "${free:-0}"
+            exit 29
+          fi
+          [ "$(stat -c %%s -- "$tmp")" = "$size" ] || exit 30
+          sync -- "$tmp" 2>/dev/null || exit 1
+          printf 'copied\\0%%s\\0' "$(sha256sum < "$tmp" | cut -c1-64)"
+          IFS= read -r -d '' word && [ "$word" = go ] || exit 30
+          if [ "$base" = absent ]; then
+            chmod -- "$(printf %%03o $((0666 & ~0$(umask))))" "$tmp" || exit 1
+            ln -T -- "$tmp" "$at" 2>/dev/null || exit 27
+            rm -f -- "$tmp"
+          else
+            now=$(stat -L --printf '%1$s' -- "$at" 2>/dev/null) || { printf 'absent\\0'; exit 28; }
+            [ "$now" = "$base" ] || { printf '%%s\\0' "$now"; exit 28; }
+            [ -w "$at" ] || exit 21
+            chmod --reference="$at" -- "$tmp" || exit 1
+            mv -fT -- "$tmp" "$at" || exit 1
+          fi
+          stat -L --printf '%1$s\\0' -- "$at" 2>/dev/null || printf 'absent\\0'
+          """
+              .formatted(VERSION);
+
+  /**
+   * Makes the path anew, a folder when the kind read after it is {@code folder}, else an empty file
+   * linked in one call that fails when the name was taken meanwhile; never over a name there.
+   */
+  static final String CREATE =
+      RESOLVE
+          + """
+          IFS= read -r -d '' path || exit 1
+          IFS= read -r -d '' kind || exit 1
+          resolve_parent "$path"
+          there "$target" && exit 27
+          if [ "$kind" = folder ]; then
+            mkdir -- "$target" 2>/dev/null && exit 0
+            there "$target" && exit 27
+            exit 21
+          fi
+          """
+          + TEMPORARY
+          + """
+          chmod -- "$(printf %03o $((0666 & ~0$(umask))))" "$tmp" || exit 1
+          ln -T -- "$tmp" "$target" 2>/dev/null || exit 27
+          """;
+
+  /**
+   * Moves the first path to the second, a link as itself, never into itself and never over a name
+   * there: moved only when the second name is now the first's own inode and the first is gone. The
+   * workspace's own folder stays where it is.
+   */
+  static final String MOVE =
+      RESOLVE
+          + """
+          IFS= read -r -d '' from || exit 1
+          IFS= read -r -d '' to || exit 1
+          resolve_parent "$from"
+          src=$target
+          there "$src" || exit 20
+          [ "$src" = "$home/workspace" ] && exit 21
+          resolve_parent "$to"
+          dst=$target
+          case $dir/ in "$src"/*) exit 31 ;; esac
+          there "$dst" && exit 27
+          inode=$(stat -c %d:%i -- "$src") || exit 1
+          mv -nT -- "$src" "$dst" 2>/dev/null
+          [ "$(stat -c %d:%i -- "$dst" 2>/dev/null)" = "$inode" ] && ! there "$src" && exit 0
+          there "$dst" && exit 27
+          exit 1
+          """;
+
+  /**
+   * Removes the path, a link as itself, a folder with all it holds on its own filesystem; the
+   * workspace's own folder stays. Anything left is said.
+   */
+  static final String REMOVE =
+      RESOLVE
+          + """
+          IFS= read -r -d '' path || exit 1
+          resolve_parent "$path"
+          there "$target" || exit 20
+          [ "$target" = "$home/workspace" ] && exit 21
+          rm -rf --one-file-system -- "$target" 2>/dev/null
+          there "$target" && exit 32
+          exit 0
+          """;
 
   private final UploadCopy.Processes processes;
   private final UploadCopy.Place place;
@@ -291,6 +454,9 @@ final class FileScripts {
       case NOT_A_FOLDER -> FilesRefusal.NOT_A_FOLDER;
       case NOT_A_FILE -> FilesRefusal.NOT_A_FILE;
       case LOOP -> FilesRefusal.LOOP;
+      case EXISTS -> FilesRefusal.EXISTS;
+      case INTO_ITSELF -> FilesRefusal.UNSAFE;
+      case PARTLY_REMOVED -> FilesRefusal.PARTLY_REMOVED;
       default -> null;
     };
   }
@@ -381,6 +547,22 @@ final class FileScripts {
         var unused = closed;
       }
       process.destroyForcibly();
+    }
+
+    /**
+     * Ends a write: its input closed, so it reads fewer bytes than it was told, or no go, and
+     * removes its own temporary; its process ended after {@link #GRACE} if it has not ended by
+     * then.
+     */
+    void cut() {
+      try {
+        process.getOutputStream().close();
+      } catch (IOException closed) {
+        var unused = closed;
+      }
+      CompletableFuture.runAsync(
+          process::destroyForcibly,
+          CompletableFuture.delayedExecutor(GRACE.toMillis(), TimeUnit.MILLISECONDS));
     }
   }
 

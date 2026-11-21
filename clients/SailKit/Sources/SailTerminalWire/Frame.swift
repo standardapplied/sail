@@ -74,6 +74,22 @@ public enum Frame: Equatable, Sendable {
     case filesTick
     /// Request `id` refused, in a sentence naming the file and the reason.
     case filesRefused(id: Int32, kind: Open<FileRefusal>, message: String)
+    /// Saves `size` bytes as file `path`, sent after it as ``putChunk(id:offset:bytes:)`` frames and a
+    /// ``putEnd(id:sha256:)``: written over the file only while it is at version `base`, or made anew
+    /// only while nothing is named `path` when `base` is `"absent"`.
+    case filesWrite(id: Int32, path: FileName, base: String, size: Int64)
+    /// Makes `path` anew, a folder when `folder`, else an empty file.
+    case filesCreate(id: Int32, path: FileName, folder: Bool)
+    /// Moves `from` to `to`, never over a name already there.
+    case filesMove(id: Int32, from: FileName, to: FileName)
+    /// Removes `path`, a folder with all it holds.
+    case filesRemove(id: Int32, path: FileName)
+    /// Write `id` is the file's whole content now, at `version`.
+    case filesWritten(id: Int32, version: String)
+    /// Write `id` wrote nothing: the file is at `version` now, `"absent"` when it is gone.
+    case filesConflict(id: Int32, version: String)
+    /// Create, move or remove `id` is done.
+    case filesDone(id: Int32)
     case output(lastInputSequence: Int64, bytes: [UInt8])
     /// What follows until ``replayEnd`` is the session's journal replayed; `safe` says whether it
     /// starts on a clean terminal boundary.
@@ -135,6 +151,17 @@ public enum FileRefusal: String, CaseIterable, Sendable {
     case loop
     /// The file changed while it was read: the client drops what it had of the read and reads again.
     case changed
+    /// The name is taken: nothing was replaced.
+    case exists
+    /// The workspace's disk has no room; the sentence says how much is free.
+    case noSpace = "no_space"
+    /// Over the 20 MB a save may carry.
+    case tooLarge = "too_large"
+    /// Some of a folder could not be removed; the tree shows what is left.
+    case partlyRemoved = "partly_removed"
+    /// A change Sail does not make: a name that is not UTF-8 or holds a control character, or a
+    /// folder moved into itself.
+    case unsafe
     case failed
 }
 

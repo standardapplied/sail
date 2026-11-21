@@ -211,6 +211,13 @@ extension Frame {
         case .filesChanged: "FilesChanged"
         case .filesTick: "FilesTick"
         case .filesRefused: "FilesRefused"
+        case .filesWrite: "FilesWrite"
+        case .filesCreate: "FilesCreate"
+        case .filesMove: "FilesMove"
+        case .filesRemove: "FilesRemove"
+        case .filesWritten: "FilesWritten"
+        case .filesConflict: "FilesConflict"
+        case .filesDone: "FilesDone"
         }
     }
 }

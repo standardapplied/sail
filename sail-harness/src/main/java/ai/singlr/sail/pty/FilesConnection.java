@@ -11,8 +11,11 @@ import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -24,7 +27,13 @@ import java.util.function.Supplier;
  * loop for the connection, started by its first watch set. A script that fails for no reason of its
  * own has the workspace asked again ({@code ended}): one stopped, gone or no longer the person's
  * ends the connection in those words; else the request is refused as failed. {@link #close} ends
- * every script and the loop at once, however the connection ended (F5).
+ * every script and the loop at once, however the connection ended (F5), a write by closing its
+ * input so it removes its own temporary.
+ *
+ * <p>A write (a save, a create, a move, a remove) takes the workspace's write lock, which every
+ * connection to the workspace shares, and asks the workspace's decision again under it before it
+ * changes anything: a save once its bytes are copied, before its {@code go}; the others before
+ * their script starts. A save's bytes stream in without the lock.
  */
 final class FilesConnection {
 
@@ -41,14 +50,60 @@ final class FilesConnection {
   /** The listing frames' budget of entry bytes, well inside the frame cap. */
   static final int LISTING_BYTES = 512 << 10;
 
-  /** A request naming {@code paths}, the first the one its answers name; a move names two. */
-  private record Request(int id, List<String> paths, boolean reads, Answer answer, long order) {
+  /**
+   * A request naming {@code paths}, the first the one its answers name and the last a taken name's
+   * (a move names two), which Sail could not {@code verb} when it fails; {@code body} is a save's.
+   */
+  private record Request(
+      int id,
+      List<String> paths,
+      boolean reads,
+      String verb,
+      Body body,
+      Answer answer,
+      long order) {
     Request {
       paths = List.copyOf(paths);
     }
 
     String path() {
       return paths.getFirst();
+    }
+  }
+
+  /**
+   * What a connection's writes are given: the workspace's write lock, shared by every connection to
+   * it and fair, so writes wait in order; and the workspace's decision for this person.
+   */
+  record Writes(ReentrantLock lock, Gate gate) {}
+
+  /** The workspace's decision for the connection's person, asked again for each write. */
+  @FunctionalInterface
+  interface Gate {
+    /**
+     * Why the person may no longer change the workspace's files, in the decision's own words and
+     * code; null when they may. Throws when it cannot be asked.
+     */
+    PtyMessage.Err refusal() throws IOException;
+  }
+
+  /**
+   * A save's bytes as the client sends them, at most {@link PtyUploads#QUEUE} chunks held until its
+   * script takes them, then its SHA-256; {@code broken} says how the client's frames broke it.
+   */
+  private static final class Body {
+    final long size;
+    final ArrayDeque<byte[]> chunks = new ArrayDeque<>();
+    long received;
+    byte[] sha256;
+    String broken;
+
+    Body(long size) {
+      this.size = size;
+    }
+
+    boolean whole() {
+      return received == size && sha256 != null;
     }
   }
 
@@ -59,8 +114,25 @@ final class FilesConnection {
 
   /** A request under way: the script it runs, once it runs one, and whether it was cancelled. */
   private static final class Running {
+    final boolean writes;
     FileScripts.Script script;
     boolean cancelled;
+
+    Running(boolean writes) {
+      this.writes = writes;
+    }
+
+    /** Ends its script: a save's by closing its input, so it removes its own temporary. */
+    void stop() {
+      if (script == null) {
+        return;
+      }
+      if (writes) {
+        script.cut();
+      } else {
+        script.end();
+      }
+    }
   }
 
   private final FileScripts files;
@@ -69,9 +141,11 @@ final class FilesConnection {
   private final Consumer<PtyMessage> reply;
   private final Supplier<PtyMessage.Err> ended;
   private final Consumer<PtyMessage.Err> end;
+  private final Writes writes;
   private final ArrayDeque<Request> reads = new ArrayDeque<>();
   private final ArrayDeque<Request> others = new ArrayDeque<>();
   private final Map<Integer, Running> underWay = new HashMap<>();
+  private final Map<Integer, Body> bodies = new HashMap<>();
   private int scripts;
   private int reading;
   private int waiting;
@@ -82,7 +156,7 @@ final class FilesConnection {
   /**
    * The connection to workspace {@code workspace}, instance {@code container}, answering on {@code
    * reply}: {@code ended} says why the workspace no longer serves it, null while it does, and
-   * {@code end} ends the connection with that.
+   * {@code end} ends the connection with that; its writes take {@code writes}' lock and gate.
    */
   FilesConnection(
       FileScripts files,
@@ -90,21 +164,23 @@ final class FilesConnection {
       String workspace,
       Consumer<PtyMessage> reply,
       Supplier<PtyMessage.Err> ended,
-      Consumer<PtyMessage.Err> end) {
+      Consumer<PtyMessage.Err> end,
+      Writes writes) {
     this.files = files;
     this.container = container;
     this.workspace = workspace;
     this.reply = reply;
     this.ended = ended;
     this.end = end;
+    this.writes = writes;
   }
 
   void list(PtyMessage.FilesList m) throws InterruptedException {
-    submit(m.id(), List.of(m.path()), false, this::listed);
+    submit(m.id(), List.of(m.path()), "read", false, null, this::listed);
   }
 
   void stat(PtyMessage.FilesStat m) throws InterruptedException {
-    submit(m.id(), List.of(m.path()), false, this::statted);
+    submit(m.id(), List.of(m.path()), "read", false, null, this::statted);
   }
 
   void read(PtyMessage.FilesRead m) throws InterruptedException {
@@ -120,8 +196,129 @@ final class FilesConnection {
     submit(
         m.id(),
         List.of(m.path()),
+        "read",
         true,
+        null,
         (request, running) -> readOf(request, running, m.offset(), length));
+  }
+
+  /**
+   * Saves {@code m}'s bytes, which follow it as chunks, over the file while it is at {@code m}'s
+   * base, or as a new file while no name is there: refused at once when it is too large, names no
+   * base, or would make a name Sail does not make.
+   */
+  void write(PtyMessage.FilesWrite m) throws InterruptedException {
+    var why =
+        m.size() < 0
+            ? "A save carries 0 bytes or more."
+            : m.base().isBlank() || m.base().indexOf('\0') >= 0
+                ? "A save names the version it was based on, or " + PtyMessage.ABSENT + "."
+                : null;
+    if (why != null) {
+      reply.accept(new PtyMessage.FilesRefused(m.id(), FilesRefusal.FAILED, why));
+    } else if (m.size() > READ_CAP) {
+      refuseAt(m.id(), FilesRefusal.TOO_LARGE, m.path(), "save");
+    } else if (m.base().equals(PtyMessage.ABSENT) && !makes(m.path())) {
+      refuseAt(m.id(), FilesRefusal.UNSAFE, m.path(), "save");
+    } else {
+      submit(
+          m.id(),
+          List.of(m.path()),
+          "save",
+          false,
+          new Body(m.size()),
+          (request, running) -> saved(request, running, m.base()));
+    }
+  }
+
+  /** Makes {@code m}'s path anew, a folder or an empty file, never over a name there. */
+  void create(PtyMessage.FilesCreate m) throws InterruptedException {
+    if (!makes(m.path())) {
+      refuseAt(m.id(), FilesRefusal.UNSAFE, m.path(), "create");
+      return;
+    }
+    var kind = m.folder() ? "folder" : "file";
+    submit(
+        m.id(),
+        List.of(m.path()),
+        "change",
+        false,
+        null,
+        (request, running) ->
+            changed(request, running, FileScripts.CREATE, List.of(m.path(), kind)));
+  }
+
+  /** Moves {@code m}'s first path to its second, never over a name there. */
+  void move(PtyMessage.FilesMove m) throws InterruptedException {
+    if (!makes(m.to())) {
+      refuseAt(m.id(), FilesRefusal.UNSAFE, m.to(), "move");
+      return;
+    }
+    submit(
+        m.id(),
+        List.of(m.from(), m.to()),
+        "change",
+        false,
+        null,
+        (request, running) -> changed(request, running, FileScripts.MOVE, request.paths()));
+  }
+
+  /** Removes {@code m}'s path, a folder with all it holds. */
+  void remove(PtyMessage.FilesRemove m) throws InterruptedException {
+    submit(
+        m.id(),
+        List.of(m.path()),
+        "change",
+        false,
+        null,
+        (request, running) -> changed(request, running, FileScripts.REMOVE, request.paths()));
+  }
+
+  /**
+   * Whether the last name of {@code path} is one Sail makes: UTF-8, no control character, and no
+   * save's temporary, which no listing shows and a later write would remove.
+   */
+  static boolean makes(String path) {
+    var name = path.substring(path.lastIndexOf('/') + 1);
+    return FileNames.shown(name).equals(name)
+        && name.chars().noneMatch(Character::isISOControl)
+        && !name.startsWith(FileScripts.SAVING);
+  }
+
+  /**
+   * The next bytes of save {@code m.id()}: held for its script, or the save broken when they are
+   * not the next ones, more than it said, or more than it may hold. Bytes of a save no longer under
+   * way are dropped: it was answered.
+   */
+  synchronized void chunk(PtyMessage.PutChunk m) {
+    var body = bodies.get(m.id());
+    if (body == null || body.broken != null) {
+      return;
+    }
+    if (m.offset() != body.received
+        || body.sha256 != null
+        || body.received + m.bytes().length > body.size
+        || body.chunks.size() >= PtyUploads.QUEUE) {
+      body.broken = "its bytes did not arrive in order and within its size";
+    } else {
+      body.chunks.addLast(m.bytes());
+      body.received += m.bytes().length;
+    }
+    notifyAll();
+  }
+
+  /** Save {@code m.id()}'s bytes are all sent, and their SHA-256. */
+  synchronized void end(PtyMessage.PutEnd m) {
+    var body = bodies.get(m.id());
+    if (body == null || body.broken != null) {
+      return;
+    }
+    if (body.sha256 != null || body.received != body.size) {
+      body.broken = "it ended before its size, or twice";
+    } else {
+      body.sha256 = m.sha256().clone();
+    }
+    notifyAll();
   }
 
   /** Ends request {@code id}: unanswered from now on, its script ended or never run. */
@@ -129,15 +326,14 @@ final class FilesConnection {
     if (reads.removeIf(request -> request.id() == m.id())
         | others.removeIf(request -> request.id() == m.id())) {
       waiting--;
-      notifyAll();
+      bodies.remove(m.id());
     }
     var running = underWay.get(m.id());
     if (running != null) {
       running.cancelled = true;
-      if (running.script != null) {
-        running.script.end();
-      }
+      running.stop();
     }
+    notifyAll();
   }
 
   /**
@@ -161,7 +357,8 @@ final class FilesConnection {
       if (!files.inHome(watched.path()) || watched.version().indexOf('\0') >= 0) {
         reply.accept(
             new PtyMessage.Err(
-                watched.path() + " is not in this workspace's home, so the watch is as it was."));
+                FileNames.shown(watched.path())
+                    + " is not in this workspace's home, so the watch is as it was."));
         return;
       }
       set.write(FileScripts.nul(watched.path()));
@@ -207,7 +404,12 @@ final class FilesConnection {
     var changed = new ArrayList<String>();
     try {
       for (var field = loop.field(); field != null; field = loop.field()) {
-        if (!field.isEmpty()) {
+        if (field.startsWith("-")) {
+          reply.accept(
+              new PtyMessage.Err(
+                  FileNames.shown(field.substring(1))
+                      + " leads outside this workspace's home, so it is not watched."));
+        } else if (!field.isEmpty()) {
           changed.add(field);
         } else if (changed.isEmpty()) {
           reply.accept(new PtyMessage.FilesTick());
@@ -234,16 +436,16 @@ final class FilesConnection {
   }
 
   /**
-   * Queues {@code request}, refused at once when a path it names is not under the home, waiting
-   * while {@link #WAITING} are queued already.
+   * Queues a request, refused at once when a path it names is not under the home, waiting while
+   * {@link #WAITING} are queued already; a save's {@code body} is held from now. A failure of it
+   * says Sail could not {@code verb} its path.
    */
-  private void submit(int id, List<String> paths, boolean isRead, Answer answer)
+  private void submit(
+      int id, List<String> paths, String verb, boolean isRead, Body body, Answer answer)
       throws InterruptedException {
     for (var path : paths) {
       if (!files.inHome(path)) {
-        reply.accept(
-            new PtyMessage.FilesRefused(
-                id, FilesRefusal.OUTSIDE_HOME, sentence(FilesRefusal.OUTSIDE_HOME, path)));
+        refuseAt(id, FilesRefusal.OUTSIDE_HOME, path, verb);
         return;
       }
     }
@@ -254,7 +456,7 @@ final class FilesConnection {
       if (closed) {
         return;
       }
-      var request = new Request(id, paths, isRead, answer, asked++);
+      var request = new Request(id, paths, isRead, verb, body, answer, asked++);
       if (underWay.containsKey(request.id())
           || reads.stream().anyMatch(waits -> waits.id() == request.id())
           || others.stream().anyMatch(waits -> waits.id() == request.id())) {
@@ -266,6 +468,9 @@ final class FilesConnection {
         return;
       }
       (request.reads() ? reads : others).addLast(request);
+      if (body != null) {
+        bodies.put(id, body);
+      }
       waiting++;
       dispatch();
     }
@@ -289,7 +494,7 @@ final class FilesConnection {
       if (next.reads()) {
         reading++;
       }
-      var running = new Running();
+      var running = new Running(next.body() != null);
       underWay.put(next.id(), running);
       Thread.ofVirtual().name("pty-files").start(() -> run(next, running));
     }
@@ -303,6 +508,7 @@ final class FilesConnection {
     } finally {
       synchronized (this) {
         underWay.remove(request.id(), running);
+        bodies.remove(request.id(), request.body());
         scripts--;
         if (request.reads()) {
           reading--;
@@ -317,20 +523,222 @@ final class FilesConnection {
    */
   private FileScripts.Script start(Request request, Running running, String script, String... args)
       throws IOException {
+    return start(running, script, List.of(request.path()), false, args);
+  }
+
+  /**
+   * Starts {@code script} with {@code fields} on its input, kept open when {@code keepOpen}, unless
+   * the request was cancelled or the connection closed.
+   */
+  private FileScripts.Script start(
+      Running running, String script, List<String> fields, boolean keepOpen, String... args)
+      throws IOException {
     synchronized (this) {
       if (closed || running.cancelled) {
         return null;
       }
     }
-    var started = files.start(container, script, request.path(), args);
+    var started = files.start(container, script, fields, keepOpen, args);
     synchronized (this) {
       running.script = started;
       if (closed || running.cancelled) {
-        started.end();
+        running.stop();
         return null;
       }
     }
     return started;
+  }
+
+  /**
+   * Saves the request's body: its script started with the path and {@code base}, its bytes copied
+   * in as they come, each acknowledged, then, once its script says they are on disk with the digest
+   * the client sent, the lock taken and the decision asked again before {@code go}. Anything else
+   * cuts the script, which writes nothing.
+   */
+  private void saved(Request request, Running running, String base) throws IOException {
+    var body = request.body();
+    var script =
+        start(running, FileScripts.WRITE, List.of(request.path(), base), true, "" + body.size);
+    if (script == null) {
+      return;
+    }
+    var ready = script.field();
+    if (!"ready".equals(ready)) {
+      unwritten(request, running, script, ready);
+      return;
+    }
+    var sent = 0L;
+    try {
+      for (var chunk = next(body, running); chunk != null; chunk = next(body, running)) {
+        script.input().write(chunk);
+        script.input().flush();
+        sent += chunk.length;
+        unless(running, new PtyMessage.PutAck(request.id(), sent));
+      }
+    } catch (IOException ended) {
+      var unused = ended;
+    }
+    String broken;
+    synchronized (this) {
+      broken = gone(running) ? "" : body.broken;
+    }
+    if (broken != null) {
+      script.cut();
+      if (!broken.isEmpty()) {
+        unless(running, failed(request, " was not saved: " + broken + "; nothing was changed."));
+      }
+      return;
+    }
+    var copied = script.field();
+    if (!"copied".equals(copied)) {
+      unwritten(request, running, script, copied);
+      return;
+    }
+    if (!HexFormat.of().formatHex(body.sha256).equals(script.field())) {
+      script.cut();
+      unless(
+          running,
+          failed(request, " was not saved: the bytes Sail received are not the bytes sent."));
+      return;
+    }
+    writes.lock().lock();
+    try {
+      if (!allowed(request, running, script)) {
+        return;
+      }
+      script.input().write(FileScripts.nul("go"));
+      script.input().close();
+      var version = script.field();
+      var status = script.status();
+      if (status == 0 && version != null) {
+        unless(running, new PtyMessage.FilesWritten(request.id(), version));
+      } else if (status == FileScripts.CONFLICT && version != null) {
+        unless(running, new PtyMessage.FilesConflict(request.id(), version));
+      } else {
+        refuse(request, running, status);
+      }
+    } finally {
+      writes.lock().unlock();
+    }
+  }
+
+  /**
+   * The next bytes of {@code body}, waiting at most {@link PtyUploads#IDLE} for them; null once it
+   * is whole, broken, cancelled or closed, or when the client sent nothing for that long.
+   */
+  private synchronized byte[] next(Body body, Running running) {
+    var idle = System.nanoTime() + PtyUploads.IDLE.toNanos();
+    while (body.chunks.isEmpty() && !body.whole() && body.broken == null && !gone(running)) {
+      var left = idle - System.nanoTime();
+      if (left <= 0) {
+        body.broken = "its bytes stopped coming for " + PtyUploads.IDLE.toMinutes() + " minutes";
+        return null;
+      }
+      try {
+        TimeUnit.NANOSECONDS.timedWait(this, left);
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        body.broken = "the host ended it";
+      }
+    }
+    return body.broken != null || gone(running) ? null : body.chunks.pollFirst();
+  }
+
+  /**
+   * A save's script that ended before it wrote, having printed {@code field}: a conflict found
+   * before the copy, a full disk with the bytes it has free, or its own refusal.
+   */
+  private void unwritten(
+      Request request, Running running, FileScripts.Script script, String field) {
+    var status = script.status();
+    if (status == FileScripts.CONFLICT && field != null) {
+      unless(running, new PtyMessage.FilesConflict(request.id(), field));
+    } else if (status == FileScripts.NO_SPACE && field != null) {
+      unless(
+          running,
+          new PtyMessage.FilesRefused(
+              request.id(),
+              FilesRefusal.NO_SPACE,
+              FileNames.shown(request.path())
+                  + " was not saved: "
+                  + workspace
+                  + "'s disk has "
+                  + field
+                  + " bytes free and the save needs "
+                  + request.body().size
+                  + "; nothing was changed."));
+    } else {
+      refuse(request, running, status);
+    }
+  }
+
+  /**
+   * Answers a create, a move or a remove: under the workspace's write lock, the decision asked
+   * again, then its one script with {@code fields}.
+   */
+  private void changed(Request request, Running running, String script, List<String> fields)
+      throws IOException {
+    writes.lock().lock();
+    try {
+      if (!allowed(request, running, null)) {
+        return;
+      }
+      var started = start(running, script, fields, false);
+      if (started == null) {
+        return;
+      }
+      while (started.field() != null) {
+        continue;
+      }
+      var status = started.status();
+      if (status == 0) {
+        unless(running, new PtyMessage.FilesDone(request.id()));
+      } else {
+        refuse(request, running, status);
+      }
+    } finally {
+      writes.lock().unlock();
+    }
+  }
+
+  /**
+   * Whether the request may change the workspace now, asked under the write lock: a refusal ends
+   * the connection in the decision's words, and a decision that cannot be asked refuses the request
+   * as failed; either way {@code script}, when there is one, is cut and writes nothing.
+   */
+  private boolean allowed(Request request, Running running, FileScripts.Script script) {
+    PtyMessage.Err refusal;
+    try {
+      refusal = writes.gate().refusal();
+    } catch (IOException | RuntimeException unasked) {
+      if (script != null) {
+        script.cut();
+      }
+      unless(
+          running,
+          failed(
+              request,
+              " was not changed: Sail could not ask whether you may still change "
+                  + workspace
+                  + "'s files; try again."));
+      return false;
+    }
+    if (refusal != null || gone(running)) {
+      if (script != null) {
+        script.cut();
+      }
+      if (refusal != null) {
+        end.accept(refusal);
+      }
+      return false;
+    }
+    return true;
+  }
+
+  /** Request {@code request} refused as failed: its path, as shown, then {@code why}. */
+  private PtyMessage.FilesRefused failed(Request request, String why) {
+    return new PtyMessage.FilesRefused(
+        request.id(), FilesRefusal.FAILED, FileNames.shown(request.path()) + why);
   }
 
   private void listed(Request request, Running running) throws IOException {
@@ -462,15 +870,21 @@ final class FilesConnection {
     }
   }
 
+  /** {@code request} refused as {@code kind}, naming its path, or a move's taken name. */
   private PtyMessage.FilesRefused refused(Request request, FilesRefusal kind) {
-    return new PtyMessage.FilesRefused(request.id(), kind, sentence(kind, request.path()));
+    var named = kind == FilesRefusal.EXISTS ? request.paths().getLast() : request.path();
+    return new PtyMessage.FilesRefused(request.id(), kind, sentence(kind, named, request.verb()));
+  }
+
+  private void refuseAt(int id, FilesRefusal kind, String path, String verb) {
+    reply.accept(new PtyMessage.FilesRefused(id, kind, sentence(kind, path, verb)));
   }
 
   /**
    * The sentence {@code kind} is said in, naming the path, each byte of it that is no UTF-8 shown
-   * as {@code U+FFFD}, and the workspace.
+   * as {@code U+FFFD}, and the workspace; a failure says what Sail could not {@code verb}.
    */
-  String sentence(FilesRefusal kind, String named) {
+  String sentence(FilesRefusal kind, String named, String verb) {
     var path = FileNames.shown(named);
     return switch (kind) {
       case NOT_FOUND -> "No file at " + path + " in " + workspace + ".";
@@ -488,7 +902,18 @@ final class FilesConnection {
           path + " is not a file (a pipe, a socket or a device), so Sail does not read it.";
       case LOOP -> path + " leads back to itself.";
       case CHANGED -> path + " changed while it was read; read it again.";
-      case FAILED -> "Sail could not read " + path + " in " + workspace + "; nothing was changed.";
+      case EXISTS -> path + " exists already, so nothing was replaced.";
+      case NO_SPACE -> workspace + "'s disk is full, so " + path + " was not saved.";
+      case TOO_LARGE -> path + " is over the 20 MB a save carries, so it was not saved.";
+      case PARTLY_REMOVED ->
+          "Some of " + path + " could not be removed; what is left is still there.";
+      case UNSAFE ->
+          "Sail does not make "
+              + path
+              + ": a name it makes is UTF-8 with no control character, and a folder never moves"
+              + " into itself.";
+      case FAILED ->
+          "Sail could not " + verb + " " + path + " in " + workspace + "; nothing was changed.";
     };
   }
 
@@ -497,6 +922,7 @@ final class FilesConnection {
    */
   void close() {
     List<FileScripts.Script> ending = new ArrayList<>();
+    List<Running> stopping = new ArrayList<>();
     synchronized (this) {
       if (closed) {
         return;
@@ -506,15 +932,13 @@ final class FilesConnection {
       others.clear();
       waiting = 0;
       notifyAll();
-      for (var running : underWay.values()) {
-        if (running.script != null) {
-          ending.add(running.script);
-        }
-      }
+      bodies.clear();
+      stopping.addAll(underWay.values());
       if (watch != null) {
         ending.add(watch);
       }
     }
+    stopping.forEach(Running::stop);
     ending.forEach(FileScripts.Script::end);
   }
 }

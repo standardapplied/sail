@@ -48,6 +48,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
@@ -216,6 +217,14 @@ public final class PtySessionHost implements AutoCloseable {
   private final Map<String, PtySession> sessions = new ConcurrentHashMap<>();
   private final Set<Admitted> admitted = ConcurrentHashMap.newKeySet();
   private final Set<Served> served = ConcurrentHashMap.newKeySet();
+
+  /**
+   * Each served workspace's write lock, by its instance, which every files connection to it shares
+   * (F2): made with the workspace's first connection and dropped with its last, both under {@code
+   * served}'s monitor.
+   */
+  private final Map<String, ReentrantLock> writeLocks = new HashMap<>();
+
   private volatile String bootId = "";
   private final AtomicInteger connections = new AtomicInteger();
   private volatile ServerSocketChannel server;
@@ -234,6 +243,12 @@ public final class PtySessionHost implements AutoCloseable {
 
   /** The most files connections one workspace holds, every person's together. */
   static final int FILES_PER_WORKSPACE = 8;
+
+  /**
+   * The most files connections one person holds in one workspace, so two are always left for
+   * others: the owner is never shut out by an admin, nor an admin by the owner.
+   */
+  static final int FILES_PER_PERSON_IN_WORKSPACE = 6;
 
   /** The most files connections one person holds, every workspace's together. */
   static final int FILES_PER_PERSON = 16;
@@ -869,6 +884,10 @@ public final class PtySessionHost implements AutoCloseable {
                 upload = uploads.begin(m, attached, subscriberId, replies);
               }
             }
+            case PtyMessage.PutChunk m when files != null -> files.connection().chunk(m);
+            case PtyMessage.PutEnd m when files != null -> files.connection().end(m);
+            case PtyMessage.PutCancel m when files != null ->
+                files.connection().cancel(new PtyMessage.FilesCancel(m.id()));
             case PtyMessage.PutChunk m -> {
               if (!uploads.chunk(upload, m, replies)) {
                 upload = null;
@@ -923,11 +942,19 @@ public final class PtySessionHost implements AutoCloseable {
             case PtyMessage.FilesRead m when files != null -> files.connection().read(m);
             case PtyMessage.FilesCancel m when files != null -> files.connection().cancel(m);
             case PtyMessage.FilesWatch m when files != null -> files.connection().watch(m);
+            case PtyMessage.FilesWrite m when files != null -> files.connection().write(m);
+            case PtyMessage.FilesCreate m when files != null -> files.connection().create(m);
+            case PtyMessage.FilesMove m when files != null -> files.connection().move(m);
+            case PtyMessage.FilesRemove m when files != null -> files.connection().remove(m);
             case PtyMessage.FilesList m -> reply(channel, NO_FILES);
             case PtyMessage.FilesStat m -> reply(channel, NO_FILES);
             case PtyMessage.FilesRead m -> reply(channel, NO_FILES);
             case PtyMessage.FilesCancel m -> reply(channel, NO_FILES);
             case PtyMessage.FilesWatch m -> reply(channel, NO_FILES);
+            case PtyMessage.FilesWrite m -> reply(channel, NO_FILES);
+            case PtyMessage.FilesCreate m -> reply(channel, NO_FILES);
+            case PtyMessage.FilesMove m -> reply(channel, NO_FILES);
+            case PtyMessage.FilesRemove m -> reply(channel, NO_FILES);
             default -> reply(channel, new PtyMessage.Err("Unexpected client frame."));
           }
         }
@@ -941,7 +968,7 @@ public final class PtySessionHost implements AutoCloseable {
       Thread.currentThread().interrupt();
     } finally {
       if (files != null) {
-        served.remove(files);
+        unserve(files);
         files.connection().close();
       }
       uploads.discard(upload);
@@ -1827,6 +1854,23 @@ public final class PtySessionHost implements AutoCloseable {
           + here
           + " files connections open, the most a workspace holds; close one, then ask again.";
     }
+    var mineHere =
+        served.stream()
+            .filter(
+                s ->
+                    s.project().equals(project)
+                        && s.workspace().equals(workspace)
+                        && s.who().fde().equals(who.fde()))
+            .count();
+    if (mineHere >= FILES_PER_PERSON_IN_WORKSPACE) {
+      return who.fde()
+          + " has "
+          + mineHere
+          + " files connections open in "
+          + workspace
+          + ", the most one person may hold there, so others can still connect; close one, then"
+          + " ask again.";
+    }
     var theirs = served.stream().filter(s -> s.who().fde().equals(who.fde())).count();
     return theirs >= FILES_PER_PERSON
         ? who.fde()
@@ -1848,23 +1892,26 @@ public final class PtySessionHost implements AutoCloseable {
     }
     var project = ticket.target();
     var workspace = ticket.workspace();
-    var connection =
-        new FilesConnection(
-            files,
-            project + "-" + workspace,
-            workspace,
-            message -> reply(channel, message),
-            () -> filesEnded(project, workspace, who),
-            err -> endFiles(channel, err));
-    var kept = new Served(project, workspace, who, channel, connection);
+    var instance = project + "-" + workspace;
     synchronized (served) {
       var full = filesFull(project, workspace, who);
       if (full != null) {
         throw new FilesFull(full);
       }
+      var lock = writeLocks.computeIfAbsent(instance, unused -> new ReentrantLock(true));
+      var connection =
+          new FilesConnection(
+              files,
+              instance,
+              workspace,
+              message -> reply(channel, message),
+              () -> filesEnded(project, workspace, who),
+              err -> endFiles(channel, err),
+              new FilesConnection.Writes(lock, () -> filesDecided(project, workspace, who)));
+      var kept = new Served(project, workspace, who, channel, connection);
       served.add(kept);
+      return kept;
     }
-    return kept;
   }
 
   /**
@@ -1932,6 +1979,26 @@ public final class PtySessionHost implements AutoCloseable {
     served.forEach(files -> closeQuietly(files.channel()));
   }
 
+  /** The write lock workspace {@code workspace} of {@code project} has now, null when none. */
+  ReentrantLock writeLock(String project, String workspace) {
+    synchronized (served) {
+      return writeLocks.get(project + "-" + workspace);
+    }
+  }
+
+  /** Drops {@code files} from those served, and its workspace's write lock with its last one. */
+  private void unserve(Served files) {
+    synchronized (served) {
+      served.remove(files);
+      if (served.stream()
+          .noneMatch(
+              s ->
+                  s.project().equals(files.project()) && s.workspace().equals(files.workspace()))) {
+        writeLocks.remove(files.project() + "-" + files.workspace());
+      }
+    }
+  }
+
   /**
    * Why workspace {@code workspace} of {@code project} no longer serves {@code who}'s files, asked
    * as its ticket was: gone, stopped, or no longer theirs to enter; null when it still does, or
@@ -1939,21 +2006,34 @@ public final class PtySessionHost implements AutoCloseable {
    */
   private PtyMessage.Err filesEnded(String project, String workspace, PtyIdentity.Person who) {
     try {
+      return filesDecided(project, workspace, who);
+    } catch (IOException unavailable) {
+      log("files-check-failed", who.fde(), project + "/" + workspace, unavailable.toString());
+      return null;
+    }
+  }
+
+  /**
+   * Why {@code who} may no longer have workspace {@code workspace}'s files, in the decision's words
+   * and code, null when they may; throws when the runner cannot say, as a write is never made on a
+   * decision that could not be asked.
+   */
+  private PtyMessage.Err filesDecided(String project, String workspace, PtyIdentity.Person who)
+      throws IOException {
+    try {
       admission.files(project, workspace, who);
       return null;
     } catch (PtyAdmission.Absent absent) {
       return new PtyMessage.Err(absent.reason(), absent.remedy(), "not_found");
     } catch (PtyAdmission.Unavailable unavailable) {
-      log("files-check-failed", who.fde(), project + "/" + workspace, unavailable.toString());
-      return null;
+      throw unavailable;
     } catch (IOException refused) {
       var err = PtyMessage.Err.of(refused);
       return err.code().isBlank()
           ? new PtyMessage.Err(err.reason(), err.remedy(), "forbidden")
           : err;
     } catch (RuntimeException unavailable) {
-      log("files-check-failed", who.fde(), project + "/" + workspace, unavailable.toString());
-      return null;
+      throw new IOException(unavailable);
     }
   }
 

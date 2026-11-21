@@ -391,8 +391,8 @@ class HostPtyTest {
     assertEquals("Workspace 'try' belongs to 'ada', not you.", refused.reason());
     assertEquals("Project 'acme' has no workspace 'gone' on this box.", absent.reason());
     assertEquals(
-        "Workspace idle of acme is stopped, and reading its files does not start it. Start it with:"
-            + " sail project workspace start acme idle.",
+        "Workspace idle of acme is stopped, and reading or changing its files does not start it."
+            + " Start it with: sail project workspace start acme idle.",
         stopped.getMessage());
     assertEquals("workspace_stopped", stopped.code());
     assertEquals(
@@ -485,7 +485,7 @@ class HostPtyTest {
         List.of(
             "not_your_workspace",
             "old is labelled for a person this box does not know as ada, so its files are not"
-                + " read until the box's pass leaves it nobody's."),
+                + " read or changed until the box's pass leaves it nobody's."),
         List.of(reused.code(), reused.reason()));
     assertEquals(
         List.of(reused.code(), reused.reason()),
@@ -495,7 +495,7 @@ class HostPtyTest {
         List.of(
             "owner_gone",
             "gone is zed's workspace, and zed is no longer active here, so its files are not read"
-                + " until the box's pass leaves it nobody's."),
+                + " or changed until the box's pass leaves it nobody's."),
         List.of(goneOwner.code(), goneOwner.reason()));
   }
 
