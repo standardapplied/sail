@@ -251,6 +251,38 @@ class TerminalTicketsTest {
         IllegalArgumentException.class, () -> door.sessions("tok-ana", "acme", "Bad Name", since));
   }
 
+  /**
+   * An agent session is listed with its harness's name as a person reads it, so an app titles its
+   * tab from the listing alone; a shell lists no agent.
+   */
+  @Test
+  void anAgentSessionIsListedWithItsHarnessesDisplayName() {
+    var agent =
+        new PtyMessage.SessionInfo(
+            "app-a",
+            "i-a",
+            true,
+            0,
+            "",
+            "",
+            List.of("claude"),
+            "acme",
+            "try",
+            "ana",
+            1L,
+            "",
+            new PtyMessage.Agent("claude-code", "plan", false));
+    assertEquals(
+        Map.of(
+            "harness", "claude-code", "display", "Claude Code", "mode", "plan", "login", "stored"),
+        WorkspaceSessionsResponse.Session.of(agent).toMap().get("agent"));
+    assertEquals(
+        null,
+        WorkspaceSessionsResponse.Session.of(info("app-s", "acme", "try", true, "ana", 1L))
+            .toMap()
+            .get("agent"));
+  }
+
   private static List<String> names(WorkspaceSessionsResponse listed) {
     return listed.sessions().stream().map(s -> s.name()).toList();
   }

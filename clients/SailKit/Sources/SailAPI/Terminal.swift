@@ -102,11 +102,14 @@ public struct RunnerSession: Codable, Equatable, Sendable {
 /// whether it was signed in with its person's stored login (`stored`) or signs in inside (`inside`).
 public struct RunnerAgent: Codable, Equatable, Sendable {
     public let harness: String
+    /// The harness's name as a person reads it ("Claude Code"), which titles its tab.
+    public let display: String
     public let mode: String
     public let login: String
 
-    public init(harness: String, mode: String, login: String) {
+    public init(harness: String, display: String, mode: String, login: String) {
         self.harness = harness
+        self.display = display
         self.mode = mode
         self.login = login
     }

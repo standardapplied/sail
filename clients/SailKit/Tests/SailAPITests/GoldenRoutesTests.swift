@@ -162,7 +162,7 @@ func answer<Response>(
         #expect(listed == RunnerSessions(sessions: [
             RunnerSession(
                 name: "app-1f2e3d4c", live: true, attached: 1, writer: "uday", opener: "uday", command: ["claude"],
-                agent: RunnerAgent(harness: "claude-code", mode: "default", login: "stored"),
+                agent: RunnerAgent(harness: "claude-code", display: "Claude Code", mode: "default", login: "stored"),
                 createdAt: Date(timeIntervalSince1970: 1_763_460_000), endedReason: nil
             ),
             RunnerSession(
@@ -188,7 +188,7 @@ func answer<Response>(
         #expect(claude.login?.name == "work" && claude.login?.kind == "api-key")
         #expect(claude.modeDefault == claude.modes.first?.mode)
         #expect(claude.modes.count == 7 && claude.refusal == nil && claude.loginRefusal == nil && claude.inside)
-        #expect(claude.kinds.map(\.label) == ["long-lived token", "API key"])
+        #expect(claude.kinds.map(\.label) == ["API key", "long-lived token"], "in the order a person is shown them")
         let codex = try #require(owned.offered.last)
         #expect(codex.refusal?.code == .known(.harnessNotInstalled) && !codex.inside && codex.login == nil)
         #expect(codex.note?.hasPrefix("Sail starts Codex CLI in a workspace with full access") == true && codex.modes.count == 1)

@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.harness.Harness.Launch;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -173,6 +174,11 @@ class HarnessContractTest {
         harness.loginVariables().containsAll(kinds.stream().map(LoginKind::variable).toList()),
         "a run on a stored login sets empty every other variable its harness reads");
     assertEquals(kinds.getFirst(), harness.loginKind(" "));
+    assertEquals(
+        Set.copyOf(kinds),
+        Set.copyOf(harness.offeredKinds()),
+        "a person is offered every kind the harness takes, and only those");
+    assertEquals(kinds.size(), harness.offeredKinds().size());
   }
 
   @ParameterizedTest
