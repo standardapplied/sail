@@ -1163,8 +1163,12 @@ class FilesHostTest {
     saveOn(first, 1, file, base, "first's");
     hold.reached();
     var lock = host.writeLock("acme", "dock");
+    var script = processes.getLast();
 
     first.close();
+    assertFalse(
+        script.waitFor(FileScripts.GRACE.toMillis() + 1000, TimeUnit.MILLISECONDS),
+        "never cut: a cut's script would be ended within its grace");
     var second = open("tok-mady");
     saveOn(second, 2, file, base, "second's");
     awaitQueued(lock);

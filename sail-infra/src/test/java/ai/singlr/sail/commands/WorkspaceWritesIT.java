@@ -339,6 +339,46 @@ class WorkspaceWritesIT extends AbstractIncusIT {
               p95(saves), SAVE_BOUND_MS, p95(stats), p95(creates));
           assertTrue(p95(saves) <= SAVE_BOUND_MS, "save p95 " + p95(saves) + " ms");
           assertEquals("", temporaries());
+
+          var persons = FOLDER + "/.sail-save-notes";
+          inInstance("printf mine > " + persons + " && touch -d '-10 min' " + persons);
+          send(
+              mine,
+              60,
+              FOLDER + "/after.md",
+              PtyMessage.ABSENT,
+              "x".getBytes(StandardCharsets.UTF_8));
+          assertInstanceOf(PtyMessage.FilesWritten.class, next(mine));
+          assertEquals(
+              "mine", inInstance("cat " + persons), "a person's name of Sail's prefix stays");
+          PtyWire.write(mine, new PtyMessage.FilesList(61, FOLDER));
+          var listed = assertInstanceOf(PtyMessage.FilesListing.class, next(mine));
+          assertTrue(
+              listed.entries().stream().anyMatch(e -> e.name().equals(".sail-save-notes")),
+              "and is listed");
+
+          var mounted =
+              exec(
+                  INSTANCE,
+                  List.of(
+                      "sh",
+                      "-c",
+                      "mkdir -p "
+                          + FOLDER
+                          + "/mnt && mount -t tmpfs -o size=1m tmpfs "
+                          + FOLDER
+                          + "/mnt && chown 1000:1000 "
+                          + FOLDER
+                          + "/mnt"));
+          assertTrue(mounted.ok(), "a disk of its own inside the home: " + mounted.stderr());
+          PtyWire.write(
+              mine, new PtyMessage.FilesMove(62, FOLDER + "/after.md", FOLDER + "/mnt/after.md"));
+          var across = assertInstanceOf(PtyMessage.FilesRefused.class, next(mine));
+          assertTrue(
+              across.message().endsWith("so Sail does not move it; nothing was changed."),
+              across.message());
+          assertEquals("x", inInstance("cat " + FOLDER + "/after.md"), "nothing moved");
+          assertTrue(exec(INSTANCE, List.of("umount", FOLDER + "/mnt")).ok());
         }
         awaitNoScripts();
 
