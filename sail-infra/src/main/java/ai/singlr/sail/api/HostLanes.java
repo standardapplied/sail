@@ -421,7 +421,7 @@ final class HostLanes {
     @Override
     public void admitFiles(String project, String workspace, PtyIdentity.Person who)
         throws IOException {
-      var found = found(project, workspace);
+      var found = found(project, workspace, workspaces::findOne);
       decide(project, workspace, found, who, WorkspaceDoors.FILES);
       if (!(found.state() instanceof ContainerState.Running)) {
         throw new PtyAdmission.Stopped(
@@ -429,8 +429,8 @@ final class HostLanes {
                 + workspace
                 + " of "
                 + project
-                + " is stopped, and reading its files does"
-                + " not start it.",
+                + " is stopped, and reading or changing its"
+                + " files does not start it.",
             Remedy.of(
                 "Start it with: ",
                 Remedy.sail("project workspace start", project, workspace),
@@ -526,13 +526,29 @@ final class HostLanes {
     }
 
     /**
+     * How a door reads a workspace's instance: {@link Workspaces#find} or {@link
+     * Workspaces#findOne}.
+     */
+    @FunctionalInterface
+    private interface Finder {
+      Optional<BoxInstances.Instance> find(String project, String workspace)
+          throws IOException, InterruptedException, TimeoutException;
+    }
+
+    /**
      * The instance of workspace {@code workspace} of {@code project}: {@link PtyAdmission.Absent}
      * when there is none, {@link PtyAdmission.Unavailable} when Incus cannot say.
      */
     private BoxInstances.Instance found(String project, String workspace) throws IOException {
+      return found(project, workspace, workspaces::find);
+    }
+
+    /** As {@link #found(String, String)}, the instance read by {@code finder}. */
+    private BoxInstances.Instance found(String project, String workspace, Finder finder)
+        throws IOException {
       Optional<BoxInstances.Instance> found;
       try {
-        found = workspaces.find(project, workspace);
+        found = finder.find(project, workspace);
       } catch (IOException | TimeoutException failed) {
         throw new PtyAdmission.Unavailable(failed);
       } catch (InterruptedException interrupted) {

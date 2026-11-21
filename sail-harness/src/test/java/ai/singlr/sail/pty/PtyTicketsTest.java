@@ -248,22 +248,34 @@ class PtyTicketsTest {
   }
 
   /**
-   * A files ticket reads its workspace's files and does nothing else; no other ticket reads any.
+   * A files ticket reads and changes its workspace's files and does nothing else; no other ticket
+   * reads or changes any. A save's bytes travel as an upload's do.
    */
   @Test
-  void aFilesTicketListsStatsReadsAndWatchesAndNothingElse() {
+  void aFilesTicketListsStatsReadsWatchesAndChangesFilesAndNothingElse() {
     var files = new PtyTickets.Ticket(PtyMessage.TicketAction.FILES, "acme", "tok-ana", "dock");
     var refusal =
         new PtyMessage.Err(
-            "This connection's ticket is to read the files of workspace 'dock' of project 'acme',"
-                + " and it admits nothing else; ask the API for a ticket for that.");
+            "This connection's ticket is to read and change the files of workspace 'dock' of"
+                + " project 'acme', and it admits nothing else; ask the API for a ticket for that.");
     var reading =
         List.<PtyMessage>of(
             new PtyMessage.FilesList(1, "/home/dev"),
             new PtyMessage.FilesStat(1, "/home/dev"),
             new PtyMessage.FilesRead(1, "/home/dev/a", 0, 1),
             new PtyMessage.FilesCancel(1),
-            new PtyMessage.FilesWatch(List.of()));
+            new PtyMessage.FilesWatch(List.of()),
+            new PtyMessage.FilesWrite(1, "/home/dev/a", PtyMessage.ABSENT, "", 1),
+            new PtyMessage.FilesCreate(1, "/home/dev/a", false),
+            new PtyMessage.FilesMove(1, "/home/dev/a", "/home/dev/b"),
+            new PtyMessage.FilesRemove(1, "/home/dev/a"));
+    for (var bytes :
+        List.<PtyMessage>of(
+            new PtyMessage.PutChunk(1, 0, new byte[] {'a'}),
+            new PtyMessage.PutEnd(1, new byte[32]),
+            new PtyMessage.PutCancel(1))) {
+      assertNull(files.refusal(bytes, null, null), bytes.toString());
+    }
     for (var message : reading) {
       assertNull(files.refusal(message, null, null));
       assertNotNull(OPEN_ACME.refusal(message, null, null), "an open ticket reads no files");

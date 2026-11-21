@@ -116,6 +116,13 @@ private extension Frame {
         case .filesChanged: 53
         case .filesTick: 54
         case .filesRefused: 55
+        case .filesWrite: 45
+        case .filesCreate: 46
+        case .filesMove: 47
+        case .filesRemove: 48
+        case .filesWritten: 56
+        case .filesConflict: 57
+        case .filesDone: 58
         }
     }
 
@@ -171,6 +178,14 @@ private extension Frame {
             [.int32(id), .string(version), .blob(bytes), .bool(eof), .bool(whole), .string(digest)]
         case let .filesChanged(paths): [.count(paths.count)] + paths.map { .blob($0.bytes) }
         case let .filesRefused(id, kind, message): [.int32(id), .string(kind.rawValue), .string(message)]
+        case let .filesWrite(id, path, base, seen, size):
+            [.int32(id), .blob(path.bytes), .string(base), .string(seen), .int64(size)]
+        case let .filesCreate(id, path, folder): [.int32(id), .blob(path.bytes), .bool(folder)]
+        case let .filesMove(id, from, to): [.int32(id), .blob(from.bytes), .blob(to.bytes)]
+        case let .filesRemove(id, path): [.int32(id), .blob(path.bytes)]
+        case let .filesWritten(id, digest, version): [.int32(id), .string(digest), .string(version)]
+        case let .filesConflict(id, digest): [.int32(id), .string(digest)]
+        case let .filesDone(id): [.int32(id)]
         case .takeWrite, .detach, .replayEnd, .paused, .continued, .accepted, .filesTick: []
         }
     }
@@ -316,6 +331,16 @@ private struct Cursor {
             .filesChanged(paths: try list { (cursor: inout Cursor) throws(TerminalWireError) in FileName(try cursor.blob()) })
         case 54: .filesTick
         case 55: .filesRefused(id: try int32(), kind: Open(rawValue: try string()), message: try string())
+        case 45:
+            .filesWrite(
+                id: try int32(), path: FileName(try blob()), base: try string(), seen: try string(), size: try int64()
+            )
+        case 46: .filesCreate(id: try int32(), path: FileName(try blob()), folder: try bool())
+        case 47: .filesMove(id: try int32(), from: FileName(try blob()), to: FileName(try blob()))
+        case 48: .filesRemove(id: try int32(), path: FileName(try blob()))
+        case 56: .filesWritten(id: try int32(), digest: try string(), version: try string())
+        case 57: .filesConflict(id: try int32(), digest: try string())
+        case 58: .filesDone(id: try int32())
         case let other: throw .unknownType(other)
         }
     }

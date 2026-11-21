@@ -409,4 +409,44 @@ class BoxInstancesTest {
             "incus list ^down$ --format json within PT3S"),
         asked);
   }
+
+  /**
+   * One instance is asked of Incus as that instance alone: its status, labels and root pool read as
+   * a listing reads them; none when Incus has no such instance; any other failure an error, never
+   * an absence; a name Incus could not hold is never put in the query.
+   */
+  @Test
+  void oneInstanceIsAskedByItsNameAloneAndOnlyItsAbsenceIsNone() throws Exception {
+    var one =
+        """
+        {"name": "acme-dock", "status": "Running", "type": "container",
+         "config": {"user.sail.project": "acme", "user.sail.workspace": "dock",
+                    "user.sail.ready": "1762941601000", "user.sail.owner": "ada"},
+         "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}}""";
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("incus query /1.0/instances/acme-dock", one)
+            .onFail("incus query /1.0/instances/acme-gone", "Error: Instance not found")
+            .onFail(
+                "incus query /1.0/instances/acme-down", "Error: Get \"http://unix.socket\": EOF");
+    var box = new BoxInstances(shell);
+
+    var dock = box.one("acme-dock", Duration.ofSeconds(3)).orElseThrow();
+    assertEquals(
+        BoxInstances.instance(ai.singlr.sail.config.YamlUtil.parseMap(one)),
+        dock,
+        "read as a listing reads it");
+    assertEquals("tank", dock.pool());
+    assertInstanceOf(ContainerState.Running.class, dock.state());
+    assertEquals(Optional.empty(), box.one("acme-gone", Duration.ofSeconds(3)));
+    var down = assertThrows(IOException.class, () -> box.one("acme-down", Duration.ofSeconds(3)));
+    assertTrue(down.getMessage().contains("EOF"), down.getMessage());
+    assertThrows(IOException.class, () -> box.one("acme/../x", Duration.ofSeconds(3)));
+    assertEquals(
+        List.of(
+            "incus query /1.0/instances/acme-dock",
+            "incus query /1.0/instances/acme-gone",
+            "incus query /1.0/instances/acme-down"),
+        shell.invocations());
+  }
 }

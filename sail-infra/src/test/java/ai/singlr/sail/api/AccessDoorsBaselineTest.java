@@ -192,9 +192,11 @@ class AccessDoorsBaselineTest {
               owner.isBlank() ? "" : fdes.byHandle(owner).orElseThrow().id());
       all.add(listed);
       incus.onOk("incus list ^acme-" + workspace.getKey() + "$", "[" + listed + "]");
+      incus.onOk("incus query /1.0/instances/acme-" + workspace.getKey(), listed);
     }
     return incus
         .onOk("incus list ^acme-", "[]")
+        .onFail("incus query /1.0/instances/acme-", "Error: Instance not found")
         .onOk("incus snapshot list acme--tmpl --format json", TestWorkspaces.V1)
         .onOk("incus operation list --format json", "[]")
         .onOk("incus copy acme--tmpl", "")
@@ -261,6 +263,8 @@ class AccessDoorsBaselineTest {
     incus
         .onOk("incus list ^acme-reused$", "[" + reused + "]")
         .onOk("incus list ^acme-gone$", "[" + gone + "]")
+        .onOk("incus query /1.0/instances/acme-reused", reused)
+        .onOk("incus query /1.0/instances/acme-gone", gone)
         .onOk("incus storage list", "[{\"name\": \"tank\", \"driver\": \"zfs\"}]");
     SailOperations node;
     try {

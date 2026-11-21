@@ -105,7 +105,11 @@ Usage:
                                 none of main's person's forge token, refused to client and to obs
                                 (a viewer), opened by her ticket over TCP from client, its home listed and
                                 watched by her files ticket (50 listings of 5,000 entries, 50 reads of
-                                256 KiB and 20 changes held to 250, 200 and 600 ms at p95), refused a
+                                256 KiB and 20 changes held to 250, 200 and 600 ms at p95), its files
+                                changed by that ticket (a new file never over a taken name, a save on
+                                a stale version told the present one, two saves on one base from two
+                                connections writing one, a folder made, moved into and removed, and
+                                20 checked saves of 100 KB held to 300 ms at p95), refused a
                                 delete while a command runs in it, and deleted with force; a second
                                 is created and stopped,
                                 apply --all leaves both and the template alone; with acme's repos set
@@ -890,7 +894,7 @@ done
 sudo sail server token revoke "direct-$handle" > /dev/null 2>&1 || true
 sudo sail server token create "direct-$handle" member --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " "'
 
-readonly DIRECT_TERMINAL='import json, re, socket, struct, sys, time, urllib.error, urllib.request
+readonly DIRECT_TERMINAL='import hashlib, json, os, re, socket, struct, sys, time, urllib.error, urllib.request
 ip, token = sys.argv[1], sys.stdin.readline().strip()
 workspace = sys.argv[2] if len(sys.argv) > 2 else ""
 def text(value):
@@ -1036,7 +1040,128 @@ for i in range(10):
     wholes.append((time.monotonic() - started) * 1000)
 print("files over TCP from another box, p95: list 5,000 %.0f ms (ceiling 250, %d frame(s)), first 256 KiB %.0f ms (ceiling 200), change to FilesChanged %.0f ms (ceiling 600), a 20 MiB read hashed twice %.0f ms (printed)" % (p95(lists), frames, p95(reads), p95(changes), p95(wholes)))
 if p95(lists) > 250 or p95(reads) > 200 or p95(changes) > 600:
-    raise SystemExit("a files figure is over its ceiling")'
+    raise SystemExit("a files figure is over its ceiling")
+def field(payload, at):
+    size = struct.unpack(">i", payload[at:at + 4])[0]
+    return payload[at + 4:at + 4 + size], at + 4 + size
+def version_of(conn, path):
+    conn.sendall(frame(41, struct.pack(">i", 900) + text(path)))
+    kind, payload = answer(conn)
+    if kind != 51:
+        raise SystemExit("the stat of %s was answered frame %d %r" % (path, kind, payload[:200]))
+    at = 4
+    for _ in range(3):
+        _, at = field(payload, at)
+    return field(payload, at + 20)[0].decode()
+def content(conn, path):
+    conn.sendall(frame(42, struct.pack(">i", 901) + text(path) + struct.pack(">qq", 0, 1 << 20)))
+    kind, payload = answer(conn)
+    if kind != 52:
+        raise SystemExit("the read of %s was answered frame %d %r" % (path, kind, payload[:200]))
+    _, at = field(payload, 4)
+    return field(payload, at)[0]
+def base_of(conn, path):
+    conn.sendall(frame(42, struct.pack(">i", 902) + text(path) + struct.pack(">qq", 0, 20 << 20)))
+    while True:
+        kind, payload = answer(conn)
+        if kind != 52:
+            raise SystemExit("the whole read of %s was answered frame %d %r" % (path, kind, payload[:200]))
+        version, at = field(payload, 4)
+        _, at = field(payload, at)
+        if payload[at] == 1:
+            if payload[at + 1] != 1:
+                raise SystemExit("the read of %s from 0 to its end was not whole" % path)
+            return field(payload, at + 2)[0].decode(), version.decode()
+def send(conn, id, path, base, body):
+    digest, seen = base
+    conn.sendall(frame(45, struct.pack(">i", id) + text(path) + text(digest) + text(seen) + struct.pack(">q", len(body))))
+    for offset in range(0, len(body), 65536):
+        piece = body[offset:offset + 65536]
+        conn.sendall(frame(13, struct.pack(">iq", id, offset) + struct.pack(">i", len(piece)) + piece))
+    conn.sendall(frame(14, struct.pack(">i", id) + struct.pack(">i", 32) + hashlib.sha256(body).digest()))
+def answered(conn):
+    while True:
+        kind, payload = answer(conn)
+        if kind != 35:
+            return kind, payload
+notes = "/home/dev/fleet-notes.md"
+absent = ("absent", "")
+send(files, 300, notes, absent, b"base")
+kind, payload = answered(files)
+if kind != 56:
+    raise SystemExit("a new file was answered frame %d %r" % (kind, payload[:200]))
+digest, at = field(payload, 4)
+written = field(payload, at)[0].decode()
+if written != version_of(files, notes) or digest.decode() != hashlib.sha256(b"base").hexdigest():
+    raise SystemExit("a save answered %s and %s, not the content and the version the file has" % (digest, written))
+send(files, 301, notes, absent, b"again")
+kind, payload = answered(files)
+if kind != 55 or b"exists" not in payload:
+    raise SystemExit("a new file over a taken name was answered frame %d %r" % (kind, payload[:200]))
+stale = base_of(files, notes)
+send(files, 302, notes, stale, b"newer")
+if answered(files)[0] != 56:
+    raise SystemExit("a save on its version was not written")
+send(files, 303, notes, stale, b"over a newer one")
+kind, payload = answered(files)
+if kind != 57 or field(payload, 4)[0].decode() != base_of(files, notes)[0] or content(files, notes) != b"newer":
+    raise SystemExit("a save on a stale version was answered frame %d %r" % (kind, payload[:200]))
+print("a save makes a new file, never over a taken name, is answered the digest and the version it has now, and one on a stale base writes nothing and is told the present digest")
+other, (kind, _) = present(json.load(urllib.request.urlopen(asked, timeout=30))["ticket"])
+if kind != 32:
+    raise SystemExit("a second files ticket was not welcomed: frame %d" % kind)
+base = base_of(files, notes)
+send(files, 304, notes, base, b"from the first window")
+send(other, 304, notes, base, b"from the second window")
+both = sorted([answered(files)[0], answered(other)[0]])
+if both != [56, 57] or content(files, notes) not in (b"from the first window", b"from the second window"):
+    raise SystemExit("two saves on one base were answered %r" % both)
+print("two saves on one base from two connections: exactly one is written, the other is told the winner")
+folder = "/home/dev/fleet-made"
+files.sendall(frame(46, struct.pack(">i", 305) + text(folder) + b"\x01"))
+files.sendall(frame(47, struct.pack(">i", 306) + text(notes) + text(folder + "/notes.md")))
+files.sendall(frame(48, struct.pack(">i", 307) + text(folder)))
+for id in (305, 306, 307):
+    kind, payload = answered(files)
+    if kind != 58 or struct.unpack(">i", payload[:4])[0] != id:
+        raise SystemExit("change %d was answered frame %d %r" % (id, kind, payload[:200]))
+print("a folder is made, a file moved into it and the folder removed, each answered done")
+body = os.urandom(100000)
+saves = []
+for i in range(20):
+    on = base_of(files, "/home/dev/fleet-blob")
+    started = time.monotonic()
+    send(files, 400 + i, "/home/dev/fleet-blob", on, body)
+    if answered(files)[0] != 56:
+        raise SystemExit("checked save %d was not written" % i)
+    saves.append((time.monotonic() - started) * 1000)
+print("a checked save of 100 KB over TCP from another box, p95 %.0f ms (budget 150, ceiling 300)" % p95(saves))
+stats, creates = [], []
+for i in range(20):
+    started = time.monotonic()
+    version_of(files, "/home/dev/fleet-blob")
+    stats.append((time.monotonic() - started) * 1000)
+for i in range(20):
+    started = time.monotonic()
+    files.sendall(frame(46, struct.pack(">i", 500 + i) + text("/home/dev/fleet-made-%d" % i) + b"\x00"))
+    if answered(files)[0] != 58:
+        raise SystemExit("create %d was not done" % i)
+    creates.append((time.monotonic() - started) * 1000)
+def session_said(seq, command, done):
+    line = command.encode() + b"; echo " + done.encode() + b"-$((40+2))\r"
+    conn.sendall(frame(3, struct.pack(">q", seq) + struct.pack(">i", len(line)) + line))
+    seen = b""
+    while (done + "-42").encode() not in seen:
+        kind, payload = read(conn)
+        if kind == 20:
+            seen += payload[12:]
+    return seen.decode(errors="replace")
+work = session_said(40, "head -c 100000 /dev/urandom > /home/dev/fleet-src; w=$(for i in $(seq 20); do s=$(date +%s%N); t=$(mktemp /home/dev/.sail-save-probeXXXXXXXX); head -c 100000 < /home/dev/fleet-src > $t; sync $t; sha256sum < $t > /dev/null; chmod --reference=/home/dev/fleet-src $t; mv -fT $t /home/dev/fleet-probe; e=$(date +%s%N); echo $(( (e - s) / 1000000 )); done | sort -n | sed -n 19p); echo work-p95=$w-ms", "probed")
+import re
+found = re.findall(r"work-p95=([0-9]+)-ms", work)
+print("where a checked save of 100 KB goes, p95 from client: a stat, one exec and no decision, %.0f ms; a create, the decision asked under the lock then one exec, %.0f ms; a save %.0f ms; the work of the save script itself in the workspace (temporary, copy, sync, digest, mode, rename) %s ms" % (p95(stats), p95(creates), p95(saves), found[-1] if found else "?"))
+if p95(saves) > 300:
+    raise SystemExit("the save figure is over its ceiling")'
 
 # With "open", opens session NAME in acme's container over a ticket, starts it counting (n-1, n-2,
 # ...), prints the last number it saw and is killed, so the host sees its client vanish unsaid; with "back", waits up to 60 s for
@@ -2016,7 +2141,7 @@ storage() {
     http_token_door "$run" main client member 403 POST /v1/projects/acme/workspaces/eng-own/stop '' "belongs to 'eng'"
   check "$run" "obs, a viewer, creates no workspace on main" \
     http_token_door "$run" main obs viewer 403 POST /v1/projects/acme/workspaces '{"name":"obs-own"}' read_only_credential
-  check "$run" "from client, eng's ticket for her workspace on main opens a session in it over TCP that echoes a line, and her files ticket lists its home and its watch ticks; 50 listings of 5,000 entries, 50 reads of 256 KiB and 20 changes from client hold the ceilings (250, 200, 600 ms at p95)" \
+  check "$run" "from client, eng's ticket for her workspace on main opens a session in it over TCP that echoes a line, and her files ticket lists its home and its watch ticks; 50 listings of 5,000 entries, 50 reads of 256 KiB and 20 changes from client hold the ceilings (250, 200, 600 ms at p95); a save makes a file, never over a taken name or a newer version, two saves on one base from two connections write one, a folder is made, moved into and removed, and 20 checked saves of 100 KB hold 300 ms at p95" \
     direct_terminal "$run" main client eng eng-own
   check "$run" "a command is left running in eng's workspace, as an open terminal would be" \
     on "$run" main "sudo sh -c 'nohup incus exec acme-eng-own -- sleep 600 > /dev/null 2>&1 &'"

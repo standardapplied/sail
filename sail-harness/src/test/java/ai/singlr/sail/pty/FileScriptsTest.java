@@ -211,7 +211,7 @@ class FileScriptsTest {
     Files.createSymbolicLink(tree.resolve("self"), tree.resolve("self"));
     Files.writeString(outside.resolve("hosts"), "secret");
     Files.createSymbolicLink(tree.resolve("hosts"), outside.resolve("hosts"));
-    Files.writeString(tree.resolve(FileScripts.SAVING + "App.java.7"), "half");
+    Files.writeString(tree.resolve(FileScripts.SAVING + "AppJava007.part"), "half");
     Files.createFile(tree.resolve("App.java"));
 
     var entries = list(tree).entries();
@@ -542,15 +542,21 @@ class FileScriptsTest {
     }
   }
 
-  /** Nit 2: a watched path is resolved, so a link out of the home is never watched there. */
+  /**
+   * Nit 2: a watched path is resolved, so a link out of the home is never watched there, and the
+   * loop says it dropped it, after a {@code -}, so the client is told.
+   */
   @Test
-  void aWatchedLinkOutOfTheHomeIsNotWatched() throws Exception {
+  void aWatchedLinkOutOfTheHomeIsNotWatchedAndSaidDropped() throws Exception {
     var secret = Files.writeString(outside.resolve("secret"), "s");
     var link = Files.createSymbolicLink(home.resolve("secret"), secret);
     var mine = Files.writeString(home.resolve("mine"), "m");
     var watch = new Watch();
     watch.set(Map.of(link, "stale", mine, "stale"));
-    assertEquals(List.of(mine.toString()), watch.changed(), "only the path in the home");
+    assertEquals(
+        List.of("-" + link, mine.toString()),
+        watch.changed(),
+        "the dropped path told as it is read, then only the path in the home");
     Files.writeString(secret, "changed outside");
     watch.onlyBeats(2);
   }
@@ -680,7 +686,7 @@ class FileScriptsTest {
     watch.onlyBeats(1);
     Files.createFile(src.resolve("Unwatched.java"));
     watch.onlyBeats(2);
-    var saving = Files.writeString(src.resolve(FileScripts.SAVING + "App.java.3"), "half");
+    var saving = Files.writeString(src.resolve(FileScripts.SAVING + "AppJava003.part"), "half");
     watch.set(Map.of(saving, "stale"));
     watch.onlyBeats(2);
     var gone = home.resolve("gone");
