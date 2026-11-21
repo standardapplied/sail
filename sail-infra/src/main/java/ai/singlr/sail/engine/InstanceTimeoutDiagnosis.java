@@ -13,7 +13,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.LongSupplier;
@@ -114,16 +113,17 @@ final class InstanceTimeoutDiagnosis {
             "systemd's jobs in " + instance,
             List.of("incus", "exec", instance, "--", "systemctl", "list-jobs", "--no-pager"));
     var jobs = state.said() ? probes.ask(jobsProbe, left(deadline)) : null;
-    if (!beside.join(left(deadline))) {
+    var answered = beside.join(left(deadline));
+    if (!answered) {
       beside.interrupt();
     }
     var answers = new LinkedHashMap<Probe, Answer>();
     answers.put(
         logProbe,
-        Objects.requireNonNullElse(
-            incusLog.get(),
-            new Answer(
-                null, "did not answer within the diagnosis's " + budget.toSeconds() + " s")));
+        answered
+            ? incusLog.get()
+            : new Answer(
+                null, "did not answer within the diagnosis's " + budget.toSeconds() + " s"));
     answers.put(stateProbe, state);
     if (jobs != null) {
       answers.put(jobsProbe, jobs);
