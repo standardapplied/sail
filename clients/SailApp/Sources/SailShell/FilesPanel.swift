@@ -48,6 +48,11 @@ final class FilesPanel: NSView {
     private(set) var shownNew: Set<String> = []
     /// How many times the rows were set: what a tick that changes nothing leaves alone.
     private(set) var rowSets = 0
+    /// The chosen entry, by its path: the panel's own, never the list's row. Rows made again keep it
+    /// chosen while it is listed; gone, the choice moves to its nearest folder still shown, else to
+    /// the row now in its place.
+    private(set) var chosenPath: String?
+    private var rebuilding = false
     package private(set) var shownLine: FilesLine?
     private var startRefusal: [String]?
     private var starting = false
@@ -74,6 +79,10 @@ final class FilesPanel: NSView {
         addSubview(line)
         list.returnKeyShown = false
         list.onKey = { [weak self] event in self?.key(event) ?? false }
+        list.onChoose = { [weak self] path in
+            guard let self, !rebuilding else { return }
+            chosenPath = path
+        }
         list.target = self
         list.doubleAction = #selector(doubleClicked(_:))
         line.onAction = { [weak self] action in self?.act(action) }
@@ -189,10 +198,36 @@ final class FilesPanel: NSView {
         shownRevision = tree.revision
         shownNew = new
         guard rows != shownRows || marked else { return }
+        let place = chosenPath.flatMap { path in shownRows.firstIndex { $0.path == path } }
         shownRows = rows
         rowSets += 1
+        rebuilding = true
         scroll.keepingScroll { list.entries = rows.map { .item(item($0, new: new.contains($0.path))) } }
+        rebuilding = false
+        keepChoice(in: rows, place: place)
         needsLayout = true
+    }
+
+    /// The chosen path chosen again in `rows`: itself while listed; else its nearest folder still
+    /// shown; else the row now at its old place `place`, never a note.
+    private func keepChoice(in rows: [FileTree.Row], place: Int?) {
+        guard let path = chosenPath else { return }
+        let target: String?
+        if rows.contains(where: { $0.path == path }) {
+            target = path
+        } else if let folder = sequence(first: path, next: FileTree.parent).dropFirst().first(where: { folder in rows.contains { $0.path == folder } }) {
+            target = folder
+        } else if let place, !rows.isEmpty {
+            let index = min(place, rows.count - 1)
+            target = (rows[index...].first { $0.kind != .note } ?? rows[..<index].last { $0.kind != .note })?.path
+        } else {
+            target = nil
+        }
+        chosenPath = target
+        guard list.chosen != target else { return }
+        rebuilding = true
+        if let target { list.selectRowIndexes(IndexSet(integer: rows.firstIndex { $0.path == target } ?? 0), byExtendingSelection: false) } else { list.deselectAll(nil) }
+        rebuilding = false
     }
 
     /// Wakes when time alone next changes what is shown, and at no other moment, while connected.

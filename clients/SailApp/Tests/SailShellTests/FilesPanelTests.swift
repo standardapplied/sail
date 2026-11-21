@@ -195,6 +195,27 @@ import Testing
         #expect(panel.tree.expanded.contains(Self.root + "/src"), "Space did not open the folder")
     }
 
+    /// The choice is the panel's, by path, through the real list: rows made again by an expand or a
+    /// listing keep it; an entry gone moves it to its nearest folder still shown, and with none, to
+    /// the row now in its place.
+    @Test func theChoiceIsHeldByPathThroughEveryRebuild() throws {
+        let panel = try Self.played([Self.folder("src"), Self.file("a.txt"), Self.file("b.txt")])
+        let src = Self.root + "/src", main = src + "/main.ts"
+        panel.list.choose(src)
+        panel.toggle(src)
+        panel.heard(.frame(.filesListing(FileListing(id: 2, version: "s1", entries: [Self.file("main.ts"), Self.file("tide.ts")], more: false, truncated: false))))
+        #expect(panel.list.chosen == src && panel.chosenPath == src, "the expand's rows lost the choice")
+        panel.list.choose(main)
+        #expect(panel.chosenPath == main, "the person's choice was not taken")
+        panel.heard(.frame(.filesChanged(paths: [src])))
+        panel.heard(.frame(.filesListing(FileListing(id: 3, version: "s2", entries: [Self.file("tide.ts")], more: false, truncated: false))))
+        #expect(panel.list.chosen == src, "main.ts gone, the choice did not move to its folder: \(panel.list.chosen ?? "nothing")")
+        panel.list.choose(Self.root + "/a.txt")
+        panel.heard(.frame(.filesChanged(paths: [Self.root])))
+        panel.heard(.frame(.filesListing(FileListing(id: 4, version: "v2", entries: [Self.folder("src"), Self.file("b.txt")], more: false, truncated: false))))
+        #expect(panel.list.chosen == Self.root + "/b.txt", "a.txt gone with no folder shown, the choice did not move to the row in its place: \(panel.list.chosen ?? "nothing")")
+    }
+
     /// Calm: a tick, or a beat with nothing changed, makes no row and draws no line.
     @Test func aTickThatChangesNothingTouchesNoView() throws {
         let panel = try Self.played((0 ..< 40).map { Self.file("berth-\($0).json") })

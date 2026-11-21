@@ -36,6 +36,19 @@ extension Driver {
         workbench.filesOnScreen
     }
 
+    /// Waits for a state of the files panel, or a figure's moment, for all of `seconds`, a failure
+    /// earlier in the run notwithstanding: Still listing comes at 6 s and Can't reach after the
+    /// reconnect's minute, so the drive's 3 s after a failure would fail every state behind one, and
+    /// one run shows them all.
+    private func waitForState(_ seconds: Double, _ condition: @MainActor () -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(seconds)
+        while !condition() {
+            guard ContinuousClock.now < deadline else { return false }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return true
+    }
+
     func performFiles(_ step: Step) async -> (Bool, String)? {
         let asks = [step.filesFolder, step.filesRefuse, step.filesNew, step.filesClick, step.filesDoubleClick, step.filesChosen, step.filesButton, step.filesShot].contains { $0 != nil }
             || step.filesRows != nil || step.filesSays != nil || step.filesHold != nil || step.filesTicks != nil || step.filesEnd != nil
@@ -52,29 +65,29 @@ extension Driver {
             return (true, "")
         }
         if let rows = step.filesRows {
-            let found = await waitUntil(step.seconds ?? 10) { self.filesShown?.list.numberOfRows == rows }
+            let found = await waitForState(step.seconds ?? 10) { self.filesShown?.list.numberOfRows == rows }
             let keys = shell.window.firstResponder.map { "\(type(of: $0))" } ?? "nothing"
             return (found, "the panel shows \(filesShown.map { "\($0.list.numberOfRows) rows: \($0.rows.prefix(12).map(\.name))" } ?? "nothing"); its line: \(filesShown?.words ?? "none"); chosen \(filesShown?.list.chosen ?? "nothing"); the keys with \(keys)")
         }
         if let words = step.filesSays {
-            let found = await waitUntil(step.seconds ?? 10) {
+            let found = await waitForState(step.seconds ?? 10) {
                 guard let shown = self.filesShown else { return false }
                 return words.isEmpty ? shown.words == nil : shown.words?.hasPrefix(words) == true
             }
             return (found, "the line says \(filesShown?.words ?? "nothing")")
         }
         if let name = step.filesNew {
-            let found = await waitUntil(step.seconds ?? 10) { self.filesShown?.new.contains { $0.hasSuffix("/" + name) } == true }
+            let found = await waitForState(step.seconds ?? 10) { self.filesShown?.new.contains { $0.hasSuffix("/" + name) } == true }
             return (found, "marked new: \(filesShown?.new.sorted() ?? [])")
         }
         if let name = step.filesClick {
             guard let shown = filesShown, let id = shown.rows.first(where: { $0.name == name && $0.kind != .note })?.path else { return (false, "no row \(name)") }
             guard await clickName(id, in: shown) else { return (false, "the click on \(name) was not sent") }
-            let chosen = await waitUntil(5) { self.filesShown?.list.chosen == id }
+            let chosen = await waitForState(5) { self.filesShown?.list.chosen == id }
             return (chosen, "chosen: \(filesShown?.list.chosen ?? "nothing")")
         }
         if let name = step.filesChosen {
-            let found = await waitUntil(step.seconds ?? 5) {
+            let found = await waitForState(step.seconds ?? 5) {
                 guard let shown = self.filesShown, let chosen = shown.list.chosen, let responder = self.shell.window.firstResponder as? NSView else { return false }
                 return chosen.hasSuffix("/" + name) && responder.isDescendant(of: shown.list)
             }
@@ -85,7 +98,7 @@ extension Driver {
             guard let shown = filesShown, let row = shown.rows.first(where: { $0.name == name && $0.kind != .note }) else { return (false, "no row \(name)") }
             let open = row.expanded
             guard await clickName(row.path, in: shown, twice: true) else { return (false, "the double-click on \(name) was not sent") }
-            let toggled = await waitUntil(5) { self.filesShown?.rows.first { $0.path == row.path }?.expanded == !open }
+            let toggled = await waitForState(5) { self.filesShown?.rows.first { $0.path == row.path }?.expanded == !open }
             return (toggled, "\(name) \(filesShown?.rows.first { $0.path == row.path }?.expanded == true ? "open" : "shut") after a double-click on its name")
         }
         if let title = step.filesButton {
@@ -132,7 +145,7 @@ extension Driver {
         var names = ["src/", "README.md", "Package.swift"]
         door.setFolder(root, names.map(Self.fileEntry))
         door.setFolder(root + "/src", ["tide.ts"].map(Self.fileEntry))
-        guard await waitUntil(10, { self.filesShown?.list.numberOfRows == names.count }) else { return (false, "the root never showed: \(filesShown?.words ?? "")") }
+        guard await waitForState(10, { self.filesShown?.list.numberOfRows == names.count }) else { return (false, "the root never showed: \(filesShown?.words ?? "")") }
         let before = Self.committed(view.terminal)
         view.terminal.resetLatency()
         mainThread.reset()
@@ -145,13 +158,13 @@ extension Driver {
             door.setFolder(root, names.map(Self.fileEntry))
             if index == 5 { door.setFolder(root + "/src", ["tide.ts", "quay.ts"].map(Self.fileEntry)) }
             let path = root + "/" + name
-            guard await waitUntil(5, { self.filesShown?.newDrawn[path] != nil }), let heard = filesShown?.changeHeard[root], let drawn = filesShown?.newDrawn[path] else {
+            guard await waitForState(5, { self.filesShown?.newDrawn[path] != nil }), let heard = filesShown?.changeHeard[root], let drawn = filesShown?.newDrawn[path] else {
                 return (false, "under the flood, \(name) drew no new row: \(filesShown?.rows.map(\.name) ?? [])")
             }
             changed.append(drawn - heard)
             try? await Task.sleep(for: .milliseconds(200))
         }
-        guard await waitUntil(60, { Self.shows(view, marker) }) else { return (false, "the flood never reached its end") }
+        guard await waitForState(60, { Self.shows(view, marker) }) else { return (false, "the flood never reached its end") }
         let figures = view.terminal.latency, judged = flood(figures), frames = Self.committed(view.terminal) - before
         let held = max(mainThread.longest - Heartbeat.interval * 1000, 0)
         let change = Percentiles(milliseconds: changed.map { $0 * 1000 }).p95
@@ -238,47 +251,47 @@ extension Driver {
         let base = ["berths/", "src/", "README.md", "Package.swift"]
         door.setFolder(root, base.map(Self.fileEntry))
         door.setFolder(root + "/berths", Self.berths(5000))
-        guard await waitUntil(10, { self.filesShown?.list.numberOfRows == base.count }) else { return (false, "the panel never showed the root: \(filesShown?.words ?? "")") }
+        guard await waitForState(10, { self.filesShown?.list.numberOfRows == base.count }) else { return (false, "the panel never showed the root: \(filesShown?.words ?? "")") }
         var opened: [Double] = [], listed: [Double] = [], changed: [Double] = []
         for _ in 0 ..< 10 {
             press("s", ["control", "command"])
-            guard await waitUntil(5, { self.filesShown == nil }) else { return (false, "⌃⌘S did not put the panel away") }
+            guard await waitForState(5, { self.filesShown == nil }) else { return (false, "⌃⌘S did not put the panel away") }
             let asked = CACurrentMediaTime()
             press("s", ["control", "command"])
-            guard await waitUntil(5, { (self.filesShown?.lastDrawn.at ?? 0) > asked && (self.filesShown?.list.numberOfRows ?? 0) > 0 }) else {
+            guard await waitForState(5, { (self.filesShown?.lastDrawn.at ?? 0) > asked && (self.filesShown?.list.numberOfRows ?? 0) > 0 }) else {
                 return (false, "⌃⌘S drew no rows: \(filesShown?.words ?? "no panel")")
             }
             opened.append((filesShown?.lastDrawn.at ?? asked) - asked)
         }
         let berths = root + "/berths"
         for _ in 0 ..< 10 {
-            guard let shown = filesShown, await clickName(berths, in: shown), await waitUntil(5, { self.filesShown?.list.chosen == berths }) else {
+            guard let shown = filesShown, await clickName(berths, in: shown), await waitForState(5, { self.filesShown?.list.chosen == berths }) else {
                 return (false, "berths could not be chosen")
             }
             press("arrowRight", [])
-            guard await waitUntil(10, { (self.filesShown?.list.numberOfRows ?? 0) >= 5000 + base.count }),
+            guard await waitForState(10, { (self.filesShown?.list.numberOfRows ?? 0) >= 5000 + base.count }),
                   let heard = filesShown?.listingHeard, heard.path == berths,
-                  await waitUntil(5, { (self.filesShown?.lastDrawn.at ?? 0) > heard.at })
+                  await waitForState(5, { (self.filesShown?.lastDrawn.at ?? 0) > heard.at })
             else { return (false, "→ on berths drew no 5,000 rows: \(filesShown?.list.numberOfRows ?? 0)") }
             listed.append((filesShown?.lastDrawn.at ?? heard.at) - heard.at)
             press("arrowLeft", [])
-            guard await waitUntil(5, { self.filesShown?.list.numberOfRows == base.count }) else { return (false, "← did not shut berths") }
+            guard await waitForState(5, { self.filesShown?.list.numberOfRows == base.count }) else { return (false, "← did not shut berths") }
         }
         guard let shown = filesShown, await clickName(berths, in: shown) else { return (false, "berths could not be chosen to scroll") }
         press("arrowRight", [])
-        guard await waitUntil(10, { (self.filesShown?.list.numberOfRows ?? 0) >= 5000 + base.count }), let scroll = filesShown?.scroll else { return (false, "berths did not open to scroll") }
+        guard await waitForState(10, { (self.filesShown?.list.numberOfRows ?? 0) >= 5000 + base.count }), let scroll = filesShown?.scroll else { return (false, "berths did not open to scroll") }
         mainThread.reset()
         let down = await turnWheel(over: scroll, to: 1), up = await turnWheel(over: scroll, to: 0)
         let scrolled = held()
         press("arrowLeft", [])
-        _ = await waitUntil(5) { self.filesShown?.list.numberOfRows == base.count }
+        _ = await waitForState(5) { self.filesShown?.list.numberOfRows == base.count }
         var names = base
         for index in 0 ..< 10 {
             let name = "tide-\(index).ts"
             names.append(name)
             door.setFolder(root, names.map(Self.fileEntry))
             let path = root + "/" + name
-            guard await waitUntil(5, { self.filesShown?.newDrawn[path] != nil }), let heard = filesShown?.changeHeard[root], let drawn = filesShown?.newDrawn[path] else {
+            guard await waitForState(5, { self.filesShown?.newDrawn[path] != nil }), let heard = filesShown?.changeHeard[root], let drawn = filesShown?.newDrawn[path] else {
                 return (false, "the change to \(name) drew no new row: \(filesShown?.rows.map(\.name) ?? [])")
             }
             changed.append(drawn - heard)
@@ -291,10 +304,10 @@ extension Driver {
                 door.setFolder(root, (names + (0 ..< count).map { "burst-\($0).log" }).map(Self.fileEntry))
             }
         }
-        let landed = await waitUntil(30) { self.filesShown?.list.numberOfRows == final.count }
+        let landed = await waitForState(30) { self.filesShown?.list.numberOfRows == final.count }
         let bursting = held()
         door.setFolder(root, base.map(Self.fileEntry))
-        _ = await waitUntil(10) { self.filesShown?.list.numberOfRows == base.count }
+        _ = await waitForState(10) { self.filesShown?.list.numberOfRows == base.count }
         let rows = [
             ("⌃⌘S to the first rows drawn p95", Percentiles(milliseconds: opened.map { $0 * 1000 }).p95, 50.0, 120.0),
             ("a 5,000-entry listing heard to its rows drawn p95", Percentiles(milliseconds: listed.map { $0 * 1000 }).p95, 60, 150),
