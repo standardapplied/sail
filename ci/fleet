@@ -890,7 +890,7 @@ done
 sudo sail server token revoke "direct-$handle" > /dev/null 2>&1 || true
 sudo sail server token create "direct-$handle" member --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " "'
 
-readonly DIRECT_TERMINAL='import json, socket, struct, sys, time, urllib.error, urllib.request
+readonly DIRECT_TERMINAL='import json, re, socket, struct, sys, time, urllib.error, urllib.request
 ip, token = sys.argv[1], sys.stdin.readline().strip()
 workspace = sys.argv[2] if len(sys.argv) > 2 else ""
 def text(value):
@@ -1018,8 +1018,8 @@ for i in range(20):
 def digest_of(payload):
     at = 4 + 4 + struct.unpack(">i", payload[4:8])[0]
     at += 4 + struct.unpack(">i", payload[at:at + 4])[0]
-    eof = payload[at] == 1
-    return eof, payload[at + 5:at + 5 + struct.unpack(">i", payload[at + 1:at + 5])[0]]
+    eof, whole = payload[at] == 1, payload[at + 1] == 1
+    return eof, whole, payload[at + 6:at + 6 + struct.unpack(">i", payload[at + 2:at + 6])[0]]
 wholes = []
 for i in range(10):
     started = time.monotonic()
@@ -1028,11 +1028,11 @@ for i in range(10):
         kind, payload = answer(files)
         if kind != 52:
             raise SystemExit("the 20 MiB read %d was answered frame %d %r" % (i, kind, payload[:200]))
-        eof, digest = digest_of(payload)
+        eof, whole, digest = digest_of(payload)
         if eof:
             break
-    if len(digest) != 64:
-        raise SystemExit("the 20 MiB read %d ended with no digest: %r" % (i, digest))
+    if not whole or not re.fullmatch(rb"[0-9a-f]{64}", digest):
+        raise SystemExit("the 20 MiB read %d did not end whole with a digest: whole %s, %r" % (i, whole, digest))
     wholes.append((time.monotonic() - started) * 1000)
 print("files over TCP from another box, p95: list 5,000 %.0f ms (ceiling 250, %d frame(s)), first 256 KiB %.0f ms (ceiling 200), change to FilesChanged %.0f ms (ceiling 600), a 20 MiB read hashed twice %.0f ms (printed)" % (p95(lists), frames, p95(reads), p95(changes), p95(wholes)))
 if p95(lists) > 250 or p95(reads) > 200 or p95(changes) > 600:
