@@ -187,9 +187,30 @@ import Testing
         #expect(Self.roundTrips(bytes, chunk: 256 * 1024) == nil, "\(name)")
     }
 
-    @Test func aFileOneByteUnderTheLimitComesBackByteForByte() {
-        let bytes = [UInt8](repeating: 0x61, count: Int(OpenFile.limit) - 2) + [0x0D, 0x0A]
-        #expect(Self.roundTrips(bytes, chunk: 256 * 1024) == nil)
+    /// The round trip at the limit, edited only at the end: walking 20 MiB by character, as the
+    /// shared check's middle edit does, costs seconds of CPU that starve other suites' deadlines.
+    @Test func aFileOneByteUnderTheLimitComesBackByteForByte() throws {
+        let bytes = [UInt8](repeating: 0x61, count: Int(OpenFile.limit) - 3) + [0x0D, 0x0A]
+        var pane = Pane(size: bytes.count)
+        pane.answer(bytes)
+        #expect(pane.file.canType && pane.text.utf8.count == bytes.count)
+        #expect(pane.file.save().asks.isEmpty, "a save with no edit wrote")
+        let text = pane.text
+        pane.type(text + "x")
+        pane.type(text)
+        #expect(pane.file.clean, "a character typed and deleted is not clean")
+        pane.type(text + "x")
+        guard case let .write(_, _, base, written)? = pane.file.save().asks.first else {
+            Issue.record("a save after an edit wrote nothing")
+            return
+        }
+        let same = written.withUnsafeBufferPointer { mine in
+            bytes.withUnsafeBufferPointer { read in
+                guard let one = mine.baseAddress, let other = read.baseAddress else { return false }
+                return memcmp(one, other, read.count) == 0
+            }
+        }
+        #expect(base == Self.digest(bytes) && written.count == bytes.count + 1 && written.last == 0x78 && same)
     }
 
     /// Bytes drawn at random from line endings, a BOM, accented and astral characters, tabs and

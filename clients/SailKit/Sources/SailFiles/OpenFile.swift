@@ -289,7 +289,7 @@ public struct OpenFile: Sendable {
         if readAgain { step.asks.append(read(.follow)) }
         readAgain = false
         guard isWhole else { return step }
-        guard String(validating: held.bytes, as: UTF8.self) != nil, !held.bytes.prefix(Self.decidedBy).contains(0) else {
+        guard held.why == .open || String(validating: held.bytes, as: UTF8.self) != nil && !held.bytes.prefix(Self.decidedBy).contains(0) else {
             return held.why == .open ? step : merge(step, notTextAnyMore(held.bytes, digest: digest))
         }
         switch held.why {
@@ -398,9 +398,17 @@ public struct OpenFile: Sendable {
         if clean { theirs = nil }
     }
 
-    /// Equal by bytes, its UTF-16 length first: a key that changes the length is told at once.
+    /// Equal by bytes, its UTF-16 length first: a key that changes the length is told at once; the
+    /// bytes compared whole where the text holds them in one run.
     private func equalsBase(_ text: String) -> Bool {
-        text.utf16.count == baseUnits && text.utf8.elementsEqual(base)
+        guard text.utf16.count == baseUnits else { return false }
+        if let same = text.utf8.withContiguousStorageIfAvailable({ mine in
+            mine.count == base.count && base.withUnsafeBufferPointer { theirs in
+                guard let one = mine.baseAddress, let other = theirs.baseAddress else { return true }
+                return memcmp(one, other, mine.count) == 0
+            }
+        }) { return same }
+        return text.utf8.elementsEqual(base)
     }
 
     private mutating func notText(_ bytes: [UInt8]) -> Step {
