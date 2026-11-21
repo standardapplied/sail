@@ -753,7 +753,7 @@ final class RowCell: NSView {
         func place(_ view: NSView, from start: Double, width: Double, height: Double) {
             let x = userInterfaceLayoutDirection == .rightToLeft ? Double(bounds.width) - start - width : start
             let below = (room - height) / 2
-            let frame = NSRect(x: x, y: isFlipped ? top + below : below, width: max(width, 0), height: height)
+            let frame = backingAlignedRect(NSRect(x: x, y: isFlipped ? top + below : below, width: max(width, 0), height: height), options: .alignAllEdgesNearest)
             if view.frame != frame { view.frame = frame }
         }
         place(content, from: leading, width: contentEnd - leading, height: contentHeight)
@@ -840,6 +840,7 @@ final class RowActions: NSView {
             let alignment = NSRect(x: end - Double(size.width), y: (height - Double(size.height)) / 2, width: Double(size.width), height: Double(size.height))
             var frame = view.frame(forAlignmentRect: alignment)
             if userInterfaceLayoutDirection == .rightToLeft { frame.origin.x = bounds.width - frame.maxX }
+            frame = backingAlignedRect(frame, options: .alignAllEdgesNearest)
             if view.frame != frame { view.frame = frame }
             end = Double(alignment.minX) - (index > 0 ? spacing(after: views[index - 1]) : 0)
         }

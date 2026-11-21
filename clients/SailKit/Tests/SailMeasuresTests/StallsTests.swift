@@ -289,21 +289,6 @@ import Testing
         #expect(beat.longest == 0)
         #expect(beat.lastTick == 200)
     }
-
-    /// Beside each gap's wall-clock length, the ticking thread's own CPU time in it: what another
-    /// process's preemption cannot inflate. The longest is kept; a reset starts again.
-    @Test func ticksRecordTheThreadsOwnCPUInEachTurn() {
-        let time = Mutex(100.0), cpu = Mutex(5.0)
-        let beat = Heartbeat(now: { time.withLock { $0 } }, cpu: { cpu.withLock { $0 } })
-        for (now, used) in [(100.01, 5.001), (100.08, 5.004), (100.09, 5.013)] {
-            time.withLock { $0 = now }
-            cpu.withLock { $0 = used }
-            beat.tick()
-        }
-        #expect(abs(beat.longest - 70) < 1e-6 && abs(beat.longestCPU - 9) < 1e-6, "wall \(beat.longest), cpu \(beat.longestCPU)")
-        beat.reset()
-        #expect(beat.longestCPU == 0)
-    }
 }
 
 /// A gated figure's verdict names it first, and a series' p95 tail is counted by nearest rank.
@@ -417,3 +402,58 @@ import Testing
     }
 }
 #endif
+
+/// A run loop's turns, each from its wake to its sleep: the longest on the wall clock and the
+/// most of the thread's own CPU any one spent, which another process's preemption cannot inflate.
+@Suite struct TurnsTests {
+    @Test func eachTurnIsTimedFromItsWakeToItsSleepOnBothClocks() {
+        let time = Mutex(100.0), cpu = Mutex(5.0)
+        let turns = Turns(now: { time.withLock { $0 } }, cpu: { cpu.withLock { $0 } })
+        func at(_ now: Double, _ used: Double, _ edge: () -> Void) {
+            time.withLock { $0 = now }
+            cpu.withLock { $0 = used }
+            edge()
+        }
+        at(100.00, 5.000, turns.woke); at(100.02, 5.009, turns.slept)
+        at(100.10, 5.009, turns.woke); at(100.11, 5.019, turns.slept)
+        at(100.20, 5.019, turns.woke); at(100.25, 5.020, turns.slept)
+        #expect(abs(turns.longest - 50) < 1e-6 && abs(turns.longestCPU - 10) < 1e-6, "wall \(turns.longest), cpu \(turns.longestCPU)")
+    }
+
+    /// A turn already under way at a reset counts from the reset; a sleep with no wake counts
+    /// nothing; a wake with no sleep before the next wake ends the turn there.
+    @Test func aResetStartsTheTurnUnderWayAfresh() {
+        let time = Mutex(0.0), cpu = Mutex(0.0)
+        let turns = Turns(now: { time.withLock { $0 } }, cpu: { cpu.withLock { $0 } })
+        turns.slept()
+        #expect(turns.longest == 0 && turns.longestCPU == 0)
+        turns.woke()
+        time.withLock { $0 = 1 }; cpu.withLock { $0 = 1 }
+        turns.reset()
+        time.withLock { $0 = 1.004 }; cpu.withLock { $0 = 1.003 }
+        turns.woke()
+        #expect(abs(turns.longest - 4) < 1e-6 && abs(turns.longestCPU - 3) < 1e-6)
+        time.withLock { $0 = 1.005 }
+        turns.slept()
+        turns.reset()
+        #expect(turns.longest == 0 && turns.longestCPU == 0)
+    }
+
+    /// A woken turn runs through its loop's next start of an iteration to its sleep; a loop that
+    /// goes round again without sleeping (its sources still pending) starts a turn there, so a
+    /// main queue fed without pause is many turns, each answering input, not one.
+    @Test func aLoopThatGoesRoundWithoutSleepingIsATurnEachTime() {
+        let time = Mutex(0.0), cpu = Mutex(0.0)
+        let turns = Turns(now: { time.withLock { $0 } }, cpu: { cpu.withLock { $0 } })
+        func at(_ now: Double, _ edge: () -> Void) {
+            time.withLock { $0 = now }
+            cpu.withLock { $0 = now / 2 }
+            edge()
+        }
+        at(0.000, turns.woke); at(0.004, turns.iterated); at(0.010, turns.slept)
+        #expect(abs(turns.longest - 10) < 1e-6 && abs(turns.longestCPU - 5) < 1e-6, "a woken turn is whole to its sleep: \(turns.longest)")
+        turns.reset()
+        at(1.000, turns.iterated); at(1.006, turns.iterated); at(1.013, turns.iterated); at(1.015, turns.slept)
+        #expect(abs(turns.longest - 7) < 1e-6 && abs(turns.longestCPU - 3.5) < 1e-6, "each iteration unslept is its own turn: \(turns.longest)")
+    }
+}

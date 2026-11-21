@@ -116,6 +116,29 @@ import Testing
     /// N2: where the card's edge is drawn over the list's leading edge (the left panel, in dark), the
     /// chosen row's bar starts a hairline in, read at 2x: the edge's point holds no bar, the two
     /// after it are the bar, its outer end still square; mirrored right to left.
+    /// What a row places by arithmetic lands on whole pixels of its window, as Auto Layout placed
+    /// it: a note centred a fraction of a pixel off is drawn re-sampled, not as it was.
+    @Test(arguments: [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft])
+    func aRowsViewsLandOnWholePixels(_ direction: NSUserInterfaceLayoutDirection) throws {
+        let list = SailList(rowStyle: .list, look: .light, mono: try ControlsTests.mono())
+        list.userInterfaceLayoutDirection = direction
+        list.entries = [.item(SailList.Item(id: "dock", name: "dock", voice: "dock", content: NSTextField(labelWithString: "dock"), actions: [SailList.Action("Open") {}], note: "about 3 s", height: 37.5))]
+        list.frame = NSRect(x: 0, y: 0, width: 440.5, height: 160)
+        let (window, _) = Self.shown(list)
+        defer { window.orderOut(nil) }
+        list.layoutSubtreeIfNeeded()
+        let cell = try #require(list.view(atColumn: 0, row: 0, makeIfNecessary: true))
+        cell.layoutSubtreeIfNeeded()
+        func placed(_ view: NSView) -> [NSView] {
+            view.subviews.flatMap { [$0] + placed($0) }
+        }
+        let off = placed(cell).filter { view in
+            let box = window.convertToBacking(view.convert(view.bounds, to: nil))
+            return [box.minX, box.minY, box.maxX, box.maxY].contains { abs($0 - $0.rounded()) > 0.001 }
+        }
+        #expect(off.isEmpty, "off the pixel grid: \(off.map { "\(type(of: $0)) \($0.frame)" })")
+    }
+
     @Test(arguments: [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft])
     func theBarStartsClearOfTheCardsEdge(_ direction: NSUserInterfaceLayoutDirection) throws {
         let look = Look.dark, canvas = NSColor(Tint(look.canvas))

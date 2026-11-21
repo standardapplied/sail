@@ -59,6 +59,7 @@ final class Driver {
         return view
     }()
     let mainThread = Heartbeat.onTheMainThread { CACurrentMediaTime() }
+    let mainTurns = Turns.onTheMainRunLoop()
     let ownThread = Heartbeat.onItsOwnThread { CACurrentMediaTime() }
     private var madeStacks: MainStacks?
     /// The main thread's sampler, begun the first time a measure asks for it, and kept.
@@ -849,5 +850,21 @@ final class Driver {
             try? png.write(to: out.appending(path: stem + ".png"))
         }
         try? text.write(to: file, atomically: true, encoding: .utf8)
+    }
+}
+
+extension Turns {
+    /// Told by the main run loop in every mode: a turn's start before any other observer of its
+    /// wake or iteration, and its end after every other observer of its sleep, Core Animation's
+    /// commit and the views' layout and display among them.
+    @MainActor static func onTheMainRunLoop() -> Turns {
+        let turns = Turns { CACurrentMediaTime() }
+        let starts = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.afterWaiting.rawValue | CFRunLoopActivity.beforeTimers.rawValue, true, CFIndex.min) { _, activity in
+            activity == .afterWaiting ? turns.woke() : turns.iterated()
+        }
+        let ends = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max) { _, _ in turns.slept() }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), starts, .commonModes)
+        CFRunLoopAddObserver(CFRunLoopGetMain(), ends, .commonModes)
+        return turns
     }
 }
