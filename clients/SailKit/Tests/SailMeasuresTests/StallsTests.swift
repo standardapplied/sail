@@ -402,3 +402,110 @@ import Testing
     }
 }
 #endif
+
+/// A run loop's turns, each from its wake to its sleep: the longest on the wall clock and the
+/// most of the thread's own CPU any one spent, which another process's preemption cannot inflate.
+@Suite struct TurnsTests {
+    @Test func eachTurnIsTimedFromItsWakeToItsSleepOnBothClocks() {
+        let time = Mutex(100.0), cpu = Mutex(5.0)
+        let turns = Turns(now: { time.withLock { $0 } }, cpu: { cpu.withLock { $0 } })
+        func at(_ now: Double, _ used: Double, _ edge: () -> Void) {
+            time.withLock { $0 = now }
+            cpu.withLock { $0 = used }
+            edge()
+        }
+        at(100.00, 5.000, turns.woke); at(100.02, 5.009, turns.slept)
+        at(100.10, 5.009, turns.woke); at(100.11, 5.019, turns.slept)
+        at(100.20, 5.019, turns.woke); at(100.25, 5.020, turns.slept)
+        #expect(abs(turns.longest - 50) < 1e-6 && abs(turns.longestCPU - 10) < 1e-6, "wall \(turns.longest), cpu \(turns.longestCPU)")
+    }
+
+    /// A turn already under way at a reset counts from the reset; a sleep with no wake counts
+    /// nothing; a wake with no sleep before the next wake ends the turn there.
+    @Test func aResetStartsTheTurnUnderWayAfresh() {
+        let time = Mutex(0.0), cpu = Mutex(0.0)
+        let turns = Turns(now: { time.withLock { $0 } }, cpu: { cpu.withLock { $0 } })
+        turns.slept()
+        #expect(turns.longest == 0 && turns.longestCPU == 0)
+        turns.woke()
+        time.withLock { $0 = 1 }; cpu.withLock { $0 = 1 }
+        turns.reset()
+        time.withLock { $0 = 1.004 }; cpu.withLock { $0 = 1.003 }
+        turns.woke()
+        #expect(abs(turns.longest - 4) < 1e-6 && abs(turns.longestCPU - 3) < 1e-6)
+        time.withLock { $0 = 1.005 }
+        turns.slept()
+        turns.reset()
+        #expect(turns.longest == 0 && turns.longestCPU == 0)
+    }
+
+    /// The costliest turn is split where Core Animation's commit begins: its CPU before the commit,
+    /// and the rest, the commit's; a turn with no commit is all before it.
+    @Test func theCostliestTurnIsSplitAtItsCommit() {
+        let time = Mutex(0.0), cpu = Mutex(0.0)
+        let turns = Turns(now: { time.withLock { $0 } }, cpu: { cpu.withLock { $0 } })
+        func at(_ now: Double, _ used: Double, _ edge: () -> Void) {
+            time.withLock { $0 = now }
+            cpu.withLock { $0 = used }
+            edge()
+        }
+        at(0.000, 0.000, turns.woke); at(0.004, 0.003, turns.committing); at(0.010, 0.009, turns.slept)
+        at(0.100, 0.009, turns.woke); at(0.105, 0.011, turns.committing); at(0.130, 0.029, turns.slept)
+        at(0.200, 0.029, turns.woke); at(0.207, 0.036, turns.slept)
+        #expect(abs(turns.longestCPU - 20) < 1e-6 && abs(turns.costliestBeforeCommit - 2) < 1e-6, "cpu \(turns.longestCPU), before its commit \(turns.costliestBeforeCommit)")
+        turns.reset()
+        at(1.000, 1.000, turns.woke); at(1.009, 1.008, turns.slept)
+        #expect(abs(turns.longestCPU - 8) < 1e-6 && abs(turns.costliestBeforeCommit - 8) < 1e-6, "a turn with no commit is all before it: \(turns.costliestBeforeCommit)")
+    }
+
+    /// A woken turn runs through its loop's next start of an iteration to its sleep; a loop that
+    /// goes round again without sleeping (its sources still pending) starts a turn there, so a
+    /// main queue fed without pause is many turns, each answering input, not one.
+    @Test func aLoopThatGoesRoundWithoutSleepingIsATurnEachTime() {
+        let time = Mutex(0.0), cpu = Mutex(0.0)
+        let turns = Turns(now: { time.withLock { $0 } }, cpu: { cpu.withLock { $0 } })
+        func at(_ now: Double, _ edge: () -> Void) {
+            time.withLock { $0 = now }
+            cpu.withLock { $0 = now / 2 }
+            edge()
+        }
+        at(0.000, turns.woke); at(0.004, turns.iterated); at(0.010, turns.slept)
+        #expect(abs(turns.longest - 10) < 1e-6 && abs(turns.longestCPU - 5) < 1e-6, "a woken turn is whole to its sleep: \(turns.longest)")
+        turns.reset()
+        at(1.000, turns.iterated); at(1.006, turns.iterated); at(1.013, turns.iterated); at(1.015, turns.slept)
+        #expect(abs(turns.longest - 7) < 1e-6 && abs(turns.longestCPU - 3.5) < 1e-6, "each iteration unslept is its own turn: \(turns.longest)")
+    }
+}
+
+/// A hold is known only once the tick that ends it has come (``Heartbeat/ticked(after:within:)``).
+@Suite struct HeartbeatTickedTests {
+    final class Clock: Sendable {
+        let now = Mutex(0.0)
+    }
+
+    @Test func aSwitchShorterThanATickIsCoveredOnlyOnceTheNextTickComes() async {
+        let clock = Clock()
+        let beat = Heartbeat { clock.now.withLock { $0 } }
+        clock.now.withLock { $0 = 0.005 }
+        #expect(beat.lastTick < 0.005)
+        #expect(await beat.ticked(after: 0.005, within: .zero) == false)
+        var pauses = 0
+        let covered = await beat.ticked(after: 0.005, within: .seconds(30)) {
+            pauses += 1
+            clock.now.withLock { $0 = 0.010 }
+            beat.tick()
+        }
+        #expect(covered && pauses == 1)
+        #expect(beat.lastTick >= 0.005)
+    }
+
+    @Test func aHoldRunningPastTheSwitchIsRecordedByThatTick() async {
+        let clock = Clock()
+        let beat = Heartbeat { clock.now.withLock { $0 } }
+        clock.now.withLock { $0 = 0.040 }
+        #expect(beat.stalls.longest(in: Span(0.030, 0.035)) == nil)
+        beat.tick()
+        #expect(await beat.ticked(after: 0.035, within: .zero))
+        #expect(beat.stalls.longest(in: Span(0.030, 0.035)) == Span(0, 0.040))
+    }
+}

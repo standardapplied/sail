@@ -221,10 +221,12 @@ public final class Tooltip: NSResponder {
         hide()
     }
 
-    public func hide() {
+    /// Hides it. The pointer leaving it warms the next tooltip to show at once (`warming`); one put
+    /// away because its anchor's row was made over for another does not.
+    public func hide(warming: Bool = true) {
         pending?.cancel()
         pending = nil
-        if isShown { Self.lastHidden = CACurrentMediaTime() }
+        if warming, isShown { Self.lastHidden = CACurrentMediaTime() }
         if let panel {
             panel.parent?.removeChildWindow(panel)
             if Self.up === panel { Self.up = nil }

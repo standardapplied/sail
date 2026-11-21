@@ -609,33 +609,35 @@ extension Driver {
     /// pane presents, so one the pane's size slows each frame's drawable.
     private func overThe(_ panes: [TerminalPane]) -> [String] {
         guard let root = shell.window.contentView?.superview else { return [] }
-        func path(_ view: NSView) -> [Int] {
-            var indices: [Int] = [], view = view
-            while let parent = view.superview {
-                indices.insert(parent.subviews.firstIndex(of: view) ?? 0, at: 0)
-                view = parent
+        return panes.enumerated().flatMap { index, pane in OverTerminals.covers(of: pane.terminal, in: root).map { "pane \(index + 1): \($0.said)" } }
+    }
+
+    /// What lies over the four panes' terminals against ``OverTerminals``' rule, checked at each
+    /// `check`: what breaks it, what it expects to find and did not (each unfocused pane's scrim,
+    /// the dividers, the card's edge in a look that has one), and every bitmap given meanwhile to
+    /// the large layers it found (``PaintWatch``).
+    @MainActor private final class OverWatch {
+        private(set) var broken: [String] = []
+        private(set) var checks = 0
+        private let painting = PaintWatch()
+
+        var paints: Int {
+            painting.paints
+        }
+
+        func check(_ grid: [TerminalPane], in root: NSView?, edged: Bool, _ when: String) {
+            guard let root else { return broken.append("\(when): the window has no frame view to look in") }
+            guard grid.count == 4 else { return broken.append("\(when): the grid has \(grid.count) panes, not 4") }
+            checks += 1
+            for (index, pane) in grid.enumerated() {
+                broken += OverTerminals.misses(over: pane.terminal, of: pane, in: root).map { "pane \(index + 1), \(when): \($0)" }
+                broken += OverTerminals.unfound(over: pane.terminal, of: pane, in: root, dimmed: pane.isDimmed, edged: edged).map { "pane \(index + 1), \(when): \($0) not found over it" }
+                painting.watch(OverTerminals.largeLayers(over: pane.terminal, of: pane, in: root))
             }
-            return indices
         }
-        func over(_ one: [Int], _ other: [Int]) -> Bool {
-            for (a, b) in zip(one, other) where a != b { return a > b }
-            return false
-        }
-        var shown: [NSView] = []
-        func walk(_ view: NSView) {
-            for child in view.subviews where !child.isHidden && child.alphaValue > 0 {
-                shown.append(child)
-                walk(child)
-            }
-        }
-        walk(root)
-        return panes.enumerated().flatMap { index, pane in
-            let terminal = pane.terminal, place = path(pane.terminal)
-            let rect = terminal.convert(terminal.bounds, to: nil)
-            return shown.filter { view in
-                view !== terminal && !view.isDescendant(of: terminal) && !terminal.isDescendant(of: view) && over(path(view), place)
-                    && view.convert(view.bounds, to: nil).intersects(rect)
-            }.map { view in "pane \(index + 1): \(type(of: view)) \(Int(view.frame.width))x\(Int(view.frame.height))\(view.layer == nil ? "" : ", a layer")" }
+
+        func stop() {
+            painting.stop()
         }
     }
 
@@ -834,6 +836,10 @@ extension Driver {
     /// How long a switch's frames may take to be told presented before its figures are read, the
     /// figures being cleared for the next switch.
     static let switchToldWithin = 0.5
+    /// How long the switches' holds wait for the main thread's clock to tick after the last of them
+    /// ends: a hold is known only once the tick that ends it has come, and a switch shorter than
+    /// the clock's 10 ms has often ended before the next.
+    static let tickedWithin = Duration.seconds(1)
 
     /// The look switched `times` times, each the other of the one before, with the four panes'
     /// scrollback full and quiet (the spec `sail-app-a-change-of-look-holds-the-main-thread-briefly`).
@@ -845,7 +851,10 @@ extension Driver {
     /// ``lookSwitchHold``, counted as ours and clipped to each, every switch measured by a main
     /// thread still ticking after it, the worst always said; the median of the four switches' worst
     /// pane waits to show the change at most ``lookShownMedian``, each net of the machine's share
-    /// (``shownWait(_:hold:)``), with a change shown in every switch, the worst always said. Reported and not judged: the first
+    /// (``shownWait(_:hold:)``), with a change shown in every switch, the worst always said; over every
+    /// pane, before the switches and after each, nothing but ``OverTerminals``' known views covering
+    /// more than a sliver or a corner, none of those painting, and no bitmap given to their layers
+    /// during the switches. Reported and not judged: the first
     /// switch's hold, every switch's main-thread CPU time, and an empty window's own switches. Nothing of the drive's runs on the main
     /// thread inside a switch: the stacks are described, and every line printed, after the last.
     private func switchLooks(_ grid: [TerminalPane], times: Int, byMenu: Bool) async -> [(String, Bool)] {
@@ -861,6 +870,8 @@ extension Driver {
         let keptBefore = SymbolInk.kept
         let laidOut = workbench.tabLayouts
         var figures: [[LatencyFigures]] = []
+        let overWatch = OverWatch(), root = shell.window.contentView?.superview
+        overWatch.check(grid, in: root, edged: shell.look.cardEdge != nil, "before the switches, in \(shell.look == .dark ? "dark" : "light")")
         for index in 0 ..< times {
             grid.forEach { $0.terminal.resetLatency() }
             let other: NSAppearance.Name = shell.look == .dark ? .aqua : .darkAqua
@@ -880,13 +891,19 @@ extension Driver {
             switches.append((at, setting, (ContinuousClock.now - began) / .milliseconds(1), span))
             _ = await waitUntil(Self.switchToldWithin) { grid.allSatisfy { $0.terminal.latency.unpresented.isEmpty } }
             figures.append(grid.map { $0.terminal.latency })
+            overWatch.check(grid, in: root, edged: shell.look.cardEdge != nil, "after switch \(index + 1), in \(shell.look == .dark ? "dark" : "light")")
         }
+        overWatch.stop()
         let layouts = workbench.tabLayouts - laidOut
+        let lastEnd = switches.last?.span.end ?? 0
+        _ = await mainThread.ticked(after: lastEnd, within: Self.tickedWithin)
+        let sampled = await waitUntil(Double(Self.tickedWithin.components.seconds)) { (self.mainStacks.lastLook ?? 0) >= lastEnd }
         let holds = switches.map { heldWithin($0.span) }
         let cpus = switches.map { mainStacks.cpu(in: $0.span) }
         let waits = figures.indices.map { index in figures[index].map { shownWait($0, hold: holds[index].gap) } }
         for (index, done) in switches.enumerated() {
-            let cpu = cpus[index].map { String(format: "%.1f ms", $0) } ?? "not covered by the looks"
+            let cpu = cpus[index].map { String(format: "%.1f ms", $0) }
+                ?? (sampled ? "not covered by the looks" : "unknown: the CPU sampler stopped before switch \(index + 1) ended")
             let untold = figures[index].map(\.unpresented.count).reduce(0, +)
             print(String(format: "look switch %d at %.3f: setting the appearance took %.1f ms on the main thread; the last pane drew it %.1f ms after the switch; ", index + 1, done.at, done.setting, done.took)
                 + "the main thread's longest hold in it, ours, \(Self.ms(holds[index].ours)) ms, its CPU time in it \(cpu); "
@@ -962,7 +979,11 @@ extension Driver {
              (holds.first?.ours ?? 0) <= Self.firstSwitchHold && resolvedFirst <= keptBefore && !unmeasured.contains(1)),
             ("6: switches 2 to \(times) held the main thread at most \(Self.ms(Self.lookSwitchHold)) ms at their median (\(laterSaid))", laterMedian <= Self.lookSwitchHold && unmeasured.isEmpty),
             ("7: the median switch's worst pane waited at most \(Self.ms(Self.lookShownMedian)) ms to show the change (\(waitSaid))", medianWait <= Self.lookShownMedian && measured.allSatisfy { $0 > 0 }),
-        ] + (byMenu ? [("8: the user menu opened over the panes, switched each look, chose Auto and closed (\(closed.1))", opened.0 && closed.0)] : [])
+            ("8: over every pane, nothing but its own scrim and the dividers covers more than 1 pt or 8 × 8 pt, each of those found, nothing covering more paints, and nothing covering more was painted during the switches "
+                + "(checked \(overWatch.checks) times, before the switches and after each, in both looks; \(overWatch.paints) bitmaps painted; "
+                + "\(overWatch.broken.isEmpty ? "nothing broke the rule" : overWatch.broken.joined(separator: "; ")))",
+             overWatch.broken.isEmpty && overWatch.paints == 0 && overWatch.checks == times + 1),
+        ] + (byMenu ? [("9: the user menu opened over the panes, switched each look, chose Auto and closed (\(closed.1))", opened.0 && closed.0)] : [])
     }
 
     /// How long a pane waited to show a switch's change, ours, in ms: its longest output to shown

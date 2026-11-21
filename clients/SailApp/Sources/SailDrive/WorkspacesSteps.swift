@@ -382,6 +382,10 @@ extension Driver {
             guard scrollable else { return (false, "nothing to scroll: \(view.documentView?.frame.height ?? 0) pt of rows in \(view.contentSize.height) pt") }
             return await turnWheel(over: view, to: fraction)
         }
+        if step.panelRowsWhole == true {
+            let blank = pane.panel.list.blankRows, shown = pane.panel.list.rows(in: pane.panel.list.visibleRect).length
+            return (blank.isEmpty, blank.isEmpty ? "each of the \(shown) sidebar rows on screen holds its own content" : "sidebar rows gone blank: \(blank)")
+        }
         if let route = step.unreachable {
             await GoldenDesk.shared.fail(route, unreached: true)
             return (true, "")

@@ -161,6 +161,16 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return true
     }
 
+    /// Hidden (⌘H), the files are not on screen, as from the Dock; shown again, they are while
+    /// the window is up.
+    public func applicationDidHide(_: Notification) {
+        thisMac.connectFiles(away: true)
+    }
+
+    public func applicationDidUnhide(_: Notification) {
+        thisMac.connectFiles(away: !window.isVisible)
+    }
+
     /// Quitting detaches every terminal, this Mac's and the runner's, and asks nothing: each
     /// session lives on at its host.
     public func applicationWillTerminate(_: Notification) {

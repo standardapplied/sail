@@ -563,8 +563,8 @@ class FileWritesTest {
             running(
                 script ->
                     script.replace(
-                        "IFS= read -r -d '' word && [ \"$word\" = go ] || exit 30",
-                        "IFS= read -r -d '' word && [ \"$word\" = go ] || exit 30\nsleep 30")),
+                        "IFS= read -r -d '' word && [ \"$word\" = go ] || exit 43",
+                        "IFS= read -r -d '' word && [ \"$word\" = go ] || exit 43\nsleep 30")),
             CONTAINER,
             "dock",
             said::add,

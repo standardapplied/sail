@@ -174,7 +174,8 @@ private extension Frame {
             [.int32(listing.id), .string(listing.version), .count(listing.entries.count)]
                 + listing.entries.flatMap(\.fields) + [.bool(listing.more), .bool(listing.truncated)]
         case let .filesEntry(id, entry, version): [.int32(id)] + entry.fields + [.string(version)]
-        case let .filesData(id, version, bytes, eof): [.int32(id), .string(version), .blob(bytes), .bool(eof)]
+        case let .filesData(id, version, bytes, eof, whole, digest):
+            [.int32(id), .string(version), .blob(bytes), .bool(eof), .bool(whole), .string(digest)]
         case let .filesChanged(paths): [.count(paths.count)] + paths.map { .blob($0.bytes) }
         case let .filesRefused(id, kind, message): [.int32(id), .string(kind.rawValue), .string(message)]
         case let .filesWrite(id, path, base, size): [.int32(id), .blob(path.bytes), .string(base), .int64(size)]
@@ -319,7 +320,11 @@ private struct Cursor {
                 more: try bool(), truncated: try bool()
             ))
         case 51: .filesEntry(id: try int32(), entry: try entry(), version: try string())
-        case 52: .filesData(id: try int32(), version: try string(), bytes: try blob(), eof: try bool())
+        case 52:
+            .filesData(
+                id: try int32(), version: try string(), bytes: try blob(), eof: try bool(), whole: try bool(),
+                digest: try string()
+            )
         case 53:
             .filesChanged(paths: try list { (cursor: inout Cursor) throws(TerminalWireError) in FileName(try cursor.blob()) })
         case 54: .filesTick

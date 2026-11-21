@@ -47,7 +47,10 @@ final class FileScripts {
   /** How long a cut write has to remove its temporary before its process is ended. */
   static final Duration GRACE = Duration.ofSeconds(2);
 
-  /** Exit statuses of the scripts that refuse, each one {@link FilesRefusal}. */
+  /**
+   * Exit statuses of the scripts that refuse, each one {@link FilesRefusal}: the reads' from 20,
+   * the writes' own from 40.
+   */
   static final int NOT_FOUND = 20;
 
   static final int NOT_PERMITTED = 21;
@@ -56,27 +59,39 @@ final class FileScripts {
   static final int NOT_A_FOLDER = 24;
   static final int NOT_A_FILE = 25;
   static final int LOOP = 26;
-  static final int EXISTS = 27;
+  static final int EXISTS = 40;
 
   /** A save's base is not the file's version now: the present one, or absent, was printed. */
-  static final int CONFLICT = 28;
+  static final int CONFLICT = 41;
 
   /** The disk filled: the bytes free on it were printed. */
-  static final int NO_SPACE = 29;
+  static final int NO_SPACE = 42;
 
   /** A save's bytes came short, or the host said no go: nothing was written. */
-  static final int UNWRITTEN = 30;
+  static final int UNWRITTEN = 43;
 
   /** A folder moved into itself or a folder it holds. */
-  static final int INTO_ITSELF = 31;
+  static final int INTO_ITSELF = 44;
 
-  static final int PARTLY_REMOVED = 32;
+  static final int PARTLY_REMOVED = 45;
 
   /** The folder a new name was to be made in went before it was made. */
-  static final int FOLDER_GONE = 33;
+  static final int FOLDER_GONE = 46;
 
   /** A move whose source and target folder are on different disks, refused before it starts. */
-  static final int OTHER_DISK = 34;
+  static final int OTHER_DISK = 47;
+
+  /**
+   * A write's exit when a digest it computed is no SHA-256 (no {@code sha256sum}, or one that
+   * failed): nothing is written, and two empty digests never compare equal.
+   */
+  static final int BAD_DIGEST = 48;
+
+  /** The read's exit when the workspace has no {@code sha256sum} to prove what it read with. */
+  static final int NO_SHA256 = 27;
+
+  /** The read's exit when a pass's digest is no SHA-256: nothing proved, nothing answered whole. */
+  static final int NO_DIGEST = 28;
 
   /** One version, as every script and the watch write it. */
   static final String VERSION = "%d:%i:%s:%.9Y:%.9Z";
@@ -149,10 +164,14 @@ final class FileScripts {
 
   /**
    * Reads at most {@code $3} bytes of the file from {@code $2}: its version and its size, each
-   * NUL-terminated, then the bytes, then its version stat-ed again, so a read the file changed
-   * under is known. A folder, and anything that is not a file (a pipe, whose read would wait for a
-   * writer; a socket; a device), is refused; the bytes are read without waiting, so a pipe swapped
-   * in after those checks ends the read at once rather than holding it.
+   * NUL-terminated, then the bytes, sent on a descriptor duplicated from its output and never by a
+   * path such as {@code /dev/fd/3}, which {@code incus exec}'s socket refuses to open again; then
+   * the SHA-256 of the bytes it sent, the same range hashed again from the file after sending them,
+   * and its version stat-ed again, each NUL-terminated but the last. A read whose two digests and
+   * two versions agree sent the file as it was at one moment, whatever the filesystem's clock; any
+   * other changed under it. A folder, and anything that is not a file (a pipe, whose read would
+   * wait for a writer; a socket; a device), is refused; the bytes are read without waiting, so a
+   * pipe swapped in after those checks ends the read at once rather than holding it.
    */
   static final String READ =
       RESOLVED
@@ -160,9 +179,17 @@ final class FileScripts {
           [ -d "$at" ] && exit 23
           [ -f "$at" ] || exit 25
           [ -r "$at" ] || exit 21
-          stat -L --printf '%s\\0%%s\\0' -- "$at" || exit 1
-          dd if="$at" iflag=skip_bytes,count_bytes,nonblock skip="$2" count="$3" bs=262144 status=none || exit 1
-          stat -L --printf '%s' -- "$at" || exit 1
+          command -v sha256sum > /dev/null || exit 27
+          before=$(stat -L --printf '%s' -- "$at") || exit 1
+          size=${before#*:*:}
+          printf '%%s\\0%%s\\0' "$before" "${size%%%%:*}"
+          set -o pipefail
+          exec 3>&1
+          sent=$( { dd if="$at" iflag=skip_bytes,count_bytes,nonblock skip="$2" count="$3" bs=262144 status=none | tee >(sha256sum >&4) >&3; } 4>&1 ) || exit 1
+          again=$(dd if="$at" iflag=skip_bytes,count_bytes,nonblock skip="$2" count="$3" bs=262144 status=none | sha256sum) || exit 1
+          [[ ${sent%%%% *} =~ ^[0-9a-f]{64}$ && ${again%%%% *} =~ ^[0-9a-f]{64}$ ]] || exit 28
+          after=$(stat -L --printf '%s' -- "$at") || exit 1
+          printf '%%s\\0%%s\\0%%s' "${sent%%%% *}" "${again%%%% *}" "$after"
           """
               .formatted(VERSION, VERSION);
 
@@ -267,18 +294,18 @@ final class FileScripts {
           IFS= read -r -d '' base || exit 1
           if [ "$base" = absent ]; then
             resolve_parent "$path"
-            there "$target" && exit 27
+            there "$target" && exit 40
             at=$target
           else
             resolve_parent "$path"
-            [ -e "$target" ] || { printf 'absent\\0'; exit 28; }
+            [ -e "$target" ] || { printf 'absent\\0'; exit 41; }
             resolve "$path"
             [ -d "$at" ] && exit 23
             [ -f "$at" ] || exit 25
             [ -w "$at" ] || exit 21
             dir=${at%%/*}
             now=$(stat -L --printf '%s' -- "$at") || exit 1
-            [ "$now" = "$base" ] || { printf '%%s\\0' "$now"; exit 28; }
+            [ "$now" = "$base" ] || { printf '%%s\\0' "$now"; exit 41; }
           fi
           """
               .formatted(VERSION)
@@ -288,20 +315,20 @@ final class FileScripts {
           if ! head -c "$size" > "$tmp" 2>/dev/null; then
             free=$(df -B1 --output=avail -- "$dir" 2>/dev/null | tail -n 1 | tr -d ' ')
             printf '%%s\\0' "${free:-0}"
-            exit 29
+            exit 42
           fi
-          [ "$(stat -c %%s -- "$tmp")" = "$size" ] || exit 30
+          [ "$(stat -c %%s -- "$tmp")" = "$size" ] || exit 43
           sync -- "$tmp" 2>/dev/null || exit 1
           exec 5< "$tmp"
           printf 'copied\\0%%s\\0' "$(sha256sum < "$tmp" | cut -c1-64)"
-          IFS= read -r -d '' word && [ "$word" = go ] || exit 30
+          IFS= read -r -d '' word && [ "$word" = go ] || exit 43
           if [ "$base" = absent ]; then
             chmod -- "$(printf %%03o $((0666 & ~0$(umask))))" "$tmp" || exit 1
-            ln -T -- "$tmp" "$at" 2>/dev/null || { there "$at" && exit 27; [ -d "$dir" ] || exit 33; exit 1; }
+            ln -T -- "$tmp" "$at" 2>/dev/null || { there "$at" && exit 40; [ -d "$dir" ] || exit 46; exit 1; }
             rm -f -- "$tmp"
           else
-            now=$(stat -L --printf '%1$s' -- "$at" 2>/dev/null) || { printf 'absent\\0'; exit 28; }
-            [ "$now" = "$base" ] || { printf '%%s\\0' "$now"; exit 28; }
+            now=$(stat -L --printf '%1$s' -- "$at" 2>/dev/null) || { printf 'absent\\0'; exit 41; }
+            [ "$now" = "$base" ] || { printf '%%s\\0' "$now"; exit 41; }
             [ -w "$at" ] || exit 21
             chmod --reference="$at" -- "$tmp" || exit 1
             mv -fT -- "$tmp" "$at" || exit 1
@@ -321,18 +348,18 @@ final class FileScripts {
           IFS= read -r -d '' path || exit 1
           IFS= read -r -d '' kind || exit 1
           resolve_parent "$path"
-          there "$target" && exit 27
+          there "$target" && exit 40
           if [ "$kind" = folder ]; then
             mkdir -- "$target" 2>/dev/null && { sync -- "$dir" 2>/dev/null; exit 0; }
-            there "$target" && exit 27
-            [ -d "$dir" ] || exit 33
+            there "$target" && exit 40
+            [ -d "$dir" ] || exit 46
             exit 21
           fi
           """
           + TEMPORARY
           + """
           chmod -- "$(printf %03o $((0666 & ~0$(umask))))" "$tmp" || exit 1
-          ln -T -- "$tmp" "$target" 2>/dev/null || { there "$target" && exit 27; [ -d "$dir" ] || exit 33; exit 1; }
+          ln -T -- "$tmp" "$target" 2>/dev/null || { there "$target" && exit 40; [ -d "$dir" ] || exit 46; exit 1; }
           sync -- "$dir" 2>/dev/null
           """;
 
@@ -352,16 +379,16 @@ final class FileScripts {
           [ "$src" = "$home/workspace" ] && exit 21
           resolve_parent "$to"
           dst=$target
-          case $dir/ in "$src"/*) exit 31 ;; esac
-          there "$dst" && exit 27
-          [ "$(stat -c %d -- "$src")" = "$(stat -c %d -- "$dir")" ] || exit 34
+          case $dir/ in "$src"/*) exit 44 ;; esac
+          there "$dst" && exit 40
+          [ "$(stat -c %d -- "$src")" = "$(stat -c %d -- "$dir")" ] || exit 47
           inode=$(stat -c %d:%i -- "$src") || exit 1
           mv -nT -- "$src" "$dst" 2>/dev/null
           if [ "$(stat -c %d:%i -- "$dst" 2>/dev/null)" = "$inode" ] && ! there "$src"; then
             sync -- "$dir" "${src%/*}" 2>/dev/null
             exit 0
           fi
-          there "$dst" && exit 27
+          there "$dst" && exit 40
           exit 1
           """;
 
@@ -377,7 +404,7 @@ final class FileScripts {
           there "$target" || exit 20
           [ "$target" = "$home/workspace" ] && exit 21
           rm -rf --one-file-system -- "$target" 2>/dev/null
-          there "$target" && exit 32
+          there "$target" && exit 45
           sync -- "$dir" 2>/dev/null
           exit 0
           """;

@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import SailAPI
+import SailControls
 import SailKitTestSupport
 import SailShell
 import SailTestPasskey
@@ -39,6 +40,7 @@ let passkey = SoftwarePasskey(
 ShellApp.run(passkeys: { _ in passkey }, connect: { plane in
     ProcessInfo.processInfo.environment["SAIL_DRIVE_GOLDENS"] == "on" ? GoldenDesk.shared as any Transport : URLSessionTransport(base: plane.url)
 }) { shell in
+    SailList.stopsOnMisuse = true
     let driver = Driver(shell: shell, passkey: passkey, signed: environment["SAIL_SIGNING"] == "on", script: script, out: out)
     Task { @MainActor in driver.start() }
 }
