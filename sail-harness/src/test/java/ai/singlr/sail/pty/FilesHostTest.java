@@ -199,7 +199,9 @@ class FilesHostTest {
             inner.set(2, "exit 1");
           }
           var process =
-              new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+              new ProcessBuilder(FileScriptsTest.onASocket(inner))
+                  .redirectError(ProcessBuilder.Redirect.DISCARD)
+                  .start();
           processes.add(process);
           started.add(kind);
           return process;
@@ -904,11 +906,11 @@ class FilesHostTest {
   }
 
   /** Where a read's bytes have been written and its version is stat-ed again. */
-  private static final String READ_DONE = "| tee /dev/fd/3 | sha256sum) || exit 1\n";
+  private static final String READ_DONE = ">&3; } 4>&1 ) || exit 1\n";
 
   /** The sent bytes' pass of the read script, which a test may split around a writer. */
   private static final String SENT =
-      "sent=$(dd if=\"$at\" iflag=skip_bytes,count_bytes,nonblock skip=\"$2\" count=\"$3\""
+      "sent=$( { dd if=\"$at\" iflag=skip_bytes,count_bytes,nonblock skip=\"$2\" count=\"$3\""
           + " bs=262144 status=none |";
 
   /** The read script's second stat, which a test may make the first's, as a coarse clock would. */
@@ -929,7 +931,7 @@ class FilesHostTest {
             script
                 .replace(
                     SENT,
-                    "sent=$({ head -c 524288 \"$at\"; printf p > '"
+                    "sent=$( { { head -c 524288 \"$at\"; printf p > '"
                         + paused
                         + "'; read g < '"
                         + go

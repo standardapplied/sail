@@ -81,12 +81,39 @@ class FileScriptsTest {
             throw new IOException("Error: Instance not found");
           }
           var inner = command.subList(command.indexOf("--") + 1, command.size());
-          var builder = new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD);
+          var builder =
+              new ProcessBuilder(onASocket(inner)).redirectError(ProcessBuilder.Redirect.DISCARD);
           builder.environment().putAll(env);
           return builder.start();
         },
         place,
         home.toString());
+  }
+
+  /**
+   * Relays a script's output as {@code incus exec} gives it: its standard output a socket, not a
+   * pipe, on which a path such as {@code /dev/fd/1} cannot be opened again.
+   */
+  private static final String RELAY =
+      """
+      import socket, subprocess, sys
+      ours, theirs = socket.socketpair()
+      script = subprocess.Popen(sys.argv[1:], stdout=theirs)
+      theirs.close()
+      while True:
+          data = ours.recv(65536)
+          if not data:
+              break
+          sys.stdout.buffer.write(data)
+          sys.stdout.buffer.flush()
+      sys.exit(script.wait())
+      """;
+
+  /** {@code command} run with its standard output a socket, as a workspace's script is. */
+  static List<String> onASocket(List<String> command) {
+    var relayed = new ArrayList<>(List.of("python3", "-c", RELAY));
+    relayed.addAll(command);
+    return relayed;
   }
 
   @BeforeEach
