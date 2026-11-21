@@ -185,6 +185,41 @@ import Testing
         #expect(left.frame.maxX < pane.bounds.midX && left.alignment == .left, "back left to right, the name at \(left.frame) stayed mirrored")
     }
 
+    /// Every shown surface as laid out: its kind, its frame in `root`, and a text field's alignment,
+    /// in the order the views stand.
+    static func layout(of view: NSView, in root: NSView) -> [String] {
+        guard !view.isHidden, !(view is NSTextView) else { return [] }
+        let frame = view.convert(view.bounds, to: root).integral
+        let alignment = (view as? NSTextField).map { " aligned \($0.alignment.rawValue)" } ?? ""
+        return ["\(type(of: view)) \(frame)\(alignment)"] + view.subviews.flatMap { layout(of: $0, in: root) }
+    }
+
+    /// A change of direction and back leaves every surface the workbench shows (the tree, the
+    /// terminals, the file pane and its divider) as it was, frame for frame and aligned the same;
+    /// right to left, the pane's title and line stand mirrored. No surface can keep the other
+    /// direction's layout.
+    @Test func aChangeOfDirectionAndBackLeavesEverySurfaceAsItWas() async throws {
+        let (_, _, bench, _, pane) = try await Self.opened(Array("one\n".utf8))
+        #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
+        bench.layoutSubtreeIfNeeded()
+        let before = Self.layout(of: bench, in: bench)
+        let chrome = { pane.subviews.flatMap { [$0] + $0.subviews }.filter { !$0.isHidden && ($0 is NSTextField || $0 is SailButton) && $0.frame.minY < FilePane.titleHeight + FilePane.lineHeight } }
+        let leftToRight = chrome().map { ($0, $0.convert($0.bounds, to: pane)) }
+        bench.userInterfaceLayoutDirection = .rightToLeft
+        bench.apply()
+        bench.layoutSubtreeIfNeeded()
+        for (view, frame) in leftToRight {
+            let mirrored = view.convert(view.bounds, to: pane)
+            #expect(abs(Double(mirrored.minX) - (Double(pane.bounds.width) - Double(frame.maxX))) < 1, "right to left, \(type(of: view)) at \(mirrored) does not mirror \(frame)")
+        }
+        bench.userInterfaceLayoutDirection = .leftToRight
+        bench.apply()
+        bench.layoutSubtreeIfNeeded()
+        let after = Self.layout(of: bench, in: bench)
+        let moved = zip(before, after).filter { $0 != $1 }.map { "\($0.0) became \($0.1)" }
+        #expect(moved.isEmpty && before.count == after.count, "back left to right, surfaces kept the other direction's layout: \(moved.prefix(8))")
+    }
+
     /// The one line's rule holds for the tree's line as for the pane's: narrow, its words keep their
     /// row and Try Again goes under them; wide, beside them.
     @Test func theTreesLineKeepsItsWordsWholeWithItsActionUnderThem() {
