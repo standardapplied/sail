@@ -179,6 +179,8 @@ struct Step: Decodable {
     /// A scroll-wheel turn over `["list" | "panel", fraction]`: the Workspaces list or the left
     /// panel scrolled that fraction of the way down, as a person's trackpad does.
     var scrollTo: [String]?
+    /// Every sidebar row on screen still holds the content its item gave it: none gone blank.
+    var panelRowsWhole: Bool?
     /// The Workspaces list's ("list") or the panel's ("panel") scroll thumb dragged down by a real
     /// mouse-down, drag and mouse-up through the window; it passes when the thumb was drawn dragged
     /// and the list moved.
@@ -289,6 +291,8 @@ struct Step: Decodable {
     var filesSays: String?
     /// With `filesSays`: the line's words do not end with this.
     var filesSaysNot: String?
+    /// With `filesSays`: the line's words end with this.
+    var filesSaysEnding: String?
     /// The files connection is closed and admitted again within `seconds` of the step's start (10 by
     /// default).
     var filesReconnects: Bool?

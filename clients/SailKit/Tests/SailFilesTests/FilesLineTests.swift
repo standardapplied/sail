@@ -10,7 +10,7 @@ import Testing
 
     static func listed(_ entries: [FileEntry], at now: Double = 0) throws -> FileTree {
         var tree = FileTree()
-        let id = try #require(FileTreeTests.id(listing: root, in: tree.connected(at: now)))
+        let id = try #require(FileTreeTests.id(listing: root, in: tree.admitted()))
         _ = tree.receive(.filesListing(FileListing(id: id, version: "v1", entries: entries, more: false, truncated: false)), at: now)
         return tree
     }
@@ -28,7 +28,7 @@ import Testing
         var tree = FileTree(openedAt: 10)
         #expect(Self.line(tree, .connecting, at: 10.29) == nil, "said before 300 ms")
         #expect(Self.line(tree, .connecting, at: 10.3)?.words == "Listing ~/workspace", "a first connect is not said as listing")
-        _ = tree.connected(at: 11)
+        _ = tree.admitted()
         #expect(Self.line(tree, .connected, at: 10.3) == FilesLine(words: "Listing ~/workspace", mark: .working))
         #expect(Self.line(tree, .connected, at: 14.9)?.words == "Listing ~/workspace")
         #expect(Self.line(tree, .connected, at: 15.9)?.words == "Listing ~/workspace", "slow before 6 s")
@@ -77,7 +77,7 @@ import Testing
         #expect(FilesLine.nextChange(tree: waiting, phase: .connecting, at: 10) == 10.3)
         #expect(FilesLine.nextChange(tree: waiting, phase: .connecting, at: 10.3) == 16)
         #expect(FilesLine.nextChange(tree: waiting, phase: .connecting, at: 16.2) == 17)
-        _ = waiting.connected(at: 11)
+        _ = waiting.admitted()
         #expect(FilesLine.nextChange(tree: waiting, phase: .stopped("dock is stopped."), at: 12) == nil, "a stopped workspace's line waits on nothing")
         var tree = try Self.listed([FileTreeTests.file("a.txt")], at: 100)
         #expect(FilesLine.nextChange(tree: tree, phase: .connected, at: 100.5) == 100 + FileTree.silence, "no wake for the silence")
@@ -109,11 +109,27 @@ import Testing
         #expect(Self.line(try Self.listed([]), .connected, at: 0) == FilesLine(words: "~/workspace is empty.", mark: .none))
     }
 
+    /// A folder that never settles says so, with when what is shown of it was listed, rather than
+    /// showing an old listing as live; the tree is not dimmed, as the rest of it is live.
+    @Test func aFolderThatNeverSettlesSaysSo() throws {
+        var tree = try Self.listed([FileTreeTests.folder("node_modules")], at: 100)
+        let modules = Self.root + "/node_modules"
+        var asked = try #require(FileTreeTests.id(listing: modules, in: tree.expand(modules)))
+        _ = tree.receive(.filesListing(FileListing(id: asked, version: "m1", entries: [], more: false, truncated: false)), at: 100)
+        asked = try #require(FileTreeTests.id(listing: modules, in: tree.receive(.filesChanged(paths: [modules]), at: 101)))
+        for tick in 1 ... FileTree.unsettledAfter {
+            _ = tree.receive(.filesRefused(id: asked, kind: .known(.changed), message: "node_modules changed while it was listed."), at: 101 + Double(tick) - 0.5)
+            let next = tree.receive(.filesTick, at: 101 + Double(tick))
+            if tick < FileTree.unsettledAfter { asked = try #require(FileTreeTests.id(listing: modules, in: next)) }
+        }
+        #expect(Self.line(tree, .connected, at: 104.2) == FilesLine(words: "node_modules keeps changing; shown as of 100s.", mark: .waiting))
+    }
+
     @Test func goneRefusedAndARefusedRootAreSaidInTheirOwnWords() throws {
         #expect(Self.line(FileTree(), .gone("Workspace dock of harbor no longer exists."), at: 0) == FilesLine(words: "Workspace dock of harbor no longer exists.", mark: .bad, dims: true))
-        #expect(Self.line(FileTree(), .refused(["You may not read dock.", "Ask its owner."]), at: 0)?.words == "You may not read dock. Ask its owner.")
+        #expect(Self.line(FileTree(), .refused(["You may not read dock.", "Ask its owner."]), at: 0) == FilesLine(words: "You may not read dock. Ask its owner.", mark: .bad, dims: true), "a refused tree is not dimmed")
         var tree = FileTree()
-        let id = try #require(FileTreeTests.id(listing: Self.root, in: tree.connected(at: 0)))
+        let id = try #require(FileTreeTests.id(listing: Self.root, in: tree.admitted()))
         _ = tree.receive(.filesRefused(id: id, kind: .known(.notPermitted), message: "The workspace's user may not open ~/workspace."), at: 0)
         #expect(Self.line(tree, .connected, at: 0)?.words == "The workspace's user may not open ~/workspace.")
         #expect(tree.rows.isEmpty, "the root's refusal is said twice")

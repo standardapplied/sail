@@ -165,7 +165,7 @@ final class FilesPanel: NSView {
             if phase == .connected { startRefusal = nil }
         case .admitted:
             admittedAt = CACurrentMediaTime()
-            send(tree.connected(at: now))
+            send(tree.admitted())
         case let .frame(frame):
             send(tree.receive(frame, at: now))
             if TreeRowCell.measuring, frame.isWholeListing, let path = tree.lastListed { listingHeard = (path.key, CACurrentMediaTime()) }
@@ -500,6 +500,8 @@ final class TreeRowCell: NSView {
     /// Rows drawn and names built, in all: what the drive holds a scroll's drawing against.
     static private(set) var draws = 0
     static private(set) var namesBuilt = 0
+    /// The main thread's own CPU spent in rows' draws, in all and the most one draw took, in ns.
+    static private(set) var drawCPU: (total: UInt64, most: UInt64) = (0, 0)
     /// Whether the probes above and below count: off in the app, on only while the drive measures.
     package static var measuring = false
 
@@ -511,7 +513,13 @@ final class TreeRowCell: NSView {
     static private(set) var newDrawn: [String: Double] = [:]
 
     override func draw(_: NSRect) {
-        let now = CACurrentMediaTime()
+        let now = CACurrentMediaTime(), began = Self.measuring ? clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) : 0
+        defer {
+            if Self.measuring {
+                let spent = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - began
+                Self.drawCPU = (Self.drawCPU.total + spent, max(Self.drawCPU.most, spent))
+            }
+        }
         if Self.measuring {
             Self.draws += 1
             Self.lastDrawn = (now, row.path.key, new)
@@ -671,7 +679,9 @@ final class FilesLineView: NSView {
     /// Its height in a panel `width` wide: its words wrapped, with their padding and the gap under it.
     func height(for width: Double) -> Double {
         let box = words.boundingRect(with: NSSize(width: wordsWidth(width), height: 1000), options: [.usesLineFragmentOrigin])
-        return Self.above + max(ceil(Double(box.height)) + wordsTop, firstRow) + Self.below + Look.hairline + Self.under
+        // Whole points, so the hairline under it and the rows below start on the pixel grid: words
+        // centred on a button's height would end it, and start them, on half a pixel.
+        return ceil(Self.above + max(ceil(Double(box.height)) + wordsTop, firstRow) + Self.below + Look.hairline + Self.under)
     }
 
     /// The first row's height: a line of words, or the button's, whichever is taller.

@@ -44,21 +44,21 @@ func + (folder: FileName, rest: String) -> FileName {
     /// A tree admitted at time 0 with the root listed as `entries` at version `v1`.
     static func listed(_ entries: [FileEntry]) throws -> FileTree {
         var tree = FileTree()
-        let id = try #require(Self.id(listing: root, in: tree.connected(at: 0)))
+        let id = try #require(Self.id(listing: root, in: tree.admitted()))
         _ = tree.receive(.filesListing(FileListing(id: id, version: "v1", entries: entries, more: false, truncated: false)), at: 0)
         return tree
     }
 
     @Test func admittedItWatchesWhatItHoldsAndListsTheRoot() throws {
         var tree = FileTree()
-        let frames = tree.connected(at: 0)
+        let frames = tree.admitted()
         #expect(Self.watched(frames) == [] && Self.id(listing: Self.root, in: frames) != nil, "\(frames)")
         #expect(tree.rows.isEmpty && !tree.rootKnown)
     }
 
     @Test func aListingInPagesIsHeldWholeFoldersFirstAsFinderSorts() throws {
         var tree = FileTree()
-        let id = try #require(Self.id(listing: Self.root, in: tree.connected(at: 0)))
+        let id = try #require(Self.id(listing: Self.root, in: tree.admitted()))
         #expect(tree.receive(.filesListing(FileListing(id: id, version: "v1", entries: [Self.file("b10.txt"), Self.folder("src")], more: true, truncated: false)), at: 0).isEmpty)
         let done = tree.receive(.filesListing(FileListing(id: id, version: "v1", entries: [Self.file("b9.txt"), Self.folder("Docs"), Self.file("a.txt")], more: false, truncated: false)), at: 0)
         #expect(tree.rows.map(\.name) == ["Docs", "src", "a.txt", "b9.txt", "b10.txt"], "\(tree.rows.map(\.name))")
@@ -124,7 +124,7 @@ func + (folder: FileName, rest: String) -> FileName {
         _ = tree.receive(.filesListing(FileListing(id: id, version: "s1", entries: [], more: false, truncated: false)), at: 0)
         tree.disconnected()
         #expect(!tree.isLive(at: 0) && tree.rows.count == 1, "a dropped connection lost the tree or stayed live")
-        let back = tree.connected(at: 10)
+        let back = tree.admitted()
         #expect(Self.watched(back) == [WatchedPath(path: Self.root, version: "v1"), WatchedPath(path: src, version: "s1")], "the watch set was not sent again: \(back)")
         #expect(Self.id(listing: Self.root, in: back) != nil && Self.id(listing: src, in: back) != nil, "a shown folder was not listed again: \(back)")
     }
@@ -140,7 +140,7 @@ func + (folder: FileName, rest: String) -> FileName {
         let five = try Self.listed((0 ..< 5000).map { Self.file(String(format: "berth-%04d.json", $0)) })
         #expect(five.rows.count == 5000 && five.rows.first?.name == "berth-0000.json" && five.rows.last?.name == "berth-4999.json")
         var tree = FileTree()
-        let id = try #require(Self.id(listing: Self.root, in: tree.connected(at: 0)))
+        let id = try #require(Self.id(listing: Self.root, in: tree.admitted()))
         _ = tree.receive(.filesListing(FileListing(id: id, version: "v1", entries: (0 ..< 50000).map { Self.file("f\($0)") }, more: false, truncated: true)), at: 0)
         #expect(tree.rows.count == 50001 && tree.rows.last?.name == "This folder has more than 50,000 entries; Sail shows 50,000 of them.")
     }
@@ -159,7 +159,7 @@ func + (folder: FileName, rest: String) -> FileName {
         #expect(tree.isNew(Self.root + "/tide.ts", at: 13) && !tree.isNew(Self.root + "/tide.ts", at: 13.01), "not new for exactly 10 s")
         #expect(!tree.isNew(Self.root + "/a.txt", at: 3), "an entry that was there already was marked new")
         tree.disconnected()
-        let again = try #require(Self.id(listing: Self.root, in: tree.connected(at: 4)))
+        let again = try #require(Self.id(listing: Self.root, in: tree.admitted()))
         _ = tree.receive(.filesListing(FileListing(id: again, version: "v3", entries: [Self.file("a.txt"), Self.file("tide.ts"), Self.file("b.txt")], more: false, truncated: false)), at: 4)
         #expect(tree.isNew(Self.root + "/b.txt", at: 4), "an entry that appeared while away was not marked new")
     }
@@ -247,10 +247,167 @@ func + (folder: FileName, rest: String) -> FileName {
     }
 
     /// Admitted, the tree is live at once, before any tick.
-    @Test func admittedTheTreeIsLiveBeforeAnyTick() throws {
-        var tree = FileTree()
-        _ = tree.connected(at: 50)
-        #expect(tree.isLive(at: 50.5), "not live at admission")
+    /// Admission alone is not the host's word that the tree is current: a host that admits but
+    /// whose watch has stalled would show the tree live for its silence at every reconnect. Live
+    /// once a tick or a listing comes after admission; until then the last time heard is said.
+    @Test func admittedTheTreeIsLiveOnlyOnceTheHostIsHeard() throws {
+        var tree = try Self.listed([Self.file("a.txt")])
+        _ = tree.receive(.filesTick, at: 49.9)
+        tree.disconnected()
+        _ = tree.admitted()
+        #expect(!tree.isLive(at: 50.5) && tree.heard == 49.9, "live at admission, before the host said anything")
+        _ = tree.receive(.filesTick, at: 51)
+        #expect(tree.isLive(at: 51.5))
+        tree.disconnected()
+        let id = try #require(Self.id(listing: Self.root, in: tree.admitted()))
+        _ = tree.receive(.filesListing(FileListing(id: id, version: "v2", entries: [Self.file("a.txt")], more: false, truncated: false)), at: 60.2)
+        #expect(tree.isLive(at: 60.5), "a listing after admission is the host heard")
+    }
+
+    /// A folder whose listing is refused as `changed` (it changed while being listed) is asked again
+    /// at the next tick, not at once.
+    @Test func aFolderChangedWhileListedIsAskedAgainAtTheNextTick() throws {
+        var tree = try Self.listed([Self.folder("src")])
+        let src = Self.root + "/src"
+        let id = try #require(Self.id(listing: src, in: tree.expand(src)))
+        let refused = tree.receive(.filesRefused(id: id, kind: .known(.changed), message: "src changed while it was listed."), at: 1)
+        #expect(Self.id(listing: src, in: refused) == nil, "asked again at once: \(refused)")
+        #expect(tree.refusals[src] == nil, "a changed listing was said as a refusal")
+        #expect(Self.id(listing: src, in: tree.receive(.filesTick, at: 2)) != nil, "not asked again at the tick")
+        #expect(tree.receive(.filesTick, at: 3).isEmpty, "asked again at a second tick with no change")
+    }
+
+    /// An expanded folder that changes on every listing (node_modules under npm install) is asked
+    /// at most once a tick, and the rest of the tree goes on: another folder's change is listed and
+    /// taken, and a folder opened meanwhile is watched.
+    @Test func aFolderThatKeepsChangingHoldsBackNothingElse() throws {
+        var tree = try Self.listed([Self.folder("node_modules"), Self.folder("src"), Self.folder("docs")])
+        let modules = Self.root + "/node_modules", src = Self.root + "/src", docs = Self.root + "/docs"
+        var asked = try #require(Self.id(listing: modules, in: tree.expand(modules)))
+        var listings = 1, ticks = 0, open = true
+        /// Every listing of node_modules asked is refused as changed at once, as long as it is asked.
+        func refuseModules(at now: Double) -> [Frame] {
+            var said: [Frame] = []
+            for _ in 0 ..< 100 where open {
+                let answer = tree.receive(.filesRefused(id: asked, kind: .known(.changed), message: "node_modules changed while it was listed."), at: now)
+                said += answer
+                open = false
+                if let again = Self.id(listing: modules, in: answer) {
+                    asked = again
+                    listings += 1
+                    open = true
+                }
+            }
+            return said
+        }
+        _ = refuseModules(at: 0.1)
+        let docsID = try #require(Self.id(listing: docs, in: tree.expand(docs)))
+        _ = tree.receive(.filesListing(FileListing(id: docsID, version: "d1", entries: [], more: false, truncated: false)), at: 0.2)
+        var srcID: Int32?
+        var srcWatch: [WatchedPath]?, docsWatch: [WatchedPath]?
+        for second in 1 ... 10 {
+            let now = Double(second)
+            ticks += 1
+            let atTick = tree.receive(.filesTick, at: now)
+            if let again = Self.id(listing: modules, in: atTick) {
+                asked = again
+                listings += 1
+                open = true
+            }
+            if second == 3 { srcID = Self.id(listing: src, in: tree.expand(src)) }
+            if second == 4, let srcID {
+                srcWatch = Self.watched(tree.receive(.filesListing(FileListing(id: srcID, version: "s1", entries: [Self.file("main.ts")], more: false, truncated: false)), at: now))
+            }
+            if second == 6 {
+                let id = try #require(Self.id(listing: docs, in: tree.receive(.filesChanged(paths: [docs]), at: now)), "another folder's change was not listed")
+                docsWatch = Self.watched(tree.receive(.filesListing(FileListing(id: id, version: "d2", entries: [Self.file("guide.md")], more: false, truncated: false)), at: now))
+            }
+            _ = refuseModules(at: now + 0.1)
+        }
+        #expect(listings <= ticks + 1, "\(listings) listings of node_modules in \(ticks) ticks")
+        #expect(tree.rows.map(\.name).contains("guide.md") && tree.rows.map(\.name).contains("main.ts"), "the rest of the tree was held back: \(tree.rows.map(\.name))")
+        #expect(srcWatch?.contains(WatchedPath(path: src, version: "s1")) == true, "src's listing, taken while node_modules was being listed, held back the watch: \(srcWatch ?? [])")
+        #expect(docsWatch?.contains(WatchedPath(path: docs, version: "d2")) == true, "docs' listing held back the watch: \(docsWatch ?? [])")
+    }
+
+    /// A folder refused as changed waits for the tick however it is named: the host naming it again
+    /// at every sweep lists it no sooner, so one that never settles is listed once a tick.
+    @Test func aFolderWaitingForTheTickIsNotListedSoonerWhenNamedAgain() throws {
+        var tree = try Self.listed([Self.folder("node_modules")])
+        let modules = Self.root + "/node_modules"
+        var asked = try #require(Self.id(listing: modules, in: tree.expand(modules)))
+        for tick in 1 ... 4 {
+            _ = tree.receive(.filesRefused(id: asked, kind: .known(.changed), message: "node_modules changed while it was listed."), at: Double(tick) - 0.9)
+            for sweep in 1 ... 3 {
+                let named = tree.receive(.filesChanged(paths: [modules]), at: Double(tick) - 0.9 + Double(sweep) * 0.25)
+                #expect(Self.id(listing: modules, in: named) == nil, "tick \(tick), sweep \(sweep): listed again before the tick")
+            }
+            asked = try #require(Self.id(listing: modules, in: tree.receive(.filesTick, at: Double(tick))), "not listed at tick \(tick)")
+        }
+    }
+
+    /// A folder refused as changed three times in a row is unsettled, as of its last listing taken;
+    /// a listing taken settles it.
+    @Test func aFolderRefusedAsChangedThreeTimesInARowIsUnsettled() throws {
+        var tree = try Self.listed([Self.folder("node_modules")])
+        let modules = Self.root + "/node_modules"
+        var asked = try #require(Self.id(listing: modules, in: tree.expand(modules)))
+        _ = tree.receive(.filesListing(FileListing(id: asked, version: "m1", entries: [], more: false, truncated: false)), at: 5)
+        asked = try #require(Self.id(listing: modules, in: tree.receive(.filesChanged(paths: [modules]), at: 6)))
+        for tick in 1 ... 3 {
+            #expect(tree.unsettled == nil, "unsettled after \(tick - 1) refusals")
+            _ = tree.receive(.filesRefused(id: asked, kind: .known(.changed), message: "node_modules changed while it was listed."), at: 6 + Double(tick) - 0.5)
+            if tick < 3 { asked = try #require(Self.id(listing: modules, in: tree.receive(.filesTick, at: 6 + Double(tick)))) }
+        }
+        let unsettled = try #require(tree.unsettled)
+        #expect(unsettled.path == modules && unsettled.shownAsOf == 5)
+        asked = try #require(Self.id(listing: modules, in: tree.receive(.filesTick, at: 10)))
+        _ = tree.receive(.filesListing(FileListing(id: asked, version: "m2", entries: [], more: false, truncated: false)), at: 10.2)
+        #expect(tree.unsettled == nil, "a listing taken did not settle it")
+    }
+
+    /// The watch set is sent only when it changed: a refusal that changes nothing sends none.
+    @Test func anUnchangedWatchSetIsNotSentAgain() throws {
+        var tree = try Self.listed([Self.folder("src")])
+        let src = Self.root + "/src"
+        let id = try #require(Self.id(listing: src, in: tree.expand(src)))
+        #expect(Self.watched(tree.receive(.filesListing(FileListing(id: id, version: "s1", entries: [], more: false, truncated: false)), at: 1)) != nil)
+        let again = try #require(Self.id(listing: src, in: tree.receive(.filesChanged(paths: [src]), at: 2)))
+        let refused = tree.receive(.filesRefused(id: again, kind: .known(.changed), message: "src changed while it was listed."), at: 2.1)
+        #expect(Self.watched(refused) == nil, "an unchanged watch set was sent again: \(refused)")
+    }
+
+    /// A folder shut while it waits for the tick forgets the wait: opened again and listed afresh,
+    /// it is not listed a second time for the old wait.
+    @Test func aFolderShutWhileWaitingForTheTickForgetsTheWait() throws {
+        var tree = try Self.listed([Self.folder("src")])
+        let src = Self.root + "/src"
+        let id = try #require(Self.id(listing: src, in: tree.expand(src)))
+        _ = tree.receive(.filesRefused(id: id, kind: .known(.changed), message: "src changed while it was listed."), at: 1)
+        _ = tree.collapse(src)
+        let fresh = try #require(Self.id(listing: src, in: tree.expand(src)))
+        _ = tree.receive(.filesTick, at: 2)
+        let taken = tree.receive(.filesListing(FileListing(id: fresh, version: "s1", entries: [], more: false, truncated: false)), at: 2.1)
+        #expect(Self.id(listing: src, in: taken) == nil, "listed again for a wait it had before it was shut: \(taken)")
+    }
+
+    /// A listing that answers after its folder was shut is not taken: the folder stays shut.
+    @Test func aListingAnsweringAfterItsFolderWasShutIsNotTaken() throws {
+        var tree = try Self.listed([Self.folder("src")])
+        let src = Self.root + "/src"
+        let id = try #require(Self.id(listing: src, in: tree.expand(src)))
+        _ = tree.collapse(src)
+        _ = tree.receive(.filesListing(FileListing(id: id, version: "s1", entries: [Self.file("main.ts")], more: false, truncated: false)), at: 1)
+        #expect(tree.folders[src] == nil && tree.rows.map(\.name) == ["src"], "a shut folder's late listing was taken: \(tree.rows.map(\.name))")
+    }
+
+    /// Two names that read alike sort by their bytes, the same whichever came first.
+    @Test func namesThatReadAlikeSortByTheirBytes() {
+        let low = FileEntry(name: FileName([0x61, 0xFE]), kind: .known(.file), target: .known(.none), size: 1, mtimeNanos: 0, mode: 0o644)
+        let high = FileEntry(name: FileName([0x61, 0xFF]), kind: .known(.file), target: .known(.none), size: 1, mtimeNanos: 0, mode: 0o644)
+        #expect(low.name.shown == high.name.shown, "the two names do not read alike")
+        #expect(FileTree.sorted([high, low]).map(\.name) == [low.name, high.name])
+        #expect(FileTree.sorted([low, high]).map(\.name) == [low.name, high.name])
     }
 
     /// The watch set goes once for a batch of listings, after the last of them, not with each.
@@ -262,7 +419,7 @@ func + (folder: FileName, rest: String) -> FileName {
             _ = tree.receive(.filesListing(FileListing(id: id, version: "v\(index)", entries: [], more: false, truncated: false)), at: 0)
         }
         tree.disconnected()
-        let reconnect = tree.connected(at: 1)
+        let reconnect = tree.admitted()
         var watches = reconnect.filter { if case .filesWatch = $0 { true } else { false } }.count
         for frame in reconnect {
             guard case let .filesList(id, path) = frame else { continue }
