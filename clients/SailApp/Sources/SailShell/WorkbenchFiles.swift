@@ -143,6 +143,8 @@ package struct FilesShown {
     package let new: Set<String>
     package let listingHeard: (path: String, at: Double)?
     package let changeHeard: [String: Double]
+    package let openedAt: Double?
+    package let admittedAt: Double?
     package let lastDrawn: (at: Double, path: String, new: Bool)
     /// When each entry was first drawn marked new.
     package let newDrawn: [String: Double]
@@ -153,7 +155,7 @@ extension WorkbenchView {
         guard let tab = model.selectedTab, let panel = tabViews[tab.id]?.files, !panel.isHidden else { return nil }
         return FilesShown(
             list: panel.list, scroll: panel.scroll, button: panel.line.button, words: panel.shownLine?.words, rows: panel.tree.rows, new: panel.shownNew,
-            listingHeard: panel.listingHeard, changeHeard: panel.changeHeard, lastDrawn: TreeRowCell.lastDrawn, newDrawn: TreeRowCell.newDrawn
+            listingHeard: panel.listingHeard, changeHeard: panel.changeHeard, openedAt: panel.openedAt, admittedAt: panel.admittedAt, lastDrawn: TreeRowCell.lastDrawn, newDrawn: TreeRowCell.newDrawn
         )
     }
 }

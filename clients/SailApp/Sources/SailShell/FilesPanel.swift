@@ -117,6 +117,7 @@ final class FilesPanel: NSView {
     /// Connects, when not already, and keeps the tree live while shown.
     func open() {
         guard session == nil else { return }
+        openedAt = CACurrentMediaTime()
         let session = FilesSession(project: project, workspace: workspace, door: .runner(tickets ?? Unsigned()))
         self.session = session
         listening = Task { [weak self] in
@@ -149,6 +150,10 @@ final class FilesPanel: NSView {
     /// folder were heard: what the drive measures each drawing from.
     package private(set) var listingHeard: (path: String, at: Double)?
     package private(set) var changeHeard: [String: Double] = [:]
+    /// When the connection was asked for and when it was admitted: a first listing's wait split
+    /// into the ticket and connect, and the rest.
+    package private(set) var openedAt: Double?
+    package private(set) var admittedAt: Double?
 
     /// One event of the connection, as the tree takes it.
     package func heard(_ event: FilesSession.Event) {
@@ -159,6 +164,7 @@ final class FilesPanel: NSView {
             if phase != .connected { tree.disconnected() }
             if phase == .connected { startRefusal = nil }
         case .admitted:
+            admittedAt = CACurrentMediaTime()
             send(tree.connected(at: now))
         case let .frame(frame):
             send(tree.receive(frame, at: now))

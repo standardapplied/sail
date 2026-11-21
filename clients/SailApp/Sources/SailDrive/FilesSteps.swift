@@ -260,6 +260,7 @@ extension Driver {
         door.setFolder(root + "/berths", Self.berths(5000))
         guard await waitForState(10, { self.filesShown?.list.numberOfRows == base.count }) else { return (false, "the panel never showed the root: \(filesShown?.words ?? "")") }
         var opened: [Double] = [], listed: [Double] = [], changed: [Double] = []
+        var toOpen: [Double] = [], toAdmitted: [Double] = [], toListing: [Double] = []
         for _ in 0 ..< 10 {
             press("s", ["control", "command"])
             guard await waitForState(5, { self.filesShown == nil }) else { return (false, "⌃⌘S did not put the panel away") }
@@ -269,6 +270,11 @@ extension Driver {
                 return (false, "⌃⌘S drew no rows: \(filesShown?.words ?? "no panel")")
             }
             opened.append((filesShown?.lastDrawn.at ?? asked) - asked)
+            if let shown = filesShown, let open = shown.openedAt, let admitted = shown.admittedAt, let listing = shown.listingHeard?.at {
+                toOpen.append(open - asked)
+                toAdmitted.append(admitted - open)
+                toListing.append(listing - admitted)
+            }
         }
         let berths = root + "/berths"
         for _ in 0 ..< 10 {
@@ -328,6 +334,11 @@ extension Driver {
         let missed = rows.filter { $0.1 > $0.3 }.map { "\($0.0) \(Self.ms($0.1)) ms over its \(Int($0.3)) ms ceiling" }
         let over = rows.filter { $0.1 > $0.2 && $0.1 <= $0.3 }.map { "\($0.0) over its \(Int($0.2)) ms budget" }
         let said = rows.map { "\($0.0) \(Self.ms($0.1)) ms (budget \(Int($0.2)), ceiling \(Int($0.3)))" }.joined(separator: "; ")
+        func p95(_ samples: [Double]) -> String {
+            Self.ms(Percentiles(milliseconds: samples.map { $0 * 1000 }).p95)
+        }
+        print("files, ⌃⌘S to the first rows split p95: the key to the connection asked \(p95(toOpen)) ms, the ticket and connect to admitted \(p95(toAdmitted)) ms, "
+            + "admitted to the root's whole listing heard \(p95(toListing)) ms, of \(toOpen.count) tries")
         print("files figures: \(said); the wheel: \(down.1), \(up.1); the burst landed: \(landed)")
         let ok = missed.isEmpty && down.0 && up.0 && landed
         return (ok, (missed.isEmpty ? "within every ceiling" : "missed: \(missed.joined(separator: "; "))") + (over.isEmpty ? "" : "; \(over.joined(separator: "; "))") + "; " + said)
