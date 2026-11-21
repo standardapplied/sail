@@ -269,6 +269,8 @@ import Testing
         pane.saveDocument(nil)
         #expect(await RunnerTabTests.until(10) { pane.noteWords == "dock's disk is full (12 KB free). Nothing was changed." }, "said: \(pane.noteWords ?? "nothing")")
         #expect(!pane.file.clean && panel.unsaved == FileName(Self.path) && door.file(Self.path) == Array("one\n".utf8))
+        door.removeFile(Self.path)
+        #expect(await RunnerTabTests.until(10) { pane.noteWords == "tide.ts was deleted on the workspace while you typed." }, "a refusal's words hid a newer word on the file: \(pane.noteWords ?? "nothing")")
     }
 
     /// M14a: a file that is not text is one sentence and Copy Path.

@@ -66,7 +66,9 @@ final class FilePane: NSView, NSTextViewDelegate {
     /// When the workspace's bytes held for Compare were read: said on the sheet beside them.
     private(set) var theirsRead = Date()
     private var shownTheirs = ""
+    /// What a save said (a refusal, not connected): kept until a save or a newer word on the file.
     private var said: String?
+    private var shownNote = OpenFile.Note.none
     private var applying = false
     var clock: @MainActor () -> Double = { CACurrentMediaTime() }
 
@@ -426,6 +428,10 @@ final class FilePane: NSView, NSTextViewDelegate {
 
     /// The title's dot and status, the one line, and the text or the sentence, as the file says now.
     private func show() {
+        if file.note != shownNote {
+            shownNote = file.note
+            if file.note != .none { said = nil }
+        }
         let unsaved = !file.clean
         if dot.isHidden == unsaved {
             dot.isHidden = !unsaved

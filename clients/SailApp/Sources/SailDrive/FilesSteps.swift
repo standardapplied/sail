@@ -379,7 +379,8 @@ extension Driver {
             let changed = hundred + Array("// change \(index)\n".utf8)
             let heard = CACurrentMediaTime()
             door.setFile(Self.filesPath("hundred.ts"), changed)
-            guard await waitForState(10, { pane()?.text.utf8.count == changed.count }) else { return (false, "a change to a clean pane was not shown") }
+            let wanted = String(decoding: changed, as: UTF8.self)
+            guard await waitForState(10, { pane()?.text == wanted }) else { return (false, "a change to a clean pane was not shown") }
             pane()?.editor.displayIfNeeded()
             changes.append(CACurrentMediaTime() - heard)
         }
