@@ -128,6 +128,15 @@ import Testing
         let panel = try #require(Self.panel(bench))
         #expect(await RunnerTabTests.until(10) { panel.list.numberOfRows == 2 }, "rows: \(panel.list.numberOfRows), line: \(panel.shownLine?.words ?? "none")")
         #expect(panel.tree.rows.map(\.name) == ["src", "README.md"])
+        let src = Self.root + "/src"
+        panel.list.choose(src)
+        panel.toggle(src)
+        #expect(await RunnerTabTests.until(10) { panel.list.numberOfRows == 3 }, "src's refusal never came: \(panel.tree.rows.map(\.name))")
+        #expect(panel.list.chosen == src, "opening the chosen folder lost the choice: \(panel.list.chosen ?? "nothing")")
+        panel.look = .dark
+        #expect(panel.list.chosen == src, "a change of look lost the choice")
+        panel.toggle(src)
+        #expect(panel.list.chosen == src && panel.list.numberOfRows == 2, "shutting the chosen folder lost the choice")
         door.setFolder(Self.root, [Self.file("README.md"), Self.folder("src"), Self.file("tide.ts")])
         #expect(await RunnerTabTests.until(10) { panel.list.numberOfRows == 3 }, "the new entry never came")
         let cell = try #require(panel.list.view(atColumn: 0, row: 2, makeIfNecessary: true).flatMap(Self.treeCell))
