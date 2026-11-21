@@ -171,6 +171,26 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         thisMac.connectFiles(away: !window.isVisible)
     }
 
+    /// Answers AppKit's deferred terminate, and asks it again: what the quit question ends in.
+    var answerTerminate: @MainActor (Bool) -> Void = { NSApp.reply(toApplicationShouldTerminate: $0) }
+    var terminateAgain: @MainActor () -> Void = { NSApp.terminate(nil) }
+
+    /// Quitting asks about each file pane's unsaved text first, Save, Discard or Cancel, one at a
+    /// time; a Cancel, a conflict, a refusal or no connection keeps the app open (M52). AppKit's
+    /// deferred terminate is answered on every path, or it keeps its run loop in the modal mode.
+    public func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
+        guard let (tab, pane) = thisMac.unsavedFilePanes.first else { return .terminateNow }
+        thisMac.show(tab)
+        pane.askToLeave(then: { [weak self] in
+            pane.finishClosing()
+            self?.answerTerminate(false)
+            self?.terminateAgain()
+        }, otherwise: { [weak self] in
+            self?.answerTerminate(false)
+        })
+        return .terminateLater
+    }
+
     /// Quitting detaches every terminal, this Mac's and the runner's, and asks nothing: each
     /// session lives on at its host.
     public func applicationWillTerminate(_: Notification) {
@@ -535,6 +555,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             Command.newTab.item(target: terminals), .separator(),
             Command.splitRight.item(target: terminals), Command.splitDown.item(target: terminals), .separator(),
             Command.close.item(target: terminals), Command.closeTab.item(target: terminals), Command.closeOtherTabs.item(target: terminals),
+            item("Save", #selector(FilePane.saveDocument(_:)), "s"),
             item("Close Window", #selector(NSWindow.performClose(_:)), "W", [.command, .shift]),
         ]
         let edit: [NSMenuItem] = [

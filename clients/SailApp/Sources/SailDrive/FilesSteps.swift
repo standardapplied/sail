@@ -51,6 +51,7 @@ extension Driver {
 
     func performFiles(_ step: Step) async -> (Bool, String)? {
         WorkbenchView.filesMeasuring = true
+        if let done = await performFile(step) { return done }
         let asks = [step.filesFolder, step.filesRefuse, step.filesNew, step.filesClick, step.filesDoubleClick, step.filesChosen, step.filesButton, step.filesShot].contains { $0 != nil }
             || step.filesRows != nil || step.filesSays != nil || step.filesHold != nil || step.filesTicks != nil || step.filesEnd != nil
             || step.filesDrop != nil || step.filesBudgets != nil || step.filesReconnects != nil || step.filesFlood != nil
@@ -247,6 +248,226 @@ extension Driver {
             try? await Task.sleep(for: .milliseconds(16))
         }
         return (true, "scrolled to \(Int(view.contentView.bounds.minY)) of \(Int(room)) pt in \(frames) frames")
+    }
+
+    /// The file pane's steps: an agent's write, opening from the tree, what it shows, typing, the
+    /// one line, Compare and the sheet.
+    private func performFile(_ step: Step) async -> (Bool, String)? {
+        let pane = { self.workbench.filePaneShown }
+        if let write = step.fileWrite, write.count == 2, let door = GoldenDesk.door {
+            door.setFile(Self.filesPath(write[0]), Array(write[1].utf8))
+            return (true, "\(write[0]) now holds \(write[1].utf8.count) bytes")
+        }
+        if let name = step.fileOpen {
+            guard workbench.openFile(at: Self.filesPath(name)) else { return (false, "no file row \(name) to open") }
+            let opened = await waitForState(step.seconds ?? 10) { pane() != nil }
+            return (opened, "the file pane: \(pane().map { "\($0.text.utf8.count) bytes" } ?? "none")")
+        }
+        if let text = step.fileShows {
+            let shown = await waitForState(step.seconds ?? 10) { pane()?.text == text && pane()?.editable == true }
+            return (shown, "the file pane shows \(pane()?.text.debugDescription ?? "nothing")\(pane()?.editable == true ? "" : ", not yet typed in")")
+        }
+        if let typed = step.fileType {
+            guard let editor = pane()?.editor, editor.isEditable else { return (false, "no file pane to type in") }
+            shell.window.makeFirstResponder(editor)
+            let end = (editor.string as NSString).length
+            editor.insertText(typed, replacementRange: NSRange(location: end, length: 0))
+            return (true, "typed \(typed.debugDescription)")
+        }
+        if let words = step.fileNote {
+            let said = await waitForState(step.seconds ?? 10) { (pane()?.note ?? "") == words }
+            return (said, "the file pane's line says \(pane()?.note ?? "nothing")")
+        }
+        if let unsaved = step.fileUnsaved {
+            let found = await waitForState(step.seconds ?? 10) { pane()?.clean == !unsaved }
+            return (found, "the file pane is \(pane()?.clean == true ? "clean" : "unsaved")")
+        }
+        if let offers = step.fileCompare {
+            guard workbench.compareFile() else { return (false, "no Compare to press: \(pane()?.note ?? "no line")") }
+            let up = await waitForState(step.seconds ?? 5) { self.workbench.sheetOffers == offers }
+            return (up, "the sheet offers \(workbench.sheetOffers)")
+        }
+        if let title = step.fileSheet {
+            let pressed = workbench.sheetUp
+            guard workbench.pressSheet(title) else { return (false, "the sheet offers no \(title): \(workbench.sheetOffers)") }
+            let gone = await waitForState(step.seconds ?? 5) { self.workbench.sheetUp !== pressed }
+            return (gone, "pressed \(title)")
+        }
+        if let heading = step.fileSheetSays {
+            let says = await waitForState(step.seconds ?? 5) { self.workbench.sheetHeading == heading }
+            return (says, "the sheet says \(workbench.sheetHeading ?? "nothing, none is up")")
+        }
+        if let text = step.fileTheirs {
+            let held = await waitForState(step.seconds ?? 10) { pane()?.theirs == text }
+            return (held, "the file pane holds for Compare \(pane()?.theirs?.debugDescription ?? "nothing")")
+        }
+        if let holds = step.fileHolds, holds.count == 2, let door = GoldenDesk.door {
+            let path = Self.filesPath(holds[0]), wanted = Array(holds[1].utf8)
+            let held = await waitForState(step.seconds ?? 10) { door.file(path) == wanted }
+            return (held, "\(holds[0]) holds \(door.file(path).map { String(decoding: $0, as: UTF8.self).debugDescription } ?? "nothing")")
+        }
+        if step.fileSaveWhileLoading == true, let door = GoldenDesk.door { return await fileSaveWhileLoading(door) }
+        if step.fileSave == true {
+            guard workbench.saveFile() else { return (false, "no file pane to save") }
+            return (true, "⌘S")
+        }
+        if let offers = step.fileSheetUp {
+            let up = await waitForState(step.seconds ?? 5) { self.workbench.sheetOffers == offers }
+            return (up, "the sheet offers \(workbench.sheetOffers)")
+        }
+        if let refusal = step.fileRefuseSave, refusal.count == 2, let kind = FileRefusal(rawValue: refusal[0]), let door = GoldenDesk.door {
+            door.refuseNextSave(kind, saying: refusal[1])
+            return (true, "the next save is refused \(refusal[0])")
+        }
+        if let name = step.fileRemove, let door = GoldenDesk.door {
+            door.removeFile(Self.filesPath(name))
+            return (true, "\(name) deleted on the workspace")
+        }
+        if step.fileLookSwitch == true { return await fileLookSwitch() }
+        if step.fileBudgets == true, let door = GoldenDesk.door { return await fileBudgets(door) }
+        if step.fileClose == true {
+            guard workbench.closeFile() else { return (false, "no file pane to close") }
+            let gone = await waitForState(step.seconds ?? 5) { pane() == nil }
+            return (gone, gone ? "the file pane closed" : "the file pane stayed: \(pane()?.clean == false ? "unsaved" : "clean")")
+        }
+        return nil
+    }
+
+    /// B1: a 4 MB file opened, and ⌘S pressed while the view still takes it a slice a turn: the
+    /// save refuses in words, nothing goes on the wire and the workspace's file stays whole; once
+    /// in, it is typed in, still as it was. The pane closed after, the root as it was.
+    private func fileSaveWhileLoading(_ door: FakeRunnerDoor) async -> (Bool, String) {
+        let pane = { self.workbench.filePaneShown }, name = "slow.ts", path = Self.filesPath(name)
+        let line = "export const tide = \"" + String(repeating: "~", count: 90) + "\";\n"
+        let slow = Array(String(repeating: line, count: 4 * 1024 * 1024 / line.utf8.count).utf8)
+        door.setFolder(Self.filesRoot, ["slow.ts", "src/", "README.md", "Package.swift"].map(Self.fileEntry))
+        door.setFile(path, slow)
+        defer { door.setFolder(Self.filesRoot, ["src/", "README.md", "Package.swift"].map(Self.fileEntry)) }
+        guard await waitForState(10, { self.filesShown?.rows.contains { $0.name == name } == true }) else { return (false, "the root never listed \(name)") }
+        let writes = { door.filesReceived.filter { if case .filesWrite = $0 { true } else { false } }.count }, before = writes()
+        guard workbench.openFile(at: path) else { return (false, "no row \(name) to open") }
+        guard await waitForState(10, { (pane()?.text.isEmpty == false) && pane()?.editable == false }) else {
+            return (false, "\(name) was never seen loading: \(pane().map { "\($0.text.utf8.count) bytes, editable \($0.editable)" } ?? "no pane")")
+        }
+        let shownWhenSaved = pane()?.text.utf8.count ?? 0
+        guard workbench.saveFile() else { return (false, "no file pane to save") }
+        let words = "\(name) is still loading. Nothing was saved."
+        let refused = pane()?.note == words
+        guard await waitForState(10, { pane()?.editable == true }) else { return (false, "\(name) was never whole") }
+        let whole = pane()?.text.utf8.count ?? 0
+        guard await waitForState(1, { writes() > before }) == false else { return (false, "⌘S while loading put a write on the wire") }
+        let kept = door.file(path) == slow
+        guard workbench.closeFile(), await waitForState(5, { pane() == nil }) else { return (false, "\(name) did not close") }
+        let said = "⌘S with \(shownWhenSaved) of \(slow.count) bytes in the view: the line said \(refused ? words.debugDescription : "something else"); whole after: \(whole) bytes; the workspace's file \(kept ? "unchanged" : "changed")"
+        return (refused && kept && whole == slow.count, said)
+    }
+
+    /// The look switched to dark and back with the file open beside the terminal: nothing over the
+    /// terminal against ``OverTerminals``' rule before or after either switch, and no bitmap given to
+    /// the large layers over it meanwhile.
+    private func fileLookSwitch() async -> (Bool, String) {
+        guard let (terminal, _) = workbench.fileAndTerminal, let root = shell.window.contentView?.superview else { return (false, "no file open beside a terminal") }
+        var broken = OverTerminals.misses(over: terminal.terminal, of: terminal, in: root).map { "before: \($0)" }
+        let painting = PaintWatch()
+        painting.watch(OverTerminals.largeLayers(over: terminal.terminal, of: terminal, in: root))
+        let start = NSApp.appearance
+        for (name, look) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+            NSApp.appearance = NSAppearance(named: look)
+            _ = await lookDrawn()
+            broken += OverTerminals.misses(over: terminal.terminal, of: terminal, in: root).map { "after \(name): \($0)" }
+        }
+        NSApp.appearance = start
+        painting.stop()
+        if painting.paints > 0 { broken.append("\(painting.paints) bitmaps given to what lies over the terminal") }
+        return (broken.isEmpty, broken.isEmpty ? "nothing over the terminal, nothing painted over it, through dark and light" : broken.joined(separator: "; "))
+    }
+
+    /// The spec's figures for the file pane, app side, the door answering at once: a 5 MB file to its
+    /// first screen drawn and to typing possible, the main thread's costliest turn while it loads, a
+    /// key to its glyph drawn; a clean pane's change to its new text drawn; ⌘S of 100 KB to the dot
+    /// gone. Each over its tries, p95, gated at its ceiling, its budget said.
+    private func fileBudgets(_ door: FakeRunnerDoor) async -> (Bool, String) {
+        let line = "export const tide = { at: 42, height: 1.25, rounding: \"minutes\" };\n"
+        let big = Array(String(repeating: line, count: 5_000_000 / line.utf8.count).utf8)
+        let hundred = Array(String(repeating: line, count: 100_000 / line.utf8.count).utf8)
+        door.setFolder(Self.filesRoot, ["big.ts", "hundred.ts", "src/", "README.md", "Package.swift"].map(Self.fileEntry))
+        door.setFile(Self.filesPath("big.ts"), big)
+        door.setFile(Self.filesPath("hundred.ts"), hundred)
+        guard await waitForState(10, { self.filesShown?.list.numberOfRows == 5 }) else { return (false, "the root never listed big.ts") }
+        let pane = { self.workbench.filePaneShown }
+        func closed() async -> Bool {
+            if pane() != nil { _ = workbench.closeFile() }
+            return await waitForState(5) { pane() == nil }
+        }
+        var first: [Double] = [], typing: [Double] = [], holds: [Double] = [], keys: [Double] = [], changes: [Double] = [], saves: [Double] = []
+        _ = mainStacks
+        var loadingPhases = "", keyPhases = ""
+        func phases() -> String {
+            PanePhases.phases.sorted { $0.value.total > $1.value.total }.map { "\($0.key) \(Self.ms($0.value.total * 1000)) ms in all, \(Self.ms($0.value.longest * 1000)) ms at most" }.joined(separator: ", ")
+        }
+        for _ in 0 ..< 3 {
+            guard await closed() else { return (false, "the file pane would not close: unsaved") }
+            mainTurns.reset()
+            mainThread.reset()
+            PanePhases.resetPhases()
+            let opened = CACurrentMediaTime()
+            guard workbench.openFile(at: Self.filesPath("big.ts")) else { return (false, "no row big.ts") }
+            guard await waitForState(10, { (pane()?.editor.textStorage?.length ?? 0) > 0 }), let editor = pane()?.editor else { return (false, "big.ts showed nothing") }
+            editor.displayIfNeeded()
+            first.append(CACurrentMediaTime() - opened)
+            guard await waitForState(10, { pane()?.editable == true }) else { return (false, "big.ts was never whole") }
+            typing.append(CACurrentMediaTime() - opened)
+            holds.append(mainTurns.longestCPU / 1000)
+            if mainTurns.longestCPU > 16 { tellLongestHold("loading a 5 MB file") }
+            loadingPhases = phases()
+            shell.window.makeFirstResponder(editor)
+            PanePhases.resetPhases()
+            mainThread.reset()
+            let key = CACurrentMediaTime()
+            editor.insertText("x", replacementRange: NSRange(location: 0, length: 0))
+            PanePhases.timed("view: displayed after the key") { editor.displayIfNeeded() }
+            keys.append(CACurrentMediaTime() - key)
+            if (CACurrentMediaTime() - key) * 1000 > 16 { tellLongestHold("a key in a 5 MB file") }
+            keyPhases = phases()
+            editor.undoManager?.undo()
+        }
+        guard await closed(), workbench.openFile(at: Self.filesPath("hundred.ts")), await waitForState(10, { pane()?.editable == true }) else { return (false, "hundred.ts never opened") }
+        for index in 0 ..< 5 {
+            let changed = hundred + Array("// change \(index)\n".utf8)
+            let heard = CACurrentMediaTime()
+            door.setFile(Self.filesPath("hundred.ts"), changed)
+            let wanted = String(decoding: changed, as: UTF8.self)
+            guard await waitForState(10, { pane()?.text == wanted }) else { return (false, "a change to a clean pane was not shown") }
+            pane()?.editor.displayIfNeeded()
+            changes.append(CACurrentMediaTime() - heard)
+        }
+        for index in 0 ..< 5 {
+            guard let editor = pane()?.editor else { break }
+            editor.insertText("// saved \(index)\n", replacementRange: NSRange(location: 0, length: 0))
+            let saved = CACurrentMediaTime()
+            _ = workbench.saveFile()
+            guard await waitForState(10, { pane()?.clean == true }) else { return (false, "a save of hundred.ts never cleared the dot: \(pane()?.note ?? "")") }
+            saves.append(CACurrentMediaTime() - saved)
+        }
+        _ = await closed()
+        door.setFolder(Self.filesRoot, ["src/", "README.md", "Package.swift"].map(Self.fileEntry))
+        func p95(_ seconds: [Double]) -> Double {
+            Percentiles(milliseconds: seconds.map { $0 * 1000 }).p95
+        }
+        let rows: [(String, Double, Double, Double)] = [
+            ("a 5 MB file chosen to its first screen drawn p95", p95(first), 60, 150),
+            ("the same file to typing possible p95", p95(typing), 400, 1000),
+            ("loading it: the main thread's own CPU in its costliest turn, the least of three", (holds.min() ?? .infinity) * 1000, 8, 16),
+            ("a key typed in a 5 MB file to its glyph drawn, the least of three", (keys.min() ?? .infinity) * 1000, 8, 16),
+            ("a clean pane's change to the new text drawn p95", p95(changes), 80, 200),
+            ("⌘S of 100 KB to the dot gone p95", p95(saves), 40, 100),
+        ]
+        let missed = rows.filter { $0.1 > $0.3 }.map { "\($0.0) \(Self.ms($0.1)) ms over its \(Int($0.3)) ms ceiling" }
+        let said = rows.map { "\($0.0) \(Self.ms($0.1)) ms (budget \(Int($0.2)), ceiling \(Int($0.3)))" }.joined(separator: "; ")
+        print("file figures: \(said); loading p95 \(Self.ms(p95(holds))) ms and a key p95 \(Self.ms(p95(keys))) ms over three tries each")
+        print("file figures, where the last load's time went: \(loadingPhases)")
+        print("file figures, where the last key's time went: \(keyPhases)")
+        return (missed.isEmpty, (missed.isEmpty ? "within every ceiling; " : "missed: \(missed.joined(separator: "; ")); ") + said)
     }
 
     /// What the main thread was doing in its longest hold since the heartbeat's reset, as the

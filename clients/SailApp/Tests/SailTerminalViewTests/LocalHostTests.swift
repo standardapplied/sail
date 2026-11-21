@@ -265,12 +265,17 @@ import Testing
     }
 
     /// A peer that writes another magic and hangs up before the client's own arrives is still said
-    /// as another version, never as nothing having answered.
+    /// as another version, never as nothing having answered. Later connections, the one that asks
+    /// the peer's pid among them, are held until the client hangs up: macOS answers `LOCAL_PEERPID`
+    /// only while the socket is connected, so a stand-in that closed them at once raced the ask.
     @Test func anotherVersionsHostThatHangsUpAtOnceIsStillSaid() async throws {
         let first = Mutex(true)
         let found = try await Self.standIn { client in
             if first.withLock({ was in defer { was = false }; return was }) {
                 _ = Array("SAILPTY3".utf8).withUnsafeBytes { send(client, $0.baseAddress, $0.count, 0) }
+            } else {
+                var byte: UInt8 = 0
+                while recv(client, &byte, 1, 0) > 0 {}
             }
             close(client)
         }

@@ -256,7 +256,10 @@ public final class WorkbenchView: NSView {
 
     private func layout(_ tab: Tab, in view: TabView) {
         tabLayouts += 1
-        let frames = model.frames(of: tab.id, in: placeFiles(of: tab, in: view), scale: scale)
+        let give = filePaneGive(of: tab, in: view, panelWidth: filesBesideWidth(of: tab, in: view))
+        let room = placeFiles(of: tab, in: view, trailing: give)
+        placeFilePane(of: tab, in: view, room: room, give: give)
+        let frames = model.frames(of: tab.id, in: room, scale: scale)
         for id in tab.layout.leaves {
             guard let pane = panes[id] else { continue }
             pane.isHidden = frames.panes[id] == nil
@@ -371,6 +374,7 @@ public final class WorkbenchView: NSView {
 
     /// A click made a pane the first responder: the model follows at once, the drawing next turn.
     private func focusClicked(_ id: PaneID) {
+        model.tab(holding: id).flatMap { tabViews[$0.id]?.filePane }?.keysTakenElsewhere()
         guard model.focusedPane?.id != id else { return }
         model.focus(id)
         applySoon()
@@ -529,6 +533,7 @@ public final class WorkbenchView: NSView {
     }
 
     @objc public func closePane(_: Any?) {
+        if let file = filePaneHoldingKeys { return file.closePressed() }
         guard let pane = focused, !leaving(elsewhere: [pane]).isEmpty else { return }
         confirm(ending: [pane], question: "Close this terminal?", detail: "The program running in it will end.")
     }
@@ -565,6 +570,14 @@ public final class WorkbenchView: NSView {
     /// Ends `tab`'s terminals, asking first when one may end a running program. Closing a tab
     /// chooses no tab: it is not selected first, so a rename open in another tab goes on.
     private func close(_ tab: Tab) {
+        guard tabViews[tab.id]?.filePane?.file.clean == false else { return closeTerminals(of: tab) }
+        askAboutFile(in: tab) { [weak self] in
+            self?.tabViews[tab.id]?.filePane?.finishClosing()
+            self?.closeTerminals(of: tab)
+        }
+    }
+
+    private func closeTerminals(of tab: Tab) {
         let views = leaving(elsewhere: tab.layout.leaves.compactMap { panes[$0] })
         guard !views.isEmpty else { return }
         let question = closeQuestion(for: tab, terminals: views.count)
@@ -657,15 +670,20 @@ public final class WorkbenchView: NSView {
         })
     }
 
+    /// Zooms the focused terminal: the file pane hides while it is zoomed, and the keys go to the
+    /// terminal.
     @objc public func zoomSplit(_: Any?) {
         change { $0.toggleZoom() }
+        if filePaneHoldingKeys != nil || model.selectedTab?.zoomed != nil, let terminal = focused { window?.makeFirstResponder(terminal.terminal) }
     }
 
     @objc public func selectPreviousSplit(_: Any?) {
+        guard !moveKeysAmongSides(next: false) else { return }
         change { $0.focusNeighbour(next: false) }
     }
 
     @objc public func selectNextSplit(_: Any?) {
+        guard !moveKeysAmongSides(next: true) else { return }
         change { $0.focusNeighbour(next: true) }
     }
 
@@ -673,7 +691,10 @@ public final class WorkbenchView: NSView {
     @objc public func selectSplit(_ sender: NSMenuItem) {
         guard Direction.allCases.indices.contains(sender.tag) else { return }
         let (direction, size, pixels) = (Direction.allCases[sender.tag], room, scale)
+        if filePaneHoldingKeys != nil || filesHoldTheKeys { return _ = moveKeysTowardSide(direction, focusMoved: false) }
+        let before = model.selectedTab?.focused
         change { $0.moveFocus(direction, in: size, scale: pixels) }
+        _ = moveKeysTowardSide(direction, focusMoved: model.selectedTab?.focused != before)
     }
 
     @objc public func equalizeSplits(_: Any?) {
@@ -735,7 +756,7 @@ public final class WorkbenchView: NSView {
         return nil
     }
 
-    private func change(_ command: (inout Workbench) -> Void) {
+    func change(_ command: (inout Workbench) -> Void) {
         command(&model)
         apply()
     }
@@ -783,7 +804,12 @@ public final class WorkbenchView: NSView {
         strip.look = look
         panes.values.forEach { $0.look = look }
         tabViews.values.forEach { $0.paint(look) }
-        tabViews.values.forEach { $0.files?.look = look }
+        tabViews.values.forEach { view in
+            view.files?.look = look
+            view.filePane?.look = look
+            view.fileDivider.look = look
+        }
+        (window?.attachedSheet as? ConflictSheet)?.look = look
     }
 }
 
@@ -805,6 +831,22 @@ extension WorkbenchView: NSMenuItemValidation {
 final class TabView: NSView {
     /// Its workspace's files panel, once shown.
     var files: FilesPanel?
+    /// Its workspace's file pane, while a file is open, and the divider before it.
+    var filePane: FilePane?
+    let fileDivider = DividerLine()
+    /// Whether the file pane is in front where it takes the terminals' place (a narrow tab).
+    var filePaneInFront = true
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        fileDivider.isHidden = true
+        addSubview(fileDivider)
+    }
+
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) {
+        nil
+    }
     var onDrag: @MainActor ([Side], Double) -> Void = { _, _ in }
     var onDragEnded: @MainActor () -> Void = {}
     private var dividers: [DividerView] = []

@@ -366,6 +366,58 @@ func + (folder: FileName, rest: String) -> FileName {
         #expect(tree.unsettled == nil, "a listing taken did not settle it")
     }
 
+    /// A folder's refusals in a row are counted afresh after a reconnect: one refusal on the new
+    /// connection never makes it unsettled.
+    @Test func aReconnectCountsAFoldersRefusalsAfresh() throws {
+        var tree = try Self.listed([Self.folder("node_modules")])
+        let modules = Self.root + "/node_modules"
+        var asked = try #require(Self.id(listing: modules, in: tree.expand(modules)))
+        for tick in 1 ... FileTree.unsettledAfter - 1 {
+            _ = tree.receive(.filesRefused(id: asked, kind: .known(.changed), message: "node_modules changed while it was listed."), at: Double(tick) - 0.5)
+            asked = try #require(Self.id(listing: modules, in: tree.receive(.filesTick, at: Double(tick))))
+        }
+        tree.disconnected()
+        asked = try #require(Self.id(listing: modules, in: tree.admitted()))
+        _ = tree.receive(.filesRefused(id: asked, kind: .known(.changed), message: "node_modules changed while it was listed."), at: 10)
+        #expect(tree.unsettled == nil, "refusals from before the reconnect were counted")
+    }
+
+    /// At the watch's cap the open file is kept first: the set stays at the cap, the file in it,
+    /// the oldest expanded folder giving way.
+    @Test func atTheCapTheOpenFileIsWatchedFirst() throws {
+        let names = (0 ..< FileTree.watchCap + 5).map { "d\($0)" }
+        var tree = try Self.listed(names.map(Self.folder) + [Self.file("tide.ts")])
+        for name in names {
+            let path = Self.root + "/" + name
+            let id = try #require(Self.id(listing: path, in: tree.expand(path)))
+            _ = tree.receive(.filesListing(FileListing(id: id, version: "v-" + name, entries: [], more: false, truncated: false)), at: 0)
+        }
+        let file = WatchedPath(path: Self.root + "/tide.ts", version: "f1")
+        let watched = try #require(Self.watched(tree.watchFile(file)))
+        #expect(watched.count == FileTree.watchCap && watched.contains(file), "\(watched.count) paths watched, the open file \(watched.contains(file) ? "in" : "left out")")
+        #expect(watched.contains(WatchedPath(path: Self.root, version: "v1")))
+    }
+
+    /// An entry shown is found by its path, as its folder listed it; one not shown is not.
+    @Test func anEntryShownIsFoundByItsPath() {
+        let tree = try? Self.listed([Self.file("tide.ts"), Self.folder("src")])
+        #expect(tree?.entry(at: Self.root + "/tide.ts") == Self.file("tide.ts"))
+        #expect(tree?.entry(at: Self.root + "/gone.ts") == nil && tree?.entry(at: Self.root) == nil)
+    }
+
+    /// The file open in the pane is watched beside the folders shown, at the version its pane holds:
+    /// sent once when it opens or its version moves, dropped when it closes.
+    @Test func theOpenFileIsWatchedBesideTheFolders() throws {
+        var tree = try Self.listed([Self.file("tide.ts")])
+        let file = Self.root + "/tide.ts"
+        #expect(Self.watched(tree.watchFile(WatchedPath(path: file, version: "f1"))) == [WatchedPath(path: Self.root, version: "v1"), WatchedPath(path: file, version: "f1")])
+        #expect(tree.watchFile(WatchedPath(path: file, version: "f1")).isEmpty, "an unchanged watch was sent again")
+        #expect(Self.watched(tree.watchFile(nil)) == [WatchedPath(path: Self.root, version: "v1")])
+        tree.disconnected()
+        #expect(tree.watchFile(WatchedPath(path: file, version: "f2")).isEmpty, "a watch was sent with no connection")
+        #expect(Self.watched(tree.admitted())?.contains(WatchedPath(path: file, version: "f2")) == true)
+    }
+
     /// The watch set is sent only when it changed: a refusal that changes nothing sends none.
     @Test func anUnchangedWatchSetIsNotSentAgain() throws {
         var tree = try Self.listed([Self.folder("src")])

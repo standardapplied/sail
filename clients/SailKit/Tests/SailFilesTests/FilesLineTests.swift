@@ -123,6 +123,7 @@ import Testing
             if tick < FileTree.unsettledAfter { asked = try #require(FileTreeTests.id(listing: modules, in: next)) }
         }
         #expect(Self.line(tree, .connected, at: 104.2) == FilesLine(words: "node_modules keeps changing; shown as of 100s.", mark: .waiting))
+        #expect(Self.line(tree, .connected, at: 104 + FileTree.silence + 0.5)?.words == "Not live since 104s.", "an unsettled folder was said over a tree that is not live")
     }
 
     @Test func goneRefusedAndARefusedRootAreSaidInTheirOwnWords() throws {
