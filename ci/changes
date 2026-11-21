@@ -8,14 +8,14 @@ set -euo pipefail
 #
 # The client lanes read clients/ (SailApp's one dependency is ../SailKit by path), the Clients
 # workflow, this script, and what the darwin sail they test against and bundle is built from: the
-# build files, the Java modules' main sources, and the Maven cache action its build job uses. No CI lane reads the app, the changelog, the
+# build files, the Java modules' main sources, and the Maven cache action its build job uses. No CI lane reads the app, the changelog or its changes/, the
 # architecture or the Clients workflow (README.md and install.sh are read by unit tests). Of
 # SailKit, the terminal lane builds all of it and the unit lanes read only its goldens
 # (ClientGoldensTest). A rename counts as both of its paths. CI narrows only a pull request; a
 # push, a dispatch, an empty change or one that cannot be computed runs every lane.
 
 readonly CLIENTS='^(clients/|\.github/workflows/clients\.yml$|ci/changes$|pom\.xml$|sail-[^/]+/(pom\.xml$|src/main/)|\.github/actions/maven-cache/)'
-readonly NO_CI_LANE='^(clients/SailApp/|CHANGELOG\.md$|ARCHITECTURE\.md$|\.github/workflows/clients\.yml$)'
+readonly NO_CI_LANE='^(clients/SailApp/|CHANGELOG\.md$|changes/|ARCHITECTURE\.md$|\.github/workflows/clients\.yml$)'
 readonly SAILKIT='^clients/SailKit/'
 readonly GOLDENS='^clients/SailKit/Tests/Goldens/'
 

@@ -25,6 +25,9 @@ Usage:
                                 naming it, and SIGTERM stops it leaving only its lock
   ci/check min-macos BINARY     fail unless the darwin BINARY's minimum macOS (its Mach-O
                                 LC_BUILD_VERSION) is no newer than the app's LSMinimumSystemVersion
+  ci/check changelog [BASE]     fail if the change from BASE (default: where it left origin/main)
+                                edits CHANGELOG.md or leaves an entry the release could not fold
+                                (ci/changelog check)
 EOF
   exit 2
 }
@@ -298,7 +301,13 @@ changed_tests() {
     | paste -sd, -
 }
 
+# A pull request's entry is a file of changes/, never an edit of CHANGELOG.md (ci/changelog).
+changelog() {
+  ci/changelog check "$@"
+}
+
 changed() {
+  changelog
   mvn -B -q spotless:apply
   local tests
   tests=$(changed_tests)
@@ -320,5 +329,6 @@ case ${1:-} in
   methods) shift; methods "$@" ;;
   local-host) shift; local_host "$@" ;;
   min-macos) shift; min_macos "$@" ;;
+  changelog) shift; changelog "$@" ;;
   *) usage ;;
 esac
