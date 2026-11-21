@@ -26,6 +26,9 @@ public final class FileNames {
 
   /** {@code bytes} as a name, every byte kept. */
   public static String decode(byte[] bytes) {
+    if (ascii(bytes)) {
+      return new String(bytes, StandardCharsets.ISO_8859_1);
+    }
     var decoder =
         StandardCharsets.UTF_8
             .newDecoder()
@@ -44,6 +47,19 @@ public final class FileNames {
     }
     decoder.flush(out);
     return out.flip().toString();
+  }
+
+  /**
+   * Whether every byte is ASCII, as every field of a listing but a name, and most names, are: those
+   * decode as themselves, with no decoder.
+   */
+  private static boolean ascii(byte[] bytes) {
+    for (var b : bytes) {
+      if (b < 0) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /** The bytes {@code name} stands for: the inverse of {@link #decode}. */

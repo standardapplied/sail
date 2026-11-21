@@ -4129,11 +4129,40 @@ connection's frames.
   file and no other, and two names a lossy decoding would merge stay two.
 - **Versions.** A version is one `stat -L` of the resolved file, `dev:ino:size:mtime:ctime`, mtime
   and ctime in ns; opaque to a client. A listing carries its folder's, a stat and a read their
-  file's. A read stats the file again after its bytes and ends with them only when that version
-  and the byte count are the ones it began with; else it is answered `changed` and the client
-  drops what it had of it and reads again, so a read's bytes are always its version's (as far as
-  a version tells states apart: a same-size rewrite within one tick of the filesystem's clock is
-  one version).
+  file's. Folder versions and the watch stay this cheap `stat`.
+- **Reads are the file at one moment, and say so by content.** A read hashes (SHA-256) the bytes
+  it sends as it sends them, then, in the same exec, hashes the same range of the file again and
+  stats it again; it ends with its bytes only when both digests and both versions agree, and its
+  last frame carries that digest as the content version of what it read. Otherwise it is
+  answered `changed`, and the client drops what it had of it and reads again. A read spliced
+  across a write would need the same splice twice, so a coarse filesystem clock (two stats inside
+  one write's tick agree; measured on ext4, never on ZFS) lets none through. The stated limit: a
+  writer that leaves the file half-written for the whole of both passes is read as that
+  half-written file, which is what the file holds then. A read hashes the range it sends; a read
+  from 0 that reaches the file's end hashes the whole file, which is the only base a save takes:
+  a base from any shorter range differs from the whole file's digest the save compares, so it can
+  cost a needless conflict, never an overwrite. The last frame says which it was (`whole`: from 0
+  to the file's end), so neither side infers it. A digest is a SHA-256 in lowercase hex or it
+  proves nothing: the script checks both of its own and exits otherwise, and the host checks the
+  one it puts on a frame; a workspace with no `sha256sum` is said so ("dock has no sha256sum, so
+  Sail cannot prove what it reads of …; nothing was changed."), and no two empty digests ever
+  agree. A failing `dd` fails the read (`pipefail`), never mislabelled `changed`.
+- **Over 20 MiB a file is said, not shown, and is never saved.** One read takes at most 20 MiB, so
+  a file larger than that has no whole read and no whole-file digest: the app says its size and
+  shows none of it as text, and since a save's base is a whole read's digest, no save of it is
+  ever offered or accepted.
+  The evidence, a tight in-place writer against stat, read, stat, 2,000 reads a run
+  (`files1-tools/torn_probe.py` in the PR's report):
+
+  | Filesystem | reads torn with both stats equal | of those, a second digest differs |
+  |---|---|---|
+  | ext4, a devbox (4 runs) | 634, 681, 271, 807 | 634, 681, 266, 806 |
+  | ext4, a GCP runner's root (2 runs) | 33, 51 | 33, 51 |
+  | ZFS, a GCP file pool (3 runs) | 0, 0, 0 | none to differ |
+
+  A script's bytes go out on a descriptor duplicated from its output, never reopened by a path
+  such as `/dev/fd/3`: `incus exec` gives a script a socket for its output, which Linux will not
+  open again, and every script test runs on one (`FileScriptsTest.onASocket`).
 - **F1. The watch.** One loop a connection (`FileScripts.WATCH`), started by its first set, stats
   only the paths of the set every 250 ms and prints those whose version is not the one held, then
   a NUL; it prints a NUL alone each second (`FilesTick`), and ends when its input closes. A set
