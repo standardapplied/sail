@@ -192,7 +192,10 @@ private extension Frame {
         case let .filesDone(id): [.int32(id)]
         case let .filesChanges(id): [.int32(id)]
         case let .filesChangeList(list):
-            [.int32(list.id), .int64(list.tookMillis), .blob(list.root.bytes), .blob(list.branch.bytes), .count(list.entries.count)]
+            [
+                .int32(list.id), .int64(list.tookMillis), .blob(list.root.bytes), .blob(list.branch.bytes),
+                .string(list.failure), .count(list.entries.count),
+            ]
                 + list.entries.flatMap { [.blob($0.path.bytes), .string($0.state.rawValue), .blob($0.from.bytes)] }
                 + [.count(list.ignored.count)] + list.ignored.map { .blob($0.bytes) }
                 + [.bool(list.truncated), .bool(list.more)]
@@ -378,7 +381,7 @@ private struct Cursor {
     private mutating func changeList() throws(TerminalWireError) -> FileChangeList {
         FileChangeList(
             id: try int32(), tookMillis: try int64(), root: FileName(try blob()), branch: FileName(try blob()),
-            entries: try list { (cursor: inout Cursor) throws(TerminalWireError) in
+            failure: try string(), entries: try list { (cursor: inout Cursor) throws(TerminalWireError) in
                 FileChange(path: FileName(try cursor.blob()), state: Open(rawValue: try cursor.string()), from: FileName(try cursor.blob()))
             },
             ignored: try list { (cursor: inout Cursor) throws(TerminalWireError) in FileName(try cursor.blob()) },

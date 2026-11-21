@@ -55,6 +55,7 @@ class FileChangesTest {
   @TempDir Path dir;
   Path home;
   Path workspace;
+  Path user;
   Map<String, String> env;
   final List<List<String>> commands = new CopyOnWriteArrayList<>();
   final LinkedBlockingQueue<PtyMessage> said = new LinkedBlockingQueue<>();
@@ -64,13 +65,13 @@ class FileChangesTest {
     home = Files.createDirectory(dir.toRealPath().resolve("home"));
     workspace = Files.createDirectory(home.resolve("workspace"));
     var excludes = Files.writeString(dir.resolve("excludes"), "*.swp\n");
-    var config =
-        Files.writeString(
-            dir.resolve("gitconfig"),
-            "[core]\n\texcludesFile = "
-                + excludes
-                + "\n[init]\n\tdefaultBranch = main\n[user]\n\tname = t\n\temail = t@t\n");
-    env = Map.of("GIT_CONFIG_GLOBAL", config.toString(), "GIT_CONFIG_NOSYSTEM", "1");
+    user = Files.createDirectory(dir.resolve("user"));
+    Files.writeString(
+        user.resolve(".gitconfig"),
+        "[core]\n\texcludesFile = "
+            + excludes
+            + "\n[init]\n\tdefaultBranch = main\n[user]\n\tname = t\n\temail = t@t\n");
+    env = Map.of("HOME", user.toString(), "GIT_CONFIG_NOSYSTEM", "1");
   }
 
   private FileScripts scripts(UnaryOperator<String> edit) {
@@ -425,13 +426,398 @@ class FileChangesTest {
     assertTrue(runs.get() > 1, runs.get() + " runs beside the commits");
   }
 
+  /** A script that leaves marker {@code kind} in {@code markers} when it runs, then fails. */
+  private Path marker(Path markers, String kind) throws IOException {
+    var script =
+        Files.writeString(
+            dir.resolve("m-" + kind + ".sh"),
+            "#!/bin/sh\n: > '" + markers + "/" + kind + "'\nexit 1\n");
+    Files.setPosixFilePermissions(
+        script, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+    return script;
+  }
+
+  private static List<String> left(Path markers) throws IOException {
+    try (var found = Files.list(markers)) {
+      return found.map(path -> path.getFileName().toString()).sorted().toList();
+    }
+  }
+
+  /**
+   * #521's M1: looking runs none of the repository's code. Every kind of program git can be told to
+   * run, or to load from elsewhere, is planted in the repository's config, the person's global
+   * config and attributes, its hooks, a promisor remote and the environment, each leaving a marker;
+   * plain git does run them, and after a changes ask and a diff of each kind of path, no marker is
+   * left and every answer came.
+   */
+  @Test
+  void lookingRunsNoneOfTheRepositorysCode() throws Exception {
+    var markers = Files.createDirectory(dir.resolve("markers"));
+    git(workspace, "init", "-q");
+    Files.writeString(workspace.resolve("a.txt"), "a\n");
+    Files.writeString(workspace.resolve("b.dat"), "b\n");
+    Files.writeString(workspace.resolve("c.g"), "c\n");
+    git(workspace, "add", ".");
+    git(workspace, "commit", "-qm", "base");
+    var lazy = Files.createDirectory(workspace.resolve("lazy"));
+    git(lazy, "init", "-q");
+    Files.writeString(lazy.resolve("f.txt"), "f\n");
+    git(lazy, "add", ".");
+    git(lazy, "commit", "-qm", "base");
+    assertEquals(0, gitStatus(lazy, "rev-parse", "HEAD:f.txt"));
+    var blob = Files.readString(dir.resolve("git.out")).strip();
+    Files.delete(lazy.resolve(".git/objects/" + blob.substring(0, 2) + "/" + blob.substring(2)));
+    for (var kv :
+        List.of(
+            List.of("core.repositoryformatversion", "1"),
+            List.of("extensions.partialClone", "origin"),
+            List.of("remote.origin.url", lazy.toString()),
+            List.of("remote.origin.promisor", "true"),
+            List.of("remote.origin.uploadpack", marker(markers, "uploadpack").toString()))) {
+      git(lazy, "config", kv.get(0), kv.get(1));
+    }
+
+    Files.writeString(workspace.resolve(".gitattributes"), "*.txt diff=evil\n*.dat filter=evil\n");
+    var included =
+        Files.writeString(
+            dir.resolve("included"), "[core]\n\tfsmonitor = " + marker(markers, "include") + "\n");
+    var hooks = Files.createDirectory(dir.resolve("hooks"));
+    for (var hook :
+        List.of(
+            "pre-commit",
+            "post-checkout",
+            "post-index-change",
+            "reference-transaction",
+            "fsmonitor-watchman",
+            "post-merge",
+            "pre-auto-gc",
+            "post-rewrite")) {
+      Files.copy(marker(markers, "hook-" + hook), hooks.resolve(hook));
+      Files.copy(marker(markers, "githook-" + hook), workspace.resolve(".git/hooks/" + hook));
+    }
+    for (var kv :
+        List.of(
+            List.of("core.fsmonitor", marker(markers, "fsmonitor").toString()),
+            List.of("filter.evil.clean", marker(markers, "clean").toString()),
+            List.of("filter.evil.smudge", marker(markers, "smudge").toString()),
+            List.of("filter.evil.process", marker(markers, "process").toString()),
+            List.of("filter.evil.required", "true"),
+            List.of("diff.external", marker(markers, "external").toString()),
+            List.of("diff.evil.command", marker(markers, "command").toString()),
+            List.of("diff.evil.textconv", marker(markers, "textconv").toString()),
+            List.of("core.hooksPath", hooks.toString()),
+            List.of("core.pager", marker(markers, "pager").toString()),
+            List.of("pager.diff", marker(markers, "pagerdiff").toString()),
+            List.of("pager.status", marker(markers, "pagerstatus").toString()),
+            List.of("core.editor", marker(markers, "editor").toString()),
+            List.of("sequence.editor", marker(markers, "seqeditor").toString()),
+            List.of("core.askPass", marker(markers, "askpass").toString()),
+            List.of("core.sshCommand", marker(markers, "ssh").toString()),
+            List.of("credential.helper", "!" + marker(markers, "credential")),
+            List.of("core.alternateRefsCommand", marker(markers, "alternate").toString()),
+            List.of("gpg.program", marker(markers, "gpg").toString()),
+            List.of("alias.status", "!" + marker(markers, "alias")),
+            List.of("diff.submodule", "log"),
+            List.of("include.path", included.toString()))) {
+      git(workspace, "config", kv.get(0), kv.get(1));
+    }
+    var attributes = Files.writeString(dir.resolve("attributes"), "*.g filter=gevil\n");
+    Files.writeString(
+        user.resolve(".gitconfig"),
+        "[core]\n\tattributesFile = "
+            + attributes
+            + "\n[filter \"gevil\"]\n\tclean = "
+            + marker(markers, "gclean")
+            + "\n\tsmudge = "
+            + marker(markers, "gsmudge")
+            + "\n[trace2]\n\teventTarget = "
+            + markers.resolve("trace2-global")
+            + "\n",
+        java.nio.file.StandardOpenOption.APPEND);
+    Files.writeString(workspace.resolve("a.txt"), "changed a\n");
+    Files.writeString(workspace.resolve("b.dat"), "changed b\n");
+    Files.writeString(workspace.resolve("c.g"), "changed c\n");
+    Files.writeString(workspace.resolve("d.md"), "new\n");
+    Files.writeString(lazy.resolve("f.txt"), "changed f\n");
+
+    gitStatus(workspace, "status");
+    gitStatus(workspace, "diff");
+    gitStatus(lazy, "diff");
+    assertTrue(
+        left(markers)
+            .containsAll(
+                List.of(
+                    "hook-post-index-change", "include", "process", "trace2-global", "uploadpack")),
+        "plain git runs what was planted: " + left(markers));
+    try (var planted = Files.list(markers)) {
+      for (var each : planted.toList()) {
+        Files.delete(each);
+      }
+    }
+
+    var poisoned = new HashMap<>(env);
+    poisoned.put("GIT_EXTERNAL_DIFF", marker(markers, "envexternal").toString());
+    poisoned.put("GIT_PAGER", marker(markers, "envpager").toString());
+    poisoned.put("PAGER", marker(markers, "envpager2").toString());
+    poisoned.put("GIT_SSH_COMMAND", marker(markers, "envssh").toString());
+    poisoned.put("GIT_ASKPASS", marker(markers, "envaskpass").toString());
+    poisoned.put(
+        "GIT_CONFIG_PARAMETERS", "'core.fsmonitor'='" + marker(markers, "envparams") + "'");
+    poisoned.put("GIT_CONFIG_COUNT", "1");
+    poisoned.put("GIT_CONFIG_KEY_0", "core.fsmonitor");
+    poisoned.put("GIT_CONFIG_VALUE_0", marker(markers, "envcount").toString());
+    poisoned.put("GIT_TRACE", markers.resolve("trace-env").toString());
+    poisoned.put("GIT_TRACE2_EVENT", markers.resolve("trace2-env").toString());
+    var sail = FileScriptsTest.over(home, commands, poisoned);
+
+    var answer = asked(new WorkspaceChanges(sail, CONTAINER, WorkspaceChanges.PATIENCE, () -> {}));
+    assertEquals(0, answer.status());
+    assertTrue(
+        entries(answer)
+            .keySet()
+            .containsAll(
+                List.of(
+                    workspace + "/a.txt",
+                    workspace + "/b.dat",
+                    workspace + "/c.g",
+                    workspace + "/d.md")),
+        "" + entries(answer).keySet());
+    assertEquals(0, diff(sail, workspace.resolve("a.txt"), 1 << 20).status());
+    assertEquals(FileScripts.FILTERED, diff(sail, workspace.resolve("b.dat"), 1 << 20).status());
+    assertEquals(FileScripts.FILTERED, diff(sail, workspace.resolve("c.g"), 1 << 20).status());
+    assertEquals(0, diff(sail, workspace.resolve("d.md"), 1 << 20).status());
+    diff(sail, lazy.resolve("f.txt"), 1 << 20);
+
+    assertEquals(List.of(), left(markers), "nothing planted ran");
+  }
+
+  /**
+   * #521's nit 2: a diff has one shape whatever the repository's diff settings: a/ and b/ from the
+   * top, no colour, no renames, three lines of context.
+   */
+  @Test
+  void aDiffHasOneShapeWhateverTheRepositorysDiffSettings() throws Exception {
+    git(workspace, "init", "-q");
+    var sub = Files.createDirectory(workspace.resolve("sub"));
+    var lines = new StringBuilder();
+    for (var i = 1; i <= 30; i++) {
+      lines.append("line ").append(i).append('\n');
+    }
+    var file = Files.writeString(sub.resolve("f.txt"), lines);
+    git(workspace, "add", ".");
+    git(workspace, "commit", "-qm", "base");
+    for (var kv :
+        List.of(
+            List.of("diff.noprefix", "true"),
+            List.of("diff.mnemonicPrefix", "true"),
+            List.of("color.ui", "always"),
+            List.of("color.diff", "always"),
+            List.of("diff.relative", "true"),
+            List.of("diff.context", "10"),
+            List.of("diff.interHunkContext", "10"),
+            List.of("diff.renames", "copies"),
+            List.of("diff.algorithm", "patience"))) {
+      git(workspace, "config", kv.get(0), kv.get(1));
+    }
+    Files.writeString(
+        file,
+        lines.toString().replace("line 10\n", "line ten\n").replace("line 20\n", "line twenty\n"));
+
+    var said = text(diff(file, 1 << 20));
+
+    assertTrue(said.startsWith("diff --git a/sub/f.txt b/sub/f.txt\n"), said);
+    assertTrue(said.contains("\n--- a/sub/f.txt\n+++ b/sub/f.txt\n@@ -7,7 +7,7 @@"), said);
+    assertTrue(said.contains("\n@@ -17,7 +17,7 @@"), "two hunks, three lines of context each");
+    assertFalse(said.contains("\u001b"), "no colour");
+  }
+
+  /**
+   * A file that passes through a filter the configuration defines is listed as changed, and its
+   * diff says why it is not shown; a filter no configuration defines filters nothing.
+   */
+  @Test
+  void aFileThatPassesThroughAFilterIsListedAndItsDiffSaysWhy() throws Exception {
+    git(workspace, "init", "-q");
+    Files.writeString(workspace.resolve(".gitattributes"), "*.bin filter=lfs\n*.raw filter=none\n");
+    var bin = Files.writeString(workspace.resolve("big.bin"), "pointer\n");
+    var raw = Files.writeString(workspace.resolve("plain.raw"), "raw\n");
+    git(workspace, "add", ".");
+    git(workspace, "commit", "-qm", "base");
+    git(workspace, "config", "filter.lfs.clean", "cat");
+    git(workspace, "config", "filter.lfs.smudge", "cat");
+    Files.writeString(bin, "content\n");
+    Files.writeString(raw, "raw changed\n");
+
+    assertEquals(
+        Set.of(workspace + "/big.bin", workspace + "/plain.raw"), entries(asked()).keySet());
+    assertEquals(FileScripts.FILTERED, diff(bin, 1 << 20).status());
+    assertTrue(text(diff(raw, 1 << 20)).contains("+raw changed\n"));
+
+    var files = scripts(UnaryOperator.identity());
+    connection(new WorkspaceChanges(files, CONTAINER, WorkspaceChanges.PATIENCE, () -> {}), files)
+        .diff(new PtyMessage.FilesDiff(1, bin.toString()));
+    assertEquals(
+        new PtyMessage.FilesRefused(
+            1,
+            PtyMessage.FilesRefusal.FILTERED,
+            bin
+                + " passes through a filter (Git LFS and its like), so its change is not shown as"
+                + " text; it is still listed as changed."),
+        answers(Set.of(1)).get(1).getFirst());
+  }
+
+  /**
+   * #521's m2: a repository git refuses is said for it alone, in git's words, and the others still
+   * answer: one with a corrupt index, one whose git folder lost its HEAD.
+   */
+  @Test
+  void aRepositoryGitRefusesIsSaidForItAloneAndTheOthersAnswer() throws Exception {
+    for (var name : List.of("bad", "broken", "good")) {
+      var repo = Files.createDirectory(workspace.resolve(name));
+      git(repo, "init", "-q");
+      Files.writeString(repo.resolve("x.md"), "x\n");
+      git(repo, "add", ".");
+    }
+    Files.writeString(workspace.resolve("bad/.git/index"), "not an index");
+    Files.delete(workspace.resolve("broken/.git/HEAD"));
+
+    var answer = asked();
+
+    var byRoot = new HashMap<String, WorkspaceChanges.Part>();
+    answer.parts().forEach(part -> byRoot.put(part.root(), part));
+    assertEquals(
+        Set.of(workspace + "/bad", workspace + "/broken", workspace + "/good"), byRoot.keySet());
+    assertEquals("", byRoot.get(workspace + "/good").failure());
+    assertEquals(
+        List.of(new Change(workspace + "/good/x.md", ChangeState.ADDED, "")),
+        byRoot.get(workspace + "/good").entries());
+    for (var refused : List.of("bad", "broken")) {
+      var part = byRoot.get(workspace + "/" + refused);
+      assertTrue(
+          part.failure().startsWith("fatal: ") || part.failure().startsWith("error: "),
+          part.failure());
+      assertEquals(List.of(), part.entries());
+    }
+
+    var files = scripts(UnaryOperator.identity());
+    connection(new WorkspaceChanges(files, CONTAINER, WorkspaceChanges.PATIENCE, () -> {}), files)
+        .changes(new PtyMessage.FilesChanges(1));
+    var framed = new HashMap<String, PtyMessage.FilesChangeList>();
+    for (var frame : answers(Set.of(1)).get(1)) {
+      var list = (PtyMessage.FilesChangeList) frame;
+      framed.put(list.root(), list);
+    }
+    assertTrue(
+        framed
+            .get(workspace + "/bad")
+            .failure()
+            .startsWith("git could not read " + workspace + "/bad: "),
+        framed.get(workspace + "/bad").failure());
+    assertEquals("", framed.get(workspace + "/good").failure());
+  }
+
+  /**
+   * #521's nit 1: a repository whose work tree git puts outside the home is neither listed nor
+   * diffed, though its git folder is in the workspace.
+   */
+  @Test
+  void aRepositoryWhoseTopIsOutsideTheHomeIsNeitherListedNorDiffed() throws Exception {
+    var far = Files.createDirectory(workspace.resolve("far"));
+    git(far, "init", "-q");
+    var outside = Files.createDirectory(dir.resolve("outside"));
+    Files.writeString(outside.resolve("secret.md"), "x\n");
+    git(far, "config", "core.worktree", outside.toString());
+    Files.writeString(far.resolve("here.md"), "x\n");
+
+    assertEquals(FileScripts.NO_REPOSITORY, asked().status());
+    assertEquals(FileScripts.OUTSIDE_HOME, diff(far.resolve("here.md"), 1 << 20).status());
+  }
+
+  /** A copy, where the repository has git find copies, is listed as added. */
+  @Test
+  void aCopyIsListedAsAdded() throws Exception {
+    git(workspace, "init", "-q");
+    var original = Files.writeString(workspace.resolve("a.md"), "the same lines\n".repeat(20));
+    git(workspace, "add", ".");
+    git(workspace, "commit", "-qm", "base");
+    git(workspace, "config", "status.renames", "copies");
+    Files.copy(original, workspace.resolve("b.md"));
+    Files.writeString(original, "the same lines\n".repeat(20) + "one more\n");
+    git(workspace, "add", ".");
+
+    var listed = entries(asked());
+
+    assertEquals(
+        new Change(workspace + "/b.md", ChangeState.ADDED, ""), listed.get(workspace + "/b.md"));
+  }
+
+  /**
+   * #521's m1: a diff is bounded after its first bytes too: one that stalls once it has sent some
+   * is ended at the changes' patience and said so, in a true sentence.
+   */
+  @Test
+  void aDiffThatStallsAfterItsFirstBytesIsEndedAndSaidSo() throws Exception {
+    git(workspace, "init", "-q");
+    var file = Files.writeString(workspace.resolve("a.md"), "x\n");
+    git(workspace, "add", ".");
+    git(workspace, "commit", "-qm", "base");
+    Files.writeString(file, "y\n");
+    var stalls =
+        scripts(
+            script ->
+                script.equals(FileScripts.DIFF)
+                    ? script.replace(
+                        "\"$@\" | head -c $((cap + 1))",
+                        "\"$@\" > /dev/null; head -c 600000 /dev/zero; exec sleep 30")
+                    : script);
+    connection(new WorkspaceChanges(stalls, CONTAINER, Duration.ofMillis(800), () -> {}), stalls)
+        .diff(new PtyMessage.FilesDiff(1, file.toString()));
+
+    var frames = answers(Set.of(1)).get(1);
+
+    assertTrue(frames.size() > 1, "some bytes were sent first: " + frames.size());
+    assertTrue(
+        frames.stream()
+            .limit(frames.size() - 1)
+            .allMatch(PtyMessage.FilesDiffData.class::isInstance));
+    assertEquals(
+        new PtyMessage.FilesRefused(
+            1,
+            PtyMessage.FilesRefusal.FAILED,
+            "The change to "
+                + file
+                + " was not shown: git did not answer within 0.8 s, so Sail ended it."),
+        frames.getLast());
+  }
+
+  /** Every git call of the scripts goes through the one safe invocation. */
+  @Test
+  void everyGitCallOfTheScriptsGoesThroughTheSafeInvocation() {
+    for (var script : List.of(FileScripts.CHANGES, FileScripts.DIFF)) {
+      assertTrue(script.contains(FileScripts.GIT), "the safe invocation is the script's own");
+      var rest = script.replace(FileScripts.GIT, "").replace("command -v git", "");
+      var bare = java.util.regex.Pattern.compile("(?m)(^|[\\s;&|(!`$\"'])git\\b").matcher(rest);
+      assertFalse(
+          bare.find(),
+          () ->
+              "a git call bypasses safe_git: "
+                  + rest.substring(bare.start(), Math.min(rest.length(), bare.start() + 60)));
+    }
+    var direct =
+        java.util.regex.Pattern.compile("command git").matcher(FileScripts.GIT).results().count();
+    assertEquals(
+        2, direct, "the safe invocation itself calls git twice: to list filters, and to run");
+  }
+
   /** One script's output read whole, and its exit status. */
   private record Ran(byte[] bytes, int status) {}
 
   private Ran diff(Path path, long cap) throws Exception {
-    var script =
-        scripts(UnaryOperator.identity())
-            .start(CONTAINER, FileScripts.DIFF, path.toString(), "" + cap);
+    return diff(scripts(UnaryOperator.identity()), path, cap);
+  }
+
+  private static Ran diff(FileScripts with, Path path, long cap) throws Exception {
+    var script = with.start(CONTAINER, FileScripts.DIFF, path.toString(), "" + cap);
     var bytes = new ByteArrayOutputStream();
     for (var chunk = script.bytes(1 << 16); chunk.length > 0; chunk = script.bytes(1 << 16)) {
       bytes.write(chunk);
@@ -823,8 +1209,8 @@ class FileChangesTest {
             script ->
                 script.equals(FileScripts.DIFF)
                     ? script.replace(
-                        "git diff --no-color --no-ext-diff --no-textconv -U3 \"$@\" | head -c $((cap + 1))",
-                        "head -c $((cap + 1)) /dev/zero")
+                        "\"$@\" | head -c $((cap + 1))",
+                        "\"$@\" > /dev/null; head -c $((cap + 1)) /dev/zero")
                     : script);
     connection(
             new WorkspaceChanges(endless, CONTAINER, WorkspaceChanges.PATIENCE, () -> {}), endless)

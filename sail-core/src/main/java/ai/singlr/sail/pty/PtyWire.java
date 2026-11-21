@@ -226,6 +226,7 @@ public final class PtyWire {
       case PtyMessage.FilesChanges m -> out.type(49).i32(m.id());
       case PtyMessage.FilesChangeList m -> {
         out.type(59).i32(m.id()).i64(m.tookMillis()).name(m.root()).name(m.branch());
+        out.string(m.failure());
         out.i32(m.entries().size());
         m.entries()
             .forEach(
@@ -285,13 +286,14 @@ public final class PtyWire {
     var took = in.getLong();
     var root = name(in);
     var branch = name(in);
+    var failure = string(in);
     var count = bounded(in);
     var entries = new ArrayList<PtyMessage.Change>(count);
     for (var i = 0; i < count; i++) {
       entries.add(new PtyMessage.Change(name(in), PtyMessage.ChangeState.of(string(in)), name(in)));
     }
     return new PtyMessage.FilesChangeList(
-        id, took, root, branch, entries, names(in), in.get() == 1, in.get() == 1);
+        id, took, root, branch, failure, entries, names(in), in.get() == 1, in.get() == 1);
   }
 
   /**

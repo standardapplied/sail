@@ -320,6 +320,7 @@
     "no_git",
     "no_repository",
     "binary",
+    "filtered",
     "failed"
   ],
   "member_modes": [

@@ -703,6 +703,12 @@ final class FilesConnection {
                   answer.tookMillis(),
                   part.root(),
                   part.branch(),
+                  part.failure().isEmpty()
+                      ? ""
+                      : "git could not read "
+                          + FileNames.shown(part.root())
+                          + ": "
+                          + FileNames.shown(part.failure()),
                   part.entries(),
                   part.ignored(),
                   part.truncated(),
@@ -759,13 +765,49 @@ final class FilesConnection {
 
   /**
    * Answers a diff: frames of at most {@link PtyMessage#FILE_CHUNK}, its last held until its script
-   * says it ended well; a diff past {@link #READ_CAP} is refused once its bytes pass it.
+   * says it ended well; a diff past {@link #READ_CAP} is refused once its bytes pass it, and one
+   * not ended within the changes' patience is ended and said so, however much of it was sent.
    */
   private void diffed(Request request, Running running) throws IOException {
     var script = start(request, running, FileScripts.DIFF, Long.toString(READ_CAP));
     if (script == null) {
       return;
     }
+    var overdue = new AtomicBoolean();
+    var bound =
+        CompletableFuture.runAsync(
+            () -> {
+              overdue.set(true);
+              script.end();
+            },
+            CompletableFuture.delayedExecutor(
+                changes.patience().toMillis(), TimeUnit.MILLISECONDS));
+    try {
+      diffed(request, running, script, overdue);
+    } catch (IOException ended) {
+      if (!overdue.get()) {
+        throw ended;
+      }
+    } finally {
+      bound.cancel(false);
+    }
+    if (overdue.get()) {
+      unless(
+          running,
+          new PtyMessage.FilesRefused(
+              request.id(),
+              FilesRefusal.FAILED,
+              "The change to "
+                  + FileNames.shown(request.path())
+                  + " was not shown: git did not answer within "
+                  + seconds(changes.patience())
+                  + " s, so Sail ended it."));
+    }
+  }
+
+  private void diffed(
+      Request request, Running running, FileScripts.Script script, AtomicBoolean overdue)
+      throws IOException {
     var held = script.bytes(PtyMessage.FILE_CHUNK);
     var total = (long) held.length;
     for (var next = script.bytes(PtyMessage.FILE_CHUNK);
@@ -781,6 +823,9 @@ final class FilesConnection {
       held = next;
     }
     var status = script.status();
+    if (overdue.get()) {
+      return;
+    }
     if (status == 0) {
       unless(running, new PtyMessage.FilesDiffData(request.id(), held, true));
     } else {
@@ -1598,6 +1643,10 @@ final class FilesConnection {
                   + workspace
                   + " has no changes to show.";
       case BINARY -> path + " is binary, so its change is not shown as text.";
+      case FILTERED ->
+          path
+              + " passes through a filter (Git LFS and its like), so its change is not shown as"
+              + " text; it is still listed as changed.";
       case PARTLY_REMOVED ->
           "Some of " + path + " could not be removed; what is left is still there.";
       case UNSAFE ->

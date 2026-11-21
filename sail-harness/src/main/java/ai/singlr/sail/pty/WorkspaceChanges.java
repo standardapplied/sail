@@ -53,9 +53,17 @@ final class WorkspaceChanges {
     }
   }
 
-  /** One frame's worth of a repository's changes; {@code truncated} on each of them when cut. */
+  /**
+   * One frame's worth of a repository's changes; {@code truncated} on each of them when cut, and
+   * {@code failure}, git's own first line, for a repository git refused, which lists nothing.
+   */
   record Part(
-      String root, String branch, List<Change> entries, List<String> ignored, boolean truncated) {
+      String root,
+      String branch,
+      String failure,
+      List<Change> entries,
+      List<String> ignored,
+      boolean truncated) {
     Part {
       entries = List.copyOf(entries);
       ignored = List.copyOf(ignored);
@@ -78,6 +86,11 @@ final class WorkspaceChanges {
     this.container = container;
     this.patience = patience;
     this.idle = idle;
+  }
+
+  /** How long a run, and a diff of the workspace, may take before it is ended. */
+  Duration patience() {
+    return patience;
   }
 
   /** Has {@code waiter} answered by the next run, starting it now when none runs. */
@@ -175,6 +188,10 @@ final class WorkspaceChanges {
       for (var record = need(script.field());
           !record.equals("end");
           record = need(script.field())) {
+        if (record.equals("failed")) {
+          parts.add(new Part(root, "", need(script.field()), List.of(), List.of(), false));
+          return;
+        }
         if (record.startsWith("# branch.head ")) {
           branch = record.substring("# branch.head ".length());
           continue;
@@ -283,7 +300,7 @@ final class WorkspaceChanges {
       changes.add(change);
       bytes += (change.path().length() + change.from().length()) * 3 + 16;
       if (bytes >= FilesConnection.LISTING_BYTES) {
-        parts.add(new Part(root, branch, changes, matched, truncated));
+        parts.add(new Part(root, branch, "", changes, matched, truncated));
         changes = new ArrayList<>();
         bytes = 0;
       }
@@ -292,14 +309,14 @@ final class WorkspaceChanges {
       matched.add(path);
       bytes += path.length() * 3 + 16;
       if (bytes >= FilesConnection.LISTING_BYTES) {
-        parts.add(new Part(root, branch, changes, matched, truncated));
+        parts.add(new Part(root, branch, "", changes, matched, truncated));
         changes = new ArrayList<>();
         matched = new ArrayList<>();
         bytes = 0;
       }
     }
     if (parts.isEmpty() || !changes.isEmpty() || !matched.isEmpty()) {
-      parts.add(new Part(root, branch, changes, matched, truncated));
+      parts.add(new Part(root, branch, "", changes, matched, truncated));
     }
     return parts;
   }

@@ -187,6 +187,7 @@ class PtyWireTest {
             Long.MAX_VALUE,
             "/home/dev/workspace",
             "(detached)",
+            "",
             changes,
             List.of("/home/dev/workspace/node_modules", path),
             true,
@@ -194,7 +195,15 @@ class PtyWireTest {
     assertEquals(list, roundTrip(list));
     var empty =
         new PtyMessage.FilesChangeList(
-            4, 0, "/home/dev/workspace/api", "main", List.of(), List.of(), false, false);
+            4,
+            0,
+            "/home/dev/workspace/api",
+            "main",
+            "git could not read /home/dev/workspace/api: fatal: bad index",
+            List.of(),
+            List.of(),
+            false,
+            false);
     assertEquals(empty, roundTrip(empty));
     assertEquals(new PtyMessage.FilesDiff(5, path), roundTrip(new PtyMessage.FilesDiff(5, path)));
     var bytes = new byte[PtyMessage.FILE_CHUNK];
@@ -267,7 +276,8 @@ class PtyWireTest {
     }
     assertEquals(12, answers, "every answer frame was walked");
     assertTrue(
-        !new PtyMessage.FilesChangeList(1, 0, "/r", "b", List.of(), List.of(), false, true).last());
+        !new PtyMessage.FilesChangeList(1, 0, "/r", "b", "", List.of(), List.of(), false, true)
+            .last());
     assertTrue(new PtyMessage.FilesDiffData(1, new byte[0], true).last());
     assertTrue(
         !new PtyMessage.FilesListing(1, "v", List.of(), true, false).last()
@@ -328,12 +338,13 @@ class PtyWireTest {
             new PtyMessage.FilesListing(1, "v", List.of(entry), false, false),
             new PtyMessage.FilesEntry(1, entry, "v"),
             new PtyMessage.FilesChanged(List.of(bad)),
-            new PtyMessage.FilesChangeList(1, 0, bad, bad, List.of(), List.of(), false, false),
+            new PtyMessage.FilesChangeList(1, 0, bad, bad, "", List.of(), List.of(), false, false),
             new PtyMessage.FilesChangeList(
                 1,
                 0,
                 "/r",
                 "b",
+                "",
                 List.of(new PtyMessage.Change(bad, PtyMessage.ChangeState.MODIFIED, "")),
                 List.of(),
                 false,
@@ -343,11 +354,13 @@ class PtyWireTest {
                 0,
                 "/r",
                 "b",
+                "",
                 List.of(new PtyMessage.Change("/r/n", PtyMessage.ChangeState.RENAMED, bad)),
                 List.of(),
                 false,
                 false),
-            new PtyMessage.FilesChangeList(1, 0, "/r", "b", List.of(), List.of(bad), false, false),
+            new PtyMessage.FilesChangeList(
+                1, 0, "/r", "b", "", List.of(), List.of(bad), false, false),
             new PtyMessage.FilesDiff(1, bad))) {
       assertEquals(message, roundTrip(message), message.getClass().getSimpleName());
       var bytes = new java.io.ByteArrayOutputStream();

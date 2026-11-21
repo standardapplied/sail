@@ -120,6 +120,29 @@ class WorkspaceChangesIT extends AbstractIncusIT {
     }
   }
 
+  /** Runs {@code script} in the instance as the dev user, as a terminal there would. */
+  private void inInstance(String script) throws Exception {
+    var ran =
+        shell.exec(
+            List.of(
+                "incus",
+                "exec",
+                INSTANCE,
+                "--user",
+                "1000",
+                "--group",
+                "1000",
+                "--cwd",
+                "/",
+                "--env",
+                "HOME=/home/dev",
+                "--",
+                "bash",
+                "-c",
+                script));
+    assertTrue(ran.ok(), script + " failed: " + ran.stderr());
+  }
+
   /** One answer to a changes request: its frames, in order, and how long it took to come. */
   private record Answered(List<PtyMessage.FilesChangeList> frames, long millis) {}
 
@@ -184,26 +207,55 @@ class WorkspaceChangesIT extends AbstractIncusIT {
                       + " && git init -q -b main && printf 'one\\ntwo\\n' > app.txt && printf"
                       + " 'build/\\n' > .gitignore && git add . && git -c user.name=t -c"
                       + " user.email=t@t commit -qm base && mkdir -p build/out && for i in $(seq 1"
-                      + " 1000); do : > build/out/o$i; done && chown -R 1000:1000 /home/dev"));
+                      + " 1000); do : > build/out/o$i; done && printf 'b\\n' > b.dat && printf"
+                      + " '*.dat filter=evil\\n' > .gitattributes && git add . && git -c user.name=t"
+                      + " -c user.email=t@t commit -qm attributes && chown -R 1000:1000 /home/dev"
+                      + " && mkdir -p /home/dev/workspace/rootowned && git -C"
+                      + " /home/dev/workspace/rootowned init -q"));
       assertTrue(prepared.ok(), prepared.stderr());
+      inInstance(
+          "mkdir -p ~/markers ~/hooks && for kind in fsmonitor clean smudge process external"
+              + " pager hook; do printf '#!/bin/sh\\n: > %s/markers/%s\\nexit 1\\n' ~ $kind >"
+              + " ~/m-$kind.sh && chmod +x ~/m-$kind.sh; done && for hook in post-index-change"
+              + " reference-transaction post-checkout; do cp ~/m-hook.sh ~/hooks/$hook; done && cd "
+              + REPO
+              + " && git config core.fsmonitor ~/m-fsmonitor.sh && git config filter.evil.clean"
+              + " ~/m-clean.sh && git config filter.evil.smudge ~/m-smudge.sh && git config"
+              + " filter.evil.process ~/m-process.sh && git config diff.external ~/m-external.sh"
+              + " && git config core.pager ~/m-pager.sh && git config core.hooksPath ~/hooks"
+              + " && printf 'b changed\\n' > b.dat");
       try (var host = startHost(dbPath);
           var files = files(host)) {
-        var before = changes(files, 1);
-        assertEquals(List.of(), before.frames().getFirst().entries(), "nothing changed yet");
+        var before = changes(files, 1).frames().getFirst();
+        assertEquals(REPO, before.root());
+        assertEquals(
+            List.of(new PtyMessage.Change(REPO + "/b.dat", PtyMessage.ChangeState.MODIFIED, "")),
+            before.entries(),
+            "only the file behind the filter");
 
         inASession("edit", "printf 'three\\n' >> " + REPO + "/app.txt");
 
         var after = changes(files, 2);
-        assertEquals(1, after.frames().size());
+        assertEquals(2, after.frames().size());
+        var refused = after.frames().getLast();
+        assertEquals("/home/dev/workspace/rootowned", refused.root());
+        assertTrue(
+            refused
+                .failure()
+                .startsWith(
+                    "git could not read /home/dev/workspace/rootowned: fatal: detected dubious ownership"),
+            refused.failure());
         var list = after.frames().getFirst();
         assertEquals(REPO, list.root());
         assertEquals("main", list.branch());
         assertEquals(
-            List.of(new PtyMessage.Change(REPO + "/app.txt", PtyMessage.ChangeState.MODIFIED, "")),
+            List.of(
+                new PtyMessage.Change(REPO + "/app.txt", PtyMessage.ChangeState.MODIFIED, ""),
+                new PtyMessage.Change(REPO + "/b.dat", PtyMessage.ChangeState.MODIFIED, "")),
             list.entries());
         assertEquals(List.of(REPO + "/build"), list.ignored(), "the build folder, named once");
         assertFalse(list.truncated());
-        assertFalse(list.more());
+        assertTrue(list.more(), "the refused repository's frame follows");
 
         PtyWire.write(files, new PtyMessage.FilesDiff(3, REPO + "/app.txt"));
         var diff = new ByteArrayOutputStream();
@@ -215,6 +267,12 @@ class WorkspaceChangesIT extends AbstractIncusIT {
         } while (!data.eof());
         var shown = diff.toString(StandardCharsets.UTF_8);
         assertTrue(shown.contains("@@ -1,2 +1,3 @@\n one\n two\n+three\n"), shown);
+        PtyWire.write(files, new PtyMessage.FilesDiff(4, REPO + "/b.dat"));
+        var filtered = assertInstanceOf(PtyMessage.FilesRefused.class, next(files));
+        assertEquals(PtyMessage.FilesRefusal.FILTERED, filtered.kind());
+        var markers = exec(INSTANCE, List.of("sh", "-c", "ls -A /home/dev/markers"));
+        assertTrue(markers.ok(), markers.stderr());
+        assertEquals("", markers.stdout().strip(), "nothing the repository planted ran");
 
         var took = new ArrayList<Long>();
         for (var i = 0; i < 20; i++) {

@@ -527,16 +527,19 @@ public sealed interface PtyMessage {
   /**
    * Part of request {@code id}'s answer: repository {@code root}, on {@code branch}, the {@code
    * entries} that differ from its {@code HEAD} and the paths git {@code ignored} there, each path
-   * absolute, an ignored folder one path with nothing beneath it. One repository's frames come
-   * together, and every repository has one at least; {@code truncated} says its lists were cut at
-   * {@link #CHANGES_CAP}, or at the answer's bytes; {@code more} while frames of the answer follow.
-   * {@code tookMillis}, on every frame, is how long the answer took to make.
+   * absolute, an ignored folder one path with nothing beneath it; or, for a repository git refused,
+   * {@code failure}, a sentence with git's own words, and nothing listed. Blank for one git read.
+   * One repository's frames come together, and every repository has one at least; {@code truncated}
+   * says its lists were cut at {@link #CHANGES_CAP}, or at the answer's bytes; {@code more} while
+   * frames of the answer follow. {@code tookMillis}, on every frame, is how long the answer took to
+   * make.
    */
   record FilesChangeList(
       int id,
       long tookMillis,
       String root,
       String branch,
+      String failure,
       List<Change> entries,
       List<String> ignored,
       boolean truncated,
@@ -665,6 +668,7 @@ public sealed interface PtyMessage {
     NO_GIT,
     NO_REPOSITORY,
     BINARY,
+    FILTERED,
     FAILED;
 
     /** The kind as the wire names it. */

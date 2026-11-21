@@ -185,6 +185,9 @@ public enum FileRefusal: String, CaseIterable, Sendable {
     case noRepository = "no_repository"
     /// The change is binary, so it is not shown as text.
     case binary
+    /// The file passes through a filter (Git LFS and its like), so its change is not shown as text;
+    /// it is still listed as changed.
+    case filtered
     case failed
 }
 
@@ -213,7 +216,8 @@ public struct FileChange: Equatable, Sendable {
 }
 
 /// Part of changes request `id`'s answer: repository `root` on `branch`, its `entries` and the paths
-/// git `ignored` there, each path absolute and an ignored folder one path. One repository's frames
+/// git `ignored` there, each path absolute and an ignored folder one path; or, for a repository git
+/// refused, `failure`, a sentence with git's own words, and nothing listed (empty for one git read). One repository's frames
 /// come together, every repository has one at least; `truncated` once its lists were cut at 5,000, or
 /// at the answer's size; `more` while frames of the answer follow. `tookMillis`, on every frame, is
 /// how long the answer took, which the client backs off by.
@@ -222,19 +226,21 @@ public struct FileChangeList: Equatable, Sendable {
     public var tookMillis: Int64
     public var root: FileName
     public var branch: FileName
+    public var failure: String
     public var entries: [FileChange]
     public var ignored: [FileName]
     public var truncated: Bool
     public var more: Bool
 
     public init(
-        id: Int32, tookMillis: Int64, root: FileName, branch: FileName, entries: [FileChange], ignored: [FileName],
-        truncated: Bool, more: Bool
+        id: Int32, tookMillis: Int64, root: FileName, branch: FileName, failure: String = "", entries: [FileChange],
+        ignored: [FileName], truncated: Bool, more: Bool
     ) {
         self.id = id
         self.tookMillis = tookMillis
         self.root = root
         self.branch = branch
+        self.failure = failure
         self.entries = entries
         self.ignored = ignored
         self.truncated = truncated

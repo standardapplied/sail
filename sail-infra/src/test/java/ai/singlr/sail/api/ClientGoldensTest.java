@@ -790,6 +790,7 @@ class ClientGoldensTest {
             41,
             "/home/dev/workspace",
             "main",
+            "",
             List.of(
                 new PtyMessage.Change(
                     "/home/dev/workspace/App.java", PtyMessage.ChangeState.MODIFIED, ""),
