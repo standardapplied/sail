@@ -368,15 +368,15 @@ final class FileScripts {
 
   /**
    * Whether a save's temporary, the path read on standard input, is still held open by a process in
-   * the workspace: {@code 50} when one holds it, {@code 0} when none does or it is gone. A save
-   * holds its temporary open from its copy to its rename, so a save whose process outlived its kill
-   * (one a hung disk holds) is seen by this, however long it lasts.
+   * the workspace: {@code 50} when one holds it, {@code 0} when none does or it is gone, since a
+   * removed file's descriptor reads as {@code <path> (deleted)}, which never matches. A save holds
+   * its temporary open from its copy to its rename, so a save whose process outlived its kill (one
+   * a hung disk holds) is seen by this, however long it lasts.
    */
   static final String HELD =
       """
       export LC_ALL=C
       IFS= read -r -d '' held || exit 1
-      [ -e "$held" ] || exit 0
       pattern=$(printf '%s' "$held" | sed 's/[][*?\\\\]/\\\\&/g')
       [ -n "$(find /proc/[0-9]*/fd -lname "$pattern" 2>/dev/null | head -n 1)" ] && exit 50
       exit 0
