@@ -306,6 +306,9 @@ struct Step: Decodable {
     /// The files panel measured against the spec's figures: opening, a 5,000-entry listing,
     /// scrolling it, a change, a burst of 2,000.
     var filesBudgets: Bool?
+    /// The tab's terminal floods at the panes4 load while the panel beside it is open and its tree
+    /// changes: the flood judged as each panes4 flood is, and each change to the screen.
+    var filesFlood: Bool?
     /// Sign Out pressed on the account, answered no further: what follows it asks.
     var signOutNow: Bool?
     /// A ticket was asked with these fields (`{"action": "open", "workspace": "dock"}`), within

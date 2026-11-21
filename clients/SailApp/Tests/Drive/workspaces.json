@@ -221,6 +221,7 @@
   {"name": "f-m60-files-again", "filesFolder": "", "filesEntries": ["build/", "docs/", "src/", "CHANGELOG.md", "Package.swift", "README.md"]},
   {"name": "f-m60-the-rows", "filesRows": 6},
   {"name": "f-budgets", "filesBudgets": true, "seconds": 180},
+  {"name": "f-flood-beside-the-files", "filesFlood": true, "seconds": 120},
   {"name": "f-m58-no-tickets", "proxyFails": "POST /v1/terminal/tickets"},
   {"name": "f-m58-the-connection-drops", "filesDrop": true},
   {"name": "f-m33-reconnecting", "filesSays": "Not live since ", "seconds": 6},

@@ -135,6 +135,27 @@ public final class FakeRunnerDoor: Sendable {
         return TerminalTicket(ticket: ticket, address: address, expiresAt: Date().addingTimeInterval(30))
     }
 
+    /// Session `session` prints `blocks` blocks of `lines` lines of `width` `x`s, one block each
+    /// `period` seconds, then `marker` on a line of its own, to every connection attached to it: an
+    /// agent's build flooding a workspace's terminal, paced by a timer as the panes4 pacer paces it.
+    public func flood(_ session: String, lines: Int, width: Int, every period: Double, blocks: Int, then marker: String) {
+        let block = Array((String(repeating: "x", count: width) + "\r\n").utf8).repeated(lines)
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "door.flood"))
+        let sent = Mutex(0)
+        timer.schedule(deadline: .now(), repeating: period)
+        timer.setEventHandler { [self] in
+            let count = sent.withLock { sent in
+                defer { sent += 1 }
+                return sent
+            }
+            let connections = state.withLock { $0.attached[session] ?? [] }
+            let bytes = count < blocks ? block : Array("\(marker)\r\n".utf8)
+            connections.forEach { answer(.output(lastInputSequence: 0, bytes: bytes), on: $0) }
+            if count >= blocks { timer.cancel() }
+        }
+        timer.resume()
+    }
+
     // MARK: Files
 
     /// Folder `path` of a files ticket's workspace now holds `entries` (more than 50,000 when
@@ -703,5 +724,12 @@ public struct DoorError: Error, CustomStringConvertible {
 
     public init(_ description: String) {
         self.description = description
+    }
+}
+
+extension Array {
+    /// These elements `times` times over, in order.
+    func repeated(_ times: Int) -> [Element] {
+        (0 ..< Swift.max(times, 0)).flatMap { _ in self }
     }
 }

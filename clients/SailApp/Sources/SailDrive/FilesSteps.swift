@@ -38,7 +38,7 @@ extension Driver {
     func performFiles(_ step: Step) async -> (Bool, String)? {
         let asks = [step.filesFolder, step.filesRefuse, step.filesNew, step.filesClick, step.filesButton, step.filesShot].contains { $0 != nil }
             || step.filesRows != nil || step.filesSays != nil || step.filesHold != nil || step.filesTicks != nil || step.filesEnd != nil
-            || step.filesDrop != nil || step.filesBudgets != nil
+            || step.filesDrop != nil || step.filesBudgets != nil || step.filesFlood != nil
         guard asks else { return nil }
         guard let door = GoldenDesk.door else { return (false, "the drive's runner door could not listen") }
         if let folder = step.filesFolder {
@@ -97,7 +97,58 @@ extension Driver {
         if let name = step.filesShot {
             return await filesShot(name)
         }
+        if step.filesFlood == true {
+            return await filesFlood(door)
+        }
         return await filesBudgets(door)
+    }
+
+    /// The real use: the workspace tab's terminal flooding with an agent's output at panes4's load
+    /// (``paneLoad``, 3 s of it) while the files panel beside it is open and the watch brings ten
+    /// entries and lists a folder again. Gated: the flood's ours (its longest output wait and the
+    /// main thread's longest hold, less the machine's share) at panes4's 100 ms; its drawable wait in
+    /// its longest commit gap at ``drawableWaitBound``; a change heard to its row drawn at the
+    /// spec's 120 ms ceiling (budget 50). Said: the main thread's longest hold.
+    private func filesFlood(_ door: FakeRunnerDoor) async -> (Bool, String) {
+        guard let view = pane, filesShown != nil else { return (false, "no workspace terminal with its files panel open") }
+        let root = Self.filesRoot, marker = "flood-files-end"
+        var names = ["src/", "README.md", "Package.swift"]
+        door.setFolder(root, names.map(Self.fileEntry))
+        door.setFolder(root + "/src", ["tide.ts"].map(Self.fileEntry))
+        guard await waitUntil(10, { self.filesShown?.list.numberOfRows == names.count }) else { return (false, "the root never showed: \(filesShown?.words ?? "")") }
+        let before = Self.committed(view.terminal)
+        view.terminal.resetLatency()
+        mainThread.reset()
+        let seconds = 3.0
+        door.flood(view.name, lines: Self.paneLoad.lines, width: 150, every: Self.paneLoad.period, blocks: Int(seconds / Self.paneLoad.period), then: marker)
+        var changed: [Double] = []
+        for index in 0 ..< 10 {
+            let name = "artifact-\(index).o"
+            names.append(name)
+            door.setFolder(root, names.map(Self.fileEntry))
+            if index == 5 { door.setFolder(root + "/src", ["tide.ts", "quay.ts"].map(Self.fileEntry)) }
+            let path = root + "/" + name
+            guard await waitUntil(5, { self.filesShown?.lastDrawn.path == path && self.filesShown?.lastDrawn.new == true }), let heard = filesShown?.changeHeard else {
+                return (false, "under the flood, \(name) drew no new row")
+            }
+            changed.append((filesShown?.lastDrawn.at ?? heard) - heard)
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        guard await waitUntil(60, { Self.shows(view, marker) }) else { return (false, "the flood never reached its end") }
+        let figures = view.terminal.latency, judged = flood(figures), frames = Self.committed(view.terminal) - before
+        let held = max(mainThread.longest - Heartbeat.interval * 1000, 0)
+        let change = Percentiles(milliseconds: changed.map { $0 * 1000 }).p95
+        let budgets = [
+            "the flood's ours <= 100 ms in its \(frames) frames (\(judged.said))": frames > 0 && judged.ours <= 100,
+            "its drawable wait in its longest commit gap <= \(Int(Self.drawableWaitBound)) ms (\(Self.ms(figures.longestGapFetching)) ms)": figures.longestGapFetching <= Self.drawableWaitBound,
+            "a change heard to its row drawn p95 <= 120 ms ceiling (\(Self.ms(change)) ms, budget 50)": change <= 120,
+        ]
+        let missed = budgets.filter { !$0.value }.keys.sorted()
+        let said = "ours \(Self.ms(judged.ours)) ms, longest gap between commits \(Self.ms((figures.longestBetweenCommits?.length ?? 0) * 1000)) ms, "
+            + "drawable wait \(Self.ms(figures.longestGapFetching)) ms, change to screen p95 \(Self.ms(change)) ms, the main thread's longest hold \(Self.ms(held)) ms"
+        print("files under a flood: \(said)")
+        door.setFolder(root, ["src/", "README.md", "Package.swift"].map(Self.fileEntry))
+        return (missed.isEmpty, (missed.isEmpty ? "within every budget" : "missed: \(missed.joined(separator: "; "))") + "; " + said)
     }
 
     /// The window in both looks, then with the workbench and the panel laid out right to left, as a
