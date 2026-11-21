@@ -4219,8 +4219,11 @@ connection's frames.
   given a turn when it is asked, waits for it before the lock, and passes it on once it holds the
   lock or ends without it, however it ends (refused, cancelled while running or queued, its script
   unstarted, its connection closed), so no turn is lost. A later write on a connection waits for a
-  save there still receiving its bytes, at most the upload's own idle limit. Reads take no turn: a
-  client that needs a read to follow a write waits for the write's answer.
+  save there still receiving its bytes, at most the upload's own idle limit; while it waits for its
+  turn it holds none of the connection's four scripts, so a listing or a stat is never held behind
+  it (F6), and when its turn comes it takes the next script free, ahead of any request not yet
+  started. Reads take no turn: a client that needs a read to follow a write waits for the write's
+  answer.
 - **An id is free again the moment its last answer is sent.** Every frame that answers a request
   is a `PtyMessage.Answer`, which says by its own type and flags whether it is the last (a listing
   frame with more to come, a read's frame before its digest and an upload's acknowledgement are
