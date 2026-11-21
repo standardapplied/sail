@@ -1,5 +1,8 @@
 import AppKit
+import os
 import SailLook
+
+private let listLog = Logger(subsystem: "sh.standardapplied.sail", category: "list")
 
 /// A list of rows in one of the two row styles (`RowStyle`): group heads and items. It is its own
 /// data source and delegate, and owns the row keys: ↑↓ move the choice (group heads cannot be
@@ -413,6 +416,26 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         item(at: row)?.name
     }
 
+    /// Whether a misuse of the list (two items handing it one view) stops the process, as tests,
+    /// debug builds and the drive want; a person's app says it once in the log and goes on safely.
+    package static var stopsOnMisuse = asserting
+    private static let asserting: Bool = {
+        var on = false
+        assert({ on = true; return true }())
+        return on
+    }()
+
+    private static var misuseSaid = false
+
+    /// A programming slip in using the list: the process stops where ``stopsOnMisuse``, and
+    /// otherwise the log says so once.
+    static func misused(_ words: String) {
+        if stopsOnMisuse { preconditionFailure("SailList: " + words) }
+        guard !misuseSaid else { return }
+        misuseSaid = true
+        listLog.fault("SailList: \(words, privacy: .public); the view stays with the row that asked last")
+    }
+
     /// The ids of rows on screen whose cell no longer holds the content its item gave it: a row
     /// gone blank.
     package var blankRows: [String] {
@@ -726,7 +749,10 @@ final class HeadCell: NSView {
 final class RowCell: NSView {
     private(set) var content = NSView()
     /// The item it shows: an item's content belongs to its one row.
-    private(set) var itemID: String?
+    private var item: SailList.Item?
+    var itemID: String? {
+        item?.id
+    }
     let actions = RowActions()
     private let rowStyle: RowStyle
     private let mono: LabelFont
@@ -768,13 +794,15 @@ final class RowCell: NSView {
     func configure(_ item: SailList.Item, actionsColumn: Double?, returnKey: Bool, look: Look) {
         self.returnKey = returnKey
         let given = item.content
-        if let holder = given.superview as? RowCell, holder !== self, holder.itemID != item.id {
-            preconditionFailure("SailList: \(item.id)'s content is shown by \(holder.itemID ?? "another") row too; build each item's content inside its closure")
+        let sharer = (given.superview as? RowCell).flatMap { $0 !== self && $0.itemID != item.id ? $0 : nil }
+        if let sharer {
+            SailList.misused("\(item.id)'s content is shown by \(sharer.itemID ?? "another") row too; build each item's content inside its closure")
         }
         if content !== given, content.superview === self { content.removeFromSuperview() }
         content = given
-        itemID = item.id
+        self.item = item
         addSubview(content, positioned: .below, relativeTo: actions)
+        sharer?.contentTaken()
         runs = item.actions.map { Run($0) }
         var buttons: [SailButton] = []
         let onRow = runs.filter { $0.action.onRow }
@@ -821,6 +849,16 @@ final class RowCell: NSView {
         actions.alphaValue = 0
         actions.isHidden = true
         show(false, chosen: false, keys: false)
+        needsLayout = true
+    }
+
+    /// Its content was taken by a row handed the same view: made again from its own item's closure,
+    /// or an empty view when that closure hands back the view taken.
+    private func contentTaken() {
+        guard let item else { return }
+        let again = item.content
+        content = again.superview == nil ? again : NSView()
+        addSubview(content, positioned: .below, relativeTo: actions)
         needsLayout = true
     }
 

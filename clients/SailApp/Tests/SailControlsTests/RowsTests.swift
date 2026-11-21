@@ -459,8 +459,8 @@ import Testing
         #expect(list.rowsReused > 0, "no row was reused")
     }
 
-    /// Two items handing the list one view are two rows showing it: the list stops the process,
-    /// saying so, rather than blanking one.
+    /// Two items handing the list one view are two rows showing it: where misuse stops the process
+    /// (tests, debug builds, the drive), the list stops it, saying so.
     @Test func twoItemsSharingAViewStopTheProcess() async {
         await #expect(processExitsWith: .failure) {
             await MainActor.run {
@@ -577,6 +577,27 @@ import Testing
         #expect(tip.isShown, "the note's tooltip did not show")
         cell.configure(SailList.Item(id: "b", name: "b", voice: "b", content: NSTextField(labelWithString: "b")), actionsColumn: nil, returnKey: true, look: .light)
         #expect(!tip.isShown, "the old note's tooltip stayed on screen over another row")
+    }
+
+    /// In a person's app two items handing the list one view do not stop it: the view stays with
+    /// the row that asked last, and the other row's cell is made again from its own closure, or
+    /// holds an empty view when that closure hands back the same one.
+    @Test func inAPersonsAppTwoItemsSharingAViewGoOnSafely() throws {
+        let mono = try ControlsTests.mono()
+        SailList.stopsOnMisuse = false
+        defer { SailList.stopsOnMisuse = true }
+        let shared = NSView()
+        var asked = 0
+        func firstTheSharedOne() -> NSView {
+            asked += 1
+            return asked == 1 ? shared : NSView()
+        }
+        let one = RowCell(SailList.Item(id: "a", name: "a", voice: "a", content: firstTheSharedOne()), rowStyle: .list, actionsColumn: nil, look: .light, mono: mono)
+        let other = RowCell(SailList.Item(id: "b", name: "b", voice: "b", content: shared), rowStyle: .list, actionsColumn: nil, look: .light, mono: mono)
+        #expect(shared.superview === other, "the view did not stay with the row that asked last")
+        #expect(one.content !== shared && one.content.superview === one && asked == 2, "the other row was not made again from its closure")
+        let third = RowCell(SailList.Item(id: "c", name: "c", voice: "c", content: shared), rowStyle: .list, actionsColumn: nil, look: .light, mono: mono)
+        #expect(shared.superview === third && other.content !== shared && other.content.superview === other, "a closure handing back the taken view left its row holding nothing")
     }
 
     /// A row with no actions, as every sidebar row is, opens no menu on a right-click.
