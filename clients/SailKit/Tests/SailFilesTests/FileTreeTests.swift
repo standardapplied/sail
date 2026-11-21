@@ -366,6 +366,22 @@ func + (folder: FileName, rest: String) -> FileName {
         #expect(tree.unsettled == nil, "a listing taken did not settle it")
     }
 
+    /// A folder's refusals in a row are counted afresh after a reconnect: one refusal on the new
+    /// connection never makes it unsettled.
+    @Test func aReconnectCountsAFoldersRefusalsAfresh() throws {
+        var tree = try Self.listed([Self.folder("node_modules")])
+        let modules = Self.root + "/node_modules"
+        var asked = try #require(Self.id(listing: modules, in: tree.expand(modules)))
+        for tick in 1 ... FileTree.unsettledAfter - 1 {
+            _ = tree.receive(.filesRefused(id: asked, kind: .known(.changed), message: "node_modules changed while it was listed."), at: Double(tick) - 0.5)
+            asked = try #require(Self.id(listing: modules, in: tree.receive(.filesTick, at: Double(tick))))
+        }
+        tree.disconnected()
+        asked = try #require(Self.id(listing: modules, in: tree.admitted()))
+        _ = tree.receive(.filesRefused(id: asked, kind: .known(.changed), message: "node_modules changed while it was listed."), at: 10)
+        #expect(tree.unsettled == nil, "refusals from before the reconnect were counted")
+    }
+
     /// The watch set is sent only when it changed: a refusal that changes nothing sends none.
     @Test func anUnchangedWatchSetIsNotSentAgain() throws {
         var tree = try Self.listed([Self.folder("src")])
