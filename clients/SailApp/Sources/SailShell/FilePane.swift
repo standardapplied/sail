@@ -96,6 +96,11 @@ final class FilePane: NSView, NSTextViewDelegate {
         true
     }
 
+    /// Mirrored right to left, its title and line laid out again the way they now read.
+    override var userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection {
+        didSet { if userInterfaceLayoutDirection != oldValue { needsLayout = true } }
+    }
+
     private func build() {
         folderLabel.lineBreakMode = .byTruncatingHead
         nameLabel.lineBreakMode = .byTruncatingMiddle
@@ -505,11 +510,10 @@ final class FilePane: NSView, NSTextViewDelegate {
             }
             top += Self.lineHeight
         }
-        if userInterfaceLayoutDirection == .rightToLeft {
-            for view in [folderLabel, nameLabel, dot, status, showTerminal, close] as [NSView] { view.frame.origin.x = width - view.frame.maxX }
-            for view in [note, compare, discard] as [NSView] { view.frame.origin.x = width - view.frame.maxX }
-            nameLabel.alignment = .right
-            note.alignment = .right
+        let rightToLeft = userInterfaceLayoutDirection == .rightToLeft
+        for label in [folderLabel, nameLabel, status, note] { label.alignment = rightToLeft ? .right : .left }
+        if rightToLeft {
+            for view in [folderLabel, nameLabel, dot, status, showTerminal, close, note, compare, discard] as [NSView] { view.frame.origin.x = width - view.frame.maxX }
         }
         scroll.frame = NSRect(x: 0, y: top, width: width, height: max(height - top, 0))
         let sentenceSize = sentence.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: max(width - 2 * pad, 0), height: .greatestFiniteMagnitude)) ?? .zero

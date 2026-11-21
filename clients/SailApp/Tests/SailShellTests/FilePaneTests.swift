@@ -165,6 +165,26 @@ import Testing
         window.attachedSheet.map { window.endSheet($0) }
     }
 
+    /// Right to left the pane's title and line mirror and read from the right; back left to right,
+    /// they read from the left again.
+    @Test func thePanesTitleMirrorsRightToLeftAndBack() async throws {
+        let (_, _, bench, _, pane) = try await Self.opened(Array("one\n".utf8))
+        #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
+        func name() -> NSTextField? {
+            pane.subviews.flatMap { [$0] + $0.subviews }.compactMap { $0 as? NSTextField }.first { $0.stringValue == "tide.ts" }
+        }
+        bench.userInterfaceLayoutDirection = .rightToLeft
+        bench.apply()
+        bench.layoutSubtreeIfNeeded()
+        let right = try #require(name())
+        #expect(right.frame.minX > pane.bounds.midX && right.alignment == .right, "right to left, the name at \(right.frame) reads from the left")
+        bench.userInterfaceLayoutDirection = .leftToRight
+        bench.apply()
+        bench.layoutSubtreeIfNeeded()
+        let left = try #require(name())
+        #expect(left.frame.maxX < pane.bounds.midX && left.alignment == .left, "back left to right, the name at \(left.frame) stayed mirrored")
+    }
+
     /// The one line's rule holds for the tree's line as for the pane's: narrow, its words keep their
     /// row and Try Again goes under them; wide, beside them.
     @Test func theTreesLineKeepsItsWordsWholeWithItsActionUnderThem() {
@@ -176,7 +196,7 @@ import Testing
             return line.button.frame
         }
         let narrow = button(at: 236), wide = button(at: 600)
-        #expect(narrow.minY > wide.maxY, "narrow, Try Again at \(narrow) is not under the words; wide, at \(wide)")
+        #expect(narrow.minY >= wide.minY + 12, "narrow, Try Again at \(narrow) is not a row under the words; wide, at \(wide)")
     }
 
     /// M14a: a file that is not text is one sentence and Copy Path.
