@@ -64,6 +64,15 @@ class FileScriptsTest {
 
   /** As {@link #over(Path, List)}, each script run with {@code env} added to its environment. */
   static FileScripts over(Path home, List<List<String>> commands, Map<String, String> env) {
+    return over(home, commands, env, java.util.function.UnaryOperator.identity());
+  }
+
+  /** As {@link #over(Path, List, Map)}, each script first edited by {@code edit}. */
+  static FileScripts over(
+      Path home,
+      List<List<String>> commands,
+      Map<String, String> env,
+      java.util.function.UnaryOperator<String> edit) {
     var place =
         new UploadCopy.Place(
             container -> List.of("incus", "exec", container, "--"),
@@ -80,7 +89,8 @@ class FileScriptsTest {
           if (!command.get(2).equals(CONTAINER)) {
             throw new IOException("Error: Instance not found");
           }
-          var inner = command.subList(command.indexOf("--") + 1, command.size());
+          var inner = new ArrayList<>(command.subList(command.indexOf("--") + 1, command.size()));
+          inner.set(2, edit.apply(inner.get(2)));
           var builder =
               new ProcessBuilder(onASocket(inner)).redirectError(ProcessBuilder.Redirect.DISCARD);
           builder.environment().putAll(env);

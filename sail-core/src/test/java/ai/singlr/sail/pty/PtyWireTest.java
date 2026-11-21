@@ -168,6 +168,45 @@ class PtyWireTest {
     assertEquals(stopped, roundTrip(stopped));
   }
 
+  /** A repository's changes, and a diff, cross the wire with every state and their edge values. */
+  @Test
+  void theChangesAndADiffSurviveTheWire() throws Exception {
+    var path = "/home/dev/workspace/a\tb\nc é";
+    assertEquals(
+        new PtyMessage.FilesChanges(Integer.MAX_VALUE),
+        roundTrip(new PtyMessage.FilesChanges(Integer.MAX_VALUE)));
+    var changes = new java.util.ArrayList<PtyMessage.Change>();
+    for (var state : PtyMessage.ChangeState.values()) {
+      changes.add(
+          new PtyMessage.Change(
+              path + state, state, state == PtyMessage.ChangeState.RENAMED ? path : ""));
+    }
+    var list =
+        new PtyMessage.FilesChangeList(
+            3,
+            Long.MAX_VALUE,
+            "/home/dev/workspace",
+            "(detached)",
+            changes,
+            List.of("/home/dev/workspace/node_modules", path),
+            true,
+            true);
+    assertEquals(list, roundTrip(list));
+    var empty =
+        new PtyMessage.FilesChangeList(
+            4, 0, "/home/dev/workspace/api", "main", List.of(), List.of(), false, false);
+    assertEquals(empty, roundTrip(empty));
+    assertEquals(new PtyMessage.FilesDiff(5, path), roundTrip(new PtyMessage.FilesDiff(5, path)));
+    var bytes = new byte[PtyMessage.FILE_CHUNK];
+    bytes[0] = (byte) 0xff;
+    var diff = (PtyMessage.FilesDiffData) roundTrip(new PtyMessage.FilesDiffData(6, bytes, true));
+    assertEquals(6, diff.id());
+    assertArrayEquals(bytes, diff.bytes());
+    assertTrue(diff.eof());
+    assertThrows(IOException.class, () -> PtyMessage.ChangeState.of("staged"));
+    assertEquals(PtyMessage.ChangeState.UNTRACKED, PtyMessage.ChangeState.of("untracked"));
+  }
+
   /** m3: a name that is not UTF-8 crosses the wire as its bytes, in every files frame. */
   @Test
   void aNameThatIsNotUtf8CrossesTheWireAsItsBytes() throws Exception {
@@ -182,7 +221,28 @@ class PtyWireTest {
             new PtyMessage.FilesWatch(List.of(new PtyMessage.Watched(bad, "v"))),
             new PtyMessage.FilesListing(1, "v", List.of(entry), false, false),
             new PtyMessage.FilesEntry(1, entry, "v"),
-            new PtyMessage.FilesChanged(List.of(bad)))) {
+            new PtyMessage.FilesChanged(List.of(bad)),
+            new PtyMessage.FilesChangeList(1, 0, bad, bad, List.of(), List.of(), false, false),
+            new PtyMessage.FilesChangeList(
+                1,
+                0,
+                "/r",
+                "b",
+                List.of(new PtyMessage.Change(bad, PtyMessage.ChangeState.MODIFIED, "")),
+                List.of(),
+                false,
+                false),
+            new PtyMessage.FilesChangeList(
+                1,
+                0,
+                "/r",
+                "b",
+                List.of(new PtyMessage.Change("/r/n", PtyMessage.ChangeState.RENAMED, bad)),
+                List.of(),
+                false,
+                false),
+            new PtyMessage.FilesChangeList(1, 0, "/r", "b", List.of(), List.of(bad), false, false),
+            new PtyMessage.FilesDiff(1, bad))) {
       assertEquals(message, roundTrip(message), message.getClass().getSimpleName());
       var bytes = new java.io.ByteArrayOutputStream();
       PtyWire.write(Channels.newChannel(bytes), message);

@@ -746,7 +746,8 @@ class FileWritesTest {
                 lock,
                 () -> null,
                 java.time.Duration.ofMillis(300),
-                java.time.Duration.ofMillis(500)));
+                java.time.Duration.ofMillis(500)),
+            changes());
     save(outliving, 1, file.toString(), digest(file), version(file), "new");
     assertEquals(PtyMessage.FilesRefusal.FAILED, ((PtyMessage.FilesRefused) answer()).kind());
     var holder = ProcessHandle.of(Long.parseLong(Files.readString(pidfile).strip())).orElseThrow();
@@ -857,7 +858,8 @@ class FileWritesTest {
             () -> null,
             endedWith::add,
             new FilesConnection.Writes(
-                lock, () -> null, java.time.Duration.ofMillis(300), FilesConnection.HOLD_BOUND));
+                lock, () -> null, java.time.Duration.ofMillis(300), FilesConnection.HOLD_BOUND),
+            changes());
 
     save(hung, 1, file.toString(), digest(file), version(file), "new");
 
@@ -1096,6 +1098,12 @@ class FileWritesTest {
   private final List<PtyMessage.Err> endedWith = new CopyOnWriteArrayList<>();
   private final FilesConnection.WorkspaceLock lock = new FilesConnection.WorkspaceLock();
 
+  /** A changes run of its own, which no write test asks. */
+  private WorkspaceChanges changes() {
+    return new WorkspaceChanges(
+        running(UnaryOperator.identity()), CONTAINER, WorkspaceChanges.PATIENCE, () -> {});
+  }
+
   private FileScripts running(UnaryOperator<String> edit) {
     return scripts(edit, Map.of());
   }
@@ -1116,7 +1124,8 @@ class FileWritesTest {
         () -> null,
         endedWith::add,
         new FilesConnection.Writes(
-            lock, gate, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND));
+            lock, gate, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND),
+        changes());
   }
 
   /** Sends save {@code id} of {@code text} over {@code path} on {@code base}, bytes and end. */
