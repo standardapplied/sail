@@ -196,6 +196,7 @@
   {"name": "f-m6-said-in-its-place", "filesRows": 10},
   {"name": "f-m6-refused-in-place", "filesShot": "31-files-refused-in-place"},
   {"name": "f-m6-shut-build", "press": "arrowLeft"},
+  {"name": "f-m6-build-shut", "filesRows": 9},
   {"name": "f-m10-an-agent-writes", "filesFolder": "src", "filesEntries": ["harbor/", "tide.ts", "berth.ts", "quay.ts"]},
   {"name": "f-m10-the-row-comes", "filesRows": 10},
   {"name": "f-m10-marked-new", "filesNew": "quay.ts"},

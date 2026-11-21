@@ -53,7 +53,8 @@ extension Driver {
         }
         if let rows = step.filesRows {
             let found = await waitUntil(step.seconds ?? 10) { self.filesShown?.list.numberOfRows == rows }
-            return (found, "the panel shows \(filesShown.map { "\($0.list.numberOfRows) rows: \($0.rows.prefix(8).map(\.name))" } ?? "nothing"); its line: \(filesShown?.words ?? "none")")
+            let keys = shell.window.firstResponder.map { "\(type(of: $0))" } ?? "nothing"
+            return (found, "the panel shows \(filesShown.map { "\($0.list.numberOfRows) rows: \($0.rows.prefix(12).map(\.name))" } ?? "nothing"); its line: \(filesShown?.words ?? "none"); chosen \(filesShown?.list.chosen ?? "nothing"); the keys with \(keys)")
         }
         if let words = step.filesSays {
             let found = await waitUntil(step.seconds ?? 10) {
@@ -136,10 +137,10 @@ extension Driver {
             door.setFolder(root, names.map(Self.fileEntry))
             if index == 5 { door.setFolder(root + "/src", ["tide.ts", "quay.ts"].map(Self.fileEntry)) }
             let path = root + "/" + name
-            guard await waitUntil(5, { self.filesShown?.lastDrawn.path == path && self.filesShown?.lastDrawn.new == true }), let heard = filesShown?.changeHeard else {
-                return (false, "under the flood, \(name) drew no new row")
+            guard await waitUntil(5, { self.filesShown?.newDrawn[path] != nil }), let heard = filesShown?.changeHeard[root], let drawn = filesShown?.newDrawn[path] else {
+                return (false, "under the flood, \(name) drew no new row: \(filesShown?.rows.map(\.name) ?? [])")
             }
-            changed.append((filesShown?.lastDrawn.at ?? heard) - heard)
+            changed.append(drawn - heard)
             try? await Task.sleep(for: .milliseconds(200))
         }
         guard await waitUntil(60, { Self.shows(view, marker) }) else { return (false, "the flood never reached its end") }
@@ -269,10 +270,10 @@ extension Driver {
             names.append(name)
             door.setFolder(root, names.map(Self.fileEntry))
             let path = root + "/" + name
-            guard await waitUntil(5, { self.filesShown?.lastDrawn.path == path && self.filesShown?.lastDrawn.new == true }), let heard = filesShown?.changeHeard else {
+            guard await waitUntil(5, { self.filesShown?.newDrawn[path] != nil }), let heard = filesShown?.changeHeard[root], let drawn = filesShown?.newDrawn[path] else {
                 return (false, "the change to \(name) drew no new row: \(filesShown?.rows.map(\.name) ?? [])")
             }
-            changed.append((filesShown?.lastDrawn.at ?? heard) - heard)
+            changed.append(drawn - heard)
         }
         mainThread.reset()
         let burst = DispatchQueue(label: "files.burst")

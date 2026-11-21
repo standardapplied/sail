@@ -137,6 +137,20 @@ import Testing
         _ = shell
     }
 
+    /// The tree keeps the keys it holds: a change in the tab's terminals (a title, an attach), which
+    /// draws the workbench again, gives them back to the terminal only when the panel goes.
+    @Test func theTreeKeepsItsKeysWhenTheTerminalsChange() throws {
+        let door = try FakeRunnerDoor(person: "uday")
+        let (shell, bench) = try Self.shell(door)
+        bench.toggleFiles(nil)
+        let panel = try #require(Self.panel(bench))
+        #expect(shell.window.firstResponder === panel.list, "⌃⌘S did not give the tree the keys")
+        bench.apply()
+        #expect(shell.window.firstResponder === panel.list, "drawing the workbench again took the keys from the tree")
+        bench.toggleFiles(nil)
+        #expect(shell.window.firstResponder === bench.focused?.terminal, "put away, the panel left the keys nowhere")
+    }
+
     static func treeCell(_ view: NSView) -> TreeRowCell? {
         (view as? TreeRowCell) ?? view.subviews.lazy.compactMap(treeCell).first
     }

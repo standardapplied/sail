@@ -136,10 +136,10 @@ final class FilesPanel: NSView {
         refresh()
     }
 
-    /// When, on the main thread's media clock, the last whole listing and the last change were
-    /// heard: what the drive measures each drawing from.
+    /// When, on the main thread's media clock, the last whole listing and the last change to each
+    /// folder were heard: what the drive measures each drawing from.
     package private(set) var listingHeard: (path: String, at: Double)?
-    package private(set) var changeHeard: Double?
+    package private(set) var changeHeard: [String: Double] = [:]
 
     /// One event of the connection, as the tree takes it.
     package func heard(_ event: FilesSession.Event) {
@@ -154,7 +154,10 @@ final class FilesPanel: NSView {
         case let .frame(frame):
             send(tree.receive(frame, at: now))
             if frame.isWholeListing, let path = tree.lastListed { listingHeard = (path, CACurrentMediaTime()) }
-            if case .filesChanged = frame { changeHeard = CACurrentMediaTime() }
+            if case let .filesChanged(paths) = frame {
+                let at = CACurrentMediaTime()
+                paths.forEach { changeHeard[$0] = at }
+            }
         }
         refresh()
     }
@@ -423,9 +426,14 @@ final class TreeRowCell: NSView {
     /// The last row drawn, on the main thread's media clock: what the drive measures a listing or a
     /// change to its rows on the screen by.
     static private(set) var lastDrawn = (at: 0.0, path: "", new: false)
+    /// When each entry was first drawn marked new: a change's row on the screen, whatever order the
+    /// rows around it are drawn in.
+    static private(set) var newDrawn: [String: Double] = [:]
 
     override func draw(_: NSRect) {
-        Self.lastDrawn = (CACurrentMediaTime(), row.path, new)
+        let now = CACurrentMediaTime()
+        Self.lastDrawn = (now, row.path, new)
+        if new, Self.newDrawn[row.path] == nil { Self.newDrawn[row.path] = now }
         let rightToLeft = userInterfaceLayoutDirection == .rightToLeft, width = Double(bounds.width)
         let start = Double(row.depth) * RowStyle.indent + Self.slot + Self.gap
         if row.kind == .note {

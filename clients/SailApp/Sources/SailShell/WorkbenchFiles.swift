@@ -48,6 +48,14 @@ extension WorkbenchView {
         if filesPanelShown, let panel = view.files { window?.makeFirstResponder(panel.list) }
     }
 
+    /// Whether the selected tab's files panel holds the keys: drawing the workbench again leaves them
+    /// there, so a change in the terminals never takes them from the tree.
+    var filesHoldTheKeys: Bool {
+        guard let tab = model.selectedTab, let panel = tabViews[tab.id]?.files, !panel.isHidden,
+              let responder = window?.firstResponder as? NSView else { return false }
+        return responder.isDescendant(of: panel)
+    }
+
     /// Escape puts away a panel floating over the terminals.
     func dismissFloatingFiles() {
         guard let tab = model.selectedTab, let view = tabViews[tab.id], view.files?.floating == true else { return }
@@ -134,8 +142,10 @@ package struct FilesShown {
     package let rows: [FileTree.Row]
     package let new: Set<String>
     package let listingHeard: (path: String, at: Double)?
-    package let changeHeard: Double?
+    package let changeHeard: [String: Double]
     package let lastDrawn: (at: Double, path: String, new: Bool)
+    /// When each entry was first drawn marked new.
+    package let newDrawn: [String: Double]
 }
 
 extension WorkbenchView {
@@ -143,7 +153,7 @@ extension WorkbenchView {
         guard let tab = model.selectedTab, let panel = tabViews[tab.id]?.files, !panel.isHidden else { return nil }
         return FilesShown(
             list: panel.list, scroll: panel.scroll, button: panel.line.button, words: panel.shownLine?.words, rows: panel.tree.rows, new: panel.shownNew,
-            listingHeard: panel.listingHeard, changeHeard: panel.changeHeard, lastDrawn: TreeRowCell.lastDrawn
+            listingHeard: panel.listingHeard, changeHeard: panel.changeHeard, lastDrawn: TreeRowCell.lastDrawn, newDrawn: TreeRowCell.newDrawn
         )
     }
 }

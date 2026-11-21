@@ -203,7 +203,7 @@ public final class WorkbenchView: NSView {
         emptyLabel.isHidden = !model.tabs.isEmpty || !restored
         newTerminal.isHidden = emptyLabel.isHidden
         showTitles()
-        if let focused, !isHidden, !strip.isRenaming, window?.firstResponder !== focused.terminal { window?.makeFirstResponder(focused.terminal) }
+        if let focused, !isHidden, !strip.isRenaming, !filesHoldTheKeys, window?.firstResponder !== focused.terminal { window?.makeFirstResponder(focused.terminal) }
         keepSoon()
     }
 
