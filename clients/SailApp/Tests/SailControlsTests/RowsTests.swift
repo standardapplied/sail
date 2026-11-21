@@ -577,6 +577,13 @@ import Testing
         #expect(tip.isShown, "the note's tooltip did not show")
         cell.configure(SailList.Item(id: "b", name: "b", voice: "b", content: NSTextField(labelWithString: "b")), actionsColumn: nil, returnKey: true, look: .light)
         #expect(!tip.isShown, "the old note's tooltip stayed on screen over another row")
+        let button = SailButton(icon: .refresh, label: "List Again", look: .light, target: nil, action: nil)
+        button.frame = NSRect(x: 100, y: 10, width: 40, height: 40)
+        list.addSubview(button)
+        let next = try #require(button.tooltip)
+        next.mouseEntered(with: try ControlsTests.entered())
+        #expect(!next.isShown, "a tooltip put away with its row warmed the next to show at once, as only the pointer leaving one does")
+        next.hide()
     }
 
     /// In a person's app two items handing the list one view do not stop it: the view stays with

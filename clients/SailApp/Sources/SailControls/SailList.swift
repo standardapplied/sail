@@ -832,7 +832,7 @@ final class RowCell: NSView {
             label.maximumNumberOfLines = 1
             return label
         }
-        noteTip?.hide()
+        noteTip?.hide(warming: false)
         noteTip = nil
         if let note, let words = item.note {
             let tip = Tooltip(words, look: look, mono: nil)
