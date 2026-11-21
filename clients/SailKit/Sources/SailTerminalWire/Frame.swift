@@ -97,6 +97,16 @@ public enum Frame: Equatable, Sendable {
     case filesConflict(id: Int32, digest: String)
     /// Create, move or remove `id` is done.
     case filesDone(id: Int32)
+    /// What differs from `HEAD` in each of the workspace's repositories, and what git ignores there:
+    /// ``filesChangeList(_:)`` frames, or a refusal.
+    case filesChanges(id: Int32)
+    case filesChangeList(FileChangeList)
+    /// `path`'s change against `HEAD` as a unified diff: ``filesDiffData(id:bytes:eof:)`` frames, or a
+    /// refusal.
+    case filesDiff(id: Int32, path: FileName)
+    /// The next bytes of diff `id`, `eof` on its last frame: a diff, never a file's content, so it
+    /// carries no version and no digest.
+    case filesDiffData(id: Int32, bytes: [UInt8], eof: Bool)
     case output(lastInputSequence: Int64, bytes: [UInt8])
     /// What follows until ``replayEnd`` is the session's journal replayed; `safe` says whether it
     /// starts on a clean terminal boundary.
@@ -169,7 +179,67 @@ public enum FileRefusal: String, CaseIterable, Sendable {
     /// A change Sail does not make: a name that is not UTF-8 or holds a control character, or a
     /// folder moved into itself.
     case unsafe
+    /// The workspace has no git, so nothing is said of its changes.
+    case noGit = "no_git"
+    /// No repository is where its changes, or a file's change, were asked.
+    case noRepository = "no_repository"
+    /// The change is binary, so it is not shown as text.
+    case binary
     case failed
+}
+
+/// How a path differs from `HEAD`.
+public enum ChangeState: String, CaseIterable, Sendable {
+    case modified
+    case added
+    case deleted
+    /// Moved from `from`: the app shows it added at its path and deleted at `from`.
+    case renamed
+    case untracked
+    case conflicted
+}
+
+/// A path that differs from `HEAD`, how, and a rename's `from`, empty for any other.
+public struct FileChange: Equatable, Sendable {
+    public var path: FileName
+    public var state: Open<ChangeState>
+    public var from: FileName
+
+    public init(path: FileName, state: Open<ChangeState>, from: FileName) {
+        self.path = path
+        self.state = state
+        self.from = from
+    }
+}
+
+/// Part of changes request `id`'s answer: repository `root` on `branch`, its `entries` and the paths
+/// git `ignored` there, each path absolute and an ignored folder one path. One repository's frames
+/// come together, every repository has one at least; `truncated` once its lists were cut at 5,000, or
+/// at the answer's size; `more` while frames of the answer follow. `tookMillis`, on every frame, is
+/// how long the answer took, which the client backs off by.
+public struct FileChangeList: Equatable, Sendable {
+    public var id: Int32
+    public var tookMillis: Int64
+    public var root: FileName
+    public var branch: FileName
+    public var entries: [FileChange]
+    public var ignored: [FileName]
+    public var truncated: Bool
+    public var more: Bool
+
+    public init(
+        id: Int32, tookMillis: Int64, root: FileName, branch: FileName, entries: [FileChange], ignored: [FileName],
+        truncated: Bool, more: Bool
+    ) {
+        self.id = id
+        self.tookMillis = tookMillis
+        self.root = root
+        self.branch = branch
+        self.entries = entries
+        self.ignored = ignored
+        self.truncated = truncated
+        self.more = more
+    }
 }
 
 /// A file's name or path as the workspace holds it: bytes, which need not be UTF-8. It addresses

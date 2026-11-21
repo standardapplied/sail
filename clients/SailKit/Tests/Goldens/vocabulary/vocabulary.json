@@ -1,4 +1,12 @@
 {
+  "change_states": [
+    "modified",
+    "added",
+    "deleted",
+    "renamed",
+    "untracked",
+    "conflicted"
+  ],
   "change_types": [
     "spec",
     "room",
@@ -309,6 +317,9 @@
     "too_large",
     "partly_removed",
     "unsafe",
+    "no_git",
+    "no_repository",
+    "binary",
     "failed"
   ],
   "member_modes": [
