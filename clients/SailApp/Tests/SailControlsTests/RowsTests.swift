@@ -495,7 +495,8 @@ import Testing
         guard depth < 8 else { return "…" }
         if let view = value as? NSView {
             let held = view.subviews.map { shape($0, depth: depth + 1) }.joined(separator: ", ")
-            return "\(type(of: view))(hidden \(view.isHidden), alpha \(view.alphaValue), frame \(view.frame), [\(held)])"
+            let words = (view as? NSTextField).map { " says \"\($0.attributedStringValue.string)\"" } ?? (view as? NSButton).map { " titled \"\($0.title)\"" } ?? ""
+            return "\(type(of: view))(hidden \(view.isHidden), alpha \(view.alphaValue), frame \(view.frame)\(words), [\(held)])"
         }
         if let menu = value as? NSMenu { return "NSMenu[\(menu.items.map(\.title).joined(separator: ", "))]" }
         if value is NSObject { return "\(type(of: value))" }
@@ -513,15 +514,30 @@ import Testing
         return fields
     }
 
-    /// A row of every kind made over for every other kind is, field by field, the row made fresh
-    /// for it: a stored property `configure` forgets to renew fails here without being named.
-    @Test func aRowOfEveryKindMadeOverForAnotherIsAFreshOne() throws {
-        let mono = try ControlsTests.mono(), kinds = Self.kinds()
+    /// A row of every kind made over for every other kind is, field by field and word for word,
+    /// the row made fresh for it, in every list style, both looks and both directions, the earlier
+    /// row chosen and hovered: a stored property `configure` forgets to renew fails here without
+    /// being named.
+    @Test(arguments: [RowStyle.list, .sidebar, .tree])
+    func aRowOfEveryKindMadeOverForAnotherIsAFreshOne(_ style: RowStyle) throws {
+        for look in [Look.light, .dark] {
+            for direction in [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft] {
+                try madeOverAsFresh(style, look, direction)
+            }
+        }
+    }
+
+    private func madeOverAsFresh(_ style: RowStyle, _ look: Look, _ direction: NSUserInterfaceLayoutDirection) throws {
+        let mono = try ControlsTests.mono(), kinds = Self.kinds(), said = "\(style == .list ? "list" : style == .sidebar ? "sidebar" : "tree"), \(look == .dark ? "dark" : "light"), \(direction == .rightToLeft ? "right to left" : "left to right")"
         func shown(_ entry: SailList.Entry) -> (SailList, TestWindow) {
-            let list = SailList(rowStyle: .list, look: .light, mono: mono)
+            let list = SailList(rowStyle: style, look: look, mono: mono)
+            list.userInterfaceLayoutDirection = direction
+            list.pointer = { NSPoint(x: -1000, y: -1000) }
             list.entries = [entry]
             list.frame = NSRect(x: 0, y: 0, width: 440, height: 200)
             let (window, _) = Self.shown(list)
+            list.layoutSubtreeIfNeeded()
+            list.choose("k")
             list.layoutSubtreeIfNeeded()
             return (list, window)
         }
@@ -539,13 +555,14 @@ import Testing
             for (before, earlier) in kinds where before != name {
                 let (list, window) = shown(earlier)
                 defer { window.orderOut(nil) }
+                (list.rowView(atRow: 0, makeIfNecessary: true) as? SailRowView)?.hovered = true
                 let reused = list.rowsReused
                 list.entries = [entry]
                 list.layoutSubtreeIfNeeded()
                 let got = try row(list)
-                if case .item = entry, case .item = earlier { #expect(list.rowsReused > reused, "\(before) to \(name): the cell was not reused") }
+                if case .item = entry, case .item = earlier { #expect(list.rowsReused > reused, "\(said): \(before) to \(name): the cell was not reused") }
                 for (wanted, made) in zip(want, got) where wanted != made {
-                    Issue.record("\(before) made over as \(name) differs from a fresh \(name):\n  fresh:  \(wanted)\n  reused: \(made)")
+                    Issue.record("\(said): \(before), chosen and hovered, made over as \(name) differs from a fresh \(name):\n  fresh:  \(wanted)\n  reused: \(made)")
                 }
                 #expect(want.count == got.count)
             }
