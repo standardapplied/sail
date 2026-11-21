@@ -397,7 +397,7 @@ final class FilesConnection {
     var total = 0L;
     var chunk = script.bytes((int) Math.min(PtyMessage.FILE_CHUNK, expected));
     while (total + chunk.length < expected && chunk.length > 0) {
-      unless(running, new PtyMessage.FilesData(request.id(), version, chunk, false, ""));
+      unless(running, new PtyMessage.FilesData(request.id(), version, chunk, false, false, ""));
       total += chunk.length;
       chunk = script.bytes((int) Math.min(PtyMessage.FILE_CHUNK, expected - total));
     }
@@ -408,9 +408,13 @@ final class FilesConnection {
       fail(request, running);
     } else if (sent == null || !sent.equals(again) || !version.equals(after)) {
       unless(running, refused(request, FilesRefusal.CHANGED));
+    } else if (!DIGEST.matcher(sent).matches()) {
+      fail(request, running);
     } else {
       var eof = offset + expected >= Long.parseLong(size);
-      unless(running, new PtyMessage.FilesData(request.id(), version, chunk, eof, sent));
+      unless(
+          running,
+          new PtyMessage.FilesData(request.id(), version, chunk, eof, offset == 0 && eof, sent));
     }
   }
 
@@ -425,8 +429,24 @@ final class FilesConnection {
     return closed || running.cancelled;
   }
 
+  /** A digest as a read's proof must be one: a SHA-256 in lowercase hex, nothing else. */
+  private static final java.util.regex.Pattern DIGEST =
+      java.util.regex.Pattern.compile("[0-9a-f]{64}");
+
   /** {@code request}'s script exited {@code status} unanswered: its own refusal, else a failure. */
   private void refuse(Request request, Running running, int status) {
+    if (status == FileScripts.NO_SHA256) {
+      unless(
+          running,
+          new PtyMessage.FilesRefused(
+              request.id(),
+              FilesRefusal.FAILED,
+              workspace
+                  + " has no sha256sum, so Sail cannot prove what it reads of "
+                  + FileNames.shown(request.path())
+                  + "; nothing was changed."));
+      return;
+    }
     var kind = FileScripts.refusalOf(status);
     if (kind == null) {
       fail(request, running);

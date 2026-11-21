@@ -755,6 +755,7 @@ class ClientGoldensTest {
             "51:10:12:7.0:7.0",
             "class App {}".getBytes(StandardCharsets.UTF_8),
             true,
+            true,
             "42f26956ba1a845d48ac0db6270beddc5d864212ef56efe8a7964871297b9da3"),
         new PtyMessage.FilesChanged(List.of("/home/dev/workspace", "/home/dev/workspace/App.java")),
         new PtyMessage.FilesTick(),

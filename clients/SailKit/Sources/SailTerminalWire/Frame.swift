@@ -56,7 +56,7 @@ public enum Frame: Equatable, Sendable {
     case filesList(id: Int32, path: FileName)
     /// What `path` is: ``filesEntry(id:entry:version:)``, or a refusal.
     case filesStat(id: Int32, path: FileName)
-    /// At most `length` bytes of file `path` from `offset`: ``filesData(id:version:bytes:eof:digest:)`` frames of at
+    /// At most `length` bytes of file `path` from `offset`: ``filesData(id:version:bytes:eof:whole:digest:)`` frames of at
     /// most 256 KiB, or a refusal.
     case filesRead(id: Int32, path: FileName, offset: Int64, length: Int64)
     /// Ends request `id`, under way or waiting; nothing more is answered for it.
@@ -69,8 +69,9 @@ public enum Frame: Equatable, Sendable {
     /// last frame when it reached the file's end.
     /// The last frame alone carries `digest`, the SHA-256 in hex of every byte the read sent, which
     /// the workspace hashed again from the file after sending them and found the same: the read's
-    /// content version, empty on every frame before the last.
-    case filesData(id: Int32, version: String, bytes: [UInt8], eof: Bool, digest: String)
+    /// content version, empty on every frame before the last. `whole`, on the last frame alone, says
+    /// the read ran from 0 to the file's end: its digest is the whole file's, the one base a save takes.
+    case filesData(id: Int32, version: String, bytes: [UInt8], eof: Bool, whole: Bool, digest: String)
     /// These watched paths changed: read them again.
     case filesChanged(paths: [FileName])
     /// The watch is live: said each second it runs.

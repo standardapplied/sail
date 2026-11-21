@@ -45,6 +45,12 @@ final class FileScripts {
   static final int NOT_A_FILE = 25;
   static final int LOOP = 26;
 
+  /** The read's exit when the workspace has no {@code sha256sum} to prove what it read with. */
+  static final int NO_SHA256 = 27;
+
+  /** The read's exit when a pass's digest is no SHA-256: nothing proved, nothing answered whole. */
+  static final int NO_DIGEST = 28;
+
   /** One version, as every script and the watch write it. */
   private static final String VERSION = "%d:%i:%s:%.9Y:%.9Z";
 
@@ -112,6 +118,7 @@ final class FileScripts {
           [ -d "$at" ] && exit 23
           [ -f "$at" ] || exit 25
           [ -r "$at" ] || exit 21
+          command -v sha256sum > /dev/null || exit 27
           before=$(stat -L --printf '%s' -- "$at") || exit 1
           size=${before#*:*:}
           printf '%%s\\0%%s\\0' "$before" "${size%%%%:*}"
@@ -119,6 +126,7 @@ final class FileScripts {
           exec 3>&1
           sent=$( { dd if="$at" iflag=skip_bytes,count_bytes,nonblock skip="$2" count="$3" bs=262144 status=none | tee >(sha256sum >&4) >&3; } 4>&1 ) || exit 1
           again=$(dd if="$at" iflag=skip_bytes,count_bytes,nonblock skip="$2" count="$3" bs=262144 status=none | sha256sum) || exit 1
+          [[ ${sent%%%% *} =~ ^[0-9a-f]{64}$ && ${again%%%% *} =~ ^[0-9a-f]{64}$ ]] || exit 28
           after=$(stat -L --printf '%s' -- "$at") || exit 1
           printf '%%s\\0%%s\\0%%s' "${sent%%%% *}" "${again%%%% *}" "$after"
           """

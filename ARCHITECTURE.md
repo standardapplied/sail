@@ -4141,7 +4141,16 @@ connection's frames.
   half-written file, which is what the file holds then. A read hashes the range it sends; a read
   from 0 that reaches the file's end hashes the whole file, which is the only base a save takes:
   a base from any shorter range differs from the whole file's digest the save compares, so it can
-  cost a needless conflict, never an overwrite.
+  cost a needless conflict, never an overwrite. The last frame says which it was (`whole`: from 0
+  to the file's end), so neither side infers it. A digest is a SHA-256 in lowercase hex or it
+  proves nothing: the script checks both of its own and exits otherwise, and the host checks the
+  one it puts on a frame; a workspace with no `sha256sum` is said so ("dock has no sha256sum, so
+  Sail cannot prove what it reads of …; nothing was changed."), and no two empty digests ever
+  agree. A failing `dd` fails the read (`pipefail`), never mislabelled `changed`.
+- **Over 20 MiB a file is said, not shown, and is never saved.** One read takes at most 20 MiB, so
+  a file larger than that has no whole read and no whole-file digest: the app says its size and
+  shows none of it as text, and since a save's base is a whole read's digest, no save of it is
+  ever offered or accepted.
   The evidence, a tight in-place writer against stat, read, stat, 2,000 reads a run
   (`files1-tools/torn_probe.py` in the PR's report):
 

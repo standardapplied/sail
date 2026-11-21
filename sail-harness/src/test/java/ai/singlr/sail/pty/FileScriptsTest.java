@@ -494,6 +494,54 @@ class FileScriptsTest {
     assertEquals(0, read.status());
   }
 
+  /**
+   * A {@code bin} of every program this machine has but {@code sha256sum}, which is then {@code
+   * fake}'s, or missing when it is null: as a workspace image without coreutils' would be.
+   */
+  private Path binWith(String fake) throws Exception {
+    var bin =
+        Files.createDirectories(dir.resolve("bin-" + (fake == null ? "none" : fake.hashCode())));
+    for (var from : List.of(Path.of("/usr/bin"), Path.of("/bin"))) {
+      try (var programs = Files.list(from)) {
+        for (var program : programs.toList()) {
+          var to = bin.resolve(program.getFileName());
+          if (!program.getFileName().toString().equals("sha256sum")
+              && !Files.exists(to, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            Files.createSymbolicLink(to, program);
+          }
+        }
+      }
+    }
+    if (fake != null) {
+      var sha = Files.writeString(bin.resolve("sha256sum"), "#!/bin/sh\n" + fake + "\n");
+      Files.setPosixFilePermissions(sha, PosixFilePermissions.fromString("rwx------"));
+    }
+    return bin;
+  }
+
+  /**
+   * Review m1: a read is proved only by genuine digests: with no {@code sha256sum} it says so, and
+   * one that prints nothing, or no SHA-256, fails the read, never letting two empty digests agree.
+   */
+  @Test
+  void aReadIsProvedOnlyByGenuineDigests() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "hello");
+    var cases = java.util.LinkedHashMap.<String, Integer>newLinkedHashMap(3);
+    cases.put(null, FileScripts.NO_SHA256);
+    cases.put("cat > /dev/null", FileScripts.NO_DIGEST);
+    cases.put("cat > /dev/null; echo 'zzzz  -'", FileScripts.NO_DIGEST);
+    for (var fake : cases.entrySet()) {
+      var bin = binWith(fake.getKey());
+      var read =
+          over(home, commands, Map.of("PATH", bin.toString()))
+              .start(CONTAINER, FileScripts.READ, file.toString(), "0", "5");
+      while (read.field() != null) {
+        continue;
+      }
+      assertEquals(fake.getValue(), read.status(), "sha256sum: " + fake.getKey());
+    }
+  }
+
   /** Nit 2: a watched path is resolved, so a link out of the home is never watched there. */
   @Test
   void aWatchedLinkOutOfTheHomeIsNotWatched() throws Exception {

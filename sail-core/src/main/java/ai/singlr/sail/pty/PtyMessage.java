@@ -397,8 +397,10 @@ public sealed interface PtyMessage {
    * {@code digest}, the SHA-256 in hex of every byte the read sent, which the workspace hashed
    * again from the file after sending them and found the same: the read's bytes are the file's at
    * one moment, and the digest is their content version. Blank on every frame before the last.
+   * {@code whole}, on the last frame alone, says the read ran from 0 to the file's end, so its
+   * digest is the whole file's: the only one a save takes as its base.
    */
-  record FilesData(int id, String version, byte[] bytes, boolean eof, String digest)
+  record FilesData(int id, String version, byte[] bytes, boolean eof, boolean whole, String digest)
       implements PtyMessage {}
 
   /** These watched paths changed: the client reads them again. */

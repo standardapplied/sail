@@ -1032,4 +1032,88 @@ class FilesHostTest {
         List.of("", "The watch of elsewhere's files could not start; connect again to watch them."),
         endedWith(files));
   }
+
+  /**
+   * Review m1, on the host: digests that are not SHA-256s, even equal ones, never prove a read; a
+   * workspace with no sha256sum is said so.
+   */
+  @Test
+  void aReadWhoseDigestsAreNoSha256IsRefusedAsFailed() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "hello");
+    edits.put(
+        "read",
+        script ->
+            script
+                .replace(SHAPE_CHECK, "")
+                .replace("\"${sent%% *}\" \"${again%% *}\" \"$after\"", "\"\" \"\" \"$after\""));
+    try (var files = open("tok-mady")) {
+      PtyWire.write(files, new PtyMessage.FilesRead(1, file.toString(), 0, 100));
+      assertEquals(
+          new PtyMessage.FilesRefused(
+              1,
+              PtyMessage.FilesRefusal.FAILED,
+              "Sail could not read " + file + " in dock; nothing was changed."),
+          next(files));
+    }
+    edits.put("read", script -> script.replace(SHA256_CHECK, "exit 27\n"));
+    try (var files = open("tok-mady")) {
+      PtyWire.write(files, new PtyMessage.FilesRead(2, file.toString(), 0, 100));
+      assertEquals(
+          new PtyMessage.FilesRefused(
+              2,
+              PtyMessage.FilesRefusal.FAILED,
+              "dock has no sha256sum, so Sail cannot prove what it reads of "
+                  + file
+                  + "; nothing was changed."),
+          next(files));
+    }
+  }
+
+  /** Where the read script checks it has a sha256sum, and that each digest is one. */
+  private static final String SHA256_CHECK = "command -v sha256sum > /dev/null || exit 27\n";
+
+  private static final String SHAPE_CHECK =
+      "[[ ${sent%% *} =~ ^[0-9a-f]{64}$ && ${again%% *} =~ ^[0-9a-f]{64}$ ]] || exit 28\n";
+
+  /** Review nit 2: a read whose {@code dd} fails mid-way is failed, never mislabelled changed. */
+  @Test
+  void aReadWhoseDdFailsIsAnsweredFailed() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "hello");
+    edits.put(
+        "read",
+        script ->
+            script.replace(
+                SENT,
+                SENT.replace("status=none |", "status=none; false; } |")
+                    .replace("sent=$( { dd", "sent=$( { { dd")));
+    try (var files = open("tok-mady")) {
+      PtyWire.write(files, new PtyMessage.FilesRead(1, file.toString(), 0, 100));
+      assertEquals(
+          PtyMessage.FilesRefusal.FAILED,
+          assertInstanceOf(PtyMessage.FilesRefused.class, next(files)).kind());
+    }
+  }
+
+  /** Review nit 1: the last frame says whether the read was whole, from 0 to the file's end. */
+  @Test
+  void theLastFrameSaysWhetherTheReadWasWhole() throws Exception {
+    var file = Files.write(home.resolve("still.txt"), filled('a'));
+    try (var files = open("tok-mady")) {
+      PtyWire.write(files, new PtyMessage.FilesRead(1, file.toString(), 0, 4L << 20));
+      PtyMessage.FilesData data;
+      do {
+        data = assertInstanceOf(PtyMessage.FilesData.class, next(files));
+        assertTrue(data.eof() || !data.whole(), "no frame before the last says whole");
+      } while (!data.eof());
+      assertTrue(data.whole(), "from 0 to the end");
+      PtyWire.write(files, new PtyMessage.FilesRead(2, file.toString(), 10, 4L << 20));
+      do {
+        data = assertInstanceOf(PtyMessage.FilesData.class, next(files));
+      } while (!data.eof());
+      assertFalse(data.whole(), "from 10, to the end, is no whole read");
+      PtyWire.write(files, new PtyMessage.FilesRead(3, file.toString(), 0, 10));
+      data = assertInstanceOf(PtyMessage.FilesData.class, next(files));
+      assertFalse(data.eof() || data.whole(), "the first 10 bytes are not the file");
+    }
+  }
 }
