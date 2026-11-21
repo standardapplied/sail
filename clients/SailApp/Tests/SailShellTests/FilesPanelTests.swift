@@ -151,6 +151,7 @@ import Testing
     @Test func theTreeKeepsItsKeysWhenTheTerminalsChange() throws {
         let door = try FakeRunnerDoor(person: "uday")
         let (shell, bench) = try Self.shell(door)
+        bench.isHidden = false
         bench.toggleFiles(nil)
         let panel = try #require(Self.panel(bench))
         #expect(shell.window.firstResponder === panel.list, "⌃⌘S did not give the tree the keys")

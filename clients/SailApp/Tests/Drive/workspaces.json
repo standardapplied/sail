@@ -244,7 +244,7 @@
   {"name": "f-m35-start-answered", "golden": ["POST /v1/projects/harbor/workspaces/dock/start", "workspace-start"]},
   {"name": "f-m35-start", "filesButton": "Start"},
   {"name": "f-m35-started-and-live", "filesSays": "", "seconds": 10},
-  {"name": "f-m35-the-rows-again", "filesRows": 4},
+  {"name": "f-m35-the-rows-again", "filesRows": 3},
   {"name": "f-put-the-files-away", "press": "s", "modifiers": ["control", "command"]},
   {"name": "w-a5-not-yours", "golden": ["POST /v1/terminal/tickets", "refusal-forbidden-not-assignee"]},
   {"name": "w-a5-a-new-one-in-dock", "press": "d", "modifiers": ["command"]},

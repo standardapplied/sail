@@ -214,6 +214,13 @@ extension Driver {
         return true
     }
 
+    /// What the main thread was doing in its longest hold since the heartbeat's reset, as the
+    /// sampler saw it: printed, so a hold over its ceiling names its own cause.
+    private func tellLongestHold(_ phase: String) {
+        guard let gap = mainThread.stalls.longest() else { return }
+        mainStacks.told(gap).forEach { print("files, \(phase), the main thread's longest hold: \($0)") }
+    }
+
     /// The window in both looks, then with the workbench and the panel laid out right to left, as a
     /// right-to-left Mac lays them out, in both again.
     private func filesShot(_ name: String) async -> (Bool, String) {
@@ -280,9 +287,11 @@ extension Driver {
         guard let shown = filesShown, await clickName(berths, in: shown) else { return (false, "berths could not be chosen to scroll") }
         press("arrowRight", [])
         guard await waitForState(10, { (self.filesShown?.list.numberOfRows ?? 0) >= 5000 + base.count }), let scroll = filesShown?.scroll else { return (false, "berths did not open to scroll") }
+        _ = mainStacks
         mainThread.reset()
         let down = await turnWheel(over: scroll, to: 1), up = await turnWheel(over: scroll, to: 0)
         let scrolled = held()
+        tellLongestHold("scrolling the 5,000 rows")
         press("arrowLeft", [])
         _ = await waitForState(5) { self.filesShown?.list.numberOfRows == base.count }
         var names = base
@@ -306,6 +315,7 @@ extension Driver {
         }
         let landed = await waitForState(30) { self.filesShown?.list.numberOfRows == final.count }
         let bursting = held()
+        tellLongestHold("2,000 changes in a burst")
         door.setFolder(root, base.map(Self.fileEntry))
         _ = await waitForState(10) { self.filesShown?.list.numberOfRows == base.count }
         let rows = [
