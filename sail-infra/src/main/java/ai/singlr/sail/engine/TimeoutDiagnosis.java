@@ -63,9 +63,12 @@ public final class TimeoutDiagnosis {
     return ask(probe, bound);
   }
 
-  /** {@code probe}'s answer, within {@code within}; not asked when nothing of it is left. */
+  /**
+   * {@code probe}'s answer, within {@code within}; not asked when less than a millisecond of it is
+   * left, which no command could answer in.
+   */
   public Answer ask(Probe probe, Duration within) {
-    if (within.isZero() || within.isNegative()) {
+    if (within.toMillis() < 1) {
       return new Answer(null, "not asked: the diagnosis's time was spent");
     }
     try {

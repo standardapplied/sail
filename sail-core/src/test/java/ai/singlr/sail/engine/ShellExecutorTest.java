@@ -446,4 +446,66 @@ class ShellExecutorTest {
         refused.getMessage());
     assertFalse(refused.getMessage().contains("token-like-input"), refused.getMessage());
   }
+
+  /**
+   * #507's last look, m1: the raise of an untaken input never races the writer: a command that
+   * exits 0 at once without reading is raised every time.
+   */
+  @Test
+  void anUntakenInputIsRaisedEveryTimeNotWhenTheWriterHappensToBeFirst() {
+    for (var time = 0; time < 40; time++) {
+      assertThrows(IOException.class, () -> handed("exit 0", Duration.ofSeconds(10)));
+    }
+  }
+
+  /**
+   * #507's last look, nit 1: a command whose own process ends while a process it left behind still
+   * holds its output is answered within its timeout, raised as a timeout, never held until that
+   * process ends.
+   */
+  @Test
+  void aProcessLeftHoldingTheOutputDoesNotOutlastTheTimeout() {
+    var started = System.nanoTime();
+    assertTimeoutPreemptively(
+        Duration.ofSeconds(5),
+        () ->
+            assertThrows(
+                CommandTimedOut.class,
+                () ->
+                    new ShellExecutor(false)
+                        .execWithInput(
+                            List.of("sh", "-c", "sleep 8 & exit 0"), "", Duration.ofSeconds(1))));
+
+    assertTrue(
+        System.nanoTime() - started < Duration.ofSeconds(3).toNanos(), "ended at its timeout");
+  }
+
+  /**
+   * #507's last look, nit 3: a command whose caller is interrupted while it waits is ended with it,
+   * never left running.
+   */
+  @Test
+  void aCommandWhoseCallerIsInterruptedIsEndedWithIt() throws Exception {
+    var marker = "sleep 37.25";
+    Thread.currentThread().interrupt();
+    assertThrows(
+        InterruptedException.class,
+        () ->
+            new ShellExecutor(false)
+                .exec(List.of("sh", "-c", "exec " + marker), null, Duration.ofSeconds(60)));
+    assertFalse(Thread.interrupted(), "the interrupt is the caller's, kept in the exception");
+
+    for (var left :
+        ProcessHandle.current()
+            .descendants()
+            .filter(handle -> handle.info().commandLine().orElse("").contains(marker))
+            .toList()) {
+      assertTrue(
+          left.onExit()
+              .thenApply(ended -> true)
+              .completeOnTimeout(false, 5, TimeUnit.SECONDS)
+              .get(),
+          "the interrupted command was ended");
+    }
+  }
 }
