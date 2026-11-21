@@ -268,7 +268,9 @@ class PtyTicketsTest {
             new PtyMessage.FilesWrite(1, "/home/dev/a", PtyMessage.ABSENT, "", 1),
             new PtyMessage.FilesCreate(1, "/home/dev/a", false),
             new PtyMessage.FilesMove(1, "/home/dev/a", "/home/dev/b"),
-            new PtyMessage.FilesRemove(1, "/home/dev/a"));
+            new PtyMessage.FilesRemove(1, "/home/dev/a"),
+            new PtyMessage.FilesChanges(1),
+            new PtyMessage.FilesDiff(1, "/home/dev/a"));
     for (var bytes :
         List.<PtyMessage>of(
             new PtyMessage.PutChunk(1, 0, new byte[] {'a'}),

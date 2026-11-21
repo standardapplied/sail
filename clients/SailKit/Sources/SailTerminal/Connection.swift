@@ -218,6 +218,10 @@ extension Frame {
         case .filesWritten: "FilesWritten"
         case .filesConflict: "FilesConflict"
         case .filesDone: "FilesDone"
+        case .filesChanges: "FilesChanges"
+        case .filesChangeList: "FilesChangeList"
+        case .filesDiff: "FilesDiff"
+        case .filesDiffData: "FilesDiffData"
         }
     }
 }

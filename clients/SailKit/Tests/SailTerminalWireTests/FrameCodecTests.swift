@@ -6,7 +6,7 @@ import Testing
 @Suite struct FrameCodecTests {
     @Test func everyFrameTheHostWritesDecodesAsItsTypeAndEncodesToTheSameBytes() throws {
         let frames = try Goldens.frames()
-        #expect(frames.count == 52)
+        #expect(frames.count == 56)
         for (name, wire) in frames {
             let frame = try FrameCodec.decode(payload: wire.dropFirst(4))
             #expect(messageName(of: frame) == name)
@@ -93,6 +93,19 @@ import Testing
         #expect(frames["FilesWritten"] == .filesWritten(id: 5, digest: "a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447", version: "51:11:13:8.0:8.0"))
         #expect(frames["FilesConflict"] == .filesConflict(id: 5, digest: "absent"))
         #expect(frames["FilesDone"] == .filesDone(id: 6))
+        #expect(frames["FilesChanges"] == .filesChanges(id: 9))
+        #expect(frames["FilesChangeList"] == .filesChangeList(FileChangeList(
+            id: 9, tookMillis: 41, root: "/home/dev/workspace", branch: "main",
+            entries: [
+                FileChange(path: "/home/dev/workspace/App.java", state: .known(.modified), from: ""),
+                FileChange(path: "/home/dev/workspace/New.java", state: .known(.renamed), from: "/home/dev/workspace/Old.java"),
+                FileChange(path: FileName([0x2F, 0x62, 0xFF]), state: .known(.untracked), from: ""),
+            ],
+            ignored: ["/home/dev/workspace/node_modules"],
+            truncated: false, more: false
+        )))
+        #expect(frames["FilesDiff"] == .filesDiff(id: 10, path: "/home/dev/workspace/App.java"))
+        #expect(frames["FilesDiffData"] == .filesDiffData(id: 10, bytes: Array("@@ -1 +1 @@\n-a\n+b\n".utf8), eof: true))
         #expect(frames["Err"] == .refused(HostRefusal(
             message: "You do not hold the write token.",
             remedy: [
@@ -123,6 +136,7 @@ import Testing
     @Test func theFilesWordsAndTheTicketWordsAreTheHostsInItsOrder() throws {
         #expect(FileKind.allCases.map(\.rawValue) == (try Goldens.vocabulary("file_kinds")))
         #expect(FileRefusal.allCases.map(\.rawValue) == (try Goldens.vocabulary("file_refusals")))
+        #expect(ChangeState.allCases.map(\.rawValue) == (try Goldens.vocabulary("change_states")))
         #expect(TicketAction.allCases.map(\.rawValue) == (try Goldens.vocabulary("ticket_actions")))
         #expect(TicketRefusal.allCases.map(\.rawValue) == (try Goldens.vocabulary("ticket_refusals")))
     }
@@ -339,6 +353,10 @@ func messageName(of frame: Frame) -> String {
     case .filesWritten: "FilesWritten"
     case .filesConflict: "FilesConflict"
     case .filesDone: "FilesDone"
+    case .filesChanges: "FilesChanges"
+    case .filesChangeList: "FilesChangeList"
+    case .filesDiff: "FilesDiff"
+    case .filesDiffData: "FilesDiffData"
     }
 }
 

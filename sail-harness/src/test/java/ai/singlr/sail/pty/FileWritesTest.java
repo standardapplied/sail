@@ -264,15 +264,17 @@ class FileWritesTest {
           commands.add(List.copyOf(command));
           var inner =
               new java.util.ArrayList<>(command.subList(command.indexOf("--") + 1, command.size()));
+          var at = inner.indexOf("-c") + 1;
           if (heldProbeFails.get()
-              && (inner.get(2).equals(FileScripts.HELD)
-                  || inner.get(2).equals(FileScripts.STUCK))) {
+              && (inner.get(at).equals(FileScripts.HELD)
+                  || inner.get(at).equals(FileScripts.STUCK))) {
             throw new IOException("Error: the holder probe could not start");
           }
-          if (inner.get(2).equals(unstartable.get())) {
+          if (inner.get(at).equals(unstartable.get())) {
             throw new IOException("Error: the script could not start");
           }
-          inner.set(2, edit.apply(inner.get(2)));
+          inner.set(at, edit.apply(inner.get(at)));
+          FileScriptsTest.standIn(inner, env);
           inner.addAll(0, List.of("python3", "-I", "-c", SOCKETS));
           var builder = new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD);
           builder.environment().putAll(env);
@@ -596,7 +598,9 @@ class FileWritesTest {
     var base = digest(file);
     for (var fake :
         java.util.Arrays.asList(null, "cat > /dev/null", "cat > /dev/null; echo 'zzzz  -'")) {
-      var broken = scripts(UnaryOperator.identity(), Map.of("PATH", binWith(fake).toString()));
+      var broken =
+          scripts(
+              UnaryOperator.identity(), Map.of(FileScriptsTest.STAND_IN, binWith(fake).toString()));
       var early = new Save(broken, file.toString(), base, "a stat that differs", 3);
       assertNull(early.first, "sha256sum " + fake + ": no digest, no ready");
       assertEquals(FileScripts.BAD_DIGEST, early.script.status(), "sha256sum: " + fake);
@@ -728,7 +732,9 @@ class FileWritesTest {
             .formatted(mount));
     Files.setPosixFilePermissions(fake, PosixFilePermissions.fromString("rwx------"));
     var otherDisk =
-        scripts(UnaryOperator.identity(), Map.of("PATH", bin + ":" + System.getenv("PATH")));
+        scripts(
+            UnaryOperator.identity(),
+            Map.of(FileScriptsTest.STAND_IN, bin + ":" + System.getenv("PATH")));
     var a = Files.writeString(home.resolve("a.md"), "a");
     assertEquals(
         FileScripts.OTHER_DISK, run(otherDisk, FileScripts.MOVE, a.toString(), mount + "/a.md"));
@@ -767,7 +773,8 @@ class FileWritesTest {
                 saving,
                 () -> null,
                 java.time.Duration.ofMillis(300),
-                java.time.Duration.ofMillis(500)));
+                java.time.Duration.ofMillis(500)),
+            changes());
     save(outliving, 1, file.toString(), digest(file), version(file), "new");
     assertEquals(PtyMessage.FilesRefusal.FAILED, ((PtyMessage.FilesRefused) answer()).kind());
     var holder = ProcessHandle.of(Long.parseLong(Files.readString(pidfile).strip())).orElseThrow();
@@ -838,7 +845,8 @@ class FileWritesTest {
                   saving,
                   () -> null,
                   FilesConnection.AFTER_GO,
-                  FilesConnection.HOLD_BOUND));
+                  FilesConnection.HOLD_BOUND),
+              changes());
       restarted.create(new PtyMessage.FilesCreate(2, home + "/b.md", false));
       assertEquals(
           new PtyMessage.FilesRefused(2, PtyMessage.FilesRefusal.FAILED, stuck(old)),
@@ -1052,7 +1060,8 @@ class FileWritesTest {
                 saving,
                 () -> null,
                 java.time.Duration.ofMillis(300),
-                FilesConnection.HOLD_BOUND));
+                FilesConnection.HOLD_BOUND),
+            changes());
 
     save(hung, 1, file.toString(), digest(file), version(file), "new");
 
@@ -1269,14 +1278,15 @@ class FileWritesTest {
     for (var command : commands) {
       assertTrue(command.stream().noneMatch(arg -> arg.contains("secret")), command.toString());
     }
-    assertArrayEquals(
-        new String[] {"sail-files", home.toString(), "15"},
+    var argv =
         commands.stream()
             .filter(command -> command.contains(FileScripts.WRITE))
             .findFirst()
-            .orElseThrow()
-            .subList(9, 12)
-            .toArray(String[]::new),
+            .orElseThrow();
+    var after = argv.indexOf(FileScripts.WRITE) + 1;
+    assertArrayEquals(
+        new String[] {"sail-files", home.toString(), "15"},
+        argv.subList(after, after + 3).toArray(String[]::new),
         "a save's argv holds its size alone");
   }
 
@@ -1291,6 +1301,12 @@ class FileWritesTest {
   private final List<PtyMessage.Err> endedWith = new CopyOnWriteArrayList<>();
   private final FilesConnection.WorkspaceLock lock = new FilesConnection.WorkspaceLock();
   private final Set<String> saving = ConcurrentHashMap.newKeySet();
+
+  /** A changes run of its own, which no write test asks. */
+  private WorkspaceChanges changes() {
+    return new WorkspaceChanges(
+        running(UnaryOperator.identity()), CONTAINER, WorkspaceChanges.PATIENCE, () -> {});
+  }
 
   private FileScripts running(UnaryOperator<String> edit) {
     return scripts(edit, Map.of());
@@ -1328,7 +1344,8 @@ class FileWritesTest {
         () -> null,
         endedWith::add,
         new FilesConnection.Writes(
-            on, runs, () -> null, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND));
+            on, runs, () -> null, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND),
+        changes());
   }
 
   private FilesConnection connection(FileScripts with, FilesConnection.Gate gate) {
@@ -1343,7 +1360,8 @@ class FileWritesTest {
         () -> null,
         endedWith::add,
         new FilesConnection.Writes(
-            lock, saving, gate, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND));
+            lock, saving, gate, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND),
+        changes());
   }
 
   /** Sends save {@code id} of {@code text} over {@code path} on {@code base}, bytes and end. */
@@ -1432,6 +1450,142 @@ class FileWritesTest {
         List.of(answer(), answer(), answer()));
     assertFalse(Files.exists(folder, LinkOption.NOFOLLOW_LINKS));
     assertFalse(Files.exists(file, LinkOption.NOFOLLOW_LINKS));
+    idle(connection);
+    assertEquals(0, connection.passedAhead(), "no turn is kept once it is behind the line");
+  }
+
+  /** Waits until {@code connection} runs no script, within 5 s. */
+  private static void idle(FilesConnection connection) {
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (connection.scripts() != 0) {
+      assertTrue(System.nanoTime() < deadline, connection.scripts() + " scripts still run");
+      Thread.onSpinWait();
+    }
+  }
+
+  /**
+   * #522's m1: a write waiting for its turn holds none of the connection's scripts: behind a save
+   * paused mid-body, three writes wait their turns while a listing and a stat are answered at once
+   * (F6); once the save is whole, the three follow it in order.
+   */
+  @Test
+  void aWriteWaitingForItsTurnHoldsNoScript() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var connection = connection(() -> null);
+    saveBut(connection, 1, file, "new text", 3);
+    for (var id = 2; id <= 4; id++) {
+      connection.create(new PtyMessage.FilesCreate(id, home + "/after-" + id + ".md", false));
+    }
+    inLine(connection, 3);
+    assertEquals(1, connection.scripts(), "the paused save alone holds a script");
+    connection.list(new PtyMessage.FilesList(5, home.toString()));
+    assertInstanceOf(PtyMessage.FilesListing.class, answer(), "a listing has a script");
+    connection.stat(new PtyMessage.FilesStat(6, file.toString()));
+    assertInstanceOf(PtyMessage.FilesEntry.class, answer(), "and so does a stat");
+
+    finish(connection, 1, "new text", 3);
+    assertInstanceOf(PtyMessage.FilesWritten.class, answer());
+    assertEquals(
+        List.of(
+            new PtyMessage.FilesDone(2), new PtyMessage.FilesDone(3), new PtyMessage.FilesDone(4)),
+        List.of(answer(), answer(), answer()));
+    idle(connection);
+  }
+
+  /**
+   * A write whose turn comes takes the next script free, ahead of requests not yet started: behind
+   * a save paused mid-body, a create waits its turn while slow listings fill the other scripts and
+   * more wait; once the save is whole, the create is answered before the listings still waiting.
+   */
+  @Test
+  void aWriteWhoseTurnComesTakesTheNextScriptAheadOfWaitingRequests() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var connection =
+        connection(
+            running(script -> script.equals(FileScripts.LIST) ? "sleep 0.5\n" + script : script),
+            () -> null);
+    saveBut(connection, 1, file, "new text", 3);
+    connection.create(new PtyMessage.FilesCreate(2, home + "/after.md", false));
+    inLine(connection, 1);
+    for (var id = 10; id < 19; id++) {
+      connection.list(new PtyMessage.FilesList(id, home.toString()));
+    }
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (connection.scripts() != FilesConnection.SCRIPTS) {
+      assertTrue(System.nanoTime() < deadline, "three listings run beside the save");
+      Thread.onSpinWait();
+    }
+    finish(connection, 1, "new text", 3);
+    var order = new java.util.ArrayList<Integer>();
+    while (order.size() < 11) {
+      order.add(
+          switch (answer()) {
+            case PtyMessage.FilesWritten written -> written.id();
+            case PtyMessage.FilesDone done -> done.id();
+            case PtyMessage.FilesListing listing -> listing.id();
+            case PtyMessage other -> throw new AssertionError("answered " + other);
+          });
+    }
+    assertTrue(
+        order.indexOf(2) < order.indexOf(13),
+        "the create is answered before the first listing that waited: " + order);
+    idle(connection);
+  }
+
+  /**
+   * #522's m2: an id reused at its last answer keeps its new request through the old one's end: a
+   * save asked with the stat's id from inside the stat's answer is still under way once the stat's
+   * run has ended, so the same id is refused, and a cancel ends that save.
+   */
+  @Test
+  void anIdReusedAtItsLastAnswerKeepsItsNewRequestThroughTheOldOnesEnd() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var self = new java.util.concurrent.atomic.AtomicReference<FilesConnection>();
+    var reused = new java.util.concurrent.atomic.AtomicBoolean();
+    var connection =
+        new FilesConnection(
+            running(UnaryOperator.identity()),
+            CONTAINER,
+            "dock",
+            message -> {
+              if (message instanceof PtyMessage.FilesEntry && reused.compareAndSet(false, true)) {
+                try {
+                  self.get()
+                      .write(
+                          new PtyMessage.FilesWrite(
+                              7, file.toString(), digest(file), version(file), 3));
+                } catch (IOException | InterruptedException failed) {
+                  throw new AssertionError(failed);
+                }
+              }
+              said.add(message);
+            },
+            () -> null,
+            endedWith::add,
+            new FilesConnection.Writes(
+                lock, saving, () -> null, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND),
+            changes());
+    self.set(connection);
+
+    connection.stat(new PtyMessage.FilesStat(7, file.toString()));
+    assertInstanceOf(PtyMessage.FilesEntry.class, answer(), "said once the save is asked");
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (connection.scripts() != 1) {
+      assertTrue(System.nanoTime() < deadline, "the stat's run ends, the save's goes on");
+      Thread.onSpinWait();
+    }
+    connection.stat(new PtyMessage.FilesStat(7, file.toString()));
+    assertEquals(
+        new PtyMessage.FilesRefused(
+            7,
+            PtyMessage.FilesRefusal.FAILED,
+            "Request 7 is under way already, so this one was not started."),
+        answer());
+    connection.cancel(new PtyMessage.FilesCancel(7));
+    idle(connection);
+    assertEquals("kept", Files.readString(file));
+    connection.stat(new PtyMessage.FilesStat(7, file.toString()));
+    assertInstanceOf(PtyMessage.FilesEntry.class, answer(), "free again once cancelled");
   }
 
   /**
@@ -1608,7 +1762,8 @@ class FileWritesTest {
             () -> null,
             endedWith::add,
             new FilesConnection.Writes(
-                lock, saving, () -> null, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND));
+                lock, saving, () -> null, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND),
+            changes());
     self.set(connection);
 
     connection.stat(new PtyMessage.FilesStat(900, file.toString()));

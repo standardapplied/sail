@@ -508,6 +508,9 @@ class ClientGoldensTest {
         "file_kinds",
         Arrays.stream(PtyMessage.FileKind.values()).map(PtyMessage.FileKind::wire).toList());
     vocabulary.put(
+        "change_states",
+        Arrays.stream(PtyMessage.ChangeState.values()).map(PtyMessage.ChangeState::wire).toList());
+    vocabulary.put(
         "file_refusals",
         Arrays.stream(PtyMessage.FilesRefusal.values())
             .map(PtyMessage.FilesRefusal::wire)
@@ -780,7 +783,31 @@ class ClientGoldensTest {
             "a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447",
             "51:11:13:8.0:8.0"),
         new PtyMessage.FilesConflict(5, PtyMessage.ABSENT),
-        new PtyMessage.FilesDone(6));
+        new PtyMessage.FilesDone(6),
+        new PtyMessage.FilesChanges(9),
+        new PtyMessage.FilesChangeList(
+            9,
+            41,
+            "/home/dev/workspace",
+            "main",
+            "",
+            List.of(
+                new PtyMessage.Change(
+                    "/home/dev/workspace/App.java", PtyMessage.ChangeState.MODIFIED, ""),
+                new PtyMessage.Change(
+                    "/home/dev/workspace/New.java",
+                    PtyMessage.ChangeState.RENAMED,
+                    "/home/dev/workspace/Old.java"),
+                new PtyMessage.Change(
+                    ai.singlr.sail.pty.FileNames.decode(new byte[] {'/', 'b', (byte) 0xff}),
+                    PtyMessage.ChangeState.UNTRACKED,
+                    "")),
+            List.of("/home/dev/workspace/node_modules"),
+            false,
+            false),
+        new PtyMessage.FilesDiff(10, "/home/dev/workspace/App.java"),
+        new PtyMessage.FilesDiffData(
+            10, "@@ -1 +1 @@\n-a\n+b\n".getBytes(StandardCharsets.UTF_8), true));
   }
 
   /** The largest chunk an upload carries, every byte value in turn. */

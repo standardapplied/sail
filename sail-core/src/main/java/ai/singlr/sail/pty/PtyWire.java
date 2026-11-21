@@ -223,6 +223,25 @@ public final class PtyWire {
           out.type(56).i32(m.id()).string(m.digest()).string(m.version());
       case PtyMessage.FilesConflict m -> out.type(57).i32(m.id()).string(m.digest());
       case PtyMessage.FilesDone m -> out.type(58).i32(m.id());
+      case PtyMessage.FilesChanges m -> out.type(49).i32(m.id());
+      case PtyMessage.FilesChangeList m -> {
+        out.type(59).i32(m.id()).i64(m.tookMillis()).name(m.root()).name(m.branch());
+        out.string(m.failure());
+        out.i32(m.entries().size());
+        m.entries()
+            .forEach(
+                change ->
+                    out.name(change.path()).string(change.state().wire()).name(change.from()));
+        out.i32(m.ignored().size());
+        m.ignored().forEach(out::name);
+        out.bool(m.truncated()).bool(m.more());
+      }
+      case PtyMessage.FilesDiff m -> out.type(60).i32(m.id()).name(m.path());
+      case PtyMessage.FilesDiffData m -> {
+        out.type(61).i32(m.id());
+        out.bytes(m.bytes());
+        out.bool(m.eof());
+      }
     }
     return out.finish();
   }
@@ -262,6 +281,21 @@ public final class PtyWire {
     return new PtyMessage.FilesListing(id, version, entries, in.get() == 1, in.get() == 1);
   }
 
+  private static PtyMessage.FilesChangeList changeList(ByteBuffer in) throws IOException {
+    var id = in.getInt();
+    var took = in.getLong();
+    var root = name(in);
+    var branch = name(in);
+    var failure = string(in);
+    var count = bounded(in);
+    var entries = new ArrayList<PtyMessage.Change>(count);
+    for (var i = 0; i < count; i++) {
+      entries.add(new PtyMessage.Change(name(in), PtyMessage.ChangeState.of(string(in)), name(in)));
+    }
+    return new PtyMessage.FilesChangeList(
+        id, took, root, branch, failure, entries, names(in), in.get() == 1, in.get() == 1);
+  }
+
   /**
    * A starting buffer size that fits {@code message} without a realloc for the frames whose length
    * we know up front — {@code Output}, the hot path, above all, where doubling from 512 would cost
@@ -273,6 +307,7 @@ public final class PtyWire {
       case PtyMessage.PutChunk(var id, var offset, var bytes) -> bytes.length + 24;
       case PtyMessage.FilesData(var id, var version, var bytes, var eof, var whole, var digest) ->
           bytes.length + version.length() + digest.length() + 32;
+      case PtyMessage.FilesDiffData(var id, var bytes, var eof) -> bytes.length + 16;
       case PtyMessage.SessionEnded(var reason) -> reason.length() + 16;
       default -> 512;
     };
@@ -446,6 +481,10 @@ public final class PtyWire {
       case 56 -> new PtyMessage.FilesWritten(in.getInt(), string(in), string(in));
       case 57 -> new PtyMessage.FilesConflict(in.getInt(), string(in));
       case 58 -> new PtyMessage.FilesDone(in.getInt());
+      case 49 -> new PtyMessage.FilesChanges(in.getInt());
+      case 59 -> changeList(in);
+      case 60 -> new PtyMessage.FilesDiff(in.getInt(), name(in));
+      case 61 -> new PtyMessage.FilesDiffData(in.getInt(), bytes(in), in.get() == 1);
       default -> throw new IOException("Unknown pty frame type " + type + ".");
     };
   }
