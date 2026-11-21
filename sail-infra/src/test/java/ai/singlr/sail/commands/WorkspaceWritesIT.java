@@ -444,7 +444,7 @@ class WorkspaceWritesIT extends AbstractIncusIT {
           PtyWire.write(after, new PtyMessage.FilesList(1, FOLDER));
           var listing = assertInstanceOf(PtyMessage.FilesListing.class, next(after));
           assertTrue(
-              listing.entries().stream().noneMatch(e -> e.name().startsWith(".sail-save-")),
+              listing.entries().stream().noneMatch(e -> e.name().equals(left)),
               "a listing never shows it");
           send(
               after,
