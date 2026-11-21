@@ -217,6 +217,23 @@ import Testing
         #expect(!cell.opens(at: NSPoint(x: Double(TreeRowCell.slot) + 1, y: 12)) && !cell.opens(at: NSPoint(x: 40, y: 12)), "a press past the slot opens the folder")
     }
 
+    /// M6: a refusal under its folder is as tall as its words wrapped, and its words fill it: none
+    /// is cut, in either direction.
+    @Test func aRefusalInPlaceIsAsTallAsItsWords() throws {
+        for direction in [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft] {
+            let panel = try Self.played([Self.folder("build"), Self.file("a.txt")])
+            panel.userInterfaceLayoutDirection = direction
+            panel.toggle(Self.root + "/build")
+            panel.heard(.frame(.filesRefused(id: 2, kind: .known(.notPermitted), message: "The workspace's user may not open build.")))
+            panel.layoutSubtreeIfNeeded()
+            let note = try #require(panel.list.view(atColumn: 0, row: 1, makeIfNecessary: true).flatMap(Self.treeCell))
+            let row = Double(panel.list.rect(ofRow: 1).height)
+            #expect(note.row.kind == .note && row > RowStyle.tree.height, "\(direction): the refusal's row is \(row) pt, one line's")
+            #expect(near(Double(note.intrinsicContentSize.height), row), "\(direction): the words are \(note.intrinsicContentSize.height) pt in a \(row) pt row")
+            #expect(note.userInterfaceLayoutDirection == direction, "\(direction): the row is not laid out as its panel")
+        }
+    }
+
     @Test func theRowsAreTheMockups() throws {
         let panel = try Self.played([Self.folder("src"), Self.file("README.md")])
         panel.toggle(Self.root + "/src")

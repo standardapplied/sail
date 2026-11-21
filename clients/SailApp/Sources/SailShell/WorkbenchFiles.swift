@@ -96,7 +96,6 @@ extension WorkbenchView {
             return size
         }
         let rightToLeft = userInterfaceLayoutDirection == .rightToLeft
-        if panel.userInterfaceLayoutDirection != userInterfaceLayoutDirection { panel.userInterfaceLayoutDirection = userInterfaceLayoutDirection }
         let width = FilesPanel.width, floating = Double(size.width) < width + Self.filesBeside
         panel.floating = floating
         if panel.isHidden { panel.isHidden = false }

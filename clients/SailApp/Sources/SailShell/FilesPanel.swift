@@ -210,11 +210,11 @@ final class FilesPanel: NSView {
     }
 
     private func item(_ row: FileTree.Row, new: Bool) -> SailList.Item {
-        let look = self.look
+        let look = self.look, direction = userInterfaceLayoutDirection
         let width = Self.width - RowStyle.tree.margin * 2 - RowStyle.tree.leading - RowStyle.tree.trailing
         if row.kind == .note {
             let height = TreeRowCell.noteHeight(row.name, depth: row.depth, width: width)
-            return SailList.Item(id: row.path, name: "", voice: row.name, content: TreeRowCell(row, new: false, look: look), height: height, inert: true)
+            return SailList.Item(id: row.path, name: "", voice: row.name, content: TreeRowCell(row, new: false, height: height, direction: direction, look: look), height: height, inert: true)
         }
         let kind = switch row.kind {
         case .folder: row.expanded ? "folder, expanded" : "folder, collapsed"
@@ -224,7 +224,7 @@ final class FilesPanel: NSView {
         }
         return SailList.Item(
             id: row.path, name: row.name, voice: new ? "\(row.name), \(kind), new" : "\(row.name), \(kind)",
-            content: TreeRowCell(row, new: new, look: look) { [weak self] in self?.toggle(row.path) }
+            content: TreeRowCell(row, new: new, height: RowStyle.tree.height, direction: direction, look: look) { [weak self] in self?.toggle(row.path) }
         )
     }
 
@@ -294,6 +294,20 @@ final class FilesPanel: NSView {
         }
     }
 
+    /// Laid out right to left (or back), its line and rows are drawn so again, each row made anew.
+    override var userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection {
+        didSet {
+            guard userInterfaceLayoutDirection != oldValue else { return }
+            for view in [list, scroll, line] as [NSView] {
+                view.userInterfaceLayoutDirection = userInterfaceLayoutDirection
+            }
+            line.show(shownLine, starting: starting)
+            shownRevision = nil
+            shownRows = []
+            refresh()
+        }
+    }
+
     override func cancelOperation(_ sender: Any?) {
         guard floating else { return super.cancelOperation(sender) }
         onDismiss()
@@ -355,16 +369,19 @@ final class TreeRowCell: NSView {
 
     let row: FileTree.Row
     let new: Bool
+    private let height: Double
     private let look: Look
     private let onDisclose: @MainActor () -> Void
     private(set) var strong = false
 
-    init(_ row: FileTree.Row, new: Bool, look: Look, onDisclose: @escaping @MainActor () -> Void = {}) {
+    init(_ row: FileTree.Row, new: Bool, height: Double, direction: NSUserInterfaceLayoutDirection, look: Look, onDisclose: @escaping @MainActor () -> Void = {}) {
         self.row = row
         self.new = new
+        self.height = height
         self.look = look
         self.onDisclose = onDisclose
         super.init(frame: .zero)
+        userInterfaceLayoutDirection = direction
         setAccessibilityElement(false)
     }
 
@@ -378,7 +395,7 @@ final class TreeRowCell: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: row.kind == .note ? NSView.noIntrinsicMetric : RowStyle.tree.height)
+        NSSize(width: NSView.noIntrinsicMetric, height: height)
     }
 
     static func noteHeight(_ words: String, depth: Int, width: Double) -> Double {
