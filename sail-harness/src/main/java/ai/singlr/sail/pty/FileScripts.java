@@ -46,29 +46,48 @@ final class FileScripts {
   static final int LOOP = 26;
 
   /** One version, as every script and the watch write it. */
-  private static final String VERSION = "%d:%i:%s:%.9Y:%.9Z";
+  static final String VERSION = "%d:%i:%s:%.9Y:%.9Z";
 
   /**
-   * Reads the path from standard input, NUL-terminated, then resolves it as {@code at}, refusing
-   * one that does not exist, loops, crosses a folder the dev user may not search, or resolves
-   * outside the home {@code $1}. A trailing newline of a name survives the substitution.
+   * The functions every script resolves with, the home {@code $1}: {@code resolve} resolves a path
+   * as {@code at}, refusing one that does not exist, loops, crosses a folder the dev user may not
+   * search, or resolves outside the home; {@code resolve_parent} resolves a path's folder so, as
+   * {@code dir}, refusing one that is no folder, and names {@code target} in it by the path's last
+   * name as given, never followed; {@code there} says whether a name exists, a dangling link
+   * included. A trailing newline of a name survives the substitution.
    */
   static final String RESOLVE =
       """
       export LC_ALL=C
       home=$1
-      IFS= read -r -d '' path || exit 1
-      at=$(realpath -e -- "$path" 2>/dev/null && echo x) || {
-        why=$(realpath -e -- "$path" 2>&1 >/dev/null)
-        case $why in
-          *"symbolic links"*) exit 26 ;;
-          *"ermission denied"*) exit 21 ;;
-        esac
-        exit 20
+      resolve() {
+        at=$(realpath -e -- "$1" 2>/dev/null && echo x) || {
+          why=$(realpath -e -- "$1" 2>&1 >/dev/null)
+          case $why in
+            *"symbolic links"*) exit 26 ;;
+            *"ermission denied"*) exit 21 ;;
+          esac
+          exit 20
+        }
+        at=${at%?x}
+        case $at/ in "$home"/*) ;; *) exit 22 ;; esac
       }
-      at=${at%?x}
-      case $at/ in "$home"/*) ;; *) exit 22 ;; esac
+      resolve_parent() {
+        name=${1##*/}
+        resolve "${1%/*}"
+        [ -d "$at" ] || exit 24
+        dir=$at target=$at/$name
+      }
+      there() { [ -e "$1" ] || [ -L "$1" ]; }
       """;
+
+  /** {@link #RESOLVE}'s functions, and the path read and resolved as {@code at}. */
+  static final String RESOLVED =
+      RESOLVE
+          + """
+          IFS= read -r -d '' path || exit 1
+          resolve "$path"
+          """;
 
   /**
    * Lists the folder: its version, then each entry but {@code .}, {@code ..} and a write's
@@ -76,7 +95,7 @@ final class FileScripts {
    * An entry gone between its folder's read and its own stat is left out, never a failure.
    */
   static final String LIST =
-      RESOLVE
+      RESOLVED
           + """
           [ -d "$at" ] || exit 24
           cd -- "$at" 2>/dev/null && [ -r . ] || exit 21
@@ -88,7 +107,7 @@ final class FileScripts {
 
   /** Says what the path is: its version, then its own entry as a listing's, named by its base. */
   static final String STAT =
-      RESOLVE
+      RESOLVED
           + """
           stat -L --printf '%s\\0' -- "$at" || exit 1
           find "$path" -maxdepth 0 -printf '%%y\\0%%Y\\0%%s\\0%%T@\\0%%m\\0%%f\\0' || exit 1
@@ -103,7 +122,7 @@ final class FileScripts {
    * in after those checks ends the read at once rather than holding it.
    */
   static final String READ =
-      RESOLVE
+      RESOLVED
           + """
           [ -d "$at" ] && exit 23
           [ -f "$at" ] || exit 25
@@ -227,17 +246,29 @@ final class FileScripts {
    * ended, as one in a frozen container would never answer.
    */
   Script start(String container, String script, String path, String... args) throws IOException {
+    return start(
+        container, script, path == null ? List.of() : List.of(path), script.equals(WATCH), args);
+  }
+
+  /**
+   * Starts {@code script} as {@link #start(String, String, String, String...)} does, with {@code
+   * fields} on its input, each then a NUL: closed after them unless {@code keepOpen}, as a save's
+   * input stays open for its bytes and the host's go.
+   */
+  Script start(
+      String container, String script, List<String> fields, boolean keepOpen, String... args)
+      throws IOException {
     var command = new ArrayList<>(place.asDev().apply(container));
     command.addAll(List.of("bash", "-c", script, "sail-files", home));
     command.addAll(List.of(args));
     var process = processes.start(command);
     var running = new Script(process);
-    if (path != null) {
-      running.input().write(nul(path));
-      running.input().flush();
-      if (!script.equals(WATCH)) {
-        running.input().close();
-      }
+    for (var field : fields) {
+      running.input().write(nul(field));
+    }
+    running.input().flush();
+    if (!keepOpen) {
+      running.input().close();
     }
     return running;
   }

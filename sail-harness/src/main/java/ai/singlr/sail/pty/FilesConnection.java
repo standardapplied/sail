@@ -41,7 +41,16 @@ final class FilesConnection {
   /** The listing frames' budget of entry bytes, well inside the frame cap. */
   static final int LISTING_BYTES = 512 << 10;
 
-  private record Request(int id, String path, boolean reads, Answer answer, long order) {}
+  /** A request naming {@code paths}, the first the one its answers name; a move names two. */
+  private record Request(int id, List<String> paths, boolean reads, Answer answer, long order) {
+    Request {
+      paths = List.copyOf(paths);
+    }
+
+    String path() {
+      return paths.getFirst();
+    }
+  }
 
   @FunctionalInterface
   private interface Answer {
@@ -91,11 +100,11 @@ final class FilesConnection {
   }
 
   void list(PtyMessage.FilesList m) throws InterruptedException {
-    submit(m.id(), m.path(), false, this::listed);
+    submit(m.id(), List.of(m.path()), false, this::listed);
   }
 
   void stat(PtyMessage.FilesStat m) throws InterruptedException {
-    submit(m.id(), m.path(), false, this::statted);
+    submit(m.id(), List.of(m.path()), false, this::statted);
   }
 
   void read(PtyMessage.FilesRead m) throws InterruptedException {
@@ -109,7 +118,10 @@ final class FilesConnection {
     }
     var length = Math.min(m.length(), READ_CAP);
     submit(
-        m.id(), m.path(), true, (request, running) -> readOf(request, running, m.offset(), length));
+        m.id(),
+        List.of(m.path()),
+        true,
+        (request, running) -> readOf(request, running, m.offset(), length));
   }
 
   /** Ends request {@code id}: unanswered from now on, its script ended or never run. */
@@ -222,16 +234,18 @@ final class FilesConnection {
   }
 
   /**
-   * Queues {@code request}, its path refused at once when it is not under the home, waiting while
-   * {@link #WAITING} are queued already.
+   * Queues {@code request}, refused at once when a path it names is not under the home, waiting
+   * while {@link #WAITING} are queued already.
    */
-  private void submit(int id, String path, boolean isRead, Answer answer)
+  private void submit(int id, List<String> paths, boolean isRead, Answer answer)
       throws InterruptedException {
-    if (!files.inHome(path)) {
-      reply.accept(
-          new PtyMessage.FilesRefused(
-              id, FilesRefusal.OUTSIDE_HOME, sentence(FilesRefusal.OUTSIDE_HOME, path)));
-      return;
+    for (var path : paths) {
+      if (!files.inHome(path)) {
+        reply.accept(
+            new PtyMessage.FilesRefused(
+                id, FilesRefusal.OUTSIDE_HOME, sentence(FilesRefusal.OUTSIDE_HOME, path)));
+        return;
+      }
     }
     synchronized (this) {
       while (waiting >= WAITING && !closed) {
@@ -240,7 +254,7 @@ final class FilesConnection {
       if (closed) {
         return;
       }
-      var request = new Request(id, path, isRead, answer, asked++);
+      var request = new Request(id, paths, isRead, answer, asked++);
       if (underWay.containsKey(request.id())
           || reads.stream().anyMatch(waits -> waits.id() == request.id())
           || others.stream().anyMatch(waits -> waits.id() == request.id())) {
