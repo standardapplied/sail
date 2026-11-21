@@ -607,7 +607,7 @@ class WorkspaceCredentialsTest {
         List.of(
             List.of("running:0"),
             List.of("degraded:1"),
-            List.of("starting:1"),
+            List.of("starting:1", "running:0"),
             List.of(":1", ":1", "running:0"),
             List.of(":1"))) {
       Files.deleteIfExists(bin.resolve("asked"));
@@ -650,15 +650,69 @@ class WorkspaceCredentialsTest {
       }
     }
 
+    assertEquals(List.of("0 ", "0 ", "0 ", "0 ", "1 systemd did not answer within 120 s"), said);
+    assertEquals("120", firstBound, "the wait is bounded by the settle time");
+  }
+
+  /**
+   * #504's CI: a booting systemd answers {@code offline} for a moment, before it has made {@code
+   * /run/systemd/system}, so offline is waited out like no answer while PID 1 is systemd, and said
+   * at once, truly, when PID 1 is something else; only the states no wait can turn into running,
+   * {@code maintenance} and {@code stopping}, end the wait at once.
+   */
+  @Test
+  void offlineIsWaitedOutWhilePidOneIsSystemdAndOnlyStatesNoWaitMendEndItAtOnce() throws Exception {
+    stub("timeout", "shift\nexec \"$@\"\n");
+    stub("sleep", "exit 0\n");
+    stub("date", "echo 1000\n");
+    var said = new ArrayList<String>();
+    for (var asked :
+        List.of(
+            List.of("systemd", "offline:1", "offline:1", "starting:1", "running:0"),
+            List.of("sleep", "offline:1"),
+            List.of("systemd", "maintenance:1"),
+            List.of("systemd", "stopping:1"),
+            List.of("systemd", "initializing:1", "unknown:1", "degraded:1"))) {
+      Files.deleteIfExists(bin.resolve("asked"));
+      var pidOne = Files.writeString(bin.resolve("comm"), asked.getFirst() + "\n");
+      answering(asked.subList(1, asked.size()));
+      var ran = script(WorkspaceCredentials.SETTLED.replace("/proc/1/comm", pidOne.toString()), "");
+      said.add(
+          ran.exit() + " " + ran.said().strip() + " after " + read(bin.resolve("asked")).strip());
+    }
+
     assertEquals(
         List.of(
-            "0 ",
-            "0 ",
-            "1 systemd says it is starting",
-            "0 ",
-            "1 systemd did not answer within 120 s"),
+            "0  after 4",
+            "1 its PID 1 is sleep, not systemd, so it has no boot to wait for after 1",
+            "1 systemd says it is maintenance after 1",
+            "1 systemd says it is stopping after 1",
+            "0  after 3"),
         said);
-    assertEquals("120", firstBound, "the wait is bounded by the settle time");
+  }
+
+  /** A {@code systemctl} that answers {@code states} in turn, the last again and again. */
+  private void answering(List<String> states) throws IOException {
+    var answers =
+        new StringBuilder(
+            "n=$(cat "
+                + bin.resolve("asked")
+                + " 2>/dev/null || echo 0)\n"
+                + "echo $((n + 1)) > "
+                + bin.resolve("asked")
+                + "\ncase $n in\n");
+    for (var k = 0; k < states.size(); k++) {
+      var parts = states.get(k).split(":", -1);
+      answers
+          .append(k == states.size() - 1 ? "  *) " : "  " + k + ") ")
+          .append(parts[0].isEmpty() ? "" : "echo " + parts[0] + "; ")
+          .append("exit ")
+          .append(parts[1])
+          .append(" ;;\n");
+    }
+    stub(
+        "systemctl",
+        "case \"$*\" in is-system-running*) ;; *) exit 9 ;; esac\n" + answers + "esac\n");
   }
 
   /**

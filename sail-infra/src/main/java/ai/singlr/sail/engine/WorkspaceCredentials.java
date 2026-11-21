@@ -175,8 +175,11 @@ final class WorkspaceCredentials {
    * Waits for the template's boot to finish, {@code running} or {@code degraded} (a unit that
    * failed changes nothing it holds): its boot cleans {@code /tmp} and makes directories there, so
    * a search during it walks a tree that changes under it. Just after its start systemd's bus is
-   * not up and systemctl answers nothing, so it is asked again until the bound. Says systemd's
-   * state when it does not settle in time.
+   * not up and systemctl answers nothing, and before systemd has made {@code /run/systemd/system}
+   * it answers {@code offline}: both are asked again until the bound, as is every state a wait can
+   * turn into running. Only {@code maintenance} and {@code stopping}, which no wait mends, end it
+   * at once, and so does {@code offline} from a PID 1 that is not systemd, which has no boot to
+   * wait for. Says systemd's state when it does not settle in time.
    */
   static final String SETTLED =
       """
@@ -187,9 +190,15 @@ final class WorkspaceCredentials {
         state=$(timeout "$left" systemctl is-system-running --wait 2>/dev/null)
         case $state in
           running|degraded) exit 0 ;;
-          "") sleep 0.5 ;;
-          *) echo "systemd says it is $state"; exit 1 ;;
+          maintenance|stopping) echo "systemd says it is $state"; exit 1 ;;
+          offline)
+            pid1=$(cat /proc/1/comm 2>/dev/null)
+            if [ "$pid1" != systemd ]; then
+              echo "its PID 1 is ${pid1:-unreadable}, not systemd, so it has no boot to wait for"
+              exit 1
+            fi ;;
         esac
+        sleep 0.5
       done
       state=$(systemctl is-system-running 2>/dev/null)
       if [ -n "$state" ]; then echo "systemd says it is $state after %d s"
