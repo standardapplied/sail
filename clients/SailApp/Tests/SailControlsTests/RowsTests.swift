@@ -217,6 +217,63 @@ import Testing
         #expect(list.chosen == "w0" && near(scroll.contentView.bounds.origin.y, away), "new rows scrolled back to the chosen one")
     }
 
+    /// `apply` changes only what differs: a new row inserted where it goes, a gone one removed, the
+    /// rows left in place kept as the same views unless named changed, and the choice on its row.
+    @Test func applyChangesOnlyWhatDiffers() throws {
+        let list = SailList(rowStyle: .tree, look: .light, mono: try ControlsTests.mono())
+        func entries(_ ids: [String]) -> [SailList.Entry] {
+            ids.map { .item(SailList.Item(id: $0, name: $0, voice: $0, content: NSView())) }
+        }
+        list.entries = entries(["a", "b", "c", "d"])
+        let (window, _) = Self.shown(list)
+        defer { window.orderOut(nil) }
+        list.choose("c")
+        let kept = try Self.row(list, 3).view(atColumn: 0) as? NSView
+        let remade = try Self.row(list, 1).view(atColumn: 0) as? NSView
+        let made = list.rowsMade
+        list.apply(entries(["a", "b", "b2", "d"]), changed: ["b"])
+        #expect(list.entries.count == 4 && list.chosen == nil, "c went and the choice stayed on a row: \(list.chosen ?? "nothing")")
+        let keptNow = try Self.row(list, 3).view(atColumn: 0) as? NSView, remadeNow = try Self.row(list, 1).view(atColumn: 0) as? NSView
+        #expect(kept != nil && keptNow === kept, "d's row was made again with nothing changed in it")
+        #expect(remadeNow !== remade, "b, named changed, was not made again")
+        #expect(list.rowsMade - made <= 2, "made \(list.rowsMade - made) rows for one inserted and one changed, not only those")
+        list.choose("d")
+        list.apply(entries(["a", "a1", "b", "b2", "d"]), changed: [])
+        #expect(list.chosen == "d", "the choice did not follow its row")
+        let first = try Self.row(list, 0).view(atColumn: 0) as? NSView
+        let bound = (0 ..< SailList.applied).map { "n\($0)" }
+        list.apply(entries(["a", "a1", "b", "b2", "d"] + bound), changed: [])
+        let atBound = try Self.row(list, 0).view(atColumn: 0) as? NSView
+        #expect(list.numberOfRows == 5 + bound.count && atBound === first, "at its bound apply made the rows again")
+        let past = (0 ..< SailList.applied + 1).map { "m\($0)" }
+        list.apply(entries(["a", "a1", "b", "b2", "d"] + past), changed: [])
+        #expect(list.numberOfRows == 5 + past.count && list.chosen == "d", "past its bound apply did not fill the table afresh, keeping the choice")
+        let pastBound = try Self.row(list, 0).view(atColumn: 0) as? NSView
+        #expect(pastBound !== first, "past its bound the rows were not made afresh")
+    }
+
+    /// A row with nothing at its end is laid out by frames, with no constraint, its content from its
+    /// leading inset to its trailing one, mirrored right to left.
+    @Test func aBareRowIsLaidOutByFramesWithNoConstraint() throws {
+        for direction in [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft] {
+            let list = SailList(rowStyle: .tree, look: .light, mono: try ControlsTests.mono())
+            let content = NSView()
+            list.entries = [.item(SailList.Item(id: "a", name: "a", voice: "a", content: content))]
+            let (window, _) = Self.shown(list)
+            defer { window.orderOut(nil) }
+            let row = try Self.row(list, 0)
+            let cell = try #require(row.view(atColumn: 0) as? RowCell)
+            cell.userInterfaceLayoutDirection = direction
+            cell.needsLayout = true
+            cell.layoutSubtreeIfNeeded()
+            let made = cell.constraints.filter { !String(describing: type(of: $0)).contains("Autoresizing") }
+            #expect(made.isEmpty && content.translatesAutoresizingMaskIntoConstraints && cell.actions.superview == nil, "\(direction): a bare row carries constraints of its own: \(made)")
+            let inset = RowStyle.tree.margin + RowStyle.tree.leading, end = RowStyle.tree.margin + RowStyle.tree.trailing
+            #expect(near(Double(content.frame.minX), direction == .rightToLeft ? end : inset), "\(direction): \(content.frame)")
+            #expect(near(Double(content.frame.maxX), Double(cell.bounds.width) - (direction == .rightToLeft ? inset : end)), "\(direction): \(content.frame)")
+        }
+    }
+
     /// A row with no actions, as every sidebar row is, opens no menu on a right-click.
     @Test func aRowWithNoActionsHasNoMenu() throws {
         let list = SailList(rowStyle: .sidebar, look: .light, mono: try ControlsTests.mono())

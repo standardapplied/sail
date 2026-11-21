@@ -628,11 +628,11 @@ extension WorkspacesModel.Screen {
     }
 }
 
-extension WorkspacesView: NSMenuItemValidation {
-    /// View ▸ Show Sidebar says Hide Sidebar while the panel is shown.
-    public func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        guard item.action == #selector(toggleSidebar(_:)) else { return true }
-        item.title = panel.isHidden ? "Show Sidebar" : "Hide Sidebar"
-        return !isHidden && panelShown
+extension WorkspacesView {
+    /// What View ▸ ⌃⌘S says and does here: Hide Sidebar while the panel is shown; off, and why,
+    /// while the section is one card with no projects beside it.
+    var sidebarCommand: (title: String, enabled: Bool, reason: String?) {
+        let title = panel.isHidden ? "Show Sidebar" : "Hide Sidebar"
+        return panelShown && !isHidden ? (title, true, nil) : (title, false, "The sidebar lists projects, and none is listed here yet.")
     }
 }

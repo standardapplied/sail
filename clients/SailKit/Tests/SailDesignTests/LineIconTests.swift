@@ -71,4 +71,10 @@ import Testing
         #expect(LineIcon.warning.strokes == [Self.line((12, 3.8), (21, 19.5), (3, 19.5), closed: true), Self.line((12, 10), (12, 14.2)), Self.line((12, 17), (12, 17.1))])
         #expect(LineIcon.error.strokes == [ring, Self.line((12, 7.5), (12, 13)), Self.line((12, 16.2), (12, 16.3))])
     }
+
+    /// A folder's disclosure, as the files mockup's `right` and `down` draw it: shut, then open.
+    @Test func theDisclosureIsTheFilesMockups() {
+        #expect(LineIcon.right.strokes == [Self.line((9, 6), (15, 12), (9, 18))])
+        #expect(LineIcon.down.strokes == [Self.line((6, 9), (12, 15), (18, 9))])
+    }
 }

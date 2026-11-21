@@ -152,6 +152,7 @@ final class RecordingTickets: TicketSource {
             case let .open(project, workspace):
                 workspace.isEmpty ? "a ticket to open a session in \(project)" : "a ticket to open a session in workspace \(workspace) of \(project)"
             case let .attach(session): "a ticket to attach to \(session)"
+            case let .files(project, workspace): "a ticket to read the files of workspace \(workspace) of \(project)"
             }
         requests.withLock { $0.append(named) }
         return try await source.ticket(for: request)
