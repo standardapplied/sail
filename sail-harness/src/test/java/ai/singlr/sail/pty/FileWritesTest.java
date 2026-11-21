@@ -60,7 +60,7 @@ class FileWritesTest {
   @BeforeEach
   void setUp() throws IOException {
     home = Files.createDirectory(dir.toRealPath().resolve("home"));
-    files = FileScriptsTest.over(home, commands);
+    files = scripts(UnaryOperator.identity(), Map.of());
   }
 
   @AfterEach
@@ -174,13 +174,62 @@ class FileWritesTest {
     }
   }
 
+  /**
+   * What gives each script sockets for its input and its output, as {@code incus exec} does, not
+   * pipes: a script that reopened a descriptor by path would fail here as it fails there. It relays
+   * this process's input to the script and the script's output back, an end of input as the end of
+   * the socket, and exits with the script's status.
+   */
+  private static final String SOCKETS =
+      """
+      import os, socket, subprocess, sys, threading
+      given, taken = socket.socketpair()
+      said, says = socket.socketpair()
+      script = subprocess.Popen(sys.argv[1:], stdin=taken, stdout=says)
+      taken.close()
+      says.close()
+      def relay():
+          try:
+              while True:
+                  data = os.read(0, 65536)
+                  if not data:
+                      break
+                  given.sendall(data)
+              given.shutdown(socket.SHUT_WR)
+          except OSError:
+              pass
+      threading.Thread(target=relay, daemon=True).start()
+      while True:
+          data = said.recv(65536)
+          if not data:
+              break
+          os.write(1, data)
+      code = script.wait()
+      sys.exit(code if code >= 0 else 128 - code)
+      """;
+
   private FileScripts edited(UnaryOperator<String> edit) {
+    return scripts(edit, Map.of());
+  }
+
+  /**
+   * The scripts run here as {@link FileScriptsTest#over} runs them, each edited by {@code edit}
+   * first, with {@code env} in its environment and sockets for its input and output ({@link
+   * #SOCKETS}); every command and process kept.
+   */
+  private FileScripts scripts(UnaryOperator<String> edit, Map<String, String> env) {
     return new FileScripts(
         command -> {
+          commands.add(List.copyOf(command));
           var inner =
               new java.util.ArrayList<>(command.subList(command.indexOf("--") + 1, command.size()));
           inner.set(2, edit.apply(inner.get(2)));
-          return new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+          inner.addAll(0, List.of("python3", "-I", "-c", SOCKETS));
+          var builder = new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD);
+          builder.environment().putAll(env);
+          var process = builder.start();
+          processes.add(process);
+          return process;
         },
         new UploadCopy.Place(
             container -> List.of("incus", "exec", container, "--"),
@@ -192,6 +241,13 @@ class FileWritesTest {
             List.of(),
             java.time.Duration.ofSeconds(10)),
         home.toString());
+  }
+
+  /** Every script here reads and writes sockets, as under {@code incus exec}, never pipes. */
+  @Test
+  void everyScriptHereHasSocketsForItsInputAndOutput() throws Exception {
+    var probed = edited(script -> "[ -S /proc/self/fd/0 ] && [ -S /proc/self/fd/1 ] || exit 9");
+    assertEquals(0, run(probed, FileScripts.REMOVE, home + "/none"));
   }
 
   @Test
@@ -563,8 +619,7 @@ class FileWritesTest {
   @Test
   void everyRefusalKeepsItsStatusInAWorkspaceOfAnotherLanguage() throws Exception {
     var german =
-        FileScriptsTest.over(
-            home, commands, Map.of("LANG", "de_DE.UTF-8", "LC_ALL", "de_DE.UTF-8"));
+        scripts(UnaryOperator.identity(), Map.of("LANG", "de_DE.UTF-8", "LC_ALL", "de_DE.UTF-8"));
     Files.writeString(home.resolve("taken"), "x");
     assertEquals(FileScripts.EXISTS, run(german, FileScripts.CREATE, home + "/taken", "file"));
     assertEquals(FileScripts.NOT_FOUND, run(german, FileScripts.REMOVE, home + "/none"));
@@ -603,29 +658,8 @@ class FileWritesTest {
   private final List<PtyMessage.Err> endedWith = new CopyOnWriteArrayList<>();
   private final ReentrantLock lock = new ReentrantLock(true);
 
-  /** The scripts run here, each edited by {@code edit} first, every process kept. */
   private FileScripts running(UnaryOperator<String> edit) {
-    return new FileScripts(
-        command -> {
-          commands.add(List.copyOf(command));
-          var inner =
-              new java.util.ArrayList<>(command.subList(command.indexOf("--") + 1, command.size()));
-          inner.set(2, edit.apply(inner.get(2)));
-          var process =
-              new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD).start();
-          processes.add(process);
-          return process;
-        },
-        new UploadCopy.Place(
-            container -> List.of("incus", "exec", container, "--"),
-            container -> List.of("incus", "exec", container, "--user", "1000", "--"),
-            "/unused",
-            "0",
-            "1000",
-            "1000",
-            List.of(),
-            java.time.Duration.ofSeconds(10)),
-        home.toString());
+    return scripts(edit, Map.of());
   }
 
   private FilesConnection connection(FilesConnection.Gate gate) {
@@ -945,10 +979,11 @@ class FileWritesTest {
     connection.chunk(new PtyMessage.PutChunk(3, 0, "new".getBytes(StandardCharsets.UTF_8)));
     assertEquals(PtyMessage.FilesRefusal.FAILED, ((PtyMessage.FilesRefused) answer()).kind());
     everyScriptEnds();
+    var base = version(file);
     var scripts = processes.size();
 
     connection.write(
-        new PtyMessage.FilesWrite(4, file.toString(), version(file), FilesConnection.READ_CAP + 1));
+        new PtyMessage.FilesWrite(4, file.toString(), base, FilesConnection.READ_CAP + 1));
     assertEquals(PtyMessage.FilesRefusal.TOO_LARGE, ((PtyMessage.FilesRefused) answer()).kind());
     var bad = home + "/" + FileNames.decode(new byte[] {'b', (byte) 0xff});
     for (var name : List.of(bad, home + "/two\nlines", home + "/" + FileScripts.SAVING + "x")) {
