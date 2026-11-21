@@ -36,6 +36,14 @@ final class FileScripts {
    */
   static final String SAVING = ".sail-save-";
 
+  /**
+   * The exact name of a save's temporary, as a shell glob: the prefix, the ten characters {@code
+   * mktemp} chose, {@code .part}. Only a name of this shape is hidden from a listing and the watch,
+   * and only a regular file of it, the dev user's own, is ever swept: a person's {@code
+   * .sail-save-notes} is seen and kept.
+   */
+  static final String TEMPORARY_SHAPE = SAVING + "[A-Za-z0-9]".repeat(10) + ".part";
+
   /** How long a cut write has to remove its temporary before its process is ended. */
   static final Duration GRACE = Duration.ofSeconds(2);
 
@@ -63,6 +71,12 @@ final class FileScripts {
   static final int INTO_ITSELF = 31;
 
   static final int PARTLY_REMOVED = 32;
+
+  /** The folder a new name was to be made in went before it was made. */
+  static final int FOLDER_GONE = 33;
+
+  /** A move whose source and target folder are on different disks, refused before it starts. */
+  static final int OTHER_DISK = 34;
 
   /** One version, as every script and the watch write it. */
   static final String VERSION = "%d:%i:%s:%.9Y:%.9Z";
@@ -119,10 +133,10 @@ final class FileScripts {
           [ -d "$at" ] || exit 24
           cd -- "$at" 2>/dev/null && [ -r . ] || exit 21
           stat -L --printf '%s\\0' . || exit 1
-          find . -mindepth 1 -maxdepth 1 ! -name '%s*' -printf '%%y\\0%%Y\\0%%s\\0%%T@\\0%%m\\0%%P\\0' 2>/dev/null
+          find . -mindepth 1 -maxdepth 1 ! -name '%s' -printf '%%y\\0%%Y\\0%%s\\0%%T@\\0%%m\\0%%P\\0' 2>/dev/null
           exit 0
           """
-              .formatted(VERSION, SAVING);
+              .formatted(VERSION, TEMPORARY_SHAPE);
 
   /** Says what the path is: its version, then its own entry as a listing's, named by its base. */
   static final String STAT =
@@ -174,7 +188,7 @@ final class FileScripts {
             at=$(realpath -m -- "$name" 2>/dev/null && echo x)
             at=${at%%?x}
             case ${name##*/}:$at/ in
-              '%s'*) ;;
+              %s:*) ;;
               *:"$home"/*) next+=("$name") given[$name]=$token ;;
               *) printf -- '-%%s\\0' "$name" ;;
             esac
@@ -214,7 +228,7 @@ final class FileScripts {
         fi
       done
       """
-          .formatted(SAVING, VERSION);
+          .formatted(TEMPORARY_SHAPE, VERSION);
 
   /**
    * The temporary a write makes in folder {@code $dir} as {@code tmp}, removed at the script's
@@ -223,8 +237,8 @@ final class FileScripts {
    */
   private static final String TEMPORARY =
       """
-      for old in "$dir"/'%1$s'*; do
-        [ -f "$old" ] && [ ! -L "$old" ] || continue
+      for old in "$dir"/%2$s; do
+        [ -f "$old" ] && [ ! -L "$old" ] && [ -O "$old" ] || continue
         [ -n "$(find "$old" -maxdepth 0 -mmin +2 2>/dev/null)" ] || continue
         pattern=$(printf '%%s' "$old" | sed 's/[][*?\\\\]/\\\\&/g')
         [ -n "$(find /proc/[0-9]*/fd -lname "$pattern" 2>/dev/null | head -n 1)" ] || rm -f -- "$old"
@@ -232,7 +246,7 @@ final class FileScripts {
       tmp=$(mktemp --suffix=.part -- "$dir/%1$sXXXXXXXXXX" 2>/dev/null) || exit 21
       trap 'rm -f -- "$tmp"' EXIT
       """
-          .formatted(SAVING);
+          .formatted(SAVING, TEMPORARY_SHAPE);
 
   /**
    * Saves {@code $2} bytes of standard input as the path, read with its base: made anew where no
@@ -261,6 +275,7 @@ final class FileScripts {
             resolve "$path"
             [ -d "$at" ] && exit 23
             [ -f "$at" ] || exit 25
+            [ -w "$at" ] || exit 21
             dir=${at%%/*}
             now=$(stat -L --printf '%s' -- "$at") || exit 1
             [ "$now" = "$base" ] || { printf '%%s\\0' "$now"; exit 28; }
@@ -277,11 +292,12 @@ final class FileScripts {
           fi
           [ "$(stat -c %%s -- "$tmp")" = "$size" ] || exit 30
           sync -- "$tmp" 2>/dev/null || exit 1
+          exec 5< "$tmp"
           printf 'copied\\0%%s\\0' "$(sha256sum < "$tmp" | cut -c1-64)"
           IFS= read -r -d '' word && [ "$word" = go ] || exit 30
           if [ "$base" = absent ]; then
             chmod -- "$(printf %%03o $((0666 & ~0$(umask))))" "$tmp" || exit 1
-            ln -T -- "$tmp" "$at" 2>/dev/null || exit 27
+            ln -T -- "$tmp" "$at" 2>/dev/null || { there "$at" && exit 27; [ -d "$dir" ] || exit 33; exit 1; }
             rm -f -- "$tmp"
           else
             now=$(stat -L --printf '%1$s' -- "$at" 2>/dev/null) || { printf 'absent\\0'; exit 28; }
@@ -290,6 +306,7 @@ final class FileScripts {
             chmod --reference="$at" -- "$tmp" || exit 1
             mv -fT -- "$tmp" "$at" || exit 1
           fi
+          sync -- "$dir" 2>/dev/null
           stat -L --printf '%1$s\\0' -- "$at" 2>/dev/null || printf 'absent\\0'
           """
               .formatted(VERSION);
@@ -306,15 +323,17 @@ final class FileScripts {
           resolve_parent "$path"
           there "$target" && exit 27
           if [ "$kind" = folder ]; then
-            mkdir -- "$target" 2>/dev/null && exit 0
+            mkdir -- "$target" 2>/dev/null && { sync -- "$dir" 2>/dev/null; exit 0; }
             there "$target" && exit 27
+            [ -d "$dir" ] || exit 33
             exit 21
           fi
           """
           + TEMPORARY
           + """
           chmod -- "$(printf %03o $((0666 & ~0$(umask))))" "$tmp" || exit 1
-          ln -T -- "$tmp" "$target" 2>/dev/null || exit 27
+          ln -T -- "$tmp" "$target" 2>/dev/null || { there "$target" && exit 27; [ -d "$dir" ] || exit 33; exit 1; }
+          sync -- "$dir" 2>/dev/null
           """;
 
   /**
@@ -335,9 +354,13 @@ final class FileScripts {
           dst=$target
           case $dir/ in "$src"/*) exit 31 ;; esac
           there "$dst" && exit 27
+          [ "$(stat -c %d -- "$src")" = "$(stat -c %d -- "$dir")" ] || exit 34
           inode=$(stat -c %d:%i -- "$src") || exit 1
           mv -nT -- "$src" "$dst" 2>/dev/null
-          [ "$(stat -c %d:%i -- "$dst" 2>/dev/null)" = "$inode" ] && ! there "$src" && exit 0
+          if [ "$(stat -c %d:%i -- "$dst" 2>/dev/null)" = "$inode" ] && ! there "$src"; then
+            sync -- "$dir" "${src%/*}" 2>/dev/null
+            exit 0
+          fi
           there "$dst" && exit 27
           exit 1
           """;
@@ -355,6 +378,7 @@ final class FileScripts {
           [ "$target" = "$home/workspace" ] && exit 21
           rm -rf --one-file-system -- "$target" 2>/dev/null
           there "$target" && exit 32
+          sync -- "$dir" 2>/dev/null
           exit 0
           """;
 
@@ -486,6 +510,16 @@ final class FileScripts {
     /** Whether it still runs. */
     boolean alive() {
       return process.isAlive();
+    }
+
+    /**
+     * Ends its process now and waits for it, then {@link #GRACE} more, as long as Incus takes to
+     * end the process in the workspace once its {@code incus exec} has gone.
+     */
+    void killAndAwait() throws InterruptedException {
+      process.destroyForcibly();
+      process.waitFor();
+      Thread.sleep(GRACE);
     }
 
     /** Runs {@code then} once it has ended, however it ended. */

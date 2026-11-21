@@ -217,6 +217,9 @@ class FilesHostTest {
     if (script.equals(FileScripts.STAT)) {
       return "stat";
     }
+    if (script.equals(FileScripts.WRITE)) {
+      return "write";
+    }
     return script.equals(FileScripts.WATCH) ? "watch" : "other";
   }
 
@@ -1086,6 +1089,118 @@ class FilesHostTest {
     try (var names = Files.list(home)) {
       assertEquals(List.of("notes.md"), names.map(p -> p.getFileName().toString()).toList());
     }
+  }
+
+  /** A save's script held between its go and its compare until {@link Hold#release}. */
+  private final class Hold {
+    final Path at;
+    final Path release;
+
+    Hold() throws Exception {
+      at = dir.resolve("at-compare");
+      release = dir.resolve("release");
+      assertEquals(0, new ProcessBuilder("mkfifo", release.toString()).start().waitFor());
+      var once = new java.util.concurrent.atomic.AtomicBoolean();
+      edits.put(
+          "write",
+          script ->
+              !once.compareAndSet(false, true)
+                  ? script
+                  : script.replace(
+                      "IFS= read -r -d '' word && [ \"$word\" = go ] || exit 30",
+                      "IFS= read -r -d '' word && [ \"$word\" = go ] || exit 30\n"
+                          + ": > '"
+                          + at
+                          + "'; read -r _ < '"
+                          + release
+                          + "'"));
+    }
+
+    /** Waits until a save's script stands at its compare, its go sent and the lock held. */
+    void reached() {
+      var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+      while (!Files.exists(at)) {
+        assertTrue(System.nanoTime() < deadline, "the save reached its compare within 5 s");
+        Thread.onSpinWait();
+      }
+    }
+
+    void release() throws IOException {
+      Files.writeString(release, "go\n");
+    }
+  }
+
+  /** Sends save {@code id} of {@code text} on {@code base}, and reads its acknowledgement. */
+  private static void saveOn(SocketChannel channel, int id, Path file, String base, String text)
+      throws Exception {
+    var bytes = text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    PtyWire.write(channel, new PtyMessage.FilesWrite(id, file.toString(), base, bytes.length));
+    PtyWire.write(channel, new PtyMessage.PutChunk(id, 0, bytes));
+    PtyWire.write(channel, new PtyMessage.PutEnd(id, sha256(bytes)));
+    assertEquals(new PtyMessage.PutAck(id, bytes.length), next(channel));
+  }
+
+  private static void awaitQueued(java.util.concurrent.locks.ReentrantLock lock) {
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!lock.hasQueuedThreads()) {
+      assertTrue(System.nanoTime() < deadline, "a save waits for the workspace's lock");
+      Thread.onSpinWait();
+    }
+  }
+
+  /**
+   * m1: a save past its go outlives its connection: closing the connection never cuts it, and it
+   * holds the workspace's write lock until its script ends, so another connection's save on the
+   * same base waits for it and is a conflict, never a second winner.
+   */
+  @Test
+  void aSavePastItsGoOutlivesItsConnectionAndHoldsTheWorkspacesLock() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "base");
+    var hold = new Hold();
+    var staying = open("tok-root");
+    var first = open("tok-mady");
+    var base = versionOf(first, file);
+    saveOn(first, 1, file, base, "first's");
+    hold.reached();
+    var lock = host.writeLock("acme", "dock");
+
+    first.close();
+    var second = open("tok-mady");
+    saveOn(second, 2, file, base, "second's");
+    awaitQueued(lock);
+    assertTrue(lock.isLocked(), "the closed connection's save holds the lock still");
+    hold.release();
+
+    assertInstanceOf(PtyMessage.FilesConflict.class, next(second));
+    assertEquals("first's", Files.readString(file), "the save past its go was written");
+    second.close();
+    staying.close();
+  }
+
+  /**
+   * m1: the write lock is the workspace's, not its connections': when the last connection ends
+   * while its save is past its go, the next connection's save waits on that same lock.
+   */
+  @Test
+  void aWorkspacesLockOutlivesItsLastConnectionWhileASaveHoldsIt() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "base");
+    var hold = new Hold();
+    var last = open("tok-mady");
+    var base = versionOf(last, file);
+    saveOn(last, 1, file, base, "first's");
+    hold.reached();
+    var lock = host.writeLock("acme", "dock");
+
+    last.close();
+    var next = open("tok-mady");
+    assertTrue(lock == host.writeLock("acme", "dock"), "the same lock, not a fresh one");
+    saveOn(next, 2, file, base, "second's");
+    awaitQueued(lock);
+    hold.release();
+
+    assertInstanceOf(PtyMessage.FilesConflict.class, next(next));
+    assertEquals("first's", Files.readString(file));
+    next.close();
   }
 
   /**

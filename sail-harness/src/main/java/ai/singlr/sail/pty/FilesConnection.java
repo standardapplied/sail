@@ -8,16 +8,20 @@ package ai.singlr.sail.pty;
 import ai.singlr.sail.pty.PtyMessage.FilesRefusal;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 /**
  * One files connection's requests answered in its workspace's container, by {@link FileScripts}: at
@@ -83,7 +87,17 @@ final class FilesConnection {
    * What a connection's writes are given: the workspace's write lock, shared by every connection to
    * it and fair, so writes wait in order; and the workspace's decision for this person.
    */
-  record Writes(ReentrantLock lock, Gate gate) {}
+  record Writes(ReentrantLock lock, Gate gate, Duration afterGo) {}
+
+  /**
+   * How long a save's script may run after its go: well above hashing and renaming 20 MiB under the
+   * lock (about 50 ms on a devbox, 200 ms on a slow box), so only a hung script meets it.
+   */
+  static final Duration AFTER_GO = Duration.ofSeconds(10);
+
+  /** The exact shape of a save's temporary, which Sail never makes as a person's name. */
+  private static final Pattern TEMPORARY =
+      Pattern.compile(Pattern.quote(FileScripts.SAVING) + "[A-Za-z0-9]{10}\\.part");
 
   /** The workspace's decision for the connection's person, asked again for each write. */
   @FunctionalInterface
@@ -125,14 +139,18 @@ final class FilesConnection {
     final boolean writes;
     FileScripts.Script script;
     boolean cancelled;
+    boolean committed;
 
     Running(boolean writes) {
       this.writes = writes;
     }
 
-    /** Ends its script: a save's by closing its input, so it removes its own temporary. */
+    /**
+     * Ends its script: a save's by closing its input, so it removes its own temporary; never a save
+     * past its go, which runs to its end under the workspace's lock, bounded by {@link #AFTER_GO}.
+     */
     void stop() {
-      if (script == null) {
+      if (script == null || committed) {
         return;
       }
       if (writes) {
@@ -291,7 +309,7 @@ final class FilesConnection {
     var name = path.substring(path.lastIndexOf('/') + 1);
     return FileNames.shown(name).equals(name)
         && name.chars().noneMatch(Character::isISOControl)
-        && !name.startsWith(FileScripts.SAVING);
+        && !TEMPORARY.matcher(name).matches();
   }
 
   /**
@@ -618,10 +636,33 @@ final class FilesConnection {
       if (!allowed(request, running, script)) {
         return;
       }
+      synchronized (this) {
+        running.committed = true;
+      }
       script.input().write(FileScripts.nul("go"));
       script.input().close();
+      var answered = new AtomicBoolean();
+      var bound =
+          CompletableFuture.runAsync(
+              () -> {
+                if (answered.compareAndSet(false, true)) {
+                  script.end();
+                }
+              },
+              CompletableFuture.delayedExecutor(
+                  writes.afterGo().toMillis(), TimeUnit.MILLISECONDS));
       var version = script.field();
       var status = script.status();
+      bound.cancel(false);
+      if (!answered.compareAndSet(false, true)) {
+        try {
+          script.killAndAwait();
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+        }
+        unless(running, overdue(request));
+        return;
+      }
       if (status == 0 && version != null) {
         unless(running, new PtyMessage.FilesWritten(request.id(), version));
       } else if (status == FileScripts.CONFLICT && version != null) {
@@ -680,6 +721,10 @@ final class FilesConnection {
     if (status == FileScripts.CONFLICT && field != null) {
       unless(running, new PtyMessage.FilesConflict(request.id(), field));
     } else if (status == FileScripts.NO_SPACE && field != null) {
+      var free =
+          field.chars().allMatch(Character::isDigit) && !field.isEmpty()
+              ? Long.parseLong(field)
+              : -1;
       unless(
           running,
           new PtyMessage.FilesRefused(
@@ -688,10 +733,12 @@ final class FilesConnection {
               FileNames.shown(request.path())
                   + " was not saved: "
                   + workspace
-                  + "'s disk has "
-                  + field
-                  + " bytes free and the save needs "
-                  + request.body().size
+                  + (free >= 0 && free < request.body().size
+                      ? "'s disk has "
+                          + free
+                          + " bytes free and the save needs "
+                          + request.body().size
+                      : "'s disk or its quota is full")
                   + "; nothing was changed."));
     } else {
       refuse(request, running, status);
@@ -762,6 +809,22 @@ final class FilesConnection {
   }
 
   /** Request {@code request} refused as failed: its path, as shown, then {@code why}. */
+  /**
+   * A save whose script did not end within {@link Writes#afterGo} and was ended: it may have
+   * renamed before it was, so the file holds either version, and the person reads it again.
+   */
+  private PtyMessage.FilesRefused overdue(Request request) {
+    var millis = writes.afterGo().toMillis();
+    return new PtyMessage.FilesRefused(
+        request.id(),
+        FilesRefusal.FAILED,
+        "Sail could not tell whether "
+            + FileNames.shown(request.path())
+            + " was saved: its save did not end within "
+            + (millis % 1000 == 0 ? Long.toString(millis / 1000) : Double.toString(millis / 1000.0))
+            + " s and was ended; the file holds its old or its new bytes; read it again.");
+  }
+
   private PtyMessage.FilesRefused failed(Request request, String why) {
     return new PtyMessage.FilesRefused(
         request.id(), FilesRefusal.FAILED, FileNames.shown(request.path()) + why);
@@ -872,6 +935,32 @@ final class FilesConnection {
 
   /** {@code request}'s script exited {@code status} unanswered: its own refusal, else a failure. */
   private void refuse(Request request, Running running, int status) {
+    if (status == FileScripts.FOLDER_GONE) {
+      var path = request.paths().getLast();
+      unless(
+          running,
+          new PtyMessage.FilesRefused(
+              request.id(),
+              FilesRefusal.NOT_FOUND,
+              "The folder "
+                  + FileNames.shown(path.substring(0, path.lastIndexOf('/')))
+                  + " is gone from "
+                  + workspace
+                  + ", so "
+                  + FileNames.shown(path)
+                  + " was not made."));
+      return;
+    }
+    if (status == FileScripts.OTHER_DISK) {
+      unless(
+          running,
+          failed(
+              request,
+              " is on another disk than "
+                  + FileNames.shown(request.paths().getLast())
+                  + " would be, so Sail does not move it; nothing was changed."));
+      return;
+    }
     var kind = FileScripts.refusalOf(status);
     if (kind == null) {
       fail(request, running);

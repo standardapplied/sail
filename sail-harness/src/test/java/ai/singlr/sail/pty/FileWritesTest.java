@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -169,7 +170,10 @@ class FileWritesTest {
     try (var names = Files.list(folder)) {
       return names
           .map(path -> path.getFileName().toString())
-          .filter(name -> name.startsWith(FileScripts.SAVING))
+          .filter(
+              name ->
+                  name.matches(
+                      java.util.regex.Pattern.quote(FileScripts.SAVING) + "[A-Za-z0-9]{10}\\.part"))
           .toList();
     }
   }
@@ -178,14 +182,17 @@ class FileWritesTest {
    * What gives each script sockets for its input and its output, as {@code incus exec} does, not
    * pipes: a script that reopened a descriptor by path would fail here as it fails there. It relays
    * this process's input to the script and the script's output back, an end of input as the end of
-   * the socket, and exits with the script's status.
+   * the socket, and exits with the script's status; the script dies with it, as a workspace's
+   * process ends once its {@code incus exec} has gone.
    */
   private static final String SOCKETS =
       """
-      import os, socket, subprocess, sys, threading
+      import ctypes, os, socket, subprocess, sys, threading
       given, taken = socket.socketpair()
       said, says = socket.socketpair()
-      script = subprocess.Popen(sys.argv[1:], stdin=taken, stdout=says)
+      def dies_with_relay():
+          ctypes.CDLL(None).prctl(1, 9)
+      script = subprocess.Popen(sys.argv[1:], stdin=taken, stdout=says, preexec_fn=dies_with_relay)
       taken.close()
       says.close()
       def relay():
@@ -426,12 +433,22 @@ class FileWritesTest {
   @Test
   void aStaleTemporaryGoesAtTheNextWriteInItsFolderAndAFreshOrHeldOneStays() throws Exception {
     var src = Files.createDirectory(home.resolve("src"));
-    var stale = Files.writeString(src.resolve(FileScripts.SAVING + "killed.part"), "x");
-    var fresh = Files.writeString(src.resolve(FileScripts.SAVING + "under-way.part"), "x");
-    var held = Files.writeString(src.resolve(FileScripts.SAVING + "held[1].part"), "x");
-    var old = FileTime.from(Instant.now().minusSeconds(180));
+    var stale = Files.writeString(src.resolve(FileScripts.SAVING + "Killed0001.part"), "x");
+    var fresh = Files.writeString(src.resolve(FileScripts.SAVING + "UnderWay01.part"), "x");
+    var held = Files.writeString(src.resolve(FileScripts.SAVING + "HeldOpen01.part"), "x");
+    var persons =
+        List.of(
+            Files.writeString(src.resolve(FileScripts.SAVING + "notes"), "a person's"),
+            Files.writeString(src.resolve(FileScripts.SAVING + "notes.part"), "a person's"),
+            Files.writeString(src.resolve(FileScripts.SAVING + "Short01.part"), "a person's"),
+            Files.writeString(src.resolve(FileScripts.SAVING + "TooLong0001x.part"), "x"),
+            Files.writeString(src.resolve(FileScripts.SAVING + "has_under.part"), "x"));
+    var old = FileTime.from(Instant.now().minusSeconds(600));
     Files.setLastModifiedTime(stale, old);
     Files.setLastModifiedTime(held, old);
+    for (var person : persons) {
+      Files.setLastModifiedTime(person, old);
+    }
     var holder = new ProcessBuilder("sleep", "30").redirectInput(held.toFile()).start();
     try {
       assertEquals(0, save(src.resolve("App.java"), PtyMessage.ABSENT, "class App {}").status());
@@ -442,6 +459,135 @@ class FileWritesTest {
     assertFalse(Files.exists(stale), "older than the patience and held by no one");
     assertTrue(Files.exists(fresh), "a write under way keeps its temporary");
     assertTrue(Files.exists(held), "a temporary a process holds open stays");
+    for (var person : persons) {
+      assertTrue(
+          Files.exists(person), "m3: a name of Sail's prefix but not its shape stays: " + person);
+    }
+    var listing = files.start(CONTAINER, FileScripts.LIST, src.toString());
+    listing.field();
+    var names = new java.util.HashSet<String>();
+    for (var entry = listing.entry(); entry != null; entry = listing.entry()) {
+      names.add(entry.name());
+    }
+    assertTrue(
+        names.containsAll(persons.stream().map(p -> p.getFileName().toString()).toList()),
+        "m3: a listing shows a person's names of Sail's prefix: " + names);
+    assertFalse(names.contains(fresh.getFileName().toString()), "and hides Sail's own shape");
+  }
+
+  /**
+   * m3: a save waiting for its go keeps its temporary open, so another save's sweep in its folder
+   * never takes it, however long the wait.
+   */
+  @Test
+  void aWaitingSavesTemporaryIsNeverSweptByAnotherSave() throws Exception {
+    var waiting = new Save(files, home + "/first.md", PtyMessage.ABSENT, 5);
+    waiting.script.input().write("first".getBytes(StandardCharsets.UTF_8));
+    waiting.script.input().flush();
+    assertEquals("copied", waiting.script.field());
+    waiting.script.field();
+    var temporary = home.resolve(temporaries(home).getFirst());
+    Files.setLastModifiedTime(temporary, FileTime.from(Instant.now().minusSeconds(600)));
+
+    assertEquals(0, save(home.resolve("second.md"), PtyMessage.ABSENT, "second").status());
+    assertTrue(Files.exists(temporary), "held open by the waiting save, so not swept");
+
+    waiting.script.input().write(FileScripts.nul("go"));
+    waiting.script.input().close();
+    assertNotNull(waiting.script.field());
+    assertEquals(0, waiting.script.status());
+    assertEquals("first", Files.readString(home.resolve("first.md")));
+  }
+
+  /** m4: a target the dev user may not write is refused before any of its bytes are taken. */
+  @Test
+  void aTargetTheUserMayNotWriteIsRefusedBeforeItsBytes() throws Exception {
+    var file = Files.writeString(home.resolve("locked.md"), "kept");
+    Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("r--r--r--"));
+
+    var save = new Save(files, file.toString(), version(file), 1 << 20);
+
+    assertNull(save.first, "no ready: refused before its bytes");
+    assertEquals(FileScripts.NOT_PERMITTED, save.script.status());
+    assertEquals(List.of(), temporaries(home));
+  }
+
+  /**
+   * m5: a name is said taken only when it is: a folder gone before the link or the mkdir is said
+   * gone, and a move onto another disk inside the home is refused before it starts.
+   */
+  @Test
+  void aNameIsSaidTakenOnlyWhenItIsAndAMoveAcrossDisksIsRefusedFirst() throws Exception {
+    var folder = Files.createDirectory(home.resolve("going"));
+    var gone =
+        edited(
+            script ->
+                script
+                    .replace(
+                        "ln -T -- \"$tmp\" \"$target\"",
+                        "rm -rf -- \"$dir\"; ln -T -- \"$tmp\" \"$target\"")
+                    .replace("mkdir -- \"$target\"", "rm -rf -- \"$dir\"; mkdir -- \"$target\""));
+    assertEquals(
+        FileScripts.FOLDER_GONE, run(gone, FileScripts.CREATE, folder + "/new.md", "file"));
+    Files.createDirectory(folder);
+    assertEquals(FileScripts.FOLDER_GONE, run(gone, FileScripts.CREATE, folder + "/new", "folder"));
+
+    var bin = Files.createDirectory(dir.resolve("bin"));
+    var mount = Files.createDirectory(home.resolve("mounted"));
+    var fake = bin.resolve("stat");
+    Files.writeString(
+        fake,
+        """
+        #!/bin/sh
+        for last; do :; done
+        if [ "$1" = -c ] && [ "$2" = %%d ] && [ "$last" = '%s' ]; then echo 4242; exit 0; fi
+        exec /usr/bin/stat "$@"
+        """
+            .formatted(mount));
+    Files.setPosixFilePermissions(fake, PosixFilePermissions.fromString("rwx------"));
+    var otherDisk =
+        scripts(UnaryOperator.identity(), Map.of("PATH", bin + ":" + System.getenv("PATH")));
+    var a = Files.writeString(home.resolve("a.md"), "a");
+    assertEquals(
+        FileScripts.OTHER_DISK, run(otherDisk, FileScripts.MOVE, a.toString(), mount + "/a.md"));
+    assertEquals("a", Files.readString(a), "nothing moved");
+    assertFalse(Files.exists(mount.resolve("a.md")));
+  }
+
+  /** m2: a save's script past its go is bounded: past it, killed, the lock freed only once dead. */
+  @Test
+  void aSavePastItsGoIsBoundedAndItsLockFreedOnlyOnceItsScriptIsDead() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var hung =
+        new FilesConnection(
+            running(
+                script ->
+                    script.replace(
+                        "IFS= read -r -d '' word && [ \"$word\" = go ] || exit 30",
+                        "IFS= read -r -d '' word && [ \"$word\" = go ] || exit 30\nsleep 30")),
+            CONTAINER,
+            "dock",
+            said::add,
+            () -> null,
+            endedWith::add,
+            new FilesConnection.Writes(lock, () -> null, java.time.Duration.ofMillis(300)));
+
+    save(hung, 1, file.toString(), version(file), "new");
+
+    var failed = assertInstanceOf(PtyMessage.FilesRefused.class, answer());
+    assertEquals(PtyMessage.FilesRefusal.FAILED, failed.kind());
+    assertEquals(
+        "Sail could not tell whether "
+            + file
+            + " was saved: its save did not end within 0.3 s and was ended; the file holds its old"
+            + " or its new bytes; read it again.",
+        failed.message());
+    assertFalse(processes.getLast().isAlive(), "its script is dead before the lock is freed");
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (lock.isLocked()) {
+      assertTrue(System.nanoTime() < deadline, "and then the lock is freed");
+      Thread.onSpinWait();
+    }
   }
 
   @Test
@@ -677,7 +823,7 @@ class FileWritesTest {
         },
         () -> null,
         endedWith::add,
-        new FilesConnection.Writes(lock, gate));
+        new FilesConnection.Writes(lock, gate, FilesConnection.AFTER_GO));
   }
 
   /** Sends save {@code id} of {@code text} over {@code path} on {@code base}, bytes and end. */
@@ -986,7 +1132,8 @@ class FileWritesTest {
         new PtyMessage.FilesWrite(4, file.toString(), base, FilesConnection.READ_CAP + 1));
     assertEquals(PtyMessage.FilesRefusal.TOO_LARGE, ((PtyMessage.FilesRefused) answer()).kind());
     var bad = home + "/" + FileNames.decode(new byte[] {'b', (byte) 0xff});
-    for (var name : List.of(bad, home + "/two\nlines", home + "/" + FileScripts.SAVING + "x")) {
+    for (var name :
+        List.of(bad, home + "/two\nlines", home + "/" + FileScripts.SAVING + "Abcdef0123.part")) {
       connection.write(new PtyMessage.FilesWrite(5, name, PtyMessage.ABSENT, 1));
       var unsafe = (PtyMessage.FilesRefused) answer();
       assertEquals(PtyMessage.FilesRefusal.UNSAFE, unsafe.kind(), name);
@@ -1029,13 +1176,10 @@ class FileWritesTest {
     save(full, 2, file.toString(), version(file), "mine");
     var refused = (PtyMessage.FilesRefused) answer();
     assertEquals(PtyMessage.FilesRefusal.NO_SPACE, refused.kind());
-    assertTrue(
-        refused
-            .message()
-            .matches(
-                java.util.regex.Pattern.quote(file + " was not saved: dock's disk has ")
-                    + "[0-9]+ bytes free and the save needs 4; nothing was changed."),
-        refused.message());
+    assertEquals(
+        file + " was not saved: dock's disk or its quota is full; nothing was changed.",
+        refused.message(),
+        "nit 3: a disk that shows room is full by its quota, and no number is said");
 
     save(connection, 3, file.toString(), PtyMessage.ABSENT, "mine");
     assertEquals(
@@ -1054,6 +1198,10 @@ class FileWritesTest {
     assertEquals(new PtyMessage.FilesDone(6), answer());
     connection.remove(new PtyMessage.FilesRemove(7, home + "/made"));
     assertEquals(new PtyMessage.FilesDone(7), answer());
+    connection.create(
+        new PtyMessage.FilesCreate(8, home + "/" + FileScripts.SAVING + "notes", false));
+    assertEquals(
+        new PtyMessage.FilesDone(8), answer(), "m3: a person's name of Sail's prefix is made");
     assertEquals("theirs", Files.readString(file));
     everyScriptEnds();
     assertEquals(List.of(), temporaries(home));

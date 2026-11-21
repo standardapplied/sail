@@ -968,8 +968,8 @@ public final class PtySessionHost implements AutoCloseable {
       Thread.currentThread().interrupt();
     } finally {
       if (files != null) {
-        unserve(files);
         files.connection().close();
+        unserve(files);
       }
       uploads.discard(upload);
       if (attached != null) {
@@ -1907,7 +1907,8 @@ public final class PtySessionHost implements AutoCloseable {
               message -> reply(channel, message),
               () -> filesEnded(project, workspace, who),
               err -> endFiles(channel, err),
-              new FilesConnection.Writes(lock, () -> filesDecided(project, workspace, who)));
+              new FilesConnection.Writes(
+                  lock, () -> filesDecided(project, workspace, who), FilesConnection.AFTER_GO));
       var kept = new Served(project, workspace, who, channel, connection);
       served.add(kept);
       return kept;
@@ -1986,15 +1987,25 @@ public final class PtySessionHost implements AutoCloseable {
     }
   }
 
-  /** Drops {@code files} from those served, and its workspace's write lock with its last one. */
+  /**
+   * Drops {@code files}, closed, from those served. The workspace's write lock is the workspace's,
+   * not its connections': it is dropped with its last connection only while no save holds it or
+   * waits for it, so a save past its go keeps it, and every later connection shares it.
+   */
   private void unserve(Served files) {
     synchronized (served) {
       served.remove(files);
-      if (served.stream()
-          .noneMatch(
-              s ->
-                  s.project().equals(files.project()) && s.workspace().equals(files.workspace()))) {
-        writeLocks.remove(files.project() + "-" + files.workspace());
+      var instance = files.project() + "-" + files.workspace();
+      var lock = writeLocks.get(instance);
+      if (lock != null
+          && !lock.isLocked()
+          && !lock.hasQueuedThreads()
+          && served.stream()
+              .noneMatch(
+                  s ->
+                      s.project().equals(files.project())
+                          && s.workspace().equals(files.workspace()))) {
+        writeLocks.remove(instance);
       }
     }
   }
