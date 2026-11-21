@@ -146,6 +146,33 @@ class WorkspaceWritesIT extends AbstractIncusIT {
     PtyWire.write(channel, new PtyMessage.PutEnd(id, sha256(bytes)));
   }
 
+  /**
+   * Saves {@code bytes} as a client does: at most two chunks unacknowledged, reading each {@code
+   * PutAck} before the next chunk, then the end; the save's answer, which may come before every
+   * chunk was sent, as a full disk's does.
+   */
+  private static PtyMessage saved(
+      SocketChannel channel, int id, String path, String base, byte[] bytes) throws Exception {
+    PtyWire.write(channel, new PtyMessage.FilesWrite(id, path, base, bytes.length));
+    var chunk = 64 << 10;
+    var acked = 0L;
+    for (var offset = 0; offset < bytes.length; offset += chunk) {
+      while (offset - acked >= 2L * chunk) {
+        var heard = PtyWire.read(channel);
+        if (heard instanceof PtyMessage.PutAck ack) {
+          acked = ack.received();
+        } else if (!(heard instanceof PtyMessage.FilesTick)) {
+          return heard;
+        }
+      }
+      var end = Math.min(bytes.length, offset + chunk);
+      PtyWire.write(
+          channel, new PtyMessage.PutChunk(id, offset, Arrays.copyOfRange(bytes, offset, end)));
+    }
+    PtyWire.write(channel, new PtyMessage.PutEnd(id, sha256(bytes)));
+    return next(channel);
+  }
+
   private String inInstance(String script) throws Exception {
     var ran =
         shell.exec(
@@ -336,8 +363,8 @@ class WorkspaceWritesIT extends AbstractIncusIT {
           var before = inInstance("sha256sum < " + notes);
           var big = new byte[16 << 20];
           random.nextBytes(big);
-          send(full, 1, notes, version(full, notes), big);
-          var refused = assertInstanceOf(PtyMessage.FilesRefused.class, next(full));
+          var answer = saved(full, 1, notes, version(full, notes), big);
+          var refused = assertInstanceOf(PtyMessage.FilesRefused.class, answer, () -> "" + answer);
           assertEquals(PtyMessage.FilesRefusal.NO_SPACE, refused.kind(), refused.message());
           assertTrue(
               refused.message().matches(".* has [0-9]+ bytes free and the save needs 16777216;.*"),
