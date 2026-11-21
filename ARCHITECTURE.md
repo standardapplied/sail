@@ -4203,7 +4203,9 @@ connection's frames.
   smudge and process; trace2 off; `--no-ext-diff --no-textconv` on every diff. Nothing else git's
   configuration can name runs for these calls: hooks need an index write, which optional locks
   forbid; a pager needs a terminal; no call edits, signs, fetches or maintains; and a submodule is a
-  folder no diff takes. Optional locks are off (`GIT_OPTIONAL_LOCKS=0`), so `git status` never refreshes the
+  folder no diff takes. Every files script starts on the image's own `PATH` (`FileScripts.SHELL`:
+  `/usr/bin/env PATH=/usr/bin:/bin bash -c`), so no `git`, `stat` or `sha256sum` put earlier on a
+  `PATH` runs; a filter only marked `required` is a filter too. Optional locks are off (`GIT_OPTIONAL_LOCKS=0`), so `git status` never refreshes the
   index and an agent's `git` never waits for its lock. A repository git refuses is said for it
   alone (`FilesChangeList.failure`, git's words) and the others answer; a path that passes through
   a defined filter (Git LFS and its like) is still listed but its diff is refused `filtered`, since

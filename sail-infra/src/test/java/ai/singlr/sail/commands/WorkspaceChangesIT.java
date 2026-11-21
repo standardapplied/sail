@@ -224,6 +224,16 @@ class WorkspaceChangesIT extends AbstractIncusIT {
               + " filter.evil.process ~/m-process.sh && git config diff.external ~/m-external.sh"
               + " && git config core.pager ~/m-pager.sh && git config core.hooksPath ~/hooks"
               + " && printf 'b changed\\n' > b.dat");
+      var shimmed =
+          exec(
+              INSTANCE,
+              List.of(
+                  "bash",
+                  "-c",
+                  "for tool in git stat sha256sum realpath find; do printf '#!/bin/sh\\n: >"
+                      + " /home/dev/markers/shim-%s\\nexec /usr/bin/%s \"$@\"\\n' $tool $tool >"
+                      + " /usr/local/bin/$tool && chmod 755 /usr/local/bin/$tool; done"));
+      assertTrue(shimmed.ok(), shimmed.stderr());
       try (var host = startHost(dbPath);
           var files = files(host)) {
         var before = changes(files, 1).frames().getFirst();
@@ -270,6 +280,10 @@ class WorkspaceChangesIT extends AbstractIncusIT {
         PtyWire.write(files, new PtyMessage.FilesDiff(4, REPO + "/b.dat"));
         var filtered = assertInstanceOf(PtyMessage.FilesRefused.class, next(files));
         assertEquals(PtyMessage.FilesRefusal.FILTERED, filtered.kind());
+        PtyWire.write(files, new PtyMessage.FilesRead(5, REPO + "/app.txt", 0, 100));
+        assertTrue(
+            assertInstanceOf(PtyMessage.FilesData.class, next(files)).last(),
+            "a read, with its stat and its digests");
         var markers = exec(INSTANCE, List.of("sh", "-c", "ls -A /home/dev/markers"));
         assertTrue(markers.ok(), markers.stderr());
         assertEquals("", markers.stdout().strip(), "nothing the repository planted ran");
