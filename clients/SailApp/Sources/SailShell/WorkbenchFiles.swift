@@ -83,10 +83,14 @@ extension WorkbenchView {
     /// Connects the selected tab's files panel when shown and ends every other's connection, before
     /// the workbench is laid out, so the ticket's round trip runs while the terminals are laid out
     /// narrower beside it.
-    func connectFiles() {
+    /// Only files on screen are followed: the section shown, the window up and not in the Dock.
+    /// `away` says the window went (closed or to the Dock, true) or came back (false), and holds.
+    func connectFiles(away: Bool? = nil) {
+        if let away { filesAway = away }
+        let onScreen = !filesAway && !isHidden && window?.isMiniaturized != true
         for tab in model.tabs {
             guard let panel = tabViews[tab.id]?.files else { continue }
-            let shown = tab.id == model.selected && workspace(of: tab).map { filesShown.contains(Self.key($0.project, $0.name)) } == true
+            let shown = onScreen && tab.id == model.selected && workspace(of: tab).map { filesShown.contains(Self.key($0.project, $0.name)) } == true
             if shown { panel.open() } else { panel.close() }
         }
     }
@@ -156,10 +160,16 @@ package struct FilesShown {
 }
 
 extension WorkbenchView {
+    /// Whether the tree rows count their drawing for the drive: off in the app.
+    package static var filesMeasuring: Bool {
+        get { TreeRowCell.measuring }
+        set { TreeRowCell.measuring = newValue }
+    }
+
     package var filesOnScreen: FilesShown? {
         guard let tab = model.selectedTab, let panel = tabViews[tab.id]?.files, !panel.isHidden else { return nil }
         return FilesShown(
-            list: panel.list, scroll: panel.scroll, button: panel.line.button, words: panel.shownLine?.words, rows: panel.tree.rows, new: panel.shownNew,
+            list: panel.list, scroll: panel.scroll, button: panel.line.button, words: panel.shownLine?.words, rows: panel.tree.rows, new: Set(panel.shownNew.map(\.key)),
             listingHeard: panel.listingHeard, changeHeard: panel.changeHeard, openedAt: panel.openedAt, admittedAt: panel.admittedAt, lastDrawn: TreeRowCell.lastDrawn, newDrawn: TreeRowCell.newDrawn,
             draws: TreeRowCell.draws, namesBuilt: TreeRowCell.namesBuilt
         )

@@ -45,13 +45,13 @@ final class FilesPanel: NSView {
     /// The tree's revision as last shown, its rows, and the entries marked new among them.
     private var shownRevision: Int?
     private var shownRows: [FileTree.Row] = []
-    private(set) var shownNew: Set<String> = []
+    private(set) var shownNew: Set<FileName> = []
     /// How many times the rows were set: what a tick that changes nothing leaves alone.
     private(set) var rowSets = 0
     /// The chosen entry, by its path: the panel's own, never the list's row. Rows made again keep it
     /// chosen while it is listed; gone, the choice moves to its nearest folder still shown, else to
     /// the row now in its place.
-    private(set) var chosenPath: String?
+    private(set) var chosenPath: FileName?
     private var rebuilding = false
     package private(set) var shownLine: FilesLine?
     private var startRefusal: [String]?
@@ -79,9 +79,9 @@ final class FilesPanel: NSView {
         addSubview(line)
         list.returnKeyShown = false
         list.onKey = { [weak self] event in self?.key(event) ?? false }
-        list.onChoose = { [weak self] path in
+        list.onChoose = { [weak self] key in
             guard let self, !rebuilding else { return }
-            chosenPath = path
+            chosenPath = key.flatMap { key in shownRows.first { $0.path.key == key }?.path }
         }
         list.target = self
         list.doubleAction = #selector(doubleClicked(_:))
@@ -168,10 +168,10 @@ final class FilesPanel: NSView {
             send(tree.connected(at: now))
         case let .frame(frame):
             send(tree.receive(frame, at: now))
-            if frame.isWholeListing, let path = tree.lastListed { listingHeard = (path, CACurrentMediaTime()) }
+            if TreeRowCell.measuring, frame.isWholeListing, let path = tree.lastListed { listingHeard = (path.key, CACurrentMediaTime()) }
             if case let .filesChanged(paths) = frame {
                 let at = CACurrentMediaTime()
-                paths.forEach { changeHeard[$0] = at }
+                if TreeRowCell.measuring { paths.forEach { changeHeard[$0.key] = at } }
             }
         }
         refresh()
@@ -212,7 +212,7 @@ final class FilesPanel: NSView {
         rowSets += 1
         rebuilding = true
         let entries = rows.map { SailList.Entry.item(item($0, new: new.contains($0.path))) }
-        scroll.keepingScroll { if fresh { list.entries = entries } else { list.apply(entries, changed: changed) } }
+        scroll.keepingScroll { if fresh { list.entries = entries } else { list.apply(entries, changed: Set(changed.map(\.key))) } }
         rebuilding = false
         keepChoice(in: rows, place: place)
         needsLayout = true
@@ -222,7 +222,7 @@ final class FilesPanel: NSView {
     /// shown; else the row now at its old place `place`, never a note.
     private func keepChoice(in rows: [FileTree.Row], place: Int?) {
         guard let path = chosenPath else { return }
-        let target: String?
+        let target: FileName?
         if rows.contains(where: { $0.path == path }) {
             target = path
         } else if let folder = sequence(first: path, next: FileTree.parent).dropFirst().first(where: { folder in rows.contains { $0.path == folder } }) {
@@ -234,7 +234,7 @@ final class FilesPanel: NSView {
             target = nil
         }
         chosenPath = target
-        guard list.chosen != target else { return }
+        guard list.chosen != target?.key else { return }
         rebuilding = true
         if let target { list.selectRowIndexes(IndexSet(integer: rows.firstIndex { $0.path == target } ?? 0), byExtendingSelection: false) } else { list.deselectAll(nil) }
         rebuilding = false
@@ -262,7 +262,7 @@ final class FilesPanel: NSView {
         let width = Self.width - RowStyle.tree.margin * 2 - RowStyle.tree.leading - RowStyle.tree.trailing
         if row.kind == .note {
             let height = TreeRowCell.noteHeight(row.name, depth: row.depth, width: width)
-            return SailList.Item(id: row.path, name: "", voice: row.name, content: TreeRowCell(row, new: false, height: height, direction: direction, look: look), height: height, inert: true)
+            return SailList.Item(id: row.path.key, name: "", voice: row.name, content: TreeRowCell(row, new: false, height: height, direction: direction, look: look), height: height, inert: true)
         }
         let kind = switch row.kind {
         case .folder: row.expanded ? "folder, expanded" : "folder, collapsed"
@@ -271,22 +271,23 @@ final class FilesPanel: NSView {
         default: "file"
         }
         return SailList.Item(
-            id: row.path, name: row.name, voice: new ? "\(row.name), \(kind), new" : "\(row.name), \(kind)",
-            content: TreeRowCell(row, new: new, height: RowStyle.tree.height, direction: direction, look: look) { [weak self] in self?.toggle(row.path) }
+            id: row.path.key, name: row.name, voice: new ? "\(row.name), \(kind), new" : "\(row.name), \(kind)",
+            content: TreeRowCell(row, new: new, height: RowStyle.tree.height, direction: direction, look: look) { [weak self] in self?.toggle(row.path) },
+            outline: SailList.Outline(level: row.depth, expanded: row.kind == .folder ? row.expanded : nil)
         )
     }
 
     // MARK: What the person does
 
     /// Opens a shut folder or shuts an open one; a broken link says why under it.
-    func toggle(_ path: String) {
+    func toggle(_ path: FileName) {
         guard let row = tree.rows.first(where: { $0.path == path }) else { return }
         send(row.kind == .folder && row.expanded ? tree.collapse(path) : tree.open(path))
         refresh()
     }
 
     @objc private func doubleClicked(_: Any?) {
-        guard list.clickedRow >= 0, let path = list.chosen else { return }
+        guard list.clickedRow >= 0, let path = chosenPath else { return }
         toggle(path)
     }
 
@@ -294,7 +295,7 @@ final class FilesPanel: NSView {
     /// holding the row; Space opens or shuts a folder. Right to left the arrows swap, as the tree
     /// points.
     private func key(_ event: NSEvent) -> Bool {
-        guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty, let path = list.chosen,
+        guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty, let path = chosenPath,
               let index = shownRows.firstIndex(where: { $0.path == path }) else { return false }
         let row = shownRows[index], rightToLeft = userInterfaceLayoutDirection == .rightToLeft
         let inward: UInt16 = rightToLeft ? 123 : 124, outward: UInt16 = rightToLeft ? 124 : 123
@@ -304,14 +305,14 @@ final class FilesPanel: NSView {
             return true
         case inward where row.kind == .folder:
             if !row.expanded { toggle(path) } else if index + 1 < shownRows.count, shownRows[index + 1].depth > row.depth, shownRows[index + 1].kind != .note {
-                list.choose(shownRows[index + 1].path)
+                list.choose(shownRows[index + 1].path.key)
             }
             return true
         case outward:
             if row.kind == .folder, row.expanded {
                 toggle(path)
             } else if let parent = FileTree.parent(of: path), parent != FileTree.root {
-                list.choose(parent)
+                list.choose(parent.key)
             }
             return true
         case 49 where row.kind == .folder || row.kind == .brokenLink:
@@ -491,7 +492,7 @@ final class TreeRowCell: NSView {
         if let built, built.strong == strong { return built.text }
         let text = NSAttributedString(string: row.name, attributes: Self.attributes(strong: strong, ink: row.kind == .brokenLink ? look.textTertiary : look.text))
         built = (strong, text)
-        Self.namesBuilt += 1
+        if Self.measuring { Self.namesBuilt += 1 }
         return text
     }
 
@@ -499,6 +500,8 @@ final class TreeRowCell: NSView {
     /// Rows drawn and names built, in all: what the drive holds a scroll's drawing against.
     static private(set) var draws = 0
     static private(set) var namesBuilt = 0
+    /// Whether the probes above and below count: off in the app, on only while the drive measures.
+    package static var measuring = false
 
     /// The last row drawn, on the main thread's media clock: what the drive measures a listing or a
     /// change to its rows on the screen by.
@@ -509,9 +512,14 @@ final class TreeRowCell: NSView {
 
     override func draw(_: NSRect) {
         let now = CACurrentMediaTime()
-        Self.draws += 1
-        Self.lastDrawn = (now, row.path, new)
-        if new, Self.newDrawn[row.path] == nil { Self.newDrawn[row.path] = now }
+        if Self.measuring {
+            Self.draws += 1
+            Self.lastDrawn = (now, row.path.key, new)
+            if new, Self.newDrawn[row.path.key] == nil {
+                Self.newDrawn = Self.newDrawn.filter { now - $0.value <= FileTree.newFor }
+                Self.newDrawn[row.path.key] = now
+            }
+        }
         let rightToLeft = userInterfaceLayoutDirection == .rightToLeft, width = Double(bounds.width)
         let start = Double(row.depth) * RowStyle.indent + Self.slot + Self.gap
         if row.kind == .note {
@@ -591,21 +599,21 @@ final class FilesLineView: NSView {
     private(set) var shown: FilesLine?
     private var starting = false
     package let spinner: Spinner
-    package let button = NSButton(title: "", target: nil, action: nil)
+    /// The library's own button: Start the one primary action in view, Try Again quiet.
+    package let button: SailButton
 
     init(look: Look) {
         self.look = look
         spinner = Spinner(look: look)
+        button = SailButton("Try Again", kind: .quiet, size: .small, look: look, target: nil, action: nil)
         super.init(frame: .zero)
-        button.isBordered = false
-        button.setButtonType(.momentaryChange)
         button.target = self
         button.action = #selector(pressed(_:))
         addSubview(spinner)
         addSubview(button)
         isHidden = true
         setAccessibilityElement(true)
-        setAccessibilityRole(.staticText)
+        setAccessibilityRole(.group)
     }
 
     @available(*, unavailable)
@@ -630,8 +638,10 @@ final class FilesLineView: NSView {
         }
         button.isHidden = line?.action == nil
         button.isEnabled = !starting
-        let ink = line?.action == .start ? Tint(look.accent) : (line?.mark == .bad ? Tint(look.error) : look.text)
-        button.attributedTitle = NSAttributedString(string: title, attributes: [.font: NSFont.systemFont(ofSize: Self.points, weight: .semibold), .foregroundColor: NSColor(ink)])
+        button.look = look
+        let kind: ButtonKind = line?.action == .start ? .primary : .quiet
+        if button.kind != kind { button.kind = kind }
+        if button.title != title { button.title = title }
         setAccessibilityLabel(line?.words)
         needsLayout = true
         needsDisplay = true
@@ -661,13 +671,23 @@ final class FilesLineView: NSView {
     /// Its height in a panel `width` wide: its words wrapped, with their padding and the gap under it.
     func height(for width: Double) -> Double {
         let box = words.boundingRect(with: NSSize(width: wordsWidth(width), height: 1000), options: [.usesLineFragmentOrigin])
-        return Self.above + max(ceil(Double(box.height)), Self.points * 1.25) + Self.below + Look.hairline + Self.under
+        return Self.above + max(ceil(Double(box.height)) + wordsTop, firstRow) + Self.below + Look.hairline + Self.under
+    }
+
+    /// The first row's height: a line of words, or the button's, whichever is taller.
+    private var firstRow: Double {
+        max(Self.points * 1.25, button.isHidden ? 0 : Double(button.intrinsicContentSize.height))
+    }
+
+    /// How far the words start below the line's top padding: centred on the first row.
+    private var wordsTop: Double {
+        (firstRow - Self.points * 1.25) / 2
     }
 
     override func layout() {
         super.layout()
         let rightToLeft = userInterfaceLayoutDirection == .rightToLeft, width = Double(bounds.width)
-        let firstLine = Self.above + Self.points * 0.625
+        let firstLine = Self.above + firstRow / 2
         let start = Self.margin + Self.inset
         let side = Double(spinner.intrinsicContentSize.width)
         spinner.frame = NSRect(x: rightToLeft ? width - start - side : start, y: firstLine - side / 2, width: side, height: side)
@@ -679,7 +699,7 @@ final class FilesLineView: NSView {
         guard let shown else { return }
         let rightToLeft = userInterfaceLayoutDirection == .rightToLeft, width = Double(bounds.width)
         let start = Self.margin + Self.inset, mark = markWidth
-        let firstLine = Self.above + Self.points * 0.625
+        let firstLine = Self.above + firstRow / 2
         let tone: Tint? = switch shown.mark {
         case .waiting: Tint(look.info)
         case .bad: Tint(look.error)
@@ -692,7 +712,7 @@ final class FilesLineView: NSView {
         }
         let lead = mark > 0 ? mark + Self.gap : 0, room = wordsWidth(width)
         let x = rightToLeft ? width - start - lead - room : start + lead
-        words.draw(with: NSRect(x: x, y: Self.above, width: room, height: Double(bounds.height)), options: [.usesLineFragmentOrigin])
+        words.draw(with: NSRect(x: x, y: Self.above + wordsTop, width: room, height: Double(bounds.height)), options: [.usesLineFragmentOrigin])
         NSColor(look.separator).setFill()
         NSRect(x: Self.margin, y: Double(bounds.height) - Self.under - Look.hairline, width: width - 2 * Self.margin, height: Look.hairline).fill()
     }

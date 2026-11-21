@@ -1,5 +1,5 @@
 /// The files panel's one quiet line: said only when the tree is not the workspace's live truth, and
-/// gone once that no longer applies; of two at once, the more severe (stopped, then can't reach, then
+/// gone once that no longer applies; "Reconnecting." only while the connection truly is; of two at once, the more severe (stopped, then can't reach, then
 /// not live, then listing). Nothing is said for the first 300 ms of a listing, so a fast one never
 /// flashes. A reason the workspace gave is said as given (a stop's own record), never one guessed.
 public struct FilesLine: Equatable, Sendable {
@@ -47,7 +47,7 @@ public struct FilesLine: Equatable, Sendable {
         var moments: [Double] = []
         if let cue = tree.nextCueEnd(after: now) { moments.append(cue) }
         switch phase {
-        case .stopped, .gone, .refused, .unreachable:
+        case .stopped, .gone, .refused, .unreachable, .limited:
             return moments.min()
         case .connecting, .connected, .reconnecting:
             break
@@ -67,13 +67,16 @@ public struct FilesLine: Equatable, Sendable {
         let shown = tree.rootKnown
         switch phase {
         case let .stopped(record):
-            self.init(words: record.isEmpty ? "\(workspace) is stopped." : record, mark: .quiet, action: .start)
+            self.init(words: record.isEmpty ? "\(workspace) is stopped." : record, mark: .quiet, action: .start, dims: true)
             return
         case let .gone(message):
-            self.init(words: message, mark: .bad)
+            self.init(words: message, mark: .bad, dims: true)
             return
         case let .refused(lines):
-            self.init(words: lines.joined(separator: " "), mark: .bad)
+            self.init(words: lines.joined(separator: " "), mark: .bad, dims: true)
+            return
+        case let .limited(message):
+            self.init(words: message, mark: .bad, action: .tryAgain, dims: shown)
             return
         case .unreachable:
             self.init(words: "Can't reach the files.", mark: .bad, action: .tryAgain, dims: shown)
@@ -93,7 +96,8 @@ public struct FilesLine: Equatable, Sendable {
                 mark: .working
             )
         } else if !tree.isLive(at: now) {
-            self.init(words: "Not live since \(time(tree.heard ?? tree.opened)). Reconnecting.", mark: .waiting, dims: true)
+            let trying = phase == .connecting || { if case .reconnecting = phase { true } else { false } }()
+            self.init(words: "Not live since \(time(tree.heard ?? tree.opened)).\(trying ? " Reconnecting." : "")", mark: .waiting, dims: true)
         } else if tree.folders[FileTree.root]?.entries.isEmpty == true {
             self.init(words: "\(FileTree.rootName) is empty.", mark: .none)
         } else if !tree.followsAll {

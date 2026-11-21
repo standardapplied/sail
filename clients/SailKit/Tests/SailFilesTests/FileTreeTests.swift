@@ -3,6 +3,11 @@ import Foundation
 import SailTerminalWire
 import Testing
 
+/// A path under folder `folder`, as the tests spell one: `root + "/src"`.
+func + (folder: FileName, rest: String) -> FileName {
+    FileName(folder.bytes + Array(rest.utf8))
+}
+
 /// The tree of a workspace's files: lazy folders, each a fresh listing replacing the one held; the
 /// watch set is what is shown, at the versions held; a reconnect sends it again and lists every shown
 /// folder again; a tree with no tick for 2 s is not live.
@@ -10,19 +15,19 @@ import Testing
     static let root = FileTree.root
 
     static func file(_ name: String) -> FileEntry {
-        FileEntry(name: name, kind: .known(.file), target: .known(.none), size: 1, mtimeNanos: 0, mode: 0o644)
+        FileEntry(name: FileName(name), kind: .known(.file), target: .known(.none), size: 1, mtimeNanos: 0, mode: 0o644)
     }
 
     static func folder(_ name: String) -> FileEntry {
-        FileEntry(name: name, kind: .known(.folder), target: .known(.none), size: 0, mtimeNanos: 0, mode: 0o755)
+        FileEntry(name: FileName(name), kind: .known(.folder), target: .known(.none), size: 0, mtimeNanos: 0, mode: 0o755)
     }
 
     static func link(_ name: String, to target: FileKind) -> FileEntry {
-        FileEntry(name: name, kind: .known(.link), target: .known(target), size: 0, mtimeNanos: 0, mode: 0o777)
+        FileEntry(name: FileName(name), kind: .known(.link), target: .known(target), size: 0, mtimeNanos: 0, mode: 0o777)
     }
 
     /// The id of the listing `frames` ask for `path`.
-    static func id(listing path: String, in frames: [Frame]) -> Int32? {
+    static func id(listing path: FileName, in frames: [Frame]) -> Int32? {
         frames.lazy.compactMap { frame -> Int32? in
             guard case let .filesList(id, listed) = frame, listed == path else { return nil }
             return id
@@ -198,6 +203,90 @@ import Testing
         let src = try Self.listed([Self.folder("src")])
         var opened = src
         #expect(Self.id(listing: Self.root + "/src", in: opened.open(Self.root + "/src")) != nil, "opening a folder did not expand it")
+    }
+
+    /// Two listings of one folder out at once (collapsed and opened again): only the latest is
+    /// taken, whichever answers last, and the older one marks nothing new.
+    @Test func onlyAFoldersLatestListingIsTaken() throws {
+        var tree = try Self.listed([Self.folder("src")])
+        let src = Self.root + "/src"
+        let older = try #require(Self.id(listing: src, in: tree.expand(src)))
+        _ = tree.collapse(src)
+        let newer = try #require(Self.id(listing: src, in: tree.expand(src)))
+        _ = tree.receive(.filesListing(FileListing(id: newer, version: "s2", entries: [Self.file("new.ts")], more: false, truncated: false)), at: 1)
+        _ = tree.receive(.filesListing(FileListing(id: older, version: "s1", entries: [Self.file("old.ts")], more: false, truncated: false)), at: 2)
+        #expect(tree.folders[src]?.version == "s2" && tree.rows.map(\.name) == ["src", "new.ts"], "the older listing replaced the newer: \(tree.rows.map(\.name))")
+        #expect(!tree.isNew(src + "/old.ts", at: 2) && !tree.isNew(src + "/new.ts", at: 2), "a stale or first listing marked an entry new")
+    }
+
+    /// A refusal that answers after its folder was shut is not kept: opened again, the folder waits
+    /// for its own new answer.
+    @Test func aRefusalForAShutFolderIsIgnored() throws {
+        var tree = try Self.listed([Self.folder("build")])
+        let build = Self.root + "/build"
+        let id = try #require(Self.id(listing: build, in: tree.expand(build)))
+        _ = tree.collapse(build)
+        _ = tree.receive(.filesRefused(id: id, kind: .known(.notPermitted), message: "The workspace's user may not open build."), at: 1)
+        #expect(tree.refusals[build] == nil, "a refusal for a shut folder was kept")
+        _ = tree.expand(build)
+        #expect(!tree.rows.contains { $0.kind == .note }, "the old refusal shows under the folder opened again")
+    }
+
+    /// A folder refused after it was listed drops the folders expanded under it, and their watch.
+    @Test func aRefusedFolderDropsWhatWasExpandedUnderIt() throws {
+        var tree = try Self.listed([Self.folder("src")])
+        let src = Self.root + "/src", deep = src + "/deep"
+        let id = try #require(Self.id(listing: src, in: tree.expand(src)))
+        _ = tree.receive(.filesListing(FileListing(id: id, version: "s1", entries: [Self.folder("deep")], more: false, truncated: false)), at: 0)
+        let deepID = try #require(Self.id(listing: deep, in: tree.expand(deep)))
+        _ = tree.receive(.filesListing(FileListing(id: deepID, version: "d1", entries: [], more: false, truncated: false)), at: 0)
+        let again = try #require(Self.id(listing: src, in: tree.receive(.filesChanged(paths: [src]), at: 1)))
+        let after = tree.receive(.filesRefused(id: again, kind: .known(.notPermitted), message: "The workspace's user may not open src."), at: 1)
+        #expect(!tree.expanded.contains(deep) && tree.folders[deep] == nil, "a folder under the refused one is still expanded")
+        #expect(Self.watched(after)?.contains { $0.path == deep } != true, "a folder under the refused one is still watched")
+    }
+
+    /// Admitted, the tree is live at once, before any tick.
+    @Test func admittedTheTreeIsLiveBeforeAnyTick() throws {
+        var tree = FileTree()
+        _ = tree.connected(at: 50)
+        #expect(tree.isLive(at: 50.5), "not live at admission")
+    }
+
+    /// The watch set goes once for a batch of listings, after the last of them, not with each.
+    @Test func theWatchSetIsSentOnceForABatch() throws {
+        var tree = try Self.listed((0 ..< 40).map { Self.folder("d\($0)") })
+        for index in 0 ..< 40 {
+            let path = Self.root + "/d\(index)"
+            let id = try #require(Self.id(listing: path, in: tree.expand(path)))
+            _ = tree.receive(.filesListing(FileListing(id: id, version: "v\(index)", entries: [], more: false, truncated: false)), at: 0)
+        }
+        tree.disconnected()
+        let reconnect = tree.connected(at: 1)
+        var watches = reconnect.filter { if case .filesWatch = $0 { true } else { false } }.count
+        for frame in reconnect {
+            guard case let .filesList(id, path) = frame else { continue }
+            let answered = tree.receive(.filesListing(FileListing(id: id, version: "r-" + path.shown, entries: path == Self.root ? (0 ..< 40).map { Self.folder("d\($0)") } : [], more: false, truncated: false)), at: 1)
+            watches += answered.filter { if case .filesWatch = $0 { true } else { false } }.count
+        }
+        #expect(watches == 2, "\(watches) watch frames for a reconnect of 41 folders: one at admission, one after the batch")
+    }
+
+    /// Two folder names that are not UTF-8 and read alike ("a\u{FFFD}") are two rows, two paths and
+    /// two keys: one opens, the other stays shut, each listed and watched by its own bytes.
+    @Test func lookAlikeNamesAreKeptApartByTheirBytes() throws {
+        func folder(_ bytes: [UInt8]) -> FileEntry {
+            FileEntry(name: FileName(bytes), kind: .known(.folder), target: .known(.none), size: 0, mtimeNanos: 0, mode: 0o755)
+        }
+        var tree = try Self.listed([folder([0x61, 0xFF]), folder([0x61, 0xFE])])
+        #expect(tree.rows.count == 2 && tree.rows[0].name == tree.rows[1].name && tree.rows[0].path != tree.rows[1].path, "\(tree.rows)")
+        #expect(tree.rows[0].path.key != tree.rows[1].path.key && tree.rows[0].name == "a\u{FFFD}")
+        let first = tree.rows[0].path
+        let id = try #require(Self.id(listing: first, in: tree.expand(first)))
+        let watched = tree.receive(.filesListing(FileListing(id: id, version: "x1", entries: [Self.file("inside")], more: false, truncated: false)), at: 0)
+        #expect(tree.expanded.contains(first) && !tree.expanded.contains(tree.rows.last?.path ?? first), "opening one look-alike opened the other")
+        #expect(tree.rows.map(\.name) == ["a\u{FFFD}", "inside", "a\u{FFFD}"] && Self.watched(watched)?.contains { $0.path == first } == true)
+        #expect(first.key.hasPrefix("\u{0}") && Self.root.appending("plain").key == "/home/dev/workspace/plain", "a key is not the path for UTF-8 names, hex after a NUL for others")
     }
 
     @Test func nothingIsSentWhileNoConnectionIsAdmitted() throws {

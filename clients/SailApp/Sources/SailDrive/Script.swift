@@ -287,6 +287,11 @@ struct Step: Decodable {
     var filesRows: Int?
     /// The files panel's line says words starting with this ("" no line), within `seconds`.
     var filesSays: String?
+    /// With `filesSays`: the line's words do not end with this.
+    var filesSaysNot: String?
+    /// The files connection is closed and admitted again within `seconds` of the step's start (10 by
+    /// default).
+    var filesReconnects: Bool?
     /// The entry of this name is marked new, within `seconds`.
     var filesNew: String?
     /// The files panel's row of this name clicked as a person clicks it.

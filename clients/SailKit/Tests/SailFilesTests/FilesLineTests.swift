@@ -38,15 +38,16 @@ import Testing
     @Test func aTreeNotLiveSaysSinceWhenAndIsDimmed() throws {
         var tree = try Self.listed([FileTreeTests.file("a.txt")], at: 100)
         let quiet = try #require(Self.line(tree, .connected, at: 102.5))
-        #expect(quiet == FilesLine(words: "Not live since 100s. Reconnecting.", mark: .waiting, dims: true), "\(quiet)")
+        #expect(quiet == FilesLine(words: "Not live since 100s.", mark: .waiting, dims: true), "M1: said reconnecting while still connected: \(quiet)")
         tree.disconnected()
         #expect(Self.line(tree, .reconnecting("the network is down"), at: 103)?.words == "Not live since 100s. Reconnecting.")
+        #expect(Self.line(tree, .connecting, at: 103)?.words == "Not live since 100s. Reconnecting.")
     }
 
     @Test func unreachableOffersTryAgainAndStoppedOffersStartAsThePersonsOwnAct() throws {
         let tree = try Self.listed([])
         #expect(Self.line(tree, .unreachable("refused"), at: 1) == FilesLine(words: "Can't reach the files.", mark: .bad, action: .tryAgain, dims: true))
-        #expect(Self.line(FileTree(), .stopped("dock is stopped."), at: 1) == FilesLine(words: "dock is stopped.", mark: .quiet, action: .start))
+        #expect(Self.line(FileTree(), .stopped("dock is stopped."), at: 1) == FilesLine(words: "dock is stopped.", mark: .quiet, action: .start, dims: true))
         #expect(Self.line(tree, .stopped("Workspace dock of harbor was stopped by ana."), at: 1)?.words == "Workspace dock of harbor was stopped by ana.", "M35: not the stop's own record")
         #expect(Self.line(FileTree(), .stopped(""), at: 1)?.words == "dock is stopped.")
     }
@@ -97,12 +98,19 @@ import Testing
         #expect(tree.revision != listed, "an expand did not move it")
     }
 
+    /// One connection over a cap says so in the words given, with Try Again, the tree dimmed.
+    @Test func overACapItSaysSoWithTryAgain() throws {
+        let tree = try Self.listed([FileTreeTests.file("a.txt")])
+        #expect(Self.line(tree, .limited("You have 16 files connections open; close one to open another."), at: 1)
+            == FilesLine(words: "You have 16 files connections open; close one to open another.", mark: .bad, action: .tryAgain, dims: true))
+    }
+
     @Test func anEmptyWorkspaceSaysSo() throws {
         #expect(Self.line(try Self.listed([]), .connected, at: 0) == FilesLine(words: "~/workspace is empty.", mark: .none))
     }
 
     @Test func goneRefusedAndARefusedRootAreSaidInTheirOwnWords() throws {
-        #expect(Self.line(FileTree(), .gone("Workspace dock of harbor no longer exists."), at: 0) == FilesLine(words: "Workspace dock of harbor no longer exists.", mark: .bad))
+        #expect(Self.line(FileTree(), .gone("Workspace dock of harbor no longer exists."), at: 0) == FilesLine(words: "Workspace dock of harbor no longer exists.", mark: .bad, dims: true))
         #expect(Self.line(FileTree(), .refused(["You may not read dock.", "Ask its owner."]), at: 0)?.words == "You may not read dock. Ask its owner.")
         var tree = FileTree()
         let id = try #require(FileTreeTests.id(listing: Self.root, in: tree.connected(at: 0)))

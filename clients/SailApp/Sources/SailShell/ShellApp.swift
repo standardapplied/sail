@@ -149,11 +149,15 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     public func windowShouldClose(_: NSWindow) -> Bool {
         window.orderOut(nil)
+        thisMac.connectFiles(away: true)
         return false
     }
 
     public func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows visible: Bool) -> Bool {
-        if !visible { window.makeKeyAndOrderFront(nil) }
+        if !visible {
+            window.makeKeyAndOrderFront(nil)
+            thisMac.connectFiles(away: false)
+        }
         return true
     }
 
@@ -172,6 +176,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         account.isHidden = item != .account
         rail.show(item)
         paintChrome()
+        thisMac.connectFiles()
         UserDefaults.standard.set(item.rawValue, forKey: Self.paneKey)
         switch item {
         case .thisMac:
@@ -283,6 +288,15 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     public func windowDidExitFullScreen(_: Notification) {
         placeTheStrip()
+    }
+
+    /// A workspace's files are followed only while on screen: not from the Dock, nor once closing.
+    public func windowDidMiniaturize(_: Notification) {
+        thisMac.connectFiles(away: true)
+    }
+
+    public func windowDidDeminiaturize(_: Notification) {
+        thisMac.connectFiles(away: false)
     }
 
     public func windowDidResize(_: Notification) {

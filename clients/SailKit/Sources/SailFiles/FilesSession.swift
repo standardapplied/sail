@@ -28,8 +28,12 @@ public final class FilesSession: Sendable {
         case stopped(String)
         /// The workspace is gone.
         case gone(String)
-        /// Refused for good (who may read it, a sign-in), in lines a person reads.
+        /// Refused for good (who may read it, a sign-in, the workspace gone to another), in lines a
+        /// person reads.
         case refused([String])
+        /// Refused as one connection more than the workspace's or the person's cap, in the host's or
+        /// the API's words; ``reconnectNow()`` asks again.
+        case limited(String)
     }
 
     public enum Event: Sendable {
@@ -43,6 +47,10 @@ public final class FilesSession: Sendable {
     public static let timeout = 10
     /// The name of the thread that reads the host's frames.
     public static let readerName = "sh.standardapplied.sail.files.reader"
+    /// How long an admitted connection may go without a frame (the watch ticks each second) before it
+    /// is closed and tried again: a half-open link, a slept laptop's, recovers in seconds, not at
+    /// keepalive's 45.
+    public static let quiet = Duration.seconds(4)
 
     public let project: String
     public let workspace: String
@@ -51,6 +59,7 @@ public final class FilesSession: Sendable {
     private let door: Door
     private let waits: ReconnectWaits
     private let timeout: Int
+    private let quiet: Duration
     private let alarm: Alarm
     private let sink: AsyncStream<Event>.Continuation
     private let state = Mutex(State())
@@ -66,13 +75,15 @@ public final class FilesSession: Sendable {
     }
 
     package init(
-        project: String, workspace: String, door: Door, waits: ReconnectWaits, timeout: Int, sleep: @escaping @Sendable (Duration) async throws -> Void
+        project: String, workspace: String, door: Door, waits: ReconnectWaits, timeout: Int, quiet: Duration = FilesSession.quiet,
+        sleep: @escaping @Sendable (Duration) async throws -> Void
     ) {
         self.project = project
         self.workspace = workspace
         self.door = door
         self.waits = waits
         self.timeout = timeout
+        self.quiet = quiet
         alarm = Alarm(sleep: sleep)
         (events, sink) = AsyncStream.makeStream(of: Event.self, bufferingPolicy: .unbounded)
     }
@@ -189,7 +200,8 @@ public final class FilesSession: Sendable {
             entry = try await door.entry(for: .files(project: project, workspace: workspace))
         } catch let .ticketRefused(refusal) {
             if refusal.code == .known(.workspaceStopped) { return .finished(.stopped(refusal.message)) }
-            if refusal.code == .known(.terminalUnavailable) || refusal.code == .known(.rateLimited) { return .failed(refusal.message) }
+            if refusal.code == .known(.rateLimited) { return .finished(.limited(refusal.message)) }
+            if refusal.code == .known(.terminalUnavailable) { return .failed(refusal.message) }
             return .finished(.refused(refusal.lines))
         } catch let .signIn(needed) {
             return .finished(.refused(needed.lines))
@@ -228,7 +240,16 @@ public final class FilesSession: Sendable {
         let admitted = ContinuousClock.now
         sink.yield(.phase(.connected))
         sink.yield(.admitted)
+        let lastFrame = Mutex(admitted)
+        let watchdog = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "sh.standardapplied.sail.files.quiet"))
+        let check = Double(quiet.components.seconds) + Double(quiet.components.attoseconds) / 1e18
+        watchdog.schedule(deadline: .now() + check / 4, repeating: check / 4)
+        watchdog.setEventHandler { [quiet] in
+            if ContinuousClock.now - lastFrame.withLock({ $0 }) > quiet { connection.close() }
+        }
+        watchdog.resume()
         defer {
+            watchdog.cancel()
             state.withLock { if $0.connection === connection { $0.connection = nil } }
             connection.close()
         }
@@ -241,6 +262,7 @@ public final class FilesSession: Sendable {
                 return .dropped(error.description, attachedFor: ContinuousClock.now - admitted)
             }
             guard let frame else { return .dropped(TerminalError.closed.description, attachedFor: ContinuousClock.now - admitted) }
+            lastFrame.withLock { $0 = ContinuousClock.now }
             if case let .refused(refusal) = frame {
                 return Self.ending(refusal) ?? .dropped(refusal.message, attachedFor: ContinuousClock.now - admitted)
             }
@@ -260,11 +282,15 @@ public final class FilesSession: Sendable {
         }
     }
 
-    /// A host's refusal that ends the connection for good: the workspace stopped or gone.
+    /// A host's ending that is final until the person asks: the workspace stopped or gone, given to
+    /// another (a sweep's `forbidden`), or one connection over its cap. Any other, a handover's
+    /// `terminal_unavailable` among them, is a drop, tried again.
     private static func ending(_ refusal: HostRefusal) -> Outcome? {
         switch refusal.code {
         case ErrorCode.workspaceStopped.rawValue: .finished(.stopped(refusal.message))
         case ErrorCode.notFound.rawValue: .finished(.gone(refusal.message))
+        case ErrorCode.forbidden.rawValue: .finished(.refused([refusal.message]))
+        case ErrorCode.rateLimited.rawValue: .finished(.limited(refusal.message))
         default: nil
         }
     }

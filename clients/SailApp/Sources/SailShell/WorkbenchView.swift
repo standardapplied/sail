@@ -30,6 +30,8 @@ public final class WorkbenchView: NSView {
     var onSignIn: @MainActor () -> Void = {}
     /// A runner tab in a workspace attached or went, so what counts its sessions counts again.
     var onRunnerTabs: @MainActor (_ project: String, _ name: String) -> Void = { _, _ in }
+    /// The window is closed or in the Dock: no workspace's files are followed.
+    var filesAway = false
     /// Starts a workspace for its files panel's Start, answering nil once started or what refused it.
     var startWorkspace: @MainActor (_ project: String, _ name: String) async -> [String]? = { _, _ in ["No one is signed in."] }
 

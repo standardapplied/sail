@@ -16,14 +16,14 @@ import Testing
 /// runner's door, the one quiet line only when the tree is not the workspace's live truth, and
 /// nothing redrawn by a tick that changes nothing.
 @MainActor @Suite struct FilesPanelTests {
-    static let root = FileTree.root
+    static let root = FileTree.root.shown
 
     static func file(_ name: String) -> FileEntry {
-        FileEntry(name: name, kind: .known(.file), target: .known(.none), size: 1, mtimeNanos: 0, mode: 0o644)
+        FileEntry(name: FileName(name), kind: .known(.file), target: .known(.none), size: 1, mtimeNanos: 0, mode: 0o644)
     }
 
     static func folder(_ name: String) -> FileEntry {
-        FileEntry(name: name, kind: .known(.folder), target: .known(.none), size: 0, mtimeNanos: 0, mode: 0o755)
+        FileEntry(name: FileName(name), kind: .known(.folder), target: .known(.none), size: 0, mtimeNanos: 0, mode: 0o755)
     }
 
     static func key(_ code: UInt16) throws -> NSEvent {
@@ -48,6 +48,7 @@ import Testing
         let bench = shell.thisMac
         let tickets = DoorTickets(door)
         bench.signedIn = { ("uday", tickets) }
+        bench.isHidden = false
         let id = bench.model.newTab(session: "uday-dock-1", place: .workspace(project: "harbor", name: "dock"))
         bench.makeView(try #require(bench.model.panes[id]), start: .attach, points: 15)
         bench.setFrameSize(NSSize(width: width, height: 600))
@@ -130,12 +131,12 @@ import Testing
         #expect(panel.tree.rows.map(\.name) == ["src", "README.md"])
         let src = Self.root + "/src"
         panel.list.choose(src)
-        panel.toggle(src)
+        panel.toggle(FileName(src))
         #expect(await RunnerTabTests.until(10) { panel.list.numberOfRows == 3 }, "src's refusal never came: \(panel.tree.rows.map(\.name))")
         #expect(panel.list.chosen == src, "opening the chosen folder lost the choice: \(panel.list.chosen ?? "nothing")")
         panel.look = .dark
         #expect(panel.list.chosen == src, "a change of look lost the choice")
-        panel.toggle(src)
+        panel.toggle(FileName(src))
         #expect(panel.list.chosen == src && panel.list.numberOfRows == 2, "shutting the chosen folder lost the choice")
         door.setFolder(Self.root, [Self.file("README.md"), Self.folder("src"), Self.file("tide.ts")])
         #expect(await RunnerTabTests.until(10) { panel.list.numberOfRows == 3 }, "the new entry never came")
@@ -151,7 +152,6 @@ import Testing
     @Test func theTreeKeepsItsKeysWhenTheTerminalsChange() throws {
         let door = try FakeRunnerDoor(person: "uday")
         let (shell, bench) = try Self.shell(door)
-        bench.isHidden = false
         bench.toggleFiles(nil)
         let panel = try #require(Self.panel(bench))
         #expect(shell.window.firstResponder === panel.list, "⌃⌘S did not give the tree the keys")
@@ -159,6 +159,96 @@ import Testing
         #expect(shell.window.firstResponder === panel.list, "drawing the workbench again took the keys from the tree")
         bench.toggleFiles(nil)
         #expect(shell.window.firstResponder === bench.focused?.terminal, "put away, the panel left the keys nowhere")
+    }
+
+    /// The connection and its watch end whenever the files are not on screen (the panel put away,
+    /// another section shown, the window closed or in the Dock, the tab closed) and come back when
+    /// they are.
+    @Test func theConnectionLastsOnlyWhileTheFilesAreOnScreen() async throws {
+        let door = try FakeRunnerDoor(person: "uday")
+        door.setFolder(Self.root, [Self.file("README.md")])
+        let (shell, bench) = try Self.shell(door)
+        func connected(_ count: Int, _ when: String) async {
+            #expect(await RunnerTabTests.until(10) { door.filesConnections == count }, "\(when): \(door.filesConnections) files connections, not \(count)")
+        }
+        bench.toggleFiles(nil)
+        await connected(1, "shown")
+        bench.toggleFiles(nil)
+        await connected(0, "the panel put away")
+        bench.toggleFiles(nil)
+        await connected(1, "shown again")
+        bench.isHidden = true
+        bench.connectFiles()
+        await connected(0, "another section shown")
+        bench.isHidden = false
+        bench.connectFiles()
+        await connected(1, "this Mac's section back")
+        _ = shell.windowShouldClose(shell.window)
+        await connected(0, "the window closed")
+        _ = shell.applicationShouldHandleReopen(NSApplication.shared, hasVisibleWindows: false)
+        await connected(1, "the window open again")
+        shell.windowDidMiniaturize(Notification(name: NSWindow.didMiniaturizeNotification))
+        await connected(0, "the window in the Dock")
+        shell.windowDidDeminiaturize(Notification(name: NSWindow.didDeminiaturizeNotification))
+        await connected(1, "the window back from the Dock")
+        let tab = try #require(bench.model.selectedTab)
+        _ = bench.model.closeTab(tab.id)
+        bench.apply()
+        await connected(0, "the tab closed")
+    }
+
+    /// VoiceOver hears a tree: the list an outline, each row an outline row at its depth, a folder
+    /// open or shut.
+    @Test func voiceOverHearsATree() throws {
+        let panel = try Self.played([Self.folder("src"), Self.file("README.md")])
+        panel.toggle(FileName(Self.root + "/src"))
+        panel.heard(.frame(.filesListing(FileListing(id: 2, version: "s1", entries: [Self.file("main.ts")], more: false, truncated: false))))
+        panel.layoutSubtreeIfNeeded()
+        #expect(panel.list.accessibilityRole() == .outline)
+        let rows = try (0 ..< 3).map { try #require(panel.list.rowView(atRow: $0, makeIfNecessary: true)) }
+        #expect(rows.map { $0.accessibilitySubrole() } == [.outlineRow, .outlineRow, .outlineRow])
+        #expect(rows.map { $0.accessibilityDisclosureLevel() } == [0, 1, 0], "\(rows.map { $0.accessibilityDisclosureLevel() })")
+        #expect(rows[0].isAccessibilityExpanded() && !rows[2].isAccessibilityExpanded() && rows[0].accessibilityLabel() == "src, folder, expanded")
+    }
+
+    /// The line's action is the library's button in every state that has one: no system button, no
+    /// tint, at most the one accent fill (Start), no grey; framed and taking a click in the turn it
+    /// shows; nothing out of reach in the panel at its width.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func theLinesButtonIsTheLibrarysAndCalm(_ name: String, _ look: Look) throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: FilesPanel.width, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.orderOut(nil) }
+        for (state, phase) in [("unreachable", FilesSession.Phase.unreachable("refused")), ("stopped", .stopped("Workspace dock of harbor was stopped by ana.")),
+                               ("limited", .limited("You have 16 files connections open; close one to open another."))] {
+            let panel = try Self.played([Self.folder("src"), Self.file("a-very-long-name-that-must-be-cut-in-the-panel-at-its-width.txt")], look: look)
+            window.contentView = panel
+            window.orderFront(nil)
+            panel.heard(.phase(phase))
+            panel.layoutSubtreeIfNeeded()
+            let system = WorkspacesViewTests.found(NSButton.self, in: panel).filter { !($0 is SailButton) && !($0 is LinkButton) && !$0.isHiddenOrHasHiddenAncestor }
+            #expect(system.isEmpty && !panel.line.button.isHidden, "\(name) \(state): \(system.map(\.title))")
+            let count = CalmTests.Count(marks(in: panel))
+            #expect(count.tint == 0 && count.fill <= 1 && count.neutral == 0, "\(name) \(state): \(count)")
+            #expect((state == "stopped") == (count.fill == 1), "\(name) \(state): Start is the one accent fill, nothing else is: \(count)")
+            #expect(WorkspacesReachTests.missesAClick(panel.line.button) == nil, "\(name) \(state): \(WorkspacesReachTests.missesAClick(panel.line.button) ?? "")")
+            let out = WorkspacesReachTests.outOfReach(in: panel)
+            #expect(out.isEmpty, "\(name) \(state): \(out)")
+        }
+    }
+
+    /// Two names that are not UTF-8 and read alike are two rows: one chosen and opened, the other
+    /// kept apart, each by its bytes.
+    @Test func lookAlikeNamesAreTwoRows() throws {
+        func folder(_ bytes: [UInt8]) -> FileEntry {
+            FileEntry(name: FileName(bytes), kind: .known(.folder), target: .known(.none), size: 0, mtimeNanos: 0, mode: 0o755)
+        }
+        let panel = try Self.played([folder([0x61, 0xFF]), folder([0x61, 0xFE])])
+        #expect(panel.list.numberOfRows == 2)
+        let paths = panel.tree.rows.map(\.path)
+        panel.list.choose(paths[1].key)
+        #expect(panel.chosenPath == paths[1] && panel.chosenPath != paths[0], "the choice went to the look-alike")
+        panel.list.keyDown(with: try Self.key(124))
+        #expect(panel.tree.expanded.contains(paths[1]) && !panel.tree.expanded.contains(paths[0]), "→ opened the look-alike")
     }
 
     static func treeCell(_ view: NSView) -> TreeRowCell? {
@@ -183,7 +273,7 @@ import Testing
         let panel = try Self.played([Self.folder("src"), Self.file("README.md")])
         panel.list.choose(Self.root + "/src")
         panel.list.keyDown(with: try Self.key(124))
-        #expect(panel.tree.expanded.contains(Self.root + "/src"), "→ did not open the folder")
+        #expect(panel.tree.expanded.contains(FileName(Self.root + "/src")), "→ did not open the folder")
         panel.heard(.frame(.filesListing(FileListing(id: 2, version: "s1", entries: [Self.file("main.ts")], more: false, truncated: false))))
         #expect(panel.list.numberOfRows == 3)
         panel.list.keyDown(with: try Self.key(124))
@@ -191,9 +281,9 @@ import Testing
         panel.list.keyDown(with: try Self.key(123))
         #expect(panel.list.chosen == Self.root + "/src", "← did not go to the folder holding the row")
         panel.list.keyDown(with: try Self.key(123))
-        #expect(!panel.tree.expanded.contains(Self.root + "/src") && panel.list.numberOfRows == 2, "← did not shut the folder")
+        #expect(!panel.tree.expanded.contains(FileName(Self.root + "/src")) && panel.list.numberOfRows == 2, "← did not shut the folder")
         panel.list.keyDown(with: try Self.key(49))
-        #expect(panel.tree.expanded.contains(Self.root + "/src"), "Space did not open the folder")
+        #expect(panel.tree.expanded.contains(FileName(Self.root + "/src")), "Space did not open the folder")
     }
 
     /// The choice is the panel's, by path, through the real list: rows made again by an expand or a
@@ -203,16 +293,16 @@ import Testing
         let panel = try Self.played([Self.folder("src"), Self.file("a.txt"), Self.file("b.txt")])
         let src = Self.root + "/src", main = src + "/main.ts"
         panel.list.choose(src)
-        panel.toggle(src)
+        panel.toggle(FileName(src))
         panel.heard(.frame(.filesListing(FileListing(id: 2, version: "s1", entries: [Self.file("main.ts"), Self.file("tide.ts")], more: false, truncated: false))))
-        #expect(panel.list.chosen == src && panel.chosenPath == src, "the expand's rows lost the choice")
+        #expect(panel.list.chosen == src && panel.chosenPath == FileName(src), "the expand's rows lost the choice")
         panel.list.choose(main)
-        #expect(panel.chosenPath == main, "the person's choice was not taken")
-        panel.heard(.frame(.filesChanged(paths: [src])))
+        #expect(panel.chosenPath == FileName(main), "the person's choice was not taken")
+        panel.heard(.frame(.filesChanged(paths: [FileName(src)])))
         panel.heard(.frame(.filesListing(FileListing(id: 3, version: "s2", entries: [Self.file("tide.ts")], more: false, truncated: false))))
         #expect(panel.list.chosen == src, "main.ts gone, the choice did not move to its folder: \(panel.list.chosen ?? "nothing")")
         panel.list.choose(Self.root + "/a.txt")
-        panel.heard(.frame(.filesChanged(paths: [Self.root])))
+        panel.heard(.frame(.filesChanged(paths: [FileName(Self.root)])))
         panel.heard(.frame(.filesListing(FileListing(id: 4, version: "v2", entries: [Self.folder("src"), Self.file("b.txt")], more: false, truncated: false))))
         #expect(panel.list.chosen == Self.root + "/b.txt", "a.txt gone with no folder shown, the choice did not move to the row in its place: \(panel.list.chosen ?? "nothing")")
     }
@@ -268,7 +358,7 @@ import Testing
         for direction in [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft] {
             let panel = try Self.played([Self.folder("build"), Self.file("a.txt")])
             panel.userInterfaceLayoutDirection = direction
-            panel.toggle(Self.root + "/build")
+            panel.toggle(FileName(Self.root + "/build"))
             panel.heard(.frame(.filesRefused(id: 2, kind: .known(.notPermitted), message: "The workspace's user may not open build.")))
             panel.layoutSubtreeIfNeeded()
             let note = try #require(panel.list.view(atColumn: 0, row: 1, makeIfNecessary: true).flatMap(Self.treeCell))
@@ -281,7 +371,7 @@ import Testing
 
     @Test func theRowsAreTheMockups() throws {
         let panel = try Self.played([Self.folder("src"), Self.file("README.md")])
-        panel.toggle(Self.root + "/src")
+        panel.toggle(FileName(Self.root + "/src"))
         panel.heard(.frame(.filesListing(FileListing(id: 2, version: "s1", entries: [Self.file("main.ts")], more: false, truncated: false))))
         panel.layoutSubtreeIfNeeded()
         #expect((0 ..< panel.list.numberOfRows).allSatisfy { near(Double(panel.list.rect(ofRow: $0).height), 24) })

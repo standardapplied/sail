@@ -71,8 +71,8 @@ public final class FakeRunnerDoor: Sendable {
     /// A files ticket's workspace, played: its folders by path, each with its entries and version, and
     /// what each files connection watches.
     private struct Files {
-        var folders: [String: Folder] = [:]
-        var refusals: [String: (kind: FileRefusal, message: String)] = [:]
+        var folders: [FileName: Folder] = [:]
+        var refusals: [FileName: (kind: FileRefusal, message: String)] = [:]
         var versions = 0
         var watched: [Int32: [WatchedPath]] = [:]
         var holding = false
@@ -80,6 +80,7 @@ public final class FakeRunnerDoor: Sendable {
         var ticking = true
         var listed: [String] = []
         var connections: [Int32] = []
+        var admitted = 0
     }
 
     struct Folder {
@@ -163,28 +164,28 @@ public final class FakeRunnerDoor: Sendable {
     public func setFolder(_ path: String, _ entries: [FileEntry], truncated: Bool = false) {
         files.withLock { files in
             files.versions += 1
-            files.folders[path] = Folder(entries: entries, version: "v\(files.versions)", truncated: truncated)
-            files.refusals[path] = nil
-            tellWatchers(of: path, in: files)
+            files.folders[FileName(path)] = Folder(entries: entries, version: "v\(files.versions)", truncated: truncated)
+            files.refusals[FileName(path)] = nil
+            tellWatchers(of: FileName(path), in: files)
         }
     }
 
     /// Folder `path` is gone: a listing of it is refused as not found, and its watchers are told.
     public func removeFolder(_ path: String) {
         files.withLock { files in
-            files.folders[path] = nil
-            tellWatchers(of: path, in: files)
+            files.folders[FileName(path)] = nil
+            tellWatchers(of: FileName(path), in: files)
         }
     }
 
     /// Under the files lock, as a socket leaves the list by.
-    private func tellWatchers(of path: String, in files: Files) {
+    private func tellWatchers(of path: FileName, in files: Files) {
         files.watched.filter { $0.value.contains { $0.path == path } }.forEach { answer(.filesChanged(paths: [path]), on: $0.key) }
     }
 
     /// A listing of folder `path` is refused, in `message`.
     public func refuseFolder(_ path: String, _ kind: FileRefusal, saying message: String) {
-        files.withLock { $0.refusals[path] = (kind, message) }
+        files.withLock { $0.refusals[FileName(path)] = (kind, message) }
     }
 
     /// From now on a listing waits, unanswered, until ``releaseListings()``.
@@ -216,6 +217,16 @@ public final class FakeRunnerDoor: Sendable {
         files.withLock { $0.listed }
     }
 
+    /// How many files connections were admitted in all.
+    public var filesAdmitted: Int {
+        files.withLock { $0.admitted }
+    }
+
+    /// How many files connections are open now.
+    public var filesConnections: Int {
+        files.withLock { $0.connections.count }
+    }
+
     /// What each live files connection watches.
     public var watched: [[WatchedPath]] {
         files.withLock { Array($0.watched.values) }
@@ -242,7 +253,10 @@ public final class FakeRunnerDoor: Sendable {
     /// It is a files connection (``dropFiles()`` reaches it) before its welcome, so a test that acts
     /// on the admission finds it.
     private func filesServed(_ connection: Int32, _ ticket: TicketRequest) {
-        files.withLock { $0.connections.append(connection) }
+        files.withLock { files in
+            files.connections.append(connection)
+            files.admitted += 1
+        }
         answer(.welcome(hostBootID: "door-1"), on: connection)
         let ticks = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "files.ticks"))
         ticks.schedule(deadline: .now() + 1, repeating: 1)
@@ -267,7 +281,7 @@ public final class FakeRunnerDoor: Sendable {
             switch frame {
             case let .filesList(id, path):
                 let wait = files.withLock { files -> DispatchSemaphore? in
-                    files.listed.append(path)
+                    files.listed.append(path.shown)
                     guard files.holding else { return nil }
                     let semaphore = DispatchSemaphore(value: 0)
                     files.held.append(semaphore)
@@ -287,7 +301,7 @@ public final class FakeRunnerDoor: Sendable {
                     answer(.filesRefused(id: id, kind: .known(.notFound), message: "No folder at \(path)."), on: connection)
                 }
             case let .filesWatch(paths):
-                let stale = files.withLock { files -> [String] in
+                let stale = files.withLock { files -> [FileName] in
                     files.watched[connection] = paths
                     return paths.filter { files.folders[$0.path]?.version != $0.version && !$0.version.isEmpty }.map(\.path)
                 }

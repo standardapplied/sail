@@ -15,7 +15,7 @@ import SailTerminalWire
 /// them, so the whole of it is tested on its own.
 public struct FileTree: Sendable {
     /// The folder the tree shows: the workspace's own, under its home.
-    public static let root = "/home/dev/workspace"
+    public static let root: FileName = "/home/dev/workspace"
     /// How the root is named on screen.
     public static let rootName = "~/workspace"
     /// How long the tree may hear no tick and still say it is live.
@@ -50,38 +50,42 @@ public struct FileTree: Sendable {
             case note
         }
 
-        /// Its path, which is also its id: a note's is its folder's with a suffix.
-        public let path: String
+        /// Its path, which is also its id, as bytes: a note's is its folder's with a suffix no file
+        /// name can hold.
+        public let path: FileName
+        /// Its name as a person reads it.
         public let name: String
         public let depth: Int
         public let kind: Kind
         public let expanded: Bool
     }
 
-    public private(set) var folders: [String: Folder] = [:]
-    public private(set) var expanded: Set<String> = [Self.root]
+    public private(set) var folders: [FileName: Folder] = [:]
+    public private(set) var expanded: Set<FileName> = [Self.root]
     /// The folders expanded, the oldest expansion first: which the watch follows past its cap.
-    private var recency: [String] = []
-    public private(set) var refusals: [String: String] = [:]
+    private var recency: [FileName] = []
+    public private(set) var refusals: [FileName: String] = [:]
     /// When each entry that appeared in a folder already shown was first listed.
-    private var appeared: [String: Double] = [:]
+    private var appeared: [FileName: Double] = [:]
     /// Broken links opened: each says why under it.
-    private var explained: Set<String> = []
+    private var explained: Set<FileName> = []
     /// Moves whenever the rows may have changed, and only then: what a redraw is skipped by.
     public private(set) var revision = 0
     /// The folder the last whole listing was of.
-    public private(set) var lastListed: String?
+    public private(set) var lastListed: FileName?
     /// Whether a connection is admitted now.
     public private(set) var connected = false
     /// When the last tick, or the last listing, was heard, in the caller's seconds.
     public private(set) var heard: Double?
     private var pending: [Int32: Pending] = [:]
     /// Folders listed again while a listing of them is under way: listed once more after it.
-    private var again: Set<String> = []
+    private var again: Set<FileName> = []
+    /// Each folder's latest listing asked: an older one answering after it is not taken.
+    private var latest: [FileName: Int32] = [:]
     private var nextID: Int32 = 1
 
     private struct Pending {
-        let path: String
+        let path: FileName
         var entries: [FileEntry] = []
     }
 
@@ -102,13 +106,13 @@ public struct FileTree: Sendable {
 
     /// Whether entry `path` appeared through the watch within ``newFor`` of `now`: an entry of a
     /// folder's first listing never did.
-    public func isNew(_ path: String, at now: Double) -> Bool {
+    public func isNew(_ path: FileName, at now: Double) -> Bool {
         guard let since = appeared[path] else { return false }
         return now - since <= Self.newFor
     }
 
     /// The entries marked new at `now`.
-    public func newPaths(at now: Double) -> Set<String> {
+    public func newPaths(at now: Double) -> Set<FileName> {
         Set(appeared.filter { now - $0.value <= Self.newFor }.keys)
     }
 
@@ -131,7 +135,7 @@ public struct FileTree: Sendable {
     /// one at the version its listing came at.
     public var watchSet: [WatchedPath] {
         let followed = [Self.root] + recency.suffix(Self.watchCap - 1)
-        return followed.sorted().compactMap { path in folders[path].map { WatchedPath(path: path, version: $0.version) } }
+        return followed.sorted { $0.bytes.lexicographicallyPrecedes($1.bytes) }.compactMap { path in folders[path].map { WatchedPath(path: path, version: $0.version) } }
     }
 
     /// A connection was admitted: the watch set is sent again and every expanded folder listed again.
@@ -140,7 +144,7 @@ public struct FileTree: Sendable {
         heard = now
         pending = [:]
         again = []
-        return [.filesWatch(watchSet)] + expanded.sorted().map { list($0) }
+        return [.filesWatch(watchSet)] + expanded.sorted { $0.bytes.lexicographicallyPrecedes($1.bytes) }.map { list($0) }
     }
 
     /// The connection ended: what is held stays, and is not live.
@@ -151,7 +155,7 @@ public struct FileTree: Sendable {
     }
 
     /// Expands folder `path`: listed when it is not held, and watched.
-    public mutating func expand(_ path: String) -> [Frame] {
+    public mutating func expand(_ path: FileName) -> [Frame] {
         guard !expanded.contains(path) else { return [] }
         expanded.insert(path)
         recency.append(path)
@@ -162,7 +166,7 @@ public struct FileTree: Sendable {
 
     /// Opens the row at `path` as the person does: a folder expands; a broken link says why under it;
     /// a file, or a pipe, socket or device, opens nothing here.
-    public mutating func open(_ path: String) -> [Frame] {
+    public mutating func open(_ path: FileName) -> [Frame] {
         guard let row = rows.first(where: { $0.path == path }) else { return [] }
         switch row.kind {
         case .folder: return expand(path)
@@ -175,7 +179,7 @@ public struct FileTree: Sendable {
     }
 
     /// Collapses folder `path`: it, and every folder expanded under it, is dropped and no longer watched.
-    public mutating func collapse(_ path: String) -> [Frame] {
+    public mutating func collapse(_ path: FileName) -> [Frame] {
         guard path != Self.root, expanded.contains(path) else { return [] }
         drop(path)
         return connected ? [.filesWatch(watchSet)] : []
@@ -205,18 +209,21 @@ public struct FileTree: Sendable {
             }
             pending[listing.id] = nil
             heard = now
+            guard latest[held.path] == listing.id else { return batchDone() }
             lastListed = held.path
             return took(Folder(entries: Self.sorted(held.entries), version: listing.version, truncated: listing.truncated), for: held.path, at: now)
-        case let .filesRefused(id, _, message):
+        case let .filesRefused(id, kind, message):
             guard let held = pending.removeValue(forKey: id) else { return [] }
             heard = now
+            guard latest[held.path] == id, expanded.contains(held.path) else { return batchDone() }
+            if kind == .known(.changed) { return [list(held.path)] }
             refusals[held.path] = message
             folders[held.path] = nil
             revision += 1
-            for path in expanded where path.hasPrefix(held.path + "/") {
+            for path in expanded where path.isUnder(held.path) {
                 drop(path)
             }
-            return relisted(held.path) + [.filesWatch(watchSet)]
+            return relisted(held.path) + batchDone()
         default:
             return []
         }
@@ -227,26 +234,26 @@ public struct FileTree: Sendable {
     /// (``FilesLine``), not a row.
     public var rows: [Row] {
         var rows: [Row] = []
-        func add(_ path: String, depth: Int) {
+        func add(_ path: FileName, depth: Int) {
             if let refusal = refusals[path] {
                 guard path != Self.root else { return }
-                rows.append(Row(path: path + "\u{0}note", name: refusal, depth: depth, kind: .note, expanded: false))
+                rows.append(Row(path: path.noted("note"), name: refusal, depth: depth, kind: .note, expanded: false))
                 return
             }
             guard let folder = folders[path] else { return }
             for entry in folder.entries {
-                let child = path + "/" + entry.name
+                let child = path.appending(entry.name)
                 let kind = Self.kind(of: entry)
                 let open = kind == .folder && expanded.contains(child)
-                rows.append(Row(path: child, name: entry.name, depth: depth, kind: kind, expanded: open))
+                rows.append(Row(path: child, name: entry.name.shown, depth: depth, kind: kind, expanded: open))
                 if open { add(child, depth: depth + 1) }
                 if kind == .brokenLink, explained.contains(child) {
                     let why = entry.target == .known(.loop) ? "This link leads back to itself." : "This link leads nowhere."
-                    rows.append(Row(path: child + "\u{0}why", name: why, depth: depth + 1, kind: .note, expanded: false))
+                    rows.append(Row(path: child.noted("why"), name: why, depth: depth + 1, kind: .note, expanded: false))
                 }
             }
             if folder.truncated {
-                rows.append(Row(path: path + "\u{0}more", name: Self.truncatedNote(folder.entries.count), depth: depth, kind: .note, expanded: false))
+                rows.append(Row(path: path.noted("more"), name: Self.truncatedNote(folder.entries.count), depth: depth, kind: .note, expanded: false))
             }
         }
         add(Self.root, depth: 0)
@@ -254,40 +261,46 @@ public struct FileTree: Sendable {
     }
 
     /// The folder holding `path`, nil for the root.
-    public static func parent(of path: String) -> String? {
-        guard path != root, let slash = path.lastIndex(of: "/") else { return nil }
-        return String(path[..<slash])
+    public static func parent(of path: FileName) -> FileName? {
+        guard path != root, let slash = path.bytes.lastIndex(of: 0x2F) else { return nil }
+        return FileName(Array(path.bytes[..<slash]))
     }
 
-    private mutating func took(_ folder: Folder, for path: String, at now: Double) -> [Frame] {
+    private mutating func took(_ folder: Folder, for path: FileName, at now: Double) -> [Frame] {
         guard expanded.contains(path) else { return relisted(path) }
         appeared = appeared.filter { now - $0.value <= Self.newFor }
         if let shown = folders[path] {
             let had = Set(shown.entries.map(\.name))
             for entry in folder.entries where !had.contains(entry.name) {
-                appeared[path + "/" + entry.name] = now
+                appeared[path.appending(entry.name)] = now
             }
         }
         folders[path] = folder
         refusals[path] = nil
         revision += 1
-        let shown = Set(folder.entries.filter { Self.kind(of: $0) == .folder }.map { path + "/" + $0.name })
+        let shown = Set(folder.entries.filter { Self.kind(of: $0) == .folder }.map { path.appending($0.name) })
         for child in expanded where Self.parent(of: child) == path && !shown.contains(child) {
             drop(child)
         }
-        return relisted(path) + [.filesWatch(watchSet)]
+        return relisted(path) + batchDone()
+    }
+
+    /// The watch set, once the last listing of a batch has answered: a reconnect of many folders sends
+    /// it once, not with each.
+    private func batchDone() -> [Frame] {
+        pending.isEmpty ? [.filesWatch(watchSet)] : []
     }
 
     /// A folder changed while it was being listed is listed once more.
-    private mutating func relisted(_ path: String) -> [Frame] {
+    private mutating func relisted(_ path: FileName) -> [Frame] {
         guard again.remove(path) != nil, expanded.contains(path), connected else { return [] }
         return [list(path)]
     }
 
-    private mutating func drop(_ path: String) {
+    private mutating func drop(_ path: FileName) {
         revision += 1
-        recency.removeAll { $0 == path || $0.hasPrefix(path + "/") }
-        for child in expanded where child == path || child.hasPrefix(path + "/") {
+        recency.removeAll { $0 == path || $0.isUnder(path) }
+        for child in expanded where child == path || child.isUnder(path) {
             expanded.remove(child)
             folders[child] = nil
             refusals[child] = nil
@@ -295,10 +308,11 @@ public struct FileTree: Sendable {
         }
     }
 
-    private mutating func list(_ path: String) -> Frame {
+    private mutating func list(_ path: FileName) -> Frame {
         let id = nextID
         nextID += 1
         pending[id] = Pending(path: path)
+        latest[path] = id
         return .filesList(id: id, path: path)
     }
 
@@ -325,7 +339,32 @@ public struct FileTree: Sendable {
         entries.sorted { one, other in
             let oneFolder = kind(of: one) == .folder, otherFolder = kind(of: other) == .folder
             if oneFolder != otherFolder { return oneFolder }
-            return one.name.localizedStandardCompare(other.name) == .orderedAscending
+            let order = one.name.shown.localizedStandardCompare(other.name.shown)
+            return order == .orderedSame ? one.name.bytes.lexicographicallyPrecedes(other.name.bytes) : order == .orderedAscending
         }
+    }
+}
+
+extension FileName {
+    /// The path of entry `name` in this folder.
+    public func appending(_ name: FileName) -> FileName {
+        FileName(bytes + [0x2F] + name.bytes)
+    }
+
+    /// Whether this path lies somewhere under folder `folder`.
+    public func isUnder(_ folder: FileName) -> Bool {
+        bytes.count > folder.bytes.count + 1 && bytes.starts(with: folder.bytes + [0x2F])
+    }
+
+    /// A row's path with a suffix no file name can hold (a NUL), for the words shown under it.
+    func noted(_ what: String) -> FileName {
+        FileName(bytes + [0] + Array(what.utf8))
+    }
+
+    /// The one string that names this path in a list and nowhere else: the path itself while it is
+    /// UTF-8, else its bytes in hex after a NUL, which no UTF-8 path holds; so two names that read
+    /// alike are never one row.
+    public var key: String {
+        String(validating: bytes, as: UTF8.self) ?? "\u{0}" + bytes.map { String(format: "%02x", $0) }.joined()
     }
 }

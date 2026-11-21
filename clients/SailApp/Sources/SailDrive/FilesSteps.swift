@@ -13,13 +13,13 @@ import SailTerminalWire
 /// or drops its files connections as a step says. Keys and clicks are a person's: ⌃⌘S and the
 /// arrows by `press`, rows and the line's button by a click sent through the app.
 extension Driver {
-    static let filesRoot = FileTree.root
+    static let filesRoot = FileTree.root.shown
 
     /// An entry as a step spells it: a trailing "/" a folder.
     nonisolated static func fileEntry(_ spelled: String) -> FileEntry {
         let folder = spelled.hasSuffix("/")
         return FileEntry(
-            name: folder ? String(spelled.dropLast()) : spelled, kind: .known(folder ? .folder : .file), target: .known(.none), size: folder ? 0 : 1,
+            name: FileName(folder ? String(spelled.dropLast()) : spelled), kind: .known(folder ? .folder : .file), target: .known(.none), size: folder ? 0 : 1,
             mtimeNanos: 0, mode: folder ? 0o755 : 0o644
         )
     }
@@ -50,9 +50,10 @@ extension Driver {
     }
 
     func performFiles(_ step: Step) async -> (Bool, String)? {
+        WorkbenchView.filesMeasuring = true
         let asks = [step.filesFolder, step.filesRefuse, step.filesNew, step.filesClick, step.filesDoubleClick, step.filesChosen, step.filesButton, step.filesShot].contains { $0 != nil }
             || step.filesRows != nil || step.filesSays != nil || step.filesHold != nil || step.filesTicks != nil || step.filesEnd != nil
-            || step.filesDrop != nil || step.filesBudgets != nil || step.filesFlood != nil
+            || step.filesDrop != nil || step.filesBudgets != nil || step.filesReconnects != nil || step.filesFlood != nil
         guard asks else { return nil }
         guard let door = GoldenDesk.door else { return (false, "the drive's runner door could not listen") }
         if let folder = step.filesFolder {
@@ -69,9 +70,15 @@ extension Driver {
             let keys = shell.window.firstResponder.map { "\(type(of: $0))" } ?? "nothing"
             return (found, "the panel shows \(filesShown.map { "\($0.list.numberOfRows) rows: \($0.rows.prefix(12).map(\.name))" } ?? "nothing"); its line: \(filesShown?.words ?? "none"); chosen \(filesShown?.list.chosen ?? "nothing"); the keys with \(keys)")
         }
+        if step.filesReconnects == true {
+            let before = door.filesAdmitted
+            let again = await waitForState(step.seconds ?? 10) { door.filesAdmitted > before }
+            return (again, "files connections admitted \(before) then \(door.filesAdmitted)")
+        }
         if let words = step.filesSays {
             let found = await waitForState(step.seconds ?? 10) {
                 guard let shown = self.filesShown else { return false }
+                if let not = step.filesSaysNot, shown.words?.hasSuffix(not) == true { return false }
                 return words.isEmpty ? shown.words == nil : shown.words?.hasPrefix(words) == true
             }
             return (found, "the line says \(filesShown?.words ?? "nothing")")
@@ -81,7 +88,7 @@ extension Driver {
             return (found, "marked new: \(filesShown?.new.sorted() ?? [])")
         }
         if let name = step.filesClick {
-            guard let shown = filesShown, let id = shown.rows.first(where: { $0.name == name && $0.kind != .note })?.path else { return (false, "no row \(name)") }
+            guard let shown = filesShown, let id = shown.rows.first(where: { $0.name == name && $0.kind != .note })?.path.key else { return (false, "no row \(name)") }
             guard await clickName(id, in: shown) else { return (false, "the click on \(name) was not sent") }
             let chosen = await waitForState(5) { self.filesShown?.list.chosen == id }
             return (chosen, "chosen: \(filesShown?.list.chosen ?? "nothing")")
@@ -97,7 +104,7 @@ extension Driver {
         if let name = step.filesDoubleClick {
             guard let shown = filesShown, let row = shown.rows.first(where: { $0.name == name && $0.kind != .note }) else { return (false, "no row \(name)") }
             let open = row.expanded
-            guard await clickName(row.path, in: shown, twice: true) else { return (false, "the double-click on \(name) was not sent") }
+            guard await clickName(row.path.key, in: shown, twice: true) else { return (false, "the double-click on \(name) was not sent") }
             let toggled = await waitForState(5) { self.filesShown?.rows.first { $0.path == row.path }?.expanded == !open }
             return (toggled, "\(name) \(filesShown?.rows.first { $0.path == row.path }?.expanded == true ? "open" : "shut") after a double-click on its name")
         }
@@ -186,7 +193,7 @@ extension Driver {
     private func clickName(_ path: String, in shown: FilesShown, twice: Bool = false) async -> Bool {
         let list = shown.list
         list.layoutSubtreeIfNeeded()
-        guard let index = shown.rows.firstIndex(where: { $0.path == path }) else { return false }
+        guard let index = shown.rows.firstIndex(where: { $0.path.key == path }) else { return false }
         let rect = list.rect(ofRow: index), depth = Double(shown.rows[index].depth)
         let name = RowStyle.tree.margin + RowStyle.tree.leading + depth * RowStyle.indent + 12 + 4 + 8
         let point = NSPoint(x: Double(rect.minX) + name, y: Double(rect.midY))

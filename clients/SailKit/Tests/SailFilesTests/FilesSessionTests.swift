@@ -104,7 +104,7 @@ import Testing
 
     @Test func admittedItHandsOnTheListingsAndTicks() async throws {
         let door = try FakeRunnerDoor()
-        door.setFolder(FileTree.root, [FileTreeTests.file("README.md")])
+        door.setFolder(FileTree.root.shown, [FileTreeTests.file("README.md")])
         let desk = Desk(door)
         let session = Self.session(desk)
         let heard = Heard(session)
@@ -123,7 +123,7 @@ import Testing
     /// reader: the tree is handed one whole listing in the order it shows.
     @Test func aListingIsHandedOnWholeAndSorted() async throws {
         let door = try FakeRunnerDoor()
-        door.setFolder(FileTree.root, (0 ..< 12_000).reversed().map { FileTreeTests.file("f\($0)") } + [FileTreeTests.folder("src")])
+        door.setFolder(FileTree.root.shown, (0 ..< 12_000).reversed().map { FileTreeTests.file("f\($0)") } + [FileTreeTests.folder("src")])
         let session = Self.session(Desk(door))
         let heard = Heard(session)
         session.start()
@@ -134,6 +134,43 @@ import Testing
         let listings = heard.frames.compactMap { if case let .filesListing(listing) = $0 { listing } else { nil } }
         #expect(listings.count == 1 && listings[0].more == false && listings[0].entries.count == 12_001, "\(listings.map { ($0.entries.count, $0.more) })")
         #expect(listings.first?.entries.prefix(3).map(\.name) == ["src", "f0", "f1"], "not in the order the tree shows")
+    }
+
+    /// M1: a live connection whose watch falls silent is closed after its quiet limit, and the shared
+    /// loop truly reconnects; until then, and after, nothing says it is reconnecting that is not.
+    @Test func aSilentConnectionIsClosedAndReconnects() async throws {
+        let door = try FakeRunnerDoor()
+        let desk = Desk(door)
+        let session = FilesSession(project: "harbor", workspace: "dock", door: .runner(desk), waits: Self.waits, timeout: 5, quiet: .milliseconds(1500)) { _ in try Task.checkCancellation() }
+        let heard = Heard(session)
+        session.start()
+        defer { session.close() }
+        #expect(await heard.until { heard.admissions == 1 })
+        #expect(await heard.until { heard.frames.count { $0 == .filesTick } >= 3 } && heard.admissions == 1, "a ticking connection was closed")
+        door.tick(false)
+        #expect(await heard.until { heard.admissions == 2 }, "the silent connection was never closed and reconnected: \(heard.phases)")
+        #expect(desk.requests.count == 2 && heard.phases.contains { if case .reconnecting = $0 { true } else { false } })
+    }
+
+    /// #510's endings: a sweep that finds the workspace given to another ends it in its words; one
+    /// connection over a cap is said with Try Again and not tried on its own; a handover's
+    /// `terminal_unavailable` is a drop, tried again at once.
+    @Test func eachEndingIsSaidOrTriedAsItDeserves() async throws {
+        let door = try FakeRunnerDoor()
+        let desk = Desk(door)
+        let session = Self.session(desk)
+        let heard = Heard(session)
+        session.start()
+        defer { session.close() }
+        #expect(await heard.until { heard.admissions == 1 })
+        door.endFiles(saying: "The runner's terminal host is restarting, which ends this connection to dock's files; connect again.", code: "terminal_unavailable")
+        #expect(await heard.until { heard.admissions == 2 }, "a handover was not tried again: \(heard.phases)")
+        door.endFiles(saying: "Workspace dock of harbor is now ana's.", code: "forbidden")
+        #expect(await heard.until { heard.phases.last == .refused(["Workspace dock of harbor is now ana's."]) }, "\(heard.phases)")
+        desk.refuse(Self.refusal(.rateLimited, "You have 16 files connections open; close one to open another."))
+        session.reconnectNow()
+        #expect(await heard.until { heard.phases.last == .limited("You have 16 files connections open; close one to open another.") }, "\(heard.phases)")
+        #expect(desk.requests.count == 3, "a capped connection was asked for again on its own: \(desk.requests.count)")
     }
 
     @Test func aStopEndsItInTheHostsWordsAndNothingTriesAgain() async throws {

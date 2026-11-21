@@ -60,10 +60,12 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         public let accessory: NSView?
         /// Words among the rows that cannot be chosen (a folder's refusal in a tree): the keys pass it.
         public let inert: Bool
+        /// Its place in a tree, as VoiceOver hears an outline's row: how deep, and open or shut.
+        public let outline: Outline?
 
         public init(
             id: String, name: String, voice: String, content: @autoclosure @escaping @MainActor () -> NSView, actions: [Action] = [], note: String? = nil, height: Double? = nil,
-            paint: RowPaint? = nil, full: Bool = false, accessory: NSView? = nil, inert: Bool = false
+            paint: RowPaint? = nil, full: Bool = false, accessory: NSView? = nil, inert: Bool = false, outline: Outline? = nil
         ) {
             self.id = id
             self.name = name
@@ -76,6 +78,18 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             self.full = full
             self.accessory = accessory
             self.inert = inert
+            self.outline = outline
+        }
+    }
+
+    /// A tree row's depth (0 at the top) and whether it is an open folder, a shut one, or no folder.
+    public struct Outline: Equatable {
+        public let level: Int
+        public let expanded: Bool?
+
+        public init(level: Int, expanded: Bool?) {
+            self.level = level
+            self.expanded = expanded
         }
     }
 
@@ -242,6 +256,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         gridStyleMask = []
         dataSource = self
         delegate = self
+        if rowStyle == .tree { setAccessibilityRole(.outline) }
     }
 
     @available(*, unavailable)
@@ -406,6 +421,12 @@ final class SailRowView: NSTableRowView {
             self.line = line
         }
         setAccessibilityLabel(item.voice)
+        if let outline = item.outline {
+            setAccessibilitySubrole(.outlineRow)
+            setAccessibilityDisclosureLevel(outline.level)
+            setAccessibilityDisclosed(outline.expanded ?? false)
+            setAccessibilityExpanded(outline.expanded ?? false)
+        }
         setAccessibilityCustomActions(item.actions.map { action in
             let run = Run(action)
             return NSAccessibilityCustomAction(name: action.title) {
