@@ -273,6 +273,19 @@ import Testing
         #expect(await RunnerTabTests.until(10) { pane.noteWords == "tide.ts was deleted on the workspace while you typed." }, "a refusal's words hid a newer word on the file: \(pane.noteWords ?? "nothing")")
     }
 
+    /// The newest word wins the line, whichever way: a save's refusal after the file's own note
+    /// replaces the note, as a newer note replaces a refusal.
+    @Test func aSavesRefusalAfterTheFilesNoteReplacesIt() async throws {
+        let (door, _, _, _, pane) = try await Self.opened(Array("one\n".utf8))
+        #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
+        pane.editor.insertText("x", replacementRange: NSRange(location: 0, length: 0))
+        door.setFile(Self.path, Array("theirs\n".utf8))
+        #expect(await RunnerTabTests.until(10) { pane.noteWords == "Changed on the workspace while you typed." })
+        door.refuseNextSave(.noSpace, saying: "dock's disk is full (12 KB free). Nothing was changed.")
+        pane.saveDocument(nil)
+        #expect(await RunnerTabTests.until(10) { pane.noteWords == "dock's disk is full (12 KB free). Nothing was changed." }, "the refusal did not replace the note: \(pane.noteWords ?? "nothing")")
+    }
+
     /// M14a: a file that is not text is one sentence and Copy Path.
     @Test func aFileThatIsNotTextIsASentence() async throws {
         let (_, _, _, _, pane) = try await Self.opened([0x89, 0x50, 0x4E, 0x47, 0, 1, 2, 3])

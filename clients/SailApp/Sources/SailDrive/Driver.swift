@@ -212,7 +212,38 @@ final class Driver {
         }
     }
 
+    static func words(in view: NSView?) -> [String] {
+        guard let view else { return [] }
+        return ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap { words(in: $0) }
+    }
+
+    /// What a step may do while a sheet an earlier step opened is up over the window: answer it,
+    /// read it, shoot it, set what the control plane answers under it, or press the keys and menus
+    /// that answer it. Any other step begun under a sheet fails at once, saying which is up, rather
+    /// than every step after failing under it.
+    static let underASheet: Set<String> = [
+        "confirm", "sheet", "asking", "sheetShows", "answeredWhileSheetShows", "sheetClick", "fileSheet", "fileSheetUp", "fileCompare", "fileSave",
+        "filesShot", "shot", "shotScreen", "deletesAsked", "questionsWaiting", "releaseAnswers", "relistAs", "golden", "proxyFails",
+        "press", "modifiers", "menuItem", "contextMenu", "choose", "arrangement", "at", "fontPoints", "items", "seconds", "name",
+    ]
+
+    /// The step's keys that are set.
+    static func keys(of step: Step) -> Set<String> {
+        Set(Mirror(reflecting: step).children.compactMap { child in
+            guard let label = child.label else { return nil }
+            let value = Mirror(reflecting: child.value)
+            return value.displayStyle == .optional && value.children.isEmpty ? nil : label
+        })
+    }
+
     private func perform(_ step: Step, name: String) async -> (Bool, String) {
+        if let sheet = shell.window.attachedSheet {
+            let stray = Self.keys(of: step).subtracting(Self.underASheet)
+            if !stray.isEmpty {
+                let words = Self.words(in: sheet.contentView).joined(separator: " ")
+                return (false, "a sheet no step answered is up over the window, saying \"\(words)\": this step (\(stray.sorted().joined(separator: ", "))) does not answer it")
+            }
+        }
         if let account = await performAccount(step) {
             return account
         }
