@@ -226,7 +226,21 @@ public final class PtySessionHost implements AutoCloseable {
 
   /** A files connection to workspace {@code workspace} of {@code project}, on {@code channel}. */
   private record Served(
-      String project, String workspace, SocketChannel channel, FilesConnection connection) {}
+      String project,
+      String workspace,
+      PtyIdentity.Person who,
+      SocketChannel channel,
+      FilesConnection connection) {}
+
+  /** The most files connections one workspace holds, every person's together. */
+  static final int FILES_PER_WORKSPACE = 8;
+
+  /** The most files connections one person holds, every workspace's together. */
+  static final int FILES_PER_PERSON = 16;
+
+  /** Whether a pass asking each files connection's workspace again is under way. */
+  private final java.util.concurrent.atomic.AtomicBoolean rechecking =
+      new java.util.concurrent.atomic.AtomicBoolean();
 
   /** How long a files connection being ended may take to hear why before it is closed anyway. */
   static final Duration TOLD = Duration.ofSeconds(5);
@@ -738,7 +752,14 @@ public final class PtySessionHost implements AutoCloseable {
     Consumer<PtyMessage> replies = msg -> reply(channel, msg);
     var me = new Admitted(channel, admission.credential(), who);
     admitted.add(me);
-    var files = filesOf(channel, admission);
+    Served files;
+    try {
+      files = filesOf(channel, admission);
+    } catch (FilesFull full) {
+      admitted.remove(me);
+      reply(channel, new PtyMessage.Err(full.getMessage(), Remedy.NONE, "rate_limited"));
+      return;
+    }
     try {
       try {
         reply(channel, new PtyMessage.Welcome(bootId));
@@ -1031,6 +1052,13 @@ public final class PtySessionHost implements AutoCloseable {
         };
     if (refused != null) {
       return refused.ticketAnswer(target);
+    }
+    var crowded =
+        request.action() == PtyMessage.TicketAction.FILES
+            ? filesFull(target, request.workspace(), who)
+            : null;
+    if (crowded != null) {
+      return new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.LIMITED, crowded);
     }
     try {
       return new PtyMessage.Ticket(
@@ -1775,11 +1803,44 @@ public final class PtySessionHost implements AutoCloseable {
       new PtyMessage.Err(
           "Files are read on a connection a files ticket admitted, and this is not one.");
 
+  /** A files connection refused as one more than its workspace or its person holds. */
+  private static final class FilesFull extends Exception {
+    FilesFull(String why) {
+      super(why, null, false, false);
+    }
+  }
+
+  /**
+   * Why workspace {@code workspace} of {@code project} takes no more files connections of {@code
+   * who}: it holds {@link #FILES_PER_WORKSPACE}, or they hold {@link #FILES_PER_PERSON}; null when
+   * it does. Asked at a files ticket and again as one is presented, the count and the connection it
+   * admits one step.
+   */
+  private String filesFull(String project, String workspace, PtyIdentity.Person who) {
+    var here =
+        served.stream()
+            .filter(s -> s.project().equals(project) && s.workspace().equals(workspace))
+            .count();
+    if (here >= FILES_PER_WORKSPACE) {
+      return workspace
+          + " has "
+          + here
+          + " files connections open, the most a workspace holds; close one, then ask again.";
+    }
+    var theirs = served.stream().filter(s -> s.who().fde().equals(who.fde())).count();
+    return theirs >= FILES_PER_PERSON
+        ? who.fde()
+            + " has "
+            + theirs
+            + " files connections open, the most a person holds; close one, then ask again."
+        : null;
+  }
+
   /**
    * The files connection a files ticket admits on {@code channel}, kept among those {@link
-   * #yieldWorkspace} ends; null for any other connection.
+   * #yieldWorkspace} ends and every sweep asks again; null for any other connection.
    */
-  private Served filesOf(SocketChannel channel, Admission admission) {
+  private Served filesOf(SocketChannel channel, Admission admission) throws FilesFull {
     if (!(admission.bound() instanceof PtyTickets.Ticket ticket
         && ticket.action() == PtyMessage.TicketAction.FILES
         && admission.who() instanceof PtyIdentity.Person who)) {
@@ -1795,9 +1856,80 @@ public final class PtySessionHost implements AutoCloseable {
             message -> reply(channel, message),
             () -> filesEnded(project, workspace, who),
             err -> endFiles(channel, err));
-    var kept = new Served(project, workspace, channel, connection);
-    served.add(kept);
+    var kept = new Served(project, workspace, who, channel, connection);
+    synchronized (served) {
+      var full = filesFull(project, workspace, who);
+      if (full != null) {
+        throw new FilesFull(full);
+      }
+      served.add(kept);
+    }
     return kept;
+  }
+
+  /**
+   * Asks every files connection's workspace again, as its ticket did ({@link #filesEnded}), on a
+   * thread of its own, once for each workspace and person, since a lookup may wait on Incus: a
+   * connection whose person no longer enters it (a re-own, a disown, a relabel), or whose workspace
+   * went or stopped, ends in those words. One pass at a time.
+   */
+  private void recheckFiles() {
+    if (served.isEmpty() || !rechecking.compareAndSet(false, true)) {
+      return;
+    }
+    var now = List.copyOf(served);
+    Thread.ofVirtual()
+        .name("pty-files-recheck")
+        .start(
+            () -> {
+              try {
+                var asked = new HashMap<List<String>, Optional<PtyMessage.Err>>();
+                for (var files : now) {
+                  var why =
+                      asked.computeIfAbsent(
+                          List.of(files.project(), files.workspace(), files.who().fde()),
+                          key ->
+                              Optional.ofNullable(
+                                  filesEnded(files.project(), files.workspace(), files.who())));
+                  why.ifPresent(err -> endFiles(files.channel(), err));
+                }
+              } finally {
+                rechecking.set(false);
+              }
+            });
+  }
+
+  /**
+   * Ends every files connection, telling each {@code why} within a second: the host is handing over
+   * or stopping, and no files connection outlives this run of it.
+   */
+  private void endEveryFiles() {
+    var enders = new ArrayList<Thread>();
+    for (var files : served) {
+      var why =
+          new PtyMessage.Err(
+              "The runner's terminal host is restarting, which ends this connection to "
+                  + files.workspace()
+                  + "'s files; connect again.",
+              Remedy.NONE,
+              "terminal_unavailable");
+      enders.add(
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    reply(files.channel(), why);
+                    closeQuietly(files.channel());
+                  }));
+    }
+    var deadline = System.nanoTime() + Duration.ofSeconds(1).toNanos();
+    for (var ender : enders) {
+      try {
+        ender.join(Duration.ofNanos(Math.max(1, deadline - System.nanoTime())));
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+      }
+    }
+    served.forEach(files -> closeQuietly(files.channel()));
   }
 
   /**
@@ -1815,7 +1947,10 @@ public final class PtySessionHost implements AutoCloseable {
       log("files-check-failed", who.fde(), project + "/" + workspace, unavailable.toString());
       return null;
     } catch (IOException refused) {
-      return PtyMessage.Err.of(refused);
+      var err = PtyMessage.Err.of(refused);
+      return err.code().isBlank()
+          ? new PtyMessage.Err(err.reason(), err.remedy(), "forbidden")
+          : err;
     } catch (RuntimeException unavailable) {
       log("files-check-failed", who.fde(), project + "/" + workspace, unavailable.toString());
       return null;
@@ -1854,15 +1989,17 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   /**
-   * One reaping pass at {@code nowNanos}: connections whose access changed severed, then the mosh
-   * grace and retention rules, nothing else. Nothing once shutdown has begun: the sessions belong
-   * to the successor or are ending.
+   * One reaping pass at {@code nowNanos}: connections whose access changed severed, every files
+   * connection's workspace asked again ({@link #recheckFiles}), then the mosh grace and retention
+   * rules, nothing else. Nothing once shutdown has begun: the sessions belong to the successor or
+   * are ending.
    */
   public synchronized void sweep(long nowNanos) {
     if (closed) {
       return;
     }
     severChanged();
+    recheckFiles();
     sessions.forEach(
         (name, session) -> {
           if (session.live()
@@ -1958,14 +2095,16 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   /**
-   * Steps aside for a successor: stops serving, then hands every live session off without ending it
-   * — its master stays open for the store's duplicate to be handed on, its ring and sidecar stay on
-   * disk. Returns the masters by session name, which is what the successor will be told as {@code
-   * LISTEN_FDNAMES}. Corpses are released here; the successor sweeps their files. Serialized with
-   * every operation that removes a session or its files, and closing the host first, so a request
-   * already in flight on an open connection either completes before the snapshot or is refused.
+   * Steps aside for a successor: ends every files connection saying so (none outlives a run of the
+   * host), stops serving, then hands every live session off without ending it — its master stays
+   * open for the store's duplicate to be handed on, its ring and sidecar stay on disk. Returns the
+   * masters by session name, which is what the successor will be told as {@code LISTEN_FDNAMES}.
+   * Corpses are released here; the successor sweeps their files. Serialized with every operation
+   * that removes a session or its files, and closing the host first, so a request already in flight
+   * on an open connection either completes before the snapshot or is refused.
    */
   public synchronized Map<String, Integer> handoff() {
+    endEveryFiles();
     closeServer();
     var masters = new LinkedHashMap<String, Integer>();
     sessions.forEach(
@@ -1985,6 +2124,7 @@ public final class PtySessionHost implements AutoCloseable {
    * loud path a {@code systemctl stop} takes; a restart takes {@link #handoff()}.
    */
   public synchronized void stop(String reason) {
+    endEveryFiles();
     closeServer();
     var endings =
         sessions.values().stream()

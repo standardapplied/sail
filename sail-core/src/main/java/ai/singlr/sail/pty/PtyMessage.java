@@ -462,6 +462,7 @@ public sealed interface PtyMessage {
     NOT_A_FOLDER,
     NOT_A_FILE,
     LOOP,
+    CHANGED,
     FAILED;
 
     /** The kind as the wire names it. */

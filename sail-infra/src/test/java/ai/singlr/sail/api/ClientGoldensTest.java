@@ -734,7 +734,15 @@ class ClientGoldensTest {
                     1_795_210_162_152_082_747L,
                     0644),
                 new PtyMessage.FileEntry(
-                    "src", PtyMessage.FileKind.LINK, PtyMessage.FileKind.FOLDER, 3, -1, 0777)),
+                    "src", PtyMessage.FileKind.LINK, PtyMessage.FileKind.FOLDER, 3, -1, 0777),
+                new PtyMessage.FileEntry(
+                    ai.singlr.sail.pty.FileNames.decode(
+                        new byte[] {'b', 'a', 'd', (byte) 0xff, 'n'}),
+                    PtyMessage.FileKind.FILE,
+                    PtyMessage.FileKind.NONE,
+                    4,
+                    7,
+                    0600)),
             false,
             true),
         new PtyMessage.FilesEntry(

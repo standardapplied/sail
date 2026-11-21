@@ -163,6 +163,33 @@ class PtyWireTest {
     assertEquals(stopped, roundTrip(stopped));
   }
 
+  /** m3: a name that is not UTF-8 crosses the wire as its bytes, in every files frame. */
+  @Test
+  void aNameThatIsNotUtf8CrossesTheWireAsItsBytes() throws Exception {
+    var bad = FileNames.decode(new byte[] {'/', 'h', (byte) 0xff, 'n'});
+    var entry =
+        new PtyMessage.FileEntry(bad, PtyMessage.FileKind.FILE, PtyMessage.FileKind.NONE, 0, 0, 0);
+    for (var message :
+        List.<PtyMessage>of(
+            new PtyMessage.FilesList(1, bad),
+            new PtyMessage.FilesStat(1, bad),
+            new PtyMessage.FilesRead(1, bad, 0, 1),
+            new PtyMessage.FilesWatch(List.of(new PtyMessage.Watched(bad, "v"))),
+            new PtyMessage.FilesListing(1, "v", List.of(entry), false, false),
+            new PtyMessage.FilesEntry(1, entry, "v"),
+            new PtyMessage.FilesChanged(List.of(bad)))) {
+      assertEquals(message, roundTrip(message), message.getClass().getSimpleName());
+      var bytes = new java.io.ByteArrayOutputStream();
+      PtyWire.write(Channels.newChannel(bytes), message);
+      var wire = bytes.toByteArray();
+      var found = false;
+      for (var i = 0; i + 3 < wire.length; i++) {
+        found |= wire[i] == '/' && wire[i + 1] == 'h' && wire[i + 2] == (byte) 0xff;
+      }
+      assertTrue(found, "the raw byte 0xff on the wire: " + message.getClass().getSimpleName());
+    }
+  }
+
   @Test
   void aFileKindAndAFilesRefusalAreOnesTheWireNamesOrRefused() {
     var kind = ByteBuffer.allocate(64);
