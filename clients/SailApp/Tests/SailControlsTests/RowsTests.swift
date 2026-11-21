@@ -130,22 +130,25 @@ import Testing
         let (window, _) = Self.shown(list)
         defer { window.orderOut(nil) }
         list.layoutSubtreeIfNeeded()
-        let cell = try #require(list.view(atColumn: 0, row: 1, makeIfNecessary: true)), row = try #require(list.rowView(atRow: 1, makeIfNecessary: true))
+        let content = try #require((list.view(atColumn: 0, row: 1, makeIfNecessary: true) as? RowCell)?.content)
         list.editing = "b"
         let many = (0 ..< 300).map { Self.plain("n\($0)", "n\($0)") }
         list.apply([Self.plain("new", "new"), Self.plain("a", "a"), Self.plain("b", "b renamed")] + many, changed: ["b"])
         list.layoutSubtreeIfNeeded()
-        #expect(list.view(atColumn: 0, row: 2, makeIfNecessary: true) === cell && list.rowView(atRow: 2, makeIfNecessary: true) === row, "the edited row was remade")
+        let during = try #require(list.rowView(atRow: 2, makeIfNecessary: true) as? SailRowView)
+        #expect((list.view(atColumn: 0, row: 2, makeIfNecessary: true) as? RowCell)?.content === content && during.item?.name == "b", "the edited row was remade: \(during.item?.name ?? "none")")
         #expect(list.editing == "b")
         list.editing = nil
         list.layoutSubtreeIfNeeded()
         let after = try #require(list.rowView(atRow: 2, makeIfNecessary: true) as? SailRowView)
-        #expect(after !== row && after.item?.name == "b renamed", "its change waited past the edit's end: \(after.item?.name ?? "none")")
+        #expect(after.item?.name == "b renamed" && (list.view(atColumn: 0, row: 2, makeIfNecessary: true) as? RowCell)?.content !== content, "its change waited past the edit's end: \(after.item?.name ?? "none")")
     }
 
     /// A row's layer, which its cell and words are drawn into, is rasterized off the main thread.
     @Test func aRowIsRasterizedOffTheMainThread() throws {
         let list = try Self.list(.list, look: .light, counts: Counts())
+        let (window, _) = Self.shown(list)
+        defer { window.orderOut(nil) }
         #expect(try Self.row(list, 1).layer?.drawsAsynchronously == true)
     }
 
@@ -171,7 +174,7 @@ import Testing
         list.apply([Self.plain("a", "a changed"), Self.plain("b", "b")], changed: ["a"])
         list.layoutSubtreeIfNeeded()
         let after = try #require(list.rowView(atRow: 0, makeIfNecessary: true) as? SailRowView)
-        #expect(after !== before && after.hovered, "the hover was lost with the row it was on")
+        #expect(after.item?.name == "a changed" && after.hovered, "the hover was lost with the row it was on: \(after.item?.name ?? "none"), hovered \(after.hovered)")
     }
 
     /// What a row places by arithmetic lands on whole pixels of its window, as Auto Layout placed

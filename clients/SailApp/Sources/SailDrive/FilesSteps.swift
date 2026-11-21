@@ -256,7 +256,7 @@ extension Driver {
     /// the frames shown, not each one.
     private func blankRowsWhileScrolling(_ scroll: NSScrollView) async -> (Bool, String) {
         let window = shell.window, clip = scroll.contentView.convert(scroll.contentView.bounds, to: nil), row = RowStyle.tree.height
-        let directory = FileManager.default.temporaryDirectory.appending(path: "files-blank-rows")
+        let directory = out.deletingLastPathComponent().appending(path: "blank-rows")
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var down = true, steps = 0, said: [String] = [], bands = 0, shots = 0
         for index in 0 ..< 8 {
