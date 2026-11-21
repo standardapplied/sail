@@ -456,6 +456,8 @@ class FileChangesTest {
     }
     var file = Files.writeString(workspace.resolve("a.txt"), lines);
     Files.writeString(workspace.resolve("gone.txt"), "going\n");
+    Files.writeString(workspace.resolve("a.md"), "plain\n");
+    Files.writeString(workspace.resolve("[ab].md"), "glob\n");
     Files.writeString(workspace.resolve(".gitattributes"), "*.txt diff=shout\n");
     git(workspace, "add", ".");
     git(workspace, "commit", "-qm", "base");
@@ -464,6 +466,8 @@ class FileChangesTest {
     Files.writeString(file, lines.toString().replace("line 10\n", "line ten\n"));
     Files.delete(workspace.resolve("gone.txt"));
     Files.writeString(workspace.resolve("new.txt"), "fresh\n");
+    Files.writeString(workspace.resolve("a.md"), "plain changed\n");
+    Files.writeString(workspace.resolve("[ab].md"), "glob changed\n");
 
     var changed = diff(file, 1 << 20);
     assertEquals(0, changed.status());
@@ -475,6 +479,8 @@ class FileChangesTest {
     assertFalse(said.contains("LINE"), "no text conversion");
 
     assertTrue(text(diff(workspace.resolve("new.txt"), 1 << 20)).contains("+fresh\n"));
+    var glob = text(diff(workspace.resolve("[ab].md"), 1 << 20));
+    assertTrue(glob.contains("+glob changed\n") && !glob.contains("plain"), "a path, never a glob");
     assertTrue(text(diff(workspace.resolve("gone.txt"), 1 << 20)).contains("-going\n"));
 
     var fresh = Files.createDirectory(workspace.resolve("fresh"));
@@ -670,6 +676,46 @@ class FileChangesTest {
     assertEquals(
         "What changed in dock was not said: git did not answer within 0.3 s, so Sail ended it.",
         refused.message());
+  }
+
+  /**
+   * A connection slow to read its answers holds no other's: each is sent on its own connection's
+   * thread, so while one's reply is held, the other's answer of the same run arrives.
+   */
+  @Test
+  void aConnectionSlowToReadHoldsNoOthersAnswer() throws Exception {
+    git(workspace, "init", "-q");
+    var files = scripts(UnaryOperator.identity());
+    var changes = new WorkspaceChanges(files, CONTAINER, WorkspaceChanges.PATIENCE, () -> {});
+    var held = new java.util.concurrent.CountDownLatch(1);
+    var stalled = new LinkedBlockingQueue<PtyMessage>();
+    var slow =
+        new FilesConnection(
+            files,
+            CONTAINER,
+            "dock",
+            message -> {
+              try {
+                held.await();
+              } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+              }
+              stalled.add(message);
+            },
+            () -> null,
+            unused -> {},
+            new FilesConnection.Writes(
+                new FilesConnection.WorkspaceLock(),
+                () -> null,
+                FilesConnection.AFTER_GO,
+                FilesConnection.HOLD_BOUND),
+            changes);
+    slow.changes(new PtyMessage.FilesChanges(1));
+    connection(changes, files).changes(new PtyMessage.FilesChanges(2));
+
+    assertEquals(Set.of(2), answers(Set.of(2)).keySet(), "answered while the other is held");
+    held.countDown();
+    assertInstanceOf(PtyMessage.FilesChangeList.class, stalled.poll(30, TimeUnit.SECONDS));
   }
 
   /** No repository and no git are refused in their own words over a connection. */
