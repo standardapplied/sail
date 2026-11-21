@@ -16,6 +16,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -39,7 +40,13 @@ import java.util.regex.Pattern;
  * <p>A write (a save, a create, a move, a remove) takes the workspace's write lock, which every
  * connection to the workspace shares, and asks the workspace's decision again under it before it
  * changes anything: a save once its bytes are copied, before its {@code go}; the others before
- * their script starts. A save's bytes stream in without the lock.
+ * their script starts. A save's bytes stream in without the lock. Writes asked on one connection
+ * take the lock in the order asked, so they are applied and answered in that order; writes on
+ * different connections are ordered by the lock. Each write is given its turn when it is asked and
+ * passes it on once it holds the lock, or once it ends without it, however it ends: refused,
+ * cancelled, its script unstarted, its connection closed. A later write therefore waits for a save
+ * still receiving its bytes, at most the upload's own idle limit. Reads take no turn: a client that
+ * needs a read to follow a write waits for the write's answer.
  */
 final class FilesConnection {
 
@@ -74,7 +81,8 @@ final class FilesConnection {
       String verb,
       Body body,
       Answer answer,
-      long order) {
+      long order,
+      long turn) {
     Request {
       paths = List.copyOf(paths);
     }
@@ -212,6 +220,10 @@ final class FilesConnection {
   private int waiting;
   private int hungry;
   private long asked;
+  private long turns;
+  private long turn;
+  private final TreeSet<Long> passed = new TreeSet<>();
+  private int inLine;
   private boolean closed;
   private FileScripts.Script watch;
 
@@ -390,10 +402,14 @@ final class FilesConnection {
 
   /** Ends request {@code id}: unanswered from now on, its script ended or never run. */
   synchronized void cancel(PtyMessage.FilesCancel m) {
+    var queued = others.stream().filter(request -> request.id() == m.id()).findFirst().orElse(null);
     if (reads.removeIf(request -> request.id() == m.id())
         | others.removeIf(request -> request.id() == m.id())) {
       waiting--;
       bodies.remove(m.id());
+    }
+    if (queued != null) {
+      pass(queued.turn());
     }
     var running = underWay.get(m.id());
     if (running != null) {
@@ -523,17 +539,19 @@ final class FilesConnection {
       if (closed) {
         return;
       }
-      var request = new Request(id, paths, isRead, verb, body, answer, asked++);
-      if (underWay.containsKey(request.id())
-          || reads.stream().anyMatch(waits -> waits.id() == request.id())
-          || others.stream().anyMatch(waits -> waits.id() == request.id())) {
+      if (underWay.containsKey(id)
+          || reads.stream().anyMatch(waits -> waits.id() == id)
+          || others.stream().anyMatch(waits -> waits.id() == id)) {
         reply.accept(
             new PtyMessage.FilesRefused(
-                request.id(),
+                id,
                 FilesRefusal.FAILED,
-                "Request " + request.id() + " is under way already, so this one was not started."));
+                "Request " + id + " is under way already, so this one was not started."));
         return;
       }
+      var request =
+          new Request(
+              id, paths, isRead, verb, body, answer, asked++, verb.equals("read") ? -1 : turns++);
       (request.reads() ? reads : others).addLast(request);
       if (body != null) {
         bodies.put(id, body);
@@ -573,6 +591,7 @@ final class FilesConnection {
     } catch (IOException | RuntimeException failed) {
       fail(request, running);
     } finally {
+      pass(request.turn());
       synchronized (this) {
         underWay.remove(request.id(), running);
         bodies.remove(request.id(), request.body());
@@ -583,6 +602,52 @@ final class FilesConnection {
         dispatch();
       }
     }
+  }
+
+  /**
+   * Takes the workspace's write lock for {@code request} once every write the connection asked
+   * before it has held it or ended, then passes its turn on; false, holding nothing, when it was
+   * cancelled or the connection closed while it waited.
+   */
+  private boolean lockInTurn(Request request, Running running) {
+    synchronized (this) {
+      inLine++;
+      try {
+        while (turn != request.turn() && !gone(running)) {
+          wait();
+        }
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        return false;
+      } finally {
+        inLine--;
+      }
+      if (gone(running)) {
+        return false;
+      }
+    }
+    writes.lock().lock();
+    pass(request.turn());
+    return true;
+  }
+
+  /**
+   * Passes write turn {@code given} on, once: the next turn goes to the earliest write not yet
+   * passed, as turns of writes that ended out of order are skipped. Nothing for a read's.
+   */
+  private synchronized void pass(long given) {
+    if (given < turn || !passed.add(given)) {
+      return;
+    }
+    while (passed.remove(turn)) {
+      turn++;
+    }
+    notifyAll();
+  }
+
+  /** How many writes wait for their turn now. */
+  synchronized int inLine() {
+    return inLine;
   }
 
   /**
@@ -689,7 +754,10 @@ final class FilesConnection {
           failed(request, " was not saved: the bytes Sail received are not the bytes sent."));
       return;
     }
-    writes.lock().lock();
+    if (!lockInTurn(request, running)) {
+      script.cut();
+      return;
+    }
     try {
       if (!allowed(request, running, script)) {
         return;
@@ -816,7 +884,9 @@ final class FilesConnection {
     if (!askedOnce(request, running)) {
       return;
     }
-    writes.lock().lock();
+    if (!lockInTurn(request, running)) {
+      return;
+    }
     try {
       if (!allowed(request, running, null)) {
         return;
