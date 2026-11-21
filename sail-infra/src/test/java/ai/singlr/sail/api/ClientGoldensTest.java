@@ -760,7 +760,22 @@ class ClientGoldensTest {
         new PtyMessage.FilesChanged(List.of("/home/dev/workspace", "/home/dev/workspace/App.java")),
         new PtyMessage.FilesTick(),
         new PtyMessage.FilesRefused(
-            4, PtyMessage.FilesRefusal.LOOP, "/home/dev/workspace/self leads back to itself."));
+            4, PtyMessage.FilesRefusal.LOOP, "/home/dev/workspace/self leads back to itself."),
+        new PtyMessage.FilesWrite(
+            5,
+            "/home/dev/workspace/App.java",
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+            "51:10:12:7.0:7.0",
+            13),
+        new PtyMessage.FilesCreate(6, "/home/dev/workspace/notes", true),
+        new PtyMessage.FilesMove(7, "/home/dev/workspace/a.md", "/home/dev/workspace/b.md"),
+        new PtyMessage.FilesRemove(8, "/home/dev/workspace/old"),
+        new PtyMessage.FilesWritten(
+            5,
+            "a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447",
+            "51:11:13:8.0:8.0"),
+        new PtyMessage.FilesConflict(5, PtyMessage.ABSENT),
+        new PtyMessage.FilesDone(6));
   }
 
   /** The largest chunk an upload carries, every byte value in turn. */

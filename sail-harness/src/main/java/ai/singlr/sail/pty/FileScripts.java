@@ -12,6 +12,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -35,7 +36,21 @@ final class FileScripts {
    */
   static final String SAVING = ".sail-save-";
 
-  /** Exit statuses of the scripts that refuse, each one {@link FilesRefusal}. */
+  /**
+   * The exact name of a save's temporary, as a shell glob: the prefix, the ten characters {@code
+   * mktemp} chose, {@code .part}. Only a name of this shape is hidden from a listing and the watch,
+   * and only a regular file of it, the dev user's own, is ever swept: a person's {@code
+   * .sail-save-notes} is seen and kept.
+   */
+  static final String TEMPORARY_SHAPE = SAVING + "[A-Za-z0-9]".repeat(10) + ".part";
+
+  /** How long a cut write has to remove its temporary before its process is ended. */
+  static final Duration GRACE = Duration.ofSeconds(2);
+
+  /**
+   * Exit statuses of the scripts that refuse, each one {@link FilesRefusal}: the reads' from 20,
+   * the writes' own from 40.
+   */
   static final int NOT_FOUND = 20;
 
   static final int NOT_PERMITTED = 21;
@@ -44,6 +59,36 @@ final class FileScripts {
   static final int NOT_A_FOLDER = 24;
   static final int NOT_A_FILE = 25;
   static final int LOOP = 26;
+  static final int EXISTS = 40;
+
+  /** A save's base is not the file's version now: the present one, or absent, was printed. */
+  static final int CONFLICT = 41;
+
+  /** The disk filled: the bytes free on it were printed. */
+  static final int NO_SPACE = 42;
+
+  /** A save's bytes came short, or the host said no go: nothing was written. */
+  static final int UNWRITTEN = 43;
+
+  /** A folder moved into itself or a folder it holds. */
+  static final int INTO_ITSELF = 44;
+
+  static final int PARTLY_REMOVED = 45;
+
+  /** The folder a new name was to be made in went before it was made. */
+  static final int FOLDER_GONE = 46;
+
+  /** A move whose source and target folder are on different disks, refused before it starts. */
+  static final int OTHER_DISK = 47;
+
+  /**
+   * A write's exit when a digest it computed is no SHA-256 (no {@code sha256sum}, or one that
+   * failed): nothing is written, and two empty digests never compare equal.
+   */
+  static final int BAD_DIGEST = 48;
+
+  /** A save over a file larger than a whole read may be, which never has a whole read's digest. */
+  static final int TOO_LARGE = 49;
 
   /** The read's exit when the workspace has no {@code sha256sum} to prove what it read with. */
   static final int NO_SHA256 = 27;
@@ -52,29 +97,48 @@ final class FileScripts {
   static final int NO_DIGEST = 28;
 
   /** One version, as every script and the watch write it. */
-  private static final String VERSION = "%d:%i:%s:%.9Y:%.9Z";
+  static final String VERSION = "%d:%i:%s:%.9Y:%.9Z";
 
   /**
-   * Reads the path from standard input, NUL-terminated, then resolves it as {@code at}, refusing
-   * one that does not exist, loops, crosses a folder the dev user may not search, or resolves
-   * outside the home {@code $1}. A trailing newline of a name survives the substitution.
+   * The functions every script resolves with, the home {@code $1}: {@code resolve} resolves a path
+   * as {@code at}, refusing one that does not exist, loops, crosses a folder the dev user may not
+   * search, or resolves outside the home; {@code resolve_parent} resolves a path's folder so, as
+   * {@code dir}, refusing one that is no folder, and names {@code target} in it by the path's last
+   * name as given, never followed; {@code there} says whether a name exists, a dangling link
+   * included. A trailing newline of a name survives the substitution.
    */
   static final String RESOLVE =
       """
       export LC_ALL=C
       home=$1
-      IFS= read -r -d '' path || exit 1
-      at=$(realpath -e -- "$path" 2>/dev/null && echo x) || {
-        why=$(realpath -e -- "$path" 2>&1 >/dev/null)
-        case $why in
-          *"symbolic links"*) exit 26 ;;
-          *"ermission denied"*) exit 21 ;;
-        esac
-        exit 20
+      resolve() {
+        at=$(realpath -e -- "$1" 2>/dev/null && echo x) || {
+          why=$(realpath -e -- "$1" 2>&1 >/dev/null)
+          case $why in
+            *"symbolic links"*) exit 26 ;;
+            *"ermission denied"*) exit 21 ;;
+          esac
+          exit 20
+        }
+        at=${at%?x}
+        case $at/ in "$home"/*) ;; *) exit 22 ;; esac
       }
-      at=${at%?x}
-      case $at/ in "$home"/*) ;; *) exit 22 ;; esac
+      resolve_parent() {
+        name=${1##*/}
+        resolve "${1%/*}"
+        [ -d "$at" ] || exit 24
+        dir=$at target=$at/$name
+      }
+      there() { [ -e "$1" ] || [ -L "$1" ]; }
       """;
+
+  /** {@link #RESOLVE}'s functions, and the path read and resolved as {@code at}. */
+  static final String RESOLVED =
+      RESOLVE
+          + """
+          IFS= read -r -d '' path || exit 1
+          resolve "$path"
+          """;
 
   /**
    * Lists the folder: its version, then each entry but {@code .}, {@code ..} and a write's
@@ -82,19 +146,19 @@ final class FileScripts {
    * An entry gone between its folder's read and its own stat is left out, never a failure.
    */
   static final String LIST =
-      RESOLVE
+      RESOLVED
           + """
           [ -d "$at" ] || exit 24
           cd -- "$at" 2>/dev/null && [ -r . ] || exit 21
           stat -L --printf '%s\\0' . || exit 1
-          find . -mindepth 1 -maxdepth 1 ! -name '%s*' -printf '%%y\\0%%Y\\0%%s\\0%%T@\\0%%m\\0%%P\\0' 2>/dev/null
+          find . -mindepth 1 -maxdepth 1 ! -name '%s' -printf '%%y\\0%%Y\\0%%s\\0%%T@\\0%%m\\0%%P\\0' 2>/dev/null
           exit 0
           """
-              .formatted(VERSION, SAVING);
+              .formatted(VERSION, TEMPORARY_SHAPE);
 
   /** Says what the path is: its version, then its own entry as a listing's, named by its base. */
   static final String STAT =
-      RESOLVE
+      RESOLVED
           + """
           stat -L --printf '%s\\0' -- "$at" || exit 1
           find "$path" -maxdepth 0 -printf '%%y\\0%%Y\\0%%s\\0%%T@\\0%%m\\0%%f\\0' || exit 1
@@ -113,7 +177,7 @@ final class FileScripts {
    * pipe swapped in after those checks ends the read at once rather than holding it.
    */
   static final String READ =
-      RESOLVE
+      RESOLVED
           + """
           [ -d "$at" ] && exit 23
           [ -f "$at" ] || exit 25
@@ -135,9 +199,10 @@ final class FileScripts {
   /**
    * The watch loop: reads watch sets from standard input, each path then the version the client
    * holds of it, NUL-terminated, a set ended by an empty path, and replaces its set with each, a
-   * save's temporary and any path that resolves outside the home ({@code $1}) left out. Every 250
-   * ms it stats the set once and prints each path whose version is not the one last held,
-   * NUL-terminated, then a NUL; once a second it prints a NUL alone. It ends when its input closes.
+   * save's temporary left out, and any path that resolves outside the home ({@code $1}) left out
+   * and printed after a {@code -}, NUL-terminated, so the client is told. Every 250 ms it stats the
+   * set once and prints each path whose version is not the one last held, NUL-terminated, then a
+   * NUL; once a second it prints a NUL alone. It ends when its input closes.
    */
   static final String WATCH =
       """
@@ -153,8 +218,9 @@ final class FileScripts {
             at=$(realpath -m -- "$name" 2>/dev/null && echo x)
             at=${at%%?x}
             case ${name##*/}:$at/ in
-              '%s'*) ;;
+              %s:*) ;;
               *:"$home"/*) next+=("$name") given[$name]=$token ;;
+              *) printf -- '-%%s\\0' "$name" ;;
             esac
             want=path
           elif [ -n "$token" ]; then
@@ -192,7 +258,203 @@ final class FileScripts {
         fi
       done
       """
-          .formatted(SAVING, VERSION);
+          .formatted(TEMPORARY_SHAPE, VERSION);
+
+  /**
+   * The temporary a write makes in folder {@code $dir} as {@code tmp}, removed at the script's
+   * exit, after removing the folder's temporaries left more than two minutes ago that no process
+   * holds open, a killed script's or a stopped workspace's.
+   */
+  private static final String TEMPORARY =
+      """
+      for old in "$dir"/%2$s; do
+        [ -f "$old" ] && [ ! -L "$old" ] && [ -O "$old" ] || continue
+        [ -n "$(find "$old" -maxdepth 0 -mmin +2 2>/dev/null)" ] || continue
+        pattern=$(printf '%%s' "$old" | sed 's/[][*?\\\\]/\\\\&/g')
+        [ -n "$(find /proc/[0-9]*/fd -lname "$pattern" 2>/dev/null | head -n 1)" ] || rm -f -- "$old"
+      done
+      tmp=$(mktemp --suffix=.part -- "$dir/%1$sXXXXXXXXXX" 2>/dev/null) || exit 21
+      trap 'rm -f -- "$tmp"' EXIT
+      """
+          .formatted(SAVING, TEMPORARY_SHAPE);
+
+  /**
+   * Saves {@code $2} bytes of standard input as the path, read with its base and the {@code stat}
+   * version the client read at: made anew where no name is when the base is {@code absent}, else
+   * written over the file the path resolves to, which must be a file the dev user may write, of at
+   * most {@code $3} bytes. The base is the SHA-256 of the whole file as the client read it. A
+   * pre-check before any byte can only refuse: when the file's {@code stat} is not the one read at,
+   * the file is hashed, and a digest other than the base is a conflict answered at once. It makes
+   * its temporary in the target's folder ({@link #TEMPORARY}), says {@code ready}, copies the bytes
+   * into it, syncs them and holds it open, says {@code copied} and their digest, then waits for the
+   * host's {@code go}: anything else, or fewer bytes, writes nothing. On {@code go}, under the
+   * host's lock, it hashes the whole target and compares that digest with the base (printing the
+   * present digest, or absent, for a conflict), refuses a file the dev user may not write, keeps
+   * its mode, and renames over it in one call, or links the new name in one call that fails when
+   * the name was taken meanwhile; then syncs the folder and prints the version the file has now.
+   * Every digest is a SHA-256 in lowercase hex, or nothing is written. A full disk prints the bytes
+   * free.
+   */
+  static final String WRITE =
+      RESOLVE
+          + """
+          size=$2 cap=$3
+          IFS= read -r -d '' path || exit 1
+          IFS= read -r -d '' base || exit 1
+          IFS= read -r -d '' seen || exit 1
+          content_digest() {
+            local found
+            found=$(sha256sum < "$1" 2>/dev/null | cut -c1-64)
+            [[ $found =~ ^[0-9a-f]{64}$ ]] || return 1
+            printf '%%s' "$found"
+          }
+          if [ "$base" = absent ]; then
+            resolve_parent "$path"
+            there "$target" && exit 40
+            at=$target
+          else
+            [[ $base =~ ^[0-9a-f]{64}$ ]] || exit 48
+            resolve_parent "$path"
+            [ -e "$target" ] || { printf 'absent\\0'; exit 41; }
+            resolve "$path"
+            [ -d "$at" ] && exit 23
+            [ -f "$at" ] || exit 25
+            [ -w "$at" ] || exit 21
+            [ "$(stat -L -c %%s -- "$at")" -le "$cap" ] || exit 49
+            dir=${at%%/*}
+            now=$(stat -L --printf '%1$s' -- "$at") || exit 1
+            if [ "$now" != "$seen" ]; then
+              found=$(content_digest "$at") || exit 48
+              [ "$found" = "$base" ] || { printf '%%s\\0' "$found"; exit 41; }
+            fi
+          fi
+          """
+              .formatted(VERSION)
+          + TEMPORARY
+          + """
+          printf 'ready\\0%%s\\0' "$tmp"
+          if ! head -c "$size" > "$tmp" 2>/dev/null; then
+            free=$(df -B1 --output=avail -- "$dir" 2>/dev/null | tail -n 1 | tr -d ' ')
+            printf '%%s\\0' "${free:-0}"
+            exit 42
+          fi
+          [ "$(stat -c %%s -- "$tmp")" = "$size" ] || exit 43
+          sync -- "$tmp" 2>/dev/null || exit 1
+          exec 5< "$tmp"
+          copied=$(content_digest "$tmp") || exit 48
+          printf 'copied\\0%%s\\0' "$copied"
+          IFS= read -r -d '' word && [ "$word" = go ] || exit 43
+          if [ "$base" = absent ]; then
+            chmod -- "$(printf %%03o $((0666 & ~0$(umask))))" "$tmp" || { [ -d "$dir" ] || exit 46; exit 1; }
+            ln -T -- "$tmp" "$at" 2>/dev/null || { there "$at" && exit 40; [ -d "$dir" ] || exit 46; exit 1; }
+            rm -f -- "$tmp"
+          else
+            hashed=$(stat -L --printf '%1$s' -- "$at" 2>/dev/null) || { printf 'absent\\0'; exit 41; }
+            found=$(content_digest "$at") || exit 48
+            [ "$found" = "$base" ] || { printf '%%s\\0' "$found"; exit 41; }
+            [ -w "$at" ] || exit 21
+            chmod --reference="$at" -- "$tmp" || exit 1
+            if [ "$(stat -L --printf '%1$s' -- "$at" 2>/dev/null)" != "$hashed" ]; then
+              found=$(content_digest "$at") || { printf 'absent\\0'; exit 41; }
+              printf '%%s\\0' "$found"
+              exit 41
+            fi
+            mv -fT -- "$tmp" "$at" || exit 1
+          fi
+          sync -- "$dir" 2>/dev/null
+          stat -L --printf '%1$s\\0' -- "$at" 2>/dev/null || printf 'absent\\0'
+          """
+              .formatted(VERSION);
+
+  /**
+   * Whether a save's temporary, the path read on standard input, is still held open by a process in
+   * the workspace: {@code 50} when one holds it, {@code 0} when none does or it is gone. A save
+   * holds its temporary open from its copy to its rename, so a save whose process outlived its kill
+   * (one a hung disk holds) is seen by this, however long it lasts.
+   */
+  static final String HELD =
+      """
+      export LC_ALL=C
+      IFS= read -r -d '' held || exit 1
+      [ -e "$held" ] || exit 0
+      pattern=$(printf '%s' "$held" | sed 's/[][*?\\\\]/\\\\&/g')
+      [ -n "$(find /proc/[0-9]*/fd -lname "$pattern" 2>/dev/null | head -n 1)" ] && exit 50
+      exit 0
+      """;
+
+  /** {@link #HELD}'s answer when a process still holds the temporary open. */
+  static final int STILL_HELD = 50;
+
+  /**
+   * Makes the path anew, a folder when the kind read after it is {@code folder}, else an empty file
+   * linked in one call that fails when the name was taken meanwhile; never over a name there.
+   */
+  static final String CREATE =
+      RESOLVE
+          + """
+          IFS= read -r -d '' path || exit 1
+          IFS= read -r -d '' kind || exit 1
+          resolve_parent "$path"
+          there "$target" && exit 40
+          if [ "$kind" = folder ]; then
+            mkdir -- "$target" 2>/dev/null && { sync -- "$dir" 2>/dev/null; exit 0; }
+            there "$target" && exit 40
+            [ -d "$dir" ] || exit 46
+            exit 21
+          fi
+          """
+          + TEMPORARY
+          + """
+          chmod -- "$(printf %03o $((0666 & ~0$(umask))))" "$tmp" || exit 1
+          ln -T -- "$tmp" "$target" 2>/dev/null || { there "$target" && exit 40; [ -d "$dir" ] || exit 46; exit 1; }
+          sync -- "$dir" 2>/dev/null
+          """;
+
+  /**
+   * Moves the first path to the second, a link as itself, never into itself and never over a name
+   * there: moved only when the second name is now the first's own inode and the first is gone. The
+   * workspace's own folder stays where it is.
+   */
+  static final String MOVE =
+      RESOLVE
+          + """
+          IFS= read -r -d '' from || exit 1
+          IFS= read -r -d '' to || exit 1
+          resolve_parent "$from"
+          src=$target
+          there "$src" || exit 20
+          [ "$src" = "$home/workspace" ] && exit 21
+          resolve_parent "$to"
+          dst=$target
+          case $dir/ in "$src"/*) exit 44 ;; esac
+          there "$dst" && exit 40
+          [ "$(stat -c %d -- "$src")" = "$(stat -c %d -- "$dir")" ] || exit 47
+          inode=$(stat -c %d:%i -- "$src") || exit 1
+          mv -nT -- "$src" "$dst" 2>/dev/null
+          if [ "$(stat -c %d:%i -- "$dst" 2>/dev/null)" = "$inode" ] && ! there "$src"; then
+            sync -- "$dir" "${src%/*}" 2>/dev/null
+            exit 0
+          fi
+          there "$dst" && exit 40
+          exit 1
+          """;
+
+  /**
+   * Removes the path, a link as itself, a folder with all it holds on its own filesystem; the
+   * workspace's own folder stays. Anything left is said.
+   */
+  static final String REMOVE =
+      RESOLVE
+          + """
+          IFS= read -r -d '' path || exit 1
+          resolve_parent "$path"
+          there "$target" || exit 20
+          [ "$target" = "$home/workspace" ] && exit 21
+          rm -rf --one-file-system -- "$target" 2>/dev/null
+          there "$target" && exit 45
+          sync -- "$dir" 2>/dev/null
+          exit 0
+          """;
 
   private final UploadCopy.Processes processes;
   private final UploadCopy.Place place;
@@ -245,17 +507,29 @@ final class FileScripts {
    * ended, as one in a frozen container would never answer.
    */
   Script start(String container, String script, String path, String... args) throws IOException {
+    return start(
+        container, script, path == null ? List.of() : List.of(path), script.equals(WATCH), args);
+  }
+
+  /**
+   * Starts {@code script} as {@link #start(String, String, String, String...)} does, with {@code
+   * fields} on its input, each then a NUL: closed after them unless {@code keepOpen}, as a save's
+   * input stays open for its bytes and the host's go.
+   */
+  Script start(
+      String container, String script, List<String> fields, boolean keepOpen, String... args)
+      throws IOException {
     var command = new ArrayList<>(place.asDev().apply(container));
     command.addAll(List.of("bash", "-c", script, "sail-files", home));
     command.addAll(List.of(args));
     var process = processes.start(command);
     var running = new Script(process);
-    if (path != null) {
-      running.input().write(nul(path));
-      running.input().flush();
-      if (!script.equals(WATCH)) {
-        running.input().close();
-      }
+    for (var field : fields) {
+      running.input().write(nul(field));
+    }
+    running.input().flush();
+    if (!keepOpen) {
+      running.input().close();
     }
     return running;
   }
@@ -278,6 +552,10 @@ final class FileScripts {
       case NOT_A_FOLDER -> FilesRefusal.NOT_A_FOLDER;
       case NOT_A_FILE -> FilesRefusal.NOT_A_FILE;
       case LOOP -> FilesRefusal.LOOP;
+      case EXISTS -> FilesRefusal.EXISTS;
+      case INTO_ITSELF -> FilesRefusal.UNSAFE;
+      case PARTLY_REMOVED -> FilesRefusal.PARTLY_REMOVED;
+      case TOO_LARGE -> FilesRefusal.TOO_LARGE;
       default -> null;
     };
   }
@@ -302,6 +580,25 @@ final class FileScripts {
     /** The script's input. */
     OutputStream input() {
       return process.getOutputStream();
+    }
+
+    /** Whether it still runs. */
+    boolean alive() {
+      return process.isAlive();
+    }
+
+    /**
+     * Ends its {@code incus exec} now and waits for it to exit. Whether the process in the
+     * workspace has ended too is a question for {@link #HELD}.
+     */
+    void kill() throws InterruptedException {
+      process.destroyForcibly();
+      process.waitFor();
+    }
+
+    /** Runs {@code then} once it has ended, however it ended. */
+    void onEnd(Runnable then) {
+      process.onExit().thenRun(then);
     }
 
     /**
@@ -368,6 +665,22 @@ final class FileScripts {
         var unused = closed;
       }
       process.destroyForcibly();
+    }
+
+    /**
+     * Ends a write: its input closed, so it reads fewer bytes than it was told, or no go, and
+     * removes its own temporary; its process ended after {@link #GRACE} if it has not ended by
+     * then.
+     */
+    void cut() {
+      try {
+        process.getOutputStream().close();
+      } catch (IOException closed) {
+        var unused = closed;
+      }
+      CompletableFuture.runAsync(
+          process::destroyForcibly,
+          CompletableFuture.delayedExecutor(GRACE.toMillis(), TimeUnit.MILLISECONDS));
     }
   }
 

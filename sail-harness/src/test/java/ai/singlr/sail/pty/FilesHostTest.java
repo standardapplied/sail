@@ -220,6 +220,9 @@ class FilesHostTest {
     if (script.equals(FileScripts.STAT)) {
       return "stat";
     }
+    if (script.equals(FileScripts.WRITE)) {
+      return "write";
+    }
     return script.equals(FileScripts.WATCH) ? "watch" : "other";
   }
 
@@ -421,8 +424,9 @@ class FilesHostTest {
           files, new PtyMessage.Create("s", List.of(), "/tmp", "acme", "", 80, 24, "dock"));
       assertEquals(
           new PtyMessage.Err(
-              "This connection's ticket is to read the files of workspace 'dock' of project"
-                  + " 'acme', and it admits nothing else; ask the API for a ticket for that."),
+              "This connection's ticket is to read and change the files of workspace 'dock' of"
+                  + " project 'acme', and it admits nothing else; ask the API for a ticket for"
+                  + " that."),
           next(files));
       ended(files);
     }
@@ -801,17 +805,23 @@ class FilesHostTest {
   }
 
   /**
-   * Nit 4: a workspace holds at most 8 files connections and a person 16, all workspaces together:
+   * Nit 4: a workspace holds at most 8 files connections and a person 16, all workspaces together,
+   * and one person at most 6 of a workspace's, so the owner and an admin never shut each other out:
    * the ticket past them is refused, and so is one presented past them, in true words.
    */
   @Test
-  void aWorkspaceHoldsEightFilesConnectionsAndAPersonSixteen() throws Exception {
+  void aWorkspaceHoldsEightFilesConnectionsAPersonSixOfThemAndSixteenInAll() throws Exception {
     var held = new ArrayList<SocketChannel>();
-    for (var i = 0; i < 7; i++) {
+    for (var i = 0; i < 6; i++) {
       held.add(open("tok-mady"));
     }
-    var late = assertInstanceOf(PtyMessage.Ticket.class, ticket("tok-mady", "acme", "dock"));
-    held.add(open("tok-mady"));
+    assertEquals(
+        "limited mady has 6 files connections open in dock, the most one person may hold there, so"
+            + " others can still connect; close one, then ask again.",
+        said(ticket("tok-mady", "acme", "dock")));
+    held.add(open("tok-root"));
+    var late = assertInstanceOf(PtyMessage.Ticket.class, ticket("tok-root", "acme", "dock"));
+    held.add(open("tok-root"));
     assertEquals(
         "limited dock has 8 files connections open, the most a workspace holds; close one, then"
             + " ask again.",
@@ -825,13 +835,16 @@ class FilesHostTest {
                 + " again."),
         List.of(why.code(), why.reason()));
     ended(presented);
-    for (var i = 0; i < 8; i++) {
+    for (var i = 0; i < 6; i++) {
       held.add(open("tok-mady", "spare"));
+    }
+    for (var i = 0; i < 4; i++) {
+      held.add(open("tok-mady", "third"));
     }
     assertEquals(
         "limited mady has 16 files connections open, the most a person holds; close one, then"
             + " ask again.",
-        said(ticket("tok-mady", "acme", "third")));
+        said(ticket("tok-mady", "acme", "fourth")));
     for (var channel : held) {
       channel.close();
     }
@@ -1031,6 +1044,317 @@ class FilesHostTest {
     assertEquals(
         List.of("", "The watch of elsewhere's files could not start; connect again to watch them."),
         endedWith(files));
+  }
+
+  private static byte[] sha256(byte[] bytes) throws Exception {
+    return java.security.MessageDigest.getInstance("SHA-256").digest(bytes);
+  }
+
+  /** The version a stat of {@code path} answers on {@code channel}. */
+  private static String versionOf(SocketChannel channel, Path path) throws IOException {
+    PtyWire.write(channel, new PtyMessage.FilesStat(99, path.toString()));
+    return assertInstanceOf(PtyMessage.FilesEntry.class, next(channel)).version();
+  }
+
+  /** A save's base as a client takes it: the digest of a whole read, and the version it read at. */
+  private record Base(String digest, String seen) {}
+
+  private static Base baseOf(SocketChannel channel, Path path) throws IOException {
+    PtyWire.write(
+        channel, new PtyMessage.FilesRead(98, path.toString(), 0, FilesConnection.READ_CAP));
+    PtyMessage.FilesData data;
+    do {
+      data = assertInstanceOf(PtyMessage.FilesData.class, next(channel));
+    } while (!data.eof());
+    assertTrue(data.whole(), "a base is a whole read's");
+    return new Base(data.digest(), data.version());
+  }
+
+  /** Save {@code id} of {@code size} bytes over {@code file} on {@code base}. */
+  private static PtyMessage.FilesWrite onBase(int id, Path file, Base base, long size) {
+    return new PtyMessage.FilesWrite(id, file.toString(), base.digest(), base.seen(), size);
+  }
+
+  /**
+   * A files ticket's connection changes its workspace's files: a save's bytes travel as an
+   * upload's, each acknowledged, and it is answered the version the file has now; a create, a move
+   * and a remove are each answered done. A connection no files ticket admitted changes nothing.
+   */
+  @Test
+  void aConnectionItAdmitsSavesMakesMovesAndRemovesItsWorkspacesFiles() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "old");
+    try (var files = open("tok-mady")) {
+      var bytes = "new words".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+      PtyWire.write(files, onBase(1, file, baseOf(files, file), bytes.length));
+      PtyWire.write(files, new PtyMessage.PutChunk(1, 0, bytes));
+      PtyWire.write(files, new PtyMessage.PutEnd(1, sha256(bytes)));
+      assertEquals(new PtyMessage.PutAck(1, bytes.length), next(files));
+      var written = assertInstanceOf(PtyMessage.FilesWritten.class, next(files));
+      assertEquals(versionOf(files, file), written.version());
+      assertEquals(baseOf(files, file).digest(), written.digest(), "the new content's digest");
+      assertEquals("new words", Files.readString(file));
+
+      PtyWire.write(files, new PtyMessage.FilesCreate(2, home + "/docs", true));
+      assertEquals(new PtyMessage.FilesDone(2), next(files));
+      PtyWire.write(files, new PtyMessage.FilesMove(3, file.toString(), home + "/docs/notes.md"));
+      assertEquals(new PtyMessage.FilesDone(3), next(files));
+      PtyWire.write(files, new PtyMessage.FilesRemove(4, home + "/docs"));
+      assertEquals(new PtyMessage.FilesDone(4), next(files));
+      assertFalse(Files.exists(home.resolve("docs")));
+    }
+    try (var box = unix("")) {
+      for (var change :
+          List.<PtyMessage>of(
+              new PtyMessage.FilesWrite(1, home + "/x", PtyMessage.ABSENT, "", 0),
+              new PtyMessage.FilesCreate(1, home + "/x", false),
+              new PtyMessage.FilesMove(1, home + "/x", home + "/y"),
+              new PtyMessage.FilesRemove(1, home + "/x"))) {
+        PtyWire.write(box, change);
+        assertEquals(
+            "Files are read on a connection a files ticket admitted, and this is not one.",
+            assertInstanceOf(PtyMessage.Err.class, PtyWire.read(box)).reason());
+      }
+    }
+    assertFalse(Files.exists(home.resolve("x")));
+  }
+
+  /**
+   * A save asks the workspace's decision again before it writes, not only at the sweep: a relabel
+   * between its bytes and its end ends the connection in the decision's words and writes nothing;
+   * an outage refuses it and the connection goes on.
+   */
+  @Test
+  void aRelabelBetweenASavesBytesAndItsEndWritesNothingAndEndsTheConnection() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var bytes = "mine".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    var files = open("tok-mady");
+    PtyWire.write(files, onBase(1, file, baseOf(files, file), 4));
+    PtyWire.write(files, new PtyMessage.PutChunk(1, 0, bytes));
+    assertEquals(new PtyMessage.PutAck(1, 4), next(files));
+    brokenNow.add("dock");
+    PtyWire.write(files, new PtyMessage.PutEnd(1, sha256(bytes)));
+    assertEquals(
+        PtyMessage.FilesRefusal.FAILED,
+        assertInstanceOf(PtyMessage.FilesRefused.class, next(files)).kind());
+    assertEquals("kept", Files.readString(file), "an outage writes nothing");
+    brokenNow.remove("dock");
+
+    PtyWire.write(files, onBase(2, file, baseOf(files, file), 4));
+    PtyWire.write(files, new PtyMessage.PutChunk(2, 0, bytes));
+    assertEquals(new PtyMessage.PutAck(2, 4), next(files), "and ends nothing");
+    relabelled.add("dock");
+    PtyWire.write(files, new PtyMessage.PutEnd(2, sha256(bytes)));
+
+    assertEquals(
+        List.of("forbidden", "Workspace 'dock' belongs to 'uday', not you."), endedWith(files));
+    everyScriptEnds();
+    assertEquals("kept", Files.readString(file));
+    try (var names = Files.list(home)) {
+      assertEquals(List.of("notes.md"), names.map(p -> p.getFileName().toString()).toList());
+    }
+  }
+
+  /** A save's script held between its go and its compare until {@link Hold#release}. */
+  private final class Hold {
+    final Path at;
+    final Path release;
+
+    Hold() throws Exception {
+      at = dir.resolve("at-compare");
+      release = dir.resolve("release");
+      assertEquals(0, new ProcessBuilder("mkfifo", release.toString()).start().waitFor());
+      var once = new java.util.concurrent.atomic.AtomicBoolean();
+      edits.put(
+          "write",
+          script ->
+              !once.compareAndSet(false, true)
+                  ? script
+                  : script.replace(
+                      "IFS= read -r -d '' word && [ \"$word\" = go ] || exit 43",
+                      "IFS= read -r -d '' word && [ \"$word\" = go ] || exit 43\n"
+                          + ": > '"
+                          + at
+                          + "'; read -r _ < '"
+                          + release
+                          + "'"));
+    }
+
+    /** Waits until a save's script stands at its compare, its go sent and the lock held. */
+    void reached() {
+      var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+      while (!Files.exists(at)) {
+        assertTrue(System.nanoTime() < deadline, "the save reached its compare within 5 s");
+        Thread.onSpinWait();
+      }
+    }
+
+    void release() throws IOException {
+      Files.writeString(release, "go\n");
+    }
+  }
+
+  /** Sends save {@code id} of {@code text} on {@code base}, and reads its acknowledgement. */
+  private static void saveOn(SocketChannel channel, int id, Path file, Base base, String text)
+      throws Exception {
+    var bytes = text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    PtyWire.write(channel, onBase(id, file, base, bytes.length));
+    PtyWire.write(channel, new PtyMessage.PutChunk(id, 0, bytes));
+    PtyWire.write(channel, new PtyMessage.PutEnd(id, sha256(bytes)));
+    assertEquals(new PtyMessage.PutAck(id, bytes.length), next(channel));
+  }
+
+  private static void awaitQueued(java.util.concurrent.locks.ReentrantLock lock) {
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!lock.hasQueuedThreads()) {
+      assertTrue(System.nanoTime() < deadline, "a save waits for the workspace's lock");
+      Thread.onSpinWait();
+    }
+  }
+
+  /**
+   * m1: a save past its go outlives its connection: closing the connection never cuts it, and it
+   * holds the workspace's write lock until its script ends, so another connection's save on the
+   * same base waits for it and is a conflict, never a second winner.
+   */
+  @Test
+  void aSavePastItsGoOutlivesItsConnectionAndHoldsTheWorkspacesLock() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "base");
+    var hold = new Hold();
+    var staying = open("tok-root");
+    var first = open("tok-mady");
+    var base = baseOf(first, file);
+    saveOn(first, 1, file, base, "first's");
+    hold.reached();
+    var lock = host.writeLock("acme", "dock");
+    var script = processes.getLast();
+
+    first.close();
+    assertFalse(
+        script.waitFor(FileScripts.GRACE.toMillis() + 1000, TimeUnit.MILLISECONDS),
+        "never cut: a cut's script would be ended within its grace");
+    var second = open("tok-mady");
+    saveOn(second, 2, file, base, "second's");
+    awaitQueued(lock);
+    assertTrue(lock.isLocked(), "the closed connection's save holds the lock still");
+    hold.release();
+
+    assertInstanceOf(PtyMessage.FilesConflict.class, next(second));
+    assertEquals("first's", Files.readString(file), "the save past its go was written");
+    second.close();
+    staying.close();
+  }
+
+  /**
+   * m1: the write lock is the workspace's, not its connections': when the last connection ends
+   * while its save is past its go, the next connection's save waits on that same lock.
+   */
+  @Test
+  void aWorkspacesLockOutlivesItsLastConnectionWhileASaveHoldsIt() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "base");
+    var hold = new Hold();
+    var last = open("tok-mady");
+    var base = baseOf(last, file);
+    saveOn(last, 1, file, base, "first's");
+    hold.reached();
+    var lock = host.writeLock("acme", "dock");
+
+    last.close();
+    var next = open("tok-mady");
+    assertTrue(lock == host.writeLock("acme", "dock"), "the same lock, not a fresh one");
+    saveOn(next, 2, file, base, "second's");
+    awaitQueued(lock);
+    hold.release();
+
+    assertInstanceOf(PtyMessage.FilesConflict.class, next(next));
+    assertEquals("first's", Files.readString(file));
+    next.close();
+  }
+
+  /**
+   * Every files connection to a workspace shares its one write lock, an owner's and an admin's
+   * alike, so two saves on one base from two windows write exactly one; the lock goes with the
+   * workspace's last connection.
+   */
+  @Test
+  void everyConnectionToAWorkspaceSharesItsWriteLock() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "base");
+    var bytes = "mine".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    var mine = open("tok-mady");
+    var admins = open("tok-root");
+    var base = baseOf(mine, file);
+    var lock = host.writeLock("acme", "dock");
+    lock.lock();
+    try {
+      for (var channel : List.of(mine, admins)) {
+        PtyWire.write(channel, onBase(1, file, base, 4));
+        PtyWire.write(channel, new PtyMessage.PutChunk(1, 0, bytes));
+        PtyWire.write(channel, new PtyMessage.PutEnd(1, sha256(bytes)));
+        assertEquals(new PtyMessage.PutAck(1, 4), next(channel));
+      }
+      var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+      while (lock.getQueueLength() < 2) {
+        assertTrue(System.nanoTime() < deadline, lock.getQueueLength() + " saves wait for it");
+        Thread.onSpinWait();
+      }
+    } finally {
+      lock.unlock();
+    }
+    var answers = List.of(next(mine), next(admins));
+    assertEquals(
+        1,
+        answers.stream().filter(PtyMessage.FilesWritten.class::isInstance).count(),
+        "" + answers);
+    assertEquals(
+        1,
+        answers.stream().filter(PtyMessage.FilesConflict.class::isInstance).count(),
+        "" + answers);
+    mine.close();
+    admins.close();
+    var gone = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (host.writeLock("acme", "dock") != null) {
+      assertTrue(System.nanoTime() < gone, "the lock outlived the workspace's last connection");
+      Thread.onSpinWait();
+    }
+  }
+
+  /** A connection closed mid-save leaves the file as it was and, within 5 s, no temporary. */
+  @Test
+  void closingTheConnectionMidSaveLeavesTheFileAndNoTemporary() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var files = open("tok-mady");
+    PtyWire.write(files, onBase(1, file, baseOf(files, file), 1 << 20));
+    PtyWire.write(files, new PtyMessage.PutChunk(1, 0, new byte[64 << 10]));
+    assertEquals(new PtyMessage.PutAck(1, 64 << 10), next(files));
+
+    files.close();
+
+    everyScriptEnds();
+    assertEquals("kept", Files.readString(file));
+    try (var names = Files.list(home)) {
+      assertEquals(List.of("notes.md"), names.map(p -> p.getFileName().toString()).toList());
+    }
+  }
+
+  /**
+   * #510's nits: a watch path outside the home is named as shown, each byte that is no UTF-8 as
+   * U+FFFD; one that resolves outside it is dropped and the client told, by name.
+   */
+  @Test
+  void aWatchSaysWhichPathItRefusedOrDroppedByItsShownName() throws Exception {
+    var files = open("tok-mady");
+    var raw = "/etc/" + FileNames.decode(new byte[] {'b', (byte) 0xff});
+    PtyWire.write(files, new PtyMessage.FilesWatch(List.of(new PtyMessage.Watched(raw, ""))));
+    assertEquals(
+        "/etc/b� is not in this workspace's home, so the watch is as it was.",
+        assertInstanceOf(PtyMessage.Err.class, next(files)).reason());
+
+    var outside = Files.createDirectories(dir.resolve("outside"));
+    var link = Files.createSymbolicLink(home.resolve("away"), outside).toString();
+    PtyWire.write(files, new PtyMessage.FilesWatch(List.of(new PtyMessage.Watched(link, ""))));
+    assertEquals(
+        link + " leads outside this workspace's home, so it is not watched.",
+        assertInstanceOf(PtyMessage.Err.class, next(files)).reason());
+    files.close();
   }
 
   /**

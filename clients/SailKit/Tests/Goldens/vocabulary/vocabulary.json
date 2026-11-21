@@ -304,6 +304,11 @@
     "not_a_file",
     "loop",
     "changed",
+    "exists",
+    "no_space",
+    "too_large",
+    "partly_removed",
+    "unsafe",
     "failed"
   ],
   "member_modes": [
