@@ -149,11 +149,15 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     public func windowShouldClose(_: NSWindow) -> Bool {
         window.orderOut(nil)
+        thisMac.connectFiles(away: true)
         return false
     }
 
     public func applicationShouldHandleReopen(_: NSApplication, hasVisibleWindows visible: Bool) -> Bool {
-        if !visible { window.makeKeyAndOrderFront(nil) }
+        if !visible {
+            window.makeKeyAndOrderFront(nil)
+            thisMac.connectFiles(away: false)
+        }
         return true
     }
 
@@ -172,6 +176,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         account.isHidden = item != .account
         rail.show(item)
         paintChrome()
+        thisMac.connectFiles()
         UserDefaults.standard.set(item.rawValue, forKey: Self.paneKey)
         switch item {
         case .thisMac:
@@ -283,6 +288,15 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     public func windowDidExitFullScreen(_: Notification) {
         placeTheStrip()
+    }
+
+    /// A workspace's files are followed only while on screen: not from the Dock, nor once closing.
+    public func windowDidMiniaturize(_: Notification) {
+        thisMac.connectFiles(away: true)
+    }
+
+    public func windowDidDeminiaturize(_: Notification) {
+        thisMac.connectFiles(away: false)
     }
 
     public func windowDidResize(_: Notification) {
@@ -443,6 +457,17 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         userMenu.fallback = { [weak self] in self?.restingResponder }
         thisMac.signedIn = { [weak self] in self?.signedIn() }
         thisMac.onSignIn = { [weak self] in self?.select(.account) }
+        thisMac.startWorkspace = { [weak self] project, name in
+            guard let client = self?.account.client() else { return SignIn.signedOut.lines }
+            do throws(SailError) {
+                _ = try await client.send(.startWorkspace(name, project: project))
+                return nil
+            } catch let .refused(refusal) {
+                return refusal.lines
+            } catch {
+                return [Said.sentence(error.description)]
+            }
+        }
         workspaces.onSignIn = { [weak self] in self?.select(.account) }
         workspaces.onAskWhoIsSignedIn = { [weak self] in self?.askWhoIsSignedIn() }
         thisMac.onRunnerTabs = { [weak self] project, name in self?.workspaces.recount(project: project, name: name) }
@@ -511,7 +536,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             item("Actual Size", #selector(TerminalView.resetFontSize(_:)), "0"), .separator(),
             Command.renameTab.item(target: terminals),
             item("Show Latency", #selector(WorkbenchView.toggleLatency(_:)), "l", [.command, .option], target: terminals), .separator(),
-            item("Show Sidebar", #selector(WorkspacesView.toggleSidebar(_:)), "s", [.command, .control], target: workspaces),
+            item("Show Sidebar", #selector(ShellApp.toggleSidebar(_:)), "s", [.command, .control], target: self),
         ]
         func directed(_ title: String, _ action: Selector, _ direction: Direction, _ modifiers: NSEvent.ModifierFlags) -> NSMenuItem {
             let keys: [Direction: Int] = [.left: NSLeftArrowFunctionKey, .right: NSRightArrowFunctionKey, .up: NSUpArrowFunctionKey, .down: NSDownArrowFunctionKey]
@@ -546,6 +571,37 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         bar.addItem(submenu("View", view))
         bar.addItem(submenu("Window", windows))
         return bar
+    }
+
+    /// ⌃⌘S, one View item for what is in front: a workspace's tab shows or hides its files; the
+    /// Workspaces section, its projects sidebar.
+    @objc func toggleSidebar(_ sender: Any?) {
+        switch rail.selected {
+        case .thisMac: thisMac.toggleFiles(sender)
+        case .workspaces: workspaces.toggleSidebar(sender)
+        default: break
+        }
+    }
+
+    /// What ⌃⌘S says and does in front now: its title, and the true reason when it does nothing.
+    var sidebarCommand: (title: String, enabled: Bool, reason: String?) {
+        guard window.attachedSheet == nil else { return ("Show Sidebar", false, "A sheet is open.") }
+        switch rail.selected {
+        case .thisMac: return thisMac.filesCommand
+        case .workspaces: return workspaces.sidebarCommand
+        default: return ("Show Sidebar", false, "The account has no sidebar.")
+        }
+    }
+}
+
+extension ShellApp: NSMenuItemValidation {
+    /// View ▸ ⌃⌘S says what it will do right now, and is off, with its reason, where it does nothing.
+    public func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        guard item.action == #selector(toggleSidebar(_:)) else { return true }
+        let command = sidebarCommand
+        item.title = command.title
+        item.toolTip = command.reason
+        return command.enabled
     }
 }
 

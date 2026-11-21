@@ -4,7 +4,8 @@ import SailVT
 /// (30 pt, 6 pt in from both sides, rounded, no gap between rows, a 2 × 14 bar at the list's
 /// leading edge, its content after a 12 pt disclosure slot with 7 pt gaps), and the main list's
 /// (52 pt, edge to edge, a 2 × 24 bar, a hairline between rows). A group head is the mono eyebrow
-/// alone: 34 pt in the main list, under a hairline, and 30 pt in the sidebar.
+/// alone: 34 pt in the main list, under a hairline, and 30 pt in the sidebar. A workspace's files
+/// tree is the sidebar's, denser: 24 pt, its content 4 pt in and ``indent`` further each level.
 public struct RowStyle: Equatable, Sendable {
     public let height: Double
     public let head: Double
@@ -17,6 +18,9 @@ public struct RowStyle: Equatable, Sendable {
 
     public static let sidebar = RowStyle(height: 30, head: 30, margin: 6, leading: 6, trailing: 6, radius: Look.smallRadius, bar: 14, hairline: false)
     public static let list = RowStyle(height: 52, head: 34, margin: 0, leading: 20, trailing: 12, radius: 0, bar: 24, hairline: true)
+    public static let tree = RowStyle(height: 24, head: 24, margin: 6, leading: 4, trailing: 6, radius: Look.smallRadius, bar: 14, hairline: false)
+    /// How much further in a tree's row is for each folder it is in: the disclosure's own slot.
+    public static let indent = 12.0
     public static let barWidth = 2.0
     public static let disclosure = 12.0, gap = 7.0
 }

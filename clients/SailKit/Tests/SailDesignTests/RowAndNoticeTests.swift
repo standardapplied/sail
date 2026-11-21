@@ -11,6 +11,14 @@ import Testing
     /// On paper no row is filled: chosen, it has the bar and its name at full weight; under the
     /// pointer, its name at full weight and its actions; the create row open has the bar; refused,
     /// nothing; under way, its progress line.
+    /// The files tree's row, as the files mockup's third pass draws it: 24 pt, 6 pt in from both
+    /// sides with 5 pt corners, its content 4 pt in and 12 pt further each level, the 2 x 14 bar.
+    @Test func theTreeRowIsTheFilesMockups() {
+        let tree = RowStyle.tree
+        #expect([tree.height, tree.head, tree.margin, tree.leading, tree.trailing, tree.radius, tree.bar] == [24, 24, 6, 4, 6, 5, 14] && !tree.hairline)
+        #expect(RowStyle.indent == 12)
+    }
+
     @Test func eachRowStateIsTheSheets() {
         let rest = RowPaint(RowState())
         #expect(!rest.bar && !rest.strong && !rest.actions)

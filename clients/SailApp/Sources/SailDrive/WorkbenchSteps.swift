@@ -415,7 +415,7 @@ extension Driver {
         return getrusage(RUSAGE_SELF, &usage) == 0 ? Double(usage.ru_maxrss) / 1_048_576 : -1
     }
 
-    private func press(_ name: String, _ modifiers: [String]) {
+    func press(_ name: String, _ modifiers: [String]) {
         if let key = Keys.named(name, modifiers: modifiers) { send(key) }
     }
 
