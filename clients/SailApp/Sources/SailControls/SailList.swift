@@ -168,13 +168,18 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     /// How many rows in or out ``apply(_:changed:)`` moves one by one: past it the table is filled
     /// afresh. Measured on the drive (#508, round five): 5,000 rows inserted one by one took 188 ms to
     /// draw against a fill's 21 ms, while a watch's change moves a few rows; 200 sits between, the
-    /// exact crossing unmeasured.
+    /// exact crossing unmeasured. Counts apart by more are filled before any difference is taken,
+    /// whose cost grows with the rows times the changes (98 ms for a 5,000-row folder, round six).
     public static let applied = 200
 
     /// The rows as `new`, changing only what differs, by id: rows gone removed and new ones inserted
     /// in one update, and only the rows named in `changed` made again, so a listing of thousands that
     /// adds one entry rebuilds one row. The choice follows its row as the table moves it.
     public func apply(_ new: [Entry], changed: Set<String>) {
+        guard abs(new.count - entries.count) <= Self.applied else {
+            entries = new
+            return
+        }
         let difference = new.map(Self.id).difference(from: entries.map(Self.id))
         func offsets(_ changes: [CollectionDifference<String?>.Change]) -> IndexSet {
             IndexSet(changes.map { change in

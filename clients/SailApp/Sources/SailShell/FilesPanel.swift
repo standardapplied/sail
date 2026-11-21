@@ -463,9 +463,26 @@ final class TreeRowCell: NSView {
         return NSRect(x: x + (Self.slot - Self.triangle) / 2, y: (Double(bounds.height) - Self.triangle) / 2, width: Self.triangle, height: Self.triangle)
     }
 
+    /// The name's attributes, made once for each weight and ink and kept as Foundation holds them: a
+    /// row scrolled into a long tree draws its name without building them (round six's scroll stacks
+    /// spent its hold hashing a new attribute dictionary per row).
+    private static var inked: [String: [NSAttributedString.Key: Any]] = [:]
+
+    private static func attributes(strong: Bool, ink: Tint) -> [NSAttributedString.Key: Any] {
+        let key = "\(strong) \(ink)"
+        if let made = inked[key] { return made }
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingTail
+        let made = NSDictionary(dictionary: [
+            NSAttributedString.Key.font: NSFont.systemFont(ofSize: Look.Step.callout.points, weight: strong ? .semibold : .regular),
+            NSAttributedString.Key.foregroundColor: NSColor(ink), NSAttributedString.Key.paragraphStyle: style,
+        ]) as? [NSAttributedString.Key: Any] ?? [:]
+        inked[key] = made
+        return made
+    }
+
     var name: NSAttributedString {
-        let font = NSFont.systemFont(ofSize: Look.Step.callout.points, weight: strong ? .semibold : .regular)
-        return NSAttributedString(string: row.name, attributes: [.font: font, .foregroundColor: NSColor(look.text)]).cut(.byTruncatingTail)
+        NSAttributedString(string: row.name, attributes: Self.attributes(strong: strong, ink: row.kind == .brokenLink ? look.textTertiary : look.text))
     }
 
     /// The last row drawn, on the main thread's media clock: what the drive measures a listing or a
@@ -510,11 +527,8 @@ final class TreeRowCell: NSView {
         let points = Look.Step.callout.points
         let baseline = TextLine.baseline(top: (Double(bounds.height) - points) / 2, points: points, lineHeight: points)
         let x = rightToLeft ? width - start - drawn : start
-        let ink = row.kind == .brokenLink ? look.textTertiary : look.text
-        let words = NSMutableAttributedString(attributedString: name)
-        words.addAttribute(.foregroundColor, value: NSColor(ink), range: NSRange(location: 0, length: words.length))
-        let font = words.length > 0 ? words.attribute(.font, at: 0, effectiveRange: nil) as? NSFont : nil
-        words.draw(with: NSRect(x: x, y: baseline - Double(font?.ascender ?? 0), width: drawn, height: points * 1.5), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
+        let font = name.length > 0 ? name.attribute(.font, at: 0, effectiveRange: nil) as? NSFont : nil
+        name.draw(with: NSRect(x: x, y: baseline - Double(font?.ascender ?? 0), width: drawn, height: points * 1.5), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
         if new {
             let at = rightToLeft ? x - Self.gap - Self.fresh : x + drawn + Self.gap
             NSColor(Tint(look.info)).setFill()
