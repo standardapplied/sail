@@ -165,8 +165,10 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     private var reloading = false
     private var applying = false
 
-    /// How many rows in or out ``apply(_:changed:)`` moves one by one: past it (a folder of thousands
-    /// opened) the table is filled afresh, which costs it less than inserting each.
+    /// How many rows in or out ``apply(_:changed:)`` moves one by one: past it the table is filled
+    /// afresh. Measured on the drive (#508, round five): 5,000 rows inserted one by one took 188 ms to
+    /// draw against a fill's 21 ms, while a watch's change moves a few rows; 200 sits between, the
+    /// exact crossing unmeasured.
     public static let applied = 200
 
     /// The rows as `new`, changing only what differs, by id: rows gone removed and new ones inserted

@@ -240,9 +240,16 @@ import Testing
         list.choose("d")
         list.apply(entries(["a", "a1", "b", "b2", "d"]), changed: [])
         #expect(list.chosen == "d", "the choice did not follow its row")
-        let many = (0 ..< SailList.applied + 1).map { "n\($0)" }
-        list.apply(entries(["a", "a1", "b", "b2", "d"] + many), changed: [])
-        #expect(list.numberOfRows == 5 + many.count && list.chosen == "d", "past its bound apply did not fill the table afresh, keeping the choice")
+        let first = try Self.row(list, 0).view(atColumn: 0) as? NSView
+        let bound = (0 ..< SailList.applied).map { "n\($0)" }
+        list.apply(entries(["a", "a1", "b", "b2", "d"] + bound), changed: [])
+        let atBound = try Self.row(list, 0).view(atColumn: 0) as? NSView
+        #expect(list.numberOfRows == 5 + bound.count && atBound === first, "at its bound apply made the rows again")
+        let past = (0 ..< SailList.applied + 1).map { "m\($0)" }
+        list.apply(entries(["a", "a1", "b", "b2", "d"] + past), changed: [])
+        #expect(list.numberOfRows == 5 + past.count && list.chosen == "d", "past its bound apply did not fill the table afresh, keeping the choice")
+        let pastBound = try Self.row(list, 0).view(atColumn: 0) as? NSView
+        #expect(pastBound !== first, "past its bound the rows were not made afresh")
     }
 
     /// A row with nothing at its end is laid out by frames, with no constraint, its content from its
