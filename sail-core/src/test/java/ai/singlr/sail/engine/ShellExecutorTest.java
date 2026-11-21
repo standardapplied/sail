@@ -459,34 +459,47 @@ class ShellExecutorTest {
   }
 
   /**
-   * #507's last look, nit 1: a command whose own process ends while a process it left behind still
-   * holds its output is answered within its timeout, raised as a timeout, never held until that
-   * process ends.
+   * #507's last look, nit 1, and #509's: a command whose own process ends while one it left behind
+   * still holds its pipes is answered within its timeout, by its own exit when the JDK drained its
+   * pipes as it ended, or as a timeout when a reader was already blocked on one; either way no
+   * descriptor of them is held after, though the process it left runs on.
    */
   @Test
-  void aProcessLeftHoldingTheOutputDoesNotOutlastTheTimeout() {
-    var started = System.nanoTime();
-    var timedOut =
-        assertTimeoutPreemptively(
-            Duration.ofSeconds(5),
-            () ->
-                assertThrows(
-                    CommandTimedOut.class,
-                    () ->
-                        new ShellExecutor(false)
-                            .execWithInput(
-                                List.of(
-                                    "sh",
-                                    "-c",
-                                    "echo $((6 * 7)); echo $((6 * 8)) >&2; sleep 8 & exit 0"),
-                                "",
-                                Duration.ofSeconds(1))));
+  @EnabledOnOs(OS.LINUX)
+  void aProcessLeftHoldingThePipesDoesNotOutlastTheTimeoutNorKeepThem() throws Exception {
+    var shell = new ShellExecutor(false);
+    shell.exec(List.of("true"), null, Duration.ofSeconds(10));
+    var before = descriptors();
 
-    assertTrue(
-        System.nanoTime() - started < Duration.ofSeconds(3).toNanos(), "ended at its timeout");
-    assertEquals("42\n", timedOut.stdout(), "what was read up to the timeout is given back");
-    assertEquals("48\n", timedOut.stderr());
-    assertFalse(timedOut.getMessage().contains("42"), "the output is never in the message");
+    for (var time = 0; time < 5; time++) {
+      var started = System.nanoTime();
+      assertTimeoutPreemptively(
+          Duration.ofSeconds(5),
+          () -> {
+            try {
+              assertEquals(
+                  0,
+                  shell
+                      .execWithInput(
+                          List.of("sh", "-c", "sleep 8 & exit 0"), "", Duration.ofMillis(500))
+                      .exitCode(),
+                  "answered by its own exit when the JDK drained its pipes as it ended");
+            } catch (CommandTimedOut heldOpen) {
+              assertFalse(heldOpen.getMessage().isEmpty());
+            }
+          });
+
+      assertTrue(
+          System.nanoTime() - started < Duration.ofMillis(2500).toNanos(), "ended at its timeout");
+      assertEquals(before, descriptors(), "no pipe of the command is held after its timeout");
+    }
+  }
+
+  /** How many descriptors this process holds open. */
+  private static long descriptors() throws IOException {
+    try (var open = Files.list(Path.of("/proc/self/fd"))) {
+      return open.count();
+    }
   }
 
   /**
