@@ -95,6 +95,11 @@ extension WorkbenchView {
             view.fileDivider.isHidden = true
             return
         }
+        pane.covering = give == 0
+        pane.onShowTerminal = { [weak self, weak view] in
+            guard let self, let view, let tab = self.model.selectedTab else { return }
+            self.keysToTerminal(tab.focused, in: view)
+        }
         guard give > 0 else {
             pane.isHidden = !view.filePaneInFront
             view.fileDivider.isHidden = true
@@ -171,7 +176,7 @@ extension WorkbenchView {
         return false
     }
 
-    private func keysToTerminal(_ id: PaneID?, in view: TabView) {
+    func keysToTerminal(_ id: PaneID?, in view: TabView) {
         view.filePaneInFront = false
         if let id { change { $0.focus(id) } } else { apply() }
         if let terminal = focused { window?.makeFirstResponder(terminal.terminal) }

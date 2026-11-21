@@ -160,13 +160,13 @@ public struct FileTree: Sendable {
 
     /// Whether every expanded folder is followed live: false past ``watchCap``.
     public var followsAll: Bool {
-        expanded.count <= Self.watchCap
+        expanded.count <= Self.watchCap - (file == nil ? 0 : 1)
     }
 
-    /// The watch set: the root and the folders expanded most recently, up to ``watchCap``, each held
-    /// one at the version its listing came at.
+    /// The watch set: the open file first, then the root and the folders expanded most recently, up
+    /// to ``watchCap`` in all, each held at the version its listing or read came at.
     public var watchSet: [WatchedPath] {
-        let followed = [Self.root] + recency.suffix(Self.watchCap - 1)
+        let followed = [Self.root] + recency.suffix(Self.watchCap - 1 - (file == nil ? 0 : 1))
         let shown = followed.sorted { $0.bytes.lexicographicallyPrecedes($1.bytes) }.compactMap { path in folders[path].map { WatchedPath(path: path, version: $0.version) } }
         return shown + [file].compactMap { $0 }
     }

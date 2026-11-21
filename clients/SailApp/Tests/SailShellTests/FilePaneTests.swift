@@ -141,5 +141,12 @@ import Testing
         bench.selectPreviousSplit(nil)
         bench.layoutSubtreeIfNeeded()
         #expect(pane.isHidden && bench.window?.firstResponder === terminal.terminal && pane.editor.string == "one\n", "the terminal was not given back its place")
+        let view = try #require(bench.model.selectedTab.flatMap { bench.tabViews[$0.id] })
+        bench.focusFilePane(in: view)
+        bench.layoutSubtreeIfNeeded()
+        #expect(!pane.isHidden && pane.covering, "Show Terminal is not offered where the pane covers the terminals")
+        pane.onShowTerminal()
+        bench.layoutSubtreeIfNeeded()
+        #expect(pane.isHidden && bench.window?.firstResponder === terminal.terminal, "Show Terminal did not bring the terminal forward")
     }
 }

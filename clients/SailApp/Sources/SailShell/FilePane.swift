@@ -27,6 +27,13 @@ final class FilePane: NSView, NSTextViewDelegate {
     var onUnsaved: @MainActor (Bool) -> Void = { _ in }
     /// The conflict sheet: theirs beside the pane's text.
     var onCompare: @MainActor (_ theirs: String) -> Void = { _ in }
+    /// Show Terminal, where the pane covers the terminals in a narrow tab: they come forward.
+    var onShowTerminal: @MainActor () -> Void = {}
+    /// Whether it covers the terminals (a tab too narrow for both): Show Terminal is in its title.
+    var covering = false {
+        didSet { if covering != oldValue { showTerminal.isHidden = !covering; needsLayout = true } }
+    }
+
     /// The version the watch is to hold the file at moved.
     var onWatched: @MainActor (WatchedPath?) -> Void = { _ in }
     private var shownWatch: WatchedPath?
@@ -40,6 +47,7 @@ final class FilePane: NSView, NSTextViewDelegate {
     private let dot = NSView()
     private let status = NSTextField(labelWithString: "")
     private let close: SailButton
+    private let showTerminal: SailButton
     private let note = NSTextField(labelWithString: "")
     private let compare: SailButton
     private let discard: SailButton
@@ -60,6 +68,7 @@ final class FilePane: NSView, NSTextViewDelegate {
         self.mono = mono
         editor = NSTextView(usingTextLayoutManager: true)
         close = SailButton(icon: .close, label: "Close", size: .small, look: look, target: nil, action: nil)
+        showTerminal = SailButton("Show Terminal", kind: .quiet, size: .small, look: look, target: nil, action: nil)
         compare = SailButton("Compare", kind: .quiet, size: .small, look: look, target: nil, action: nil)
         discard = SailButton("Discard Mine", kind: .quiet, size: .small, look: look, target: nil, action: nil)
         copyPath = SailButton("Copy Path", kind: .secondary, size: .small, look: look, target: nil, action: nil)
@@ -89,7 +98,10 @@ final class FilePane: NSView, NSTextViewDelegate {
         dot.isHidden = true
         dot.setAccessibilityElement(true)
         dot.setAccessibilityLabel("Unsaved")
-        for view in [folderLabel, nameLabel, dot, status, close] as [NSView] { titleBar.addSubview(view) }
+        for view in [folderLabel, nameLabel, dot, status, showTerminal, close] as [NSView] { titleBar.addSubview(view) }
+        showTerminal.isHidden = true
+        showTerminal.target = self
+        showTerminal.action = #selector(showTerminalPressed)
         close.target = self
         close.action = #selector(closePressed)
         compare.target = self
@@ -230,6 +242,10 @@ final class FilePane: NSView, NSTextViewDelegate {
     func finishClosing() {
         send(Self.frames(file.close().asks))
         onClose()
+    }
+
+    @objc private func showTerminalPressed() {
+        onShowTerminal()
     }
 
     @objc private func comparePressed() {
@@ -411,7 +427,7 @@ final class FilePane: NSView, NSTextViewDelegate {
         note.textColor = NSColor(look.text)
         sentence.textColor = NSColor(look.text)
         dot.layer?.backgroundColor = NSColor(look.text).cgColor
-        for button in [close, compare, discard, copyPath] { button.look = look }
+        for button in [close, showTerminal, compare, discard, copyPath] { button.look = look }
         editor.textColor = NSColor(look.text)
         editor.insertionPointColor = NSColor(look.text)
         editor.backgroundColor = NSColor(Tint(look.surface))
@@ -425,14 +441,20 @@ final class FilePane: NSView, NSTextViewDelegate {
         titleBar.frame = NSRect(x: 0, y: 0, width: width, height: Self.titleHeight)
         let closeSize = close.intrinsicContentSize
         close.frame = NSRect(x: width - pad - Double(closeSize.width), y: (Self.titleHeight - Double(closeSize.height)) / 2, width: Double(closeSize.width), height: Double(closeSize.height))
-        let folder = folderLabel.intrinsicContentSize, name = nameLabel.intrinsicContentSize, room = Double(close.frame.minX) - pad - 8
+        var end = Double(close.frame.minX)
+        if !showTerminal.isHidden {
+            let size = showTerminal.intrinsicContentSize
+            showTerminal.frame = NSRect(x: end - 8 - Double(size.width), y: (Self.titleHeight - Double(size.height)) / 2, width: Double(size.width), height: Double(size.height))
+            end = Double(showTerminal.frame.minX)
+        }
+        let folder = folderLabel.intrinsicContentSize, name = nameLabel.intrinsicContentSize, room = end - pad - 8
         let folderWidth = min(Double(folder.width), max(room - Double(name.width) - 14, 0))
         folderLabel.frame = NSRect(x: pad, y: (Self.titleHeight - Double(folder.height)) / 2, width: folderWidth, height: Double(folder.height))
         let nameWidth = min(Double(name.width), room - folderWidth - 14)
         nameLabel.frame = NSRect(x: pad + folderWidth, y: (Self.titleHeight - Double(name.height)) / 2, width: max(nameWidth, 0), height: Double(name.height))
         dot.frame = NSRect(x: Double(nameLabel.frame.maxX) + 6, y: Self.titleHeight / 2 - 3, width: 6, height: 6)
         let statusSize = status.intrinsicContentSize
-        status.frame = NSRect(x: Double(dot.frame.maxX) + 8, y: (Self.titleHeight - Double(statusSize.height)) / 2, width: max(Double(close.frame.minX) - Double(dot.frame.maxX) - 16, 0), height: Double(statusSize.height))
+        status.frame = NSRect(x: Double(dot.frame.maxX) + 8, y: (Self.titleHeight - Double(statusSize.height)) / 2, width: max(end - Double(dot.frame.maxX) - 16, 0), height: Double(statusSize.height))
         var top = Self.titleHeight
         if !note.isHidden {
             var end = width - pad
