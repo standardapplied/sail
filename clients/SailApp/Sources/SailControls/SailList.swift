@@ -152,6 +152,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         willSet { kept = chosen }
         didSet {
             guard !applying else { return }
+            fills += 1
             reloading = true
             reloadKeepingHover()
             select(kept)
@@ -164,6 +165,10 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     private var kept: String?
     private var reloading = false
     private var applying = false
+    /// Times the rows were filled afresh, and rows `apply` inserted or made again: what the drive
+    /// holds the rows made against, so only changed rows are ever made.
+    package private(set) var fills = 0
+    package private(set) var appliedRows = 0
 
     /// How many rows in or out ``apply(_:changed:)`` moves one by one: past it the table is filled
     /// afresh. Measured on the drive (#508, round five): 5,000 rows inserted one by one took 188 ms to
@@ -202,6 +207,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         if !inserted.isEmpty { insertRows(at: inserted, withAnimation: []) }
         endUpdates()
         let remade = IndexSet(new.indices.filter { Self.id(new[$0]).map(changed.contains) ?? false }.filter { !inserted.contains($0) })
+        appliedRows += inserted.count + remade.count
         if !remade.isEmpty {
             reloadData(forRowIndexes: remade, columnIndexes: IndexSet(integer: 0))
             noteHeightOfRows(withIndexesChanged: remade)

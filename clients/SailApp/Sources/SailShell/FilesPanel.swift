@@ -481,9 +481,19 @@ final class TreeRowCell: NSView {
         return made
     }
 
+    /// The name as drawn, built once for each weight the row shows: a draw builds none.
     var name: NSAttributedString {
-        NSAttributedString(string: row.name, attributes: Self.attributes(strong: strong, ink: row.kind == .brokenLink ? look.textTertiary : look.text))
+        if let built, built.strong == strong { return built.text }
+        let text = NSAttributedString(string: row.name, attributes: Self.attributes(strong: strong, ink: row.kind == .brokenLink ? look.textTertiary : look.text))
+        built = (strong, text)
+        Self.namesBuilt += 1
+        return text
     }
+
+    private var built: (strong: Bool, text: NSAttributedString)?
+    /// Rows drawn and names built, in all: what the drive holds a scroll's drawing against.
+    static private(set) var draws = 0
+    static private(set) var namesBuilt = 0
 
     /// The last row drawn, on the main thread's media clock: what the drive measures a listing or a
     /// change to its rows on the screen by.
@@ -494,6 +504,7 @@ final class TreeRowCell: NSView {
 
     override func draw(_: NSRect) {
         let now = CACurrentMediaTime()
+        Self.draws += 1
         Self.lastDrawn = (now, row.path, new)
         if new, Self.newDrawn[row.path] == nil { Self.newDrawn[row.path] = now }
         let rightToLeft = userInterfaceLayoutDirection == .rightToLeft, width = Double(bounds.width)
