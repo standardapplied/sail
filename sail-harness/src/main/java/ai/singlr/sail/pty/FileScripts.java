@@ -97,10 +97,13 @@ final class FileScripts {
 
   /**
    * Reads at most {@code $3} bytes of the file from {@code $2}: its version and its size, each
-   * NUL-terminated, then the bytes, then its version stat-ed again, so a read the file changed
-   * under is known. A folder, and anything that is not a file (a pipe, whose read would wait for a
-   * writer; a socket; a device), is refused; the bytes are read without waiting, so a pipe swapped
-   * in after those checks ends the read at once rather than holding it.
+   * NUL-terminated, then the bytes; then the SHA-256 of the bytes it sent, the same range hashed
+   * again from the file after sending them, and its version stat-ed again, each NUL-terminated but
+   * the last. A read whose two digests and two versions agree sent the file as it was at one
+   * moment, whatever the filesystem's clock; any other changed under it. A folder, and anything
+   * that is not a file (a pipe, whose read would wait for a writer; a socket; a device), is
+   * refused; the bytes are read without waiting, so a pipe swapped in after those checks ends the
+   * read at once rather than holding it.
    */
   static final String READ =
       RESOLVE
@@ -108,9 +111,15 @@ final class FileScripts {
           [ -d "$at" ] && exit 23
           [ -f "$at" ] || exit 25
           [ -r "$at" ] || exit 21
-          stat -L --printf '%s\\0%%s\\0' -- "$at" || exit 1
-          dd if="$at" iflag=skip_bytes,count_bytes,nonblock skip="$2" count="$3" bs=262144 status=none || exit 1
-          stat -L --printf '%s' -- "$at" || exit 1
+          before=$(stat -L --printf '%s' -- "$at") || exit 1
+          size=${before#*:*:}
+          printf '%%s\\0%%s\\0' "$before" "${size%%%%:*}"
+          set -o pipefail
+          exec 3>&1
+          sent=$(dd if="$at" iflag=skip_bytes,count_bytes,nonblock skip="$2" count="$3" bs=262144 status=none | tee /dev/fd/3 | sha256sum) || exit 1
+          again=$(dd if="$at" iflag=skip_bytes,count_bytes,nonblock skip="$2" count="$3" bs=262144 status=none | sha256sum) || exit 1
+          after=$(stat -L --printf '%s' -- "$at") || exit 1
+          printf '%%s\\0%%s\\0%%s' "${sent%%%% *}" "${again%%%% *}" "$after"
           """
               .formatted(VERSION, VERSION);
 

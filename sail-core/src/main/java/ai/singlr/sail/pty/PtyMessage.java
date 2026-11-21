@@ -393,9 +393,13 @@ public sealed interface PtyMessage {
 
   /**
    * The next bytes request {@code id} reads, at the version the file had when the read began;
-   * {@code eof} on the last frame when it reached the file's end.
+   * {@code eof} on the last frame when it reached the file's end. The last frame alone carries
+   * {@code digest}, the SHA-256 in hex of every byte the read sent, which the workspace hashed
+   * again from the file after sending them and found the same: the read's bytes are the file's at
+   * one moment, and the digest is their content version. Blank on every frame before the last.
    */
-  record FilesData(int id, String version, byte[] bytes, boolean eof) implements PtyMessage {}
+  record FilesData(int id, String version, byte[] bytes, boolean eof, String digest)
+      implements PtyMessage {}
 
   /** These watched paths changed: the client reads them again. */
   record FilesChanged(List<String> paths) implements PtyMessage {

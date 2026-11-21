@@ -67,6 +67,12 @@ class WorkspaceFilesIT extends AbstractIncusIT {
   private static final long READ_BOUND_MS = 5 * 200;
   private static final long CHANGE_BOUND_MS = 5 * 600;
 
+  /**
+   * A 20 MiB read hashed twice has no ceiling of the spec's: its figure is printed, and a bound of
+   * 10 s catches only a hang, since two SHA-256 passes over 20 MiB take well under a second.
+   */
+  private static final long WHOLE_BOUND_MS = 10_000;
+
   @TempDir Path dir;
 
   private final Map<String, PtyIdentity.Person> people =
@@ -292,6 +298,25 @@ class WorkspaceFilesIT extends AbstractIncusIT {
           assertTrue(p95(lists) <= LIST_BOUND_MS, "list p95 " + p95(lists) + " ms");
           assertTrue(p95(reads) <= READ_BOUND_MS, "read p95 " + p95(reads) + " ms");
           assertTrue(change <= CHANGE_BOUND_MS, "change " + change + " ms");
+
+          inInstance("head -c 20971520 /dev/urandom > /home/dev/twenty");
+          var whole = new ArrayList<Long>();
+          for (var i = 0; i < 10; i++) {
+            var started = System.nanoTime();
+            PtyWire.write(files, new PtyMessage.FilesRead(400 + i, "/home/dev/twenty", 0, 20L << 20));
+            var sha = java.security.MessageDigest.getInstance("SHA-256");
+            PtyMessage.FilesData data;
+            do {
+              data = next(files, PtyMessage.FilesData.class);
+              sha.update(data.bytes());
+            } while (!data.eof());
+            whole.add((System.nanoTime() - started) / 1_000_000);
+            assertEquals(java.util.HexFormat.of().formatHex(sha.digest()), data.digest());
+          }
+          System.out.printf(
+              "a 20 MiB read, hashed as sent and again from the file: p95 %d ms (bound %d ms)%n",
+              p95(whole), WHOLE_BOUND_MS);
+          assertTrue(p95(whole) <= WHOLE_BOUND_MS, "20 MiB read p95 " + p95(whole) + " ms");
 
           PtyWire.write(files, new PtyMessage.FilesRead(300, "/home/dev/huge", 0, 20L << 20));
           next(files, PtyMessage.FilesData.class);

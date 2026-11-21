@@ -79,7 +79,10 @@ import Testing
             entry: FileEntry(name: "App.java", kind: .known(.file), target: .known(.none), size: 12, mtimeNanos: 7, mode: 0o600),
             version: "51:10:12:7.0:7.0"
         ))
-        #expect(frames["FilesData"] == .filesData(id: 3, version: "51:10:12:7.0:7.0", bytes: Array("class App {}".utf8), eof: true))
+        #expect(frames["FilesData"] == .filesData(
+            id: 3, version: "51:10:12:7.0:7.0", bytes: Array("class App {}".utf8), eof: true,
+            digest: "42f26956ba1a845d48ac0db6270beddc5d864212ef56efe8a7964871297b9da3"
+        ))
         #expect(frames["FilesChanged"] == .filesChanged(paths: ["/home/dev/workspace", "/home/dev/workspace/App.java"]))
         #expect(frames["FilesTick"] == .filesTick)
         #expect(frames["FilesRefused"] == .filesRefused(id: 4, kind: .known(.loop), message: "/home/dev/workspace/self leads back to itself."))

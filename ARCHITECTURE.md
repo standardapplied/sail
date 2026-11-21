@@ -4129,11 +4129,19 @@ connection's frames.
   file and no other, and two names a lossy decoding would merge stay two.
 - **Versions.** A version is one `stat -L` of the resolved file, `dev:ino:size:mtime:ctime`, mtime
   and ctime in ns; opaque to a client. A listing carries its folder's, a stat and a read their
-  file's. A read stats the file again after its bytes and ends with them only when that version
-  and the byte count are the ones it began with; else it is answered `changed` and the client
-  drops what it had of it and reads again, so a read's bytes are always its version's (as far as
-  a version tells states apart: a same-size rewrite within one tick of the filesystem's clock is
-  one version).
+  file's. Folder versions and the watch stay this cheap `stat`.
+- **Reads are the file at one moment, and say so by content.** A read hashes (SHA-256) the bytes
+  it sends as it sends them, then, in the same exec, hashes the same range of the file again and
+  stats it again; it ends with its bytes only when both digests and both versions agree, and its
+  last frame carries that digest as the content version of what it read. Otherwise it is
+  answered `changed`, and the client drops what it had of it and reads again. A read spliced
+  across a write would need the same splice twice, so a coarse filesystem clock (two stats inside
+  one write's tick agree; measured on ext4, never on ZFS) lets none through. The stated limit: a
+  writer that leaves the file half-written for the whole of both passes is read as that
+  half-written file, which is what the file holds then. A read hashes the range it sends; a read
+  from 0 that reaches the file's end hashes the whole file, which is the only base a save takes:
+  a base from any shorter range differs from the whole file's digest the save compares, so it can
+  cost a needless conflict, never an overwrite.
 - **F1. The watch.** One loop a connection (`FileScripts.WATCH`), started by its first set, stats
   only the paths of the set every 250 ms and prints those whose version is not the one held, then
   a NUL; it prints a NUL alone each second (`FilesTick`), and ends when its input closes. A set

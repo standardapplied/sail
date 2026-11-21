@@ -21,6 +21,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -278,6 +279,13 @@ class FileScriptsTest {
     var version = read.field();
     assertEquals("300000", read.field());
     assertArrayEquals(java.util.Arrays.copyOfRange(bytes, 1000, 263_144), read.bytes(262_144));
+    var sent =
+        HexFormat.of()
+            .formatHex(
+                java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(java.util.Arrays.copyOfRange(bytes, 1000, 263_144)));
+    assertEquals(sent, read.field(), "the digest of the range sent");
+    assertEquals(sent, read.field(), "that range hashed again from the file");
     assertEquals(version, read.field(), "its version again after its bytes");
     assertEquals(0, read.status());
 
@@ -451,6 +459,9 @@ class FileScriptsTest {
     var before = read.field();
     assertEquals("5", read.field());
     assertArrayEquals("hello".getBytes(java.nio.charset.StandardCharsets.UTF_8), read.bytes(5));
+    var hello = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+    assertEquals(hello, read.field(), "the digest of the bytes it sent");
+    assertEquals(hello, read.field(), "and of the file hashed again after them");
     assertEquals(before, read.field(), "the same version after the bytes");
     assertNull(read.field());
     assertEquals(0, read.status());
