@@ -74,8 +74,8 @@ record WorkspaceSessionsResponse(List<Session> sessions) implements Mappable {
   /**
    * One session: {@code writer} holds its keyboard (blank for no one), {@code command} is what it
    * runs ({@code ["bash", "-l"]} for the login shell, the harness's own command for an agent, never
-   * what started it), {@code agent} the harness it runs (null for a command), and {@code
-   * endedReason} the host's words for its end, null while it lives.
+   * what started it), {@code agent} the harness it runs with its name as a person reads it (null
+   * for a command), and {@code endedReason} the host's words for its end, null while it lives.
    */
   record Session(
       String name,
@@ -117,6 +117,8 @@ record WorkspaceSessionsResponse(List<Session> sessions) implements Mappable {
               : Map.of(
                   "harness",
                   agent.harness(),
+                  "display",
+                  Harnesses.displayName(agent.harness()),
                   "mode",
                   agent.mode(),
                   "login",
@@ -2174,7 +2176,7 @@ record AgentOffer(
     }
     m.put(
         "kinds",
-        harness.loginKinds().stream()
+        harness.offeredKinds().stream()
             .map(
                 kind -> {
                   var shown = new LinkedHashMap<String, Object>();

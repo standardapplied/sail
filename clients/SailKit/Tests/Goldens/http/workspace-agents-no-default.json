@@ -12,14 +12,14 @@
           "inside": true,
           "kinds": [
             {
-              "how": "Run claude setup-token on a machine where Claude Code is signed in",
-              "kind": "token",
-              "label": "long-lived token"
-            },
-            {
               "how": "Create an API key in the Claude Console",
               "kind": "api-key",
               "label": "API key"
+            },
+            {
+              "how": "Run claude setup-token on a machine where Claude Code is signed in",
+              "kind": "token",
+              "label": "long-lived token"
             }
           ],
           "login_refusal": {

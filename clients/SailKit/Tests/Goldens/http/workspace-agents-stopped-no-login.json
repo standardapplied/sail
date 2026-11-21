@@ -12,40 +12,40 @@
           "inside": true,
           "kinds": [
             {
-              "how": "Run claude setup-token on a machine where Claude Code is signed in",
-              "kind": "token",
-              "label": "long-lived token"
-            },
-            {
               "how": "Create an API key in the Claude Console",
               "kind": "api-key",
               "label": "API key"
+            },
+            {
+              "how": "Run claude setup-token on a machine where Claude Code is signed in",
+              "kind": "token",
+              "label": "long-lived token"
             }
           ],
           "login_refusal": {
-            "action": "Run claude setup-token on a machine where Claude Code is signed in, then agent login claude-code. Or: Create an API key in the Claude Console, then agent login claude-code --kind api-key.",
+            "action": "Create an API key in the Claude Console, then agent login claude-code --kind api-key. Or: Run claude setup-token on a machine where Claude Code is signed in, then agent login claude-code.",
             "code": "login_not_stored",
             "field_errors": [],
             "message": "No Claude Code login stored for ana, so a Claude Code session cannot start in quay.",
             "remedy": [
               {
-                "text": "Run claude setup-token on a machine where Claude Code is signed in, then "
-              },
-              {
-                "args": [
-                  "claude-code"
-                ],
-                "run": "sail",
-                "verb": "agent login"
-              },
-              {
-                "text": ". Or: Create an API key in the Claude Console, then "
+                "text": "Create an API key in the Claude Console, then "
               },
               {
                 "args": [
                   "claude-code",
                   "--kind",
                   "api-key"
+                ],
+                "run": "sail",
+                "verb": "agent login"
+              },
+              {
+                "text": ". Or: Run claude setup-token on a machine where Claude Code is signed in, then "
+              },
+              {
+                "args": [
+                  "claude-code"
                 ],
                 "run": "sail",
                 "verb": "agent login"
