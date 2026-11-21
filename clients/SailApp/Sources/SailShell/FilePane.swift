@@ -453,6 +453,12 @@ final class FilePane: NSView, NSTextViewDelegate {
         for view in [folderLabel, nameLabel, status, note] { view.font = .systemFont(ofSize: Look.Step.callout.points) }
     }
 
+    /// A label's words as drawn, measured from them: its intrinsic size lags a change of font.
+    private static func measured(_ label: NSTextField) -> NSSize {
+        let size = label.attributedStringValue.size()
+        return NSSize(width: label.stringValue.isEmpty ? 0 : (Double(size.width) + 4).rounded(.up), height: (Double(size.height)).rounded(.up))
+    }
+
     override func layout() {
         super.layout()
         let width = Double(bounds.width), height = Double(bounds.height), pad = 12.0
@@ -465,7 +471,7 @@ final class FilePane: NSView, NSTextViewDelegate {
             showTerminal.frame = NSRect(x: end - 8 - Double(size.width), y: (Self.titleHeight - Double(size.height)) / 2, width: Double(size.width), height: Double(size.height))
             end = Double(showTerminal.frame.minX)
         }
-        let folder = folderLabel.intrinsicContentSize, name = nameLabel.intrinsicContentSize, room = end - pad - 8
+        let folder = Self.measured(folderLabel), name = Self.measured(nameLabel), room = end - pad - 8
         let folderWidth = min(Double(folder.width), max(room - Double(name.width) - 14, 0))
         folderLabel.frame = NSRect(x: pad, y: (Self.titleHeight - Double(folder.height)) / 2, width: folderWidth, height: Double(folder.height))
         let nameWidth = min(Double(name.width), room - folderWidth - 14)
@@ -514,6 +520,7 @@ final class LineNumbers: NSRulerView {
     override init(scrollView: NSScrollView?, orientation: NSRulerView.Orientation) {
         super.init(scrollView: scrollView, orientation: orientation)
         ruleThickness = 44
+        clipsToBounds = true
     }
 
     @available(*, unavailable)

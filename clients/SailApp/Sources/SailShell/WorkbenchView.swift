@@ -804,7 +804,11 @@ public final class WorkbenchView: NSView {
         strip.look = look
         panes.values.forEach { $0.look = look }
         tabViews.values.forEach { $0.paint(look) }
-        tabViews.values.forEach { $0.files?.look = look }
+        tabViews.values.forEach { view in
+            view.files?.look = look
+            view.filePane?.look = look
+            view.fileDivider.look = look
+        }
     }
 }
 
