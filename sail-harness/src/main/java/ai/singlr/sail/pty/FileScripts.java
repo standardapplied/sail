@@ -12,7 +12,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -98,8 +97,10 @@ final class FileScripts {
 
   /**
    * Reads at most {@code $3} bytes of the file from {@code $2}: its version and its size, each
-   * NUL-terminated, then the bytes. A folder, and anything that is not a file (a pipe, whose read
-   * would wait for a writer; a socket; a device), is refused.
+   * NUL-terminated, then the bytes, then its version stat-ed again, so a read the file changed
+   * under is known. A folder, and anything that is not a file (a pipe, whose read would wait for a
+   * writer; a socket; a device), is refused; the bytes are read without waiting, so a pipe swapped
+   * in after those checks ends the read at once rather than holding it.
    */
   static final String READ =
       RESOLVE
@@ -108,19 +109,22 @@ final class FileScripts {
           [ -f "$at" ] || exit 25
           [ -r "$at" ] || exit 21
           stat -L --printf '%s\\0%%s\\0' -- "$at" || exit 1
-          exec dd if="$at" iflag=skip_bytes,count_bytes skip="$2" count="$3" bs=262144 status=none
+          dd if="$at" iflag=skip_bytes,count_bytes,nonblock skip="$2" count="$3" bs=262144 status=none || exit 1
+          stat -L --printf '%s' -- "$at" || exit 1
           """
-              .formatted(VERSION);
+              .formatted(VERSION, VERSION);
 
   /**
    * The watch loop: reads watch sets from standard input, each path then the version the client
-   * holds of it, NUL-terminated, a set ended by an empty path, and replaces its set with each.
-   * Every 250 ms it stats the set once and prints each path whose version is not the one last held,
+   * holds of it, NUL-terminated, a set ended by an empty path, and replaces its set with each, a
+   * save's temporary and any path that resolves outside the home ({@code $1}) left out. Every 250
+   * ms it stats the set once and prints each path whose version is not the one last held,
    * NUL-terminated, then a NUL; once a second it prints a NUL alone. It ends when its input closes.
    */
   static final String WATCH =
       """
       export LC_ALL=C
+      home=$1
       declare -A held=() given=()
       paths=() next=() part='' want=path name=''
       last=${EPOCHREALTIME/./} beat=$last
@@ -128,9 +132,11 @@ final class FileScripts {
         if IFS= read -r -d '' -t 0.25 token; then
           token=$part$token part=''
           if [ $want = version ]; then
-            case ${name##*/} in
+            at=$(realpath -m -- "$name" 2>/dev/null && echo x)
+            at=${at%%?x}
+            case ${name##*/}:$at/ in
               '%s'*) ;;
-              *) next+=("$name") given[$name]=$token ;;
+              *:"$home"/*) next+=("$name") given[$name]=$token ;;
             esac
             want=path
           elif [ -n "$token" ]; then
@@ -198,11 +204,20 @@ final class FileScripts {
 
   /**
    * Whether {@code path} may be asked of a script at all: absolute, under the home or the home
-   * itself, with no NUL, which a name cannot hold and the scripts end a path with. A link's target
-   * is the scripts' to check.
+   * itself, spelled plainly (no {@code .} or {@code ..} part, no empty one), with no NUL, which a
+   * name cannot hold and the scripts end a path with. Where a link leads is the scripts' to check:
+   * each resolves its path, the watch included.
    */
   boolean inHome(String path) {
-    return path.indexOf('\0') < 0 && (path.equals(home) || path.startsWith(home + "/"));
+    if (path.indexOf('\0') >= 0 || !(path.equals(home) || path.startsWith(home + "/"))) {
+      return false;
+    }
+    for (var part : path.substring(home.length()).split("/", -1)) {
+      if (part.equals(".") || part.equals("..")) {
+        return false;
+      }
+    }
+    return !path.endsWith("/") && !path.contains("//");
   }
 
   /**
@@ -229,7 +244,7 @@ final class FileScripts {
 
   /** {@code path} as the scripts read it: its bytes, then a NUL. */
   static byte[] nul(String path) {
-    var bytes = path.getBytes(StandardCharsets.UTF_8);
+    var bytes = FileNames.encode(path);
     var ended = new byte[bytes.length + 1];
     System.arraycopy(bytes, 0, ended, 0, bytes.length);
     return ended;
@@ -282,7 +297,7 @@ final class FileScripts {
         bytes.write(next);
       }
       answered.complete(null);
-      return next < 0 && bytes.size() == 0 ? null : bytes.toString(StandardCharsets.UTF_8);
+      return next < 0 && bytes.size() == 0 ? null : FileNames.decode(bytes.toByteArray());
     }
 
     /** Up to {@code count} bytes of its output, fewer only at its end. */

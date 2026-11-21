@@ -53,12 +53,12 @@ public enum Frame: Equatable, Sendable {
     /// it; only the host's dispatch authority sends it.
     case yieldWorkspace(project: String, workspace: String, reason: String, record: String)
     /// Lists folder `path` of a files ticket's workspace: ``filesListing(_:)`` frames, or ``filesRefused(id:kind:message:)``.
-    case filesList(id: Int32, path: String)
+    case filesList(id: Int32, path: FileName)
     /// What `path` is: ``filesEntry(id:entry:version:)``, or a refusal.
-    case filesStat(id: Int32, path: String)
+    case filesStat(id: Int32, path: FileName)
     /// At most `length` bytes of file `path` from `offset`: ``filesData(id:version:bytes:eof:)`` frames of at
     /// most 256 KiB, or a refusal.
-    case filesRead(id: Int32, path: String, offset: Int64, length: Int64)
+    case filesRead(id: Int32, path: FileName, offset: Int64, length: Int64)
     /// Ends request `id`, under way or waiting; nothing more is answered for it.
     case filesCancel(id: Int32)
     /// Replaces the connection's whole watch set, each path from the version this client holds of it.
@@ -69,7 +69,7 @@ public enum Frame: Equatable, Sendable {
     /// last frame when it reached the file's end.
     case filesData(id: Int32, version: String, bytes: [UInt8], eof: Bool)
     /// These watched paths changed: read them again.
-    case filesChanged(paths: [String])
+    case filesChanged(paths: [FileName])
     /// The watch is live: said each second it runs.
     case filesTick
     /// Request `id` refused, in a sentence naming the file and the reason.
@@ -133,20 +133,49 @@ public enum FileRefusal: String, CaseIterable, Sendable {
     case notAFolder = "not_a_folder"
     case notAFile = "not_a_file"
     case loop
+    /// The file changed while it was read: the client drops what it had of the read and reads again.
+    case changed
     case failed
+}
+
+/// A file's name or path as the workspace holds it: bytes, which need not be UTF-8. It addresses
+/// that file exactly, and ``shown`` is what a person reads, each byte that is no UTF-8 as U+FFFD.
+public struct FileName: Hashable, Sendable, ExpressibleByStringLiteral, CustomStringConvertible {
+    public var bytes: [UInt8]
+
+    public init(_ bytes: [UInt8]) {
+        self.bytes = bytes
+    }
+
+    public init(_ text: String) {
+        bytes = Array(text.utf8)
+    }
+
+    public init(stringLiteral text: String) {
+        self.init(text)
+    }
+
+    /// The name as a person reads it.
+    public var shown: String {
+        String(decoding: bytes, as: UTF8.self)
+    }
+
+    public var description: String {
+        shown
+    }
 }
 
 /// One entry of a folder: its own size, its modification time in nanoseconds since the epoch, and its
 /// permission bits; `target` is what a link leads to, ``FileKind/none`` for any other entry.
 public struct FileEntry: Equatable, Sendable {
-    public var name: String
+    public var name: FileName
     public var kind: Open<FileKind>
     public var target: Open<FileKind>
     public var size: Int64
     public var mtimeNanos: Int64
     public var mode: Int32
 
-    public init(name: String, kind: Open<FileKind>, target: Open<FileKind>, size: Int64, mtimeNanos: Int64, mode: Int32) {
+    public init(name: FileName, kind: Open<FileKind>, target: Open<FileKind>, size: Int64, mtimeNanos: Int64, mode: Int32) {
         self.name = name
         self.kind = kind
         self.target = target
@@ -158,10 +187,10 @@ public struct FileEntry: Equatable, Sendable {
 
 /// A watched path and the opaque version this client holds of it, empty for one it holds as missing.
 public struct WatchedPath: Equatable, Sendable {
-    public var path: String
+    public var path: FileName
     public var version: String
 
-    public init(path: String, version: String) {
+    public init(path: FileName, version: String) {
         self.path = path
         self.version = version
     }

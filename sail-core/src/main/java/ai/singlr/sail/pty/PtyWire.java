@@ -185,14 +185,14 @@ public final class PtyWire {
               .string(m.workspace())
               .string(m.reason())
               .string(m.record());
-      case PtyMessage.FilesList m -> out.type(40).i32(m.id()).string(m.path());
-      case PtyMessage.FilesStat m -> out.type(41).i32(m.id()).string(m.path());
+      case PtyMessage.FilesList m -> out.type(40).i32(m.id()).name(m.path());
+      case PtyMessage.FilesStat m -> out.type(41).i32(m.id()).name(m.path());
       case PtyMessage.FilesRead m ->
-          out.type(42).i32(m.id()).string(m.path()).i64(m.offset()).i64(m.length());
+          out.type(42).i32(m.id()).name(m.path()).i64(m.offset()).i64(m.length());
       case PtyMessage.FilesCancel m -> out.type(43).i32(m.id());
       case PtyMessage.FilesWatch m -> {
         out.type(44).i32(m.paths().size());
-        m.paths().forEach(watched -> out.string(watched.path()).string(watched.version()));
+        m.paths().forEach(watched -> out.name(watched.path()).string(watched.version()));
       }
       case PtyMessage.FilesListing m -> {
         out.type(50).i32(m.id()).string(m.version()).i32(m.entries().size());
@@ -206,7 +206,10 @@ public final class PtyWire {
         out.bytes(m.bytes());
         out.bool(m.eof());
       }
-      case PtyMessage.FilesChanged m -> out.type(53).stringList(m.paths());
+      case PtyMessage.FilesChanged m -> {
+        out.type(53).i32(m.paths().size());
+        m.paths().forEach(out::name);
+      }
       case PtyMessage.FilesTick m -> out.type(54);
       case PtyMessage.FilesRefused m ->
           out.type(55).i32(m.id()).string(m.kind().wire()).string(m.message());
@@ -215,13 +218,13 @@ public final class PtyWire {
   }
 
   private static Writer encodeEntry(Writer out, PtyMessage.FileEntry entry) {
-    out.string(entry.name()).string(entry.kind().wire()).string(entry.target().wire());
+    out.name(entry.name()).string(entry.kind().wire()).string(entry.target().wire());
     return out.i64(entry.size()).i64(entry.mtimeNanos()).i32(entry.mode());
   }
 
   private static PtyMessage.FileEntry entry(ByteBuffer in) throws IOException {
     return new PtyMessage.FileEntry(
-        string(in),
+        name(in),
         PtyMessage.FileKind.of(string(in)),
         PtyMessage.FileKind.of(string(in)),
         in.getLong(),
@@ -233,7 +236,7 @@ public final class PtyWire {
     var count = bounded(in);
     var paths = new ArrayList<PtyMessage.Watched>(count);
     for (var i = 0; i < count; i++) {
-      paths.add(new PtyMessage.Watched(string(in), string(in)));
+      paths.add(new PtyMessage.Watched(name(in), string(in)));
     }
     return new PtyMessage.FilesWatch(paths);
   }
@@ -410,15 +413,15 @@ public final class PtyWire {
       case 31 -> decodeErr(in);
       case 32 -> new PtyMessage.Welcome(string(in));
       case 16 -> new PtyMessage.YieldWorkspace(string(in), string(in), string(in), string(in));
-      case 40 -> new PtyMessage.FilesList(in.getInt(), string(in));
-      case 41 -> new PtyMessage.FilesStat(in.getInt(), string(in));
-      case 42 -> new PtyMessage.FilesRead(in.getInt(), string(in), in.getLong(), in.getLong());
+      case 40 -> new PtyMessage.FilesList(in.getInt(), name(in));
+      case 41 -> new PtyMessage.FilesStat(in.getInt(), name(in));
+      case 42 -> new PtyMessage.FilesRead(in.getInt(), name(in), in.getLong(), in.getLong());
       case 43 -> new PtyMessage.FilesCancel(in.getInt());
       case 44 -> watch(in);
       case 50 -> listing(in);
       case 51 -> new PtyMessage.FilesEntry(in.getInt(), entry(in), string(in));
       case 52 -> new PtyMessage.FilesData(in.getInt(), string(in), bytes(in), in.get() == 1);
-      case 53 -> new PtyMessage.FilesChanged(stringList(in));
+      case 53 -> new PtyMessage.FilesChanged(names(in));
       case 54 -> new PtyMessage.FilesTick();
       case 55 ->
           new PtyMessage.FilesRefused(
@@ -449,6 +452,20 @@ public final class PtyWire {
     var bytes = new byte[bounded(in)];
     in.get(bytes);
     return bytes;
+  }
+
+  /** A file's name or path, its bytes kept whatever they are ({@link FileNames}). */
+  private static String name(ByteBuffer in) throws IOException {
+    return FileNames.decode(bytes(in));
+  }
+
+  private static List<String> names(ByteBuffer in) throws IOException {
+    var count = bounded(in);
+    var values = new ArrayList<String>(count);
+    for (var i = 0; i < count; i++) {
+      values.add(name(in));
+    }
+    return List.copyOf(values);
   }
 
   private static List<String> stringList(ByteBuffer in) throws IOException {
@@ -513,6 +530,12 @@ public final class PtyWire {
 
     Writer string(String value) {
       bytes(value == null ? new byte[0] : value.getBytes(StandardCharsets.UTF_8));
+      return this;
+    }
+
+    /** A file's name or path as its bytes ({@link FileNames}). */
+    Writer name(String value) {
+      bytes(FileNames.encode(value));
       return this;
     }
 

@@ -63,6 +63,17 @@ class FilesHostTest {
   private final Set<String> revoked = ConcurrentHashMap.newKeySet();
   private final Set<String> stopped = ConcurrentHashMap.newKeySet();
   private final Set<String> goneNow = ConcurrentHashMap.newKeySet();
+
+  /** Workspaces relabelled for another person, which mady may no longer enter. */
+  private final Set<String> relabelled = ConcurrentHashMap.newKeySet();
+
+  /** Workspaces Incus cannot say anything of now. */
+  private final Set<String> brokenNow = ConcurrentHashMap.newKeySet();
+
+  /** Each script's text as this test changes it, by its kind, as a racing writer would. */
+  private final Map<String, java.util.function.UnaryOperator<String>> edits =
+      new ConcurrentHashMap<>();
+
   private final List<String> entered = new CopyOnWriteArrayList<>();
 
   /** The scripts that stall instead of running, as a frozen container's would. */
@@ -121,8 +132,12 @@ class FilesHostTest {
                 "Project '" + project + "' has no workspace '" + workspace + "' on this box.",
                 Remedy.NONE);
           }
-          if (workspace.equals("broken")) {
+          if (workspace.equals("broken") || brokenNow.contains(workspace)) {
             throw new PtyAdmission.Unavailable(new IOException("incus list failed"));
+          }
+          if (!who.actor().isAdmin() && relabelled.contains(workspace)) {
+            throw Remedied.io(
+                "Workspace '" + workspace + "' belongs to 'uday', not you.", Remedy.NONE);
           }
           if (!who.actor().isAdmin() && !who.fde().equals("mady")) {
             throw Remedied.io(
@@ -174,6 +189,9 @@ class FilesHostTest {
           var inner = new ArrayList<>(command.subList(command.indexOf("--") + 1, command.size()));
           var script = inner.get(2);
           var kind = kindOf(script);
+          if (edits.containsKey(kind)) {
+            inner.set(2, edits.get(kind).apply(script));
+          }
           if (stall.contains(kind)) {
             inner.set(2, "exec sleep 30");
           } else if (failing.contains(kind)) {
@@ -255,11 +273,26 @@ class FilesHostTest {
 
   /** A files connection of {@code credential} to workspace dock of acme, welcomed. */
   private SocketChannel open(String credential) throws IOException {
-    var ticket = assertInstanceOf(PtyMessage.Ticket.class, ticket(credential, "acme", "dock"));
+    return open(credential, "dock");
+  }
+
+  /** A files connection of {@code credential} to {@code workspace} of acme, welcomed. */
+  private SocketChannel open(String credential, String workspace) throws IOException {
+    var channel = present(credential, workspace);
+    assertInstanceOf(PtyMessage.Welcome.class, PtyWire.read(channel));
+    return channel;
+  }
+
+  /** A files ticket of {@code credential} to {@code workspace} of acme, presented. */
+  private SocketChannel present(String credential, String workspace) throws IOException {
+    return present(
+        assertInstanceOf(PtyMessage.Ticket.class, ticket(credential, "acme", workspace)));
+  }
+
+  private SocketChannel present(PtyMessage.Ticket ticket) throws IOException {
     var channel = SocketChannel.open(host.tcpAddress().orElseThrow());
     PtyWire.handshake(channel, channel);
     PtyWire.write(channel, new PtyMessage.Hello(ticket.ticket()));
-    assertInstanceOf(PtyMessage.Welcome.class, PtyWire.read(channel));
     return channel;
   }
 
@@ -696,5 +729,262 @@ class FilesHostTest {
           PtyWire.read(box));
     }
     assertEquals(List.of(), commands);
+  }
+
+  /** The reason and code the host ended {@code channel} with, which it then closed. */
+  private static List<String> endedWith(SocketChannel channel) throws IOException {
+    var why = assertInstanceOf(PtyMessage.Err.class, next(channel));
+    ended(channel);
+    return List.of(why.code(), why.reason());
+  }
+
+  /**
+   * m1: every sweep asks the workspace again, as its ticket did: a connection whose person no
+   * longer enters it (a re-own, a disown, a hand-made relabel) ends saying so, coded, as one whose
+   * workspace went or stopped does; one the runner cannot read now goes on, an outage not a change.
+   */
+  @Test
+  void everySweepAsksTheWorkspaceAgainAndEndsAConnectionItNoLongerAdmits() throws Exception {
+    var relabel = open("tok-mady");
+    var gone = open("tok-mady", "spare");
+    var idle = open("tok-mady", "idle");
+    var unread = open("tok-mady", "lost");
+    var staying = open("tok-root");
+    relabelled.add("dock");
+    goneNow.add("spare");
+    stopped.add("idle");
+    brokenNow.add("lost");
+
+    host.sweep(now.get());
+
+    assertEquals(
+        List.of("forbidden", "Workspace 'dock' belongs to 'uday', not you."), endedWith(relabel));
+    assertEquals(
+        List.of("not_found", "Project 'acme' has no workspace 'spare' on this box."),
+        endedWith(gone));
+    assertEquals("workspace_stopped", endedWith(idle).getFirst());
+    PtyWire.write(unread, new PtyMessage.FilesStat(1, home.toString()));
+    assertEquals(
+        PtyMessage.FilesRefusal.FAILED,
+        assertInstanceOf(PtyMessage.FilesRefused.class, next(unread)).kind(),
+        "an outage ends nothing: the connection still answers");
+    PtyWire.write(staying, new PtyMessage.FilesStat(1, home.toString()));
+    assertInstanceOf(PtyMessage.FilesEntry.class, next(staying), "an admin still enters it");
+    unread.close();
+    staying.close();
+  }
+
+  /** Nit 3: a handover ends every files connection, saying so in words an app reconnects on. */
+  @Test
+  void aHandoverEndsEveryFilesConnectionSayingSo() throws Exception {
+    var files = open("tok-mady");
+    PtyWire.write(files, new PtyMessage.FilesWatch(List.of()));
+    assertInstanceOf(PtyMessage.FilesTick.class, PtyWire.read(files));
+    host.handoff();
+    assertEquals(
+        List.of(
+            "terminal_unavailable",
+            "The runner's terminal host is restarting, which ends this connection to dock's files;"
+                + " connect again."),
+        endedWith(files));
+    everyScriptEnds();
+  }
+
+  @Test
+  void aStopOfTheHostEndsEveryFilesConnectionSayingSo() throws Exception {
+    var files = open("tok-mady");
+    host.stop("the host stops");
+    assertEquals("terminal_unavailable", endedWith(files).getFirst());
+  }
+
+  /**
+   * Nit 4: a workspace holds at most 8 files connections and a person 16, all workspaces together:
+   * the ticket past them is refused, and so is one presented past them, in true words.
+   */
+  @Test
+  void aWorkspaceHoldsEightFilesConnectionsAndAPersonSixteen() throws Exception {
+    var held = new ArrayList<SocketChannel>();
+    for (var i = 0; i < 7; i++) {
+      held.add(open("tok-mady"));
+    }
+    var late = assertInstanceOf(PtyMessage.Ticket.class, ticket("tok-mady", "acme", "dock"));
+    held.add(open("tok-mady"));
+    assertEquals(
+        "limited dock has 8 files connections open, the most a workspace holds; close one, then"
+            + " ask again.",
+        said(ticket("tok-root", "acme", "dock")));
+    var presented = present(late);
+    var why = assertInstanceOf(PtyMessage.Err.class, PtyWire.read(presented));
+    assertEquals(
+        List.of(
+            "rate_limited",
+            "dock has 8 files connections open, the most a workspace holds; close one, then ask"
+                + " again."),
+        List.of(why.code(), why.reason()));
+    ended(presented);
+    for (var i = 0; i < 8; i++) {
+      held.add(open("tok-mady", "spare"));
+    }
+    assertEquals(
+        "limited mady has 16 files connections open, the most a person holds; close one, then"
+            + " ask again.",
+        said(ticket("tok-mady", "acme", "third")));
+    for (var channel : held) {
+      channel.close();
+    }
+  }
+
+  /** m4: one read takes at most 20 MiB, however much it asks for. */
+  @Test
+  void aReadTakesAtMostTwentyMebibytes() throws Exception {
+    var file = home.resolve("big.bin");
+    try (var out = Files.newOutputStream(file)) {
+      out.write(new byte[30 << 20]);
+    }
+    try (var files = open("tok-mady")) {
+      PtyWire.write(files, new PtyMessage.FilesRead(1, file.toString(), 0, 64L << 20));
+      var total = 0L;
+      PtyMessage.FilesData data;
+      do {
+        data = assertInstanceOf(PtyMessage.FilesData.class, next(files));
+        total += data.bytes().length;
+      } while (!data.eof() && total < (20L << 20));
+      assertEquals(20L << 20, total);
+      assertFalse(data.eof(), "20 MiB of 30 is not the file's end");
+      PtyWire.write(files, new PtyMessage.FilesStat(2, file.toString()));
+      assertInstanceOf(
+          PtyMessage.FilesEntry.class, next(files), "and the read sent nothing past 20 MiB");
+    }
+  }
+
+  /**
+   * m4: past 64 waiting requests the connection's next frame waits to be read: a cancel sent after
+   * the 69th request is not heard until a running script ends.
+   */
+  @Test
+  void pastSixtyFourWaitingTheNextFrameWaitsToBeRead() throws Exception {
+    stall.add("list");
+    try (var files = open("tok-mady")) {
+      for (var id = 1; id <= 4 + FilesConnection.WAITING + 1; id++) {
+        PtyWire.write(files, new PtyMessage.FilesList(id, home.toString()));
+      }
+      take(4);
+      var running = List.copyOf(processes);
+      for (var id = 1; id <= 4; id++) {
+        PtyWire.write(files, new PtyMessage.FilesCancel(id));
+      }
+      assertFalse(
+          running.getFirst().waitFor(1, TimeUnit.SECONDS),
+          "the cancels wait behind the 69th request");
+      running.getLast().destroyForcibly();
+      for (var process : running) {
+        assertTrue(process.waitFor(10, TimeUnit.SECONDS), "and are heard once one ended");
+      }
+    }
+  }
+
+  /**
+   * m2, deterministically: a file written after its bytes were read and before the read ended is
+   * answered {@code changed}, never with bytes under a version they do not match.
+   */
+  @Test
+  void aReadOfAFileWrittenWhileItWasReadIsAnsweredChanged() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "hello");
+    edits.put("read", script -> script.replace(READ_DONE, READ_DONE + "printf x >> \"$at\"\n"));
+    try (var files = open("tok-mady")) {
+      PtyWire.write(files, new PtyMessage.FilesRead(1, file.toString(), 0, 100));
+      assertEquals(
+          new PtyMessage.FilesRefused(
+              1,
+              PtyMessage.FilesRefusal.CHANGED,
+              file + " changed while it was read; read it again."),
+          next(files));
+    }
+  }
+
+  /** Where a read's bytes have been written and its version is stat-ed again. */
+  private static final String READ_DONE = "status=none || exit 1\n";
+
+  /**
+   * m2, racing: a writer rewriting a file in place, a byte longer each time, while it is read over
+   * and over: every read that is answered whole holds one write's bytes alone, and every other is
+   * answered {@code changed}.
+   */
+  @Test
+  void aReadRacingAWriterIsWholeOrAnsweredChanged() throws Exception {
+    var file = home.resolve("racing.txt");
+    Files.write(file, new byte[1 << 20]);
+    var writing = new java.util.concurrent.atomic.AtomicBoolean(true);
+    var writer =
+        Thread.ofPlatform()
+            .start(
+                () -> {
+                  try (var channel =
+                      java.nio.channels.FileChannel.open(
+                          file, java.nio.file.StandardOpenOption.WRITE)) {
+                    for (var i = 0; writing.get(); i++) {
+                      var bytes = new byte[(1 << 20) + i];
+                      Arrays.fill(bytes, (byte) (i % 2 == 0 ? 'a' : 'b'));
+                      channel.write(ByteBuffer.wrap(bytes), 0);
+                    }
+                  } catch (IOException stopped) {
+                    var unused = stopped;
+                  }
+                });
+    var whole = 0;
+    var changed = 0;
+    try (var files = open("tok-mady")) {
+      for (var id = 1; id <= 30; id++) {
+        PtyWire.write(files, new PtyMessage.FilesRead(id, file.toString(), 0, 4L << 20));
+        var read = new java.io.ByteArrayOutputStream();
+        while (true) {
+          var answer = next(files);
+          if (answer instanceof PtyMessage.FilesRefused refused) {
+            assertEquals(PtyMessage.FilesRefusal.CHANGED, refused.kind());
+            changed++;
+            break;
+          }
+          var data = assertInstanceOf(PtyMessage.FilesData.class, answer);
+          read.write(data.bytes());
+          if (data.eof()) {
+            var bytes = read.toByteArray();
+            var first = bytes[0];
+            for (var b : bytes) {
+              assertEquals(first, b, "a read answered whole holds one write's bytes alone");
+            }
+            whole++;
+            break;
+          }
+        }
+      }
+    } finally {
+      writing.set(false);
+      writer.join();
+    }
+    assertEquals(30, whole + changed);
+  }
+
+  /**
+   * Nit 1: a pipe swapped in for a file after the read's checks is read without waiting for a
+   * writer, and the read answered.
+   */
+  @Test
+  void aPipeSwappedInMidReadNeverLeavesTheReadWaiting() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "hello");
+    edits.put("read", script -> script.replace("dd if=", "rm -f \"$at\"; mkfifo \"$at\"\ndd if="));
+    try (var files = open("tok-mady")) {
+      PtyWire.write(files, new PtyMessage.FilesRead(1, file.toString(), 0, 100));
+      assertEquals(PtyMessage.FilesRefusal.CHANGED, ((PtyMessage.FilesRefused) next(files)).kind());
+    }
+  }
+
+  /** A watch Incus cannot start ends the connection saying so, never silently. */
+  @Test
+  void aWatchThatCannotStartEndsTheConnectionSayingSo() throws Exception {
+    var files = open("tok-mady", "elsewhere");
+    PtyWire.write(files, new PtyMessage.FilesWatch(List.of()));
+    assertEquals(
+        List.of("", "The watch of elsewhere's files could not start; connect again to watch them."),
+        endedWith(files));
   }
 }

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,6 +17,7 @@ import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.pty.FileNames;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyMessage;
@@ -262,6 +264,26 @@ class WorkspaceFilesIT extends AbstractIncusIT {
           var change = (System.nanoTime() - changed) / 1_000_000;
           assertInstanceOf(PtyMessage.FilesTick.class, PtyWire.read(files), "reported once");
           assertInstanceOf(PtyMessage.FilesTick.class, PtyWire.read(files), "and only once");
+
+          inInstance(
+              "mkdir -p /home/dev/odd && printf body > \"/home/dev/odd/bad$(printf '\\377')n\"");
+          PtyWire.write(files, new PtyMessage.FilesList(300, "/home/dev/odd"));
+          var odd = next(files, PtyMessage.FilesListing.class).entries().getFirst().name();
+          assertArrayEquals(new byte[] {'b', 'a', 'd', (byte) 0xff, 'n'}, FileNames.encode(odd));
+          var oddPath = "/home/dev/odd/" + odd;
+          PtyWire.write(files, new PtyMessage.FilesRead(301, oddPath, 0, 100));
+          var oddData = next(files, PtyMessage.FilesData.class);
+          assertEquals(
+              "body", new String(oddData.bytes(), java.nio.charset.StandardCharsets.UTF_8));
+          PtyWire.write(files, new PtyMessage.FilesStat(302, oddPath));
+          var oddVersion = next(files, PtyMessage.FilesEntry.class).version();
+          PtyWire.write(
+              files,
+              new PtyMessage.FilesWatch(List.of(new PtyMessage.Watched(oddPath, oddVersion))));
+          assertInstanceOf(PtyMessage.FilesTick.class, PtyWire.read(files));
+          inInstance("printf more >> \"/home/dev/odd/bad$(printf '\\377')n\"");
+          assertEquals(
+              new PtyMessage.FilesChanged(List.of(oddPath)), next(files), "watched by its bytes");
           System.out.printf(
               "files over incus exec, host side: list 5,000 p95 %d ms, first 256 KiB p95 %d ms,"
                   + " change to FilesChanged %d ms (gated on GCP at 250, 200 and 600 ms; here at"

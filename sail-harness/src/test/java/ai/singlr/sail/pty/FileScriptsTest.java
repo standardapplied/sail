@@ -58,6 +58,11 @@ class FileScriptsTest {
    * after its {@code incus exec ... --}, as the dev user does in a workspace.
    */
   static FileScripts over(Path home, List<List<String>> commands) {
+    return over(home, commands, Map.of());
+  }
+
+  /** As {@link #over(Path, List)}, each script run with {@code env} added to its environment. */
+  static FileScripts over(Path home, List<List<String>> commands, Map<String, String> env) {
     var place =
         new UploadCopy.Place(
             container -> List.of("incus", "exec", container, "--"),
@@ -75,7 +80,9 @@ class FileScriptsTest {
             throw new IOException("Error: Instance not found");
           }
           var inner = command.subList(command.indexOf("--") + 1, command.size());
-          return new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+          var builder = new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD);
+          builder.environment().putAll(env);
+          return builder.start();
         },
         place,
         home.toString());
@@ -270,7 +277,8 @@ class FileScriptsTest {
     var read = files.start(CONTAINER, FileScripts.READ, file.toString(), "1000", "262144");
     var version = read.field();
     assertEquals("300000", read.field());
-    assertArrayEquals(java.util.Arrays.copyOfRange(bytes, 1000, 263_144), read.bytes(1 << 20));
+    assertArrayEquals(java.util.Arrays.copyOfRange(bytes, 1000, 263_144), read.bytes(262_144));
+    assertEquals(version, read.field(), "its version again after its bytes");
     assertEquals(0, read.status());
 
     var stat = files.start(CONTAINER, FileScripts.STAT, file.toString());
@@ -307,6 +315,21 @@ class FileScriptsTest {
   }
 
   @Test
+  void aPathWithADotADoubleSlashOrATrailingSlashIsNeverAsked() {
+    for (var spelled :
+        List.of(
+            home + "/a/../../etc",
+            home + "/./a",
+            home + "/..",
+            home + "//a",
+            home + "/a/",
+            home + "/.")) {
+      assertFalse(files.inHome(spelled), spelled);
+    }
+    assertTrue(files.inHome(home + "/.hidden/..a/a..b"), "dots in a name are a name");
+  }
+
+  @Test
   void onlyTheHomeAndWhatIsUnderItMayBeAskedAndNoNameHoldsANul() {
     assertTrue(files.inHome(home.toString()));
     assertTrue(files.inHome(home + "/workspace/src"));
@@ -314,6 +337,136 @@ class FileScriptsTest {
     assertFalse(files.inHome("/etc/hosts"));
     assertFalse(files.inHome("workspace/src"), "a relative path is never resolved against /");
     assertFalse(files.inHome(home + "/a\0b"));
+  }
+
+  /** {@code name} under {@code folder}, made by the shell, since Java names files as UTF-8. */
+  private static String shellMade(Path folder, byte[] name) throws Exception {
+    var octal = new StringBuilder();
+    for (var b : name) {
+      octal.append(String.format("\\%03o", b & 0xff));
+    }
+    var made =
+        new ProcessBuilder(
+                "sh",
+                "-c",
+                "printf 'body' > \"$1/$(printf '" + octal + "')\"",
+                "sh",
+                folder.toString())
+            .start();
+    assertEquals(0, made.waitFor());
+    return folder + "/" + FileNames.decode(name);
+  }
+
+  /** m3: a name that is not UTF-8 is listed, read, stat-ed and watched by its own bytes. */
+  @Test
+  void aNameThatIsNotUtf8IsListedReadStatedAndWatchedByItsBytes() throws Exception {
+    var src = Files.createDirectory(home.resolve("src"));
+    var path = shellMade(src, new byte[] {'b', 'a', 'd', (byte) 0xff, 'n'});
+    shellMade(src, new byte[] {'b', 'a', 'd', (byte) 0xfe, 'n'});
+
+    var names = list(src).entries().keySet();
+    assertEquals(
+        java.util.Set.of(
+            FileNames.decode(new byte[] {'b', 'a', 'd', (byte) 0xff, 'n'}),
+            FileNames.decode(new byte[] {'b', 'a', 'd', (byte) 0xfe, 'n'})),
+        names,
+        "two names, never merged");
+    var read = files.start(CONTAINER, FileScripts.READ, path, "0", "100");
+    read.field();
+    assertEquals("4", read.field());
+    assertArrayEquals("body".getBytes(java.nio.charset.StandardCharsets.UTF_8), read.bytes(4));
+    var stat = files.start(CONTAINER, FileScripts.STAT, path);
+    var version = stat.field();
+    assertEquals(path.substring(path.lastIndexOf('/') + 1), stat.entry().name());
+    assertEquals(0, stat.status());
+    var watch = new Watch();
+    watch.loop.input().write(FileScripts.nul(path));
+    watch.loop.input().write(FileScripts.nul(version));
+    watch.loop.input().write(0);
+    watch.loop.input().flush();
+    watch.onlyBeats(1);
+    assertEquals(
+        0,
+        new ProcessBuilder(
+                "sh",
+                "-c",
+                "for f in \"$1\"/bad?n; do printf more >> \"$f\"; done",
+                "sh",
+                src.toString())
+            .start()
+            .waitFor());
+    assertEquals(List.of(path), watch.changed(), "the changed name, as its bytes");
+  }
+
+  /**
+   * The scripts read realpath's failures in English whatever the workspace's locale: a realpath
+   * that answers in German, as one in a translated workspace would unless {@code LC_ALL=C}, still
+   * reads as a loop and as permission denied.
+   */
+  @Test
+  void aLoopAndADeniedFolderReadAsThemselvesInAWorkspaceOfAnotherLanguage() throws Exception {
+    var bin = Files.createDirectory(dir.resolve("bin"));
+    var fake = bin.resolve("realpath");
+    Files.writeString(
+        fake,
+        """
+        #!/bin/sh
+        if [ "$LC_ALL" != C ]; then
+          for last; do :; done
+          case $last in
+            */self) echo "realpath: $last: Zu viele Ebenen aus symbolischen Links" >&2; exit 1 ;;
+            */build/*) echo "realpath: $last: Keine Berechtigung" >&2; exit 1 ;;
+          esac
+        fi
+        exec /usr/bin/realpath "$@"
+        """);
+    Files.setPosixFilePermissions(fake, PosixFilePermissions.fromString("rwx------"));
+    var german =
+        over(
+            home,
+            commands,
+            Map.of(
+                "PATH",
+                bin + ":" + System.getenv("PATH"),
+                "LANG",
+                "de_DE.UTF-8",
+                "LC_ALL",
+                "de_DE.UTF-8"));
+    Files.createSymbolicLink(home.resolve("self"), home.resolve("self"));
+    var build = Files.createDirectory(home.resolve("build"));
+    Files.createFile(build.resolve("out"));
+    Files.setPosixFilePermissions(build, PosixFilePermissions.fromString("rw-------"));
+
+    var loop = german.start(CONTAINER, FileScripts.STAT, home.resolve("self").toString());
+    assertEquals(FileScripts.LOOP, loop.status());
+    var denied = german.start(CONTAINER, FileScripts.STAT, build.resolve("out").toString());
+    assertEquals(FileScripts.NOT_PERMITTED, denied.status());
+  }
+
+  /** m2: a read ends with the file's version stat-ed again after its bytes. */
+  @Test
+  void aReadEndsWithTheVersionStatedAgainAfterItsBytes() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "hello");
+    var read = files.start(CONTAINER, FileScripts.READ, file.toString(), "0", "5");
+    var before = read.field();
+    assertEquals("5", read.field());
+    assertArrayEquals("hello".getBytes(java.nio.charset.StandardCharsets.UTF_8), read.bytes(5));
+    assertEquals(before, read.field(), "the same version after the bytes");
+    assertNull(read.field());
+    assertEquals(0, read.status());
+  }
+
+  /** Nit 2: a watched path is resolved, so a link out of the home is never watched there. */
+  @Test
+  void aWatchedLinkOutOfTheHomeIsNotWatched() throws Exception {
+    var secret = Files.writeString(outside.resolve("secret"), "s");
+    var link = Files.createSymbolicLink(home.resolve("secret"), secret);
+    var mine = Files.writeString(home.resolve("mine"), "m");
+    var watch = new Watch();
+    watch.set(Map.of(link, "stale", mine, "stale"));
+    assertEquals(List.of(mine.toString()), watch.changed(), "only the path in the home");
+    Files.writeString(secret, "changed outside");
+    watch.onlyBeats(2);
   }
 
   @Test
