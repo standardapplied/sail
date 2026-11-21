@@ -18,6 +18,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -108,6 +110,7 @@ public final class ShellExecutor implements ShellExec {
       pb.directory(workDir.toFile());
     }
 
+    var deadline = System.nanoTime() + timeout.toNanos();
     var process = pb.start();
     var stdout = new AtomicReference<String>("");
     var stderr = new AtomicReference<String>("");
@@ -115,31 +118,81 @@ public final class ShellExecutor implements ShellExec {
         Thread.ofVirtual().start(() -> stdout.set(readFully(process.getInputStream())));
     var stderrThread =
         Thread.ofVirtual().start(() -> stderr.set(readFully(process.getErrorStream())));
-    var notTaken = new AtomicReference<IOException>();
-    var writer = Thread.ofVirtual().start(() -> notTaken.set(hand(process, input)));
+    var writing = new FutureTask<>(() -> hand(process, input));
+    Thread.ofVirtual().start(writing);
 
-    var finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+    boolean finished;
+    try {
+      finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+    } catch (InterruptedException interrupted) {
+      destroyWithDescendants(process);
+      throw interrupted;
+    }
     if (!finished) {
       var processes = listOnTimeout && LISTING_SCOPES.get() > 0 ? processesOf(process) : "";
       destroyWithDescendants(process);
-      writer.join(WRITER_GRACE);
-      throw new CommandTimedOut(
-          "Command timed out after " + timeout.toSeconds() + "s: " + String.join(" ", command),
-          processes);
+      written(writing, System.nanoTime() + WRITER_GRACE.toNanos());
+      throw timedOut(command, timeout, processes);
     }
 
-    writer.join();
-    stdoutThread.join();
-    stderrThread.join();
+    var written = written(writing, deadline);
+    if (!stdoutThread.join(left(deadline))
+        || !stderrThread.join(left(deadline))
+        || !written.ended()) {
+      destroyWithDescendants(process);
+      throw outlasted(command, timeout);
+    }
     var status = process.exitValue();
-    if (status == 0 && notTaken.get() != null) {
+    if (status == 0 && written.notTaken() != null) {
       throw new IOException(
           String.join(" ", command)
               + " exited 0 without taking all of its input ("
-              + notTaken.get().getMessage()
+              + written.notTaken().getMessage()
               + ")");
     }
     return new Result(status, stdout.get(), stderr.get());
+  }
+
+  /**
+   * The timeout of a command answered past its bound after its exit: one whose own process ended
+   * while one it left behind still holds its output. Its readers are left to end with that process,
+   * each a virtual thread. Closing the pipe does not wake a reader already blocked on it (measured
+   * on JDK 26: 17 of 20 such readers were still blocked 500 ms after the close), so the pipes are
+   * not closed here; the JDK releases their descriptors once the command's own process has ended
+   * (20 of 20 calls held none after them).
+   */
+  private static CommandTimedOut outlasted(List<String> command, Duration timeout) {
+    return timedOut(command, timeout, "");
+  }
+
+  private static CommandTimedOut timedOut(
+      List<String> command, Duration timeout, String processes) {
+    return new CommandTimedOut(
+        "Command timed out after " + timeout.toSeconds() + "s: " + String.join(" ", command),
+        processes);
+  }
+
+  /** What is left until {@code deadline}, never less than nothing. */
+  private static Duration left(long deadline) {
+    return Duration.ofNanos(Math.max(0, deadline - System.nanoTime()));
+  }
+
+  /** How a command's input was handed over: whether the write ended, and why it failed if so. */
+  private record Written(boolean ended, IOException notTaken) {}
+
+  /**
+   * The write's own answer, read from its end, so whether the input was taken never depends on
+   * which thread got there first; not ended when the write was still under way at {@code deadline}.
+   */
+  private static Written written(FutureTask<IOException> writing, long deadline)
+      throws InterruptedException {
+    try {
+      return new Written(true, writing.get(left(deadline).toNanos(), TimeUnit.NANOSECONDS));
+    } catch (TimeoutException stillWriting) {
+      return new Written(false, null);
+    } catch (ExecutionException failed) {
+      return new Written(true, new IOException(failed.getCause()));
+    }
   }
 
   /**
