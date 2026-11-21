@@ -505,6 +505,14 @@ public final class WorkbenchView: NSView {
         open(model.newTab(session: place.newSessionName, place: place), points: points)
     }
 
+    /// A new runner tab in workspace `name` of `project` whose session is `agent`: the host composes
+    /// its command and signs it in, and the tab is titled by its harness and workspace.
+    func openAgent(_ agent: AgentStart, project: String, name: String) {
+        guard restored, signedIn() != nil else { return }
+        let place = Place.workspace(project: project, name: name)
+        open(model.newTab(session: place.newSessionName, place: place, agent: agent), points: points)
+    }
+
     @objc public func newTab(_: Any?) {
         onShow()
         guard restored else { return }

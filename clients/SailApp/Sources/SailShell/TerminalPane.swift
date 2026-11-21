@@ -35,6 +35,8 @@ public final class TerminalPane: NSView {
     public let terminal: TerminalView
     public let host: LocalHost
     public let place: Place
+    /// The harness the pane's session runs, nil for a shell.
+    public let agent: AgentStart?
     public let opened = ContinuousClock.now
     public private(set) var session: TerminalSession?
     var onEvent: @MainActor (TerminalPane, SessionEvent) -> Void = { _, _ in }
@@ -92,6 +94,7 @@ public final class TerminalPane: NSView {
         id = pane.id
         name = pane.session
         place = pane.place
+        agent = pane.agent
         self.start = start
         self.host = host
         self.person = person
@@ -135,14 +138,18 @@ public final class TerminalPane: NSView {
         let size = TerminalSize(columns: Int32(grid.columns), rows: Int32(grid.rows))
         let next = switch start {
         case .open:
-            TerminalSession(open: place.sessionCreate(session: name, size: size), door: door, screen: screen)
+            TerminalSession(open: place.sessionCreate(session: name, size: size, agent: agent), door: door, screen: screen)
         case .attach:
             TerminalSession(attach: name, write: true, door: door, screen: screen)
         case .resume:
             TerminalSession(attach: name, write: true, takes: false, door: door, screen: screen)
         }
         session = next
-        banner.show(place.label.map { "Connecting to \($0) on the runner" } ?? "Connecting to this Mac's terminal host")
+        if let agent, start == .open, let label = place.label {
+            banner.show(NewSessionWords.starting(agent, in: label))
+        } else {
+            banner.show(place.label.map { "Connecting to \($0) on the runner" } ?? "Connecting to this Mac's terminal host")
+        }
         terminal.onEvent = { [weak self] event in self?.handle(event) }
         terminal.recolour(look.palette)
         terminal.attach(next)
@@ -332,6 +339,8 @@ public final class TerminalPane: NSView {
             banner.show(Said.sentence(reason), tone: .warning, button: "Open Again", handler: again)
         case let .ticketRefused(refusal) where refusal.code == .known(.notFound) && (start != .open || attachedOnce):
             Task { await showReturn(refused: end) }
+        case let .refused(refusal) where agent != nil:
+            banner.show(NewSessionWords.refused(refusal), tone: .warning, button: "Close", handler: { [weak self] in MainActor.assumeIsolated { self.map { $0.onClose($0) } } })
         case .signIn:
             banner.show(end.said.joined(separator: " "), tone: .warning, button: "Sign In", handler: signIn)
         case let .ticketRefused(refusal) where [.known(.missingBearerToken), .known(.invalidBearerToken)].contains(refusal.code):

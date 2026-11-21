@@ -51,10 +51,11 @@ public struct Workbench: Hashable, Sendable {
         return made
     }
 
-    private mutating func makePane(session: String, place: Place) -> PaneID {
+    private mutating func makePane(session: String, place: Place, agent: AgentStart? = nil) -> PaneID {
         precondition(!panes.values.contains { $0.session == session }, "the session \(session) has a pane already, and a session has one pane")
+        precondition(agent == nil || place.onRunner, "an agent runs in a workspace on the runner")
         let id = PaneID(mint())
-        panes[id] = Pane(id: id, session: session, place: place)
+        panes[id] = Pane(id: id, session: session, place: place, agent: agent)
         return id
     }
 
@@ -68,9 +69,9 @@ public struct Workbench: Hashable, Sendable {
     /// split losing a side collapses to the other, and a ratio not strictly inside (0, 1) is halved.
     mutating func adopt(_ node: Arrangement.Node, from unheld: inout Set<String>) -> Layout? {
         switch node {
-        case let .pane(session, place):
+        case let .pane(session, place, agent):
             guard unheld.remove(session) != nil else { return nil }
-            return .pane(makePane(session: session, place: place))
+            return .pane(makePane(session: session, place: place, agent: agent))
         case let .split(axis, ratio, first, second):
             let (one, other) = (adopt(first, from: &unheld), adopt(second, from: &unheld))
             guard let one, let other else { return one ?? other }
@@ -85,8 +86,8 @@ public struct Workbench: Hashable, Sendable {
     }
 
     @discardableResult
-    public mutating func newTab(session: String, place: Place) -> PaneID {
-        let pane = makePane(session: session, place: place)
+    public mutating func newTab(session: String, place: Place, agent: AgentStart? = nil) -> PaneID {
+        let pane = makePane(session: session, place: place, agent: agent)
         let tab = Tab(id: TabID(mint()), layout: .pane(pane), name: nil, focused: pane, history: [pane], zoomed: nil)
         tabs.append(tab)
         selected = tab.id
@@ -290,8 +291,8 @@ public struct Workbench: Hashable, Sendable {
         guard let tab = tabs.first(where: { $0.id == tab }) else { return Self.untitled }
         let program = panes[tab.focused]?.programTitle ?? ""
         if let name = tab.name { return name }
-        guard let label = panes[tab.focused]?.place.label else { return program.isEmpty ? Self.untitled : program }
-        let before = tabs.prefix { $0.id != tab.id }.filter { $0.name == nil && panes[$0.focused]?.place.label == label }.count
+        guard let label = panes[tab.focused]?.label else { return program.isEmpty ? Self.untitled : program }
+        let before = tabs.prefix { $0.id != tab.id }.filter { $0.name == nil && panes[$0.focused]?.label == label }.count
         return before == 0 ? label : "\(label) \(before + 1)"
     }
 
