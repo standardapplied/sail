@@ -341,6 +341,19 @@ struct Step: Decodable {
     var fileSheet: String?
     /// The file pane closed, as its × is pressed: a clean pane closes at once.
     var fileClose: Bool?
+    /// ⌘S in the file pane.
+    var fileSave: Bool?
+    /// The conflict sheet is up, brought by a save, with these actions.
+    var fileSheetUp: [String]?
+    /// The next save refused as `[code, words]`, nothing written.
+    var fileRefuseSave: [String]?
+    /// File `name` under the root deleted on the workspace.
+    var fileRemove: String?
+    /// The look switched to dark and back with the file open: nothing over the terminal, and no
+    /// bitmap given to what lies over it, before, during or after.
+    var fileLookSwitch: Bool?
+    /// The spec's figures for the file pane, each gated at its ceiling.
+    var fileBudgets: Bool?
     /// Sign Out pressed on the account, answered no further: what follows it asks.
     var signOutNow: Bool?
     /// A ticket was asked with these fields (`{"action": "open", "workspace": "dock"}`), within

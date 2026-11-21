@@ -303,6 +303,19 @@ extension WorkbenchView {
         return true
     }
 
+    /// ⌘S in the selected tab's file pane.
+    package func saveFile() -> Bool {
+        guard let pane = model.selectedTab.flatMap({ tabViews[$0.id]?.filePane }) else { return false }
+        pane.saveDocument(nil)
+        return true
+    }
+
+    /// The selected tab's terminal pane focused, and its file pane: what the look check watches.
+    package var fileAndTerminal: (terminal: TerminalPane, pane: NSView)? {
+        guard let terminal = focused, let pane = model.selectedTab.flatMap({ tabViews[$0.id]?.filePane }) else { return nil }
+        return (terminal, pane)
+    }
+
     /// Compare, as its button is pressed on the one line.
     package func compareFile() -> Bool {
         guard let pane = model.selectedTab.flatMap({ tabViews[$0.id]?.filePane }), let theirs = pane.file.theirs else { return false }

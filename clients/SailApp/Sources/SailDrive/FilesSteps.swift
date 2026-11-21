@@ -292,12 +292,122 @@ extension Driver {
             let gone = await waitForState(step.seconds ?? 5) { self.workbench.sheetOffers.isEmpty }
             return (gone, "pressed \(title)")
         }
+        if step.fileSave == true {
+            guard workbench.saveFile() else { return (false, "no file pane to save") }
+            return (true, "⌘S")
+        }
+        if let offers = step.fileSheetUp {
+            let up = await waitForState(step.seconds ?? 5) { self.workbench.sheetOffers == offers }
+            return (up, "the sheet offers \(workbench.sheetOffers)")
+        }
+        if let refusal = step.fileRefuseSave, refusal.count == 2, let kind = FileRefusal(rawValue: refusal[0]), let door = GoldenDesk.door {
+            door.refuseNextSave(kind, saying: refusal[1])
+            return (true, "the next save is refused \(refusal[0])")
+        }
+        if let name = step.fileRemove, let door = GoldenDesk.door {
+            door.removeFile(Self.filesPath(name))
+            return (true, "\(name) deleted on the workspace")
+        }
+        if step.fileLookSwitch == true { return await fileLookSwitch() }
+        if step.fileBudgets == true, let door = GoldenDesk.door { return await fileBudgets(door) }
         if step.fileClose == true {
             guard workbench.closeFile() else { return (false, "no file pane to close") }
             let gone = await waitForState(step.seconds ?? 5) { pane() == nil }
             return (gone, gone ? "the file pane closed" : "the file pane stayed: \(pane()?.clean == false ? "unsaved" : "clean")")
         }
         return nil
+    }
+
+    /// The look switched to dark and back with the file open beside the terminal: nothing over the
+    /// terminal against ``OverTerminals``' rule before or after either switch, and no bitmap given to
+    /// the large layers over it meanwhile.
+    private func fileLookSwitch() async -> (Bool, String) {
+        guard let (terminal, _) = workbench.fileAndTerminal, let root = shell.window.contentView?.superview else { return (false, "no file open beside a terminal") }
+        var broken = OverTerminals.misses(over: terminal.terminal, of: terminal, in: root).map { "before: \($0)" }
+        let painting = PaintWatch()
+        painting.watch(OverTerminals.largeLayers(over: terminal.terminal, of: terminal, in: root))
+        let start = NSApp.appearance
+        for (name, look) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+            NSApp.appearance = NSAppearance(named: look)
+            _ = await lookDrawn()
+            broken += OverTerminals.misses(over: terminal.terminal, of: terminal, in: root).map { "after \(name): \($0)" }
+        }
+        NSApp.appearance = start
+        painting.stop()
+        if painting.paints > 0 { broken.append("\(painting.paints) bitmaps given to what lies over the terminal") }
+        return (broken.isEmpty, broken.isEmpty ? "nothing over the terminal, nothing painted over it, through dark and light" : broken.joined(separator: "; "))
+    }
+
+    /// The spec's figures for the file pane, app side, the door answering at once: a 5 MB file to its
+    /// first screen drawn and to typing possible, the main thread's costliest turn while it loads, a
+    /// key to its glyph drawn; a clean pane's change to its new text drawn; ⌘S of 100 KB to the dot
+    /// gone. Each over its tries, p95, gated at its ceiling, its budget said.
+    private func fileBudgets(_ door: FakeRunnerDoor) async -> (Bool, String) {
+        let line = "export const tide = { at: 42, height: 1.25, rounding: \"minutes\" };\n"
+        let big = Array(String(repeating: line, count: 5_000_000 / line.utf8.count).utf8)
+        let hundred = Array(String(repeating: line, count: 100_000 / line.utf8.count).utf8)
+        door.setFolder(Self.filesRoot, ["big.ts", "hundred.ts", "src/", "README.md", "Package.swift"].map(Self.fileEntry))
+        door.setFile(Self.filesPath("big.ts"), big)
+        door.setFile(Self.filesPath("hundred.ts"), hundred)
+        guard await waitForState(10, { self.filesShown?.list.numberOfRows == 5 }) else { return (false, "the root never listed big.ts") }
+        let pane = { self.workbench.filePaneShown }
+        func closed() async -> Bool {
+            if pane() != nil { _ = workbench.closeFile() }
+            return await waitForState(5) { pane() == nil }
+        }
+        var first: [Double] = [], typing: [Double] = [], holds: [Double] = [], keys: [Double] = [], changes: [Double] = [], saves: [Double] = []
+        for _ in 0 ..< 3 {
+            guard await closed() else { return (false, "the file pane would not close: unsaved") }
+            mainTurns.reset()
+            let opened = CACurrentMediaTime()
+            guard workbench.openFile(at: Self.filesPath("big.ts")) else { return (false, "no row big.ts") }
+            guard await waitForState(10, { (pane()?.editor.textStorage?.length ?? 0) > 0 }), let editor = pane()?.editor else { return (false, "big.ts showed nothing") }
+            editor.displayIfNeeded()
+            first.append(CACurrentMediaTime() - opened)
+            guard await waitForState(10, { pane()?.editable == true }) else { return (false, "big.ts was never whole") }
+            typing.append(CACurrentMediaTime() - opened)
+            holds.append(mainTurns.longestCPU / 1000)
+            shell.window.makeFirstResponder(editor)
+            let key = CACurrentMediaTime()
+            editor.insertText("x", replacementRange: NSRange(location: 0, length: 0))
+            editor.displayIfNeeded()
+            keys.append(CACurrentMediaTime() - key)
+            editor.undoManager?.undo()
+        }
+        guard await closed(), workbench.openFile(at: Self.filesPath("hundred.ts")), await waitForState(10, { pane()?.editable == true }) else { return (false, "hundred.ts never opened") }
+        for index in 0 ..< 5 {
+            let changed = hundred + Array("// change \(index)\n".utf8)
+            let heard = CACurrentMediaTime()
+            door.setFile(Self.filesPath("hundred.ts"), changed)
+            guard await waitForState(10, { pane()?.text.utf8.count == changed.count }) else { return (false, "a change to a clean pane was not shown") }
+            pane()?.editor.displayIfNeeded()
+            changes.append(CACurrentMediaTime() - heard)
+        }
+        for index in 0 ..< 5 {
+            guard let editor = pane()?.editor else { break }
+            editor.insertText("// saved \(index)\n", replacementRange: NSRange(location: 0, length: 0))
+            let saved = CACurrentMediaTime()
+            _ = workbench.saveFile()
+            guard await waitForState(10, { pane()?.clean == true }) else { return (false, "a save of hundred.ts never cleared the dot: \(pane()?.note ?? "")") }
+            saves.append(CACurrentMediaTime() - saved)
+        }
+        _ = await closed()
+        door.setFolder(Self.filesRoot, ["src/", "README.md", "Package.swift"].map(Self.fileEntry))
+        func p95(_ seconds: [Double]) -> Double {
+            Percentiles(milliseconds: seconds.map { $0 * 1000 }).p95
+        }
+        let rows: [(String, Double, Double, Double)] = [
+            ("a 5 MB file chosen to its first screen drawn p95", p95(first), 60, 150),
+            ("the same file to typing possible p95", p95(typing), 400, 1000),
+            ("loading it: the main thread's own CPU in its costliest turn p95", p95(holds), 8, 16),
+            ("a key typed in a 5 MB file to its glyph drawn p95", p95(keys), 8, 16),
+            ("a clean pane's change to the new text drawn p95", p95(changes), 80, 200),
+            ("⌘S of 100 KB to the dot gone p95", p95(saves), 40, 100),
+        ]
+        let missed = rows.filter { $0.1 > $0.3 }.map { "\($0.0) \(Self.ms($0.1)) ms over its \(Int($0.3)) ms ceiling" }
+        let said = rows.map { "\($0.0) \(Self.ms($0.1)) ms (budget \(Int($0.2)), ceiling \(Int($0.3)))" }.joined(separator: "; ")
+        print("file figures: \(said)")
+        return (missed.isEmpty, (missed.isEmpty ? "within every ceiling; " : "missed: \(missed.joined(separator: "; ")); ") + said)
     }
 
     /// What the main thread was doing in its longest hold since the heartbeat's reset, as the
