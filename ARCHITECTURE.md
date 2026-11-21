@@ -4195,10 +4195,23 @@ connection's frames.
   across its connections would sit on the host beside `PtySessionHost.served`, keyed by instance
   and handed to each `FilesConnection`.
 - **F12. What changed since `HEAD` (`FilesChanges`, `FilesDiff`; `WorkspaceChanges`).** The
-  workspace's own `git`, as the dev user with each repository's own config and hooks
-  (`core.fsmonitor` as the repository has it), the reach a terminal there has, with optional locks
-  off (`GIT_OPTIONAL_LOCKS=0`), so `git status` never refreshes the index and an agent's `git`
-  never waits for its lock. The repositories are `/home/dev/workspace` and each folder directly
+  workspace's own `git`, as the dev user, run only through one safe invocation (`FileScripts.GIT`:
+  `git_in`, then `safe_git`), so looking runs none of the repository's code: every inherited `GIT_*`
+  dropped; through `GIT_CONFIG_COUNT`, which wins over every config file and reaches any git it
+  starts, no fsmonitor, no transport at all (so a lazy fetch runs no upload-pack, ssh command or
+  credential helper), and every filter the folder's configuration defines given an empty clean,
+  smudge and process; trace2 off; `--no-ext-diff --no-textconv` on every diff. Nothing else git's
+  configuration can name runs for these calls: hooks need an index write, which optional locks
+  forbid; a pager needs a terminal; no call edits, signs, fetches or maintains; and a submodule is a
+  folder no diff takes. Optional locks are off (`GIT_OPTIONAL_LOCKS=0`), so `git status` never refreshes the
+  index and an agent's `git` never waits for its lock. A repository git refuses is said for it
+  alone (`FilesChangeList.failure`, git's words) and the others answer; a path that passes through
+  a defined filter (Git LFS and its like) is still listed but its diff is refused `filtered`, since
+  its sides would be the filtered and the unfiltered bytes, and one whose stat changed is listed
+  even when its filtered content did not. A copy, where the repository has git find copies, is
+  listed as added. A diff has one shape whatever the repository's diff settings (`a/` and `b/` from
+  the top, no colour, no renames, three lines of context) and is ended at the changes' 30 s however
+  much of it was sent. The repositories are `/home/dev/workspace` and each folder directly
   under it that is its own top. One `git status --porcelain=v2 -z --branch --untracked-files=all
   --ignored=matching` each: an ignored folder is one path git never walks, while an untracked
   folder no rule ignores is walked whole, which is git's own cost. Measured on git 2.43: an
