@@ -1541,7 +1541,6 @@ class FileWritesTest {
             CONTAINER,
             "dock",
             message -> {
-              said.add(message);
               if (message instanceof PtyMessage.FilesEntry && reused.compareAndSet(false, true)) {
                 try {
                   self.get()
@@ -1552,6 +1551,7 @@ class FileWritesTest {
                   throw new AssertionError(failed);
                 }
               }
+              said.add(message);
             },
             () -> null,
             endedWith::add,
@@ -1561,7 +1561,7 @@ class FileWritesTest {
     self.set(connection);
 
     connection.stat(new PtyMessage.FilesStat(7, file.toString()));
-    assertInstanceOf(PtyMessage.FilesEntry.class, answer());
+    assertInstanceOf(PtyMessage.FilesEntry.class, answer(), "said once the save is asked");
     var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
     while (connection.scripts() != 1) {
       assertTrue(System.nanoTime() < deadline, "the stat's run ends, the save's goes on");
