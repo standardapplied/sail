@@ -37,7 +37,7 @@ extension Driver {
     }
 
     func performFiles(_ step: Step) async -> (Bool, String)? {
-        let asks = [step.filesFolder, step.filesRefuse, step.filesNew, step.filesClick, step.filesDoubleClick, step.filesButton, step.filesShot].contains { $0 != nil }
+        let asks = [step.filesFolder, step.filesRefuse, step.filesNew, step.filesClick, step.filesDoubleClick, step.filesChosen, step.filesButton, step.filesShot].contains { $0 != nil }
             || step.filesRows != nil || step.filesSays != nil || step.filesHold != nil || step.filesTicks != nil || step.filesEnd != nil
             || step.filesDrop != nil || step.filesBudgets != nil || step.filesFlood != nil
         guard asks else { return nil }
@@ -72,6 +72,14 @@ extension Driver {
             guard await clickName(id, in: shown) else { return (false, "the click on \(name) was not sent") }
             let chosen = await waitUntil(5) { self.filesShown?.list.chosen == id }
             return (chosen, "chosen: \(filesShown?.list.chosen ?? "nothing")")
+        }
+        if let name = step.filesChosen {
+            let found = await waitUntil(step.seconds ?? 5) {
+                guard let shown = self.filesShown, let chosen = shown.list.chosen, let responder = self.shell.window.firstResponder as? NSView else { return false }
+                return chosen.hasSuffix("/" + name) && responder.isDescendant(of: shown.list)
+            }
+            let keys = shell.window.firstResponder.map { "\(type(of: $0))" } ?? "nothing"
+            return (found, "chosen \(filesShown?.list.chosen ?? "nothing"), the keys with \(keys)")
         }
         if let name = step.filesDoubleClick {
             guard let shown = filesShown, let row = shown.rows.first(where: { $0.name == name && $0.kind != .note }) else { return (false, "no row \(name)") }

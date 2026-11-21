@@ -291,6 +291,9 @@ struct Step: Decodable {
     var filesNew: String?
     /// The files panel's row of this name clicked as a person clicks it.
     var filesClick: String?
+    /// The files panel's chosen row is the one of this name, and the tree holds the keys, within
+    /// `seconds`.
+    var filesChosen: String?
     /// The files panel's row of this name double-clicked on its name as a person does.
     var filesDoubleClick: String?
     /// The files panel's line's button of this title clicked.
