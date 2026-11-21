@@ -154,6 +154,87 @@ import Testing
         #expect(write.bytes == read + Array("y".utf8) && write.base == Self.digest(read))
     }
 
+    /// For any bytes that open as text: a save with no edit sends nothing; a character typed and
+    /// deleted, anywhere, is clean again; a save then sends exactly the bytes read with the edit.
+    static func roundTrips(_ bytes: [UInt8], chunk: Int) -> String? {
+        var pane = Pane(size: bytes.count)
+        pane.answer(bytes, chunk: chunk)
+        guard pane.file.canType else { return nil }
+        if !pane.text.utf8.elementsEqual(bytes) { return "the text shown is not the bytes read" }
+        if !pane.file.save().asks.isEmpty { return "a save with no edit wrote" }
+        let text = pane.text, middle = text.index(text.startIndex, offsetBy: text.count / 2)
+        for typed in [text + "x", String(text[..<middle]) + "x" + String(text[middle...])] {
+            pane.type(typed)
+            pane.type(text)
+            if !pane.file.clean { return "a character typed and deleted is not clean" }
+        }
+        pane.type(text + "x")
+        guard case let .write(_, _, base, written)? = pane.file.save().asks.first else { return "a save after an edit wrote nothing" }
+        return written == bytes + Array("x".utf8) && base == OpenFileTests.digest(bytes) ? nil : "the bytes saved are not the bytes read and the edit"
+    }
+
+    @Test(arguments: [
+        ("a lone CR", Array("one\rtwo".utf8)),
+        ("mixed endings", Array("a\r\nb\nc\rd\r\n".utf8)),
+        ("a BOM", [0xEF, 0xBB, 0xBF] + Array("bom\n".utf8)),
+        ("a BOM alone", [0xEF, 0xBB, 0xBF]),
+        ("ending mid-line", Array("no newline at the end".utf8)),
+        ("empty", []),
+        ("CRLF across a chunk", Array(String(repeating: "x", count: 262_143).utf8) + Array("\r\nmore".utf8)),
+        ("a character across a chunk", Array(String(repeating: "x", count: 262_143).utf8) + Array("⚓é".utf8)),
+    ] as [(String, [UInt8])])
+    func oddFilesComeBackByteForByte(_ name: String, _ bytes: [UInt8]) {
+        #expect(Self.roundTrips(bytes, chunk: 256 * 1024) == nil, "\(name)")
+    }
+
+    @Test func aFileOneByteUnderTheLimitComesBackByteForByte() {
+        let bytes = [UInt8](repeating: 0x61, count: Int(OpenFile.limit) - 2) + [0x0D, 0x0A]
+        #expect(Self.roundTrips(bytes, chunk: 256 * 1024) == nil)
+    }
+
+    /// Bytes drawn at random from line endings, a BOM, accented and astral characters, tabs and
+    /// stray high bytes, cut into chunks of random sizes: every one that opens as text comes back.
+    @Test func randomFilesThatOpenAsTextComeBackByteForByte() {
+        var seed: UInt64 = 0x5EED
+        func next() -> Int {
+            seed = seed &+ 0x9E37_79B9_7F4A_7C15
+            var z = seed
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            return Int(truncatingIfNeeded: (z ^ (z >> 31)) >> 1)
+        }
+        let pieces: [[UInt8]] = [[0x0D], [0x0A], [0x0D, 0x0A], [0xEF, 0xBB, 0xBF], Array("é".utf8), Array("⚓".utf8), Array("🧭".utf8), [0x09], Array("tide".utf8), [0x20], [0xC3], [0xFF], [0x80]]
+        var opened = 0
+        for round in 0 ..< 300 {
+            let alphabet = next() % 3 == 0 ? pieces.count : pieces.count - 3
+            let bytes = (0 ..< next() % 400).flatMap { _ in pieces[next() % alphabet] }
+            let chunk = 1 + next() % 97
+            var pane = Pane(size: bytes.count)
+            pane.answer(bytes, chunk: chunk)
+            guard pane.file.canType else { continue }
+            opened += 1
+            if let wrong = Self.roundTrips(bytes, chunk: chunk) { Issue.record("round \(round), \(bytes.count) bytes in chunks of \(chunk): \(wrong)") }
+        }
+        #expect(opened >= 30, "only \(opened) of the random files opened as text")
+    }
+
+    /// A followed read that is no longer text: a clean pane shows the sentence, and follows back to
+    /// text when it is again; an unsaved pane keeps its text and says the file changed.
+    @Test func aFollowedFileThatStopsBeingTextNeverTakesTypedText() throws {
+        var clean = Self.opened("one\n")
+        clean.take(clean.file.changed())
+        clean.answer([0x89, 0x50, 0x4E, 0x47, 0x00, 0x01], version: "v2")
+        #expect(clean.file.state == .notText("tide.ts isn't text: a PNG image, 6 bytes.") && !clean.file.canType)
+        clean.take(clean.file.changed())
+        clean.answer(Array("two\n".utf8), version: "v3")
+        #expect(clean.file.state == .text && clean.text == "two\n" && clean.file.canType, "a file that is text again was not followed back")
+        var typed = Self.opened("one\n")
+        typed.type("mine\n")
+        typed.take(typed.file.changed())
+        typed.answer([0x89, 0x50, 0x4E, 0x47, 0x00, 0x01], version: "v2")
+        #expect(typed.file.state == .text && typed.text == "mine\n" && typed.file.note == .changed && typed.file.canType)
+    }
+
     // MARK: Following
 
     /// F14: clean, a change is read and shown; the same bytes again only move the base.

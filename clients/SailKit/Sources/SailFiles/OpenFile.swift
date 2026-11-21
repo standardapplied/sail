@@ -192,9 +192,10 @@ public struct OpenFile: Sendable {
         return Step(asks: [read(whole ? .follow : .open)])
     }
 
-    /// ⌘S: the pane's bytes, written only while the file is at the digest read (M26, M27).
+    /// ⌘S: the pane's bytes, written only while the file is at the digest read (M26, M27); a clean
+    /// pane holds the bytes it read, and writes nothing.
     public mutating func save() -> Step {
-        write(against: digest)
+        clean ? Step() : write(against: digest)
     }
 
     /// Keep Mine: the pane's bytes, written against the version the sheet showed.
@@ -277,13 +278,19 @@ public struct OpenFile: Sendable {
             state = .tooLarge("\(name) is \(Self.amount(Int64(held.bytes.count))). Sail shows text files up to \(Self.amount(Self.limit)).")
             return Step()
         }
-        var step = held.why == .open ? shown(ending: true) : Step()
-        if case .notText = state { return step }
+        var step = Step()
+        if held.why == .open {
+            step = shown(ending: true)
+            if case .notText = state { return step }
+        }
         reading = nil
         self.version = version
         if readAgain { step.asks.append(read(.follow)) }
         readAgain = false
-        guard isWhole, String(validating: held.bytes, as: UTF8.self) != nil else { return step }
+        guard isWhole else { return step }
+        guard String(validating: held.bytes, as: UTF8.self) != nil, !held.bytes.prefix(Self.decidedBy).contains(0) else {
+            return held.why == .open ? step : merge(step, notTextAnyMore(held.bytes, digest: digest))
+        }
         switch held.why {
         case .open:
             state = .text
@@ -324,6 +331,22 @@ public struct OpenFile: Sendable {
         return Step()
     }
 
+    /// A followed read that is no longer text: a clean pane shows the sentence; an unsaved one keeps
+    /// its text and says the file changed.
+    private mutating func notTextAnyMore(_ bytes: [UInt8], digest: String) -> Step {
+        guard clean else {
+            theirs = bytes
+            theirsDigest = digest
+            note = .changed
+            return Step()
+        }
+        base = bytes
+        self.digest = digest
+        baseUnits = -1
+        state = .notText("\(name) isn't text: \(Self.kind(of: bytes)), \(Self.amount(Int64(bytes.count))).")
+        return Step()
+    }
+
     private mutating func readRefused(_ kind: Open<FileRefusal>, _ message: String, _ why: Why) -> Step {
         if kind == .known(.changed) {
             dueAtTick = true
@@ -357,6 +380,7 @@ public struct OpenFile: Sendable {
 
     /// The workspace's bytes become the pane's text and its base: it is clean and follows again.
     private mutating func take(_ bytes: [UInt8], digest: String) -> Step {
+        state = .text
         text = String(decoding: bytes, as: UTF8.self)
         adopt(bytes, digest: digest)
         note = .none
