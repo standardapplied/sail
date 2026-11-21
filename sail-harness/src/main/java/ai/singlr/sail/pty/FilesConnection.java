@@ -1052,7 +1052,11 @@ final class FilesConnection {
     var path = FileNames.shown(named);
     return switch (kind) {
       case NOT_FOUND -> "No file at " + path + " in " + workspace + ".";
-      case NOT_PERMITTED -> "The workspace's user may not open " + path + ".";
+      case NOT_PERMITTED ->
+          "The workspace's user may not "
+              + ("read".equals(verb) ? "open " : "change ")
+              + path
+              + ".";
       case OUTSIDE_HOME ->
           path
               + " is outside "

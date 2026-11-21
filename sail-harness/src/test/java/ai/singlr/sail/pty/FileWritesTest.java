@@ -1372,6 +1372,16 @@ class FileWritesTest {
         new PtyMessage.FilesRefused(
             4, PtyMessage.FilesRefusal.EXISTS, file + " exists already, so nothing was replaced."),
         answer());
+    var locked = Files.writeString(home.resolve("locked.md"), "kept");
+    Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("r--r--r--"));
+    save(connection, 9, locked.toString(), digest(locked), version(locked), "mine");
+    assertEquals(
+        new PtyMessage.FilesRefused(
+            9,
+            PtyMessage.FilesRefusal.NOT_PERMITTED,
+            "The workspace's user may not change " + locked + "."),
+        answer(),
+        "a write's refusal says change, a read's open");
     connection.create(new PtyMessage.FilesCreate(5, home + "/made", true));
     assertEquals(new PtyMessage.FilesDone(5), answer());
     connection.move(new PtyMessage.FilesMove(6, other.toString(), home + "/made/other.md"));
