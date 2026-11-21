@@ -123,6 +123,10 @@ private extension Frame {
         case .filesWritten: 56
         case .filesConflict: 57
         case .filesDone: 58
+        case .filesChanges: 49
+        case .filesChangeList: 59
+        case .filesDiff: 60
+        case .filesDiffData: 61
         }
     }
 
@@ -186,6 +190,14 @@ private extension Frame {
         case let .filesWritten(id, digest, version): [.int32(id), .string(digest), .string(version)]
         case let .filesConflict(id, digest): [.int32(id), .string(digest)]
         case let .filesDone(id): [.int32(id)]
+        case let .filesChanges(id): [.int32(id)]
+        case let .filesChangeList(list):
+            [.int32(list.id), .int64(list.tookMillis), .blob(list.root.bytes), .blob(list.branch.bytes), .count(list.entries.count)]
+                + list.entries.flatMap { [.blob($0.path.bytes), .string($0.state.rawValue), .blob($0.from.bytes)] }
+                + [.count(list.ignored.count)] + list.ignored.map { .blob($0.bytes) }
+                + [.bool(list.truncated), .bool(list.more)]
+        case let .filesDiff(id, path): [.int32(id), .blob(path.bytes)]
+        case let .filesDiffData(id, bytes, eof): [.int32(id), .blob(bytes), .bool(eof)]
         case .takeWrite, .detach, .replayEnd, .paused, .continued, .accepted, .filesTick: []
         }
     }
@@ -341,6 +353,10 @@ private struct Cursor {
         case 56: .filesWritten(id: try int32(), digest: try string(), version: try string())
         case 57: .filesConflict(id: try int32(), digest: try string())
         case 58: .filesDone(id: try int32())
+        case 49: .filesChanges(id: try int32())
+        case 59: .filesChangeList(try changeList())
+        case 60: .filesDiff(id: try int32(), path: FileName(try blob()))
+        case 61: .filesDiffData(id: try int32(), bytes: try blob(), eof: try bool())
         case let other: throw .unknownType(other)
         }
     }
@@ -356,6 +372,17 @@ private struct Cursor {
         FileEntry(
             name: FileName(try blob()), kind: Open(rawValue: try string()), target: Open(rawValue: try string()),
             size: try int64(), mtimeNanos: try int64(), mode: try int32()
+        )
+    }
+
+    private mutating func changeList() throws(TerminalWireError) -> FileChangeList {
+        FileChangeList(
+            id: try int32(), tookMillis: try int64(), root: FileName(try blob()), branch: FileName(try blob()),
+            entries: try list { (cursor: inout Cursor) throws(TerminalWireError) in
+                FileChange(path: FileName(try cursor.blob()), state: Open(rawValue: try cursor.string()), from: FileName(try cursor.blob()))
+            },
+            ignored: try list { (cursor: inout Cursor) throws(TerminalWireError) in FileName(try cursor.blob()) },
+            truncated: try bool(), more: try bool()
         )
     }
 

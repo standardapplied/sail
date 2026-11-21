@@ -90,6 +90,15 @@ final class FileScripts {
   /** A save over a file larger than a whole read may be, which never has a whole read's digest. */
   static final int TOO_LARGE = 49;
 
+  /** The changes' and a diff's exit when the workspace has no {@code git}. */
+  static final int NO_GIT = 60;
+
+  /** The changes' exit when the workspace holds no repository, and a diff's for a path in none. */
+  static final int NO_REPOSITORY = 61;
+
+  /** A diff's exit when the change is binary, which git does not show as text. */
+  static final int BINARY = 62;
+
   /** The read's exit when the workspace has no {@code sha256sum} to prove what it read with. */
   static final int NO_SHA256 = 27;
 
@@ -383,6 +392,82 @@ final class FileScripts {
       """;
 
   /**
+   * What differs from {@code HEAD} in each repository of the workspace: the workspace folder itself
+   * and each folder directly under it whose own top {@code git} says it is, under the home. Each is
+   * said as {@code repo} and its root, then git's own {@code status} in porcelain v2 with NUL ends,
+   * untracked files listed one by one and ignored paths as git matched them, an ignored folder one
+   * path git never walks, then {@code end}; every field NUL-terminated. Run as the dev user with
+   * the repository's own config and hooks, and with optional locks off, so it never takes the
+   * index's lock and an agent's {@code git} never waits for it. No git, or no repository, is its
+   * own exit.
+   */
+  static final String CHANGES =
+      """
+      export LC_ALL=C GIT_OPTIONAL_LOCKS=0
+      home=$1
+      command -v git > /dev/null || exit 60
+      found=''
+      for dir in "$home/workspace" "$home"/workspace/*/; do
+        dir=${dir%/}
+        [ -d "$dir" ] || continue
+        top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null && echo x) || continue
+        top=${top%?x}
+        real=$(realpath -e -- "$dir" 2>/dev/null && echo x) || continue
+        real=${real%?x}
+        [ "$top" = "$real" ] || continue
+        case $top/ in "$home"/*) ;; *) continue ;; esac
+        found=1
+        printf 'repo\\0%s\\0' "$top"
+        git -C "$top" status --porcelain=v2 -z --branch --untracked-files=all --ignored=matching --ignore-submodules=dirty || exit 1
+        printf 'end\\0'
+      done
+      [ -n "$found" ] || exit 61
+      """;
+
+  /**
+   * The path's change against {@code HEAD} as a unified diff, three lines of context, at most
+   * {@code $2} bytes and one more, so a longer one is seen: an untracked file's against nothing,
+   * and against git's empty tree in a repository with no commit yet. The repository is the one git
+   * finds from the nearest folder of the path that still exists, which must resolve under the home,
+   * as its top must. A file larger than {@code $2} on either side, or a binary change, is refused
+   * before any byte; no external diff or text conversion is ever run, pathspecs are literal, and
+   * optional locks are off.
+   */
+  static final String DIFF =
+      RESOLVE
+          + """
+          export GIT_OPTIONAL_LOCKS=0 GIT_LITERAL_PATHSPECS=1
+          cap=$2
+          IFS= read -r -d '' path || exit 1
+          command -v git > /dev/null || exit 60
+          folder=${path%/*} rest=${path##*/}
+          until [ -d "$folder" ] || [ "$folder" = "$home" ]; do
+            rest=${folder##*/}/$rest folder=${folder%/*}
+          done
+          resolve "$folder"
+          cd -- "$at" 2>/dev/null || exit 21
+          top=$(git rev-parse --show-toplevel 2>/dev/null && echo x) || exit 61
+          top=${top%?x}
+          case $top/ in "$home"/*) ;; *) exit 22 ;; esac
+          [ -d "$rest" ] && [ ! -L "$rest" ] && exit 23
+          base=HEAD
+          git rev-parse -q --verify 'HEAD^{commit}' > /dev/null || base=$(git hash-object -t tree /dev/null) || exit 1
+          if { [ -e "$rest" ] || [ -L "$rest" ]; } && ! git ls-files --error-unmatch -- "$rest" > /dev/null 2>&1; then
+            set -- --no-index -- /dev/null "$rest"
+          else
+            [ "$(git cat-file -s "$base:./$rest" 2>/dev/null || echo 0)" -le "$cap" ] || exit 49
+            set -- "$base" -- "$rest"
+          fi
+          if [ -f "$rest" ] && [ ! -L "$rest" ] && [ "$(stat -c %s -- "$rest")" -gt "$cap" ]; then exit 49; fi
+          counted=$(git diff --no-ext-diff --no-textconv --numstat "$@")
+          [ $? -le 1 ] || exit 1
+          case $counted in -$'\t'-$'\t'*) exit 62 ;; esac
+          git diff --no-color --no-ext-diff --no-textconv -U3 "$@" | head -c $((cap + 1))
+          status=${PIPESTATUS[0]}
+          [ "$status" -le 1 ] || [ "$status" -eq 141 ] || exit 1
+          """;
+
+  /**
    * Whether a save of an earlier host, or of this one before its workspace's lock was dropped, is
    * still stuck in the workspace: a process holding open a file of Sail's exact temporary shape
    * under the home ({@code $1}) whose last change is older than {@code $2} seconds, the save bound,
@@ -582,6 +667,9 @@ final class FileScripts {
       case INTO_ITSELF -> FilesRefusal.UNSAFE;
       case PARTLY_REMOVED -> FilesRefusal.PARTLY_REMOVED;
       case TOO_LARGE -> FilesRefusal.TOO_LARGE;
+      case NO_GIT -> FilesRefusal.NO_GIT;
+      case NO_REPOSITORY -> FilesRefusal.NO_REPOSITORY;
+      case BINARY -> FilesRefusal.BINARY;
       default -> null;
     };
   }

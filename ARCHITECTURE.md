@@ -4108,10 +4108,10 @@ Incus.
 ticket (`{"action": "files", "project", "workspace"}`) names a workspace, never the project's own
 container, and is decided as an open there (`PtySessionHost.filesRefusal`: the project, then
 `PtyAdmission.files`); a stopped workspace is refused `workspace_stopped` (409) with the remedy
-that starts it, and nothing is started by looking. The connection it admits speaks only frames
-40-44 (`FilesList`, `FilesStat`, `FilesRead`, `FilesCancel`, `FilesWatch`), answered by 50-55
-(`FilesListing`, `FilesEntry`, `FilesData`, `FilesChanged`, `FilesTick`, `FilesRefused`, a kind
-and a sentence naming the file), for that workspace (`PtyTickets.Ticket#refusal`). Two classes, one
+that starts it, and nothing is started by looking. The connection it admits speaks only the files
+frames, 40-49 and 60 (lists, stats, reads, cancels, the watch, the writes, `FilesChanges` and
+`FilesDiff`), answered by 50-59 and 61 (among them `FilesRefused`, a kind and a sentence naming
+the file), for that workspace (`PtyTickets.Ticket#refusal`). Two classes, one
 job each: `FileScripts` is the shell (four bash scripts as constants, their exit statuses, one
 `incus exec` as the dev user each, `UploadCopy.Place.asDev`), `FilesConnection` answers one
 connection's frames.
@@ -4194,6 +4194,26 @@ connection's frames.
   (`.sail-save-`), which a save writes beside its target. A lock serialising writes to a workspace
   across its connections would sit on the host beside `PtySessionHost.served`, keyed by instance
   and handed to each `FilesConnection`.
+- **F12. What changed since `HEAD` (`FilesChanges`, `FilesDiff`; `WorkspaceChanges`).** The
+  workspace's own `git`, as the dev user with each repository's own config and hooks
+  (`core.fsmonitor` as the repository has it), the reach a terminal there has, with optional locks
+  off (`GIT_OPTIONAL_LOCKS=0`), so `git status` never refreshes the index and an agent's `git`
+  never waits for its lock. The repositories are `/home/dev/workspace` and each folder directly
+  under it that is its own top. One `git status --porcelain=v2 -z --branch --untracked-files=all
+  --ignored=matching` each: an ignored folder is one path git never walks, while an untracked
+  folder no rule ignores is walked whole, which is git's own cost. Measured on git 2.43: an
+  ignored `node_modules/` of 50,000 files is one line and status takes 24 ms; `--ignored=traditional`
+  lists all 50,000 in 73 ms. A workspace runs one changes script at a time across every connection
+  to it (`PtySessionHost.changeRuns`, dropped with its last connection once idle): an ask that comes
+  while one runs waits, and every ask waiting is answered by the one next run, made whole (each
+  list cut at 5,000, the answer at 4 MiB of paths, `truncated`) and then sent by each connection
+  on its own thread, so one slow to read holds no other's answer. A run past 30 s is ended and
+  said so. Each `FilesChangeList` frame carries `tookMillis`, by which the client backs off. A
+  diff is `git diff --no-color --no-ext-diff --no-textconv -U3` with literal pathspecs, against
+  git's own empty tree in a repository with no commit, `--no-index` against `/dev/null` for an
+  untracked file, answered as `FilesDiffData`, never `FilesData`, so it carries no version or
+  digest a save could take; a binary change, a side or a diff over 20 MiB, no git and no
+  repository are refused as what they are (exits 60 to 62).
 
 **Where a session opens (`PtySessionHost.folderOf`).** One rule. A session in a container or a
 workspace starts its `incus exec` in `/` on the box and its shell in the instance's own

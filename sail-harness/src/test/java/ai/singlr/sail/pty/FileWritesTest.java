@@ -760,7 +760,8 @@ class FileWritesTest {
                 saving,
                 () -> null,
                 java.time.Duration.ofMillis(300),
-                java.time.Duration.ofMillis(500)));
+                java.time.Duration.ofMillis(500)),
+            changes());
     save(outliving, 1, file.toString(), digest(file), version(file), "new");
     assertEquals(PtyMessage.FilesRefusal.FAILED, ((PtyMessage.FilesRefused) answer()).kind());
     var holder = ProcessHandle.of(Long.parseLong(Files.readString(pidfile).strip())).orElseThrow();
@@ -831,7 +832,8 @@ class FileWritesTest {
                   saving,
                   () -> null,
                   FilesConnection.AFTER_GO,
-                  FilesConnection.HOLD_BOUND));
+                  FilesConnection.HOLD_BOUND),
+              changes());
       restarted.create(new PtyMessage.FilesCreate(2, home + "/b.md", false));
       assertEquals(
           new PtyMessage.FilesRefused(2, PtyMessage.FilesRefusal.FAILED, stuck(old)),
@@ -1045,7 +1047,8 @@ class FileWritesTest {
                 saving,
                 () -> null,
                 java.time.Duration.ofMillis(300),
-                FilesConnection.HOLD_BOUND));
+                FilesConnection.HOLD_BOUND),
+            changes());
 
     save(hung, 1, file.toString(), digest(file), version(file), "new");
 
@@ -1285,6 +1288,12 @@ class FileWritesTest {
   private final FilesConnection.WorkspaceLock lock = new FilesConnection.WorkspaceLock();
   private final Set<String> saving = ConcurrentHashMap.newKeySet();
 
+  /** A changes run of its own, which no write test asks. */
+  private WorkspaceChanges changes() {
+    return new WorkspaceChanges(
+        running(UnaryOperator.identity()), CONTAINER, WorkspaceChanges.PATIENCE, () -> {});
+  }
+
   private FileScripts running(UnaryOperator<String> edit) {
     return scripts(edit, Map.of());
   }
@@ -1321,7 +1330,8 @@ class FileWritesTest {
         () -> null,
         endedWith::add,
         new FilesConnection.Writes(
-            on, runs, () -> null, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND));
+            on, runs, () -> null, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND),
+        changes());
   }
 
   private FilesConnection connection(FileScripts with, FilesConnection.Gate gate) {
@@ -1336,7 +1346,8 @@ class FileWritesTest {
         () -> null,
         endedWith::add,
         new FilesConnection.Writes(
-            lock, saving, gate, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND));
+            lock, saving, gate, FilesConnection.AFTER_GO, FilesConnection.HOLD_BOUND),
+        changes());
   }
 
   /** Sends save {@code id} of {@code text} over {@code path} on {@code base}, bytes and end. */
