@@ -466,18 +466,27 @@ class ShellExecutorTest {
   @Test
   void aProcessLeftHoldingTheOutputDoesNotOutlastTheTimeout() {
     var started = System.nanoTime();
-    assertTimeoutPreemptively(
-        Duration.ofSeconds(5),
-        () ->
-            assertThrows(
-                CommandTimedOut.class,
-                () ->
-                    new ShellExecutor(false)
-                        .execWithInput(
-                            List.of("sh", "-c", "sleep 8 & exit 0"), "", Duration.ofSeconds(1))));
+    var timedOut =
+        assertTimeoutPreemptively(
+            Duration.ofSeconds(5),
+            () ->
+                assertThrows(
+                    CommandTimedOut.class,
+                    () ->
+                        new ShellExecutor(false)
+                            .execWithInput(
+                                List.of(
+                                    "sh",
+                                    "-c",
+                                    "echo $((6 * 7)); echo $((6 * 8)) >&2; sleep 8 & exit 0"),
+                                "",
+                                Duration.ofSeconds(1))));
 
     assertTrue(
         System.nanoTime() - started < Duration.ofSeconds(3).toNanos(), "ended at its timeout");
+    assertEquals("42\n", timedOut.stdout(), "what was read up to the timeout is given back");
+    assertEquals("48\n", timedOut.stderr());
+    assertFalse(timedOut.getMessage().contains("42"), "the output is never in the message");
   }
 
   /**

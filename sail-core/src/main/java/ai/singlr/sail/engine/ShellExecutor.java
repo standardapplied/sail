@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -112,12 +113,10 @@ public final class ShellExecutor implements ShellExec {
 
     var deadline = System.nanoTime() + timeout.toNanos();
     var process = pb.start();
-    var stdout = new AtomicReference<String>("");
-    var stderr = new AtomicReference<String>("");
-    var stdoutThread =
-        Thread.ofVirtual().start(() -> stdout.set(readFully(process.getInputStream())));
-    var stderrThread =
-        Thread.ofVirtual().start(() -> stderr.set(readFully(process.getErrorStream())));
+    var stdout = new Output();
+    var stderr = new Output();
+    var stdoutThread = Thread.ofVirtual().start(() -> stdout.drain(process.getInputStream()));
+    var stderrThread = Thread.ofVirtual().start(() -> stderr.drain(process.getErrorStream()));
     var writing = new FutureTask<>(() -> hand(process, input));
     Thread.ofVirtual().start(writing);
 
@@ -140,7 +139,8 @@ public final class ShellExecutor implements ShellExec {
         || !stderrThread.join(left(deadline))
         || !written.ended()) {
       destroyWithDescendants(process);
-      throw timedOut(command, timeout, "");
+      throw new CommandTimedOut(
+          timedOut(command, timeout, "").getMessage(), "", stdout.read(), stderr.read());
     }
     var status = process.exitValue();
     if (status == 0 && written.notTaken() != null) {
@@ -150,7 +150,38 @@ public final class ShellExecutor implements ShellExec {
               + written.notTaken().getMessage()
               + ")");
     }
-    return new Result(status, stdout.get(), stderr.get());
+    return new Result(status, stdout.read(), stderr.read());
+  }
+
+  /**
+   * One of a command's outputs, read as it comes on its reader's own virtual thread, so what was
+   * read so far can be given back when the command's timeout passes while the pipe is still open: a
+   * process the command left behind may hold it. That reader is then left blocked: closing the pipe
+   * would wait for the blocked read's own lock, which holds the caller as long as the leftover
+   * process lives. The reader ends when that process ends and the pipe closes; until then it is one
+   * virtual thread holding one descriptor.
+   */
+  private static final class Output {
+    private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+
+    void drain(InputStream in) {
+      var chunk = new byte[8192];
+      try (in) {
+        for (int n; (n = in.read(chunk)) >= 0; ) {
+          synchronized (bytes) {
+            bytes.write(chunk, 0, n);
+          }
+        }
+      } catch (IOException ended) {
+        var unused = ended;
+      }
+    }
+
+    String read() {
+      synchronized (bytes) {
+        return bytes.toString(StandardCharsets.UTF_8);
+      }
+    }
   }
 
   private static CommandTimedOut timedOut(
