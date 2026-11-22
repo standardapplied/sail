@@ -73,9 +73,11 @@ extension Driver {
             return (found, "the panel shows \(filesShown.map { "\($0.list.numberOfRows) rows: \($0.rows.prefix(12).map(\.name))" } ?? "nothing"); its line: \(filesShown?.words ?? "none"); chosen \(filesShown?.list.chosen ?? "nothing"); the keys with \(keys)")
         }
         if step.filesReconnects == true {
-            let before = door.filesAdmitted
-            let again = await waitForState(step.seconds ?? 10) { door.filesAdmitted > before }
-            return (again, "files connections admitted \(before) then \(door.filesAdmitted)")
+            // Admitted on the app's side too: the door counts its admission before the app hears it,
+            // and a save sent between the two is said "not connected" and stays unsaved.
+            let before = door.filesAdmitted, heard = filesShown?.admittedAt ?? 0
+            let again = await waitForState(step.seconds ?? 10) { door.filesAdmitted > before && (self.filesShown?.admittedAt ?? 0) > heard }
+            return (again, "files connections admitted \(before) then \(door.filesAdmitted), the app's admission heard \(again ? "after" : "never after") the drop")
         }
         if let words = step.filesSays {
             let found = await waitForState(step.seconds ?? 10) {
@@ -285,7 +287,7 @@ extension Driver {
         }
         if let unsaved = step.fileUnsaved {
             let found = await waitForState(step.seconds ?? 10) { pane()?.clean == !unsaved }
-            return (found, "the file pane is \(pane()?.clean == true ? "clean" : "unsaved")")
+            return (found, "the file pane is \(pane()?.clean == true ? "clean" : "unsaved"); its line: \(pane()?.note ?? "none")")
         }
         if let offers = step.fileCompare {
             guard workbench.compareFile() else { return (false, "no Compare to press: \(pane()?.note ?? "no line")") }
