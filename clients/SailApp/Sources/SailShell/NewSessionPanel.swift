@@ -663,9 +663,10 @@ package final class NewSessionRow: NSView {
 
 extension ModeMemory {
     /// Where `person`'s starts are kept: one person on one control plane, so whoever signs in next
-    /// on this Mac, or the same handle on another control plane, inherits nothing.
+    /// on this Mac, or the same handle on another control plane, inherits nothing. The parts are
+    /// joined by the unit separator, which neither an address nor a handle holds.
     static func key(for person: WorkspacesModel.Person) -> String {
-        "sail.agentStarts.\(person.controlPlane).\(person.handle)"
+        ["sail.agentStarts", person.controlPlane, person.handle].joined(separator: "\u{1F}")
     }
 
     /// What `defaults` remember of `person`'s starts; nothing, before any or past a reading.

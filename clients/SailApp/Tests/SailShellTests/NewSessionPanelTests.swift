@@ -196,9 +196,9 @@ import Testing
         #expect(quick.started.isEmpty && quick.view.newSession.isOpen && quick.view.newSession.view.modes?.title == "Claude Code's own", "a mode no longer offered started, or the panel did not fall back to the harness's own")
     }
 
-    /// While what starts is asked, the row's + is in flight and takes no press; a second ⌥⌘T is
-    /// the same ask, not another, and the panel opens once.
-    @Test func thePlusSaysItIsAskingAndASecondPressIsTheSameAsk() async throws {
+    /// While what starts is asked, the row's + is in flight; a second ⌥⌘T takes the ask over (the
+    /// newest press wins), and the panel opens once, for it.
+    @Test func thePlusSaysItIsAskingAndTheNewestPressTakesTheAskOver() async throws {
         let transport = Held(RecordedServer([try Exchange("projects"), try Exchange("workspaces-three"), try Exchange("workspace-agents-dock")]), holding: "agents")
         let (view, window) = try WorkspacesViewTests.view(transport)
         defer { window.orderOut(nil) }
@@ -213,8 +213,76 @@ import Testing
         #expect(view.project.list.onKey?(try Self.optionCommandT()) == true)
         transport.release()
         #expect(await RunnerTabTests.until { view.newSession.isOpen })
-        #expect(transport.routes.filter { $0.hasSuffix("/agents") }.count == 1, "a second press asked again: \(transport.routes)")
+        #expect(transport.routes.filter { $0.hasSuffix("/agents") }.count == 2, "the second press did not ask again: \(transport.routes)")
+        #expect(window.childWindows?.filter { $0 === view.newSession.popover.panel }.count == 1, "the panel opened twice")
         #expect((view.project.plus("dock") as? SailButton)?.busyWord == nil, "the + stayed in flight")
+    }
+
+    /// The newest press wins: a quick item pressed on pier while dock's ask is out takes it over,
+    /// pier then marked asking; dock's answer, landing after, starts nothing.
+    @Test func aQuickItemOnAnotherRowTakesOverTheAsk() async throws {
+        let pier = Exchange(method: "GET", path: "/v1/projects/harbor/workspaces/pier/agents", status: 200, body: try Exchange("workspace-agents-dock").body)
+        let transport = Held(RecordedServer([try Exchange("projects"), try Exchange("workspaces-three"), try Exchange("workspace-agents-dock"), pier]), holding: "agents")
+        let (view, window) = try WorkspacesViewTests.view(transport)
+        defer { window.orderOut(nil) }
+        view.project.list.pointer = { nil }
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("quay") })
+        view.memory = ModeMemory(modes: ["claude-code": "plan"], last: AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan"))
+        var started: [String] = []
+        view.onStart = { _, _, name in started.append(name) }
+        view.project.on(.startLast("dock"))
+        view.project.on(.startLast("pier"))
+        _ = try Self.onRow("pier", in: view)
+        #expect((view.project.plus("pier") as? SailButton)?.busyWord == NewSessionWords.asking, "pier is not marked asking")
+        transport.release()
+        #expect(await RunnerTabTests.until { !view.busy }, "the asks never ended")
+        #expect(started == ["pier"], "the earlier ask's answer acted: started \(started)")
+    }
+
+    /// The newest press wins on one row too: + pressed while dock's quick item is asking opens the
+    /// panel, and the quick item's answer starts nothing.
+    @Test func thePlusDuringAQuickItemsAskOpensThePanelAndStartsNothing() async throws {
+        let transport = Held(RecordedServer([try Exchange("projects"), try Exchange("workspaces-three"), try Exchange("workspace-agents-dock")]), holding: "agents")
+        let (view, window) = try WorkspacesViewTests.view(transport)
+        defer { window.orderOut(nil) }
+        view.project.list.pointer = { nil }
+        view.newSession.popover.keysLeft = Notification.Name("sail.tests.keys-left.\(UUID().uuidString)")
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("quay") })
+        view.memory = ModeMemory(modes: ["claude-code": "plan"], last: AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan"))
+        var started = 0
+        view.onStart = { _, _, _ in started += 1 }
+        view.project.on(.startLast("dock"))
+        view.project.on(.newSession("dock"))
+        transport.release()
+        #expect(await RunnerTabTests.until { !view.busy && view.newSession.isOpen }, "the + did not open the panel")
+        #expect(started == 0, "the quick item's answer started an agent the person did not last ask for")
+    }
+
+    /// An answer landing while the section is hidden takes its row's "Asking" away all the same.
+    @Test func anAnswerWhileHiddenTakesTheAskingMarkAway() async throws {
+        let transport = Held(RecordedServer([try Exchange("projects"), try Exchange("workspaces-three"), try Exchange("workspace-agents-dock")]), holding: "agents")
+        let (view, window) = try WorkspacesViewTests.view(transport)
+        defer { window.orderOut(nil) }
+        view.project.list.pointer = { nil }
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("quay") })
+        view.project.on(.newSession("dock"))
+        view.isHidden = true
+        transport.release()
+        #expect(await RunnerTabTests.until { !view.busy })
+        view.isHidden = false
+        _ = try Self.onRow("dock", in: view)
+        #expect((view.project.plus("dock") as? SailButton)?.busyWord == nil && !view.newSession.isOpen, "dock still says it is asking, or a panel opened over a hidden section")
+    }
+
+    /// The defaults key joins control plane and handle by a separator neither holds: two people can
+    /// never share one.
+    @Test func noTwoPeopleShareAKey() {
+        let one = WorkspacesModel.Person(handle: "c", admin: false, confirmed: true, controlPlane: "a.b")
+        let other = WorkspacesModel.Person(handle: "b.c", admin: false, confirmed: true, controlPlane: "a")
+        #expect(ModeMemory.key(for: one) != ModeMemory.key(for: other))
     }
 
     /// What a person started is theirs on that control plane: the next person signing in on this

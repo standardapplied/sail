@@ -486,6 +486,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         account.onChecking = { [weak self] in self?.updateMenu() }
         userMenu.popover.fallback = { [weak self] in self?.restingResponder }
         thisMac.signedIn = { [weak self] in self?.signedIn() }
+        thisMac.controlPlane = { [weak self] in self?.account.standing?.controlPlane.url.host() ?? "" }
         thisMac.onSignIn = { [weak self] in self?.select(.account) }
         thisMac.startWorkspace = { [weak self] project, name in
             guard let client = self?.account.client() else { return SignIn.signedOut.lines }

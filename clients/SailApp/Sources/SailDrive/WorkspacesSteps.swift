@@ -632,11 +632,16 @@ extension Driver {
             let kept = await waitUntil(step.seconds ?? 2) { panel.isOpen && panel.view.modes?.title == before }
             return (opened && kept, (opened ? "the mode menu opened and was put away" : "⌘M opened no menu") + "; " + said())
         }
-        if step.newSessionStartTwice == true {
+        if let title = step.newSessionStartTwice {
             guard panel.isOpen, let enter = Keys.named("enter", modifiers: []) else { return (false, said()) }
             send(enter)
             send(enter)
-            return (true, "two Returns sent at once; the keys are with \(shell.window.firstResponder.map { String(describing: type(of: $0)) } ?? "nothing")")
+            let titles = { self.workbench.model.tabs.map { self.workbench.model.title(of: $0.id) } }
+            let once = await waitUntil(step.seconds ?? 5) { !panel.isOpen && titles() == [title] }
+            return (once, "two Returns sent at once; the tabs are \(titles()); the keys are with \(shell.window.firstResponder.map { String(describing: type(of: $0)) } ?? "nothing")")
+        }
+        if step.newSessionModesEscape == true {
+            return await modesEscape(panel)
         }
         if let pick = step.shadowWhole, pick.count == 2 {
             let popover = pick[1] == "userMenu" ? shell.userMenu.popover : panel.popover
@@ -692,6 +697,52 @@ extension Driver {
             if zip(one, other).contains(where: { abs($0 - $1) > 4 }) { faults.append("the window's edge shows at \(inside): \(one.map(Int.init)) inside, \(other.map(Int.init)) outside") }
         }
         return judged == 0 ? ["no side of the floating window lies on the window's content"] : faults
+    }
+
+    /// ⌘M, then a real Escape while AppKit tracks the mode menu, then a second Escape. A menu's
+    /// tracking loop reads its own events, so the Escape is posted the two ways one can reach it:
+    /// first to the app's event queue, then, if the menu is still up, to this process through the
+    /// window server. Should neither reach it, the menu is put away as Escape puts it away (its
+    /// `cancelTracking`), and the result says which way it went, so the behaviour pinned is the
+    /// nearest true one and never claimed as more.
+    private func modesEscape(_ panel: NewSessionPanel) async -> (Bool, String) {
+        guard panel.isOpen, let menu = panel.view.modes?.menu, let before = panel.view.modes?.title,
+              let open = Keys.named("m", modifiers: ["command"]), let escape = Keys.named("escape", modifiers: [])
+        else { return (false, "no mode menu to open") }
+        let menuShown = { NSApp.windows.contains { $0.isVisible && $0.level.rawValue >= NSWindow.Level.popUpMenu.rawValue } }
+        var opened = false, way = "nothing yet"
+        let queued = Timer(timeInterval: 0.3, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                opened = menuShown()
+                for type in [NSEvent.EventType.keyDown, .keyUp] {
+                    guard let event = NSEvent.keyEvent(
+                        with: type, location: .zero, modifierFlags: escape.flags, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0, context: nil,
+                        characters: escape.characters, charactersIgnoringModifiers: escape.ignoring, isARepeat: false, keyCode: escape.code
+                    ) else { continue }
+                    NSApp.postEvent(event, atStart: false)
+                }
+            }
+        }
+        let windowServer = Timer(timeInterval: 0.9, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                guard menuShown() else { return way = "an Escape posted to the app's event queue" }
+                for down in [true, false] { CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(escape.code), keyDown: down)?.postToPid(getpid()) }
+            }
+        }
+        let last = Timer(timeInterval: 1.6, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                guard way == "nothing yet" else { return }
+                guard menuShown() else { return way = "an Escape posted to this process through the window server" }
+                way = "neither posted Escape (the app's queue, then the window server to this process) reached the tracking menu; it was put away by its cancelTracking, as Escape does"
+                menu.cancelTracking()
+            }
+        }
+        [queued, windowServer, last].forEach { RunLoop.main.add($0, forMode: .common) }
+        send(open)
+        let kept = await waitUntil(3) { !menuShown() && panel.isOpen && panel.view.modes?.title == before }
+        send(escape)
+        let closed = await waitUntil(3) { !panel.isOpen }
+        return (opened && kept && closed, "\(opened ? "the mode menu opened" : "⌘M opened no menu"); it went by \(way); the panel \(kept ? "stayed open, its mode \(before)" : "did not stay as it was"); a second Escape \(closed ? "closed it" : "left it open")")
     }
 
     /// The buttons row `name` shows now, in order.

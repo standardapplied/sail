@@ -74,6 +74,8 @@ public final class WorkspacesView: NSView {
     package let newSession: NewSessionPanel
     /// The workspace the New Session panel was last asked for.
     private var startingIn: (project: String, name: String)?
+    /// The newest ask of an agents route: an answer to any earlier one is dropped when it lands.
+    private var asks = 0
     /// Where the panel's row was when it opened, and what it said: the panel follows it or closes.
     private var panelRow: (frame: NSRect, line: WorkspacesModel.Line)?
     /// The card shown in place of the panel and the project: an empty state saying why.
@@ -399,14 +401,16 @@ public final class WorkspacesView: NSView {
     /// Asks what can start in workspace `name` of `project`, its row's + in flight meanwhile, and
     /// shows it under its row; asked again for the workspace it shows, the panel closes. `again`,
     /// the row's quick item: the last start starts at once when it still can (``NewSession/startsAgain``),
-    /// else the panel opens at its harness saying why. One ask at a time: a press during it is the same ask.
+    /// else the panel opens at its harness saying why. The newest press wins: a press during an ask
+    /// takes it over, its row then marked asking, and the earlier answer is dropped when it lands.
     private func askAgents(_ name: String, project projectName: String, _ client: SailClient, again: Bool) {
         let asked = startingIn.map { $0.project == projectName && $0.name == name } ?? false
         if newSession.isOpen {
             newSession.close()
             if asked, !again { return }
         }
-        guard model.askingAgentsIn == nil else { return }
+        asks += 1
+        let ask = asks
         model.askingAgentsIn = name
         startingIn = (projectName, name)
         render()
@@ -414,7 +418,7 @@ public final class WorkspacesView: NSView {
         byAPerson { [weak self] in
             guard let self else { return }
             let answer = await Self.result { () async throws(SailError) in try await client.send(.agents(workspace: name, project: projectName)) }
-            guard era == self.era else { return }
+            guard era == self.era, ask == asks else { return }
             model.askingAgentsIn = nil
             guard model.chosen == projectName, !isHiddenOrHasHiddenAncestor else { return }
             if again, case let .success(agents) = answer, agents.refusal == nil {

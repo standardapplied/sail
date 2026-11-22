@@ -139,6 +139,23 @@ import Testing
         #expect(Self.runnerSessions(bench).isEmpty && runner.createsReceived == 0, "uday's queued start ran as ana")
     }
 
+    /// The same handle signed in to another control plane meanwhile is someone else: the queued
+    /// start is dropped too.
+    @Test func anAgentQueuedBeforeTheFirstRestoreIsDroppedOnAnotherControlPlane() async throws {
+        let (local, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
+        defer { local.stop(); runner.stop() }
+        let bench = try WorkbenchView(fonts: LookTests.fonts, host: ThisMacEndingTests.host(at: local), look: .light, defaults: Self.defaults())
+        let tickets = DoorTickets(runner)
+        bench.signedIn = { ("uday", tickets) }
+        var plane = "main.acme.dev"
+        bench.controlPlane = { plane }
+        bench.openAgent(AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan"), project: "harbor", name: "dock")
+        plane = "main.other.dev"
+        bench.shown()
+        #expect(await RunnerTabTests.until(10) { bench.restored })
+        #expect(Self.runnerSessions(bench).isEmpty && runner.createsReceived == 0, "uday's queued start ran on another control plane")
+    }
+
     /// R7: Open on a workspace attaches a tab to each of the person's live sessions no tab holds,
     /// newest first; with all in tabs, it chooses the newest's tab and starts nothing (minor 8).
     @Test func openingAWorkspaceReattachesItsLiveSessionsNewestFirst() async throws {

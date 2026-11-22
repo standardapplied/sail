@@ -264,8 +264,12 @@ struct Step: Decodable {
     /// ⌘M pressed with the panel open and its mode menu put away unchosen, as Escape puts it away:
     /// the panel stays open, its mode as it was.
     var newSessionModesDismissed: Bool?
-    /// Return pressed twice at once with the panel open: one start, the second Return reaching no Open.
-    var newSessionStartTwice: Bool?
+    /// Return pressed twice at once with the panel open: the panel closes and exactly one tab, the
+    /// agent's of this title, opens, the second Return reaching no Open, within `seconds` (5 by default).
+    var newSessionStartTwice: String?
+    /// ⌘M with the panel open, then a real Escape posted while AppKit tracks the mode menu: the menu
+    /// goes, the panel stays open with its mode as it was; a second Escape closes the panel.
+    var newSessionModesEscape: Bool?
     /// The Workspaces section laid out right to left (true), as a right-to-left Mac lays it out,
     /// or left to right again (false).
     var workspacesRightToLeft: Bool?
