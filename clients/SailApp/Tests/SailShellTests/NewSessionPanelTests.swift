@@ -285,6 +285,19 @@ import Testing
         #expect(ModeMemory.key(for: one) != ModeMemory.key(for: other))
     }
 
+    /// Two control planes on one host, on two ports, are two places: the same handle signed in to
+    /// each is a person of each, with keys of their own.
+    @Test func twoControlPlanesOnOneHostAreTwoPlaces() throws {
+        let unconfirmed: AccountRefusal
+        do { _ = try ControlPlane(address: "not an address"); Issue.record("a non-address was taken"); return } catch { unconfirmed = error }
+        let signedIn = { (address: String) throws -> SignedIn in
+            SignedIn(controlPlane: try ControlPlane(address: address), fde: "uday", until: .distantFuture, whoami: .failure(unconfirmed))
+        }
+        let one = WorkspacesModel.Person(try signedIn("https://main.acme.dev")), other = WorkspacesModel.Person(try signedIn("https://main.acme.dev:8443"))
+        #expect(one.controlPlane == "https://main.acme.dev" && other.controlPlane == "https://main.acme.dev:8443", "the people are at \(one.controlPlane) and \(other.controlPlane)")
+        #expect(ModeMemory.key(for: one) != ModeMemory.key(for: other))
+    }
+
     /// What a person started is theirs on that control plane: the next person signing in on this
     /// Mac, or the same handle on another control plane, inherits no quick item and no mode.
     @Test func startsAreRememberedPerPersonAndControlPlane() async throws {

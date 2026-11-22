@@ -20,6 +20,16 @@ public struct WorkspacesModel: Sendable {
             self.confirmed = confirmed
             self.controlPlane = controlPlane
         }
+
+        /// Who `signedIn` is, as its `whoami` confirmed this time, at the control plane's full
+        /// address (two control planes on one host are two places); no one, signed out.
+        public init(_ signedIn: SignedIn?) {
+            let whoami = signedIn.flatMap { try? $0.whoami.get() }
+            self.init(
+                handle: whoami?.fde ?? signedIn?.fde ?? "", admin: whoami?.role == .known(.admin), confirmed: whoami != nil,
+                controlPlane: signedIn?.controlPlane.description ?? ""
+            )
+        }
     }
 
     public enum Screen: Equatable, Sendable {

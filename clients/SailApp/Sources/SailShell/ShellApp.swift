@@ -278,12 +278,8 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Who is signed in, as the account learnt it: the Workspaces item and the runner's tickets
     /// are theirs, and go with them.
     private func standing(_ signedIn: SignedIn?) {
-        let whoami = signedIn.flatMap { try? $0.whoami.get() }
         workspaces.client = account.client()
-        workspaces.person = WorkspacesModel.Person(
-            handle: whoami?.fde ?? signedIn?.fde ?? "", admin: whoami?.role == .known(.admin), confirmed: whoami != nil,
-            controlPlane: signedIn?.controlPlane.url.host() ?? ""
-        )
+        workspaces.person = WorkspacesModel.Person(signedIn)
         rail.offer(.workspaces, signedIn != nil || rail.selected == .workspaces)
         thisMac.standingChanged()
         if signedIn == nil {
@@ -486,7 +482,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         account.onChecking = { [weak self] in self?.updateMenu() }
         userMenu.popover.fallback = { [weak self] in self?.restingResponder }
         thisMac.signedIn = { [weak self] in self?.signedIn() }
-        thisMac.controlPlane = { [weak self] in self?.account.standing?.controlPlane.url.host() ?? "" }
+        thisMac.controlPlane = { [weak self] in self?.workspaces.person.controlPlane ?? "" }
         thisMac.onSignIn = { [weak self] in self?.select(.account) }
         thisMac.startWorkspace = { [weak self] project, name in
             guard let client = self?.account.client() else { return SignIn.signedOut.lines }

@@ -702,15 +702,16 @@ extension Driver {
     /// ⌘M, then a real Escape while AppKit tracks the mode menu, then a second Escape. A menu's
     /// tracking loop reads its own events, so the Escape is posted the two ways one can reach it:
     /// first to the app's event queue, then, if the menu is still up, to this process through the
-    /// window server. Should neither reach it, the menu is put away as Escape puts it away (its
-    /// `cancelTracking`). Each way is tried only while the menu is up and none once it has gone, so
-    /// the result names the way that put it away; gone before any, the step fails.
+    /// window server. Each way is tried only while the menu is up and none once it has gone, so the
+    /// result names the way that put it away. The step passes only when one of them did: should
+    /// neither reach it, it fails, the menu put away by its `cancelTracking` so no later step is
+    /// left under it; gone before any was posted, it fails too.
     private func modesEscape(_ panel: NewSessionPanel) async -> (Bool, String) {
         guard panel.isOpen, let menu = panel.view.modes?.menu, let before = panel.view.modes?.title,
               let open = Keys.named("m", modifiers: ["command"]), let escape = Keys.named("escape", modifiers: [])
         else { return (false, "no mode menu to open") }
         let menuShown = { NSApp.windows.contains { $0.isVisible && $0.level.rawValue >= NSWindow.Level.popUpMenu.rawValue } }
-        var opened = false, way: String?
+        var opened = false, way: String?, unreached = false
         let queued = Timer(timeInterval: 0.3, repeats: false) { _ in
             MainActor.assumeIsolated {
                 opened = menuShown()
@@ -734,7 +735,7 @@ extension Driver {
         let last = Timer(timeInterval: 1.6, repeats: false) { _ in
             MainActor.assumeIsolated {
                 guard menuShown() else { return }
-                way = "neither posted Escape (the app's queue, then the window server to this process) reached the tracking menu; it was put away by its cancelTracking, as Escape does"
+                unreached = true
                 menu.cancelTracking()
             }
         }
@@ -744,7 +745,10 @@ extension Driver {
         [queued, windowServer, last].forEach { $0.invalidate() }
         send(escape)
         let closed = await waitUntil(3) { !panel.isOpen }
-        return (opened && way != nil && kept && closed, "\(opened ? "the mode menu opened" : "⌘M opened no menu"); it went by \(way ?? "nothing: it was gone before any Escape was posted"); the panel \(kept ? "stayed open, its mode \(before)" : "did not stay as it was"); a second Escape \(closed ? "closed it" : "left it open")")
+        let went = unreached
+            ? "no posted Escape (the app's queue, then the window server to this process) put it away; the step put it away by its cancelTracking"
+            : "it went by \(way ?? "nothing: it was gone before any Escape was posted")"
+        return (opened && way != nil && !unreached && kept && closed, "\(opened ? "the mode menu opened" : "⌘M opened no menu"); \(went); the panel \(kept ? "stayed open, its mode \(before)" : "did not stay as it was"); a second Escape \(closed ? "closed it" : "left it open")")
     }
 
     /// The buttons row `name` shows now, in order.
