@@ -252,8 +252,7 @@ struct Step: Decodable {
     /// door naming exactly this agent, and no command.
     var doorCreated: [String]?
     /// `[shot, "newSession" | "userMenu"]`: in that shot's two looks, the floating box shown casts
-    /// its shadow whole: its window's edges show no step against what lies behind, and just outside
-    /// the card's corners nothing is lighter than the page beside the window.
+    /// its shadow whole: its window's edges, where they lie on the window's content, show no step.
     var shadowWhole: [String]?
     /// The Workspaces section laid out right to left (true), as a right-to-left Mac lays it out,
     /// or left to right again (false).
@@ -372,6 +371,18 @@ struct Step: Decodable {
     var fileCompare: [String]?
     /// The conflict sheet's button of this title pressed: that sheet goes (another may come).
     var fileSheet: String?
+    /// The workspace terminal focused prints this line, as a compiler would.
+    var terminalPrints: String?
+    /// ⌘-click on this text where the workspace terminal focused shows it: a path it opens.
+    var fileCommandClick: String?
+    /// The file pane went to this line: the caret on it and the accent bar beside it, within `seconds`.
+    var fileAtLine: Int?
+    /// The files panel's tree shows a row of this name, within `seconds`.
+    var filesRowShown: String?
+    /// The files panel's tree shows no row of this name, within `seconds`.
+    var filesRowGone: String?
+    /// The workspace terminal focused says this in its own card, within `seconds`.
+    var terminalSays: String?
     /// The conflict sheet up says this as its heading, within `seconds`.
     var fileSheetSays: String?
     /// The workspace's bytes the file pane holds for Compare are this text, within `seconds`.

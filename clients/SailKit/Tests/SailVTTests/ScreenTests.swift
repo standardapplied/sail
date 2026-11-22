@@ -52,6 +52,24 @@ import Testing
         #expect(resized.rows.count == 4 && resized.rows.allSatisfy { $0.cells.count == 12 })
     }
 
+    /// A line longer than its row goes on in the row below, which the row says; a line ended by
+    /// CR LF does not, though it fills its row.
+    @Test func aRowSaysWhenItsLineGoesOnBelow() throws {
+        let screen = try Screen(size: GridSize(columns: 10, rows: 4), scrollbackBytes: 0, palette: .dark)
+        _ = screen.feed(Array("src/very/long.ts:3\r\n0123456789\r\nend".utf8))
+        let rows = try screen.frame().rows
+        #expect(rows.map(\.wrapped) == [true, false, false, false], "\(rows.map(\.wrapped))")
+        #expect(rows.map(\.continues) == [false, true, false, false], "\(rows.map(\.continues))")
+    }
+
+    /// R2-5: a line whose start has scrolled above the screen says so on its first row left.
+    @Test func aRowSaysWhenItsLineBeganAbove() throws {
+        let screen = try Screen(size: GridSize(columns: 10, rows: 2), scrollbackBytes: 0, palette: .dark)
+        _ = screen.feed(Array("src/very/long.ts:3\r\nend".utf8))
+        let rows = try screen.frame().rows
+        #expect(rows.map(\.continues) == [true, false] && rows.map(\.wrapped) == [false, false], "\(rows.map(\.continues)) \(rows.map(\.wrapped))")
+    }
+
     @Test func readingTheTextLeavesTheNextFramesChanges() throws {
         let screen = try screen(columns: 10, rows: 3)
         _ = try screen.frame()

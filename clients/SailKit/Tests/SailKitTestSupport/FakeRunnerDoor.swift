@@ -169,6 +169,13 @@ public final class FakeRunnerDoor: Sendable {
         timer.resume()
     }
 
+    /// Session `session` prints `text` to every connection attached to it, once: a compiler's line
+    /// in a workspace's terminal.
+    public func print(_ session: String, _ text: String) {
+        let connections = state.withLock { $0.attached[session] ?? [] }
+        connections.forEach { answer(.output(lastInputSequence: 0, bytes: Array(text.utf8)), on: $0) }
+    }
+
     // MARK: Files
 
     /// Folder `path` of a files ticket's workspace now holds `entries` (more than 50,000 when
@@ -182,21 +189,62 @@ public final class FakeRunnerDoor: Sendable {
         }
     }
 
-    /// File `path` now holds `bytes`, at a new version: each files connection watching it is told.
+    /// File `path` now holds `bytes`, at a new version: each files connection watching it is told,
+    /// and its folder's listing holds it, as the host's does.
     public func setFile(_ path: String, _ bytes: [UInt8]) {
         files.withLock { files in
             files.versions += 1
             files.contents[FileName(path)] = (bytes, "v\(files.versions)")
             tellWatchers(of: FileName(path), in: files)
+            listed(FileName(path), size: bytes.count, in: &files)
         }
     }
 
-    /// File `path` is gone: a read of it is refused as not found, and its watchers are told.
+    /// File `path` is gone: a read of it is refused as not found, its watchers are told, and its
+    /// folder's listing loses it.
     public func removeFile(_ path: String) {
         files.withLock { files in
             files.contents[FileName(path)] = nil
             tellWatchers(of: FileName(path), in: files)
+            listed(FileName(path), size: nil, in: &files)
         }
+    }
+
+    /// File `from` is now `to`: both folders' listings follow, and their watchers are told.
+    public func moveFile(_ from: String, to: String) {
+        files.withLock { files in
+            guard let file = files.contents.removeValue(forKey: FileName(from)) else { return }
+            files.versions += 1
+            files.contents[FileName(to)] = (file.bytes, "v\(files.versions)")
+            tellWatchers(of: FileName(from), in: files)
+            tellWatchers(of: FileName(to), in: files)
+            listed(FileName(from), size: nil, in: &files)
+            listed(FileName(to), size: file.bytes.count, in: &files)
+        }
+    }
+
+    /// Folder `path`'s entries as the door lists them now, nil for a folder it holds none of.
+    public func folder(_ path: String) -> [FileEntry]? {
+        files.withLock { $0.folders[FileName(path)]?.entries }
+    }
+
+    /// File `path`'s folder's listing kept in step with it, as the host's listing and watch are:
+    /// its entry put, replaced (`size`) or taken away (nil), at a new version, and the folder's
+    /// watchers told. A folder the door does not list is left unlisted.
+    private func listed(_ path: FileName, size: Int?, in files: inout Files) {
+        guard let slash = path.bytes.lastIndex(of: 0x2F) else { return }
+        let parent = FileName(Array(path.bytes[..<slash])), name = FileName(Array(path.bytes[path.bytes.index(after: slash)...]))
+        guard var folder = files.folders[parent] else { return }
+        let had = folder.entries.first { $0.name == name }
+        guard size != nil || had != nil else { return }
+        folder.entries.removeAll { $0.name == name }
+        if let size {
+            folder.entries.append(FileEntry(name: name, kind: .known(.file), target: .known(.none), size: Int64(size), mtimeNanos: 0, mode: had?.mode ?? 0o100644))
+        }
+        files.versions += 1
+        folder.version = "v\(files.versions)"
+        files.folders[parent] = folder
+        tellWatchers(of: parent, in: files)
     }
 
     /// The next save is refused as `kind`, in `message`, nothing written.
@@ -325,7 +373,7 @@ public final class FakeRunnerDoor: Sendable {
             }
         }
         while let frame = frame(on: connection) {
-            if let outside = Self.refusal(of: frame, under: ticket, opened: nil) {
+            if let outside = Self.refusal(of: frame, under: ticket, opened: nil, writing: nil) {
                 return answer(.refused(HostRefusal(message: outside, remedy: [])), on: connection)
             }
             files.withLock { $0.received.append(frame) }
@@ -344,6 +392,18 @@ public final class FakeRunnerDoor: Sendable {
                     answer(.filesData(id: id, version: file.version, bytes: chunk, eof: next >= file.bytes.count, whole: last && offset == 0 && next >= file.bytes.count, digest: digest), on: connection)
                     at = next
                 } while at < end
+            case let .filesStat(id, path):
+                let (file, folder) = files.withLock { ($0.contents[path], $0.folders[path]) }
+                let name = FileName(Array(path.bytes.split(separator: 0x2F).last ?? []))
+                if let file {
+                    let entry = FileEntry(name: name, kind: .known(.file), target: .known(.none), size: Int64(file.bytes.count), mtimeNanos: 0, mode: 0o100644)
+                    answer(.filesEntry(id: id, entry: entry, version: file.version), on: connection)
+                } else if let folder {
+                    let entry = FileEntry(name: name, kind: .known(.folder), target: .known(.none), size: 0, mtimeNanos: 0, mode: 0o040755)
+                    answer(.filesEntry(id: id, entry: entry, version: folder.version), on: connection)
+                } else {
+                    answer(.filesRefused(id: id, kind: .known(.notFound), message: "No file at \(path.shown)."), on: connection)
+                }
             case let .filesWrite(id, path, base, _, _):
                 if let refusal = files.withLock({ files -> (kind: FileRefusal, message: String)? in
                     defer { files.refuseSave = nil }
@@ -368,9 +428,11 @@ public final class FakeRunnerDoor: Sendable {
                     let present = files.contents[save.path].map { Self.hex($0.bytes) } ?? "absent"
                     guard present == save.base else { return .filesConflict(id: id, digest: present) }
                     files.versions += 1
-                    files.contents[save.path] = (save.bytes, "v\(files.versions)")
+                    let version = "v\(files.versions)"
+                    files.contents[save.path] = (save.bytes, version)
                     tellWatchers(of: save.path, in: files)
-                    return .filesWritten(id: id, digest: Self.hex(save.bytes), version: "v\(files.versions)")
+                    listed(save.path, size: save.bytes.count, in: &files)
+                    return .filesWritten(id: id, digest: Self.hex(save.bytes), version: version)
                 }
                 answer(outcome, on: connection)
             case let .filesList(id, path):
@@ -654,7 +716,8 @@ public final class FakeRunnerDoor: Sendable {
     private func attached(_ connection: Int32, _ number: Int, _ ticket: TicketRequest) {
         var opened: String?
         while let frame = frame(on: connection) {
-            if let outside = Self.refusal(of: frame, under: ticket, opened: opened) {
+            let writing = (opened ?? Self.session(of: ticket)).flatMap { session in state.withLock { $0.writers[session] == number ? session : nil } }
+            if let outside = Self.refusal(of: frame, under: ticket, opened: opened, writing: writing) {
                 return answer(.refused(HostRefusal(message: outside, remedy: [])), on: connection)
             }
             switch frame {
@@ -786,8 +849,9 @@ public final class FakeRunnerDoor: Sendable {
     /// Why `frame` is refused under `ticket`, nil when admitted: only the frames the host's ticket
     /// of that action admits (the admits golden), and of those, a create only into the ticket's
     /// own project and workspace before anything is opened, an attach or a kill only of its own
-    /// session.
-    public static func refusal(of frame: Frame, under ticket: TicketRequest, opened: String?) -> String? {
+    /// session, and a kill only by the connection holding its keyboard (`writing`), in the host's
+    /// words.
+    public static func refusal(of frame: Frame, under ticket: TicketRequest, opened: String?, writing: String?) -> String? {
         let (action, own, scope): (String, String?, String) = switch ticket {
         case let .open(project, workspace):
             ("open", opened, workspace.isEmpty ? "open a session in project '\(project)'" : "open a session in workspace '\(workspace)' of project '\(project)'")
@@ -796,6 +860,7 @@ public final class FakeRunnerDoor: Sendable {
         }
         let refused = "This connection's ticket is to \(scope), and it admits nothing else; ask the API for a ticket for that."
         guard admits[action]?.contains(messageName(of: frame)) == true else { return refused }
+        if case let .kill(session) = frame, session == own, session != writing { return notTheWriter }
         let covered = switch frame {
         case let .create(create):
             if case let .open(project, workspace) = ticket { opened == nil && create.project == project && create.workspace == workspace } else { false }

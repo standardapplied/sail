@@ -30,6 +30,21 @@ final class FilesPanel: NSView {
     var onStart: @MainActor (_ project: String, _ name: String) async -> [String]? = { _, _ in nil }
     /// A file row opened (⏎, a double click): the tab's file pane shows it.
     var onOpenFile: @MainActor (FileName, FileEntry) -> Void = { _, _ in }
+    /// A terminal path being looked for, place by place, and what to do with what is found. It lives
+    /// only for the click's moment: it ends with the file found, with a refusal, or with any phase
+    /// but connecting and connected (heard before the click or after it), each said; a close or
+    /// another file opened ends it unsaid; its first ask waits for the connection's admission, and a
+    /// reconnection never asks it again (the person clicks again).
+    private var lookup: (path: TerminalPath.Lookup, unsent: Frame?, done: @MainActor (TerminalPath.Lookup.Next) -> Void)?
+    private var nextLookup: Int32 = 1 << 29
+    private var admitted = false
+    /// Hears each frame the panel sends: what a test sees go out.
+    var onSent: @MainActor ([Frame]) -> Void = { _ in }
+
+    /// Whether a terminal path is being looked for: the connection is wanted meanwhile.
+    var lookingUp: Bool {
+        lookup != nil
+    }
     /// The tab's file pane, which speaks over this connection: its requests' answers, the watch's
     /// word on its file, the ticks, admissions and drops reach it here.
     weak var filePane: FilePane?
@@ -144,6 +159,8 @@ final class FilesPanel: NSView {
     /// Ends the connection and lets the tree go: shown again, it is listed afresh, as a first
     /// listing (no entry of it marked new).
     func close() {
+        lookup = nil
+        admitted = false
         guard session != nil else { return }
         wake?.invalidate()
         wake = nil
@@ -173,17 +190,28 @@ final class FilesPanel: NSView {
         switch event {
         case let .phase(phase):
             self.phase = phase
+            if phase != .connected { admitted = false }
+            if let words = ending(phase), let ended = lookup {
+                lookup = nil
+                ended.done(.said(words))
+            }
             if phase != .connected {
                 tree.disconnected()
                 filePane?.disconnected()
             }
             if phase == .connected { startRefusal = nil }
         case .admitted:
+            admitted = true
             admittedAt = CACurrentMediaTime()
+            if let unsent = lookup?.unsent {
+                lookup?.unsent = nil
+                send([unsent])
+            }
             send(tree.watchFile(filePane?.watched))
             send(tree.admitted())
             filePane?.admitted()
         case let .frame(frame):
+            if lookedUp(frame) { break }
             if filePane?.takes(frame) == true { break }
             send(tree.receive(frame, at: now))
             if TreeRowCell.measuring, frame.isWholeListing, let path = tree.lastListed { listingHeard = (path.key, CACurrentMediaTime()) }
@@ -198,7 +226,53 @@ final class FilesPanel: NSView {
     /// What the tree asks of the host, sent on the connection admitted now, if any: the tree has
     /// taken its own change either way.
     func send(_ frames: [Frame]) {
+        onSent(frames)
         session?.send(frames)
+    }
+
+    /// Looks for terminal path `path` on the workspace, from the folder the terminal reported
+    /// (``TerminalPath/Lookup``): `done` hears the file found, or what was said, at once when the
+    /// connection is parked; a lookup under way is given up, unsaid, for this one.
+    func lookUp(_ path: String, cwd: String?, then done: @escaping @MainActor (TerminalPath.Lookup.Next) -> Void) {
+        lookup = nil
+        if let words = ending(phase) { return done(.said(words)) }
+        var looking = TerminalPath.Lookup(path: path, cwd: cwd, workspace: workspace, firstID: nextLookup)
+        nextLookup += Int32(TerminalPath.Lookup.places)
+        let first = looking.start()
+        guard case let .ask(ask) = first else { return done(first) }
+        lookup = (looking, admitted ? nil : ask, done)
+        if admitted { send([ask]) }
+    }
+
+    /// Gives up the lookup under way, unsaid: the person opened another file since the click.
+    func giveUpLookup() {
+        lookup = nil
+    }
+
+    /// What a lookup ends with at a phase that ends the connection, parks it or is making it again:
+    /// the files connection's state in the panel line's own words (``FilesLine/state(of:workspace:)``),
+    /// and while it reconnects, that a click again will do once it is back.
+    func ending(_ phase: FilesSession.Phase) -> String? {
+        guard let state = FilesLine.state(of: phase, workspace: workspace) else { return nil }
+        if case .reconnecting = phase { return state + " Click again once it is back." }
+        return state
+    }
+
+    /// A frame the lookup under way was waiting for, taken: the next place asked, or its end told.
+    private func lookedUp(_ frame: Frame) -> Bool {
+        guard var current = lookup else { return false }
+        let next = current.path.receive(frame)
+        switch next {
+        case .nothing:
+            return false
+        case let .ask(ask):
+            lookup = current
+            send([ask])
+        case .found, .said:
+            lookup = nil
+            current.done(next)
+        }
+        return true
     }
 
     /// The open file watched at `watched`, or none.

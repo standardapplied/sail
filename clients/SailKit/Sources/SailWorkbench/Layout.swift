@@ -102,6 +102,17 @@ public struct Pane: Hashable, Sendable {
         guard let agent, case let .workspace(_, name) = place else { return place.label }
         return "\(agent.display) · \(name)"
     }
+
+    /// The host the shell's first report named ("" for none), nil before its first report.
+    public internal(set) var firstHost: String?
+
+    /// Whether the shell reports a folder on another host than its first report named: the person
+    /// went to another machine from it, and its output is that machine's. A first report naming no
+    /// host compares nothing.
+    public var elsewhere: Bool {
+        guard let firstHost, !firstHost.isEmpty else { return false }
+        return ReportedFolder.host(reportedFolder) != firstHost
+    }
 }
 
 /// How a split lays its sides out: side by side (split right) or stacked (split down).

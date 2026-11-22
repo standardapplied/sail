@@ -13,7 +13,10 @@ import SailTerminalWire
 final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     static let titleHeight = 30.0, lineHeight = 30.0, points = 12.0, barFor = 10.0, updatedFor = 3.0
 
-    private(set) var file: OpenFile
+    /// Its model, read and acted on only here: outside the pane what it holds is asked by the
+    /// accessors below, whether it is unsaved only through ``unsaved``, which decides an edit no
+    /// delegate heard first.
+    private var file: OpenFile
     let workspace: String
     var look: Look {
         didSet { if look != oldValue { paint() } }
@@ -189,6 +192,20 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     /// An edit no `textDidChange` reported, decided now.
     private func settleEdits() {
         if editedUnseen { decideEdit() }
+    }
+
+    /// The file it holds, as the tree names it.
+    var path: FileName {
+        file.path
+    }
+
+    var name: String {
+        file.name
+    }
+
+    /// The workspace's bytes held for Compare, read while the text was unsaved and found different.
+    var theirs: OpenFile.Theirs? {
+        file.theirs
     }
 
     /// Whether its text is unsaved, any edit not yet decided decided first.
@@ -422,6 +439,25 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
         sentence.isHidden ? nil : sentence.stringValue
     }
 
+    /// The line a ⌘-click went to, carrying the accent bar; nil for none.
+    var atLine: Int? {
+        numbers.at
+    }
+
+    /// The 1-based line the caret is on, counted by the text's own line ranges: walking a large
+    /// file's characters through Swift took seconds.
+    var caretLine: Int {
+        let text = editor.textStorage?.mutableString ?? NSMutableString(), at = min(editor.selectedRange().location, text.length)
+        var line = 1, index = 0
+        while index < text.length {
+            let next = NSMaxRange(text.lineRange(for: NSRange(location: index, length: 0)))
+            guard next <= at, next > index, next < text.length || at == text.length && next == at else { break }
+            line += 1
+            index = next
+        }
+        return line
+    }
+
     /// The title's status words, empty while there are none.
     var statusWords: String {
         status.stringValue
@@ -432,17 +468,35 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
         heldKeysLast = false
     }
 
-    /// Opens at `line` (1-based): the caret at its start, the line scrolled into view.
-    func show(line: Int) {
+    /// Goes to `line` (1-based), as a ⌘-click on a terminal path asks: the caret at its start, in
+    /// view, the line carrying the accent bar; once the whole file is in, when it is not yet.
+    func go(toLine line: Int) {
+        guard editor.isEditable else {
+            pendingLine = line
+            return
+        }
+        pendingLine = nil
+        numbers.at = show(line: line)
+    }
+
+    /// The line a ⌘-click asked for, gone to once the whole file is in.
+    private var pendingLine: Int?
+
+    /// Opens at `line` (1-based), or the last line when the text has fewer: the caret at its start,
+    /// the line scrolled into view; answers the line it reached.
+    @discardableResult
+    func show(line: Int) -> Int {
         let text = wholeText as NSString
-        var location = 0
+        var location = 0, reached = 1
         for _ in 1 ..< max(line, 1) {
             let next = text.lineRange(for: NSRange(location: location, length: 0))
             guard NSMaxRange(next) < text.length else { break }
             location = NSMaxRange(next)
+            reached += 1
         }
         editor.setSelectedRange(NSRange(location: location, length: 0))
         editor.scrollRangeToVisible(NSRange(location: location, length: 0))
+        return reached
     }
 
     /// A key: decided at once.
@@ -455,6 +509,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     /// base's.
     private func decideEdit() {
         editedUnseen = false
+        numbers.at = nil
         let step = PanePhases.timed("model: a key decided") { file.edited(units: editor.textStorage?.length ?? 0) ?? file.edited(wholeText) }
         apply(step)
     }
@@ -494,6 +549,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
             case .whole:
                 editor.isEditable = true
                 numbers.invalidate()
+                if let line = pendingLine { go(toLine: line) }
             case let .replaced(text, units, chosen): replace(with: text, units: units, undoable: chosen)
             case .restarted: restart()
             case .saved:
@@ -590,6 +646,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     /// differ barred for ten seconds, "Updated just now" for three. One the person chose can be undone.
     private func replace(with text: String, units: Int, undoable: Bool) {
         slices = []
+        numbers.at = nil
         (slicesMade, slicesDealt, slicesTaken) = (0, 0, 0)
         let old = wholeText, top = firstVisibleLine, selection = editor.selectedRange()
         let storage = editor.textStorage, all = NSRange(location: 0, length: storage?.length ?? 0), new = NSAttributedString(string: text, attributes: textAttributes)
@@ -789,6 +846,11 @@ final class LineNumbers: NSRulerView {
         didSet { if barred != oldValue { needsDisplay = true } }
     }
 
+    /// The line a ⌘-click went to: a 2 pt accent bar at its leading edge, until the text changes.
+    var at: Int? {
+        didSet { if at != oldValue { needsDisplay = true } }
+    }
+
     private var starts: [Int] = [0]
     private var counted = 0
 
@@ -841,6 +903,8 @@ final class LineNumbers: NSRulerView {
         let y: Double
         let height: Double
         let barred: Bool
+        /// The line a ⌘-click went to.
+        var at = false
     }
 
     /// The lines shown now, each with its rows' extent: what the ruler draws.
@@ -854,7 +918,7 @@ final class LineNumbers: NSRulerView {
             guard Double(frame.minY) + inset <= Double(visible.maxY) else { return false }
             let offset = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
             let number = line(of: offset, in: text)
-            rows.append(Row(number: number, y: Double(frame.minY) + inset - Double(visible.minY), height: Double(frame.height), barred: barred.contains(number)))
+            rows.append(Row(number: number, y: Double(frame.minY) + inset - Double(visible.minY), height: Double(frame.height), barred: barred.contains(number), at: number == at))
             return true
         }
         return rows
@@ -872,6 +936,10 @@ final class LineNumbers: NSRulerView {
             if row.barred {
                 NSColor(look.info).setFill()
                 NSRect(x: Double(ruleThickness) - 2, y: row.y, width: 2, height: row.height).fill()
+            }
+            if row.at {
+                NSColor(look.accent).setFill()
+                NSRect(x: 0, y: row.y, width: 2, height: row.height).fill()
             }
             let label = "\(row.number)" as NSString, size = label.size(withAttributes: attributes)
             label.draw(at: NSPoint(x: Double(ruleThickness) - 8 - Double(size.width), y: row.y + 1), withAttributes: attributes)

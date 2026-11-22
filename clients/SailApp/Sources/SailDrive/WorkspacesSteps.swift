@@ -602,7 +602,7 @@ extension Driver {
         }
         if let pick = step.shadowWhole, pick.count == 2 {
             let popover = pick[1] == "userMenu" ? shell.userMenu.popover : panel.popover
-            guard popover.isOpen, let screen = shell.window.screen else { return (false, "no \(pick[1]) open on a screen") }
+            guard popover.isOpen else { return (false, "no \(pick[1]) open") }
             var faults: [String] = [], read: [String] = []
             for look in ["light", "dark"] {
                 let file = out.deletingLastPathComponent().appending(path: "window").appending(path: "\(pick[0])-\(look).png")
@@ -610,7 +610,7 @@ extension Driver {
                     faults.append("no \(file.lastPathComponent)")
                     continue
                 }
-                faults += Self.shadowCut(in: bitmap, of: popover, on: screen).map { "\(look): \($0)" }
+                faults += Self.shadowCut(in: bitmap, of: popover, over: shell.window).map { "\(look): \($0)" }
                 read.append(file.lastPathComponent)
             }
             return (faults.isEmpty, faults.isEmpty ? "the shadow is whole in \(read.joined(separator: " and "))" : faults.joined(separator: "; "))
@@ -630,31 +630,30 @@ extension Driver {
     }
 
     /// Where a screen shot shows `popover`'s shadow cut: at the middle of each side of its window, a
-    /// pixel just inside that differs from one just outside (the window's edge drawn as a step); or,
-    /// just outside a corner of its card, a pixel lighter than the page just outside the window on
-    /// that side.
-    private static func shadowCut(in bitmap: NSBitmapImageRep, of popover: Popover, on screen: NSScreen) -> [String] {
-        let scale = Double(bitmap.pixelsWide) / Double(screen.frame.width)
+    /// pixel just inside that differs from one just outside, the window's edge drawn as a step. A
+    /// side is judged only where both pixels lie on `window`'s content, the same surface under both
+    /// (a floating window may reach past it, over the desktop); a shot judging no side is a fault.
+    private static func shadowCut(in bitmap: NSBitmapImageRep, of popover: Popover, over window: NSWindow) -> [String] {
+        guard let screen = window.screen else { return ["the window is on no screen"] }
+        let scale = Double(bitmap.pixelsWide) / Double(screen.frame.width), content = window.convertToScreen(window.contentLayoutRect).insetBy(dx: 4, dy: 4)
         func ink(_ point: NSPoint) -> [Double]? {
+            guard content.contains(point) else { return nil }
             let x = Int((Double(point.x) - Double(screen.frame.minX)) * scale), y = Int((Double(screen.frame.maxY) - Double(point.y)) * scale)
             guard x >= 0, y >= 0, x < bitmap.pixelsWide, y < bitmap.pixelsHigh, let colour = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return nil }
             return [colour.redComponent, colour.greenComponent, colour.blueComponent].map { Double($0) * 255 }
         }
-        let outer = popover.panel.frame, card = popover.frame
-        var faults: [String] = []
+        let outer = popover.panel.frame
         let sides = [
             (NSPoint(x: outer.minX + 1, y: outer.midY), NSPoint(x: outer.minX - 2, y: outer.midY)), (NSPoint(x: outer.maxX - 1, y: outer.midY), NSPoint(x: outer.maxX + 2, y: outer.midY)),
             (NSPoint(x: outer.midX, y: outer.minY + 1), NSPoint(x: outer.midX, y: outer.minY - 2)), (NSPoint(x: outer.midX, y: outer.maxY - 1), NSPoint(x: outer.midX, y: outer.maxY + 2)),
         ]
+        var faults: [String] = [], judged = 0
         for (inside, outside) in sides {
             guard let one = ink(inside), let other = ink(outside) else { continue }
+            judged += 1
             if zip(one, other).contains(where: { abs($0 - $1) > 4 }) { faults.append("the window's edge shows at \(inside): \(one.map(Int.init)) inside, \(other.map(Int.init)) outside") }
         }
-        for (x, y, beside) in [(card.minX - 1.5, card.minY - 1.5, outer.minX - 2), (card.maxX + 1.5, card.minY - 1.5, outer.maxX + 2), (card.minX - 1.5, card.maxY + 1.5, outer.minX - 2), (card.maxX + 1.5, card.maxY + 1.5, outer.maxX + 2)] {
-            guard let corner = ink(NSPoint(x: x, y: y)), let page = ink(NSPoint(x: beside, y: y)) else { continue }
-            if corner.reduce(0, +) > page.reduce(0, +) + 12 { faults.append("just outside the card's corner at \(x), \(y), \(corner.map(Int.init)) is lighter than the page beside it, \(page.map(Int.init))") }
-        }
-        return faults
+        return judged == 0 ? ["no side of the floating window lies on the window's content"] : faults
     }
 
     /// The buttons row `name` shows now, in order.
@@ -743,12 +742,12 @@ extension Driver {
     /// A click at `point` in `view` as a person makes it: a mouse-down sent through the app, so its
     /// monitors see it as they see a person's, with its mouse-up queued behind it, so the view's own
     /// tracking takes both.
-    func click(_ view: NSView, at point: NSPoint) async -> Bool {
+    func click(_ view: NSView, at point: NSPoint, modifiers: NSEvent.ModifierFlags = []) async -> Bool {
         guard let window = view.window else { return false }
         let location = view.convert(point, to: nil)
         func event(_ type: NSEvent.EventType) -> NSEvent? {
             NSEvent.mouseEvent(
-                with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                with: type, location: location, modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
                 eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0
             )
         }

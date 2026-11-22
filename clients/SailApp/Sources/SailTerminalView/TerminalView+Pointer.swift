@@ -8,6 +8,11 @@ extension TerminalView {
     /// A click on a view not focused only focuses it. The window makes the clicked view first
     /// responder before handing it the press, so a press older than the view's focus is that click.
     override public func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.command), let place = place(of: event), let found = linkUnder(place.cell) {
+            linkClicked = true
+            onLink(found.text, found.column)
+            return
+        }
         if window?.firstResponder !== self { window?.makeFirstResponder(self) }
         focusingClick = event.timestamp <= focusedAt
         guard !focusingClick else { return }
@@ -21,12 +26,17 @@ extension TerminalView {
     /// A drag moves the pointer as a program sees it, so the next motion without a button is
     /// reported whatever cell it is in.
     override public func mouseDragged(with event: NSEvent) {
+        guard !linkClicked else { return }
         hovered = nil
         guard !focusingClick, let place = place(of: event) else { return }
         apply(pointer.dragged(to: place.cell), MouseInput(action: .motion, button: .left, x: place.x, y: place.y, modifiers: Self.modifiers(event)))
     }
 
     override public func mouseUp(with event: NSEvent) {
+        guard !linkClicked else {
+            linkClicked = false
+            return
+        }
         guard !focusingClick else {
             focusingClick = false
             return
@@ -38,14 +48,16 @@ extension TerminalView {
     override public func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self, userInfo: nil))
     }
 
     /// The pointer moving into another cell with no button held, as xterm and Ghostty report it:
     /// sent, from the input queue, only while a program tracks the mouse, and the encoder sends it
     /// only to one that asked for every motion (mode 1003).
     override public func mouseMoved(with event: NSEvent) {
-        guard let link, let place = place(of: event), place.cell != hovered else { return }
+        guard let place = place(of: event) else { return }
+        showLink(at: place.cell, command: event.modifierFlags.contains(.command))
+        guard let link, place.cell != hovered else { return }
         hovered = place.cell
         let mouse = MouseInput(action: .motion, button: nil, x: place.x, y: place.y, modifiers: Self.modifiers(event))
         input.async {
@@ -201,8 +213,12 @@ extension TerminalView {
         }
     }
 
+    override public func mouseExited(with _: NSEvent) {
+        showLink(at: nil, command: false)
+    }
+
     /// The cell under the event, and its place in pixels from the grid's top left.
-    private func place(of event: NSEvent) -> (cell: CellPoint, x: Double, y: Double)? {
+    func place(of event: NSEvent) -> (cell: CellPoint, x: Double, y: Double)? {
         guard let grid = lastFrame?.size ?? grid else { return nil }
         let point = convert(event.locationInWindow, from: nil)
         let scale = renderer.faces.scale

@@ -132,15 +132,28 @@ extension Workbench {
 /// host is empty, `localhost` or one of this Mac's names; or an absolute path. Anything else, a
 /// relative path, another host or nothing, names no folder here.
 public enum ReportedFolder {
+    private static let schemes = [("file://", true), ("kitty-shell-cwd://", false)]
+
     public static func path(_ reported: String, hostNames: Set<String>) -> String? {
         if reported.hasPrefix("/") { return reported }
-        for (scheme, decoded) in [("file://", true), ("kitty-shell-cwd://", false)] where reported.hasPrefix(scheme) {
+        for (scheme, decoded) in schemes where reported.hasPrefix(scheme) {
             let rest = reported.dropFirst(scheme.count)
             guard let slash = rest.firstIndex(of: "/") else { return nil }
             let host = rest[..<slash].lowercased()
             guard host.isEmpty || host == "localhost" || hostNames.contains(where: { $0.lowercased() == host }) else { return nil }
             let path = String(rest[slash...])
             return decoded ? path.removingPercentEncoding : path
+        }
+        return nil
+    }
+
+    /// The host a report names, lowercased: "" for a bare path or a URL naming none, nil when it
+    /// is neither.
+    public static func host(_ reported: String) -> String? {
+        if reported.hasPrefix("/") { return "" }
+        for (scheme, _) in schemes where reported.hasPrefix(scheme) {
+            let rest = reported.dropFirst(scheme.count)
+            return String(rest[..<(rest.firstIndex(of: "/") ?? rest.endIndex)]).lowercased()
         }
         return nil
     }
