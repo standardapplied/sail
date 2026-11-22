@@ -169,13 +169,9 @@ public struct Starved: Sendable, Equatable {
     /// The stretch proven by `looks`, nil when the machine's busy ticks did not move over it or
     /// our processes' CPU was not read at its ends.
     init?(_ looks: [ThreadLook]) {
-        guard let first = looks.first, let last = looks.last, let from = first.busyTicks, let to = last.busyTicks, to &- from > 0,
-              let ourFrom = first.ourCPU, let ourTo = last.ourCPU
-        else {
-            return nil
-        }
+        guard let first = looks.first, let last = looks.last, let ours = MachineShare.ourShare(from: first, to: last) else { return nil }
         self.looks = looks
-        ours = min(1, max(0, ourTo - ourFrom) / (Double(to &- from) * ThreadLook.tick))
+        self.ours = ours
     }
 
     public var span: Span {

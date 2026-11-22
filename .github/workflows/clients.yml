@@ -593,6 +593,15 @@ jobs:
             ${{ runner.temp }}/drive-out
             ${{ runner.temp }}/test-logs
 
+      - name: Leave the drive's figures, a small table the trend reads back
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: drive-figures-${{ github.sha }}
+          if-no-files-found: ignore
+          retention-days: 90
+          path: ${{ runner.temp }}/drive-out/figures.tsv
+
       - name: Leave the window as the screen showed it, in both looks
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
