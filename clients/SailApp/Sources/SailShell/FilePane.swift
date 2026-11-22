@@ -78,8 +78,8 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     private var slicesMade = 0, slicesDealt = 0
     private(set) var slicesTaken = 0
     var losesSlice: Int?
-    /// How many times the view's whole text was read into a string (``wholeText``): a copy of all
-    /// of it, which no key that changes the text's length makes.
+    /// How many times the view's whole text was handed to a consumer (``wholeText``), which then
+    /// walks all of it: what no key that changes the text's length does.
     private(set) var wholeTextReads = 0
     private var shownNote = OpenFile.Note.none
     private var applying = false
@@ -281,7 +281,8 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
         if file.clean { finishLeaving() }
     }
 
-    /// The view's whole text as a string, a copy of all of it: the one way the pane reads it, counted.
+    /// The view's whole text as one string, which a consumer then walks: the one way the pane reads
+    /// it, counted. (Reading the view's string copies nothing; walking what it gives costs the length.)
     private var wholeText: String {
         wholeTextReads += 1
         return editor.string
@@ -845,7 +846,7 @@ final class LineNumbers: NSRulerView {
     /// The lines shown now, each with its rows' extent: what the ruler draws.
     var rows: [Row] {
         guard let editor, let manager = editor.textLayoutManager, let content = manager.textContentManager, let scroll = scrollView else { return [] }
-        let text = editor.string as NSString, visible = scroll.contentView.bounds, inset = Double(editor.textContainerInset.height)
+        let text: NSString = editor.textStorage?.mutableString ?? "", visible = scroll.contentView.bounds, inset = Double(editor.textContainerInset.height)
         guard let first = manager.textLayoutFragment(for: CGPoint(x: 0, y: Double(visible.minY) - inset)) else { return [] }
         var rows: [Row] = []
         manager.enumerateTextLayoutFragments(from: first.rangeInElement.location, options: [.ensuresLayout]) { fragment in
@@ -882,13 +883,6 @@ final class LineNumbers: NSRulerView {
 @MainActor
 final class PaneTextView: NSTextView {
     var onKeys: @MainActor () -> Void = {}
-    /// How many layout passes the view took: what a slice placed asks of it, once.
-    private(set) var layouts = 0
-
-    override func layout() {
-        layouts += 1
-        super.layout()
-    }
 
     override func becomeFirstResponder() -> Bool {
         let taken = super.becomeFirstResponder()

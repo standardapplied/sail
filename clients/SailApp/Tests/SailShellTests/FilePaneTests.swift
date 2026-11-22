@@ -540,9 +540,10 @@ import Testing
         return Array(String(repeating: line, count: 1_000_000 / line.utf8.count).utf8)
     }()
 
-    /// A key that changes the text's length never reads the view's whole text into a string (a
-    /// copy of all of it): twenty keys in a 1 MB file, not one read. The cost the drive's key
-    /// figure stops gating below 32 ms.
+    /// A key that changes the text's length never hands the view's whole text to a consumer to
+    /// walk: twenty keys in a 1 MB file, not one read through `wholeText`, the pane's one way to
+    /// it (`theWholeTextIsReadOnlyThroughItsOneAccessor`). The cost the drive's key figure stops
+    /// gating below 32 ms.
     @Test func aKeyNeverReadsTheWholeText() async throws {
         let (_, _, _, _, pane) = try await Self.opened(Self.megabyte)
         #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
@@ -554,18 +555,23 @@ import Testing
         #expect(pane.wholeTextReads == before, "\(pane.wholeTextReads - before) whole-text reads for 20 keys")
     }
 
-    /// A slice placed asks one layout pass of the view at most: loading a 1 MB file (31 slices), the
-    /// view's passes are no more than its slices and the few of the pane's opening, and some were
-    /// taken. The cost the drive's load figure stops gating below 32 ms.
+    /// A 1 MB file loads with TextKit laying out a few screenfuls, whatever the file's size: the
+    /// text-layout fragments made (through the layout manager's delegate) are at most four
+    /// screenfuls of lines and one a slice, and the viewport is laid out at most once a slice placed
+    /// and the pane's few on opening. A slice that lays out the document, or the viewport again,
+    /// fails it. The cost the drive's load figure stops gating below 32 ms.
     @Test func aSliceIsLaidOutOnce() async throws {
         let (_, _, bench, _, pane) = try await Self.opened(Self.megabyte)
-        let before = pane.editor.layouts
+        let counter = TextKitCounter(pane.editor)
         #expect(await RunnerTabTests.until(10) {
             bench.layoutSubtreeIfNeeded()
             return pane.editor.isEditable
         })
-        let passes = pane.editor.layouts - before
-        #expect(pane.slicesTaken > 20 && passes > 0 && passes <= pane.slicesTaken + 4, "\(passes) layout passes for \(pane.slicesTaken) slices")
+        let font = try #require(pane.editor.font)
+        let screenful = Int((Double(pane.scroll.contentView.bounds.height) / Double(NSLayoutManager().defaultLineHeight(for: font))).rounded(.up))
+        #expect(pane.slicesTaken > 20 && counter.fragments > 0 && counter.fragments <= 4 * screenful + pane.slicesTaken,
+                "\(counter.fragments) fragments laid out for \(pane.slicesTaken) slices, a screenful \(screenful) lines")
+        #expect(counter.viewportLayouts > 0 && counter.viewportLayouts <= pane.slicesTaken + 4, "\(counter.viewportLayouts) viewport layouts for \(pane.slicesTaken) slices")
     }
 
     /// Half of a character (a lone surrogate) is never saved as U+FFFD: the save says where it is
@@ -713,5 +719,44 @@ import Testing
         pane.onShowTerminal()
         bench.layoutSubtreeIfNeeded()
         #expect(pane.isHidden && bench.window?.firstResponder === terminal.terminal, "Show Terminal did not bring the terminal forward")
+    }
+}
+
+/// Counts what TextKit lays out in a text view: the layout fragments its layout manager makes and
+/// the viewport layouts its controller runs, standing in as both delegates and handing on to the
+/// view everything the view's own delegate does. TextKit calls it on the main thread alone.
+final class TextKitCounter: NSObject, NSTextLayoutManagerDelegate, NSTextViewportLayoutControllerDelegate, @unchecked Sendable {
+    private(set) var fragments = 0
+    private(set) var viewportLayouts = 0
+    private weak var view: (any NSTextViewportLayoutControllerDelegate)?
+
+    @MainActor init(_ editor: NSTextView) {
+        super.init()
+        guard let manager = editor.textLayoutManager else { return }
+        view = manager.textViewportLayoutController.delegate
+        manager.delegate = self
+        manager.textViewportLayoutController.delegate = self
+    }
+
+    func textLayoutManager(_: NSTextLayoutManager, textLayoutFragmentFor _: any NSTextLocation, in element: NSTextElement) -> NSTextLayoutFragment {
+        fragments += 1
+        return NSTextLayoutFragment(textElement: element, range: element.elementRange)
+    }
+
+    func viewportBounds(for controller: NSTextViewportLayoutController) -> CGRect {
+        view?.viewportBounds(for: controller) ?? .zero
+    }
+
+    func textViewportLayoutController(_ controller: NSTextViewportLayoutController, configureRenderingSurfaceFor fragment: NSTextLayoutFragment) {
+        view?.textViewportLayoutController(controller, configureRenderingSurfaceFor: fragment)
+    }
+
+    func textViewportLayoutControllerWillLayout(_ controller: NSTextViewportLayoutController) {
+        view?.textViewportLayoutControllerWillLayout?(controller)
+    }
+
+    func textViewportLayoutControllerDidLayout(_ controller: NSTextViewportLayoutController) {
+        viewportLayouts += 1
+        view?.textViewportLayoutControllerDidLayout?(controller)
     }
 }
