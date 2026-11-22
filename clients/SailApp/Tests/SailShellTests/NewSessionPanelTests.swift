@@ -139,21 +139,102 @@ import Testing
         #expect(!quay.items.contains { $0.title.contains("…") } && !again.items.contains { $0.title.contains("…") })
     }
 
-    /// The harness last started starts again from the menu, in its mode, without the panel and
-    /// without asking what starts.
-    @Test func theHarnessStartedLastStartsAgainWithoutThePanel() async throws {
-        let (view, window, server) = try await Self.listed([])
-        defer { window.orderOut(nil) }
-        let plan = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan")
-        view.memory = ModeMemory(modes: ["claude-code": "plan"], last: plan)
-        var started: [(AgentStart, String, String)] = []
-        view.onStart = { started.append(($0, $1, $2)) }
-        let menu = try Self.menu("dock", in: view)
-        let index = try #require(menu.items.firstIndex { $0.title == "New Claude Code Session" })
+    /// The row's quick item, "New Claude Code Session", asks what starts in the workspace first:
+    /// the last start starts at once while it still can (a stored login; signing in there when
+    /// that is how it last started), else the panel opens at that harness saying why, nothing started.
+    static func quickItem(_ golden: String, last: AgentStart, row: String = "dock") async throws -> (view: WorkspacesView, window: KeyWindow, started: [AgentStart], asked: Int) {
+        let (view, window, server) = try await Self.listed([golden])
+        var memory = ModeMemory()
+        memory.remember(last)
+        view.memory = memory
+        var started: [AgentStart] = []
+        view.onStart = { start, _, _ in started.append(start) }
+        let menu = try Self.menu(row, in: view)
+        let index = try #require(menu.items.firstIndex { $0.title == "New \(last.display) Session" })
         menu.performActionForItem(at: index)
-        #expect(started.count == 1 && started.first?.0 == plan && started.first?.1 == "harbor" && started.first?.2 == "dock")
-        let asked = await server.requests
-        #expect(!view.newSession.isOpen && !asked.contains { $0.route.hasSuffix("/agents") }, "the quick start asked or showed the panel")
+        #expect(await RunnerTabTests.until { !view.busy }, "the quick item's ask never ended")
+        let asked = await server.requests.filter { $0.route.hasSuffix("/agents") }.count
+        return (view, window, started, asked)
+    }
+
+    @Test func theQuickItemStartsAStoredLoginsLastStartAtOnce() async throws {
+        let plan = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan")
+        let quick = try await Self.quickItem("workspace-agents-dock", last: plan)
+        defer { quick.window.orderOut(nil) }
+        #expect(quick.started == [plan] && quick.asked == 1 && !quick.view.newSession.isOpen, "started \(quick.started), asked \(quick.asked)")
+    }
+
+    @Test func theQuickItemSignsInThereAgainWhenThatIsHowItLastStarted() async throws {
+        let inside = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan", inside: true)
+        let quick = try await Self.quickItem("workspace-agents-dock-no-login", last: inside)
+        defer { quick.window.orderOut(nil) }
+        #expect(quick.started == [inside] && !quick.view.newSession.isOpen, "started \(quick.started)")
+    }
+
+    @Test func theQuickItemOpensThePanelWhenItsLoginIsGone() async throws {
+        let plan = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan")
+        let quick = try await Self.quickItem("workspace-agents-dock-no-login", last: plan)
+        defer { quick.window.orderOut(nil) }
+        let panel = quick.view.newSession
+        #expect(quick.started.isEmpty && panel.isOpen, "started \(quick.started), the panel \(panel.isOpen ? "open" : "closed")")
+        #expect(panel.view.rows.first(where: \.chosen)?.name.stringValue == "Claude Code" && panel.view.words.contains("No Claude Code login stored for uday, so a Claude Code session cannot start in dock."))
+    }
+
+    @Test func theQuickItemOpensThePanelAtAHarnessNoLongerInstalled() async throws {
+        let codex = AgentStart(harness: "codex", display: "Codex CLI", mode: "full-access")
+        let quick = try await Self.quickItem("workspace-agents-dock-not-installed", last: codex)
+        defer { quick.window.orderOut(nil) }
+        let panel = quick.view.newSession
+        #expect(quick.started.isEmpty && panel.isOpen && panel.view.rows.first(where: \.chosen)?.name.stringValue == "Codex CLI")
+        #expect(panel.view.words.contains("Codex CLI is not installed in harbor's workspaces; its agent installation lists Claude Code.") && panel.view.primary?.isEnabled == false)
+    }
+
+    @Test func theQuickItemOpensThePanelForAModeNoLongerOffered() async throws {
+        let ghost = AgentStart(harness: "claude-code", display: "Claude Code", mode: "ghost")
+        let quick = try await Self.quickItem("workspace-agents-dock", last: ghost)
+        defer { quick.window.orderOut(nil) }
+        #expect(quick.started.isEmpty && quick.view.newSession.isOpen && quick.view.newSession.view.modes?.title == "Claude Code's own", "a mode no longer offered started, or the panel did not fall back to the harness's own")
+    }
+
+    /// While what starts is asked, the row's + is in flight and takes no press; a second ⌥⌘T is
+    /// the same ask, not another, and the panel opens once.
+    @Test func thePlusSaysItIsAskingAndASecondPressIsTheSameAsk() async throws {
+        let transport = Held(RecordedServer([try Exchange("projects"), try Exchange("workspaces-three"), try Exchange("workspace-agents-dock")]), holding: "agents")
+        let (view, window) = try WorkspacesViewTests.view(transport)
+        defer { window.orderOut(nil) }
+        view.project.list.pointer = { nil }
+        view.newSession.popover.keysLeft = Notification.Name("sail.tests.keys-left.\(UUID().uuidString)")
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("quay") })
+        view.project.list.choose("dock")
+        window.makeFirstResponder(view.project.list)
+        #expect(view.project.list.onKey?(try Self.optionCommandT()) == true)
+        #expect(await RunnerTabTests.until { (view.project.plus("dock") as? SailButton)?.busyWord == NewSessionWords.asking }, "the + never said it was asking")
+        #expect(view.project.list.onKey?(try Self.optionCommandT()) == true)
+        transport.release()
+        #expect(await RunnerTabTests.until { view.newSession.isOpen })
+        #expect(transport.routes.filter { $0.hasSuffix("/agents") }.count == 1, "a second press asked again: \(transport.routes)")
+        #expect((view.project.plus("dock") as? SailButton)?.busyWord == nil, "the + stayed in flight")
+    }
+
+    /// What a person started is theirs on that control plane: the next person signing in on this
+    /// Mac, or the same handle on another control plane, inherits no quick item and no mode.
+    @Test func startsAreRememberedPerPersonAndControlPlane() async throws {
+        let defaults = ReattachTests.defaults()
+        let plan = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan")
+        var udays = ModeMemory()
+        udays.remember(plan)
+        udays.store(in: defaults, for: WorkspacesViewTests.uday)
+        let other = WorkspacesModel.Person(handle: "uday", admin: true, confirmed: true, controlPlane: "main.acme.dev")
+        #expect(ModeMemory.stored(in: defaults, for: WorkspacesViewTests.uday) == udays)
+        #expect(ModeMemory.stored(in: defaults, for: WorkspacesViewTests.ana) == ModeMemory() && ModeMemory.stored(in: defaults, for: other) == ModeMemory())
+        let (view, window, _) = try await Self.listed([])
+        defer { window.orderOut(nil) }
+        view.remembered = { ModeMemory.stored(in: defaults, for: $0) }
+        view.person = WorkspacesViewTests.ana
+        #expect(view.memory == ModeMemory(), "ana inherited uday's starts")
+        view.person = WorkspacesViewTests.uday
+        #expect(view.memory == udays, "uday's starts did not come back with him")
     }
 
     // MARK: The panel
@@ -282,7 +363,7 @@ import Testing
         view.onStart = { start, _, _ in started.append(start) }
         try Self.press(try Self.returnKey(), in: window)
         #expect(started.map { [$0.wire.harness, $0.wire.mode] } == [["claude-code", "default"]] && started.allSatisfy(\.wire.inside))
-        #expect(view.memory.last == Self.claude, "a start that signed in there is remembered as one")
+        #expect(view.memory.last == AgentStart(harness: "claude-code", display: "Claude Code", mode: "default", inside: true), "a start that signed in there is not remembered as one")
     }
 
     /// A harness not installed: its row says so in the quiet ink; chosen, the server's sentence and
@@ -382,6 +463,78 @@ import Testing
         #expect(near(box.minY, row.maxY + NewSessionPanel.gap), "the panel is \(box), the row \(row)")
     }
 
+    /// The panel follows its row or closes: the list scrolled, or drawn again with its row gone or
+    /// stopped by someone else, it closes, never floating over another row while Start acts on dock.
+    @Test func thePanelFollowsItsRowOrCloses() async throws {
+        let many = try WorkspacesReachTests.list([["name": "dock", "instance": "harbor-dock", "state": "running", "owner": "uday"]] + (1 ... 30).map { ["name": String(format: "ws-%02d", $0), "instance": String(format: "harbor-ws-%02d", $0), "state": "running", "owner": "uday"] })
+        let (view, window, _) = try await Self.listed(["workspace-agents-dock"], rows: many, saying: "ws-30")
+        defer { window.orderOut(nil) }
+        _ = try await Self.open("dock", in: view)
+        let clip = try #require(view.project.listScroll?.contentView)
+        clip.scroll(to: NSPoint(x: 0, y: 40))
+        view.project.listScroll?.reflectScrolledClipView(clip)
+        #expect(!view.newSession.isOpen, "the list scrolled under the panel and it stayed")
+        for (name, rows) in [("gone", [["name": "pier", "instance": "harbor-pier", "state": "stopped", "owner": "uday"]]), ("stopped by ana", [["name": "dock", "instance": "harbor-dock", "state": "stopped", "owner": "uday"]])] {
+            let (shown, shownWindow, _) = try await Self.listed(["workspace-agents-dock"])
+            defer { shownWindow.orderOut(nil) }
+            _ = try await Self.open("dock", in: shown)
+            shown.client = SailClient(transport: RecordedServer([try Exchange("projects"), try WorkspacesReachTests.list(rows)]), token: "tok")
+            await shown.refresh()
+            #expect(await RunnerTabTests.until { !shown.newSession.isOpen }, "dock \(name) and the panel stayed")
+        }
+        let (same, sameWindow, server) = try await Self.listed(["workspace-agents-dock"])
+        defer { sameWindow.orderOut(nil) }
+        _ = try await Self.open("dock", in: same)
+        let before = await server.requests.count
+        await same.refresh()
+        #expect(await RunnerTabTests.until { !same.busy } && same.newSession.isOpen, "a listing that left dock where it was closed the panel")
+        let after = await server.requests.count
+        #expect(after > before, "the refresh asked nothing")
+    }
+
+    /// A closed panel's keys do nothing, and a list not shown takes no key: a Return after Start,
+    /// with the section left, never presses the list's Open.
+    @Test func aClosedPanelAndAHiddenListTakeNoKeys() async throws {
+        let (view, window, _) = try await Self.listed(["workspace-agents-dock"])
+        defer { window.orderOut(nil) }
+        var started = 0, opened = 0
+        view.onStart = { _, _, _ in started += 1 }
+        view.onOpen = { _, _ in opened += 1 }
+        _ = try await Self.open("dock", in: view)
+        let keys = try #require(window.firstResponder as? NewSessionKeys)
+        try Self.press(try Self.escape(), in: window)
+        keys.keyDown(with: try Self.returnKey())
+        #expect(started == 0 && opened == 0, "a closed panel's keys started an agent or opened dock")
+        view.isHidden = true
+        view.project.list.keyDown(with: try Self.returnKey())
+        #expect(opened == 0, "a hidden list's Return opened dock")
+    }
+
+    /// Store a Login's words stand on the text column: as drawn, their ink starts where the
+    /// sentence above them starts.
+    @Test func theLinkStandsOnTheTextColumn() async throws {
+        let (view, window, _) = try await Self.listed(["workspace-agents-dock-no-login"])
+        defer { window.orderOut(nil) }
+        let panel = try await Self.open("dock", in: view)
+        let link = try #require(panel.view.storeLogin)
+        let sentence = try #require(WorkspacesViewTests.found(NSTextField.self, in: panel.view).first { $0.stringValue.hasPrefix("No Claude Code login stored") })
+        let drawn = try #require(panel.view.bitmapImageRepForCachingDisplay(in: panel.view.bounds))
+        panel.view.cacheDisplay(in: panel.view.bounds, to: drawn)
+        let scale = Double(drawn.pixelsWide) / Double(panel.view.bounds.width)
+        func ink(in band: NSRect) -> Double? {
+            let rows = Int(Double(band.minY) * scale) ..< Int(Double(band.maxY) * scale), columns = Int(Double(band.minX) * scale) ..< Int(Double(band.maxX) * scale)
+            for x in columns {
+                for y in rows {
+                    guard let colour = drawn.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                    if colour.redComponent + colour.greenComponent + colour.blueComponent < 1.2 { return Double(x) / scale }
+                }
+            }
+            return nil
+        }
+        let words = try #require(ink(in: link.frame)), column = try #require(ink(in: sentence.frame))
+        #expect(abs(words - column) <= 0.5, "the link's ink starts at \(words) pt, the sentence's at \(column) pt")
+    }
+
     /// The panel closes when its section goes, another project is chosen, or the window is resized.
     @Test func thePanelGoesWithItsPlace() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-dock"])
@@ -395,18 +548,19 @@ import Testing
         #expect(!view.newSession.isOpen, "a resize left it open")
     }
 
-    /// What the person's starts remember outlives the app: kept in the defaults and read back by
-    /// the next shell into its Workspaces section.
+    /// What a person's starts remember outlives the app: kept in the defaults and read back by
+    /// the next shell into its Workspaces section for whoever it signs in as.
     @Test func theStartsAreKeptBetweenLaunches() throws {
         let defaults = ReattachTests.defaults()
-        #expect(ModeMemory.stored(in: defaults) == ModeMemory())
         let kept = ModeMemory(modes: ["claude-code": "plan"], last: AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan"))
-        kept.store(in: defaults)
-        #expect(ModeMemory.stored(in: defaults) == kept)
+        #expect(ModeMemory.stored(in: defaults, for: WorkspacesViewTests.uday) == ModeMemory())
+        kept.store(in: defaults, for: WorkspacesViewTests.uday)
+        #expect(ModeMemory.stored(in: defaults, for: WorkspacesViewTests.uday) == kept)
         let shell = try ShellApp(fonts: LookTests.fonts, helper: nil, look: .light, passkeys: { _ in SoftwarePasskey(file: FileManager.default.temporaryDirectory.appending(path: "sail-a1-\(UUID().uuidString).json")) }, defaults: defaults)
+        shell.workspaces.person = WorkspacesViewTests.uday
         #expect(shell.workspaces.memory == kept)
-        defaults.set(Data("not a memory".utf8), forKey: ModeMemory.key)
-        #expect(ModeMemory.stored(in: defaults) == ModeMemory(), "an unreadable memory is not read as nothing")
+        defaults.set(Data("not a memory".utf8), forKey: ModeMemory.key(for: WorkspacesViewTests.uday))
+        #expect(ModeMemory.stored(in: defaults, for: WorkspacesViewTests.uday) == ModeMemory(), "an unreadable memory is not read as nothing")
     }
 
     // MARK: Look, reach and calm

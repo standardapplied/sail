@@ -392,7 +392,9 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             case .startAndOpen: SailList.Action("Start and Open") { [weak self] in self?.on(.startAndOpen(line.name)) }
             case let .startLast(display): SailList.Action(NewSessionWords.quickStart(display), onRow: false) { [weak self] in self?.on(.startLast(line.name)) }
             case .newSession:
-                SailList.Action(NewSessionWords.newSession, key: "t", modifiers: [.command, .option], icon: .plus) { [weak self] in self?.on(.newSession(line.name)) }
+                SailList.Action(NewSessionWords.newSession, key: "t", modifiers: [.command, .option], icon: .plus, busy: line.askingAgents ? NewSessionWords.asking : nil) { [weak self] in
+                    self?.on(.newSession(line.name))
+                }
             case .copyName: SailList.Action("Copy Name", key: "c", modifiers: .command, onRow: false) { [weak self] in self?.on(.copyName(line.name)) }
             case .stop: SailList.Action("Stop", onRow: false, startsGroup: true) { [weak self] in self?.on(.stop(line.name)) }
             case .delete:

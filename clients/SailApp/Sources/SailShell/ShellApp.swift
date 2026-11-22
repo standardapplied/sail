@@ -505,10 +505,11 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.select(.thisMac)
             self?.thisMac.openWorkspace(project: project, name: name)
         }
-        workspaces.memory = ModeMemory.stored(in: defaults)
+        workspaces.remembered = { [defaults] person in ModeMemory.stored(in: defaults, for: person) }
+        workspaces.memory = workspaces.remembered(workspaces.person)
         workspaces.onStart = { [weak self] start, project, name in
             guard let self else { return }
-            workspaces.memory.store(in: defaults)
+            workspaces.memory.store(in: defaults, for: workspaces.person)
             select(.thisMac)
             thisMac.openAgent(start, project: project, name: name)
         }

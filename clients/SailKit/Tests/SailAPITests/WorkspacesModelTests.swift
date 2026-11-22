@@ -659,6 +659,16 @@ extension WorkspacesModelTests {
         #expect(Self.row(paused, "dock")?.menu == [.startAndOpen, .newSession, .copyName, .stop, .delete], "a paused workspace, which can be stopped, offers no Stop")
     }
 
+    /// While what starts in a workspace is asked, its row says so, and no other row does.
+    @Test func aRowSaysWhatStartsInItIsBeingAsked() throws {
+        var model = Self.listed(Self.uday)
+        #expect(Self.row(model, "dock")?.askingAgents == false)
+        model.askingAgentsIn = "dock"
+        #expect(Self.row(model, "dock")?.askingAgents == true && Self.row(model, "pier")?.askingAgents == false)
+        model.askingAgentsIn = nil
+        #expect(Self.row(model, "dock")?.askingAgents == false)
+    }
+
     /// An agent starts only in the person's own workspace: their own rows that open offer New
     /// Session, and, once a harness was started, that harness again before it; someone else's row
     /// offers neither, an admin's included, nor does a row under way or one that does not open.

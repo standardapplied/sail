@@ -130,6 +130,42 @@ import Testing
         #expect(NewSessionWords.quickStart(codex.display) == "New Codex CLI Session")
     }
 
+    /// The row's quick item starts the last start again at once only while the route still offers
+    /// its harness and mode and it can start as it did: with a stored login, or signing in there
+    /// when that is how it last started; otherwise the panel opens at that harness, saying why.
+    @Test func theQuickItemStartsAgainOnlyWhileTheLastStartStillCan() throws {
+        let stored = try Self.agents("workspace-agents-dock"), noLogin = try Self.agents("workspace-agents-dock-no-login"), notInstalled = try Self.agents("workspace-agents-dock-not-installed")
+        let plan = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan"), inside = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan", inside: true)
+        func memory(_ last: AgentStart) -> ModeMemory {
+            var memory = ModeMemory()
+            memory.remember(last)
+            return memory
+        }
+        var signedIn = NewSession(stored, memory: memory(plan))
+        #expect(signedIn.startsAgain && signedIn.start() == plan, "a stored login's last start does not start again")
+        var insideAgain = NewSession(noLogin, memory: memory(inside))
+        #expect(insideAgain.startsAgain && insideAgain.start() == inside, "a start that signed in there does not start again signing in there")
+        #expect(!NewSession(noLogin, memory: memory(plan)).startsAgain, "a stored login's last start starts again with the login gone")
+        #expect(NewSession(stored, memory: memory(inside)).startsAgain, "a login stored since a sign-in there does not start")
+        let ghost = AgentStart(harness: "claude-code", display: "Claude Code", mode: "ghost")
+        let stale = NewSession(stored, memory: memory(ghost))
+        #expect(!stale.startsAgain && stale.chosen == .harness("claude-code"), "a mode no longer offered starts")
+        let codex = AgentStart(harness: "codex", display: "Codex CLI", mode: "full-access")
+        let missing = NewSession(notInstalled, memory: memory(codex))
+        #expect(!missing.startsAgain && missing.chosen == .harness("codex"), "a harness not installed starts, or the panel is not at it")
+        let gone = AgentStart(harness: "gone", display: "Gone", mode: "x")
+        #expect(!NewSession(stored, memory: memory(gone)).startsAgain, "a harness not offered starts")
+        #expect(!NewSession(try Self.agents("workspace-agents-not-yours"), memory: memory(plan)).startsAgain, "someone else's workspace starts")
+    }
+
+    /// The last start is remembered whole, signing in there included.
+    @Test func theLastStartIsRememberedWhole() {
+        var memory = ModeMemory()
+        let inside = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan", inside: true)
+        memory.remember(inside)
+        #expect(memory.last == inside && memory.modes == ["claude-code": "plan"])
+    }
+
     @Test func upAndDownMoveThroughTheRowsAndStopAtEitherEnd() throws {
         var panel = NewSession(try Self.agents("workspace-agents"), memory: ModeMemory())
         panel.move(by: -1)

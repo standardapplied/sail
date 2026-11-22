@@ -193,8 +193,9 @@ struct Step: Decodable {
     /// marked prompt, as a command it runs moves it), within `seconds` (10 by default): a close sent
     /// before the shell has answered a command's Return finds the cursor still at the prompt.
     var mayEndAProgram: Bool?
-    /// `[name, "stopped" | "gone"]`: harbor's list from now on as it is answered now, that row stopped
-    /// or left out, as the runner lists it after a stop or a delete.
+    /// `[name, "stopped" | "gone" | "owner:<handle>"]`: harbor's list from now on as it is answered
+    /// now, that row stopped, left out, or another's ("owner:removed", an owner no longer active), as
+    /// the runner lists it after a stop, a delete or a change of hands.
     var relistAs: [String]?
     /// A plain delete of that harbor workspace refused as holding work, in the server's sentence
     /// naming it.
@@ -254,6 +255,17 @@ struct Step: Decodable {
     /// `[shot, "newSession" | "userMenu"]`: in that shot's two looks, the floating box shown casts
     /// its shadow whole: its window's edges, where they lie on the window's content, show no step.
     var shadowWhole: [String]?
+    /// The runner's door holds every `Create` from now on (true), as a workspace still starting, or
+    /// lets those held go on (false).
+    var doorHoldsCreates: Bool?
+    /// `[code, sentence]`: the runner's door refuses every `Create` from now on, in the host's words;
+    /// `[]` makes them again.
+    var doorRefusesCreates: [String]?
+    /// ⌘M pressed with the panel open and its mode menu put away unchosen, as Escape puts it away:
+    /// the panel stays open, its mode as it was.
+    var newSessionModesDismissed: Bool?
+    /// Return pressed twice at once with the panel open: one start, the second Return reaching no Open.
+    var newSessionStartTwice: Bool?
     /// The Workspaces section laid out right to left (true), as a right-to-left Mac lays it out,
     /// or left to right again (false).
     var workspacesRightToLeft: Bool?

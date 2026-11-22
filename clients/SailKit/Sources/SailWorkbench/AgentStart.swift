@@ -31,8 +31,8 @@ extension RunnerAgent {
     }
 }
 
-/// What a person last started, per harness the mode, and the last start whole, which the row's
-/// menu names and starts again without the panel. Kept by the app between launches.
+/// What a person last started, per harness the mode, and the last start whole (signing in there
+/// included), which the row's menu names and starts again. Kept by the app between launches.
 public struct ModeMemory: Codable, Equatable, Sendable {
     public private(set) var modes: [String: String]
     public private(set) var last: AgentStart?
@@ -44,7 +44,7 @@ public struct ModeMemory: Codable, Equatable, Sendable {
 
     public mutating func remember(_ start: AgentStart) {
         modes[start.harness] = start.mode
-        last = AgentStart(harness: start.harness, display: start.display, mode: start.mode)
+        last = start
     }
 }
 
@@ -120,6 +120,18 @@ public struct NewSession: Equatable, Sendable {
     public mutating func choose(mode: String) {
         guard case let .harness(harness) = chosen, offer(harness)?.modes.contains(where: { $0.mode == mode }) == true else { return }
         modes[harness] = mode
+    }
+
+    /// Whether the row's quick item starts the last start again at once: its harness chosen, its
+    /// mode still offered, and the start going ahead as it did, with a stored login, or signing in
+    /// there when that is how it last started. Otherwise the panel opens at that harness, saying why.
+    public var startsAgain: Bool {
+        guard let last = memory.last, chosen == .harness(last.harness), offer(last.harness)?.modes.contains(where: { $0.mode == last.mode }) == true else { return false }
+        switch readiness {
+        case .start: return true
+        case .signInThere: return last.inside
+        case .needsLogin, .refused, .shell: return false
+        }
     }
 
     public var readiness: Readiness {
@@ -228,6 +240,8 @@ public enum NewSessionWords {
     }
 
     public static let newSession = "New Session"
+    /// What the row's + says while what can start is asked.
+    public static let asking = "Asking"
     public static let openAShell = "Open a Shell"
 
     /// What an agent tab says while its host composes it and hands its login over.

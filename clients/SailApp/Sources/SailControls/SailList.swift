@@ -23,11 +23,13 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         public let destructive: Bool
         /// On the row it is this icon alone, beside ⋯ (New Session's +), its title the tooltip's.
         public let icon: LineIcon?
+        /// It is under way: its button on the row in flight under this word, taking no press.
+        public let busy: String?
         public let run: @MainActor () -> Void
 
         public init(
             _ title: String, key: String = "", modifiers: NSEvent.ModifierFlags = [], onRow: Bool = true, startsGroup: Bool = false, destructive: Bool = false,
-            icon: LineIcon? = nil, run: @escaping @MainActor () -> Void
+            icon: LineIcon? = nil, busy: String? = nil, run: @escaping @MainActor () -> Void
         ) {
             self.title = title
             self.key = key
@@ -36,6 +38,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             self.startsGroup = startsGroup
             self.destructive = destructive
             self.icon = icon
+            self.busy = busy
             self.run = run
         }
     }
@@ -387,8 +390,11 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         return true
     }
 
-    /// Return, Home, End, or an action's key on the chosen row; false when the key is none of them.
+    /// Return, Home, End, or an action's key on the chosen row; false when the key is none of them,
+    /// and for any key while the list is not shown (its section left with the keys still on it), so
+    /// a second Return after an agent's Start never presses Open.
     func act(on event: NSEvent) -> Bool {
+        guard !isHiddenOrHasHiddenAncestor else { return false }
         if onKey?(event) == true { return true }
         let items = entries.indices.filter { item(at: $0).map { !$0.inert } ?? false }
         switch event.keyCode {
@@ -842,7 +848,9 @@ final class RowCell: NSView {
         }
         for other in onRow.dropFirst() {
             let button = other.action.icon.map { SailButton(icon: $0, label: other.action.title, size: .small, look: look, target: other, action: #selector(Run.go(_:))) }
-            buttons.append(button ?? SailButton(other.action.title, kind: .secondary, size: .small, look: look, target: other, action: #selector(Run.go(_:))))
+                ?? SailButton(other.action.title, kind: .secondary, size: .small, look: look, target: other, action: #selector(Run.go(_:)))
+            if let busy = other.action.busy { button.fly(busy) }
+            buttons.append(button)
         }
         moreMenu = nil
         if rowStyle != .sidebar, runs.contains(where: { !$0.action.onRow }) {

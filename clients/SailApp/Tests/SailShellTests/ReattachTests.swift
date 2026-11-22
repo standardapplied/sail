@@ -123,6 +123,22 @@ import Testing
         #expect(create.agent.harness == "claude-code" && create.agent.mode == "plan" && create.command.isEmpty)
     }
 
+    /// An agent queued before the first restore starts only for the person who asked for it: a
+    /// sign-in as someone else meanwhile drops it.
+    @Test func anAgentQueuedBeforeTheFirstRestoreIsDroppedForAnotherPerson() async throws {
+        let (local, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
+        defer { local.stop(); runner.stop() }
+        let bench = try WorkbenchView(fonts: LookTests.fonts, host: ThisMacEndingTests.host(at: local), look: .light, defaults: Self.defaults())
+        let tickets = DoorTickets(runner)
+        let who = Who("uday")
+        bench.signedIn = { who.handle.map { ($0, tickets) } }
+        bench.openAgent(AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan"), project: "harbor", name: "dock")
+        who.handle = "ana"
+        bench.shown()
+        #expect(await RunnerTabTests.until(10) { bench.restored })
+        #expect(Self.runnerSessions(bench).isEmpty && runner.createsReceived == 0, "uday's queued start ran as ana")
+    }
+
     /// R7: Open on a workspace attaches a tab to each of the person's live sessions no tab holds,
     /// newest first; with all in tabs, it chooses the newest's tab and starts nothing (minor 8).
     @Test func openingAWorkspaceReattachesItsLiveSessionsNewestFirst() async throws {

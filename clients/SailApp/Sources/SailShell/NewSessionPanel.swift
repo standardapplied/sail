@@ -173,6 +173,7 @@ package final class NewSessionPanel: NSObject {
 
     /// A key while open: ↑ ↓ choose, ⌘M the modes, Return presses Start, Escape closes.
     fileprivate func key(_ event: NSEvent) -> Bool {
+        guard isOpen else { return false }
         let held = event.modifierFlags.intersection([.command, .option, .control, .shift])
         if held == .command, event.charactersIgnoringModifiers?.lowercased() == "m" {
             openModes()
@@ -221,7 +222,10 @@ final class NewSessionKeys: NSView {
         true
     }
 
+    /// While its panel is closed it keeps any key it is still handed: passed on, a Return would
+    /// press the list's Open.
     override func keyDown(with event: NSEvent) {
+        guard owner?.isOpen == true else { return }
         if owner?.key(event) != true { super.keyDown(with: event) }
     }
 
@@ -244,6 +248,9 @@ final class NewSessionKeys: NSView {
 @MainActor
 package final class NewSessionView: NSView {
     static let radius = 8.0, padding = 14.0, row = 30.0, gap = 7.0, about = 17.0
+    /// How far in from its frame a label's cell draws its words, where a borderless button draws
+    /// its title at its frame's edge: a link among labels moves in by it to stand on their column.
+    static let labelInset = 2.0
 
     /// What it shows: the route's harnesses and the Shell, or why no agent starts and whether the
     /// workspace still opens as a shell for the person.
@@ -443,7 +450,7 @@ package final class NewSessionView: NSView {
         storeLogin = link
         let size = link.fittingSize
         let linkWidth = min(Double(size.width), width)
-        link.frame = mirrored(NSRect(x: x, y: y, width: linkWidth, height: Double(size.height)))
+        link.frame = mirrored(NSRect(x: x + Self.labelInset, y: y, width: linkWidth, height: Double(size.height)))
         addSubview(link)
         let end = y + Double(size.height)
         guard !showsHow else {
@@ -655,15 +662,19 @@ package final class NewSessionRow: NSView {
 }
 
 extension ModeMemory {
-    static let key = "sail.agentStarts"
-
-    /// What `defaults` remember of the person's starts; nothing, before any or past a reading.
-    static func stored(in defaults: UserDefaults) -> ModeMemory {
-        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(ModeMemory.self, from: $0) } ?? ModeMemory()
+    /// Where `person`'s starts are kept: one person on one control plane, so whoever signs in next
+    /// on this Mac, or the same handle on another control plane, inherits nothing.
+    static func key(for person: WorkspacesModel.Person) -> String {
+        "sail.agentStarts.\(person.controlPlane).\(person.handle)"
     }
 
-    func store(in defaults: UserDefaults) {
+    /// What `defaults` remember of `person`'s starts; nothing, before any or past a reading.
+    static func stored(in defaults: UserDefaults, for person: WorkspacesModel.Person) -> ModeMemory {
+        defaults.data(forKey: key(for: person)).flatMap { try? JSONDecoder().decode(ModeMemory.self, from: $0) } ?? ModeMemory()
+    }
+
+    func store(in defaults: UserDefaults, for person: WorkspacesModel.Person) {
         guard let data = try? JSONEncoder().encode(self) else { return }
-        defaults.set(data, forKey: Self.key)
+        defaults.set(data, forKey: Self.key(for: person))
     }
 }

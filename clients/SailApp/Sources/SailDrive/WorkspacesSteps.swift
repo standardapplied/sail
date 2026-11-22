@@ -5,6 +5,7 @@ import SailControls
 import SailKitTestSupport
 import SailShell
 import SailTerminal
+import SailTerminalWire
 
 /// The control plane of the drive's workspaces run: every route answered as the server answered
 /// it in the goldens its `ClientGoldensTest` writes, a step choosing which golden answers a route
@@ -99,6 +100,13 @@ actor GoldenDesk: Transport {
         guard let answer = answers[route], var body = try JSONSerialization.jsonObject(with: answer.body) as? [String: Any], var rows = body["workspaces"] as? [[String: Any]] else { return }
         if change == "gone" {
             rows.removeAll { $0["name"] as? String == name }
+        } else if change.hasPrefix("owner:") {
+            rows = rows.map { row in
+                guard row["name"] as? String == name else { return row }
+                var changed = row
+                changed["owner"] = String(change.dropFirst("owner:".count))
+                return changed
+            }
         } else {
             rows = rows.map { row in
                 guard row["name"] as? String == name else { return row }
@@ -599,6 +607,36 @@ extension Driver {
             guard found, let create = door.create(of: name) else { return (false, "the door was asked no Create for \(name)") }
             let agent = [create.agent.harness, create.agent.mode, create.agent.inside ? "inside" : "stored"]
             return (agent == wanted && create.command.isEmpty, "\(name)'s Create named \(agent) and the command \(create.command)")
+        }
+        if let holding = step.doorHoldsCreates {
+            guard let door = GoldenDesk.door else { return (false, "the drive's runner door did not listen") }
+            if holding { door.holdCreates() } else { door.releaseCreates() }
+            return (true, "")
+        }
+        if let refusal = step.doorRefusesCreates {
+            guard let door = GoldenDesk.door, refusal.isEmpty || refusal.count == 2 else { return (false, "no door, or not [code, sentence]") }
+            door.refuseCreates(with: refusal.isEmpty ? nil : HostRefusal(message: refusal[1], remedy: [], code: refusal[0]))
+            return (true, "")
+        }
+        if step.newSessionModesDismissed == true {
+            guard panel.isOpen, let menu = panel.view.modes?.menu, let before = panel.view.modes?.title, let key = Keys.named("m", modifiers: ["command"]) else { return (false, "no mode menu; " + said()) }
+            var opened = false
+            let dismiss = Timer(timeInterval: 0.3, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    opened = NSApp.windows.contains { $0.isVisible && $0.level.rawValue >= NSWindow.Level.popUpMenu.rawValue }
+                    menu.cancelTracking()
+                }
+            }
+            RunLoop.main.add(dismiss, forMode: .common)
+            send(key)
+            let kept = await waitUntil(step.seconds ?? 2) { panel.isOpen && panel.view.modes?.title == before }
+            return (opened && kept, (opened ? "the mode menu opened and was put away" : "⌘M opened no menu") + "; " + said())
+        }
+        if step.newSessionStartTwice == true {
+            guard panel.isOpen, let enter = Keys.named("enter", modifiers: []) else { return (false, said()) }
+            send(enter)
+            send(enter)
+            return (true, "two Returns sent at once; the keys are with \(shell.window.firstResponder.map { String(describing: type(of: $0)) } ?? "nothing")")
         }
         if let pick = step.shadowWhole, pick.count == 2 {
             let popover = pick[1] == "userMenu" ? shell.userMenu.popover : panel.popover
