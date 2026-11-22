@@ -20,11 +20,16 @@ mkdir -p "$logs"
 "$(dirname "$0")/window-server-check" || exit 1
 : > "$logs/window-server.since"
 
+# Ended by a pattern, not by walking the suite's tree: once the alarm ends `script`, its children
+# are launchd's, in the session `script` gave them, so no tree or group reaches them. The pattern
+# is this checkout's own `.build` path (its characters escaped), which no other process runs from.
 outlived() {
-  local suite=$1 pids pid
-  pids=$(pgrep -f -- "$PWD/\.build/.*PackageTests" || true)
+  local suite=$1 build pids pid
+  # shellcheck disable=SC2001
+  build=$(sed 's/[][\.*^$+?(){}|]/\\&/g' <<< "$PWD/.build/")
+  pids=$(pgrep -f -- "$build.*PackageTests" || true)
   for pid in $pids; do
-    sample "$pid" 3 -file "$logs/$suite.outlived-$pid.txt" > /dev/null 2>&1 || true
+    perl -e 'alarm shift; exec @ARGV or exit 127' 30 sample "$pid" 3 -file "$logs/$suite.outlived-$pid.txt" > /dev/null 2>&1 || true
     echo "ci/test-suites: $suite's test process $pid outlived its alarm; its threads are in $logs/$suite.outlived-$pid.txt, and it is ended" >&2
     kill -KILL "$pid" 2> /dev/null || true
   done
@@ -92,5 +97,6 @@ for index in "${!suites[@]}"; do
   fi
 done
 "$(dirname "$0")/../../SailKit/scripts/ends" "$logs"/*.events || failed=1
-echo "ci/test-suites: ${#ran[@]} of $(wc -w <<< "$listed" | tr -d ' ') suites ran: ${ran[*]}"
+unrun=$(comm -23 <(sort <<< "$listed") <(printf '%s\n' "${ran[@]}" | sort) | paste -sd ' ' -)
+echo "ci/test-suites: ${#ran[@]} of $(wc -w <<< "$listed" | tr -d ' ') suites ran: ${ran[*]}${unrun:+; not run: $unrun}"
 exit $failed
