@@ -1366,6 +1366,41 @@ class FilesHostTest {
   }
 
   /**
+   * #526's m1: a closed connection's write queued on the workspace's lock makes nothing while
+   * another connection keeps that lock the host's: the lock it takes is current, so its closed
+   * connection alone refuses it.
+   */
+  @Test
+  void aClosedConnectionsWriteQueuedOnACurrentLockMakesNothing() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "base");
+    var hold = new Hold();
+    var staying = open("tok-root");
+    var first = open("tok-mady");
+    saveOn(first, 1, file, baseOf(first, file), "first's");
+    hold.reached();
+    var lock = host.writeLock("acme", "dock");
+    PtyWire.write(first, new PtyMessage.FilesCreate(2, home + "/queued.md", false));
+    awaitQueued(lock);
+    first.close();
+    var unserved = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (host.filesServed("acme", "dock") != 1) {
+      assertTrue(System.nanoTime() < unserved, "the closed connection was never dropped");
+      Thread.onSpinWait();
+    }
+    hold.release();
+    var ended = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (lock.isLocked() || lock.hasQueuedThreads()) {
+      assertTrue(System.nanoTime() < ended, "the save and the queued create ended");
+      Thread.onSpinWait();
+    }
+    assertSame(lock, host.writeLock("acme", "dock"), "the staying connection keeps the lock");
+    assertFalse(
+        Files.exists(home.resolve("queued.md")), "the closed connection's create made nothing");
+    assertEquals("first's", Files.readString(file));
+    staying.close();
+  }
+
+  /**
    * #526's m1: a closed connection's write queued on the workspace's lock makes nothing: a create
    * waits behind its own connection's save past its go; the connection closes, the save ends and
    * the lock is dropped; a new connection's save is the only change.
@@ -1410,12 +1445,16 @@ class FilesHostTest {
   @Test
   void aChangesRunUnderWayAsTheLastConnectionGoesGoesWhenItEnds() throws Exception {
     var go = dir.resolve("go");
-    edits.put("changes", script -> "until [ -e '" + go + "' ]; do sleep 0.05; done\n" + script);
+    var started = dir.resolve("started");
+    edits.put(
+        "changes",
+        script ->
+            ": > '" + started + "'; until [ -e '" + go + "' ]; do sleep 0.05; done\n" + script);
     var mine = open("tok-mady");
     PtyWire.write(mine, new PtyMessage.FilesChanges(1));
     var asked = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-    while (host.changeRuns("acme", "dock") == null || host.changeRuns("acme", "dock").idle()) {
-      assertTrue(System.nanoTime() < asked, "the run never started");
+    while (!Files.exists(started)) {
+      assertTrue(System.nanoTime() < asked, "the run's script never started");
       Thread.onSpinWait();
     }
     var runs = host.changeRuns("acme", "dock");

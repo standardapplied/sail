@@ -2051,6 +2051,16 @@ public final class PtySessionHost implements AutoCloseable {
     }
   }
 
+  /** How many files connections to workspace {@code workspace} of {@code project} are served. */
+  int filesServed(String project, String workspace) {
+    synchronized (served) {
+      return (int)
+          served.stream()
+              .filter(s -> s.project().equals(project) && s.workspace().equals(workspace))
+              .count();
+    }
+  }
+
   /** Workspace {@code workspace} of {@code project}'s changes runs now, null when none. */
   WorkspaceChanges changeRuns(String project, String workspace) {
     synchronized (served) {
