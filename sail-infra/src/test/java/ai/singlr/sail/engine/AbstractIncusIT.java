@@ -75,16 +75,13 @@ public abstract class AbstractIncusIT {
   /**
    * Skips the test where no incus daemon answers, and otherwise makes this machine a box whose
    * sail-api has run: its socket directory exists, which every container's sail machinery mounts.
-   * Each test gets it here, so none depends on another having created it first.
+   * Each test gets it here, so none depends on another having created it first. Said in one setup
+   * line, outside any step, so a daemon that never answers is still the reason the test fails or
+   * skips on.
    */
   protected void ensureIncusOrSkip() {
-    String[] reason = {null};
-    try {
-      step("ask Incus whether it answers", STEP_BOUND, () -> reason[0] = incusUnreachableReason());
-    } catch (Exception e) {
-      reason[0] = e.getClass().getSimpleName() + ": " + e.getMessage();
-    }
-    var unreachable = reason[0];
+    var unreachable = incusUnreachableReason();
+    steps.say(unreachable == null ? "Incus answers" : "Incus does not answer: " + unreachable);
     if (unreachable == null) {
       try {
         Files.createDirectories(SailPaths.apiSocketHostDir());
@@ -309,15 +306,15 @@ public abstract class AbstractIncusIT {
   }
 
   /**
-   * Deletes {@code container}, saying nothing when there is none; a delete that runs out of time
-   * fails, naming it, as a hung Incus is no leftover to step over.
+   * Deletes {@code container}, saying nothing when there is none. A delete that could not run, or
+   * ran out of time, is said in one setup line naming the container and is passed over: this runs
+   * in cleanups, where a throw would hide the test's own failure and skip the deletes after it.
    */
   protected void deleteContainerQuietly(String container) {
     try {
       shell.exec(List.of("incus", "delete", "--force", container));
-    } catch (CommandTimedOut timedOut) {
-      throw new AssertionError("could not delete " + container + ": " + timedOut.getMessage());
-    } catch (Exception ignored) {
+    } catch (Exception e) {
+      steps.say("could not delete " + container + ": " + e.getMessage());
     }
   }
 

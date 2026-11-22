@@ -20,15 +20,21 @@ import java.util.function.LongSupplier;
 /**
  * The steps of an integration test's setup, each said as it starts and ends, with the time, and
  * each held to a stated bound: a command run on the step's thread is given what is left of the
- * bound as its timeout, so a step that outlasts its bound fails naming the command it was waiting
- * for. Without it a setup that crawls is said by nothing until the job's limit cancels the job: on
- * #529's run a runner whose disk copied some 60 times slower than usual held {@code WorkspaceIT}'s
- * first setup silent for 12.75 minutes. A step inside a step runs within the outer one's bound.
+ * bound as its timeout. Without the lines a setup that crawls is said by nothing until the job's
+ * limit cancels the job: on #529's run a runner whose disk copied some 60 times slower than usual
+ * held {@code WorkspaceIT}'s first setup silent for 12.75 minutes.
+ *
+ * <p>A command the bound cuts off times out as any command does, a {@link CommandTimedOut} whose
+ * message keeps its own form and adds the step's, so what reads a timeout (a start's or a stop's
+ * {@link InstanceTimeoutDiagnosis}, the lane's search for a timed-out incus command) reads this one
+ * too. The step is spent from then on: what runs after on its thread, that diagnosis among it, has
+ * its own timeout, and the step fails at its end even when its work went on. A step inside a step
+ * runs within the outer one's bound.
  */
 final class SetupSteps implements ShellExec {
 
-  /** What a command asks for when it names no timeout: {@link ShellExecutor}'s default. */
-  static final Duration COMMAND_DEFAULT = Duration.ofSeconds(120);
+  /** What a command asks for when it names no timeout. */
+  static final Duration COMMAND_DEFAULT = ShellExecutor.DEFAULT_TIMEOUT;
 
   private final ShellExec incus;
   private final PrintStream out;
@@ -47,18 +53,23 @@ final class SetupSteps implements ShellExec {
     T run() throws Exception;
   }
 
-  private record Step(String name, Duration bound, long started) {}
+  /** A step under way; {@code overran} says how its bound ran out, once it has. */
+  private record Step(String name, Duration bound, long started, String overran) {}
 
   /** Runs {@code work} as the setup step {@code name}, held to {@code bound}. */
   <T> T step(String name, Duration bound, Work<T> work) throws Exception {
     if (current.get() != null) {
       return work.run();
     }
-    var step = new Step(name, bound, nanos.getAsLong());
+    var step = new Step(name, bound, nanos.getAsLong(), null);
     say("start " + name + " (bound " + bound.toSeconds() + " s)");
     current.set(step);
     try {
       var answer = work.run();
+      var overran = current.get().overran();
+      if (overran != null) {
+        throw new AssertionError(overran);
+      }
       say("done " + name + " in " + seconds(elapsed(step)));
       return answer;
     } catch (Exception | AssertionError failure) {
@@ -114,39 +125,49 @@ final class SetupSteps implements ShellExec {
   }
 
   /**
-   * {@code call} given the least of what it asks and what is left of the current step's bound; a
-   * timeout the step's bound set is the step's failure, naming the command.
+   * {@code call} given the least of what it asks and what is left of the current step's bound, or
+   * what it asks once the step is spent; a timeout the bound set spends the step.
    */
   private Result bounded(List<String> command, Duration asked, Call call)
       throws IOException, InterruptedException, TimeoutException {
     var step = current.get();
-    if (step == null) {
+    if (step == null || step.overran() != null) {
       return call.with(asked);
     }
     var left = step.bound().minus(elapsed(step));
     if (!left.isPositive()) {
-      throw overran(step, command);
+      throw spend(
+          step,
+          new CommandTimedOut("Command timed out after 0s: " + String.join(" ", command), ""),
+          "it was spent before `" + String.join(" ", command) + "` began");
     }
-    var given = asked.compareTo(left) < 0 ? asked : left;
+    if (asked.compareTo(left) <= 0) {
+      return call.with(asked);
+    }
     try {
-      return call.with(given);
+      return call.with(left);
     } catch (CommandTimedOut timedOut) {
-      if (given.equals(left)) {
-        throw overran(step, command);
-      }
-      throw timedOut;
+      throw spend(
+          step,
+          timedOut,
+          "it gave `" + String.join(" ", command) + "` its last " + seconds(left) + " of it");
     }
   }
 
-  private static AssertionError overran(Step step, List<String> command) {
-    return new AssertionError(
+  /** {@code timedOut} with the step's word of its bound after its own; the step spent. */
+  private CommandTimedOut spend(Step step, CommandTimedOut timedOut, String how) {
+    var overran =
         "setup step '"
             + step.name()
             + "' did not end within its bound of "
             + step.bound().toSeconds()
-            + " s: it was waiting for `"
-            + String.join(" ", command)
-            + "`");
+            + " s: "
+            + how;
+    current.set(new Step(step.name(), step.bound(), step.started(), overran));
+    var said =
+        new CommandTimedOut(timedOut.getMessage() + " (" + overran + ")", timedOut.processes());
+    said.initCause(timedOut);
+    return said;
   }
 
   private Duration elapsed(Step step) {
@@ -157,7 +178,8 @@ final class SetupSteps implements ShellExec {
     return String.format(Locale.ROOT, "%.1f s", duration.toMillis() / 1000.0);
   }
 
-  private void say(String what) {
+  /** Says {@code what} as one line of the setup's, with the time. */
+  void say(String what) {
     out.println("[it-setup] " + DateTimeUtils.format(DateTimeUtils.now()) + " " + what);
   }
 }
