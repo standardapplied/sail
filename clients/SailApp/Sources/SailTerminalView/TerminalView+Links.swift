@@ -7,30 +7,47 @@ import SailVT
 /// A ⌘-click on a link goes to the link alone: neither the selection nor a program that tracks the
 /// mouse gets it. Every other click, ⌘ held or not, is as before.
 extension TerminalView {
-    /// The text of row `y` in characters, and the cell each character starts at.
-    func rowText(_ y: Int) -> (text: String, starts: [Int])? {
+    /// The text of the line holding row `y`, the rows it is soft-wrapped across joined into one,
+    /// and the cell each character starts at with its width.
+    func lineText(_ y: Int) -> (text: String, starts: [(cell: CellPoint, width: Int)])? {
         guard let rows = lastFrame?.rows, rows.indices.contains(y) else { return nil }
-        var text = "", starts: [Int] = []
-        for (x, cell) in rows[y].cells.enumerated() {
-            switch cell.width {
-            case .spacerTail, .spacerHead: continue
-            case .narrow, .wide:
-                let grapheme = cell.grapheme.isEmpty ? " " : cell.grapheme
-                for character in grapheme {
-                    text.append(character)
-                    starts.append(x)
+        var first = y, last = y
+        while first > 0, rows[first - 1].wrapped {
+            first -= 1
+        }
+        while last < rows.count - 1, rows[last].wrapped {
+            last += 1
+        }
+        var text = "", starts: [(cell: CellPoint, width: Int)] = []
+        for row in first ... last {
+            for (x, cell) in rows[row].cells.enumerated() {
+                switch cell.width {
+                case .spacerTail, .spacerHead: continue
+                case .narrow, .wide:
+                    let grapheme = cell.grapheme.isEmpty ? " " : cell.grapheme
+                    for character in grapheme {
+                        text.append(character)
+                        starts.append((CellPoint(x: x, y: row), cell.width == .wide ? 2 : 1))
+                    }
                 }
             }
         }
         return (text, starts)
     }
 
-    /// The link under `cell`: its row's text, the 1-based character there, and the cells it takes.
+    /// The link under `cell`: its line's text, the 1-based character there, and the cells it takes,
+    /// a run in each row its line is soft-wrapped across.
     func linkUnder(_ cell: CellPoint) -> (text: String, column: Int, link: OverlayLink)? {
-        guard let (text, starts) = rowText(cell.y), let index = starts.lastIndex(where: { $0 <= cell.x }),
+        guard let (text, starts) = lineText(cell.y),
+              let index = starts.lastIndex(where: { $0.cell.y < cell.y || $0.cell.y == cell.y && $0.cell.x <= cell.x }),
               let range = linkIn(text, index + 1), !range.isEmpty, range.lowerBound >= 0, range.upperBound <= starts.count else { return nil }
-        let end = range.upperBound < starts.count ? starts[range.upperBound] : starts[range.upperBound - 1] + 1
-        return (text, index + 1, OverlayLink(row: cell.y, columns: starts[range.lowerBound] ..< end))
+        var spans: [OverlayLink.Span] = []
+        for row in Set(starts[range].map(\.cell.y)).sorted() {
+            let cells = starts[range].filter { $0.cell.y == row }
+            guard let first = cells.map(\.cell.x).min(), let end = cells.map({ $0.cell.x + $0.width }).max() else { continue }
+            spans.append(OverlayLink.Span(row: row, columns: first ..< end))
+        }
+        return (text, index + 1, OverlayLink(spans: spans))
     }
 
     /// ⌘ held over `cell`, or not: the link there underlined and the pointing hand over it, or
@@ -53,9 +70,10 @@ extension TerminalView {
     /// The cell where `text` first starts in the text drawn, nil when it is not there: where the
     /// drive clicks.
     package func cell(of text: String) -> CellPoint? {
-        for y in lastFrame?.rows.indices ?? 0 ..< 0 {
-            guard let (row, starts) = rowText(y), let range = row.range(of: text) else { continue }
-            return CellPoint(x: starts[row.distance(from: row.startIndex, to: range.lowerBound)], y: y)
+        guard let rows = lastFrame?.rows else { return nil }
+        for y in rows.indices where y == 0 || !rows[y - 1].wrapped {
+            guard let (line, starts) = lineText(y), let range = line.range(of: text) else { continue }
+            return starts[line.distance(from: line.startIndex, to: range.lowerBound)].cell
         }
         return nil
     }
@@ -75,17 +93,17 @@ extension TerminalView {
         return metrics.cell(atX: Double(point.x) * scale, y: Double(point.y) * scale, in: grid)
     }
 
-    /// Where `link` lies, in the view's points.
-    func rect(of link: OverlayLink) -> NSRect {
-        let metrics = metrics, origin = metrics.origin(of: CellPoint(x: link.columns.lowerBound, y: link.row))
+    /// Where `span` of a link lies, in the view's points.
+    func rect(of span: OverlayLink.Span) -> NSRect {
+        let metrics = metrics, origin = metrics.origin(of: CellPoint(x: span.columns.lowerBound, y: span.row))
         return NSRect(
             x: Double(origin.x) / metrics.scale, y: Double(origin.y) / metrics.scale,
-            width: Double(link.columns.count * metrics.width) / metrics.scale, height: Double(metrics.height) / metrics.scale
+            width: Double(span.columns.count * metrics.width) / metrics.scale, height: Double(metrics.height) / metrics.scale
         )
     }
 
     override public func resetCursorRects() {
-        if let shownLink { addCursorRect(rect(of: shownLink), cursor: .pointingHand) }
+        shownLink?.spans.forEach { addCursorRect(rect(of: $0), cursor: .pointingHand) }
     }
 }
 

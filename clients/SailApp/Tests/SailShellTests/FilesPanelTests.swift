@@ -277,6 +277,53 @@ import Testing
         return panel
     }
 
+    static func stats(_ frames: [Frame]) -> [Int32] {
+        frames.compactMap { if case let .filesStat(id, _) = $0 { id } else { nil } }
+    }
+
+    /// M1: a ⌘-click's lookup while the connection cannot be had ends with the connection, said in
+    /// the session's own words; it asks nothing before admission, and nothing when the connection is
+    /// had again (the person clicks again).
+    @Test(arguments: [
+        ("stopped", FilesSession.Phase.stopped("Workspace dock of harbor was stopped by ana."), "Workspace dock of harbor was stopped by ana."),
+        ("refused", .refused(["Workspace 'dock' belongs to 'uday', not you.", "Ask uday to enter it."]), "Workspace 'dock' belongs to 'uday', not you. Ask uday to enter it."),
+        ("unreachable", .unreachable("dock did not answer for 30 s."), "dock did not answer for 30 s."),
+    ] as [(String, FilesSession.Phase, String)])
+    func aLookupEndsWithTheConnectionInItsOwnWords(_ name: String, _ phase: FilesSession.Phase, _ words: String) throws {
+        let panel = FilesPanel(project: "harbor", workspace: "dock", tickets: nil, look: .light, mono: try LabelFont(directory: LookTests.fonts))
+        var sent: [Frame] = [], said: [TerminalPath.Lookup.Next] = []
+        panel.onSent = { sent += $0 }
+        panel.lookUp("src/a.ts", cwd: nil) { said.append($0) }
+        #expect(sent.isEmpty && panel.lookingUp, "\(name): asked before the connection was admitted")
+        panel.heard(.phase(phase))
+        #expect(said == [.said(words)] && !panel.lookingUp, "\(name): \(said)")
+        panel.heard(.phase(.connected))
+        panel.heard(.admitted)
+        #expect(Self.stats(sent).isEmpty && said.count == 1, "\(name): the ended lookup was asked when the connection came back")
+    }
+
+    /// M1: a lookup whose connection drops mid-way is said in the drop's words and never asked
+    /// again: the connection had again asks nothing, and a late answer to its old ask opens
+    /// nothing; a close ends a lookup unsaid.
+    @Test func aLookupDroppedMidWayIsSaidAndNeverAskedAgain() throws {
+        let panel = try Self.played([Self.folder("src")])
+        var sent: [Frame] = [], said: [TerminalPath.Lookup.Next] = []
+        panel.onSent = { sent += $0 }
+        panel.lookUp("src/a.ts", cwd: nil) { said.append($0) }
+        let asked = try #require(Self.stats(sent).first, "the lookup asked nothing")
+        panel.heard(.phase(.reconnecting("The connection to dock dropped.")))
+        #expect(said == [.said("The connection to dock dropped.")] && !panel.lookingUp)
+        sent = []
+        panel.heard(.phase(.connected))
+        panel.heard(.admitted)
+        panel.heard(.frame(.filesEntry(id: asked, entry: Self.file("a.ts"), version: "v1")))
+        #expect(Self.stats(sent).isEmpty && said.count == 1, "the dropped lookup was asked again, or its late answer opened a file: \(said)")
+        panel.lookUp("src/b.ts", cwd: nil) { said.append($0) }
+        #expect(panel.lookingUp)
+        panel.close()
+        #expect(!panel.lookingUp && said.count == 1, "a close left the lookup, or said something")
+    }
+
     /// → opens a folder and ← shuts it, Space too; ↓ moves among rows as any list's.
     @Test func theArrowsOpenAndShutAFolder() throws {
         let panel = try Self.played([Self.folder("src"), Self.file("README.md")])

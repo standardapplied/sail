@@ -465,24 +465,27 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
             return
         }
         pendingLine = nil
-        show(line: line)
-        numbers.at = line
+        numbers.at = show(line: line)
     }
 
     /// The line a ⌘-click asked for, gone to once the whole file is in.
     private var pendingLine: Int?
 
-    /// Opens at `line` (1-based): the caret at its start, the line scrolled into view.
-    func show(line: Int) {
+    /// Opens at `line` (1-based), or the last line when the text has fewer: the caret at its start,
+    /// the line scrolled into view; answers the line it reached.
+    @discardableResult
+    func show(line: Int) -> Int {
         let text = editor.string as NSString
-        var location = 0
+        var location = 0, reached = 1
         for _ in 1 ..< max(line, 1) {
             let next = text.lineRange(for: NSRange(location: location, length: 0))
             guard NSMaxRange(next) < text.length else { break }
             location = NSMaxRange(next)
+            reached += 1
         }
         editor.setSelectedRange(NSRange(location: location, length: 0))
         editor.scrollRangeToVisible(NSRange(location: location, length: 0))
+        return reached
     }
 
     /// A key: decided at once.

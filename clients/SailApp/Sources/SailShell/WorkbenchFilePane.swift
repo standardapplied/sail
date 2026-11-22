@@ -66,16 +66,16 @@ extension WorkbenchView {
     }
 
     /// A ⌘-click on a path in workspace terminal `pane` (its row's `text`, the 1-based character
-    /// `column`): looked for on the workspace, in the folder the terminal last reported, then the
-    /// root, then each folder under it (M17); the first found opened in the tab's file pane at its
-    /// line; none found, the terminal's own card says so (M18). Nothing is typed into the terminal.
+    /// `column`): looked for on the workspace (``TerminalPath/Lookup``: the folder the terminal last
+    /// reported, the root, then at most 16 folders under it) (M17); the first found opened in the
+    /// tab's file pane at its line, the file already open only going there; none found, a refusal
+    /// or the connection's end, the terminal's own card says so (M18). Nothing is typed into it.
     func openTerminalPath(in text: String, at column: Int, from pane: TerminalPane) {
         guard let found = TerminalPath.find(in: text, at: column), let tab = model.tabs.first(where: { $0.layout.leaves.contains(pane.id) }),
               let view = tabViews[tab.id], let (project, name) = workspace(of: tab) else { return }
         let panel = view.files ?? makeFiles(project: project, name: name, in: view)
-        let cwd = model.panes[pane.id].flatMap { Self.reportedPath($0.reportedFolder) }.map { FileName($0) }
-        let places = TerminalPath.places(for: found.path, cwd: cwd, root: FileTree.root, folders: panel.rootFolders)
-        panel.lookUp(found.path, in: places) { [weak self, weak view, weak pane] next in
+        let cwd = model.panes[pane.id].flatMap { Self.reportedPath($0.reportedFolder) }
+        panel.lookUp(found.path, cwd: cwd) { [weak self, weak view, weak pane] next in
             guard let self else { return }
             switch next {
             case let .found(path, entry):

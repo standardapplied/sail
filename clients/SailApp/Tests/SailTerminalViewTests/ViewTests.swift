@@ -257,6 +257,27 @@ import Testing
         }
     }
 
+    /// A path soft-wrapped across two rows is one line: the link sees it whole, and ⌘ over either
+    /// row underlines its cells on both.
+    @Test func aPathWrappedAcrossRowsIsReadWhole() async throws {
+        let harness = try Harness(columns: 20, rows: 4, size: NSSize(width: 200, height: 160))
+        let columns = try #require(harness.view.grid?.columns)
+        try #require(columns > 10 && columns < 32, "a grid of \(columns) columns wraps the path nowhere")
+        harness.link.output("error in src/very/long/name.ts:9 here")
+        var seen: [String] = []
+        harness.view.linkIn = { text, column in
+            seen.append(text)
+            guard let range = text.range(of: "src/very/long/name.ts:9") else { return nil }
+            let start = text.distance(from: text.startIndex, to: range.lowerBound), link = start ..< start + 23
+            return link.contains(column - 1) ? link : nil
+        }
+        await harness.tick()
+        harness.mouse(.mouseMoved, column: 1, row: 1, flags: .command)
+        #expect(seen.last?.hasPrefix("error in src/very/long/name.ts:9 here") == true, "the line was not read whole: \(seen.last ?? "")")
+        #expect(harness.view.shownLink == OverlayLink(spans: [OverlayLink.Span(row: 0, columns: 9 ..< columns), OverlayLink.Span(row: 1, columns: 0 ..< 32 - columns)]),
+                "\(String(describing: harness.view.shownLink))")
+    }
+
     /// A ⌘-click on a link, in the text drawn, goes to the link alone: nothing is selected and a
     /// program that tracks the mouse gets nothing, its drag and release included; the same click
     /// without ⌘ is the program's, as before.

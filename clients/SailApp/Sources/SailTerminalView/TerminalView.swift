@@ -502,7 +502,7 @@ public final class TerminalView: NSView {
             committedFrames += 1
             marks.committed(frame: number, read: read, target: target)
             lastFrame = frame
-            if let shownLink, frame.changed.touches(shownLink.row) { lookForLinkAgain() }
+            if let shownLink, shownLink.spans.contains(where: { frame.changed.touches($0.row) }) { lookForLinkAgain() }
             needsDraw = renderer.lastFrameWantsAnother
             updateBlink()
             return refreshed(.drew, screenChanged || needsDraw)
