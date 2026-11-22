@@ -339,6 +339,14 @@ struct Step: Decodable {
     var fileCompare: [String]?
     /// The conflict sheet's button of this title pressed: that sheet goes (another may come).
     var fileSheet: String?
+    /// The workspace terminal focused prints this line, as a compiler would.
+    var terminalPrints: String?
+    /// ⌘-click on this text where the workspace terminal focused shows it: a path it opens.
+    var fileCommandClick: String?
+    /// The file pane went to this line: the caret on it and the accent bar beside it, within `seconds`.
+    var fileAtLine: Int?
+    /// The workspace terminal focused says this in its own card, within `seconds`.
+    var terminalSays: String?
     /// The conflict sheet up says this as its heading, within `seconds`.
     var fileSheetSays: String?
     /// The workspace's bytes the file pane holds for Compare are this text, within `seconds`.

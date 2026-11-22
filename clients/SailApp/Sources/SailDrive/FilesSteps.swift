@@ -307,6 +307,24 @@ extension Driver {
             return (held, "\(holds[0]) holds \(door.file(path).map { String(decoding: $0, as: UTF8.self).debugDescription } ?? "nothing")")
         }
         if step.fileSaveWhileLoading == true, let door = GoldenDesk.door { return await fileSaveWhileLoading(door) }
+        if let text = step.terminalPrints, let door = GoldenDesk.door {
+            guard let terminal = self.pane else { return (false, "no workspace terminal focused") }
+            door.print(terminal.name, text + "\r\n")
+            let shown = await waitForState(step.seconds ?? 10) { terminal.terminal.cell(of: text) != nil }
+            return (shown, shown ? "the terminal shows \(text.debugDescription)" : "the terminal never showed \(text.debugDescription)")
+        }
+        if let text = step.fileCommandClick {
+            guard let terminal = self.pane, let cell = terminal.terminal.cell(of: text) else { return (false, "the workspace terminal shows no \(text.debugDescription)") }
+            return (await click(terminal.terminal, at: terminal.terminal.point(of: cell), modifiers: .command), "⌘-clicked \(text.debugDescription) at column \(cell.x + 1), row \(cell.y + 1)")
+        }
+        if let line = step.fileAtLine {
+            let there = await waitForState(step.seconds ?? 10) { pane()?.editable == true && pane()?.atLine == line && pane()?.caretLine == line }
+            return (there, "the file pane: the bar at \(pane()?.atLine.map(String.init) ?? "no line"), the caret on line \(pane()?.caretLine ?? 0)")
+        }
+        if let words = step.terminalSays {
+            let said = await waitForState(step.seconds ?? 10) { self.pane?.status.says == words }
+            return (said, "the terminal's card says \(self.pane?.status.says ?? "nothing")")
+        }
         if step.fileSave == true {
             guard workbench.saveFile() else { return (false, "no file pane to save") }
             return (true, "⌘S")
