@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -33,18 +34,54 @@ public abstract class AbstractIncusIT {
 
   protected static final String IMAGE = "images:ubuntu/24.04";
 
+  /** The bound of a setup step that launches a container. */
+  protected static final Duration LAUNCH_BOUND = Duration.ofSeconds(120);
+
+  /** The bound of a setup step that makes a storage pool. */
+  protected static final Duration POOL_BOUND = Duration.ofSeconds(180);
+
+  /** The bound of any other setup step: a seal, an install, a stop, a snapshot, a cleanup. */
+  protected static final Duration STEP_BOUND = Duration.ofSeconds(120);
+
+  private final SetupSteps steps =
+      new SetupSteps(new NoAddressEvidence(new ShellExecutor(false)), System.out, System::nanoTime);
+
   /**
-   * This host's Incus, keeping evidence of a make that gets no address ({@link NoAddressEvidence}).
+   * This host's Incus, keeping evidence of a make that gets no address ({@link NoAddressEvidence}),
+   * each command in a setup step held to that step's bound ({@link #step}).
    */
-  protected final ShellExec shell = new NoAddressEvidence(new ShellExecutor(false));
+  protected final ShellExec shell = steps;
+
+  /** One step of a test's setup. */
+  @FunctionalInterface
+  protected interface Action {
+    void run() throws Exception;
+  }
+
+  /**
+   * Runs {@code action} as the setup step {@code name}: said as it starts and ends, with the time,
+   * and failed naming the command it waits for once it has run {@code bound} ({@link SetupSteps}).
+   */
+  protected void step(String name, Duration bound, Action action) throws Exception {
+    steps.step(
+        name,
+        bound,
+        () -> {
+          action.run();
+          return null;
+        });
+  }
 
   /**
    * Skips the test where no incus daemon answers, and otherwise makes this machine a box whose
    * sail-api has run: its socket directory exists, which every container's sail machinery mounts.
-   * Each test gets it here, so none depends on another having created it first.
+   * Each test gets it here, so none depends on another having created it first. Said in one setup
+   * line, outside any step, so a daemon that never answers is still the reason the test fails or
+   * skips on.
    */
   protected void ensureIncusOrSkip() {
     var unreachable = incusUnreachableReason();
+    steps.say(unreachable == null ? "Incus answers" : "Incus does not answer: " + unreachable);
     if (unreachable == null) {
       try {
         Files.createDirectories(SailPaths.apiSocketHostDir());
@@ -74,12 +111,17 @@ public abstract class AbstractIncusIT {
 
   /** Launches {@code container} from the base image, with {@code options} to incus launch. */
   protected void launch(String container, String... options) throws Exception {
-    deleteContainerQuietly(container);
-    var command = new ArrayList<>(List.of("incus", "launch", IMAGE, container));
-    command.addAll(List.of(options));
-    var launched = shell.exec(command);
-    assertTrue(
-        launched.ok(), "could not launch test container " + IMAGE + ": " + launched.stderr());
+    step(
+        "launch " + container + " from " + IMAGE,
+        LAUNCH_BOUND,
+        () -> {
+          deleteContainerQuietly(container);
+          var command = new ArrayList<>(List.of("incus", "launch", IMAGE, container));
+          command.addAll(List.of(options));
+          var launched = shell.exec(command);
+          assertTrue(
+              launched.ok(), "could not launch test container " + IMAGE + ": " + launched.stderr());
+        });
   }
 
   private static final String PREPARED_ALIAS = "sail-it-prepared-v3";
@@ -97,26 +139,31 @@ public abstract class AbstractIncusIT {
    * naming the bake, instead of reaching the internet from a test's body.
    */
   protected void launchPrepared(String container, String... options) throws Exception {
-    synchronized (PREPARE_LOCK) {
-      if (!preparedImageReady) {
-        assertTrue(
-            shell.exec(List.of("incus", "image", "show", PREPARED_ALIAS)).ok(),
-            "the prepared image "
-                + PREPARED_ALIAS
-                + " is not on this host: bake it with ci/images prepared-image bake");
-        preparedImageReady = true;
-      }
-    }
-    deleteContainerQuietly(container);
-    var launch = new ArrayList<>(List.of("incus", "launch", PREPARED_ALIAS, container));
-    launch.addAll(List.of(options));
-    var launched = shell.exec(launch);
-    assertTrue(
-        launched.ok(),
-        "could not launch test container from local image "
-            + PREPARED_ALIAS
-            + ": "
-            + launched.stderr());
+    step(
+        "launch " + container + " from " + PREPARED_ALIAS,
+        LAUNCH_BOUND,
+        () -> {
+          synchronized (PREPARE_LOCK) {
+            if (!preparedImageReady) {
+              assertTrue(
+                  shell.exec(List.of("incus", "image", "show", PREPARED_ALIAS)).ok(),
+                  "the prepared image "
+                      + PREPARED_ALIAS
+                      + " is not on this host: bake it with ci/images prepared-image bake");
+              preparedImageReady = true;
+            }
+          }
+          deleteContainerQuietly(container);
+          var launch = new ArrayList<>(List.of("incus", "launch", PREPARED_ALIAS, container));
+          launch.addAll(List.of(options));
+          var launched = shell.exec(launch);
+          assertTrue(
+              launched.ok(),
+              "could not launch test container from local image "
+                  + PREPARED_ALIAS
+                  + ": "
+                  + launched.stderr());
+        });
   }
 
   /** The ZFS pool a spec's workspaces are cloned on in this lane: a file, beside the dir pool. */
@@ -168,35 +215,60 @@ public abstract class AbstractIncusIT {
    * definition as a dispatch reads it, and snapshotted: what every run of a spec is cloned from.
    */
   protected void specBox(ProjectDefinition definition, TemplateSetup setup) throws Exception {
-    removeSpecBox(definition.name());
-    var made = new IncusStorage(shell).create(SPEC_POOL, new PoolSource.File(10240));
-    assertTrue(made.ok(), "Incus could not make a file-backed zfs pool: " + made.reason());
+    step(
+        "remove " + definition.name() + "'s spec box leftovers",
+        STEP_BOUND,
+        () -> removeSpecBox(definition.name()));
+    step(
+        "make the file-backed zfs pool " + SPEC_POOL,
+        POOL_BOUND,
+        () -> {
+          var made = new IncusStorage(shell).create(SPEC_POOL, new PoolSource.File(10240));
+          assertTrue(made.ok(), "Incus could not make a file-backed zfs pool: " + made.reason());
+        });
     var template = WorkspaceTemplate.nameOf(definition.name());
     launchPrepared(template, "--storage", SPEC_POOL);
-    var seal = new ArrayList<>(List.of("bash", "-c", SEAL_SPEC_TEMPLATE, "seal"));
-    for (var repo :
-        Objects.requireNonNullElse(definition.repos(), List.<ProjectDefinition.Repo>of())) {
-      seal.add(repo.path());
-    }
-    var sealed = exec(template, seal);
-    assertTrue(sealed.ok(), "could not seal the template: " + sealed.stderr() + sealed.stdout());
-    setup.into(template);
-    ContainerSailSetup.ensureInstalled(shell, template);
-    new ContainerManager(shell).stop(template);
-    var recorded =
-        shell.exec(
-            List.of(
-                "incus",
-                "config",
-                "set",
-                template,
-                BoxInstances.TEMPLATE_OF_KEY + "=" + definition.name(),
-                WorkspaceTemplate.CURRENT_KEY + "=v1",
-                WorkspaceTemplate.INPUTS_KEY
-                    + "="
-                    + ProjectProvisioner.inputs(definition, Optional.empty())));
-    assertTrue(recorded.ok(), recorded.reason());
-    new SnapshotManager(shell).create(template, "v1");
+    step(
+        "seal " + template,
+        STEP_BOUND,
+        () -> {
+          var seal = new ArrayList<>(List.of("bash", "-c", SEAL_SPEC_TEMPLATE, "seal"));
+          for (var repo :
+              Objects.requireNonNullElse(definition.repos(), List.<ProjectDefinition.Repo>of())) {
+            seal.add(repo.path());
+          }
+          var sealed = exec(template, seal);
+          assertTrue(
+              sealed.ok(), "could not seal the template: " + sealed.stderr() + sealed.stdout());
+        });
+    step("the test's own setup of " + template, STEP_BOUND, () -> setup.into(template));
+    step(
+        "install sail's machinery in " + template,
+        STEP_BOUND,
+        () -> ContainerSailSetup.ensureInstalled(shell, template));
+    step("stop " + template, STEP_BOUND, () -> new ContainerManager(shell).stop(template));
+    step(
+        "record " + template + " current at v1",
+        STEP_BOUND,
+        () -> {
+          var recorded =
+              shell.exec(
+                  List.of(
+                      "incus",
+                      "config",
+                      "set",
+                      template,
+                      BoxInstances.TEMPLATE_OF_KEY + "=" + definition.name(),
+                      WorkspaceTemplate.CURRENT_KEY + "=v1",
+                      WorkspaceTemplate.INPUTS_KEY
+                          + "="
+                          + ProjectProvisioner.inputs(definition, Optional.empty())));
+          assertTrue(recorded.ok(), recorded.reason());
+        });
+    step(
+        "snapshot " + template + " v1",
+        STEP_BOUND,
+        () -> new SnapshotManager(shell).create(template, "v1"));
   }
 
   /** Removes every workspace and the template of {@code project}, then {@link #SPEC_POOL}. */
@@ -233,10 +305,16 @@ public abstract class AbstractIncusIT {
     return command;
   }
 
+  /**
+   * Deletes {@code container}, saying nothing when there is none. A delete that could not run, or
+   * ran out of time, is said in one setup line naming the container and is passed over: this runs
+   * in cleanups, where a throw would hide the test's own failure and skip the deletes after it.
+   */
   protected void deleteContainerQuietly(String container) {
     try {
       shell.exec(List.of("incus", "delete", "--force", container));
-    } catch (Exception ignored) {
+    } catch (Exception e) {
+      steps.say("could not delete " + container + ": " + e.getMessage());
     }
   }
 

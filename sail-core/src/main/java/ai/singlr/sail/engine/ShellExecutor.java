@@ -34,6 +34,9 @@ import java.util.stream.Stream;
  */
 public final class ShellExecutor implements ShellExec {
 
+  /** How long a command may run when its caller names no timeout. */
+  public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(120);
+
   private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(3);
   private static final AtomicInteger LISTING_SCOPES = new AtomicInteger();
 
@@ -49,7 +52,7 @@ public final class ShellExecutor implements ShellExec {
   }
 
   public ShellExecutor(boolean dryRun) {
-    this(dryRun, Duration.ofSeconds(120));
+    this(dryRun, DEFAULT_TIMEOUT);
   }
 
   /** An open {@link #listingTimedOutProcesses} scope, closed without throwing. */

@@ -3,9 +3,9 @@ description: >
   Leaves what a test job's maven run proved where it can be read without scrolling the log: the
   totals and every failed test in the job summary and as the log's last lines, and, unless the
   job passed, the surefire and failsafe reports as an artifact, with the evidence an Incus test kept
-  of a workspace that got no address (`target/incus-evidence`) and Sail's record of an incus start
-  or stop that timed out (`target/it-home-*/.sail/logs/containers.log`). Run it last, with
-  `if: always()`, after a maven step that teed its output to $RUNNER_TEMP/maven.log.
+  of a workspace that got no address (`target/incus-evidence`) and Sail's own logs of each test
+  home (`target/it-home-*/.sail/logs`: the record of an incus start or stop that timed out). Run it
+  last, with `if: always()`, after a maven step that teed its output to $RUNNER_TEMP/maven.log.
 
 inputs:
   job-status:
@@ -38,14 +38,17 @@ runs:
           fi
         } | tee -a "$GITHUB_STEP_SUMMARY"
 
+    # A test home's logs are under `.sail`, a hidden folder the upload otherwise leaves out: #529's
+    # shard 2 named its containers.log, and the artifact held none.
     - name: Upload the surefire and failsafe reports
       if: inputs.job-status != 'success'
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: ${{ github.job }}${{ inputs.label && format('-{0}', inputs.label) || '' }}-test-reports
         if-no-files-found: ignore
+        include-hidden-files: true
         path: |
           **/target/surefire-reports
           **/target/failsafe-reports
           **/target/incus-evidence
-          **/target/it-home-*/.sail/logs/containers.log
+          **/target/it-home-*/.sail/logs
