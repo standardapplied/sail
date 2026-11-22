@@ -102,6 +102,27 @@ import Testing
         #expect(runner.sessions == [session] && runner.kills.isEmpty)
     }
 
+    /// A1: an agent started before This Mac was ever shown, so before its first restore, opens
+    /// its tab once the restore is done, titled by its harness, its Create naming the agent; the
+    /// restore makes no This Mac tab in its place.
+    @Test func anAgentStartedBeforeTheFirstRestoreOpensOnceRestored() async throws {
+        let (local, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
+        defer { local.stop(); runner.stop() }
+        let bench = try WorkbenchView(fonts: LookTests.fonts, host: ThisMacEndingTests.host(at: local), look: .light, defaults: Self.defaults())
+        let tickets = DoorTickets(runner)
+        bench.signedIn = { ("uday", tickets) }
+        let start = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan")
+        bench.openAgent(start, project: "harbor", name: "dock")
+        #expect(!bench.restored && bench.model.tabs.isEmpty)
+        bench.shown()
+        #expect(await RunnerTabTests.until(10) { bench.restored && Self.runnerSessions(bench).count == 1 }, "the agent's tab never opened")
+        #expect(bench.model.tabs.map { bench.model.title(of: $0.id) } == ["Claude Code · dock"])
+        #expect(await Self.attached(bench))
+        let session = try #require(Self.runnerSessions(bench).first)
+        let create = try #require(runner.create(of: session))
+        #expect(create.agent.harness == "claude-code" && create.agent.mode == "plan" && create.command.isEmpty)
+    }
+
     /// R7: Open on a workspace attaches a tab to each of the person's live sessions no tab holds,
     /// newest first; with all in tabs, it chooses the newest's tab and starts nothing (minor 8).
     @Test func openingAWorkspaceReattachesItsLiveSessionsNewestFirst() async throws {

@@ -33,6 +33,7 @@ import Testing
         let (view, window) = try WorkspacesViewTests.view(server, width: width)
         view.person = person
         view.look = look
+        view.project.list.pointer = { nil }
         view.newSession.popover.keysLeft = Notification.Name("sail.tests.keys-left.\(UUID().uuidString)")
         view.shown()
         #expect(await RunnerTabTests.until { !view.busy && view.text.contains(words) }, "nothing listed: \(view.text)")
@@ -121,6 +122,7 @@ import Testing
         defer { window.orderOut(nil) }
         let dockActions = try Self.onRow("dock", in: view), quayActions = try Self.onRow("quay", in: view)
         #expect(dockActions == ["Open", NewSessionWords.newSession, "More"], "dock shows \(dockActions)")
+        _ = try Self.onRow("dock", in: view)
         let plus = try #require(view.project.plus("dock") as? SailButton), size = plus.intrinsicContentSize
         #expect(near(size.width, size.height) && near(size.height, ButtonSize.small.height), "the + is not the small icon button ⋯ is: \(size)")
         #expect(quayActions == ["Open", "More"], "quay, ana's, shows \(quayActions)")
