@@ -301,7 +301,7 @@
   {"name": "a1-refused", "shot": "a1-refused"},
   {"name": "a1-pier-nothing-made", "doorLists": 0},
   {"name": "a1-pier-close-the-card", "pressStatus": "Close"},
-  {"name": "a1-pier-no-tab-left", "arrangement": {"titles": []}},
+  {"name": "a1-pier-no-tab-left", "arrangement": {"tabs": [], "titles": []}},
   {"name": "a1-pier-made-again", "doorRefusesCreates": []},
   {"name": "a1-pier-back-to-workspaces", "select": "workspaces"},
   {"name": "a1-pier-left-by-ben", "relistAs": ["pier", "owner:removed"]},
