@@ -43,6 +43,12 @@ public enum Goldens {
         }
     }
 
+    /// What a ticket of each action admits, by its action's wire name: the host's `PtyMessage`
+    /// names its own `PtyTickets` lets through, as the host's `TicketAdmitsGoldenTest` asked them.
+    public static func admits() throws -> [String: Set<String>] {
+        try object("tickets/admits.json").mapValues { Set($0 as? [String] ?? []) }
+    }
+
     /// The handshake magic the host's `PtyWire` sends.
     public static func magic() throws -> [UInt8] {
         try bytes(hex: object("frames/frames.json")["magic"] as? String ?? "")
