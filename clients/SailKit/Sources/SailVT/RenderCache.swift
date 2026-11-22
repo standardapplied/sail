@@ -92,7 +92,11 @@ final class RenderCache {
         while row.count < columns, ghostty_render_state_row_cells_next(rowCells.pointer) {
             row.append(try readCell())
         }
-        return ScreenFrame.Row(cells: row)
+        var raw = GhosttyRow()
+        try require("ghostty_render_state_row_get", ghostty_render_state_row_get(rowIterator.pointer, GHOSTTY_RENDER_STATE_ROW_DATA_RAW, &raw))
+        var wrapped = false
+        try require("ghostty_row_get", ghostty_row_get(raw, GHOSTTY_ROW_DATA_WRAP, &wrapped))
+        return ScreenFrame.Row(cells: row, wrapped: wrapped)
     }
 
     private func readCell() throws(ScreenError) -> Cell {

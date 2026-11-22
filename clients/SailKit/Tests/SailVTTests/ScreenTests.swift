@@ -52,6 +52,15 @@ import Testing
         #expect(resized.rows.count == 4 && resized.rows.allSatisfy { $0.cells.count == 12 })
     }
 
+    /// A line longer than its row goes on in the row below, which the row says; a line ended by
+    /// CR LF does not, though it fills its row.
+    @Test func aRowSaysWhenItsLineGoesOnBelow() throws {
+        let screen = try Screen(size: GridSize(columns: 10, rows: 4), scrollbackBytes: 0, palette: .dark)
+        _ = screen.feed(Array("src/very/long.ts:3\r\n0123456789\r\nend".utf8))
+        let rows = try screen.frame().rows
+        #expect(rows.map(\.wrapped) == [true, false, false, false], "\(rows.map(\.wrapped))")
+    }
+
     @Test func readingTheTextLeavesTheNextFramesChanges() throws {
         let screen = try screen(columns: 10, rows: 3)
         _ = try screen.frame()

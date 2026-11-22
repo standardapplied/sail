@@ -185,21 +185,62 @@ public final class FakeRunnerDoor: Sendable {
         }
     }
 
-    /// File `path` now holds `bytes`, at a new version: each files connection watching it is told.
+    /// File `path` now holds `bytes`, at a new version: each files connection watching it is told,
+    /// and its folder's listing holds it, as the host's does.
     public func setFile(_ path: String, _ bytes: [UInt8]) {
         files.withLock { files in
             files.versions += 1
             files.contents[FileName(path)] = (bytes, "v\(files.versions)")
             tellWatchers(of: FileName(path), in: files)
+            listed(FileName(path), size: bytes.count, in: &files)
         }
     }
 
-    /// File `path` is gone: a read of it is refused as not found, and its watchers are told.
+    /// File `path` is gone: a read of it is refused as not found, its watchers are told, and its
+    /// folder's listing loses it.
     public func removeFile(_ path: String) {
         files.withLock { files in
             files.contents[FileName(path)] = nil
             tellWatchers(of: FileName(path), in: files)
+            listed(FileName(path), size: nil, in: &files)
         }
+    }
+
+    /// File `from` is now `to`: both folders' listings follow, and their watchers are told.
+    public func moveFile(_ from: String, to: String) {
+        files.withLock { files in
+            guard let file = files.contents.removeValue(forKey: FileName(from)) else { return }
+            files.versions += 1
+            files.contents[FileName(to)] = (file.bytes, "v\(files.versions)")
+            tellWatchers(of: FileName(from), in: files)
+            tellWatchers(of: FileName(to), in: files)
+            listed(FileName(from), size: nil, in: &files)
+            listed(FileName(to), size: file.bytes.count, in: &files)
+        }
+    }
+
+    /// Folder `path`'s entries as the door lists them now, nil for a folder it holds none of.
+    public func folder(_ path: String) -> [FileEntry]? {
+        files.withLock { $0.folders[FileName(path)]?.entries }
+    }
+
+    /// File `path`'s folder's listing kept in step with it, as the host's listing and watch are:
+    /// its entry put, replaced (`size`) or taken away (nil), at a new version, and the folder's
+    /// watchers told. A folder the door does not list is left unlisted.
+    private func listed(_ path: FileName, size: Int?, in files: inout Files) {
+        guard let slash = path.bytes.lastIndex(of: 0x2F) else { return }
+        let parent = FileName(Array(path.bytes[..<slash])), name = FileName(Array(path.bytes[path.bytes.index(after: slash)...]))
+        guard var folder = files.folders[parent] else { return }
+        let had = folder.entries.first { $0.name == name }
+        guard size != nil || had != nil else { return }
+        folder.entries.removeAll { $0.name == name }
+        if let size {
+            folder.entries.append(FileEntry(name: name, kind: .known(.file), target: .known(.none), size: Int64(size), mtimeNanos: 0, mode: had?.mode ?? 0o100644))
+        }
+        files.versions += 1
+        folder.version = "v\(files.versions)"
+        files.folders[parent] = folder
+        tellWatchers(of: parent, in: files)
     }
 
     /// The next save is refused as `kind`, in `message`, nothing written.
@@ -383,9 +424,11 @@ public final class FakeRunnerDoor: Sendable {
                     let present = files.contents[save.path].map { Self.hex($0.bytes) } ?? "absent"
                     guard present == save.base else { return .filesConflict(id: id, digest: present) }
                     files.versions += 1
-                    files.contents[save.path] = (save.bytes, "v\(files.versions)")
+                    let version = "v\(files.versions)"
+                    files.contents[save.path] = (save.bytes, version)
                     tellWatchers(of: save.path, in: files)
-                    return .filesWritten(id: id, digest: Self.hex(save.bytes), version: "v\(files.versions)")
+                    listed(save.path, size: save.bytes.count, in: &files)
+                    return .filesWritten(id: id, digest: Self.hex(save.bytes), version: version)
                 }
                 answer(outcome, on: connection)
             case let .filesList(id, path):

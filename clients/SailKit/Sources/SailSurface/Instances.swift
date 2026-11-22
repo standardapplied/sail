@@ -173,14 +173,27 @@ public struct Overlay: Equatable, Sendable {
     }
 }
 
-/// A run of cells in one row, underlined as a link: what ⌘ held over a path in a terminal shows.
+/// Cells underlined as a link, a run in each row it takes (a line soft-wrapped across rows takes
+/// several): what ⌘ held over a path in a terminal shows.
 public struct OverlayLink: Equatable, Sendable {
-    public let row: Int
-    public let columns: Range<Int>
+    public struct Span: Equatable, Sendable {
+        public let row: Int
+        public let columns: Range<Int>
+
+        public init(row: Int, columns: Range<Int>) {
+            self.row = row
+            self.columns = columns
+        }
+    }
+
+    public let spans: [Span]
+
+    public init(spans: [Span]) {
+        self.spans = spans
+    }
 
     public init(row: Int, columns: Range<Int>) {
-        self.row = row
-        self.columns = columns
+        spans = [Span(row: row, columns: columns)]
     }
 }
 
@@ -271,13 +284,14 @@ public struct InstanceBuilder: Sendable {
 
     /// A link's cells underlined, single, in the default foreground, within the grid.
     private func underlined(_ link: OverlayLink, _ frame: ScreenFrame, glyphs: some GlyphSource) -> Overlaid {
-        guard frame.rows.indices.contains(link.row), let place = glyphs.place(.sprite(.underline(.single), wide: false)) else {
-            return ([], !frame.rows.indices.contains(link.row))
-        }
+        let spans = link.spans.filter { frame.rows.indices.contains($0.row) }
+        guard !spans.isEmpty else { return ([], true) }
+        guard let place = glyphs.place(.sprite(.underline(.single), wide: false)) else { return ([], false) }
         let ink = Self.color(frame.colors.foreground)
-        let columns = max(link.columns.lowerBound, 0) ..< min(link.columns.upperBound, frame.size.columns)
-        return (columns.map { x in
-            GlyphInstance(rect: rect(metrics.origin(of: CellPoint(x: x, y: link.row)), cells: 1), slot: Self.origin(place.slot), colour: place.colour, color: ink)
+        return (spans.flatMap { span in
+            (max(span.columns.lowerBound, 0) ..< min(span.columns.upperBound, frame.size.columns)).map { x in
+                GlyphInstance(rect: rect(metrics.origin(of: CellPoint(x: x, y: span.row)), cells: 1), slot: Self.origin(place.slot), colour: place.colour, color: ink)
+            }
         }, true)
     }
 
