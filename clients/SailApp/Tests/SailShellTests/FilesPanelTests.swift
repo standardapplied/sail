@@ -281,30 +281,40 @@ import Testing
         frames.compactMap { if case let .filesStat(id, _) = $0 { id } else { nil } }
     }
 
-    /// M1: a ⌘-click's lookup while the connection cannot be had ends with the connection, said in
-    /// the session's own words; it asks nothing before admission, and nothing when the connection is
+    /// M1: a ⌘-click's lookup lives only while the connection is being asked for or is up: a phase
+    /// that ends or parks the connection, heard before the click or after it, ends the lookup in the
+    /// session's own words; it asks nothing before admission, and nothing when the connection is
     /// had again (the person clicks again).
     @Test(arguments: [
         ("stopped", FilesSession.Phase.stopped("Workspace dock of harbor was stopped by ana."), "Workspace dock of harbor was stopped by ana."),
         ("refused", .refused(["Workspace 'dock' belongs to 'uday', not you.", "Ask uday to enter it."]), "Workspace 'dock' belongs to 'uday', not you. Ask uday to enter it."),
         ("unreachable", .unreachable("dock did not answer for 30 s."), "dock did not answer for 30 s."),
+        ("gone", .gone("Workspace dock of harbor is gone."), "Workspace dock of harbor is gone."),
+        ("limited", .limited("You have 8 files connections open, the most one person may."), "You have 8 files connections open, the most one person may."),
+        ("reconnecting", .reconnecting("The connection to dock dropped."), "The connection to dock dropped."),
     ] as [(String, FilesSession.Phase, String)])
     func aLookupEndsWithTheConnectionInItsOwnWords(_ name: String, _ phase: FilesSession.Phase, _ words: String) throws {
-        let panel = FilesPanel(project: "harbor", workspace: "dock", tickets: nil, look: .light, mono: try LabelFont(directory: LookTests.fonts))
-        var sent: [Frame] = [], said: [TerminalPath.Lookup.Next] = []
-        panel.onSent = { sent += $0 }
-        panel.lookUp("src/a.ts", cwd: nil) { said.append($0) }
-        #expect(sent.isEmpty && panel.lookingUp, "\(name): asked before the connection was admitted")
-        panel.heard(.phase(phase))
-        #expect(said == [.said(words)] && !panel.lookingUp, "\(name): \(said)")
-        panel.heard(.phase(.connected))
-        panel.heard(.admitted)
-        #expect(Self.stats(sent).isEmpty && said.count == 1, "\(name): the ended lookup was asked when the connection came back")
+        for parkedFirst in [false, true] {
+            let panel = FilesPanel(project: "harbor", workspace: "dock", tickets: nil, look: .light, mono: try LabelFont(directory: LookTests.fonts))
+            var sent: [Frame] = [], said: [TerminalPath.Lookup.Next] = []
+            panel.onSent = { sent += $0 }
+            if parkedFirst { panel.heard(.phase(phase)) }
+            panel.lookUp("src/a.ts", cwd: nil) { said.append($0) }
+            #expect(sent.isEmpty, "\(name): asked before the connection was admitted")
+            if !parkedFirst {
+                #expect(panel.lookingUp)
+                panel.heard(.phase(phase))
+            }
+            #expect(said == [.said(words)] && !panel.lookingUp, "\(name), parked first \(parkedFirst): \(said)")
+            panel.heard(.phase(.connected))
+            panel.heard(.admitted)
+            #expect(Self.stats(sent).isEmpty && said.count == 1, "\(name), parked first \(parkedFirst): the ended lookup was asked when the connection came back")
+        }
     }
 
     /// M1: a lookup whose connection drops mid-way is said in the drop's words and never asked
     /// again: the connection had again asks nothing, and a late answer to its old ask opens
-    /// nothing; a close ends a lookup unsaid.
+    /// nothing; a close ends a lookup unsaid, and the next click waits for the next admission.
     @Test func aLookupDroppedMidWayIsSaidAndNeverAskedAgain() throws {
         let panel = try Self.played([Self.folder("src")])
         var sent: [Frame] = [], said: [TerminalPath.Lookup.Next] = []
@@ -322,6 +332,9 @@ import Testing
         #expect(panel.lookingUp)
         panel.close()
         #expect(!panel.lookingUp && said.count == 1, "a close left the lookup, or said something")
+        sent = []
+        panel.lookUp("src/c.ts", cwd: nil) { said.append($0) }
+        #expect(sent.isEmpty && panel.lookingUp, "a click after a close was asked before the connection had again was admitted")
     }
 
     /// → opens a folder and ← shuts it, Space too; ↓ moves among rows as any list's.

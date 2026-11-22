@@ -23,9 +23,11 @@ extension WorkbenchView {
     }
 
     /// Opens `path` into the tab's file pane, at `line` when given: an unsaved pane on another file
-    /// asks first (M47).
+    /// asks first (M47). A ⌘-click still being looked for is given up: its find never closes or
+    /// questions a file opened since.
     func openFile(_ path: FileName, _ entry: FileEntry, in view: TabView, line: Int? = nil) {
         guard let panel = view.files else { return }
+        panel.giveUpLookup()
         if let pane = view.filePane {
             if pane.path == path {
                 if let line { pane.go(toLine: line) }
@@ -67,9 +69,9 @@ extension WorkbenchView {
 
     /// A ⌘-click on a path in workspace terminal `pane` (its row's `text`, the 1-based character
     /// `column`): looked for on the workspace (``TerminalPath/Lookup``: the folder the terminal last
-    /// reported, the root, then at most 16 folders under it) (M17); the first found opened in the
-    /// tab's file pane at its line, the file already open only going there; none found, a refusal
-    /// or the connection's end, the terminal's own card says so (M18). Nothing is typed into it.
+    /// reported, then the root) (M17); the first file found opened in the tab's file pane at its
+    /// line, the file already open only going there; a folder, none found, a refusal or the
+    /// connection not had, the terminal's own card says so (M18). Nothing is typed into it.
     func openTerminalPath(in text: String, at column: Int, from pane: TerminalPane) {
         guard let found = TerminalPath.find(in: text, at: column), let tab = model.tabs.first(where: { $0.layout.leaves.contains(pane.id) }),
               let view = tabViews[tab.id], let (project, name) = workspace(of: tab) else { return }

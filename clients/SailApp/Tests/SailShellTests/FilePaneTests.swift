@@ -549,12 +549,14 @@ import Testing
 
     /// M17, M18: a ⌘-click on a compiler's line in the workspace's terminal is looked for on the
     /// workspace and opened in the tab's file pane at its line, the caret there and the line barred
-    /// in the accent, the files panel never shown; a path that is not there is said in the
-    /// terminal's own card, and nothing opens.
+    /// in the accent, the files panel never shown; a path that is not there, or a folder, is said
+    /// in the terminal's own card, and nothing opens; a find from before the person opened a file
+    /// never closes or questions it.
     @Test func aCommandClickOnATerminalPathOpensTheFileAtItsLine() async throws {
         let door = try FakeRunnerDoor(person: "uday")
         door.hold("uday-dock-1")
         door.setFolder(FilesPanelTests.root, [FileEntry(name: "src", kind: .known(.folder), target: .known(.none), size: 0, mtimeNanos: 0, mode: 0o040755)])
+        door.setFolder(FilesPanelTests.root + "/src", [])
         let text = (1 ... 60).map { "let line\($0) = \($0)" }.joined(separator: "\n") + "\n"
         door.setFile(FilesPanelTests.root + "/src/App.java", Array(text.utf8))
         let (_, bench) = try FilesPanelTests.shell(door)
@@ -567,7 +569,7 @@ import Testing
         bench.openTerminalPath(in: "src/App.java:42: error: ';' expected", at: 3, from: terminal)
         let pane = { bench.model.selectedTab.flatMap { bench.tabViews[$0.id]?.filePane } }
         #expect(await RunnerTabTests.until(10) { pane()?.editor.isEditable == true }, "the file never opened")
-        let opened = try #require(pane())
+        var opened = try #require(pane())
         bench.layoutSubtreeIfNeeded()
         let line42 = (text as NSString).range(of: "let line42 =").location
         #expect(opened.editor.selectedRange().location == line42, "the caret is at \(opened.editor.selectedRange().location), line 42 at \(line42)")
@@ -578,11 +580,32 @@ import Testing
         opened.editor.setSelectedRange(NSRange(location: 0, length: 0))
         #expect(opened.caretLine == 1)
         #expect(!bench.filesPanelShown, "the files panel was shown")
+        let panel = try #require(bench.model.selectedTab.flatMap { bench.tabViews[$0.id]?.files })
+        func entry(_ name: String) -> FileEntry {
+            FileEntry(name: FileName(Array(name.utf8)), kind: .known(.file), target: .known(.none), size: 0, mtimeNanos: 0, mode: 0o100644)
+        }
+        let app = FileName(FilesPanelTests.root + "/src/App.java"), mine = FileName(FilesPanelTests.root + "/src/Mine.java")
+        door.setFile(FilesPanelTests.root + "/src/B.java", Array("b\n".utf8))
+        door.setFile(mine.shown, Array("mine\n".utf8))
+        bench.openTerminalPath(in: "src/B.java:1: error: class B is public", at: 3, from: terminal)
+        panel.onOpenFile(mine, entry("Mine.java"))
+        #expect(pane()?.path == mine, "the file opened from the tree is not in the pane")
+        #expect(await RunnerTabTests.until(10) { pane()?.editor.string == "mine\n" }, "Mine.java was never read")
+        #expect(pane()?.path == mine, "a find from before the person opened a file closed it")
+        bench.openTerminalPath(in: "src/Gone.java:3: error: cannot find symbol", at: 3, from: terminal)
+        #expect(await RunnerTabTests.until(10) { terminal.status.says == "No file at src/Gone.java in dock." }, "a click as the connection came back was never said: \(terminal.status.says ?? "nothing")")
+        #expect(pane()?.path == mine)
+        panel.onOpenFile(app, entry("App.java"))
+        #expect(await RunnerTabTests.until(10) { pane()?.path == app && pane()?.editor.isEditable == true }, "App.java did not open again from the tree")
+        opened = try #require(pane())
         opened.editor.insertText("// mine\n", replacementRange: NSRange(location: 0, length: 0))
         #expect(opened.unsaved)
         bench.openTerminalPath(in: "  ./src/App.java:3:1  error  'x' is never used", at: 4, from: terminal)
         #expect(await RunnerTabTests.until(10) { opened.caretLine == 3 }, "the open file's caret did not move: line \(opened.caretLine)")
         #expect(pane() === opened && window.attachedSheet == nil && opened.unsaved && opened.editor.string.hasPrefix("// mine\n"), "the open file, named with ./, was taken for another")
+        bench.openTerminalPath(in: "ls ./src", at: 5, from: terminal)
+        #expect(await RunnerTabTests.until(10) { terminal.status.says == "./src is a folder." }, "said: \(terminal.status.says ?? "nothing")")
+        #expect(pane() === opened && window.attachedSheet == nil && opened.unsaved, "a folder found was opened in the pane")
         bench.openTerminalPath(in: "src/Gone.java:3: error: cannot find symbol", at: 3, from: terminal)
         #expect(await RunnerTabTests.until(10) { terminal.status.says == "No file at src/Gone.java in dock." }, "said: \(terminal.status.says ?? "nothing")")
         #expect(pane()?.path == FileName(FilesPanelTests.root + "/src/App.java"))

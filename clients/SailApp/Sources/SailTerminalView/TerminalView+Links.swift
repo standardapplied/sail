@@ -8,8 +8,9 @@ import SailVT
 /// mouse gets it. Every other click, ⌘ held or not, is as before.
 extension TerminalView {
     /// The text of the line holding row `y`, the rows it is soft-wrapped across joined into one,
-    /// and the cell each character starts at with its width.
-    func lineText(_ y: Int) -> (text: String, starts: [(cell: CellPoint, width: Int)])? {
+    /// the cell each character starts at with its width, and whether the screen's edge cuts it:
+    /// its start above the screen, its end below.
+    func lineText(_ y: Int) -> (text: String, starts: [(cell: CellPoint, width: Int)], cut: (start: Bool, end: Bool))? {
         guard let rows = lastFrame?.rows, rows.indices.contains(y) else { return nil }
         var first = y, last = y
         while first > 0, rows[first - 1].wrapped {
@@ -32,15 +33,19 @@ extension TerminalView {
                 }
             }
         }
-        return (text, starts)
+        return (text, starts, (first == 0 && rows[first].continues, last == rows.count - 1 && rows[last].wrapped))
     }
 
     /// The link under `cell`: its line's text, the 1-based character there, and the cells it takes,
-    /// a run in each row its line is soft-wrapped across.
+    /// a run in each row its line is soft-wrapped across; none in a word the screen's edge cuts, as
+    /// what is left of it is not it.
     func linkUnder(_ cell: CellPoint) -> (text: String, column: Int, link: OverlayLink)? {
-        guard let (text, starts) = lineText(cell.y),
+        guard let (text, starts, cut) = lineText(cell.y),
               let index = starts.lastIndex(where: { $0.cell.y < cell.y || $0.cell.y == cell.y && $0.cell.x <= cell.x }),
               let range = linkIn(text, index + 1), !range.isEmpty, range.lowerBound >= 0, range.upperBound <= starts.count else { return nil }
+        let characters = Array(text)
+        if cut.start, !characters[..<range.lowerBound].contains(where: \.isWhitespace) { return nil }
+        if cut.end, !characters[range.upperBound...].contains(where: \.isWhitespace) { return nil }
         var spans: [OverlayLink.Span] = []
         for row in Set(starts[range].map(\.cell.y)).sorted() {
             let cells = starts[range].filter { $0.cell.y == row }
@@ -72,7 +77,7 @@ extension TerminalView {
     package func cell(of text: String) -> CellPoint? {
         guard let rows = lastFrame?.rows else { return nil }
         for y in rows.indices where y == 0 || !rows[y - 1].wrapped {
-            guard let (line, starts) = lineText(y), let range = line.range(of: text) else { continue }
+            guard let (line, starts, _) = lineText(y), let range = line.range(of: text) else { continue }
             return starts[line.distance(from: line.startIndex, to: range.lowerBound)].cell
         }
         return nil

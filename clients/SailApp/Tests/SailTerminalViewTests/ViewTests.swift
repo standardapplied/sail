@@ -278,6 +278,40 @@ import Testing
                 "\(String(describing: harness.view.shownLink))")
     }
 
+    /// R2-5: a line whose start has scrolled above the screen is never read from its tail, nor one
+    /// going on below the screen from its head: no link lies in a word the edge cuts, even one
+    /// ending short of the edge (a path's closing `.` left out), so ⌘ over it underlines nothing
+    /// and a ⌘-click opens nothing.
+    @Test func aPathCutByTheScreensEdgeIsNoLink() async throws {
+        let harness = try Harness(columns: 20, rows: 4, size: NSSize(width: 200, height: 160))
+        let grid = try #require(harness.view.grid)
+        let path = "src/very/long/folder/name.ts:9 x", wraps = (path.count + grid.columns - 1) / grid.columns
+        try #require(wraps > 1, "a grid of \(grid.columns) columns wraps the path nowhere")
+        var opened: [String] = []
+        harness.view.linkIn = { text, column in
+            let end = text.firstIndex(of: " ").map { text.distance(from: text.startIndex, to: $0) } ?? text.count
+            return column - 1 < end - 1 ? 0 ..< end - 1 : nil
+        }
+        harness.view.onLink = { text, _ in opened.append(text) }
+        harness.link.output(String(repeating: "pad\r\n", count: grid.rows) + path + String(repeating: "\r\nz", count: grid.rows))
+        _ = harness.link.screen.scroll(lines: -1, x: 0, y: 0)
+        await harness.tick()
+        try #require(harness.view.lastFrame?.rows.first?.continues == true, "the path's start did not scroll above the screen")
+        harness.mouse(.mouseMoved, column: 1, row: 0, flags: .command)
+        #expect(harness.view.shownLink == nil, "the tail of a cut path was underlined")
+        harness.mouse(.leftMouseDown, column: 1, row: 0, flags: .command)
+        harness.mouse(.leftMouseUp, column: 1, row: 0, flags: .command)
+        harness.link.screen.scrollToBottom()
+        _ = harness.link.screen.scroll(lines: -(grid.rows + wraps - 1), x: 0, y: 0)
+        await harness.tick()
+        try #require(harness.view.lastFrame?.rows.last?.wrapped == true && harness.view.lastFrame?.rows.first?.continues == false, "the path's head is not on the last row")
+        harness.mouse(.mouseMoved, column: 1, row: grid.rows - 1, flags: .command)
+        #expect(harness.view.shownLink == nil, "the head of a cut path was underlined")
+        harness.mouse(.leftMouseDown, column: 1, row: grid.rows - 1, flags: .command)
+        harness.mouse(.leftMouseUp, column: 1, row: grid.rows - 1, flags: .command)
+        #expect(opened.isEmpty, "a cut path was opened: \(opened)")
+    }
+
     /// A ⌘-click on a link, in the text drawn, goes to the link alone: nothing is selected and a
     /// program that tracks the mouse gets nothing, its drag and release included; the same click
     /// without ⌘ is the program's, as before.

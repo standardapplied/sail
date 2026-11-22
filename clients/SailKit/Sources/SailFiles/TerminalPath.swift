@@ -16,9 +16,6 @@ public struct TerminalPath: Equatable, Sendable {
 
     /// The workspace's home: no path outside it is asked.
     public static let home = "/home/dev"
-    /// How many folders directly under the workspace's root a relative path is looked for in, at
-    /// most: the first by name, a name starting with a dot left out.
-    public static let folders = 16
 
     private static let pattern = try? NSRegularExpression(
         pattern: #"(?<![\w/.~:@+-])((?:~|\.{1,2})?/?(?:[\w.+@-]+/)*[\w.+@-]+)(?::(\d+)(?::(\d+))?|\((\d+),(\d+)\))?"#
@@ -85,11 +82,11 @@ public struct TerminalPath: Equatable, Sendable {
         return resolved == home || resolved.hasPrefix(home + "/") ? resolved : nil
     }
 
-    /// Looking for a path, one place at a time, the first the workspace finds being the file: as
-    /// written when absolute (`~/` the home); else in the folder the terminal reported, then the
-    /// workspace's root, then at most ``folders`` folders directly under the root, which it lists
-    /// itself. A path leaving the home is not asked, and says so; none found says so; any other
-    /// refusal is said in its own words.
+    /// Looking for a path, one place at a time, the first file the workspace finds being the one:
+    /// as written when absolute (`~/` the home); else in the folder the terminal reported, then in
+    /// the workspace's root, each place resolving `..` on its own. A path leaving the home from
+    /// every place is not asked, and says so; a folder is never the file; none found says where it
+    /// looked; any other refusal is said in its own words.
     public struct Lookup: Sendable {
         public enum Next: Equatable, Sendable {
             case ask(Frame)
@@ -98,27 +95,37 @@ public struct TerminalPath: Equatable, Sendable {
             case nothing
         }
 
+        /// The most places one lookup asks: what its ids leave room for.
+        public static let places = 2
+
         let asked: String
-        let workspace: String
+        private let unfound: String
         private var queue: [FileName] = []
-        private var tried: Set<FileName> = []
         private var current: (id: Int32, place: FileName)?
-        private var listing: (id: Int32, entries: [FileEntry])?
-        private var listed: Bool
+        private var folder = false
         private var id: Int32
 
         /// Looking for `path`, as the terminal shows it, from the folder the terminal reported.
         public init(path: String, cwd: String?, workspace: String, firstID: Int32) {
             asked = path
-            self.workspace = workspace
             id = firstID
             let root = FileTree.root.shown, absolute = path.hasPrefix("/") || path.hasPrefix("~/")
-            listed = absolute
-            guard let fromRoot = TerminalPath.resolved(path, in: root) else { return }
-            let fromCwd = absolute ? nil : cwd.flatMap { TerminalPath.resolved(path, in: $0) }
-            for place in [fromCwd, fromRoot].compactMap({ $0 }).map({ FileName($0) }) where !queue.contains(place) {
-                queue.append(place)
+            let folder = absolute ? nil : cwd.flatMap { TerminalPath.resolved(".", in: $0) }
+            var named: [String] = []
+            for (place, name) in [(folder, folder.map { Self.name(of: $0, workspace: workspace) }), (root, workspace)] {
+                guard let place, let name, let resolved = TerminalPath.resolved(path, in: place).map({ FileName($0) }), !queue.contains(resolved) else { continue }
+                queue.append(resolved)
+                named.append(name)
             }
+            unfound = "No file at \(path) in " + (named.count == 2 ? "\(named[0]) or in \(workspace)'s root" : named.first ?? workspace) + "."
+        }
+
+        /// A folder as said in a sentence: under the root, from it; else from the home.
+        private static func name(of folder: String, workspace: String) -> String {
+            let root = FileTree.root.shown
+            if folder == root { return workspace }
+            if folder.hasPrefix(root + "/") { return String(folder.dropFirst(root.count + 1)) }
+            return "~" + folder.dropFirst(TerminalPath.home.count)
         }
 
         /// What it asks first, or says at once of a path leaving the home.
@@ -130,47 +137,25 @@ public struct TerminalPath: Equatable, Sendable {
         public mutating func receive(_ frame: Frame) -> Next {
             switch frame {
             case let .filesEntry(answered, entry, _) where answered == current?.id:
-                return .found(current?.place ?? FileTree.root, entry)
+                guard entry.kind == .known(.folder) || entry.kind == .known(.link) && entry.target == .known(.folder) else {
+                    return .found(current?.place ?? FileTree.root, entry)
+                }
+                folder = true
+                return next()
             case let .filesRefused(answered, kind, message) where answered == current?.id:
                 return kind == .known(.notFound) ? next() : .said(message)
-            case let .filesListing(page) where page.id == listing?.id:
-                listing?.entries += page.entries
-                guard !page.more, let entries = listing?.entries else { return .nothing }
-                listing = nil
-                let root = FileTree.root.shown
-                let folders = entries
-                    .filter { ($0.kind == .known(.folder) || $0.kind == .known(.link) && $0.target == .known(.folder)) && !$0.name.shown.hasPrefix(".") }
-                    .map(\.name.shown).sorted().prefix(TerminalPath.folders)
-                for folder in folders {
-                    guard let place = TerminalPath.resolved(asked, in: root + "/" + folder).map({ FileName($0) }), !tried.contains(place), !queue.contains(place) else { continue }
-                    queue.append(place)
-                }
-                return next()
-            case let .filesRefused(answered, _, message) where answered == listing?.id:
-                listing = nil
-                return .said(message)
             default:
                 return .nothing
             }
         }
 
-        /// The next place asked; the root listed once the first places are spent; then none found.
+        /// The next place asked; with none left, a folder found or none found said.
         private mutating func next() -> Next {
             current = nil
-            if !queue.isEmpty {
-                let place = queue.removeFirst()
-                tried.insert(place)
-                id += 1
-                current = (id, place)
-                return .ask(.filesStat(id: id, path: place))
-            }
-            guard listed else {
-                listed = true
-                id += 1
-                listing = (id, [])
-                return .ask(.filesList(id: id, path: FileTree.root))
-            }
-            return .said("No file at \(asked) in \(workspace).")
+            guard !queue.isEmpty else { return .said(folder ? "\(asked) is a folder." : unfound) }
+            id += 1
+            current = (id, queue.removeFirst())
+            return .ask(.filesStat(id: id, path: current?.place ?? FileTree.root))
         }
     }
 }

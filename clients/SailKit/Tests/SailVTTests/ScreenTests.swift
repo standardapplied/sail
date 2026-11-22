@@ -59,6 +59,15 @@ import Testing
         _ = screen.feed(Array("src/very/long.ts:3\r\n0123456789\r\nend".utf8))
         let rows = try screen.frame().rows
         #expect(rows.map(\.wrapped) == [true, false, false, false], "\(rows.map(\.wrapped))")
+        #expect(rows.map(\.continues) == [false, true, false, false], "\(rows.map(\.continues))")
+    }
+
+    /// R2-5: a line whose start has scrolled above the screen says so on its first row left.
+    @Test func aRowSaysWhenItsLineBeganAbove() throws {
+        let screen = try Screen(size: GridSize(columns: 10, rows: 2), scrollbackBytes: 0, palette: .dark)
+        _ = screen.feed(Array("src/very/long.ts:3\r\nend".utf8))
+        let rows = try screen.frame().rows
+        #expect(rows.map(\.continues) == [true, false] && rows.map(\.wrapped) == [false, false], "\(rows.map(\.continues)) \(rows.map(\.wrapped))")
     }
 
     @Test func readingTheTextLeavesTheNextFramesChanges() throws {

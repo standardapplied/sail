@@ -27,6 +27,7 @@ import Testing
         ("(see a.ts)", "a.ts", "a.ts", nil, nil),
         ("  ./src/cli.ts:7:3  error  'x' is never used", "cli.ts", "./src/cli.ts", 7, 3),
         ("Node.js v20 here", "Node.js", "Node.js", nil, nil),
+        ("cc -c a.c -o a.o", "a.c", "a.c", nil, nil),
     ] as [(String, String, String, Int?, Int?)])
     func realOutputIsFound(_ line: String, _ under: String, _ path: String, _ number: Int?, _ column: Int?) throws {
         let found = try #require(Self.found(line, at: under), "nothing found in \(line)")
@@ -72,36 +73,62 @@ import Testing
         FileEntry(name: FileName(Array(name.utf8)), kind: .known(.folder), target: .known(.none), size: 0, mtimeNanos: 0, mode: 0o040755)
     }
 
-    /// The places asked are bounded and fixed: the terminal's folder, the root, then the root
-    /// listed and at most 16 folders under it, first by name, dot-names left out, the listing's
-    /// pages gathered; each asked only once it answered the last as not found.
-    @Test func theLookupAsksABoundedFixedListOfPlaces() throws {
-        var lookup = TerminalPath.Lookup(path: "./src/a.ts", cwd: "/home/dev/workspace/api", workspace: "dock", firstID: 0)
-        var asked: [Frame] = []
+    static let file = FileEntry(name: "a.ts", kind: .known(.file), target: .known(.none), size: 3, mtimeNanos: 0, mode: 0o100644)
+
+    /// Every place `path` is asked at, each answered as not found or with `answers` by place, and
+    /// what the lookup ends with.
+    static func looked(_ path: String, cwd: String?, answers: [String: FileEntry] = [:]) -> (asked: [String], end: TerminalPath.Lookup.Next) {
+        var lookup = TerminalPath.Lookup(path: path, cwd: cwd, workspace: "dock", firstID: 0)
+        var asked: [String] = []
         var next = lookup.start()
-        let root = 500
-        var listed = false
         while case let .ask(frame) = next {
-            asked.append(frame)
-            switch frame {
-            case let .filesStat(id, _):
-                next = lookup.receive(.filesRefused(id: id, kind: .known(.notFound), message: "No a.ts."))
-            case let .filesList(id, path):
-                #expect(path == FileTree.root && !listed)
-                listed = true
-                let names = [".git", ".cache"] + (0 ..< root).map { String(format: "f%03d", root - 1 - $0) }
-                _ = lookup.receive(.filesListing(FileListing(id: id, version: "v1", entries: names.prefix(250).map(Self.folder), more: true, truncated: false)))
-                next = lookup.receive(.filesListing(FileListing(id: id, version: "v1", entries: names.dropFirst(250).map(Self.folder), more: false, truncated: false)))
-            default:
+            guard case let .filesStat(id, place) = frame else {
                 Issue.record("asked \(frame)")
-                next = .nothing
+                break
             }
+            asked.append(place.shown)
+            next = lookup.receive(answers[place.shown].map { .filesEntry(id: id, entry: $0, version: "v1") } ?? .filesRefused(id: id, kind: .known(.notFound), message: "No a.ts."))
         }
-        #expect(next == .said("No file at ./src/a.ts in dock."))
-        let stats = asked.compactMap { if case let .filesStat(_, path) = $0 { path.shown } else { nil } }
-        #expect(stats.count == 2 + TerminalPath.folders && asked.count == stats.count + 1, "\(asked.count) asked")
-        #expect(Array(stats.prefix(3)) == ["/home/dev/workspace/api/src/a.ts", "/home/dev/workspace/src/a.ts", "/home/dev/workspace/f000/src/a.ts"])
-        #expect(stats.last == "/home/dev/workspace/f015/src/a.ts" && !stats.contains { $0.contains("/.") })
+        return (asked, next)
+    }
+
+    /// R2-1: a relative path is asked in the folder the terminal reported and in the root, no
+    /// more, and none found names where it looked when both were asked.
+    @Test func theLookupAsksTheTerminalsFolderAndTheRootOnly() {
+        let api = "/home/dev/workspace/api"
+        let both = Self.looked("./src/a.ts", cwd: api)
+        #expect(both.asked == [api + "/src/a.ts", "/home/dev/workspace/src/a.ts"] && both.end == .said("No file at ./src/a.ts in api or in dock's root."), "\(both)")
+        let deeper = Self.looked("a.ts", cwd: api + "/packages/x/")
+        #expect(deeper.end == .said("No file at a.ts in api/packages/x or in dock's root."), "\(deeper)")
+        for cwd in [nil, "/home/dev/workspace", "/home/dev/workspace/", "/tmp"] {
+            let root = Self.looked("a.ts", cwd: cwd)
+            #expect(root.asked == ["/home/dev/workspace/a.ts"] && root.end == .said("No file at a.ts in dock."), "\(cwd ?? "none"): \(root)")
+        }
+        let home = Self.looked("notes.txt", cwd: "/home/dev/other")
+        #expect(home.end == .said("No file at notes.txt in ~/other or in dock's root."), "\(home)")
+    }
+
+    /// R2-3: `..` is taken from each place on its own; outside the home is said only when it
+    /// leaves the home from every place.
+    @Test func aPathLeavesTheHomeOnlyWhenItLeavesItFromEveryPlace() {
+        let fromCwd = Self.looked("../../notes.txt", cwd: "/home/dev/workspace/api")
+        #expect(fromCwd.asked == ["/home/dev/notes.txt"] && fromCwd.end == .said("No file at ../../notes.txt in api."), "\(fromCwd)")
+        let found = Self.looked("../../notes.txt", cwd: "/home/dev/workspace/api", answers: ["/home/dev/notes.txt": Self.file])
+        #expect(found.end == .found("/home/dev/notes.txt", Self.file))
+        let everywhere = Self.looked("../../../etc/passwd", cwd: "/home/dev/workspace/api")
+        #expect(everywhere.asked.isEmpty && everywhere.end == .said("../../../etc/passwd is outside the workspace's home, so Sail does not look for it."), "\(everywhere)")
+    }
+
+    /// R2-4: a folder is never the file: the next place is asked, and a folder alone found is said
+    /// to be one.
+    @Test func aFolderFoundIsSaidNeverOpened() {
+        let api = "/home/dev/workspace/api", link = FileEntry(name: "src", kind: .known(.link), target: .known(.folder), size: 0, mtimeNanos: 0, mode: 0o120777)
+        for folder in [Self.folder("src"), link] {
+            let alone = Self.looked("./src", cwd: api, answers: [api + "/src": folder])
+            #expect(alone.asked.count == 2 && alone.end == .said("./src is a folder."), "\(alone)")
+        }
+        let file = Self.looked("src", cwd: api, answers: [api + "/src": Self.folder("src"), "/home/dev/workspace/src": Self.file])
+        #expect(file.end == .found("/home/dev/workspace/src", Self.file), "\(file)")
     }
 
     /// The lookup asks each place in turn; the first the workspace finds is opened; none found is
@@ -111,8 +138,7 @@ import Testing
         var lookup = TerminalPath.Lookup(path: "src/a.ts", cwd: "/home/dev/workspace/api", workspace: "dock", firstID: 6)
         #expect(lookup.start() == .ask(.filesStat(id: 7, path: "/home/dev/workspace/api/src/a.ts")))
         #expect(lookup.receive(.filesRefused(id: 7, kind: .known(.notFound), message: "No a.ts.")) == .ask(.filesStat(id: 8, path: "/home/dev/workspace/src/a.ts")))
-        let entry = FileEntry(name: "a.ts", kind: .known(.file), target: .known(.none), size: 3, mtimeNanos: 0, mode: 0o100644)
-        #expect(lookup.receive(.filesEntry(id: 8, entry: entry, version: "v1")) == .found("/home/dev/workspace/src/a.ts", entry))
+        #expect(lookup.receive(.filesEntry(id: 8, entry: Self.file, version: "v1")) == .found("/home/dev/workspace/src/a.ts", Self.file))
         var refused = TerminalPath.Lookup(path: "src/a.ts", cwd: nil, workspace: "dock", firstID: 0)
         _ = refused.start()
         #expect(refused.receive(.filesRefused(id: 1, kind: .known(.notPermitted), message: "The workspace's user may not read src.")) == .said("The workspace's user may not read src."))
@@ -121,9 +147,5 @@ import Testing
         var absolute = TerminalPath.Lookup(path: "/home/dev/workspace/Gone.java", cwd: "/home/dev/workspace/api", workspace: "dock", firstID: 0)
         #expect(absolute.start() == .ask(.filesStat(id: 1, path: "/home/dev/workspace/Gone.java")))
         #expect(absolute.receive(.filesRefused(id: 1, kind: .known(.notFound), message: "No Gone.java.")) == .said("No file at /home/dev/workspace/Gone.java in dock."))
-        var listing = TerminalPath.Lookup(path: "a.ts", cwd: nil, workspace: "dock", firstID: 0)
-        _ = listing.start()
-        #expect(listing.receive(.filesRefused(id: 1, kind: .known(.notFound), message: "No a.ts.")) == .ask(.filesList(id: 2, path: FileTree.root)))
-        #expect(listing.receive(.filesRefused(id: 2, kind: .known(.notPermitted), message: "The workspace's user may not list it.")) == .said("The workspace's user may not list it."))
     }
 }

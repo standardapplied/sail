@@ -30,9 +30,10 @@ final class FilesPanel: NSView {
     var onStart: @MainActor (_ project: String, _ name: String) async -> [String]? = { _, _ in nil }
     /// A file row opened (⏎, a double click): the tab's file pane shows it.
     var onOpenFile: @MainActor (FileName, FileEntry) -> Void = { _, _ in }
-    /// A terminal path being looked for, place by place, and what to do with what is found. It has
-    /// one lifetime: it ends with the file found, with a refusal, or with the connection's end, each
-    /// said; a close ends it unsaid; its first ask waits for the connection's admission, and a
+    /// A terminal path being looked for, place by place, and what to do with what is found. It lives
+    /// only for the click's moment: it ends with the file found, with a refusal, or with any phase
+    /// but connecting and connected (heard before the click or after it), each said; a close or
+    /// another file opened ends it unsaid; its first ask waits for the connection's admission, and a
     /// reconnection never asks it again (the person clicks again).
     private var lookup: (path: TerminalPath.Lookup, unsent: Frame?, done: @MainActor (TerminalPath.Lookup.Next) -> Void)?
     private var nextLookup: Int32 = 1 << 29
@@ -159,6 +160,7 @@ final class FilesPanel: NSView {
     /// listing (no entry of it marked new).
     func close() {
         lookup = nil
+        admitted = false
         guard session != nil else { return }
         wake?.invalidate()
         wake = nil
@@ -229,18 +231,22 @@ final class FilesPanel: NSView {
     }
 
     /// Looks for terminal path `path` on the workspace, from the folder the terminal reported
-    /// (``TerminalPath/Lookup``): `done` hears the file found, or what was said; a lookup under way
-    /// is given up, unsaid, for this one.
+    /// (``TerminalPath/Lookup``): `done` hears the file found, or what was said, at once when the
+    /// connection is parked; a lookup under way is given up, unsaid, for this one.
     func lookUp(_ path: String, cwd: String?, then done: @escaping @MainActor (TerminalPath.Lookup.Next) -> Void) {
+        lookup = nil
+        if let words = Self.ending(phase) { return done(.said(words)) }
         var looking = TerminalPath.Lookup(path: path, cwd: cwd, workspace: workspace, firstID: nextLookup)
-        nextLookup += Int32(TerminalPath.folders + 4)
+        nextLookup += Int32(TerminalPath.Lookup.places)
         let first = looking.start()
-        guard case let .ask(ask) = first else {
-            lookup = nil
-            return done(first)
-        }
+        guard case let .ask(ask) = first else { return done(first) }
         lookup = (looking, admitted ? nil : ask, done)
         if admitted { send([ask]) }
+    }
+
+    /// Gives up the lookup under way, unsaid: the person opened another file since the click.
+    func giveUpLookup() {
+        lookup = nil
     }
 
     /// The words a phase that ends the connection, or parks it, says: what a lookup ends with.
