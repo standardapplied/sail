@@ -22,12 +22,19 @@ extension WorkbenchView {
         set { defaults.set(newValue, forKey: Self.filePaneWidthsKey) }
     }
 
-    /// Opens `path` into the tab's file pane, at `line` when given: an unsaved pane on another file
-    /// asks first (M47). A ⌘-click still being looked for is given up: its find never closes or
-    /// questions a file opened since.
-    func openFile(_ path: FileName, _ entry: FileEntry, in view: TabView, line: Int? = nil) {
+    /// Opens `path`, as the person chose it, into the tab's file pane (``showFile(_:_:in:line:)``):
+    /// a ⌘-click still being looked for is given up, so its find never closes or questions a file
+    /// opened since.
+    func openFile(_ path: FileName, _ entry: FileEntry, in view: TabView) {
+        view.files?.giveUpLookup()
+        showFile(path, entry, in: view)
+    }
+
+    /// Shows `path` in the tab's file pane, at `line` when given: an unsaved pane on another file
+    /// asks first (M47), and the answer opens this file alone, leaving any ⌘-click made since to its
+    /// own lookup.
+    func showFile(_ path: FileName, _ entry: FileEntry, in view: TabView, line: Int? = nil) {
         guard let panel = view.files else { return }
-        panel.giveUpLookup()
         if let pane = view.filePane {
             if pane.path == path {
                 if let line { pane.go(toLine: line) }
@@ -35,7 +42,7 @@ extension WorkbenchView {
             }
             return pane.askToLeave(then: { [weak self, weak view, weak pane] in
                 pane?.finishClosing()
-                if let view { self?.openFile(path, entry, in: view, line: line) }
+                if let view { self?.showFile(path, entry, in: view, line: line) }
             })
         }
         let pane = FilePane(path: path, entry: entry, workspace: panel.workspace, look: look, mono: labels)
@@ -71,17 +78,19 @@ extension WorkbenchView {
     /// `column`): looked for on the workspace (``TerminalPath/Lookup``: the folder the terminal last
     /// reported, then the root) (M17); the first file found opened in the tab's file pane at its
     /// line, the file already open only going there; a folder, none found, a refusal or the
-    /// connection not had, the terminal's own card says so (M18). Nothing is typed into it.
+    /// connection not had, the terminal's own card says so (M18). Nothing is typed into it. A
+    /// terminal whose shell is on another machine (``Pane/elsewhere``) offers no path.
     func openTerminalPath(in text: String, at column: Int, from pane: TerminalPane) {
-        guard let found = TerminalPath.find(in: text, at: column), let tab = model.tabs.first(where: { $0.layout.leaves.contains(pane.id) }),
-              let view = tabViews[tab.id], let (project, name) = workspace(of: tab) else { return }
+        guard let found = TerminalPath.find(in: text, at: column), let shell = model.panes[pane.id], !shell.elsewhere,
+              let tab = model.tabs.first(where: { $0.layout.leaves.contains(pane.id) }), let view = tabViews[tab.id], let (project, name) = workspace(of: tab)
+        else { return }
         let panel = view.files ?? makeFiles(project: project, name: name, in: view)
-        let cwd = model.panes[pane.id].flatMap { Self.reportedPath($0.reportedFolder) }
+        let cwd = Self.reportedPath(shell.reportedFolder)
         panel.lookUp(found.path, cwd: cwd) { [weak self, weak view, weak pane] next in
             guard let self else { return }
             switch next {
             case let .found(path, entry):
-                if let view { openFile(path, entry, in: view, line: found.line) }
+                if let view { showFile(path, entry, in: view, line: found.line) }
             case let .said(words):
                 if pane?.tell(words) != true { tell(words) }
             case .ask, .nothing:

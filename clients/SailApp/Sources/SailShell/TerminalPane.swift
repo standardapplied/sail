@@ -83,6 +83,10 @@ public final class TerminalPane: NSView {
     private let banner: Card
     /// The sentence ``tell(_:)`` last showed.
     private var told: String?
+    /// How many sentences were told: each hides only itself, never one told after it.
+    private var tellings = 0
+    /// How a told sentence waits out its ten seconds: a test's to hold.
+    var toldWait: @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) }
     private let scrim = Scrim()
     private let latency = NSTextField(labelWithString: "")
     private var latencyTimer: Timer?
@@ -291,10 +295,12 @@ public final class TerminalPane: NSView {
     func tell(_ sentence: String) -> Bool {
         guard banner.isHidden || banner.shown == told else { return false }
         told = sentence
+        tellings += 1
+        let telling = tellings, wait = toldWait
         say(sentence)
         Task { [weak self] in
-            try? await Task.sleep(for: .seconds(10))
-            guard let self, banner.shown == sentence else { return }
+            await wait(.seconds(10))
+            guard let self, tellings == telling, banner.shown == sentence else { return }
             banner.hide()
         }
         return true

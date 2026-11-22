@@ -281,17 +281,20 @@ import Testing
         frames.compactMap { if case let .filesStat(id, _) = $0 { id } else { nil } }
     }
 
-    /// M1: a ⌘-click's lookup lives only while the connection is being asked for or is up: a phase
-    /// that ends or parks the connection, heard before the click or after it, ends the lookup in the
-    /// session's own words; it asks nothing before admission, and nothing when the connection is
-    /// had again (the person clicks again).
+    /// M1, R3-1: a ⌘-click's lookup lives only while the connection is being asked for or is up: a
+    /// phase that ends or parks the connection, heard before the click or after it, ends the lookup
+    /// in the panel line's own words for the files connection, never the session's internal reason
+    /// and never blank, with "Click again once it is back." while it reconnects; it asks nothing
+    /// before admission, and nothing when the connection is had again (the person clicks again).
+    /// The phases are the values `FilesSession` makes.
     @Test(arguments: [
         ("stopped", FilesSession.Phase.stopped("Workspace dock of harbor was stopped by ana."), "Workspace dock of harbor was stopped by ana."),
+        ("stopped unrecorded", .stopped(""), "dock is stopped."),
         ("refused", .refused(["Workspace 'dock' belongs to 'uday', not you.", "Ask uday to enter it."]), "Workspace 'dock' belongs to 'uday', not you. Ask uday to enter it."),
-        ("unreachable", .unreachable("dock did not answer for 30 s."), "dock did not answer for 30 s."),
-        ("gone", .gone("Workspace dock of harbor is gone."), "Workspace dock of harbor is gone."),
-        ("limited", .limited("You have 8 files connections open, the most one person may."), "You have 8 files connections open, the most one person may."),
-        ("reconnecting", .reconnecting("The connection to dock dropped."), "The connection to dock dropped."),
+        ("unreachable", .unreachable(TerminalError.timedOut("the admission").description), "Can't reach dock's files."),
+        ("gone", .gone("Workspace dock of harbor no longer exists."), "Workspace dock of harbor no longer exists."),
+        ("limited", .limited("You have 16 files connections open; close one to open another."), "You have 16 files connections open; close one to open another."),
+        ("reconnecting", .reconnecting(TerminalError.closed.description), "Reconnecting to dock's files. Click again once it is back."),
     ] as [(String, FilesSession.Phase, String)])
     func aLookupEndsWithTheConnectionInItsOwnWords(_ name: String, _ phase: FilesSession.Phase, _ words: String) throws {
         for parkedFirst in [false, true] {
@@ -321,8 +324,8 @@ import Testing
         panel.onSent = { sent += $0 }
         panel.lookUp("src/a.ts", cwd: nil) { said.append($0) }
         let asked = try #require(Self.stats(sent).first, "the lookup asked nothing")
-        panel.heard(.phase(.reconnecting("The connection to dock dropped.")))
-        #expect(said == [.said("The connection to dock dropped.")] && !panel.lookingUp)
+        panel.heard(.phase(.reconnecting(TerminalError.closed.description)))
+        #expect(said == [.said("Reconnecting to dock's files. Click again once it is back.")] && !panel.lookingUp)
         sent = []
         panel.heard(.phase(.connected))
         panel.heard(.admitted)
@@ -400,7 +403,7 @@ import Testing
         panel.heard(.frame(.filesTick))
         #expect(panel.line.isHidden && panel.scroll.alphaValue == 1, "\(name): the tick did not make it live again")
         panel.heard(.phase(.unreachable("refused")))
-        #expect(panel.shownLine?.words == "Can't reach the files." && panel.line.button.title == "Try Again" && !panel.line.button.isHidden)
+        #expect(panel.shownLine?.words == "Can't reach dock's files." && panel.line.button.title == "Try Again" && !panel.line.button.isHidden)
         panel.heard(.phase(.stopped("Workspace dock of harbor was stopped by ana.")))
         #expect(panel.shownLine?.words == "Workspace dock of harbor was stopped by ana." && panel.line.button.title == "Start", "\(name): not the stop's own record with Start")
         panel.layoutSubtreeIfNeeded()

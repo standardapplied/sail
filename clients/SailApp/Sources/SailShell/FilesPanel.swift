@@ -191,7 +191,7 @@ final class FilesPanel: NSView {
         case let .phase(phase):
             self.phase = phase
             if phase != .connected { admitted = false }
-            if let words = Self.ending(phase), let ended = lookup {
+            if let words = ending(phase), let ended = lookup {
                 lookup = nil
                 ended.done(.said(words))
             }
@@ -235,7 +235,7 @@ final class FilesPanel: NSView {
     /// connection is parked; a lookup under way is given up, unsaid, for this one.
     func lookUp(_ path: String, cwd: String?, then done: @escaping @MainActor (TerminalPath.Lookup.Next) -> Void) {
         lookup = nil
-        if let words = Self.ending(phase) { return done(.said(words)) }
+        if let words = ending(phase) { return done(.said(words)) }
         var looking = TerminalPath.Lookup(path: path, cwd: cwd, workspace: workspace, firstID: nextLookup)
         nextLookup += Int32(TerminalPath.Lookup.places)
         let first = looking.start()
@@ -249,13 +249,13 @@ final class FilesPanel: NSView {
         lookup = nil
     }
 
-    /// The words a phase that ends the connection, or parks it, says: what a lookup ends with.
-    static func ending(_ phase: FilesSession.Phase) -> String? {
-        switch phase {
-        case .connecting, .connected: nil
-        case let .reconnecting(why), let .unreachable(why), let .stopped(why), let .gone(why), let .limited(why): why
-        case let .refused(lines): lines.joined(separator: " ")
-        }
+    /// What a lookup ends with at a phase that ends the connection, parks it or is making it again:
+    /// the files connection's state in the panel line's own words (``FilesLine/state(of:workspace:)``),
+    /// and while it reconnects, that a click again will do once it is back.
+    func ending(_ phase: FilesSession.Phase) -> String? {
+        guard let state = FilesLine.state(of: phase, workspace: workspace) else { return nil }
+        if case .reconnecting = phase { return state + " Click again once it is back." }
+        return state
     }
 
     /// A frame the lookup under way was waiting for, taken: the next place asked, or its end told.

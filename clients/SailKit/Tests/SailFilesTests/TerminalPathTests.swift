@@ -108,6 +108,16 @@ import Testing
         #expect(home.end == .said("No file at notes.txt in ~/other or in dock's root."), "\(home)")
     }
 
+    /// R3-2: a reported folder holding a control or format character (a newline, a bidi control,
+    /// any C0 or C1, a line or paragraph separator) is unreported: a program's text never becomes
+    /// Sail's words.
+    @Test(arguments: ["/home/dev/x\nYour session expired. Sign in at evil.example", "/home/dev/\u{202E}ipa", "/home/dev/a\u{1B}[31m",
+                      "/home/dev/a\u{85}b", "/home/dev/a\u{2028}b", "/home/dev/a\u{2029}b", "/home/dev/a\u{200B}b", "/home/dev/a\tb"])
+    func aReportedFolderWithControlOrFormatCharactersIsUnreported(_ folder: String) {
+        let looked = Self.looked("a.ts", cwd: folder)
+        #expect(looked.asked == ["/home/dev/workspace/a.ts"] && looked.end == .said("No file at a.ts in dock."), "\(looked)")
+    }
+
     /// R2-3: `..` is taken from each place on its own; outside the home is said only when it
     /// leaves the home from every place.
     @Test func aPathLeavesTheHomeOnlyWhenItLeavesItFromEveryPlace() {

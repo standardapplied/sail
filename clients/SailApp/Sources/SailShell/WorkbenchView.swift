@@ -332,7 +332,9 @@ public final class WorkbenchView: NSView {
         view.terminal.contextMenu = { [weak self] in self?.paneMenu() }
         view.terminal.onFocus = { [weak self, id = pane.id] in self?.focusClicked(id) }
         if pane.place.onRunner {
-            view.terminal.linkIn = { text, column in TerminalPath.find(in: text, at: column)?.range }
+            view.terminal.linkIn = { [weak self, id = pane.id] text, column in
+                self?.model.panes[id]?.elsewhere == false ? TerminalPath.find(in: text, at: column)?.range : nil
+            }
             view.terminal.onLink = { [weak self, weak view] text, column in
                 guard let self, let view else { return }
                 openTerminalPath(in: text, at: column, from: view)

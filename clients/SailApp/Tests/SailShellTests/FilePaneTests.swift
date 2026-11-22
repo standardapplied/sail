@@ -609,6 +609,53 @@ import Testing
         bench.openTerminalPath(in: "src/Gone.java:3: error: cannot find symbol", at: 3, from: terminal)
         #expect(await RunnerTabTests.until(10) { terminal.status.says == "No file at src/Gone.java in dock." }, "said: \(terminal.status.says ?? "nothing")")
         #expect(pane()?.path == FileName(FilesPanelTests.root + "/src/App.java"))
+        bench.openTerminalPath(in: "src/Mine.java:1: error: class Mine is public", at: 3, from: terminal)
+        #expect(await RunnerTabTests.until(5) { window.attachedSheet != nil }, "a find over unsaved text asked nothing")
+        bench.openTerminalPath(in: "src/Lost.java:3: error: cannot find symbol", at: 3, from: terminal)
+        window.attachedSheet.map { window.endSheet($0, returnCode: .alertSecondButtonReturn) }
+        #expect(await RunnerTabTests.until(10) { pane()?.path == mine }, "Discard did not open the file the question was for")
+        #expect(await RunnerTabTests.until(10) { terminal.status.says == "No file at src/Lost.java in dock." },
+                "the click made while the question was up was given up by its answer: \(terminal.status.says ?? "nothing")")
+    }
+
+    /// The terminal's card hides a told sentence by its telling, not by its words: the same
+    /// sentence told again keeps its own ten seconds.
+    @Test func aToldSentenceKeepsItsOwnTime() async throws {
+        let door = try FakeRunnerDoor(person: "uday")
+        door.hold("uday-dock-1")
+        let (_, bench) = try FilesPanelTests.shell(door)
+        let terminal = try #require(bench.focused)
+        #expect(await RunnerTabTests.until(10) { terminal.status.says == nil }, "the terminal never attached: \(terminal.status.says ?? "")")
+        let turnstile = Turnstile()
+        terminal.toldWait = { _ in await turnstile.wait() }
+        #expect(terminal.tell("No file at a.ts in dock."))
+        #expect(await RunnerTabTests.until(5) { turnstile.waiting == 1 })
+        #expect(terminal.tell("No file at a.ts in dock."))
+        #expect(await RunnerTabTests.until(5) { turnstile.waiting == 2 })
+        turnstile.letOne()
+        await turnstile.passed(1)
+        #expect(terminal.status.says == "No file at a.ts in dock.", "the first telling's time hid the second")
+        turnstile.letOne()
+        #expect(await RunnerTabTests.until(5) { terminal.status.says == nil }, "the second telling's time did not hide it")
+    }
+
+    /// A shell that reports a folder on another host than it first did (the person went to another
+    /// machine from the workspace) is that machine's: its folder is unreported and no path in its
+    /// output is a link.
+    @Test func aTerminalOnAnotherMachineOffersNoPathLinks() async throws {
+        let door = try FakeRunnerDoor(person: "uday")
+        door.hold("uday-dock-1")
+        let (_, bench) = try FilesPanelTests.shell(door)
+        let terminal = try #require(bench.focused)
+        #expect(await RunnerTabTests.until(10) { terminal.status.says == nil }, "the terminal never attached: \(terminal.status.says ?? "")")
+        let session = try #require(bench.model.panes[terminal.id]?.session)
+        let line = "src/App.java:3: error"
+        door.print(session, "\u{1B}]7;file://dock/home/dev/workspace/api\u{07}")
+        #expect(await RunnerTabTests.until(10) { bench.model.panes[terminal.id]?.reportedFolder == "file://dock/home/dev/workspace/api" })
+        #expect(terminal.terminal.linkIn(line, 3) == 0 ..< 14, "the workspace's own output offers no link")
+        door.print(session, "\u{1B}]7;file://build-box/srv/app\u{07}")
+        #expect(await RunnerTabTests.until(10) { bench.model.panes[terminal.id]?.reportedFolder == "file://build-box/srv/app" })
+        #expect(terminal.terminal.linkIn(line, 3) == nil, "another machine's output offered a link")
     }
 
     /// Half of a character (a lone surrogate) is never saved as U+FFFD: the save says where it is
@@ -756,5 +803,35 @@ import Testing
         pane.onShowTerminal()
         bench.layoutSubtreeIfNeeded()
         #expect(pane.isHidden && bench.window?.firstResponder === terminal.terminal, "Show Terminal did not bring the terminal forward")
+    }
+}
+
+/// Holds each wait until let through, one at a time, in order: a test's hand on a timer.
+@MainActor final class Turnstile {
+    private var held: [CheckedContinuation<Void, Never>] = []
+    private var through = 0
+    private var watching: [(count: Int, go: CheckedContinuation<Void, Never>)] = []
+
+    var waiting: Int {
+        held.count
+    }
+
+    func wait() async {
+        await withCheckedContinuation { held.append($0) }
+        through += 1
+        let ready = watching.filter { $0.count <= through }
+        watching.removeAll { $0.count <= through }
+        ready.forEach { $0.go.resume() }
+    }
+
+    func letOne() {
+        guard !held.isEmpty else { return }
+        held.removeFirst().resume()
+    }
+
+    /// Returns once `count` waits have returned.
+    func passed(_ count: Int) async {
+        guard through < count else { return }
+        await withCheckedContinuation { watching.append((count, $0)) }
     }
 }

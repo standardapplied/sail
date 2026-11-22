@@ -110,7 +110,7 @@ public struct TerminalPath: Equatable, Sendable {
             asked = path
             id = firstID
             let root = FileTree.root.shown, absolute = path.hasPrefix("/") || path.hasPrefix("~/")
-            let folder = absolute ? nil : cwd.flatMap { TerminalPath.resolved(".", in: $0) }
+            let folder = absolute ? nil : cwd.flatMap { Self.plain($0) ? TerminalPath.resolved(".", in: $0) : nil }
             var named: [String] = []
             for (place, name) in [(folder, folder.map { Self.name(of: $0, workspace: workspace) }), (root, workspace)] {
                 guard let place, let name, let resolved = TerminalPath.resolved(path, in: place).map({ FileName($0) }), !queue.contains(resolved) else { continue }
@@ -118,6 +118,13 @@ public struct TerminalPath: Equatable, Sendable {
                 named.append(name)
             }
             unfound = "No file at \(path) in " + (named.count == 2 ? "\(named[0]) or in \(workspace)'s root" : named.first ?? workspace) + "."
+        }
+
+        /// Whether a reported folder holds no control or format character (a newline, a bidi
+        /// control, any C0 or C1, a line or paragraph separator): one that does is a program's text,
+        /// never said as Sail's words, and is taken as unreported.
+        private static func plain(_ folder: String) -> Bool {
+            !folder.unicodeScalars.contains { [.control, .format, .lineSeparator, .paragraphSeparator].contains($0.properties.generalCategory) }
         }
 
         /// A folder as said in a sentence: under the root, from it; else from the home.
