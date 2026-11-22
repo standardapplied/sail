@@ -19,6 +19,7 @@ import Testing
         ("/home/dev/workspace/Sources/Tide/Tide.swift:7:13: error: cannot find 'x' in scope", "Tide.swift", "/home/dev/workspace/Sources/Tide/Tide.swift", 7, 13),
         ("crates/berth/src/lib.rs:118:    let quay = Quay::new();", "lib.rs", "crates/berth/src/lib.rs", 118, nil),
         ("docs/guide.md:3:## Mooring", "guide.md", "docs/guide.md", 3, nil),
+        ("web/src/tide.ts:42:export function roundTide(at: Date): string {", "tide.ts", "web/src/tide.ts", 42, nil),
         ("  modified:   Package.swift", "Package.swift", "Package.swift", nil, nil),
         ("see ~/workspace/notes.txt for more", "notes.txt", "~/workspace/notes.txt", nil, nil),
     ] as [(String, String, String, Int?, Int?)])

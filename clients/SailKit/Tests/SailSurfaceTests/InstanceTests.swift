@@ -250,6 +250,24 @@ import Testing
         #expect(clipped.decorations.count == 4 * 3, "the row holds four of the six from column 2")
     }
 
+    /// A link is underlined, single, in the default foreground, across exactly its cells and in
+    /// its row, after the cursor; it lays no row out again, and one off the grid draws nothing.
+    @Test func aLinkIsUnderlinedAcrossItsCells() throws {
+        let screen = try screen(20, 2).fed("see src/a.ts:4 here")
+        var builder = try InstanceBuilder(metrics: metrics(points: 15))
+        let glyphs = Glyphs()
+        let plain = builder.build(try screen.frame(), overlay: Overlay(cursorOn: false), glyphs: glyphs)
+        let linked = builder.build(try screen.frame(), overlay: Overlay(cursorOn: false, link: OverlayLink(row: 0, columns: 4 ..< 14)), glyphs: glyphs)
+        #expect(builder.rebuilt.isEmpty, "the link laid rows out again: \(builder.rebuilt)")
+        let underline = linked.decorations.dropFirst(plain.decorations.count)
+        #expect(underline.count == 10)
+        #expect(underline.map(\.rect.x) == (4 ..< 14).map { Float(20 + $0 * 18) }, "\(underline.map(\.rect))")
+        #expect(underline.allSatisfy { $0.rect.y == 16 && $0.color == InstanceBuilder.color(try! screen.frame().colors.foreground) })
+        #expect(glyphs.asked.contains(.sprite(.underline(.single), wide: false)))
+        let off = builder.build(try screen.frame(), overlay: Overlay(cursorOn: false, link: OverlayLink(row: 5, columns: 0 ..< 3)), glyphs: glyphs)
+        #expect(off.decorations.count == plain.decorations.count && builder.complete)
+    }
+
     @Test func linesBoxesAndStylesBecomeTheirItems() throws {
         let screen = try screen(20, 2).fed("\u{1b}[1;3;4;9m x\u{1b}[0m─\u{1b}[8mh")
         var builder = try InstanceBuilder(metrics: metrics(points: 15))

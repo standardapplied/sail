@@ -165,6 +165,13 @@ public final class FakeRunnerDoor: Sendable {
         timer.resume()
     }
 
+    /// Session `session` prints `text` to every connection attached to it, once: a compiler's line
+    /// in a workspace's terminal.
+    public func print(_ session: String, _ text: String) {
+        let connections = state.withLock { $0.attached[session] ?? [] }
+        connections.forEach { answer(.output(lastInputSequence: 0, bytes: Array(text.utf8)), on: $0) }
+    }
+
     // MARK: Files
 
     /// Folder `path` of a files ticket's workspace now holds `entries` (more than 50,000 when
@@ -340,6 +347,18 @@ public final class FakeRunnerDoor: Sendable {
                     answer(.filesData(id: id, version: file.version, bytes: chunk, eof: next >= file.bytes.count, whole: last && offset == 0 && next >= file.bytes.count, digest: digest), on: connection)
                     at = next
                 } while at < end
+            case let .filesStat(id, path):
+                let (file, folder) = files.withLock { ($0.contents[path], $0.folders[path]) }
+                let name = FileName(Array(path.bytes.split(separator: 0x2F).last ?? []))
+                if let file {
+                    let entry = FileEntry(name: name, kind: .known(.file), target: .known(.none), size: Int64(file.bytes.count), mtimeNanos: 0, mode: 0o100644)
+                    answer(.filesEntry(id: id, entry: entry, version: file.version), on: connection)
+                } else if let folder {
+                    let entry = FileEntry(name: name, kind: .known(.folder), target: .known(.none), size: 0, mtimeNanos: 0, mode: 0o040755)
+                    answer(.filesEntry(id: id, entry: entry, version: folder.version), on: connection)
+                } else {
+                    answer(.filesRefused(id: id, kind: .known(.notFound), message: "No file at \(path.shown)."), on: connection)
+                }
             case let .filesWrite(id, path, base, _, _):
                 if let refusal = files.withLock({ files -> (kind: FileRefusal, message: String)? in
                     defer { files.refuseSave = nil }
