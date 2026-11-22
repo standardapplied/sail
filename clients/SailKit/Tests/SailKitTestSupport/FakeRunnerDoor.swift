@@ -369,7 +369,7 @@ public final class FakeRunnerDoor: Sendable {
             }
         }
         while let frame = frame(on: connection) {
-            if let outside = Self.refusal(of: frame, under: ticket, opened: nil) {
+            if let outside = Self.refusal(of: frame, under: ticket, opened: nil, writing: nil) {
                 return answer(.refused(HostRefusal(message: outside, remedy: [])), on: connection)
             }
             files.withLock { $0.received.append(frame) }
@@ -696,7 +696,8 @@ public final class FakeRunnerDoor: Sendable {
     private func attached(_ connection: Int32, _ number: Int, _ ticket: TicketRequest) {
         var opened: String?
         while let frame = frame(on: connection) {
-            if let outside = Self.refusal(of: frame, under: ticket, opened: opened) {
+            let writing = (opened ?? Self.session(of: ticket)).flatMap { session in state.withLock { $0.writers[session] == number ? session : nil } }
+            if let outside = Self.refusal(of: frame, under: ticket, opened: opened, writing: writing) {
                 return answer(.refused(HostRefusal(message: outside, remedy: [])), on: connection)
             }
             switch frame {
@@ -823,8 +824,9 @@ public final class FakeRunnerDoor: Sendable {
     /// Why `frame` is refused under `ticket`, nil when admitted: only the frames the host's ticket
     /// of that action admits (the admits golden), and of those, a create only into the ticket's
     /// own project and workspace before anything is opened, an attach or a kill only of its own
-    /// session.
-    public static func refusal(of frame: Frame, under ticket: TicketRequest, opened: String?) -> String? {
+    /// session, and a kill only by the connection holding its keyboard (`writing`), in the host's
+    /// words.
+    public static func refusal(of frame: Frame, under ticket: TicketRequest, opened: String?, writing: String?) -> String? {
         let (action, own, scope): (String, String?, String) = switch ticket {
         case let .open(project, workspace):
             ("open", opened, workspace.isEmpty ? "open a session in project '\(project)'" : "open a session in workspace '\(workspace)' of project '\(project)'")
@@ -833,6 +835,7 @@ public final class FakeRunnerDoor: Sendable {
         }
         let refused = "This connection's ticket is to \(scope), and it admits nothing else; ask the API for a ticket for that."
         guard admits[action]?.contains(messageName(of: frame)) == true else { return refused }
+        if case let .kill(session) = frame, session == own, session != writing { return notTheWriter }
         let covered = switch frame {
         case let .create(create):
             if case let .open(project, workspace) = ticket { opened == nil && create.project == project && create.workspace == workspace } else { false }

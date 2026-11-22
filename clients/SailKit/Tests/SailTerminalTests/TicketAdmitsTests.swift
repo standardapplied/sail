@@ -22,11 +22,36 @@ import Testing
                 case "attach": .attach(session: own ?? "lounge")
                 default: .files(project: "harbor", workspace: "dock")
                 }
-                let admitted = FakeRunnerDoor.refusal(of: frame, under: ticket, opened: action == "open" ? own : nil) == nil
+                let admitted = FakeRunnerDoor.refusal(of: frame, under: ticket, opened: action == "open" ? own : nil, writing: own) == nil
                 let host = admits[action]?.contains(name) == true
                 #expect(admitted == host, "\(action) ticket: the fake door \(admitted ? "admits" : "refuses") \(name), the host \(host ? "admits" : "refuses") it")
             }
         }
+    }
+
+    /// Aimed elsewhere, the fake refuses what the host's ticket refuses there: a create into
+    /// another project or workspace, an attach or a kill of another session; every other frame as
+    /// the golden says. A kill of its own session by a connection without the keyboard is refused
+    /// in the host's words.
+    @Test func theFakeDoorRefusesWhatIsAimedElsewhere() throws {
+        let admits = try Goldens.admits()
+        let frames = try Goldens.frames().map { ($0.name, try FrameCodec.decode(payload: $0.wire.dropFirst(4))) }
+        let aimed: Set<String> = ["Create", "Attach", "Kill"]
+        for action in admits.keys.sorted() {
+            let ticket: TicketRequest = switch action {
+            case "open": .open(project: "elsewhere", workspace: "other")
+            case "attach": .attach(session: "other-session")
+            default: .files(project: "elsewhere", workspace: "other")
+            }
+            for (name, frame) in frames {
+                let opened = action == "open" ? "other-session" : nil
+                let admitted = FakeRunnerDoor.refusal(of: frame, under: ticket, opened: opened, writing: "other-session") == nil
+                let host = admits[action]?.contains(name) == true && !aimed.contains(name)
+                #expect(admitted == host, "\(action) ticket aimed elsewhere: the fake \(admitted ? "admits" : "refuses") \(name)")
+            }
+        }
+        #expect(FakeRunnerDoor.refusal(of: .kill(session: "lounge"), under: .attach(session: "lounge"), opened: nil, writing: nil) == FakeRunnerDoor.notTheWriter)
+        #expect(FakeRunnerDoor.refusal(of: .kill(session: "lounge"), under: .attach(session: "lounge"), opened: nil, writing: "lounge") == nil)
     }
 
     /// The session a frame names as its own, which a ticket aimed at it holds.
