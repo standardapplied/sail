@@ -7,8 +7,8 @@ import Testing
 /// said not measured cleanly; a reading too short to mean anything judges nothing.
 @Suite struct TimingGateTests {
     static let load = TimingGate(name: "loading it, the least of three", statistic: .least, tries: 3, budget: 16, ceiling: 32)
-    static let quiet = MachineReading.read(idle: 40, ticks: 300)
-    static let starved = MachineReading.read(idle: 2, ticks: 300)
+    static let quiet = MachineReading.read(idle: 40, ours: 20, ticks: 300)
+    static let starved = MachineReading.read(idle: 2, ours: 1, ticks: 300)
 
     @Test func aGateJudgesItsStatisticAtItsCeilingOnAMachineNotStarved() {
         let verdict = Self.load.judge([30, 12, 20], machine: Self.quiet)
@@ -28,21 +28,38 @@ import Testing
         #expect(!gross.met && gross.missed == "loading it, the least of three 1190.0 ms over twice its ceiling (64 ms), not measured cleanly: machine starved")
     }
 
-    /// Starved is under 5% idle from at least 100 ticks; fewer ticks is too short, judged as if
-    /// the machine were not starved.
-    @Test func aReadingIsStarvedOnlyWhenLongEnoughAndNearlyNeverIdle() {
-        #expect(MachineReading(MachineIdle(idleTicks: 4, busyTicks: 96, from: 0, to: 1)).starved)
-        #expect(!MachineReading(MachineIdle(idleTicks: 5, busyTicks: 95, from: 0, to: 1)).starved)
-        #expect(MachineReading(MachineIdle(idleTicks: 0, busyTicks: 99, from: 0, to: 1)) == .tooShort(ticks: 99))
-        #expect(MachineReading(nil) == .tooShort(ticks: 0))
-        #expect(MachineReading(MachineIdle(idleTicks: 0, busyTicks: 100, from: 0, to: 1)).said == "the machine's CPUs 0.0% idle over 100 ticks across the step's tries: starved")
-        #expect(MachineReading.tooShort(ticks: 42).said == "the machine's reading too short (42 ticks across the step's tries, 100 wanted), judged at the ceilings")
-        let tooShort = Self.load.judge([33, 34, 35], machine: .tooShort(ticks: 42))
+    static func idle(_ idle: Double, busy: Double, ours: Double?) -> MachineIdle {
+        MachineIdle(idleTicks: idle, busyTicks: busy, ourTicks: ours, from: 0, to: 1)
+    }
+
+    /// M1: starved is what the other processes left us, the idle ticks and our own, under 5% of at
+    /// least 100 ticks; our own work, however much of the machine it takes, never reads starved.
+    @Test func aReadingIsStarvedOnlyWhenOthersLeaveUsNearlyNothing() {
+        #expect(!MachineReading(Self.idle(0, busy: 100, ours: 95)).starved, "our own work read the machine starved")
+        #expect(MachineReading(Self.idle(0, busy: 100, ours: 4)).starved, "others taking 96% did not read starved")
+        #expect(MachineReading(Self.idle(2, busy: 98, ours: 2)).starved)
+        #expect(!MachineReading(Self.idle(2, busy: 98, ours: 3)).starved)
+        #expect(!MachineReading(Self.idle(5, busy: 95, ours: 0)).starved)
+        #expect(MachineReading(Self.idle(0, busy: 100, ours: 400)) == .read(idle: 0, ours: 100, ticks: 100), "our share was not bound by the busy ticks")
+        #expect(MachineReading(Self.idle(0, busy: 100, ours: 3)).said
+            == "the machine's CPUs 0.0% idle over 100 ticks across the step's tries, our processes 3.0% of them, others leaving us 3.0%: starved")
+    }
+
+    /// A reading too short, cut by the sampler's window, or without our share judges nothing: the
+    /// step is judged at its ceilings, and says why.
+    @Test func aReadingThatCannotBeJudgedSaysWhy() {
+        #expect(MachineReading(Self.idle(0, busy: 99, ours: 0)) == .unjudged("too short (99 ticks across the step's tries, 100 wanted)"))
+        #expect(MachineReading(nil) == .unjudged("too short (0 ticks across the step's tries, 100 wanted)"))
+        #expect(MachineReading(Self.idle(0, busy: 300, ours: 0), whole: false) == .unjudged("incomplete (the sampler's window began after the step's first try)"))
+        #expect(MachineReading(Self.idle(0, busy: 300, ours: nil)) == .unjudged("without our processes' share"))
+        #expect(MachineReading.unjudged("too short (42 ticks across the step's tries, 100 wanted)").said
+            == "the machine's reading too short (42 ticks across the step's tries, 100 wanted), judged at the ceilings")
+        let tooShort = Self.load.judge([33, 34, 35], machine: MachineReading(nil))
         #expect(!tooShort.met && tooShort.missed == "loading it, the least of three 33.0 ms over its 32 ms ceiling")
     }
 
-    static func look(_ time: Double, idle: UInt32?, busy: UInt32?) -> ThreadLook {
-        ThreadLook(time: time, runnable: idle != nil, cpu: 0, ourCPU: nil, idleTicks: idle, busyTicks: busy)
+    static func look(_ time: Double, idle: UInt32?, busy: UInt32?, ours: Double? = nil) -> ThreadLook {
+        ThreadLook(time: time, runnable: idle != nil, cpu: 0, ourCPU: ours ?? idle.map { _ in time }, idleTicks: idle, busyTicks: busy)
     }
 
     /// The machine's idle share over a step's spans: each span's ticks between its first and last
@@ -56,6 +73,11 @@ import Testing
         #expect(one.idleTicks == 1 && one.busyTicks == 6 && one.from == 1.0 && one.to == 1.1 && abs((one.percent ?? 0) - 100.0 / 7) < 1e-9, "\(one)")
         let union = try #require(MachineShare.idle(in: [Span(1.05, 1.1), Span(1.0, 1.1), Span(1.0, 1.06), Span(2.0, 2.1), Span(2.95, 3.05)], looks: looks))
         #expect(union.idleTicks == 4 && union.busyTicks == 16 && union.from == 1.0 && union.to == 2.1, "overlapping spans counted twice, or a span read once added: \(union)")
+        #expect(abs((union.ourTicks ?? 0) - 20) < 1e-6, "our processes' CPU over the spans: \(union)")
+        let contained = try #require(MachineShare.idle(in: [Span(1.0, 2.1), Span(1.05, 1.1)], looks: looks))
+        #expect(contained.idleTicks == 103 && contained.busyTicks == 60 && contained.to == 2.1, "a span inside an earlier one shortened it: \(contained)")
+        let unread = looks.map { ThreadLook(time: $0.time, runnable: $0.runnable, cpu: 0, ourCPU: nil, idleTicks: $0.idleTicks, busyTicks: $0.busyTicks) }
+        #expect(MachineShare.idle(in: [Span(1.0, 1.1)], looks: unread)?.ourTicks == nil, "an unread share was taken as none of ours")
         #expect(MachineShare.idle(in: [Span(1.06, 1.2), Span(2.95, 3.05)], looks: looks) == nil, "spans read once made a share")
         let still = try #require(MachineShare.idle(in: [Span(1.09, 1.11)], looks: looks + [Self.look(1.11, idle: 101, busy: 56)]))
         #expect(still.percent == nil, "ticks that did not move made a share")

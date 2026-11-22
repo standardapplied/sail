@@ -75,6 +75,9 @@ final class Driver {
     /// Whether the step under way was judged on a machine read starved, and every step that was.
     private var notCleanInStep = false
     private var notClean: [String] = []
+    /// Every timing gate's verdict this run, a row each of `figures.tsv`: the figure against its
+    /// marks and the machine as read over its step, kept so drift shows across runs.
+    private var figureRows: [String] = []
 
     struct Result: Encodable {
         let index: Int
@@ -191,6 +194,10 @@ final class Driver {
         let overLook = lookCheap ? "" : String(format: "; FAILED: a look took more on average than the watcher's computation of %.0f µs", MainStacks.computation * 1e6)
         let demoted = stayedRealTime ? "" : "; FAILED: the watcher was demoted out of real time"
         Self.say(stretches + sampler + overClaim + overLook + demoted)
+        if !figureRows.isEmpty {
+            let table = (["figure\tvalue\tbudget\tmark\tceiling\tidle %\tours %\tstarved"] + figureRows).joined(separator: "\n") + "\n"
+            try? table.write(to: out.appending(path: "figures.tsv"), atomically: true, encoding: .utf8)
+        }
         let passed = results.count == steps.count && results.allSatisfy(\.ok) && withinClaim && lookCheap && stayedRealTime
         let report = Report(
             passed: passed, hertz: shell.window.screen?.maximumFramesPerSecond ?? 0, scale: terminal.metrics.scale, steps: results,
@@ -602,10 +609,17 @@ final class Driver {
     /// step (``MachineReading``), each gate then judged on its tries; a step read starved is kept
     /// for the run's summary.
     func judged(_ gates: [TimingGate], _ tries: [String: [Taken]]) -> (verdicts: [TimingGate.Verdict], machine: MachineReading) {
-        let spans = gates.flatMap { tries[$0.name]?.map(\.span) ?? [] }
-        let machine = MachineReading(MachineShare.idle(in: spans, looks: mainStacks.looks))
+        let spans = gates.flatMap { tries[$0.name]?.map(\.span) ?? [] }, looks = mainStacks.looks
+        let whole = (spans.map(\.start).min() ?? .infinity) >= (looks.first?.time ?? -.infinity)
+        let machine = MachineReading(MachineShare.idle(in: spans, looks: looks), whole: whole)
         if machine.starved { notCleanInStep = true }
-        return (gates.map { $0.judge(tries[$0.name]?.map(\.value) ?? [], machine: machine) }, machine)
+        let verdicts = gates.map { $0.judge(tries[$0.name]?.map(\.value) ?? [], machine: machine) }
+        let (idle, ours) = if case let .read(idle, ours, _) = machine { (String(format: "%.1f", idle), String(format: "%.1f", ours)) } else { ("", "") }
+        for (gate, verdict) in zip(gates, verdicts) {
+            figureRows.append([gate.name, String(format: "%.1f", verdict.value), String(format: "%g", gate.budget), gate.mark.map { String(format: "%g", $0) } ?? "",
+                               String(format: "%g", gate.ceiling), idle, ours, machine.starved ? "yes" : "no"].joined(separator: "\t"))
+        }
+        return (verdicts, machine)
     }
 
     /// A step's line from its gates' verdicts: what missed, then every figure, then how the

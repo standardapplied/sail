@@ -118,14 +118,18 @@ tests bite, and the deletion count in the body.
   posts events to the app's queue (`NSApp.postEvent`): with no `NSApp.run` under it, that stopped
   the main run loop and ended the suite's process (#499); real clicks and keys are the drive's.
 - The drive's timing gates are of two kinds, and a new one is one of them, never a third. A
-  figure taken over tries (`f-budgets`, `p-figures`, the files flood's change) goes through
-  `TimingGate`: the step takes its tries, the machine is read once over the union of their spans
-  (`MachineReading`: under 5% idle over at least 100 ticks is starved; fewer ticks is too short and
-  judges nothing), and a starved step's gates are judged at twice their ceilings and named in the
-  run's summary as not measured cleanly. A single long wait (a flood, a split, the terminal's
-  latency) is judged by `ours()`, less the time `MachineShare` proves the machine starved it. A
-  ceiling sits outside the runner's own range as seen on main and other branches, with that
-  range written beside it.
+  figure taken over tries (`f-budgets`, `p-figures`) goes through `TimingGate`: the step takes its
+  tries, the machine is read once over the union of their spans (`MachineReading`), and when the
+  other processes left us under 5% of at least 100 ticks (idle plus our own share, so our own work
+  never excuses itself) the step's gates are judged at twice their ceilings, a `::warning::` and the
+  job summary name it, and the step is "not measured cleanly". The files flood's change p95 takes
+  the same path, but its tries are a few milliseconds long and its reading is always too short, so
+  it is judged at its ceiling. A single long wait (a flood, a split, the terminal's latency) is
+  judged by `ours()`, less the time `MachineShare` proves the machine starved it, our share kept
+  ours by the same `MachineShare.ourShare`. A ceiling sits outside the runner's own range as seen
+  on main and other branches, with that range written beside it. Every run's figures, marks and
+  reading are in `figures.tsv` and the job summary; `clients/SailApp/ci/figures-trend` prints
+  main's last 30 runs as one series a figure.
 - Nothing a layout pass of the Mac app reaches (`layout()` and what it calls, `updateConstraints`,
   `viewDidLayout`, `resizeSubviews`, `setFrameSize`) changes what forces another pass: an intrinsic
   size, `preferredMaxLayoutWidth`, a label's text or font, a constraint's `constant` or `isActive`.

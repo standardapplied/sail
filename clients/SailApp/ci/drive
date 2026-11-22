@@ -212,6 +212,33 @@ open_drive() {
   esac
 }
 
+# What the run's page shows, run or fail: every timing figure against its marks and the machine's
+# reading, as a table (the runs' figures.tsv joined into OUT's), and a warning naming each step
+# judged at twice its ceilings because the machine was starved.
+report_figures() {
+  local tables=("$out_dir"/*/figures.tsv) starved
+  if [[ -e ${tables[0]} ]]; then
+    { head -1 "${tables[0]}"; for table in "${tables[@]}"; do tail -n +2 "$table"; done; } > "$out_dir/figures.tsv"
+    [[ -z ${GITHUB_STEP_SUMMARY:-} ]] || {
+      echo "### Drive figures"
+      echo
+      awk -F'\t' '{ row = "|"; for (i = 1; i <= NF; i++) row = row " " $i " |"; print row }
+        NR == 1 { row = "|"; for (i = 1; i <= NF; i++) row = row " --- |"; print row }' "$out_dir/figures.tsv"
+      echo
+    } >> "$GITHUB_STEP_SUMMARY"
+  fi
+  starved=$(grep -h -E '^drive: [1-9][0-9]* steps? not measured cleanly' "$out_dir"/*-output.txt 2> /dev/null || true)
+  [[ -n $starved ]] || return 0
+  while IFS= read -r line; do echo "::warning title=Drive::$line"; done <<< "$starved"
+  [[ -z ${GITHUB_STEP_SUMMARY:-} ]] || {
+    echo "### Not measured cleanly"
+    echo
+    echo "$starved" | sed 's/^/- /'
+    grep -h -E '^drive [0-9]+ .*not measured cleanly' "$out_dir"/*-output.txt | cut -c1-400 | sed 's/^/- /'
+    echo
+  } >> "$GITHUB_STEP_SUMMARY"
+}
+
 for run in first second third shots workspaces kit kit-rtl; do
   if [[ $run == third ]]; then
     echo "ci/drive: another copy's host, and a client on it"
@@ -268,9 +295,11 @@ for run in first second third shots workspaces kit kit-rtl; do
     elif (( status > 128 )); then
       echo "ci/drive: the drive left no crash report in $reports within 90 s" >&2
     fi
+    report_figures
     exit "$status"
   }
 done
+report_figures
 # The third script measures nothing: its sampler never runs, and its last line says so rather
 # than judging the CPU share of a watcher that had no period to run in.
 grep -qF "the main thread's sampler never ran: no step measured a wait" "$out/third-output.txt" \

@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# figures-trend [RUNS]: the drive's timing figures over main's last RUNS (30) Clients runs, one
+# line a figure, oldest first, with its mark and ceiling: drift a single run's page cannot show.
+# Each run's figures.tsv (the drive-figures-<sha> artifact) is fetched once, by one `gh run
+# download`, and kept in ~/.cache/sail-figures by run id, as a finished run never changes; a run
+# without the table (older than it, or failed before the drive) is remembered as such and not
+# asked again.
+set -euo pipefail
+
+readonly repo=standardapplied/sail runs=${1:-30}
+readonly cache=${XDG_CACHE_HOME:-$HOME/.cache}/sail-figures
+mkdir -p "$cache"
+
+gh run list -R "$repo" --workflow clients.yml --branch main --status completed -L "$runs" \
+  --json databaseId,headSha,createdAt -q '.[] | "\(.createdAt) \(.databaseId) \(.headSha)"' | sort |
+  while read -r _ id sha; do
+    table=$cache/$id.tsv
+    if [[ ! -e $table && ! -e $table.none ]]; then
+      rm -rf "$cache/$id.d"
+      if gh run download "$id" -R "$repo" -n "drive-figures-$sha" -D "$cache/$id.d" > /dev/null 2>&1 && [[ -s $cache/$id.d/figures.tsv ]]; then
+        mv "$cache/$id.d/figures.tsv" "$table"
+      else
+        : > "$table.none"
+      fi
+      rm -rf "$cache/$id.d"
+    fi
+    if [[ -s $table ]]; then tail -n +2 "$table"; fi
+  done |
+  awk -F'\t' '
+    !($1 in seen) { seen[$1] = 1; order[++n] = $1; mark[$1] = $4; ceiling[$1] = $5 }
+    { series[$1] = series[$1] " " $2 ($8 == "yes" ? "*" : "") }
+    END {
+      for (i = 1; i <= n; i++) {
+        f = order[i]
+        printf "%s:%s (mark %s, ceiling %s)\n", f, series[f], (mark[f] == "" ? "none" : mark[f]), ceiling[f]
+      }
+      if (n > 0) print "* the machine read starved over that step: judged at twice the ceiling"
+    }'

@@ -535,6 +535,39 @@ import Testing
         window.attachedSheet.map { window.endSheet($0, returnCode: .alertThirdButtonReturn) }
     }
 
+    static let megabyte: [UInt8] = {
+        let line = "export const tide = { at: 42, height: 1.25 };\n"
+        return Array(String(repeating: line, count: 1_000_000 / line.utf8.count).utf8)
+    }()
+
+    /// A key that changes the text's length never reads the view's whole text into a string (a
+    /// copy of all of it): twenty keys in a 1 MB file, not one read. The cost the drive's key
+    /// figure stops gating below 32 ms.
+    @Test func aKeyNeverReadsTheWholeText() async throws {
+        let (_, _, _, _, pane) = try await Self.opened(Self.megabyte)
+        #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
+        let before = pane.wholeTextReads
+        for index in 0 ..< 20 {
+            pane.editor.insertText("x\(index)", replacementRange: NSRange(location: 0, length: 0))
+        }
+        #expect(await RunnerTabTests.until(5) { pane.unsaved })
+        #expect(pane.wholeTextReads == before, "\(pane.wholeTextReads - before) whole-text reads for 20 keys")
+    }
+
+    /// A slice placed asks one layout pass of the view at most: loading a 1 MB file (31 slices), the
+    /// view's passes are no more than its slices and the few of the pane's opening, and some were
+    /// taken. The cost the drive's load figure stops gating below 32 ms.
+    @Test func aSliceIsLaidOutOnce() async throws {
+        let (_, _, bench, _, pane) = try await Self.opened(Self.megabyte)
+        let before = pane.editor.layouts
+        #expect(await RunnerTabTests.until(10) {
+            bench.layoutSubtreeIfNeeded()
+            return pane.editor.isEditable
+        })
+        let passes = pane.editor.layouts - before
+        #expect(pane.slicesTaken > 20 && passes > 0 && passes <= pane.slicesTaken + 4, "\(passes) layout passes for \(pane.slicesTaken) slices")
+    }
+
     /// Half of a character (a lone surrogate) is never saved as U+FFFD: the save says where it is
     /// and writes nothing.
     @Test func halfACharacterIsNeverSavedAsAnother() async throws {

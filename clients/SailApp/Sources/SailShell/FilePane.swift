@@ -75,8 +75,12 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     /// The slices made of the arriving text, those dealt to the view and those it took; and one to
     /// lose, as a broken slicing would: tests break the slicing so, to prove a view missing text is
     /// never typed in or saved.
-    private var slicesMade = 0, slicesDealt = 0, slicesTaken = 0
+    private var slicesMade = 0, slicesDealt = 0
+    private(set) var slicesTaken = 0
     var losesSlice: Int?
+    /// How many times the view's whole text was read into a string (``wholeText``): a copy of all
+    /// of it, which no key that changes the text's length makes.
+    private(set) var wholeTextReads = 0
     private var shownNote = OpenFile.Note.none
     private var applying = false
     var clock: @MainActor () -> Double = { CACurrentMediaTime() }
@@ -277,10 +281,16 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
         if file.clean { finishLeaving() }
     }
 
+    /// The view's whole text as a string, a copy of all of it: the one way the pane reads it, counted.
+    private var wholeText: String {
+        wholeTextReads += 1
+        return editor.string
+    }
+
     /// The view's text to write, or nil with the reason said: half of a character (a lone surrogate,
     /// from a malformed paste) would be written as U+FFFD, other bytes than the person sees.
     private func textToWrite() -> String? {
-        guard let held = editor.textStorage?.mutableString, let line = Self.loneSurrogateLine(held) else { return editor.string }
+        guard let held = editor.textStorage?.mutableString, let line = Self.loneSurrogateLine(held) else { return wholeText }
         said = "Line \(line) holds half of a character, which can't be saved as text. Nothing was saved."
         abandonLeaving()
         show()
@@ -423,7 +433,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
 
     /// Opens at `line` (1-based): the caret at its start, the line scrolled into view.
     func show(line: Int) {
-        let text = editor.string as NSString
+        let text = wholeText as NSString
         var location = 0
         for _ in 1 ..< max(line, 1) {
             let next = text.lineRange(for: NSRange(location: location, length: 0))
@@ -444,7 +454,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     /// base's.
     private func decideEdit() {
         editedUnseen = false
-        let step = PanePhases.timed("model: a key decided") { file.edited(units: editor.textStorage?.length ?? 0) ?? file.edited(editor.string) }
+        let step = PanePhases.timed("model: a key decided") { file.edited(units: editor.textStorage?.length ?? 0) ?? file.edited(wholeText) }
         apply(step)
     }
 
@@ -487,7 +497,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
             case .restarted: restart()
             case .saved:
                 said = nil
-                if !file.clean { apply(file.edited(editor.string)) }
+                if !file.clean { apply(file.edited(wholeText)) }
                 finishLeaving()
             case let .conflict(theirs, again):
                 abandonLeaving()
@@ -580,7 +590,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     private func replace(with text: String, units: Int, undoable: Bool) {
         slices = []
         (slicesMade, slicesDealt, slicesTaken) = (0, 0, 0)
-        let old = editor.string, top = firstVisibleLine, selection = editor.selectedRange()
+        let old = wholeText, top = firstVisibleLine, selection = editor.selectedRange()
         let storage = editor.textStorage, all = NSRange(location: 0, length: storage?.length ?? 0), new = NSAttributedString(string: text, attributes: textAttributes)
         applying = true
         if undoable, editor.isEditable, editor.shouldChangeText(in: all, replacementString: text) {
@@ -633,7 +643,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     }
 
     private var firstVisibleLine: Int {
-        let text = editor.string as NSString
+        let text = wholeText as NSString
         guard let manager = editor.textLayoutManager, let fragment = manager.textLayoutFragment(for: CGPoint(x: 0, y: scroll.contentView.bounds.minY)),
               let content = manager.textContentManager else { return 1 }
         let offset = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
@@ -872,6 +882,13 @@ final class LineNumbers: NSRulerView {
 @MainActor
 final class PaneTextView: NSTextView {
     var onKeys: @MainActor () -> Void = {}
+    /// How many layout passes the view took: what a slice placed asks of it, once.
+    private(set) var layouts = 0
+
+    override func layout() {
+        layouts += 1
+        super.layout()
+    }
 
     override func becomeFirstResponder() -> Bool {
         let taken = super.becomeFirstResponder()

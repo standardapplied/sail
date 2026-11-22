@@ -411,10 +411,10 @@ extension Driver {
         // CPU figures gate at two 60 Hz frames, 32 ms: over 11 runs on hosted runners (main and
         // unrelated branches, 2026-11-21/22) the load turn read 9.4 to 17.6 ms and the key 7.2 to
         // 16.7 ms, and a 16 ms ceiling failed main itself at 17.6. The 16 and 8 ms marks are said,
-        // never gated; what regresses for real is caught by the pane's structural tests (the O(1)
-        // probe, the slices, no key copying the text) and by 32 ms (the 1.2 s caret walk).
-        let hold = TimingGate(name: "loading it: the main thread's own CPU in its costliest turn, the least of three", statistic: .least, tries: 3, budget: 16, ceiling: 32)
-        let key = TimingGate(name: "a key typed in a 5 MB file to its glyph drawn, the least of three", statistic: .least, tries: 3, budget: 16, ceiling: 32)
+        // never gated; what regresses for real is caught by the pane's structural tests
+        // (`aKeyNeverReadsTheWholeText`, `aSliceIsLaidOutOnce`) and by 32 ms itself.
+        let hold = TimingGate(name: "loading it: the main thread's own CPU in its costliest turn, the least of three", statistic: .least, tries: 3, budget: 8, mark: 16, ceiling: 32)
+        let key = TimingGate(name: "a key typed in a 5 MB file to its glyph drawn, the least of three", statistic: .least, tries: 3, budget: 8, mark: 16, ceiling: 32)
         let change = TimingGate(name: "a clean pane's change to the new text drawn p95", statistic: .p95, tries: 5, budget: 80, ceiling: 200)
         let save = TimingGate(name: "⌘S of 100 KB to the dot gone p95", statistic: .p95, tries: 5, budget: 40, ceiling: 100)
         var loadingPhases = "", keyPhases = "", failure = ""
@@ -566,14 +566,15 @@ extension Driver {
         // The two scroll gates sit at three 60 Hz frames, 48 ms, 40 and the tighter marks said: over
         // 14 runs on hosted runners (main and unrelated branches, 2026-11-21/22) the scroll's longest
         // turn read 10.8 to 35.6 ms and its costliest turn's CPU 10.6 to 32.2 ms, inside a 40 ms
-        // ceiling's reach. Every other ceiling here and in `p-figures` is at least twice the worst
-        // those runs read.
+        // ceiling's reach. The burst's two figures read 12.3 to 24.0 ms over the same runs, under
+        // its 40. Every other ceiling here and in `p-figures` is at least twice the worst those runs
+        // read.
         let toFirstRows = TimingGate(name: "⌃⌘S to the first rows drawn p95", statistic: .p95, tries: 10, budget: 50, ceiling: 120)
         let toListed = TimingGate(name: "a 5,000-entry listing heard to its rows drawn p95", statistic: .p95, tries: 10, budget: 60, ceiling: 150)
         let toChanged = TimingGate(name: "a change heard to the new row and its cue drawn p95", statistic: .p95, tries: 10, budget: 50, ceiling: 120)
-        let scrollCPU = TimingGate(name: "scrolling the 5,000 rows end to end and back, the least of three: the main thread's own CPU in its most costly turn", statistic: .least, tries: 3, budget: 24, ceiling: 48)
+        let scrollCPU = TimingGate(name: "scrolling the 5,000 rows end to end and back, the least of three: the main thread's own CPU in its most costly turn", statistic: .least, tries: 3, budget: 24, mark: 40, ceiling: 48)
         let burstCPU = TimingGate(name: "2,000 changes in a burst, the least of three: the main thread's own CPU in its most costly turn", statistic: .least, tries: 3, budget: 24, ceiling: 40)
-        let scrollWall = TimingGate(name: "scrolling the 5,000 rows end to end and back, the least of three: the main thread's longest turn on the wall clock", statistic: .least, tries: 3, budget: 24, ceiling: 48)
+        let scrollWall = TimingGate(name: "scrolling the 5,000 rows end to end and back, the least of three: the main thread's longest turn on the wall clock", statistic: .least, tries: 3, budget: 24, mark: 40, ceiling: 48)
         let burstWall = TimingGate(name: "2,000 changes in a burst, the least of three: the main thread's longest turn on the wall clock", statistic: .least, tries: 3, budget: 24, ceiling: 40)
         var toOpen: [Double] = [], toAdmitted: [Double] = [], toListing: [Double] = []
         var worstOpen = 0.0, failure = ""
