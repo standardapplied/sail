@@ -43,6 +43,29 @@ import Testing
         session.close()
     }
 
+    /// The fake host ends a connection as the host does: it closes it, not only shuts it down. On
+    /// macOS a unix socket's shutdown does not always wake a client already blocked reading it
+    /// (measured: up to 26 of 2000 such shutdowns), and the parking test above then waited 5 s on a
+    /// session still blocked in its read with the end of the stream waiting; a close always wakes it.
+    @Test func aPeerTheFakeHostClosesIsClosedNotOnlyShutDown() async throws {
+        let host = try FakeHost()
+        let client = try Connection.connect(to: host.address, timeout: 5)
+        let peer = try await host.accept()
+        let accepted = peer.descriptor
+        let before = Self.inode(accepted)
+
+        peer.close()
+
+        #expect(before >= 0)
+        #expect(Self.inode(accepted) != before, "the peer's socket is still open after its close")
+        _ = client
+    }
+
+    private static func inode(_ descriptor: Int32) -> Int64 {
+        var status = stat()
+        return fstat(descriptor, &status) == 0 ? Int64(truncatingIfNeeded: UInt64(status.st_ino)) : -1
+    }
+
     /// A runner's door goes on at the 8 s cap until a minute of waits is spent: the open, then 11
     /// reconnects.
     @Test func aRunnerThatAttachesAndClosesIsAskedTwelveTicketsThenParks() async throws {
