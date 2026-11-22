@@ -591,12 +591,12 @@ extension Driver {
     /// A click at `point` in `view` as a person makes it: a mouse-down sent through the app, so its
     /// monitors see it as they see a person's, with its mouse-up queued behind it, so the view's own
     /// tracking takes both.
-    func click(_ view: NSView, at point: NSPoint) async -> Bool {
+    func click(_ view: NSView, at point: NSPoint, modifiers: NSEvent.ModifierFlags = []) async -> Bool {
         guard let window = view.window else { return false }
         let location = view.convert(point, to: nil)
         func event(_ type: NSEvent.EventType) -> NSEvent? {
             NSEvent.mouseEvent(
-                with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                with: type, location: location, modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
                 eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0
             )
         }

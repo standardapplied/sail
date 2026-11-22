@@ -151,21 +151,49 @@ public protocol GlyphSource: AnyObject {
 
 /// What a view adds to the screen's frame: whether it has focus (the cursor is hollow without
 /// it, in `idleCursor` when given), whether a blinking cursor is in its shown half (`cursorOn`),
-/// the text an input method is composing, drawn at the cursor, and selected text's fixed colours
-/// (nil inverts each selected cell).
+/// the text an input method is composing, drawn at the cursor, selected text's fixed colours
+/// (nil inverts each selected cell), and a link underlined in the text's own ink.
 public struct Overlay: Equatable, Sendable {
     public var focused: Bool
     public var cursorOn: Bool
     public var marked: String
     public var selection: SelectionInk?
     public var idleCursor: RGB?
+    public var link: OverlayLink?
 
-    public init(focused: Bool = true, cursorOn: Bool = true, marked: String = "", selection: SelectionInk? = nil, idleCursor: RGB? = nil) {
+    public init(
+        focused: Bool = true, cursorOn: Bool = true, marked: String = "", selection: SelectionInk? = nil, idleCursor: RGB? = nil, link: OverlayLink? = nil
+    ) {
         self.focused = focused
         self.cursorOn = cursorOn
         self.marked = marked
         self.selection = selection
         self.idleCursor = idleCursor
+        self.link = link
+    }
+}
+
+/// Cells underlined as a link, a run in each row it takes (a line soft-wrapped across rows takes
+/// several): what ⌘ held over a path in a terminal shows.
+public struct OverlayLink: Equatable, Sendable {
+    public struct Span: Equatable, Sendable {
+        public let row: Int
+        public let columns: Range<Int>
+
+        public init(row: Int, columns: Range<Int>) {
+            self.row = row
+            self.columns = columns
+        }
+    }
+
+    public let spans: [Span]
+
+    public init(spans: [Span]) {
+        self.spans = spans
+    }
+
+    public init(row: Int, columns: Range<Int>) {
+        spans = [Span(row: row, columns: columns)]
     }
 }
 
@@ -235,7 +263,8 @@ public struct InstanceBuilder: Sendable {
         rebuilt = []
         let overlaid: Overlaid = !overlay.marked.isEmpty ? composing(overlay.marked, frame, glyphs: glyphs)
             : overlay.cursorOn ? cursor(frame, focused: overlay.focused, idle: overlay.idleCursor, glyphs: glyphs) : ([], true)
-        overlayComplete = overlaid.complete
+        let linked: Overlaid = overlay.link.map { underlined($0, frame, glyphs: glyphs) } ?? ([], true)
+        overlayComplete = overlaid.complete && linked.complete
         var memo = PlaceMemo()
         for y in frame.rows.indices {
             if dirty.contains(y) || rows[y].incomplete || !rows[y].items.entries.allSatisfy({ memo.place($0.item, glyphs: glyphs) == $0.place }) {
@@ -249,8 +278,21 @@ public struct InstanceBuilder: Sendable {
             glyphs: Self.joined(rows.map(\.glyphs)),
             decorations: Self.joined(rows.map(\.decorations))
         )
-        instances.decorations += overlaid.drawn
+        instances.decorations += overlaid.drawn + linked.drawn
         return instances
+    }
+
+    /// A link's cells underlined, single, in the default foreground, within the grid.
+    private func underlined(_ link: OverlayLink, _ frame: ScreenFrame, glyphs: some GlyphSource) -> Overlaid {
+        let spans = link.spans.filter { frame.rows.indices.contains($0.row) }
+        guard !spans.isEmpty else { return ([], true) }
+        guard let place = glyphs.place(.sprite(.underline(.single), wide: false)) else { return ([], false) }
+        let ink = Self.color(frame.colors.foreground)
+        return (spans.flatMap { span in
+            (max(span.columns.lowerBound, 0) ..< min(span.columns.upperBound, frame.size.columns)).map { x in
+                GlyphInstance(rect: rect(metrics.origin(of: CellPoint(x: x, y: span.row)), cells: 1), slot: Self.origin(place.slot), colour: place.colour, color: ink)
+            }
+        }, true)
     }
 
     private func layout(

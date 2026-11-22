@@ -90,7 +90,7 @@ extension WorkbenchView {
         let onScreen = !filesAway && !isHidden && window?.isMiniaturized != true
         for tab in model.tabs {
             guard let panel = tabViews[tab.id]?.files else { continue }
-            let wanted = tabViews[tab.id]?.filePane != nil || workspace(of: tab).map { filesShown.contains(Self.key($0.project, $0.name)) } == true
+            let wanted = tabViews[tab.id]?.filePane != nil || panel.lookingUp || workspace(of: tab).map { filesShown.contains(Self.key($0.project, $0.name)) } == true
             let shown = onScreen && tab.id == model.selected && wanted
             if shown { panel.open() } else { panel.close() }
         }
@@ -133,7 +133,7 @@ extension WorkbenchView {
     }
 
     @discardableResult
-    private func makeFiles(project: String, name: String, in view: TabView) -> FilesPanel {
+    func makeFiles(project: String, name: String, in view: TabView) -> FilesPanel {
         let reached = signedIn()
         let tickets = reached.map { SignedInTickets(for: $0.handle, current: signedIn) }
         let panel = FilesPanel(project: project, workspace: name, tickets: tickets, look: look, mono: labels)

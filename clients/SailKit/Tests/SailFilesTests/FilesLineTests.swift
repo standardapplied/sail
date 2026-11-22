@@ -19,6 +19,25 @@ import Testing
         FilesLine(tree: tree, phase: phase, workspace: "dock", at: now) { "\(Int($0))s" }
     }
 
+    /// R3-1: the connection's state in words a person reads, one source for the panel's line and a
+    /// ⌘-click's card: the session's own reason (a terminal error's description) never said, a
+    /// sentence the workspace gave said as given, and never blank.
+    @Test(arguments: [
+        (FilesSession.Phase.reconnecting("the terminal host closed the connection"), "Reconnecting to dock's files."),
+        (.unreachable("the terminal host could not be reached: connection refused"), "Can't reach dock's files."),
+        (.stopped("Workspace dock of harbor was stopped by ana."), "Workspace dock of harbor was stopped by ana."),
+        (.stopped(""), "dock is stopped."),
+        (.stopped(" \n"), "dock is stopped."),
+        (.gone(""), "dock is gone."),
+        (.refused([]), "Sail may not open dock's files."),
+        (.limited(""), "Too many files connections are open to dock."),
+        (.limited("You have 16 files connections open; close one to open another."), "You have 16 files connections open; close one to open another."),
+    ] as [(FilesSession.Phase, String)])
+    func theConnectionsStateIsSaidInWordsAPersonReads(_ phase: FilesSession.Phase, _ words: String) {
+        #expect(FilesLine.state(of: phase, workspace: "dock") == words)
+        #expect(FilesLine.state(of: .connected, workspace: "dock") == nil && FilesLine.state(of: .connecting, workspace: "dock") == nil)
+    }
+
     @Test func aLiveTreeSaysNothing() throws {
         let tree = try Self.listed([FileTreeTests.file("a.txt")])
         #expect(Self.line(tree, .connected, at: 1) == nil)
@@ -46,7 +65,7 @@ import Testing
 
     @Test func unreachableOffersTryAgainAndStoppedOffersStartAsThePersonsOwnAct() throws {
         let tree = try Self.listed([])
-        #expect(Self.line(tree, .unreachable("refused"), at: 1) == FilesLine(words: "Can't reach the files.", mark: .bad, action: .tryAgain, dims: true))
+        #expect(Self.line(tree, .unreachable("refused"), at: 1) == FilesLine(words: "Can't reach dock's files.", mark: .bad, action: .tryAgain, dims: true))
         #expect(Self.line(FileTree(), .stopped("dock is stopped."), at: 1) == FilesLine(words: "dock is stopped.", mark: .quiet, action: .start, dims: true))
         #expect(Self.line(tree, .stopped("Workspace dock of harbor was stopped by ana."), at: 1)?.words == "Workspace dock of harbor was stopped by ana.", "M35: not the stop's own record")
         #expect(Self.line(FileTree(), .stopped(""), at: 1)?.words == "dock is stopped.")
@@ -56,7 +75,7 @@ import Testing
     @Test func theMoreSevereStateIsSaid() throws {
         var tree = try Self.listed([FileTreeTests.file("a.txt")])
         tree.disconnected()
-        #expect(Self.line(tree, .unreachable("refused"), at: 30)?.words == "Can't reach the files.", "not live outranked can't reach")
+        #expect(Self.line(tree, .unreachable("refused"), at: 30)?.words == "Can't reach dock's files.", "not live outranked can't reach")
         #expect(Self.line(tree, .stopped("dock is stopped."), at: 30)?.words == "dock is stopped.")
         #expect(Self.line(tree, .reconnecting("down"), at: 30)?.mark == .waiting)
     }

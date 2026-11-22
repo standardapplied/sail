@@ -277,6 +277,69 @@ import Testing
         return panel
     }
 
+    static func stats(_ frames: [Frame]) -> [Int32] {
+        frames.compactMap { if case let .filesStat(id, _) = $0 { id } else { nil } }
+    }
+
+    /// M1, R3-1: a ⌘-click's lookup lives only while the connection is being asked for or is up: a
+    /// phase that ends or parks the connection, heard before the click or after it, ends the lookup
+    /// in the panel line's own words for the files connection, never the session's internal reason
+    /// and never blank, with "Click again once it is back." while it reconnects; it asks nothing
+    /// before admission, and nothing when the connection is had again (the person clicks again).
+    /// The phases are the values `FilesSession` makes.
+    @Test(arguments: [
+        ("stopped", FilesSession.Phase.stopped("Workspace dock of harbor was stopped by ana."), "Workspace dock of harbor was stopped by ana."),
+        ("stopped unrecorded", .stopped(""), "dock is stopped."),
+        ("refused", .refused(["Workspace 'dock' belongs to 'uday', not you.", "Ask uday to enter it."]), "Workspace 'dock' belongs to 'uday', not you. Ask uday to enter it."),
+        ("unreachable", .unreachable(TerminalError.timedOut("the admission").description), "Can't reach dock's files."),
+        ("gone", .gone("Workspace dock of harbor no longer exists."), "Workspace dock of harbor no longer exists."),
+        ("limited", .limited("You have 16 files connections open; close one to open another."), "You have 16 files connections open; close one to open another."),
+        ("reconnecting", .reconnecting(TerminalError.closed.description), "Reconnecting to dock's files. Click again once it is back."),
+    ] as [(String, FilesSession.Phase, String)])
+    func aLookupEndsWithTheConnectionInItsOwnWords(_ name: String, _ phase: FilesSession.Phase, _ words: String) throws {
+        for parkedFirst in [false, true] {
+            let panel = FilesPanel(project: "harbor", workspace: "dock", tickets: nil, look: .light, mono: try LabelFont(directory: LookTests.fonts))
+            var sent: [Frame] = [], said: [TerminalPath.Lookup.Next] = []
+            panel.onSent = { sent += $0 }
+            if parkedFirst { panel.heard(.phase(phase)) }
+            panel.lookUp("src/a.ts", cwd: nil) { said.append($0) }
+            #expect(sent.isEmpty, "\(name): asked before the connection was admitted")
+            if !parkedFirst {
+                #expect(panel.lookingUp)
+                panel.heard(.phase(phase))
+            }
+            #expect(said == [.said(words)] && !panel.lookingUp, "\(name), parked first \(parkedFirst): \(said)")
+            panel.heard(.phase(.connected))
+            panel.heard(.admitted)
+            #expect(Self.stats(sent).isEmpty && said.count == 1, "\(name), parked first \(parkedFirst): the ended lookup was asked when the connection came back")
+        }
+    }
+
+    /// M1: a lookup whose connection drops mid-way is said in the drop's words and never asked
+    /// again: the connection had again asks nothing, and a late answer to its old ask opens
+    /// nothing; a close ends a lookup unsaid, and the next click waits for the next admission.
+    @Test func aLookupDroppedMidWayIsSaidAndNeverAskedAgain() throws {
+        let panel = try Self.played([Self.folder("src")])
+        var sent: [Frame] = [], said: [TerminalPath.Lookup.Next] = []
+        panel.onSent = { sent += $0 }
+        panel.lookUp("src/a.ts", cwd: nil) { said.append($0) }
+        let asked = try #require(Self.stats(sent).first, "the lookup asked nothing")
+        panel.heard(.phase(.reconnecting(TerminalError.closed.description)))
+        #expect(said == [.said("Reconnecting to dock's files. Click again once it is back.")] && !panel.lookingUp)
+        sent = []
+        panel.heard(.phase(.connected))
+        panel.heard(.admitted)
+        panel.heard(.frame(.filesEntry(id: asked, entry: Self.file("a.ts"), version: "v1")))
+        #expect(Self.stats(sent).isEmpty && said.count == 1, "the dropped lookup was asked again, or its late answer opened a file: \(said)")
+        panel.lookUp("src/b.ts", cwd: nil) { said.append($0) }
+        #expect(panel.lookingUp)
+        panel.close()
+        #expect(!panel.lookingUp && said.count == 1, "a close left the lookup, or said something")
+        sent = []
+        panel.lookUp("src/c.ts", cwd: nil) { said.append($0) }
+        #expect(sent.isEmpty && panel.lookingUp, "a click after a close was asked before the connection had again was admitted")
+    }
+
     /// → opens a folder and ← shuts it, Space too; ↓ moves among rows as any list's.
     @Test func theArrowsOpenAndShutAFolder() throws {
         let panel = try Self.played([Self.folder("src"), Self.file("README.md")])
@@ -340,7 +403,7 @@ import Testing
         panel.heard(.frame(.filesTick))
         #expect(panel.line.isHidden && panel.scroll.alphaValue == 1, "\(name): the tick did not make it live again")
         panel.heard(.phase(.unreachable("refused")))
-        #expect(panel.shownLine?.words == "Can't reach the files." && panel.line.button.title == "Try Again" && !panel.line.button.isHidden)
+        #expect(panel.shownLine?.words == "Can't reach dock's files." && panel.line.button.title == "Try Again" && !panel.line.button.isHidden)
         panel.heard(.phase(.stopped("Workspace dock of harbor was stopped by ana.")))
         #expect(panel.shownLine?.words == "Workspace dock of harbor was stopped by ana." && panel.line.button.title == "Start", "\(name): not the stop's own record with Start")
         panel.layoutSubtreeIfNeeded()
