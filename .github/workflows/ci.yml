@@ -503,6 +503,21 @@ jobs:
           if [ -z "$found" ]; then echo "No incus start or stop timed out."; fi
           for log in $found; do echo "== $log"; cat "$log"; done
 
+      # Any incus command that timed out, not only a start or a stop: its container's state and log
+      # as Incus holds them now, each asked within 30 s, then what the Incus daemon itself logged.
+      - name: What Incus holds of a container a timed-out command named
+        if: failure()
+        run: |
+          names=$(grep -oE 'timed out after [0-9]+s: incus (launch [^ ]+|start|stop|restart|exec|delete --force|delete|snapshot create|publish) [^ .]+' "$RUNNER_TEMP/maven.log" 2> /dev/null \
+            | awk '{ print $NF }' | sort -u || true)
+          if [ -z "$names" ]; then echo "No incus command timed out."; fi
+          for name in $names; do
+            echo "== incus info --show-log $name"
+            timeout 30 incus info --show-log "$name" || echo "(incus answered nothing of $name within 30 s)"
+          done
+          echo "== the Incus daemon's journal, its last 200 lines"
+          timeout 30 sudo journalctl -u incus --no-pager -n 200 || true
+
       - name: Leave the test evidence
         if: always()
         uses: ./.github/actions/test-evidence

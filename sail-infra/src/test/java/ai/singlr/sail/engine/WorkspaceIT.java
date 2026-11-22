@@ -175,28 +175,50 @@ class WorkspaceIT extends AbstractIncusIT {
   @BeforeEach
   void aDirBoxWithAZfsPoolBesideAndASealedTemplate() throws Exception {
     ensureIncusOrSkip();
-    removeEverything();
-    var made = new IncusStorage(shell).create(POOL, new PoolSource.File(10240));
-    assertTrue(made.ok(), "Incus could not make a file-backed zfs pool: " + made.reason());
+    step("remove the last test's leftovers", STEP_BOUND, this::removeEverything);
+    step(
+        "make the file-backed zfs pool " + POOL,
+        POOL_BOUND,
+        () -> {
+          var made = new IncusStorage(shell).create(POOL, new PoolSource.File(10240));
+          assertTrue(made.ok(), "Incus could not make a file-backed zfs pool: " + made.reason());
+        });
     launchPrepared(PROJECT);
     launchPrepared(TEMPLATE, "--storage", POOL);
-    var sealed = exec(TEMPLATE, List.of("bash", "-c", SEAL));
-    assertTrue(sealed.ok(), "could not seal the template: " + sealed.stderr() + sealed.stdout());
-    ContainerSailSetup.ensureInstalled(shell, TEMPLATE);
-    containers.stop(TEMPLATE);
-    var recorded =
-        shell.exec(
-            List.of(
-                "incus",
-                "config",
-                "set",
-                TEMPLATE,
-                "user.sail.template.of=" + PROJECT,
-                "user.sail.template.current=v1",
-                "user.sail.template.inputs="
-                    + ProjectProvisioner.inputs(definition(), Optional.empty())));
-    assertTrue(recorded.ok(), recorded.reason());
-    new SnapshotManager(shell).create(TEMPLATE, "v1");
+    step(
+        "seal " + TEMPLATE,
+        STEP_BOUND,
+        () -> {
+          var sealed = exec(TEMPLATE, List.of("bash", "-c", SEAL));
+          assertTrue(
+              sealed.ok(), "could not seal the template: " + sealed.stderr() + sealed.stdout());
+        });
+    step(
+        "install sail's machinery in " + TEMPLATE,
+        STEP_BOUND,
+        () -> ContainerSailSetup.ensureInstalled(shell, TEMPLATE));
+    step("stop " + TEMPLATE, STEP_BOUND, () -> containers.stop(TEMPLATE));
+    step(
+        "record " + TEMPLATE + " current at v1",
+        STEP_BOUND,
+        () -> {
+          var recorded =
+              shell.exec(
+                  List.of(
+                      "incus",
+                      "config",
+                      "set",
+                      TEMPLATE,
+                      "user.sail.template.of=" + PROJECT,
+                      "user.sail.template.current=v1",
+                      "user.sail.template.inputs="
+                          + ProjectProvisioner.inputs(definition(), Optional.empty())));
+          assertTrue(recorded.ok(), recorded.reason());
+        });
+    step(
+        "snapshot " + TEMPLATE + " v1",
+        STEP_BOUND,
+        () -> new SnapshotManager(shell).create(TEMPLATE, "v1"));
   }
 
   @AfterEach
