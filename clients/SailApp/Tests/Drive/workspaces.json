@@ -192,6 +192,7 @@
   {"name": "a1-dock-offers-each-harness", "newSessionSays": ["New session in dock", "Claude Code", "login “default” · API key", "Mode", "Claude Code's own", "Starts as Claude Code starts by itself: the project's default mode, else Auto where it is available, else Manual.", "Codex CLI", "login “work” · API key", "Shell", "a terminal, no agent", "Start", "↑↓ choose · ⌘M mode"]},
   {"name": "a1-claude-chosen-first", "newSessionChosen": "Claude Code"},
   {"name": "a1-new-session", "shotScreen": "a1-new-session"},
+  {"name": "a1-the-shadow-whole", "shadowWhole": ["a1-new-session", "newSession"]},
   {"name": "a1-down-to-codex", "press": "arrowDown"},
   {"name": "a1-codex-chosen", "newSessionChosen": "Codex CLI"},
   {"name": "a1-codex-one-mode-with-its-note", "newSessionSays": ["Codex CLI", "Mode", "Full access", "Sail starts Codex CLI in a workspace with full access, running every command without asking and without its sandbox: that sandbox, bubblewrap, cannot start in a workspace's container."]},
@@ -293,6 +294,7 @@
   {"name": "a1-least-the-rows-plus", "clickRowButton": ["dock", "New Session"]},
   {"name": "a1-least-said", "newSessionSays": ["New session in dock", "Claude Code", "Codex CLI", "Shell", "Start"]},
   {"name": "a1-least-window", "shotScreen": "a1-new-session-least"},
+  {"name": "a1-least-shadow-whole", "shadowWhole": ["a1-new-session-least", "newSession"]},
   {"name": "a1-least-escape", "press": "escape"},
   {"name": "a1-least-closed", "newSessionOpen": false},
   {"name": "a1-the-designs-size", "window": [1024, 684]},
@@ -528,5 +530,6 @@
   {"name": "w-m7-the-user-menu-signed-out", "menu": "click"},
   {"name": "w-m7-the-user-menu-says-signed-out", "menuSays": "open: Not signed in; nothing highlighted; Auto chosen"},
   {"name": "w-m7-the-user-menu-signed-out-in-both-looks", "shotScreen": "user-menu-signed-out"},
+  {"name": "w-m7-the-user-menus-shadow-whole", "shadowWhole": ["user-menu-signed-out", "userMenu"]},
   {"name": "w-m7-sign-in-from-the-user-menu", "menuClick": "Sign In"}
 ]}

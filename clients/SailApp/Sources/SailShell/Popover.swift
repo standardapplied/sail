@@ -4,14 +4,15 @@ import SailLook
 
 /// A box of ours floating over a window, as the user menu and the New Session panel are: in a
 /// borderless child panel that never takes the keys, over the look's pop shadow, with `room` around
-/// the box for the shadow. While it shows, `keys`, a view of its owner's added to the window, holds
+/// the box for all of the shadow. While it shows, `keys`, a view of its owner's added to the window, holds
 /// the window's keys; they go back where they were when it closes: to the anchor when the keys
 /// opened it and the anchor takes them, else to what held them (a field being edited, its selection
 /// given back), else, when that view has left the window, to `fallback`. A click outside it (one on
 /// the anchor is the anchor's own) or the window giving up the keys tells `onDismiss`.
 @MainActor
 package final class Popover: NSObject {
-    static let room = 24.0
+    /// Clear room around the box, as far as the pop shadow reaches in either look.
+    static let room = [Look.light, Look.dark].map(PopShadow.reach).max() ?? 0
 
     package let panel: NSPanel
     private let shadow: PopShadowView
@@ -40,11 +41,13 @@ package final class Popover: NSObject {
     private var mouseWatch: Any?
     private var resignWatch: (any NSObjectProtocol)?
 
-    init(_ box: NSView, keys: NSView, look: Look) {
+    /// Floats `box`, whose corners are `radius`, its keys taken by `keys`.
+    init(_ box: NSView, keys: NSView, look: Look, radius: Double) {
         self.box = box
         self.keys = keys
         self.look = look
         shadow = PopShadowView(look: look)
+        shadow.radius = radius
         panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         super.init()
         panel.isOpaque = false
@@ -52,6 +55,7 @@ package final class Popover: NSObject {
         panel.hasShadow = false
         panel.becomesKeyOnlyIfNeeded = true
         let host = NSView()
+        host.wantsLayer = true
         host.addSubview(shadow)
         host.addSubview(box)
         panel.contentView = host
@@ -120,9 +124,10 @@ package final class Popover: NSObject {
         }
     }
 
-    /// A click outside the box dismisses it; one on the anchor is the anchor's own (it toggles).
+    /// A click outside the box dismisses it, on its shadow too; one on the anchor is the anchor's own
+    /// (it toggles).
     func clickedAnywhere(_ event: NSEvent) {
-        if event.window === panel { return }
+        if event.window === panel, box.frame.contains(event.locationInWindow) { return }
         if let anchor, event.window === window {
             let at = anchor.convert(event.locationInWindow, from: nil)
             if anchor.bounds.contains(at) { return }

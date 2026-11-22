@@ -155,4 +155,10 @@ public enum PopShadow {
             ? [Layer(y: 0, blur: 0, spread: 1, color: Tint(0x000000, alpha: 0.5)), Layer(y: 6, blur: 14, color: Tint(0x000000, alpha: 0.35)), Layer(y: 18, blur: 44, color: Tint(0x000000, alpha: 0.5))]
             : [Layer(y: 0, blur: 0, spread: 0.5, color: Tint(0x0E1217, alpha: 0.05)), Layer(y: 4, blur: 10, color: Tint(0x0E1217, alpha: 0.07)), Layer(y: 14, blur: 36, color: Tint(0x0E1217, alpha: 0.14))]
     }
+
+    /// How far past its box the shadow reaches on its longest side: the room a box floating in a
+    /// window of its own keeps around it, so the window's edge never cuts the shadow.
+    public static func reach(_ look: Look) -> Double {
+        layers(look).map { abs($0.y) + $0.blur + $0.spread }.max() ?? 0
+    }
 }

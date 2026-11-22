@@ -129,6 +129,7 @@ public final class WorkspacesView: NSView {
         panel.onChoose = { [weak self] name in self?.choose(name) }
         project.on = { [weak self] act in self?.act(act) }
         newSession.onStart = { [weak self] start, memory in self?.started(start, memory) }
+        newSession.onClose = { [weak self] in self?.project.list.primaryElsewhere = false }
         newSession.onShell = { [weak self] in
             guard let self, let place = startingIn else { return }
             onOpen(place.project, place.name)
@@ -409,6 +410,7 @@ public final class WorkspacesView: NSView {
             case let .failure(error): .failed(error.said(at: model.person.controlPlane), remedy: nil)
             }
             newSession.open(said, workspace: name, memory: memory, under: row, page: project, narrow: project.narrow, anchor: project.plus(name))
+            project.list.primaryElsewhere = newSession.isOpen
         }
     }
 

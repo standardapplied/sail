@@ -155,6 +155,14 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     /// The chosen row's first action shows ⏎ while the list holds the keys; off, it shows none,
     /// and Return still presses it (a narrow row's actions column has no room for the keycap).
     public var returnKeyShown = true
+    /// The one primary in view is elsewhere (a panel floating over the list): no row's first action
+    /// is drawn primary, the chosen row's in its outline form until this is false again.
+    public var primaryElsewhere = false {
+        didSet {
+            guard primaryElsewhere != oldValue else { return }
+            enumerateAvailableRowViews { row, _ in (row as? SailRowView)?.refresh() }
+        }
+    }
 
     /// How far in from the list's leading edge the chosen row's bar starts: a hairline where the
     /// card's own edge is drawn over that edge (the panel at the card's leading edge, in dark), so
@@ -636,7 +644,7 @@ final class SailRowView: NSTableRowView {
     func refresh() {
         let paint = self.paint
         if numberOfColumns > 0, let cell = view(atColumn: 0) as? RowCell {
-            cell.show(paint.actions, chosen: isSelected, keys: isEmphasized)
+            cell.show(paint.actions, chosen: isSelected, keys: isEmphasized, quiet: (superview as? SailList)?.primaryElsewhere == true)
             (cell.content as? MarkedRow)?.mark(chosen: isSelected, strong: paint.strong)
         }
         needsDisplay = true
@@ -644,6 +652,12 @@ final class SailRowView: NSTableRowView {
 
     override func didAddSubview(_ subview: NSView) {
         super.didAddSubview(subview)
+        refresh()
+    }
+
+    /// Its list's `primaryElsewhere` reaches a row made while it holds.
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
         refresh()
     }
 
@@ -907,10 +921,11 @@ final class RowCell: NSView {
     }
 
     /// The actions shown (over 120 ms, at once while motion is reduced) or gone; the primary loud
-    /// while the row is chosen, and Return its key (shown as ⏎) only while the list holds the keys.
-    func show(_ shown: Bool, chosen: Bool, keys: Bool) {
+    /// while the row is chosen and the one primary is not elsewhere (`quiet`), and Return its key
+    /// (shown as ⏎) only while the list holds the keys.
+    func show(_ shown: Bool, chosen: Bool, keys: Bool, quiet: Bool = false) {
         if let first {
-            let kind: ButtonKind = chosen ? .primary : .secondary, key = chosen && keys && returnKey ? "\r" : ""
+            let kind: ButtonKind = chosen && !quiet ? .primary : .secondary, key = chosen && keys && returnKey ? "\r" : ""
             if first.kind != kind { first.kind = kind }
             if first.keyEquivalent != key { first.keyEquivalent = key }
         }

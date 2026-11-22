@@ -234,6 +234,11 @@ import Testing
         let outside = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 5, y: 5), modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
         view.newSession.popover.clickedAnywhere(outside)
         #expect(!view.newSession.isOpen && started == 0, "a click outside left it open")
+        _ = try await Self.open("dock", in: view)
+        let panelWindow = view.newSession.popover.panel
+        let onTheShadow = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 2, y: 2), modifierFlags: [], timestamp: 0, windowNumber: panelWindow.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        view.newSession.popover.clickedAnywhere(onTheShadow)
+        #expect(!view.newSession.isOpen, "a click on its shadow, outside the card, left it open")
         let panel = try await Self.open("dock", in: view)
         for _ in 0 ..< 2 { try Self.press(try Self.down(), in: window) }
         #expect(panel.view.primary?.title == "Start" && panel.view.modes == nil)
@@ -327,15 +332,24 @@ import Testing
         #expect(panel.view.words == ["New session in dock", "Workspace 'dock' belongs to 'uday', not you.", "Ask uday to enter it, or have an admin do it.", "Close"], "\(panel.view.words)")
     }
 
-    /// At the least window the panel spans the page less 8 pt on each side, under the row.
+    /// At the least window the panel spans what shows of the page less 8 pt on each side, under
+    /// the row: never past the card, which there holds the section wider than itself (the drive's
+    /// least frame: 27 pt).
     @Test func atTheLeastWindowThePanelSpansThePage() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-dock"], width: WorkspacesViewTests.narrowestCard)
         defer { window.orderOut(nil) }
+        let card = NSView(frame: try #require(window.contentView).frame)
+        window.contentView = card
+        view.frame = NSRect(x: 0, y: 0, width: WorkspacesViewTests.narrowestCard + 27, height: card.frame.height)
+        card.addSubview(view)
+        view.layoutSubtreeIfNeeded()
         #expect(view.project.narrow)
         let panel = try await Self.open("dock", in: view)
-        let page = window.convertToScreen(view.project.convert(view.project.bounds, to: nil)), box = panel.popover.frame
+        let page = window.convertToScreen(view.project.convert(view.project.visibleRect, to: nil)), box = panel.popover.frame
         let row = try #require(view.project.rowFrame("dock").map { window.convertToScreen($0) })
-        #expect(near(box.minX, page.minX + NewSessionPanel.inset) && near(box.maxX, page.maxX - NewSessionPanel.inset), "the panel is \(box) on the page \(page)")
+        #expect(near(box.minX, page.minX + NewSessionPanel.inset) && near(box.maxX, page.maxX - NewSessionPanel.inset), "the panel is \(box) on what shows of the page \(page)")
+        let content = window.convertToScreen(try #require(window.contentView).frame)
+        #expect(box.minX >= content.minX + NewSessionPanel.inset - 0.5 && box.maxX <= content.maxX - NewSessionPanel.inset + 0.5, "the panel \(box) overhangs the window's content \(content)")
         #expect(near(box.maxY, row.minY - NewSessionPanel.gap))
     }
 
@@ -492,13 +506,63 @@ import Testing
         }
         let (view, window, _) = try await Self.listed(["workspace-agents-dock"], look: look)
         defer { window.orderOut(nil) }
-        view.project.list.choose("dock")
-        view.layoutSubtreeIfNeeded()
-        let before = CalmTests.Count(marks(in: view))
+        let open = { () throws -> SailButton? in
+            let index = try #require(view.project.list.entries.firstIndex { if case let .item(item) = $0 { item.id == "dock" } else { false } })
+            let row = try #require(view.project.list.rowView(atRow: index, makeIfNecessary: true))
+            return WorkspacesViewTests.found(SailButton.self, in: row).first { $0.title == "Open" }
+        }
         _ = try await Self.open("dock", in: view)
-        let after = CalmTests.Count(marks(in: view))
-        #expect(after.fill <= before.fill && after.line <= before.line && after.tint == 0 && after.neutral == 0, "opening the panel marked the page more: \(before), then \(after)")
+        view.layoutSubtreeIfNeeded()
+        let shown = CalmTests.Count(marks(in: window))
+        #expect(shown.fill == 1 && shown.tint == 0 && shown.neutral == 0, "the window with the panel open draws \(shown): one primary on screen")
+        #expect(try open()?.kind == .secondary, "the chosen row's Open stays primary under the panel")
+        try Self.press(try Self.escape(), in: window)
+        #expect(try open()?.kind == .primary, "the chosen row's Open is not primary again once the panel closed")
+        #expect(CalmTests.Count(marks(in: window)).fill == 1)
         #expect(faults.isEmpty, "\(faults.joined(separator: "\n"))")
+    }
+
+    /// The floating box casts its shadow whole, rounded as its card is: in every look the shadow's
+    /// reach fits the panel's room, so the window's edge never cuts it into a square band; each
+    /// layer's blur stays inside the window; and no square corner of shadow stands past the card's
+    /// rounded one. For the New Session panel and the user menu, which share the popover. The pixels
+    /// of both, on screen, are the drive's (`newSessionShadowWhole`).
+    @Test(arguments: [Look.light, .dark])
+    func theFloatingBoxCastsItsShadowWhole(_ look: Look) async throws {
+        for each in [Look.light, .dark, Look.light.contrasted(), Look.dark.contrasted()] {
+            #expect(PopShadow.reach(each) <= Popover.room, "the pop shadow reaches \(PopShadow.reach(each)) pt, past the room of \(Popover.room) pt")
+        }
+        let (view, window, _) = try await Self.listed(["workspace-agents-dock"], look: look)
+        defer { window.orderOut(nil) }
+        let panel = try await Self.open("dock", in: view)
+        var faults = try Self.shadowCut(panel.popover, card: panel.view, radius: NewSessionView.radius).map { "the New Session panel: \($0)" }
+        let shell = try UserMenuTests.shell(look)
+        defer { shell.window.orderOut(nil) }
+        try UserMenuTests.open(shell, UserMenuTests.uday)
+        faults += try Self.shadowCut(shell.userMenu.popover, card: shell.userMenu.view, radius: Look.contentRadius).map { "the user menu: \($0)" }
+        shell.userMenu.close()
+        #expect(faults.isEmpty, "\(faults.joined(separator: "\n"))")
+    }
+
+    /// How `popover`'s shadow is cut or squared: a layer whose blurred, offset path leaves the window,
+    /// or a path that holds `card`'s own corner, which its `radius` rounds away.
+    static func shadowCut(_ popover: Popover, card: NSView, radius: Double) throws -> [String] {
+        let host = try #require(popover.panel.contentView)
+        host.layoutSubtreeIfNeeded()
+        let shadow = try #require(host.subviews.compactMap { $0 as? PopShadowView }.first)
+        #expect(near(shadow.frame, card.frame), "the shadow is cast by \(shadow.frame), not the card's \(card.frame)")
+        var faults: [String] = []
+        for cast in shadow.cast {
+            let path = try #require(cast.shadowPath)
+            let reach = 2 * Double(cast.shadowRadius)
+            let extent = path.boundingBox.offsetBy(dx: cast.shadowOffset.width, dy: cast.shadowOffset.height).insetBy(dx: -reach, dy: -reach)
+            let inHost = host.convert(extent, from: shadow)
+            if !host.bounds.insetBy(dx: -0.5, dy: -0.5).contains(inHost) { faults.append("a shadow layer reaches \(inHost), out of the window's \(host.bounds)") }
+            let corner = CGPoint(x: path.boundingBox.minX + 0.5, y: path.boundingBox.minY + 0.5)
+            if path.contains(corner) { faults.append("a shadow layer's path is square at \(corner); the card's corners are \(radius) pt round") }
+        }
+        if shadow.cast.isEmpty { faults.append("no shadow is cast") }
+        return faults
     }
 
     /// A change of look while it shows reaches everything in it, at every width.

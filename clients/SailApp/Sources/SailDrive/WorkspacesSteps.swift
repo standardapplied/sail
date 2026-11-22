@@ -600,6 +600,21 @@ extension Driver {
             let agent = [create.agent.harness, create.agent.mode, create.agent.inside ? "inside" : "stored"]
             return (agent == wanted && create.command.isEmpty, "\(name)'s Create named \(agent) and the command \(create.command)")
         }
+        if let pick = step.shadowWhole, pick.count == 2 {
+            let popover = pick[1] == "userMenu" ? shell.userMenu.popover : panel.popover
+            guard popover.isOpen, let screen = shell.window.screen else { return (false, "no \(pick[1]) open on a screen") }
+            var faults: [String] = [], read: [String] = []
+            for look in ["light", "dark"] {
+                let file = out.deletingLastPathComponent().appending(path: "window").appending(path: "\(pick[0])-\(look).png")
+                guard let data = try? Data(contentsOf: file), let bitmap = NSBitmapImageRep(data: data) else {
+                    faults.append("no \(file.lastPathComponent)")
+                    continue
+                }
+                faults += Self.shadowCut(in: bitmap, of: popover, on: screen).map { "\(look): \($0)" }
+                read.append(file.lastPathComponent)
+            }
+            return (faults.isEmpty, faults.isEmpty ? "the shadow is whole in \(read.joined(separator: " and "))" : faults.joined(separator: "; "))
+        }
         if let rightToLeft = step.workspacesRightToLeft {
             let direction: NSUserInterfaceLayoutDirection = rightToLeft ? .rightToLeft : .leftToRight
             for view in [pane] + Self.views(in: pane) {
@@ -612,6 +627,34 @@ extension Driver {
             return (true, "the section is laid out \(rightToLeft ? "right to left" : "left to right")")
         }
         return nil
+    }
+
+    /// Where a screen shot shows `popover`'s shadow cut: at the middle of each side of its window, a
+    /// pixel just inside that differs from one just outside (the window's edge drawn as a step); or,
+    /// just outside a corner of its card, a pixel lighter than the page just outside the window on
+    /// that side.
+    private static func shadowCut(in bitmap: NSBitmapImageRep, of popover: Popover, on screen: NSScreen) -> [String] {
+        let scale = Double(bitmap.pixelsWide) / Double(screen.frame.width)
+        func ink(_ point: NSPoint) -> [Double]? {
+            let x = Int((Double(point.x) - Double(screen.frame.minX)) * scale), y = Int((Double(screen.frame.maxY) - Double(point.y)) * scale)
+            guard x >= 0, y >= 0, x < bitmap.pixelsWide, y < bitmap.pixelsHigh, let colour = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return nil }
+            return [colour.redComponent, colour.greenComponent, colour.blueComponent].map { Double($0) * 255 }
+        }
+        let outer = popover.panel.frame, card = popover.frame
+        var faults: [String] = []
+        let sides = [
+            (NSPoint(x: outer.minX + 1, y: outer.midY), NSPoint(x: outer.minX - 2, y: outer.midY)), (NSPoint(x: outer.maxX - 1, y: outer.midY), NSPoint(x: outer.maxX + 2, y: outer.midY)),
+            (NSPoint(x: outer.midX, y: outer.minY + 1), NSPoint(x: outer.midX, y: outer.minY - 2)), (NSPoint(x: outer.midX, y: outer.maxY - 1), NSPoint(x: outer.midX, y: outer.maxY + 2)),
+        ]
+        for (inside, outside) in sides {
+            guard let one = ink(inside), let other = ink(outside) else { continue }
+            if zip(one, other).contains(where: { abs($0 - $1) > 4 }) { faults.append("the window's edge shows at \(inside): \(one.map(Int.init)) inside, \(other.map(Int.init)) outside") }
+        }
+        for (x, y, beside) in [(card.minX - 1.5, card.minY - 1.5, outer.minX - 2), (card.maxX + 1.5, card.minY - 1.5, outer.maxX + 2), (card.minX - 1.5, card.maxY + 1.5, outer.minX - 2), (card.maxX + 1.5, card.maxY + 1.5, outer.maxX + 2)] {
+            guard let corner = ink(NSPoint(x: x, y: y)), let page = ink(NSPoint(x: beside, y: y)) else { continue }
+            if corner.reduce(0, +) > page.reduce(0, +) + 12 { faults.append("just outside the card's corner at \(x), \(y), \(corner.map(Int.init)) is lighter than the page beside it, \(page.map(Int.init))") }
+        }
+        return faults
     }
 
     /// The buttons row `name` shows now, in order.

@@ -5,9 +5,9 @@ import SailLook
 import SailWorkbench
 
 /// A workspace row's New Session panel (`agent-start-a1-mockup.html`): what its agents route
-/// answered, in a 372 pt box 4 pt under the row, its trailing edge on the row's ⋯ (spanning the page
-/// less 8 pt where the page is drawn narrow), and over the row when the window has no room under
-/// it. It lists each harness offered in the route's order with its login, then the Shell; the
+/// answered, in a 372 pt box 4 pt under the row, its trailing edge on the row's ⋯, always within
+/// what shows of the page less 8 pt each side (spanning that where the page is drawn narrow, as at
+/// the least window), and over the row when the window has no room under it. It lists each harness offered in the route's order with its login, then the Shell; the
 /// chosen one alone shows its mode and the mode's words, or what stops it in the server's sentence.
 /// Start, its one primary, starts the chosen harness in its mode, signed in, or to sign in there
 /// (Start and Sign In There) when no login is stored; for the Shell it is the row's Open. Where no
@@ -36,6 +36,8 @@ package final class NewSessionPanel: NSObject {
     var onStart: @MainActor (AgentStart, ModeMemory) -> Void = { _, _ in }
     /// Told when Start opens the Shell, or Open a Shell is pressed: the row's Open.
     var onShell: @MainActor () -> Void = {}
+    /// Told when it closes, however it closes.
+    var onClose: @MainActor () -> Void = {}
     /// Shows the mode button's menu: the library's opener, whose menu tracks the pointer; a unit
     /// test, which runs no menu tracking, reads the menu instead.
     var popUp: @MainActor (SailButton) -> Void = { MenuOpener.shared.open($0) }
@@ -55,7 +57,7 @@ package final class NewSessionPanel: NSObject {
     init(look: Look, mono: LabelFont) {
         self.look = look
         view = NewSessionView(look: look, mono: mono)
-        popover = Popover(view, keys: keys, look: look)
+        popover = Popover(view, keys: keys, look: look, radius: NewSessionView.radius)
         super.init()
         keys.owner = self
         popover.onDismiss = { [weak self] in self?.close() }
@@ -74,7 +76,7 @@ package final class NewSessionPanel: NSObject {
         showsHow = false
         content = Self.content(answer, memory: memory)
         view.direction = page.userInterfaceLayoutDirection
-        let area = page.convert(page.bounds, to: nil)
+        let area = page.convert(page.visibleRect, to: nil)
         let width = narrow ? Double(area.width) - 2 * Self.inset : min(Self.width, Double(area.width) - 2 * Self.inset)
         draw(width: width)
         let height = view.height
@@ -99,6 +101,7 @@ package final class NewSessionPanel: NSObject {
         resizeWatch = nil
         popover.close()
         keys.setAccessibilityElement(false)
+        onClose()
     }
 
     static func content(_ answer: Answer, memory: ModeMemory) -> NewSessionView.Content {

@@ -251,6 +251,10 @@ struct Step: Decodable {
     /// `[harness, mode, "stored" | "inside"]`: the focused tab's session was asked of the runner's
     /// door naming exactly this agent, and no command.
     var doorCreated: [String]?
+    /// `[shot, "newSession" | "userMenu"]`: in that shot's two looks, the floating box shown casts
+    /// its shadow whole: its window's edges show no step against what lies behind, and just outside
+    /// the card's corners nothing is lighter than the page beside the window.
+    var shadowWhole: [String]?
     /// The Workspaces section laid out right to left (true), as a right-to-left Mac lays it out,
     /// or left to right again (false).
     var workspacesRightToLeft: Bool?

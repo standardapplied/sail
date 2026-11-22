@@ -39,7 +39,7 @@ package final class UserMenu: NSObject {
     init(look: Look, mono: LabelFont) {
         self.look = look
         view = UserMenuView(look: look, mono: mono)
-        popover = Popover(view, keys: keys, look: look)
+        popover = Popover(view, keys: keys, look: look, radius: Look.contentRadius)
         super.init()
         popover.onDismiss = { [weak self] in self?.close() }
         keys.owner = self
