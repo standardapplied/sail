@@ -30,6 +30,16 @@ final class FilesPanel: NSView {
     var onStart: @MainActor (_ project: String, _ name: String) async -> [String]? = { _, _ in nil }
     /// A file row opened (⏎, a double click): the tab's file pane shows it.
     var onOpenFile: @MainActor (FileName, FileEntry) -> Void = { _, _ in }
+    /// A terminal path being looked for, place by place, and what to do with what is found; its
+    /// next ask is sent once the connection is admitted.
+    private var lookup: (path: TerminalPath.Lookup, ask: Frame, done: @MainActor (TerminalPath.Lookup.Next) -> Void)?
+    private var nextLookup: Int32 = 1 << 29
+    private var admitted = false
+
+    /// Whether a terminal path is being looked for: the connection is wanted meanwhile.
+    var lookingUp: Bool {
+        lookup != nil
+    }
     /// The tab's file pane, which speaks over this connection: its requests' answers, the watch's
     /// word on its file, the ticks, admissions and drops reach it here.
     weak var filePane: FilePane?
@@ -173,17 +183,21 @@ final class FilesPanel: NSView {
         switch event {
         case let .phase(phase):
             self.phase = phase
+            if phase != .connected { admitted = false }
             if phase != .connected {
                 tree.disconnected()
                 filePane?.disconnected()
             }
             if phase == .connected { startRefusal = nil }
         case .admitted:
+            admitted = true
             admittedAt = CACurrentMediaTime()
+            if let lookup { send([lookup.ask]) }
             send(tree.watchFile(filePane?.watched))
             send(tree.admitted())
             filePane?.admitted()
         case let .frame(frame):
+            if lookedUp(frame) { break }
             if filePane?.takes(frame) == true { break }
             send(tree.receive(frame, at: now))
             if TreeRowCell.measuring, frame.isWholeListing, let path = tree.lastListed { listingHeard = (path.key, CACurrentMediaTime()) }
@@ -199,6 +213,39 @@ final class FilesPanel: NSView {
     /// taken its own change either way.
     func send(_ frames: [Frame]) {
         session?.send(frames)
+    }
+
+    /// Looks for terminal path `path` in `places`, in order, on the workspace: `done` hears the first
+    /// found, or what was said when none was; a lookup under way is given up for this one.
+    func lookUp(_ path: String, in places: [FileName], then done: @escaping @MainActor (TerminalPath.Lookup.Next) -> Void) {
+        var looking = TerminalPath.Lookup(asked: path, places: places, workspace: workspace, firstID: nextLookup)
+        nextLookup += Int32(max(places.count, 1))
+        guard let ask = looking.start() else { return done(.said("No file at \(path) in \(workspace).")) }
+        lookup = (looking, ask, done)
+        if admitted { send([ask]) }
+    }
+
+    /// The root's folders as the tree lists them: where a relative terminal path is looked for last.
+    var rootFolders: [FileName] {
+        tree.rows.filter { $0.depth == 0 && $0.kind == .folder }.map(\.path)
+    }
+
+    /// A frame the lookup under way was waiting for, taken: the next place asked, or its end told.
+    private func lookedUp(_ frame: Frame) -> Bool {
+        guard var current = lookup else { return false }
+        let next = current.path.receive(frame)
+        switch next {
+        case .nothing:
+            return false
+        case let .ask(ask):
+            current.ask = ask
+            lookup = current
+            send([ask])
+        case .found, .said:
+            lookup = nil
+            current.done(next)
+        }
+        return true
     }
 
     /// The open file watched at `watched`, or none.

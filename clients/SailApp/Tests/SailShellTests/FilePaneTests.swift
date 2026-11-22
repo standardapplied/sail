@@ -45,10 +45,7 @@ import Testing
         bench.layoutSubtreeIfNeeded()
         let terminal = try #require(bench.focused)
         #expect(pane.frame.minX >= terminal.frame.maxX && pane.frame.width >= WorkbenchView.filePaneLeast, "the pane at \(pane.frame) is not beside the terminal at \(terminal.frame)")
-        #expect(pane.file.clean)
-        var hash = SHA256()
-        hash.update(Array("one\ntwo\n".utf8))
-        #expect(pane.file.digest == hash.finalize().map { String(format: "%02x", $0) }.joined(), "the base is not the read's digest: \(pane.file.digest)")
+        #expect(!pane.unsaved)
     }
 
     /// F14: clean, the workspace's change is shown; typed in, the dot is on the title and the row,
@@ -60,15 +57,15 @@ import Testing
         #expect(await RunnerTabTests.until(10) { pane.editor.string == "two\n" }, "a clean pane did not follow: \(pane.editor.string)")
         pane.editor.setSelectedRange(NSRange(location: 4, length: 0))
         pane.editor.insertText("mine", replacementRange: NSRange(location: 4, length: 0))
-        #expect(!pane.file.clean && panel.unsaved == FileName(Self.path), "typing did not mark the pane and its row unsaved")
+        #expect(pane.unsaved && panel.unsaved == FileName(Self.path), "typing did not mark the pane and its row unsaved")
         door.setFile(Self.path, Array("theirs\n".utf8))
-        #expect(await RunnerTabTests.until(10) { pane.file.note == .changed }, "the change underneath was not said")
+        #expect(await RunnerTabTests.until(10) { pane.noteWords == "Changed on the workspace while you typed." }, "the change underneath was not said")
         #expect(pane.editor.string == "two\nmine", "an unsaved pane was replaced: \(pane.editor.string)")
         pane.layoutSubtreeIfNeeded()
         let line = try #require(pane.subviews.compactMap { $0 as? NSTextField }.first { $0.stringValue == "Changed on the workspace while you typed." })
         #expect(line.frame.width >= line.attributedStringValue.size().width, "the line's words are cut: \(line.frame.width) pt for \(line.attributedStringValue.size().width)")
         pane.discardPressed()
-        #expect(await RunnerTabTests.until(10) { pane.editor.string == "theirs\n" && pane.file.clean && panel.unsaved == nil })
+        #expect(await RunnerTabTests.until(10) { pane.editor.string == "theirs\n" && !pane.unsaved && panel.unsaved == nil })
     }
 
     /// A newline typed near the top renumbers every line below it.
@@ -161,7 +158,7 @@ import Testing
         #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
         pane.editor.insertText("mine", replacementRange: NSRange(location: 0, length: 0))
         door.setFile(Self.path, Array("theirs\n".utf8))
-        #expect(await RunnerTabTests.until(10) { pane.file.note == .changed })
+        #expect(await RunnerTabTests.until(10) { pane.noteWords == "Changed on the workspace while you typed." })
         #expect(bench.compareFile())
         let window = try #require(bench.window)
         #expect(await RunnerTabTests.until(5) { window.attachedSheet != nil }, "the sheet did not come up")
@@ -253,8 +250,8 @@ import Testing
         #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
         pane.editor.insertText("saved ", replacementRange: NSRange(location: 0, length: 0))
         pane.saveDocument(nil)
-        #expect(await RunnerTabTests.until(10) { door.file(Self.path) == Array("saved one\n".utf8) && pane.file.clean && panel.unsaved == nil },
-                "the door holds \(door.file(Self.path).map { String(decoding: $0, as: UTF8.self) } ?? "nothing"), the pane \(pane.file.clean ? "clean" : "unsaved")")
+        #expect(await RunnerTabTests.until(10) { door.file(Self.path) == Array("saved one\n".utf8) && !pane.unsaved && panel.unsaved == nil },
+                "the door holds \(door.file(Self.path).map { String(decoding: $0, as: UTF8.self) } ?? "nothing"), the pane \(!pane.unsaved ? "clean" : "unsaved")")
     }
 
     /// M27: ⌘S over a newer file writes nothing and brings up the sheet; Keep Mine then writes the
@@ -264,12 +261,12 @@ import Testing
         #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
         pane.editor.insertText("mine ", replacementRange: NSRange(location: 0, length: 0))
         door.setFile(Self.path, Array("theirs\n".utf8))
-        #expect(await RunnerTabTests.until(10) { pane.file.note == .changed })
+        #expect(await RunnerTabTests.until(10) { pane.noteWords == "Changed on the workspace while you typed." })
         pane.saveDocument(nil)
         #expect(await RunnerTabTests.until(10) { bench.sheetOffers == ["Cancel", "Keep Theirs", "Keep Mine"] }, "no sheet after a save over a newer file")
         #expect(door.file(Self.path) == Array("theirs\n".utf8), "the save wrote over the newer file")
         #expect(bench.pressSheet("Keep Mine"))
-        #expect(await RunnerTabTests.until(10) { door.file(Self.path) == Array("mine one\n".utf8) && pane.file.clean }, "Keep Mine did not write the pane's text")
+        #expect(await RunnerTabTests.until(10) { door.file(Self.path) == Array("mine one\n".utf8) && !pane.unsaved }, "Keep Mine did not write the pane's text")
     }
 
     /// M29: a save refused for a full disk says so in the host's words; the dot stays.
@@ -280,7 +277,7 @@ import Testing
         door.refuseNextSave(.noSpace, saying: "dock's disk is full (12 KB free). Nothing was changed.")
         pane.saveDocument(nil)
         #expect(await RunnerTabTests.until(10) { pane.noteWords == "dock's disk is full (12 KB free). Nothing was changed." }, "said: \(pane.noteWords ?? "nothing")")
-        #expect(!pane.file.clean && panel.unsaved == FileName(Self.path) && door.file(Self.path) == Array("one\n".utf8))
+        #expect(pane.unsaved && panel.unsaved == FileName(Self.path) && door.file(Self.path) == Array("one\n".utf8))
         door.removeFile(Self.path)
         #expect(await RunnerTabTests.until(10) { pane.noteWords == "tide.ts was deleted on the workspace while you typed." }, "a refusal's words hid a newer word on the file: \(pane.noteWords ?? "nothing")")
     }
@@ -326,7 +323,7 @@ import Testing
         pane.saveDocument(nil)
         #expect(Self.writes(sent()).isEmpty && pane.noteWords == "tide.ts is still loading. Nothing was saved.", "⌘S with \(shown) units in the view: \(pane.noteWords ?? "nothing said")")
         #expect(await RunnerTabTests.until(30) { pane.editor.isEditable }, "the file was never whole")
-        #expect(door.file(Self.path) == Self.large && pane.editor.string.utf8.count == Self.large.count && pane.file.clean)
+        #expect(door.file(Self.path) == Self.large && pane.editor.string.utf8.count == Self.large.count && !pane.unsaved)
     }
 
     /// B2: a change on the workspace while the view still takes the file is read once it holds it
@@ -335,8 +332,8 @@ import Testing
         let (door, _, _, _, pane) = try await Self.opened(Self.large)
         #expect(await RunnerTabTests.until(20) { !pane.editor.string.isEmpty && !pane.editor.isEditable }, "the file was never seen loading")
         door.setFile(Self.path, Array("short\n".utf8))
-        #expect(await RunnerTabTests.until(30) { pane.editor.string == "short\n" && pane.editor.isEditable && pane.file.clean },
-                "the view holds \(pane.editor.textStorage?.length ?? 0) units, the file 6 bytes; clean \(pane.file.clean)")
+        #expect(await RunnerTabTests.until(30) { pane.editor.string == "short\n" && pane.editor.isEditable && !pane.unsaved },
+                "the view holds \(pane.editor.textStorage?.length ?? 0) units, the file 6 bytes; clean \(!pane.unsaved)")
     }
 
     /// The one check every write passes, proven by breaking the slicing: a view that lost a slice is
@@ -348,7 +345,7 @@ import Testing
         let sent = Self.watchSends(pane)
         let words = OpenFile.notShownWhole("tide.ts")
         #expect(await RunnerTabTests.until(20) { pane.noteWords == words }, "said: \(pane.noteWords ?? "nothing")")
-        #expect(!pane.editor.isEditable && !pane.file.canType)
+        #expect(!pane.editor.isEditable)
         pane.saveDocument(nil)
         #expect(Self.writes(sent()).isEmpty && pane.noteWords == words && door.file(Self.path) == text)
     }
@@ -364,8 +361,8 @@ import Testing
         pane.editor.insertText("y", replacementRange: NSRange(location: 5, length: 0))
         pane.saveDocument(nil)
         #expect(Self.writes(sent()).count == 1, "a second upload began while the first was under way")
-        #expect(await RunnerTabTests.until(10) { door.file(Self.path) == Array("one\nxy".utf8) && pane.file.clean }, "the door holds \(door.file(Self.path).map { String(decoding: $0, as: UTF8.self) } ?? "nothing")")
-        #expect(Self.writes(sent()).count == 2 && pane.file.note == .none && pane.noteWords == nil && bench.sheetOffers.isEmpty)
+        #expect(await RunnerTabTests.until(10) { door.file(Self.path) == Array("one\nxy".utf8) && !pane.unsaved }, "the door holds \(door.file(Self.path).map { String(decoding: $0, as: UTF8.self) } ?? "nothing")")
+        #expect(Self.writes(sent()).count == 2 && pane.noteWords == nil && bench.sheetOffers.isEmpty)
     }
 
     /// M1: an upload given up is cancelled on the wire, so the host lets go of the file at once: by
@@ -383,14 +380,14 @@ import Testing
         #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
         pane.editor.insertText("mine ", replacementRange: NSRange(location: 0, length: 0))
         door.setFile(Self.path, Array("theirs\n".utf8))
-        #expect(await RunnerTabTests.until(10) { pane.file.theirs != nil })
+        #expect(await RunnerTabTests.until(10) { pane.theirs != nil })
         let sent = Self.watchSends(pane)
         pane.saveDocument(nil)
         let first = try #require(Self.writes(sent()).first)
-        pane.keepMine(against: try #require(pane.file.theirs))
+        pane.keepMine(against: try #require(pane.theirs))
         let cancel = try #require(sent().firstIndex(of: .putCancel(id: first)), "Keep Mine did not cancel the save under way")
         #expect(Self.writes(Array(sent()[cancel...])).count == 1)
-        #expect(await RunnerTabTests.until(10) { door.file(Self.path) == Array("mine one\n".utf8) && pane.file.clean } && bench.sheetOffers.isEmpty)
+        #expect(await RunnerTabTests.until(10) { door.file(Self.path) == Array("mine one\n".utf8) && !pane.unsaved } && bench.sheetOffers.isEmpty)
     }
 
     /// M2: a file that grows past 20 MB while open keeps the person's text, says it can no longer
@@ -403,7 +400,7 @@ import Testing
         door.setFile(Self.path, [UInt8](repeating: 0x61, count: Int(OpenFile.limit) + 10))
         let words = OpenFile.tooLargeNow("tide.ts")
         #expect(await RunnerTabTests.until(30) { pane.noteWords == words }, "said: \(pane.noteWords ?? "nothing")")
-        #expect(pane.editor.string == "mine one\n" && !pane.file.clean)
+        #expect(pane.editor.string == "mine one\n" && pane.unsaved)
         pane.saveDocument(nil)
         #expect(Self.writes(sent()).isEmpty && pane.noteWords == words)
     }
@@ -427,7 +424,7 @@ import Testing
         switch end {
         case .conflict:
             door.setFile(Self.path, Array("theirs\n".utf8))
-            #expect(await RunnerTabTests.until(10) { pane.file.note == .changed })
+            #expect(await RunnerTabTests.until(10) { pane.noteWords == "Changed on the workspace while you typed." })
         case .refused: door.refuseNextSave(.noSpace, saying: "dock's disk is full. Nothing was changed.")
         case .notConnected:
             pane.disconnected()
@@ -458,7 +455,7 @@ import Testing
         pane.editor.insertText("y", replacementRange: NSRange(location: 5, length: 0))
         pane.editor.setSelectedRange(NSRange(location: 6, length: 0))
         pane.editor.deleteBackward(nil)
-        #expect(await RunnerTabTests.until(10) { door.file(Self.path) == Array("one\nx".utf8) && pane.file.clean && panel.unsaved == nil }, "the dot stayed over the text saved")
+        #expect(await RunnerTabTests.until(10) { door.file(Self.path) == Array("one\nx".utf8) && !pane.unsaved && panel.unsaved == nil }, "the dot stayed over the text saved")
     }
 
     /// "Updated just now" is not said beside unsaved text, and goes after its three seconds.
@@ -470,7 +467,7 @@ import Testing
         pane.editor.insertText("x", replacementRange: NSRange(location: 0, length: 0))
         #expect(pane.statusWords.isEmpty, "\"Updated just now\" stood beside unsaved text")
         pane.editor.undoManager?.undo()
-        #expect(await RunnerTabTests.until(5) { pane.file.clean && pane.statusWords.isEmpty }, "the status stayed past its three seconds: \(pane.statusWords)")
+        #expect(await RunnerTabTests.until(5) { !pane.unsaved && pane.statusWords.isEmpty }, "the status stayed past its three seconds: \(pane.statusWords)")
     }
 
     /// Keep Theirs and Discard Mine are the person's choice: ⌘Z brings their text back, unsaved.
@@ -479,13 +476,13 @@ import Testing
         #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
         pane.editor.insertText("mine ", replacementRange: NSRange(location: 0, length: 0))
         door.setFile(Self.path, Array("theirs\n".utf8))
-        #expect(await RunnerTabTests.until(10) { pane.file.note == .changed })
+        #expect(await RunnerTabTests.until(10) { pane.noteWords == "Changed on the workspace while you typed." })
         pane.discardPressed()
-        #expect(pane.editor.string == "theirs\n" && pane.file.clean)
+        #expect(pane.editor.string == "theirs\n" && !pane.unsaved)
         pane.editor.undoManager?.undo()
-        #expect(await RunnerTabTests.until(5) { pane.editor.string == "mine one\n" && !pane.file.clean }, "⌘Z after Discard Mine: \(pane.editor.string.debugDescription), \(pane.file.clean ? "clean" : "unsaved")")
+        #expect(await RunnerTabTests.until(5) { pane.editor.string == "mine one\n" && pane.unsaved }, "⌘Z after Discard Mine: \(pane.editor.string.debugDescription), \(!pane.unsaved ? "clean" : "unsaved")")
         pane.editor.undoManager?.redo()
-        #expect(await RunnerTabTests.until(5) { pane.editor.string == "theirs\n" && pane.file.clean }, "⌘⇧Z: \(pane.editor.string.debugDescription)")
+        #expect(await RunnerTabTests.until(5) { pane.editor.string == "theirs\n" && !pane.unsaved }, "⌘⇧Z: \(pane.editor.string.debugDescription)")
     }
 
     /// The text view's own undo reaches the model as a key does: typing undone is clean again, the
@@ -494,9 +491,9 @@ import Testing
         let (_, _, _, panel, pane) = try await Self.opened(Array("one\n".utf8))
         #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
         pane.editor.insertText("x", replacementRange: NSRange(location: 0, length: 0))
-        #expect(!pane.file.clean && panel.unsaved != nil)
+        #expect(pane.unsaved && panel.unsaved != nil)
         pane.editor.undoManager?.undo()
-        #expect(await RunnerTabTests.until(5) { pane.editor.string == "one\n" && pane.file.clean && panel.unsaved == nil }, "after ⌘Z: \(pane.editor.string.debugDescription), \(pane.file.clean ? "clean" : "unsaved")")
+        #expect(await RunnerTabTests.until(5) { pane.editor.string == "one\n" && !pane.unsaved && panel.unsaved == nil }, "after ⌘Z: \(pane.editor.string.debugDescription), \(!pane.unsaved ? "clean" : "unsaved")")
     }
 
     /// N1: an undo or redo the text view tells no delegate of is decided before any answer enters:
@@ -508,7 +505,7 @@ import Testing
         let sent = Self.watchSends(pane)
         pane.editor.insertText("mine ", replacementRange: NSRange(location: 0, length: 0))
         pane.editor.undoManager?.undo()
-        #expect(await RunnerTabTests.until(5) { pane.editor.string == "one\n" && pane.file.clean })
+        #expect(await RunnerTabTests.until(5) { pane.editor.string == "one\n" && !pane.unsaved })
         _ = pane.takes(.filesChanged(paths: [FileName(Self.path)]))
         let id = try #require(sent().compactMap { if case let .filesRead(id, _, _, _) = $0 { id } else { nil } }.last, "no follow read was asked")
         pane.editor.undoManager?.redo()
@@ -516,7 +513,7 @@ import Testing
         var hash = SHA256()
         hash.update(theirs)
         _ = pane.takes(.filesData(id: id, version: "v9", bytes: theirs, eof: true, whole: true, digest: hash.finalize().map { String(format: "%02x", $0) }.joined()))
-        #expect(pane.editor.string == "mine one\n" && !pane.file.clean && pane.file.note == .changed, "the redone typing became \(pane.editor.string.debugDescription), \(pane.file.clean ? "clean" : "unsaved")")
+        #expect(pane.editor.string == "mine one\n" && pane.unsaved && pane.noteWords == "Changed on the workspace while you typed.", "the redone typing became \(pane.editor.string.debugDescription), \(!pane.unsaved ? "clean" : "unsaved")")
     }
 
     /// Closing the tab reads the pane's text as unsaved through its one door: a redo the text view
@@ -526,13 +523,44 @@ import Testing
         #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
         pane.editor.insertText("mine ", replacementRange: NSRange(location: 0, length: 0))
         pane.editor.undoManager?.undo()
-        #expect(await RunnerTabTests.until(5) { pane.editor.string == "one\n" && pane.file.clean })
+        #expect(await RunnerTabTests.until(5) { pane.editor.string == "one\n" && !pane.unsaved })
         let window = try #require(pane.window)
         pane.editor.undoManager?.redo()
         bench.closeTab(nil)
         #expect(window.attachedSheet != nil, "the tab closed over redone, unsaved text without asking")
         #expect(bench.model.selectedTab.flatMap { bench.tabViews[$0.id]?.filePane } === pane)
         window.attachedSheet.map { window.endSheet($0, returnCode: .alertThirdButtonReturn) }
+    }
+
+    /// M17, M18: a ⌘-click on a compiler's line in the workspace's terminal is looked for on the
+    /// workspace and opened in the tab's file pane at its line, the caret there and the line barred
+    /// in the accent, the files panel never shown; a path that is not there is said in the
+    /// terminal's own card, and nothing opens.
+    @Test func aCommandClickOnATerminalPathOpensTheFileAtItsLine() async throws {
+        let door = try FakeRunnerDoor(person: "uday")
+        door.hold("uday-dock-1")
+        door.setFolder(FilesPanelTests.root, [FileEntry(name: "src", kind: .known(.folder), target: .known(.none), size: 0, mtimeNanos: 0, mode: 0o040755)])
+        let text = (1 ... 60).map { "let line\($0) = \($0)" }.joined(separator: "\n") + "\n"
+        door.setFile(FilesPanelTests.root + "/src/App.java", Array(text.utf8))
+        let (_, bench) = try FilesPanelTests.shell(door)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        bench.removeFromSuperview()
+        window.contentView = bench
+        Self.windows.append(window)
+        let terminal = try #require(bench.focused)
+        #expect(await RunnerTabTests.until(10) { terminal.status.says == nil }, "the terminal never attached: \(terminal.status.says ?? "")")
+        bench.openTerminalPath(in: "src/App.java:42: error: ';' expected", at: 3, from: terminal)
+        let pane = { bench.model.selectedTab.flatMap { bench.tabViews[$0.id]?.filePane } }
+        #expect(await RunnerTabTests.until(10) { pane()?.editor.isEditable == true }, "the file never opened")
+        let opened = try #require(pane())
+        bench.layoutSubtreeIfNeeded()
+        let line42 = (text as NSString).range(of: "let line42 =").location
+        #expect(opened.editor.selectedRange().location == line42, "the caret is at \(opened.editor.selectedRange().location), line 42 at \(line42)")
+        #expect(opened.lineNumbers.rows.contains { $0.number == 42 && $0.at }, "line 42 does not carry the bar: \(opened.lineNumbers.rows.filter(\.at))")
+        #expect(!bench.filesPanelShown, "the files panel was shown")
+        bench.openTerminalPath(in: "src/Gone.java:3: error: cannot find symbol", at: 3, from: terminal)
+        #expect(await RunnerTabTests.until(10) { terminal.status.says == "No file at src/Gone.java in dock." }, "said: \(terminal.status.says ?? "nothing")")
+        #expect(pane()?.path == FileName(FilesPanelTests.root + "/src/App.java"))
     }
 
     /// Half of a character (a lone surrogate) is never saved as U+FFFD: the save says where it is
@@ -566,7 +594,7 @@ import Testing
     /// M14a: a file that is not text is one sentence and Copy Path.
     @Test func aFileThatIsNotTextIsASentence() async throws {
         let (_, _, _, _, pane) = try await Self.opened([0x89, 0x50, 0x4E, 0x47, 0, 1, 2, 3])
-        #expect(await RunnerTabTests.until(10) { pane.file.state == .notText("tide.ts isn't text: a PNG image, 8 bytes.") })
+        #expect(await RunnerTabTests.until(10) { pane.sentenceWords == "tide.ts isn't text: a PNG image, 8 bytes." })
         #expect(pane.scroll.isHidden)
     }
 
@@ -579,7 +607,7 @@ import Testing
         pane.editor.undoManager?.undo()
         pane.editor.insertText("again", replacementRange: NSRange(location: 0, length: 0))
         door.setFile(Self.path, Array("theirs\n".utf8))
-        #expect(await RunnerTabTests.until(10) { pane.file.note == .changed })
+        #expect(await RunnerTabTests.until(10) { pane.noteWords == "Changed on the workspace while you typed." })
         pane.discardPressed()
         bench.toggleFiles(nil)
         bench.toggleFiles(nil)

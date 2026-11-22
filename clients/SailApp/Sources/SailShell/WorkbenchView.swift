@@ -1,6 +1,7 @@
 import AppKit
 import SailAPI
 import SailControls
+import SailFiles
 import SailLook
 import SailSurface
 import SailTerminal
@@ -330,6 +331,13 @@ public final class WorkbenchView: NSView {
         }
         view.terminal.contextMenu = { [weak self] in self?.paneMenu() }
         view.terminal.onFocus = { [weak self, id = pane.id] in self?.focusClicked(id) }
+        if pane.place.onRunner {
+            view.terminal.linkIn = { text, column in TerminalPath.find(in: text, at: column)?.range }
+            view.terminal.onLink = { [weak self, weak view] text, column in
+                guard let self, let view else { return }
+                openTerminalPath(in: text, at: column, from: view)
+            }
+        }
         panes[pane.id] = view
         tabView(tab.id).addPane(view)
         return view
