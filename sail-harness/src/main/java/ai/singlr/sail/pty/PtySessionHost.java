@@ -981,6 +981,8 @@ public final class PtySessionHost implements AutoCloseable {
       Thread.currentThread().interrupt();
     } finally {
       if (files != null) {
+        // Closed before unserved, so a write still queued on the workspace's lock sees its
+        // connection closed before the lock can be dropped.
         files.connection().close();
         unserve(files);
       }
@@ -1933,7 +1935,8 @@ public final class PtySessionHost implements AutoCloseable {
                   saving,
                   () -> filesDecided(project, workspace, who),
                   FilesConnection.AFTER_GO,
-                  FilesConnection.HOLD_BOUND),
+                  FilesConnection.HOLD_BOUND,
+                  () -> writeLock(project, workspace)),
               changes);
       var kept = new Served(project, workspace, who, channel, connection);
       served.add(kept);

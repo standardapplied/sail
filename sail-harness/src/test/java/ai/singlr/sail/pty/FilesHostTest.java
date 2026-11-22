@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -1362,6 +1363,44 @@ class FilesHostTest {
     assertNull(
         host.writeLock("acme", "dock"),
         "the lock outlived the save that held it past the last connection");
+  }
+
+  /**
+   * #526's m1: a closed connection's write queued on the workspace's lock makes nothing: a create
+   * waits behind its own connection's save past its go; the connection closes, the save ends and
+   * the lock is dropped; a new connection's save is the only change.
+   */
+  @Test
+  void aClosedConnectionsWriteQueuedOnTheLockMakesNothing() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "base");
+    var hold = new Hold();
+    var first = open("tok-mady");
+    saveOn(first, 1, file, baseOf(first, file), "first's");
+    hold.reached();
+    var lock = host.writeLock("acme", "dock");
+    PtyWire.write(first, new PtyMessage.FilesCreate(2, home + "/queued.md", false));
+    awaitQueued(lock);
+    first.close();
+    var unserved = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (host.changeRuns("acme", "dock") != null) {
+      assertTrue(System.nanoTime() < unserved, "the connection was never dropped");
+      Thread.onSpinWait();
+    }
+    hold.release();
+    var dropped = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (host.writeLock("acme", "dock") != null) {
+      assertTrue(System.nanoTime() < dropped, "the lock outlived the writes queued on it");
+      Thread.onSpinWait();
+    }
+
+    var second = open("tok-mady");
+    saveOn(second, 3, file, baseOf(second, file), "second's");
+    assertInstanceOf(PtyMessage.FilesWritten.class, next(second));
+    assertNotSame(lock, host.writeLock("acme", "dock"), "the new connection has a lock of its own");
+    assertFalse(
+        Files.exists(home.resolve("queued.md")), "the closed connection's create made nothing");
+    assertEquals("second's", Files.readString(file));
+    second.close();
   }
 
   /**

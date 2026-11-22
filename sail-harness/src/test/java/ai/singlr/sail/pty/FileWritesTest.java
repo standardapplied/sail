@@ -1790,6 +1790,40 @@ class FileWritesTest {
     assertTrue(refused, "a listing with frames to come still holds its id");
   }
 
+  /**
+   * #526's m1, made structural: a write holding a lock the host no longer keeps for the workspace
+   * changes nothing, whatever its connection's state: neither a create nor a save.
+   */
+  @Test
+  void aWriteHoldingALockTheHostNoLongerKeepsChangesNothing() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "kept");
+    var now = new FilesConnection.WorkspaceLock();
+    var stale =
+        new FilesConnection(
+            running(UnaryOperator.identity()),
+            CONTAINER,
+            "dock",
+            said::add,
+            () -> null,
+            endedWith::add,
+            new FilesConnection.Writes(
+                lock,
+                saving,
+                () -> null,
+                FilesConnection.AFTER_GO,
+                FilesConnection.HOLD_BOUND,
+                () -> now),
+            changes());
+    stale.create(new PtyMessage.FilesCreate(1, home + "/made.md", false));
+    assertEquals(PtyMessage.FilesRefusal.FAILED, ((PtyMessage.FilesRefused) answer()).kind());
+    save(stale, 2, file.toString(), digest(file), version(file), "new");
+    assertEquals(PtyMessage.FilesRefusal.FAILED, ((PtyMessage.FilesRefused) answer()).kind());
+    everyScriptEnds();
+    assertFalse(Files.exists(home.resolve("made.md")));
+    assertEquals("kept", Files.readString(file));
+    assertEquals(List.of(), temporaries(home));
+  }
+
   /** Waits until {@code count} threads wait for the write lock, within 5 s. */
   private void waitingForTheLock(int count) {
     var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);

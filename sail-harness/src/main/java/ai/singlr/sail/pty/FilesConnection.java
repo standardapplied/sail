@@ -96,11 +96,24 @@ final class FilesConnection {
    * What a connection's writes are given: the workspace's write lock, shared by every connection to
    * it and fair, so writes wait in order; the temporaries of every save the host runs, each as
    * {@link #saving} keys it, from its {@code ready} until its {@code incus exec} ends; the
-   * workspace's decision for this person; how long a save may run after its go; and how long its
-   * process is waited for once it is ended.
+   * workspace's decision for this person; how long a save may run after its go; how long its
+   * process is waited for once it is ended; and the host's lock for the workspace now, which a
+   * write holding {@code lock} must find to be that same lock before it acts.
    */
   record Writes(
-      WorkspaceLock lock, Set<String> saving, Gate gate, Duration afterGo, Duration holdBound) {}
+      WorkspaceLock lock,
+      Set<String> saving,
+      Gate gate,
+      Duration afterGo,
+      Duration holdBound,
+      Supplier<WorkspaceLock> current) {
+
+    /** Writes whose lock is always the workspace's own: a connection no host keeps. */
+    Writes(
+        WorkspaceLock lock, Set<String> saving, Gate gate, Duration afterGo, Duration holdBound) {
+      this(lock, saving, gate, afterGo, holdBound, () -> lock);
+    }
+  }
 
   /**
    * A workspace's write lock, which also remembers a save whose process outlived its kill: while
@@ -1224,11 +1237,24 @@ final class FilesConnection {
   }
 
   /**
-   * Whether the request may change the workspace now, asked under the write lock: a refusal ends
-   * the connection in the decision's words, and a decision that cannot be asked refuses the request
-   * as failed; either way {@code script}, when there is one, is cut and writes nothing.
+   * Whether the request may change the workspace now, asked under the write lock, the one place
+   * every write passes once it holds it: not when the lock it holds is no longer the host's lock
+   * for the workspace (one dropped with the workspace's last connection, which a write of a
+   * connection closed meanwhile may still take), so two writers never act under two locks, whatever
+   * order a connection is closed and unserved in; not when a save in the workspace is stuck; not
+   * when the request was cancelled or its connection closed; and not when the person may no longer
+   * change the workspace: a refusal ends the connection in the decision's words, and a decision
+   * that cannot be asked refuses the request as failed. Either way {@code script}, when there is
+   * one, is cut and writes nothing.
    */
   private boolean allowed(Request request, Running running, FileScripts.Script script) {
+    if (writes.current().get() != writes.lock()) {
+      if (script != null) {
+        script.cut();
+      }
+      unless(running, refused(request, FilesRefusal.FAILED));
+      return false;
+    }
     var held = writes.lock().held;
     if (held != null) {
       try {
