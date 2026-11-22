@@ -72,6 +72,13 @@ final class Driver {
     }
     /// Every stretch of a judged wait excused as the machine's, with its evidence, once each.
     private var excused: [String] = []
+    /// The most time the whole drive spends on tries past a loop's first (``tried(_:ended:_:)``),
+    /// in seconds: spent, every gate judges the tries it has.
+    static let extraTriesCap = 120.0
+    private(set) var extraTriesLeft = Driver.extraTriesCap
+    /// The gates of the step under way judged with no try counting, and every step that had one.
+    private var notCleanInStep: [String] = []
+    private var notClean: [String] = []
 
     struct Result: Encodable {
         let index: Int
@@ -150,7 +157,9 @@ final class Driver {
                 Self.say("drive \(index) \(name): skipped on \(signed ? "a signed" : "an unsigned") build")
                 continue
             }
+            notCleanInStep = []
             var (ok, detail) = await perform(step, name: name)
+            if !notCleanInStep.isEmpty { notClean.append("\(index) \(name) (\(notCleanInStep.joined(separator: "; ")))") }
             await Task.yield()
             let drew = await waitUntil(Self.drawDeadline) {
                 !self.onTerminal || self.measuring || self.terminal.visibleText == self.screenText && self.terminal.isDrawnInFull
@@ -174,6 +183,9 @@ final class Driver {
         }
         let failed = results.filter { !$0.ok }.map { "\($0.index) \($0.name)" }
         if !failed.isEmpty { Self.say("drive: \(failed.count) step\(failed.count == 1 ? "" : "s") FAILED: " + failed.joined(separator: ", ")) }
+        Self.say("drive: \(notClean.count) step\(notClean.count == 1 ? "" : "s") not measured cleanly (the machine starved in every try of a gate)"
+            + (notClean.isEmpty ? "" : ": " + notClean.joined(separator: ", "))
+            + String(format: "; extra tries took %.1f s of the drive's %.0f s", Self.extraTriesCap - extraTriesLeft, Self.extraTriesCap))
         let withinClaim = madeStacks.map { $0.watcherShare <= MainStacks.claim } ?? true
         let lookCheap = madeStacks.map { $0.averageLook <= MainStacks.computation } ?? true
         let stayedRealTime = madeStacks.map { !$0.demoted } ?? true
@@ -574,6 +586,48 @@ final class Driver {
             : ""
         return (ours, "waited \(Self.ms((wait.length - tick) * 1000)) ms, the drive's own thread held \(Self.ms(ownHeld * 1000)) ms of it, "
             + "the main thread runnable without CPU on a machine with none idle \(Self.ms(starved * 1000)) ms of it (\(evidence))\(ceiling), ours \(Self.ms(ours)) ms")
+    }
+
+    /// One try's figure for a gate, in ms, and the span it was taken over.
+    typealias Taken = (value: Double, span: Span)
+
+    /// Tries of `gates`, each try (`attempt`) giving every gate its figure and span, judged by
+    /// ``TimingGate``'s one rule: taken until every gate has its count of tries that count or its
+    /// most, a try past the loop's first only while the drive's time for extra tries lasts and
+    /// `ended` is false. Each try carries the machine's idle share over its own span. Nil when a
+    /// try could not be taken (`attempt` gave nil, its failure its own to say).
+    func tried(_ gates: [TimingGate], ended: () -> Bool = { false }, _ attempt: () async -> [String: Taken]?) async -> [String: [TimedTry]]? {
+        _ = mainStacks
+        var tries: [String: [TimedTry]] = [:], taken = 0
+        let first = gates.map(\.wanted).max() ?? 0
+        while TimingGate.another(gates, tries: tries, taken: taken, extraLeft: extraTriesLeft), taken < first || !ended() {
+            let began = CACurrentMediaTime()
+            guard let figures = await attempt() else { return nil }
+            let looks = mainStacks.looks
+            for gate in gates {
+                guard let figure = figures[gate.name] else { continue }
+                tries[gate.name, default: []].append(TimedTry(value: figure.value, idle: MachineShare.idle(in: figure.span, looks: looks)?.percent))
+            }
+            if taken >= first { extraTriesLeft -= CACurrentMediaTime() - began }
+            taken += 1
+        }
+        return tries
+    }
+
+    /// The verdicts of `gates` on their `tries`, any gate with no try counting kept for the run's
+    /// summary; tries cut short were cut for the reason `stopped` names.
+    func judged(_ gates: [TimingGate], _ tries: [String: [TimedTry]], stopped: String = "the drive's extra tries were spent") -> [TimingGate.Verdict] {
+        gates.map { gate in
+            let verdict = gate.judge(tries[gate.name] ?? [], stopped: stopped)
+            if !verdict.clean { notCleanInStep.append(gate.name) }
+            return verdict
+        }
+    }
+
+    /// A step's line from its gates' verdicts: what missed, then every figure.
+    static func line(_ verdicts: [TimingGate.Verdict], missed more: [String] = []) -> (ok: Bool, said: String) {
+        let missed = verdicts.compactMap(\.missed) + more
+        return (missed.isEmpty, (missed.isEmpty ? "within every ceiling; " : "missed: \(missed.joined(separator: "; ")); ") + verdicts.map(\.said).joined(separator: "; "))
     }
 
     /// The main thread's longest hold, its heartbeat's longest gap (in `span` when given) less one

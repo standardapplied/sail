@@ -362,19 +362,19 @@ final class MainStacks: @unchecked Sendable {
     /// (by name, the main thread first), and the main thread's priority.
     func summary(of span: Span) -> String {
         let taken = lock.withLock { samples.filter { $0.time >= span.start && $0.time <= span.end && $0.idleTicks != nil && $0.busyTicks != nil } }
-        guard let first = taken.first, let last = taken.last, taken.count > 1 else { return "fewer than two samples with the machine's ticks in the span" }
-        let idleTicks = Double((last.idleTicks ?? 0) &- (first.idleTicks ?? 0)), busyTicks = Double((last.busyTicks ?? 0) &- (first.busyTicks ?? 0))
-        let idle = idleTicks + busyTicks > 0 ? idleTicks / (idleTicks + busyTicks) * 100 : -1
+        let looks = taken.map { ThreadLook(time: $0.time, runnable: true, cpu: $0.cpu, ourCPU: nil, idleTicks: $0.idleTicks, busyTicks: $0.busyTicks) }
+        guard let machine = MachineShare.idle(in: span, looks: looks) else { return "fewer than two samples with the machine's ticks in the span" }
+        let idleTicks = machine.idleTicks, busyTicks = machine.busyTicks, idle = machine.percent ?? -1, read = (machine.to - machine.from) * 1000
         let readings = taken.filter { $0.fill != nil }
         guard let early = readings.first, let late = readings.last, early.fill != late.fill, let from = early.filledAt, let to = late.filledAt else {
             return String(format: "over %.0f ms between samples: the machine's CPUs %.0f%% idle (ticks busy %.0f, idle %.0f); the process's threads read once in it",
-                          (last.time - first.time) * 1000, idle, busyTicks, idleTicks)
+                          read, idle, busyTicks, idleTicks)
         }
         let before = Dictionary(early.threads.map { ($0.id, $0) }, uniquingKeysWith: { one, _ in one })
         let used = late.threads.compactMap { thread in before[thread.id].map { (thread, (thread.cpu - $0.cpu) * 1000) } }.sorted { $0.1 > $1.1 }
         let busiest = used.prefix(8).map { String(format: "%@ %.1f ms (pri %d, state %d)", $0.0.name.isEmpty ? "#\($0.0.id)" : $0.0.name, $0.1, $0.0.priority, $0.0.state) }
         return String(format: "over %.0f ms between samples: the machine's CPUs %.0f%% idle (ticks busy %.0f, idle %.0f); the process's threads by CPU used between two readings %.0f ms apart: ",
-                      (last.time - first.time) * 1000, idle, busyTicks, idleTicks, (to - from) * 1000) + busiest.joined(separator: ", ")
+                      read, idle, busyTicks, idleTicks, (to - from) * 1000) + busiest.joined(separator: ", ")
     }
 
     /// The main thread's return addresses, innermost first, into `buffer`; nothing allocated

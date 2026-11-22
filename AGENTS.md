@@ -117,6 +117,13 @@ tests bite, and the deletion count in the body.
 - A unit test of the Mac app never runs AppKit's own mouse tracking (a control's `mouseDown`) or
   posts events to the app's queue (`NSApp.postEvent`): with no `NSApp.run` under it, that stopped
   the main run loop and ended the suite's process (#499); real clicks and keys are the drive's.
+- The drive's timing gates are of two kinds, and a new one is one of them, never a third. A
+  figure taken over tries (`f-budgets`, `p-figures`, the files flood's change) goes through
+  `TimingGate` and `Driver.tried`: a try whose span read the machine's CPUs 0% idle does not count,
+  tries go on to twice the count until enough count, and with none counting all are judged at twice
+  the ceiling and the run's summary names the step as not measured cleanly; the drive's extra tries
+  are capped at `Driver.extraTriesCap`. A single long wait (a flood, a split, the terminal's
+  latency) is judged by `ours()`, less the time `MachineShare` proves the machine starved it.
 - Nothing a layout pass of the Mac app reaches (`layout()` and what it calls, `updateConstraints`,
   `viewDidLayout`, `resizeSubviews`, `setFrameSize`) changes what forces another pass: an intrinsic
   size, `preferredMaxLayoutWidth`, a label's text or font, a constraint's `constant` or `isActive`.
