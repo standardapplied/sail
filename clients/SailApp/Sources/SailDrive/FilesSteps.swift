@@ -322,6 +322,11 @@ extension Driver {
             let there = await waitForState(step.seconds ?? 10) { pane()?.editable == true && lines()?.at == line && lines()?.caret == line }
             return (there, "the file pane: the bar at \(lines()?.at.map(String.init) ?? "no line"), the caret on line \(lines()?.caret ?? 0)")
         }
+        if let name = step.filesRowShown ?? step.filesRowGone {
+            let shown = step.filesRowShown != nil
+            let there = await waitForState(step.seconds ?? 10) { (self.filesShown?.rows.contains { $0.name == name } == true) == shown }
+            return (there, "the tree's rows: \(filesShown?.rows.prefix(12).map(\.name) ?? [])")
+        }
         if let words = step.terminalSays {
             let said = await waitForState(step.seconds ?? 10) { self.pane?.status.says == words }
             return (said, "the terminal's card says \(self.pane?.status.says ?? "nothing")")
@@ -359,9 +364,13 @@ extension Driver {
         let pane = { self.workbench.filePaneShown }, name = "slow.ts", path = Self.filesPath(name)
         let line = "export const tide = \"" + String(repeating: "~", count: 90) + "\";\n"
         let slow = Array(String(repeating: line, count: 4 * 1024 * 1024 / line.utf8.count).utf8)
-        door.setFolder(Self.filesRoot, ["slow.ts", "src/", "README.md", "Package.swift"].map(Self.fileEntry))
+        let found = door.folder(Self.filesRoot) ?? []
+        door.setFolder(Self.filesRoot, found + [Self.fileEntry("slow.ts")])
         door.setFile(path, slow)
-        defer { door.setFolder(Self.filesRoot, ["src/", "README.md", "Package.swift"].map(Self.fileEntry)) }
+        defer {
+            door.removeFile(path)
+            door.setFolder(Self.filesRoot, found)
+        }
         guard await waitForState(10, { self.filesShown?.rows.contains { $0.name == name } == true }) else { return (false, "the root never listed \(name)") }
         let writes = { door.filesReceived.filter { if case .filesWrite = $0 { true } else { false } }.count }, before = writes()
         guard workbench.openFile(at: path) else { return (false, "no row \(name) to open") }

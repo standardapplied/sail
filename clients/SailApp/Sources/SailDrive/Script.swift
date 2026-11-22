@@ -345,6 +345,10 @@ struct Step: Decodable {
     var fileCommandClick: String?
     /// The file pane went to this line: the caret on it and the accent bar beside it, within `seconds`.
     var fileAtLine: Int?
+    /// The files panel's tree shows a row of this name, within `seconds`.
+    var filesRowShown: String?
+    /// The files panel's tree shows no row of this name, within `seconds`.
+    var filesRowGone: String?
     /// The workspace terminal focused says this in its own card, within `seconds`.
     var terminalSays: String?
     /// The conflict sheet up says this as its heading, within `seconds`.
