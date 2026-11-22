@@ -144,6 +144,9 @@ tests bite, and the deletion count in the body.
   close always does.
 - A test that runs a container script for real (`flock`, `mv -T`, `/proc`) is
   `@EnabledOnOs(OS.LINUX)`: the release workflow runs the suite on macOS too.
+- An Incus IT's Sail home logs (`target/it-home-*/.sail/logs`) ship whole in a failed lane's
+  artifact, so nothing secret is ever written there: no token, no key, not a fake one that looks
+  real.
 - A change to a contract in `ARCHITECTURE.md` (the sync, loop and skill rows) changes the
   row and the tests it names in the same pull request.
 
