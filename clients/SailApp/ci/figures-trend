@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# figures-trend [RUNS]: the drive's timing figures over main's last RUNS (30) Clients runs, oldest
+# first: a header of the runs' short shas, then one line a figure, its value under each run ("-"
+# where that run has none of it, "*" where the machine read starved), with its mark and ceiling:
+# drift a single run's page cannot show. Each run's figures.tsv (the drive-figures-<sha> artifact)
+# is fetched once, by one `gh run download`, and kept in ~/.cache/sail-figures by run id, as a
+# finished run never changes. A run is remembered as having no table only when GitHub lists no such
+# artifact for it; a download that fails otherwise (a rate limit, the network, a login) is said and
+# asked again next time.
+set -euo pipefail
+
+readonly repo=standardapplied/sail runs=${1:-30}
+readonly cache=${XDG_CACHE_HOME:-$HOME/.cache}/sail-figures
+mkdir -p "$cache"
+unread=0 labels=()
+
+while read -r _ id sha; do
+  table=$cache/$id.tsv
+  if [[ ! -e $table && ! -e $table.none ]]; then
+    rm -rf "$cache/$id.d"
+    if gh run download "$id" -R "$repo" -n "drive-figures-$sha" -D "$cache/$id.d" > /dev/null 2>&1 && [[ -s $cache/$id.d/figures.tsv ]]; then
+      mv "$cache/$id.d/figures.tsv" "$table"
+    elif listed=$(gh api "repos/$repo/actions/runs/$id/artifacts" -q "[.artifacts[] | select(.name == \"drive-figures-$sha\")] | length" 2> /dev/null) && [[ $listed == 0 ]]; then
+      : > "$table.none"
+    else
+      unread=$((unread + 1))
+    fi
+    rm -rf "$cache/$id.d"
+  fi
+  [[ -s $table ]] || continue
+  labels+=("${sha:0:7}")
+  tail -n +2 "$table" | sed "s/^/${sha:0:7}	/" >> "$cache/.series.$$"
+done < <(gh run list -R "$repo" --workflow clients.yml --branch main --status completed -L "$runs" \
+  --json databaseId,headSha,createdAt -q '.[] | "\(.createdAt) \(.databaseId) \(.headSha)"' | sort)
+
+((unread == 0)) || echo "figures-trend: $unread run(s) could not be read now (not cached; asked again next time)" >&2
+[[ -e $cache/.series.$$ ]] || { echo "figures-trend: no run of the last $runs has a figures table" >&2; exit 0; }
+awk -F'\t' -v labels="${labels[*]}" '
+  { run = $1; f = $2; if (!(f in seen)) { seen[f] = 1; order[++n] = f; mark[f] = $5; ceiling[f] = $6 }
+    value[run, f] = $3 ($9 == "yes" ? "*" : "") }
+  END {
+    count = split(labels, runs, " ")
+    printf "runs:"; for (r = 1; r <= count; r++) printf " %s", runs[r]; printf "\n"
+    for (i = 1; i <= n; i++) {
+      f = order[i]; printf "%s:", f
+      for (r = 1; r <= count; r++) printf " %s", ((runs[r], f) in value ? value[runs[r], f] : "-")
+      printf " (mark %s, ceiling %s)\n", (mark[f] == "" ? "none" : mark[f]), ceiling[f]
+    }
+    print "- the run has none of that figure; * the machine read starved over its step, judged at twice the ceiling"
+  }' "$cache/.series.$$"
+rm -f "$cache/.series.$$"
