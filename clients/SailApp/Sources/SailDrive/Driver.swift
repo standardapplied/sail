@@ -72,6 +72,12 @@ final class Driver {
     }
     /// Every stretch of a judged wait excused as the machine's, with its evidence, once each.
     private var excused: [String] = []
+    /// Whether the step under way was judged on a machine read starved, and every step that was.
+    private var notCleanInStep = false
+    private var notClean: [String] = []
+    /// Every timing gate's verdict this run, a row each of `figures.tsv`: the figure against its
+    /// marks and the machine as read over its step, kept so drift shows across runs.
+    private var figureRows: [String] = []
 
     struct Result: Encodable {
         let index: Int
@@ -150,7 +156,9 @@ final class Driver {
                 Self.say("drive \(index) \(name): skipped on \(signed ? "a signed" : "an unsigned") build")
                 continue
             }
+            notCleanInStep = false
             var (ok, detail) = await perform(step, name: name)
+            if notCleanInStep { notClean.append("\(index) \(name)") }
             await Task.yield()
             let drew = await waitUntil(Self.drawDeadline) {
                 !self.onTerminal || self.measuring || self.terminal.visibleText == self.screenText && self.terminal.isDrawnInFull
@@ -174,6 +182,8 @@ final class Driver {
         }
         let failed = results.filter { !$0.ok }.map { "\($0.index) \($0.name)" }
         if !failed.isEmpty { Self.say("drive: \(failed.count) step\(failed.count == 1 ? "" : "s") FAILED: " + failed.joined(separator: ", ")) }
+        Self.say("drive: \(notClean.count) step\(notClean.count == 1 ? "" : "s") not measured cleanly: machine starved, judged at twice the ceilings"
+            + (notClean.isEmpty ? "" : ": " + notClean.joined(separator: ", ")))
         let withinClaim = madeStacks.map { $0.watcherShare <= MainStacks.claim } ?? true
         let lookCheap = madeStacks.map { $0.averageLook <= MainStacks.computation } ?? true
         let stayedRealTime = madeStacks.map { !$0.demoted } ?? true
@@ -184,6 +194,10 @@ final class Driver {
         let overLook = lookCheap ? "" : String(format: "; FAILED: a look took more on average than the watcher's computation of %.0f µs", MainStacks.computation * 1e6)
         let demoted = stayedRealTime ? "" : "; FAILED: the watcher was demoted out of real time"
         Self.say(stretches + sampler + overClaim + overLook + demoted)
+        if !figureRows.isEmpty {
+            let table = (["figure\tvalue\tbudget\tmark\tceiling\tidle %\tours %\tstarved"] + figureRows).joined(separator: "\n") + "\n"
+            try? table.write(to: out.appending(path: "figures.tsv"), atomically: true, encoding: .utf8)
+        }
         let passed = results.count == steps.count && results.allSatisfy(\.ok) && withinClaim && lookCheap && stayedRealTime
         let report = Report(
             passed: passed, hertz: shell.window.screen?.maximumFramesPerSecond ?? 0, scale: terminal.metrics.scale, steps: results,
@@ -574,6 +588,46 @@ final class Driver {
             : ""
         return (ours, "waited \(Self.ms((wait.length - tick) * 1000)) ms, the drive's own thread held \(Self.ms(ownHeld * 1000)) ms of it, "
             + "the main thread runnable without CPU on a machine with none idle \(Self.ms(starved * 1000)) ms of it (\(evidence))\(ceiling), ours \(Self.ms(ours)) ms")
+    }
+
+    /// One try's figure for a gate, in ms, and the span it was taken over.
+    typealias Taken = (value: Double, span: Span)
+
+    /// `count` tries, each (`attempt`) giving its gates' figures and spans, by gate. Nil when a try
+    /// could not be taken (`attempt` gave nil, its failure its own to say).
+    func tried(_ count: Int, _ attempt: () async -> [String: Taken]?) async -> [String: [Taken]]? {
+        _ = mainStacks
+        var tries: [String: [Taken]] = [:]
+        for _ in 0 ..< count {
+            guard let figures = await attempt() else { return nil }
+            figures.forEach { tries[$0.key, default: []].append($0.value) }
+        }
+        return tries
+    }
+
+    /// A step's verdicts by ``TimingGate``'s rule: the machine read once over every try of the
+    /// step (``MachineReading``), each gate then judged on its tries; a step read starved is kept
+    /// for the run's summary.
+    func judged(_ gates: [TimingGate], _ tries: [String: [Taken]]) -> (verdicts: [TimingGate.Verdict], machine: MachineReading) {
+        let spans = gates.flatMap { tries[$0.name]?.map(\.span) ?? [] }, looks = mainStacks.looks
+        let whole = (spans.map(\.start).min() ?? .infinity) >= (looks.first?.time ?? -.infinity)
+        let machine = MachineReading(MachineShare.idle(in: spans, looks: looks), whole: whole)
+        if machine.starved { notCleanInStep = true }
+        let verdicts = gates.map { $0.judge(tries[$0.name]?.map(\.value) ?? [], machine: machine) }
+        let (idle, ours) = if case let .read(idle, ours, _) = machine { (String(format: "%.1f", idle), String(format: "%.1f", ours)) } else { ("", "") }
+        for (gate, verdict) in zip(gates, verdicts) {
+            figureRows.append([gate.name, String(format: "%.1f", verdict.value), String(format: "%g", gate.budget), gate.mark.map { String(format: "%g", $0) } ?? "",
+                               String(format: "%g", gate.ceiling), idle, ours, machine.starved ? "yes" : "no"].joined(separator: "\t"))
+        }
+        return (verdicts, machine)
+    }
+
+    /// A step's line from its gates' verdicts: what missed, then every figure, then how the
+    /// machine read over the step.
+    static func line(_ judged: (verdicts: [TimingGate.Verdict], machine: MachineReading), missed more: [String] = []) -> (ok: Bool, said: String) {
+        let missed = judged.verdicts.compactMap(\.missed) + more
+        let figures = judged.verdicts.map(\.said) + [judged.machine.said]
+        return (missed.isEmpty, (missed.isEmpty ? "within every ceiling; " : "missed: \(missed.joined(separator: "; ")); ") + figures.joined(separator: "; "))
     }
 
     /// The main thread's longest hold, its heartbeat's longest gap (in `span` when given) less one

@@ -123,6 +123,22 @@ import Testing
         #expect(read >= 19)
     }
 
+    /// The file pane reads its view's whole text only through `wholeText`, which counts it: no
+    /// other `editor.string` or `textStorage?.string` in its source, so no key path walks the text
+    /// unseen by `aKeyNeverReadsTheWholeText`.
+    @Test func theWholeTextIsReadOnlyThroughItsOneAccessor() throws {
+        let source = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appending(path: "Sources/SailShell/FilePane.swift")
+        let text = try String(contentsOf: source, encoding: .utf8)
+        let accessor = try #require(text.range(of: "private var wholeText: String {"), "FilePane has no wholeText")
+        let body = try #require(text.range(of: "\n    }\n", range: accessor.upperBound ..< text.endIndex))
+        let outside = String(text[..<accessor.lowerBound]) + String(text[body.upperBound...])
+        for read in ["editor.string", "textStorage?.string", "textStorage!.string", ".textStorage.string"] {
+            #expect(!outside.contains(read), "FilePane reads \(read) outside wholeText")
+        }
+        #expect(text[accessor.upperBound ..< body.lowerBound].contains("editor.string"))
+    }
+
     @Test func theTitleFontIsThePinnedNewsreaderMedium() throws {
         let fonts = Self.fonts
         let pins = [
