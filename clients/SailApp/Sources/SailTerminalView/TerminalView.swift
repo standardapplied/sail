@@ -66,6 +66,18 @@ public final class TerminalView: NSView {
     var rightReported = false
     /// The menu a right-click or a control-click offers; none unless the app gives one.
     public var contextMenu: @MainActor () -> NSMenu? = { nil }
+    /// The characters a link takes in a row's text, given that text and the 1-based character
+    /// under the pointer: asked only while ⌘ is held, nil where there is none. None unless the app
+    /// gives it, as it does for a workspace's terminals, whose paths it can open.
+    public var linkIn: @MainActor (_ text: String, _ column: Int) -> Range<Int>? = { _, _ in nil }
+    /// A ⌘-click on a link: its row's text and the 1-based character clicked.
+    public var onLink: @MainActor (_ text: String, _ column: Int) -> Void = { _, _ in }
+    /// The link underlined now, ⌘ held over it.
+    public internal(set) var shownLink: OverlayLink?
+    /// The cell the link was last looked for under, to look again when the text there changes.
+    var linkPointer: CellPoint?
+    /// The button went down on a link: its drag and release go nowhere.
+    var linkClicked = false
     /// When the view last became its window's first responder, on the events' clock.
     var focusedAt = 0.0
     var gatherer = ScrollGatherer()
@@ -369,7 +381,7 @@ public final class TerminalView: NSView {
     }
 
     var overlay: Overlay {
-        Overlay(focused: holdsTheKeys, cursorOn: cursorOn, marked: composition.marked, selection: ink.selection, idleCursor: ink.idleCursor)
+        Overlay(focused: holdsTheKeys, cursorOn: cursorOn, marked: composition.marked, selection: ink.selection, idleCursor: ink.idleCursor, link: shownLink)
     }
 
     /// The palette's selection and idle cursor, the look's fixed colours.
@@ -490,6 +502,7 @@ public final class TerminalView: NSView {
             committedFrames += 1
             marks.committed(frame: number, read: read, target: target)
             lastFrame = frame
+            if let shownLink, frame.changed.touches(shownLink.row) { lookForLinkAgain() }
             needsDraw = renderer.lastFrameWantsAnother
             updateBlink()
             return refreshed(.drew, screenChanged || needsDraw)

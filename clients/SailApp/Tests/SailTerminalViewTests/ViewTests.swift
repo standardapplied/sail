@@ -219,6 +219,68 @@ import Testing
         }
     }
 
+    /// The view finds `src/a.ts:4` as its link, as the app finds a path, wherever the row holds it.
+    static func linksPaths(_ view: TerminalView) {
+        view.linkIn = { text, column in
+            guard let range = text.range(of: "src/a.ts:4") else { return nil }
+            let start = text.distance(from: text.startIndex, to: range.lowerBound), link = start ..< start + 10
+            return link.contains(column - 1) ? link : nil
+        }
+    }
+
+    /// ⌘ held over a link underlines exactly its cells, at every font size, in both palettes and
+    /// right to left; without ⌘, or over text that is no link, nothing is underlined.
+    @Test(arguments: [("light", false), ("dark", false), ("light", true)])
+    func commandOverALinkUnderlinesExactlyItsCells(_ palette: String, _ rightToLeft: Bool) async throws {
+        for points in FontLadder.sizes {
+            let harness = try Harness()
+            harness.view.recolour(palette == "dark" ? .dark : .light)
+            harness.view.userInterfaceLayoutDirection = rightToLeft ? .rightToLeft : .leftToRight
+            harness.view.setFontSize(points)
+            harness.link.output("see src/a.ts:4 here")
+            Self.linksPaths(harness.view)
+            await harness.tick()
+            let before = try #require(try harness.view.snapshot())
+            harness.mouse(.mouseMoved, column: 6, row: 0)
+            #expect(harness.view.shownLink == nil, "\(points) pt: underlined without ⌘")
+            harness.mouse(.mouseMoved, column: 6, row: 0, flags: .command)
+            #expect(harness.view.shownLink == OverlayLink(row: 0, columns: 4 ..< 14), "\(points) pt: \(String(describing: harness.view.shownLink))")
+            await harness.tick()
+            let linked = try #require(try harness.view.snapshot())
+            let metrics = harness.view.metrics, origin = metrics.origin(of: CellPoint(x: 4, y: 0))
+            let cells = (x: origin.x ..< origin.x + 10 * metrics.width, y: origin.y ..< origin.y + metrics.height)
+            let all = (x: 0 ..< linked.width, y: 0 ..< linked.height)
+            let inside = Self.differing(linked, before, in: cells)
+            #expect(inside > 0 && Self.differing(linked, before, in: all) == inside, "\(points) pt: the underline is not exactly the link's cells")
+            harness.mouse(.mouseMoved, column: 16, row: 0, flags: .command)
+            #expect(harness.view.shownLink == nil, "\(points) pt: a word that is no link was underlined")
+        }
+    }
+
+    /// A ⌘-click on a link, in the text drawn, goes to the link alone: nothing is selected and a
+    /// program that tracks the mouse gets nothing, its drag and release included; the same click
+    /// without ⌘ is the program's, as before.
+    @Test func aCommandClickOnALinkGoesToTheLinkAlone() async throws {
+        let harness = try Harness()
+        harness.link.output("\u{1b}[?1000h\u{1b}[?1006hsee src/a.ts:4 here")
+        Self.linksPaths(harness.view)
+        var opened: [(String, Int)] = []
+        harness.view.onLink = { opened.append(($0, $1)) }
+        await harness.tick()
+        harness.link.forget()
+        harness.mouse(.leftMouseDown, column: 6, row: 0, flags: .command)
+        harness.mouse(.leftMouseDragged, column: 8, row: 0, flags: .command)
+        harness.mouse(.leftMouseUp, column: 8, row: 0, flags: .command)
+        harness.flush()
+        #expect(opened.map(\.1) == [7] && opened.first?.0.hasPrefix("see src/a.ts:4 here") == true, "\(opened)")
+        #expect(harness.link.bytes.isEmpty, "the program got the ⌘-click: \(harness.link.bytes)")
+        #expect(harness.link.screen.selectedText() == nil)
+        harness.mouse(.leftMouseDown, column: 6, row: 0)
+        harness.mouse(.leftMouseUp, column: 6, row: 0)
+        harness.flush()
+        #expect(opened.count == 1 && String(decoding: harness.link.bytes, as: UTF8.self) == "\u{1b}[<0;7;1M\u{1b}[<0;7;1m")
+    }
+
     private static func differing(_ one: RenderedImage, _ other: RenderedImage, in area: (x: Range<Int>, y: Range<Int>)) -> Int {
         var count = 0
         for y in area.y where y < one.height {
