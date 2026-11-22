@@ -139,6 +139,9 @@ tests bite, and the deletion count in the body.
   anywhere should be fully covered in the same pull request. Gates never go down.
 - Prompts, hook files and launch commands are pinned whole by golden tests; a change to them
   changes the golden text deliberately.
+- A fake ends a connection as the real host does: it closes it, never shuts it down alone. On
+  macOS a unix socket's `shutdown()` may not wake the other end's reader blocked in `recv()`; a
+  close always does.
 - A test that runs a container script for real (`flock`, `mv -T`, `/proc`) is
   `@EnabledOnOs(OS.LINUX)`: the release workflow runs the suite on macOS too.
 - A change to a contract in `ARCHITECTURE.md` (the sync, loop and skill rows) changes the

@@ -54,7 +54,7 @@ final class FakeHost: Sendable {
             guard accepted >= 0 else { throw HostError("accept failed: \(errno)") }
             let socket = Socket(descriptor: accepted)
             socket.setReadTimeout(seconds: Self.deadline)
-            return Peer(socket: socket)
+            return Peer(socket: socket, descriptor: accepted)
         }
     }
 
@@ -76,12 +76,22 @@ final class FakeHost: Sendable {
 
     /// One accepted connection, which the test drives.
     final class Peer: Sendable {
-        private let socket: Socket
+        /// The accepted descriptor's number, for a test of the close.
+        let descriptor: Int32
+        private let open: Mutex<Socket?>
         private let frames = Mutex(FrameReader())
         private let unread = Mutex<[Frame]>([])
 
-        init(socket: Socket) {
-            self.socket = socket
+        init(socket: Socket, descriptor: Int32) {
+            open = Mutex(socket)
+            self.descriptor = descriptor
+        }
+
+        private var socket: Socket {
+            get throws {
+                guard let socket = open.withLock({ $0 }) else { throw HostError("the peer was closed") }
+                return socket
+            }
         }
 
         /// Answers the client's magic with the host's and its `Hello` with a `Welcome` of `bootID`:
@@ -95,6 +105,7 @@ final class FakeHost: Sendable {
 
         /// Answers the magic and reads the client's `Hello`: its token.
         func hello(magic: [UInt8] = Handshake.magic) async throws -> String {
+            let socket = try socket
             try socket.send(magic)
             let theirs = try await onThread { [socket] in
                 var buffer = [UInt8](repeating: 0, count: 8)
@@ -114,11 +125,12 @@ final class FakeHost: Sendable {
         /// The next frame the client sent.
         func read() async throws -> Frame {
             if let frame = unread.withLock({ $0.isEmpty ? nil : $0.removeFirst() }) { return frame }
+            let socket = try socket
             return try await onThread { [self] in
                 var buffer = [UInt8](repeating: 0, count: 64 * 1024)
                 while true {
                     if let frame = self.unread.withLock({ $0.isEmpty ? nil : $0.removeFirst() }) { return frame }
-                    let count = try self.socket.receive(into: &buffer)
+                    let count = try socket.receive(into: &buffer)
                     guard count > 0 else { throw HostError("the client closed the connection") }
                     let read = try self.frames.withLock { try $0.read(buffer[..<count]) }
                     self.unread.withLock { $0 += read }
@@ -159,8 +171,15 @@ final class FakeHost: Sendable {
             try socket.send(bytes)
         }
 
+        /// Ends the connection as the host does: shut down, then closed with the last reference to its
+        /// socket, which a read under way holds until it ends. A shutdown alone would leave the socket
+        /// open, and on macOS it does not always wake a client blocked reading a unix socket.
         func close() {
-            socket.shutdown()
+            let socket = open.withLock { open in
+                defer { open = nil }
+                return open
+            }
+            socket?.shutdown()
         }
     }
 

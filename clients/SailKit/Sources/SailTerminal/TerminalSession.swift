@@ -737,6 +737,8 @@ public final class TerminalSession: Sendable {
         return "This app and that runner are different versions of Sail, so they cannot talk. Bring both to the same version, then open it again."
     }
 
+    /// Reads the attached stream until it ends. The read blocks in `recv()`, which the host's close
+    /// ends: on macOS a unix-socket peer that only shuts down may not wake it, and our hosts close.
     private func read(_ connection: Connection, since attached: ContinuousClock.Instant) -> Outcome {
         do throws(TerminalError) {
             while let frame = try connection.next() {
