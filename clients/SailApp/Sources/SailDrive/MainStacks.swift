@@ -363,7 +363,7 @@ final class MainStacks: @unchecked Sendable {
     func summary(of span: Span) -> String {
         let taken = lock.withLock { samples.filter { $0.time >= span.start && $0.time <= span.end && $0.idleTicks != nil && $0.busyTicks != nil } }
         let looks = taken.map { ThreadLook(time: $0.time, runnable: true, cpu: $0.cpu, ourCPU: nil, idleTicks: $0.idleTicks, busyTicks: $0.busyTicks) }
-        guard let machine = MachineShare.idle(in: span, looks: looks) else { return "fewer than two samples with the machine's ticks in the span" }
+        guard let machine = MachineShare.idle(in: [span], looks: looks) else { return "fewer than two samples with the machine's ticks in the span" }
         let idleTicks = machine.idleTicks, busyTicks = machine.busyTicks, idle = machine.percent ?? -1, read = (machine.to - machine.from) * 1000
         let readings = taken.filter { $0.fill != nil }
         guard let early = readings.first, let late = readings.last, early.fill != late.fill, let from = early.filledAt, let to = late.filledAt else {

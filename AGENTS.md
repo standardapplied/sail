@@ -119,11 +119,13 @@ tests bite, and the deletion count in the body.
   the main run loop and ended the suite's process (#499); real clicks and keys are the drive's.
 - The drive's timing gates are of two kinds, and a new one is one of them, never a third. A
   figure taken over tries (`f-budgets`, `p-figures`, the files flood's change) goes through
-  `TimingGate` and `Driver.tried`: a try whose span read the machine's CPUs 0% idle does not count,
-  tries go on to twice the count until enough count, and with none counting all are judged at twice
-  the ceiling and the run's summary names the step as not measured cleanly; the drive's extra tries
-  are capped at `Driver.extraTriesCap`. A single long wait (a flood, a split, the terminal's
-  latency) is judged by `ours()`, less the time `MachineShare` proves the machine starved it.
+  `TimingGate`: the step takes its tries, the machine is read once over the union of their spans
+  (`MachineReading`: under 5% idle over at least 100 ticks is starved; fewer ticks is too short and
+  judges nothing), and a starved step's gates are judged at twice their ceilings and named in the
+  run's summary as not measured cleanly. A single long wait (a flood, a split, the terminal's
+  latency) is judged by `ours()`, less the time `MachineShare` proves the machine starved it. A
+  ceiling sits outside the runner's own range as seen on main and other branches, with that
+  range written beside it.
 - Nothing a layout pass of the Mac app reaches (`layout()` and what it calls, `updateConstraints`,
   `viewDidLayout`, `resizeSubviews`, `setFrameSize`) changes what forces another pass: an intrinsic
   size, `preferredMaxLayoutWidth`, a label's text or font, a constraint's `constant` or `isActive`.

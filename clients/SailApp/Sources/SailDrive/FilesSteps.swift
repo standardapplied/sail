@@ -148,8 +148,8 @@ extension Driver {
     /// entries and lists a folder again. Gated: the flood's ours (its longest output wait and the
     /// main thread's longest hold, less the machine's share) at panes4's 100 ms; its drawable wait in
     /// its longest commit gap at ``drawableWaitBound``; a change heard to its row drawn at the
-    /// spec's 120 ms ceiling (budget 50) by ``TimingGate``'s rule, its extra tries only while the
-    /// flood lasts. Said: the main thread's longest hold.
+    /// spec's 120 ms ceiling (budget 50) by ``TimingGate``'s rule. Said: the main thread's longest
+    /// hold.
     private func filesFlood(_ door: FakeRunnerDoor) async -> (Bool, String) {
         guard let view = pane, filesShown != nil else { return (false, "no workspace terminal with its files panel open") }
         let root = Self.filesRoot, marker = "flood-files-end"
@@ -162,9 +162,9 @@ extension Driver {
         mainThread.reset()
         let seconds = 3.0
         door.flood(view.name, lines: Self.paneLoad.lines, width: 150, every: Self.paneLoad.period, blocks: Int(seconds / Self.paneLoad.period), then: marker)
-        let toChanged = TimingGate(name: "a change heard to its row drawn p95", statistic: .p95, wanted: 10, budget: 50, ceiling: 120)
+        let toChanged = TimingGate(name: "a change heard to its row drawn p95", statistic: .p95, tries: 10, budget: 50, ceiling: 120)
         var failure = ""
-        let changes = await tried([toChanged], ended: { Self.shows(view, marker) }) { () async -> [String: Taken]? in
+        let changes = await tried(toChanged.tries) { () async -> [String: Taken]? in
             let index = names.count - 3, name = "artifact-\(index).o"
             names.append(name)
             door.setFolder(root, names.map(Self.fileEntry))
@@ -181,7 +181,7 @@ extension Driver {
         guard await waitForState(60, { Self.shows(view, marker) }) else { return (false, "the flood never reached its end") }
         let figures = view.terminal.latency, judged = flood(figures), frames = Self.committed(view.terminal) - before
         let held = max(mainThread.longest - Heartbeat.interval * 1000, 0)
-        let change = self.judged([toChanged], changes, stopped: "the flood ended")[0]
+        let step = self.judged([toChanged], changes), change = step.verdicts[0]
         let budgets = [
             "the flood's ours <= 100 ms in its \(frames) frames (\(judged.said))": frames > 0 && judged.ours <= 100,
             "its drawable wait in its longest commit gap <= \(Int(Self.drawableWaitBound)) ms (\(Self.ms(figures.longestGapFetching)) ms)": figures.longestGapFetching <= Self.drawableWaitBound,
@@ -189,7 +189,7 @@ extension Driver {
         ]
         let missed = budgets.filter { !$0.value }.keys.sorted()
         let said = "ours \(Self.ms(judged.ours)) ms, longest gap between commits \(Self.ms((figures.longestBetweenCommits?.length ?? 0) * 1000)) ms, "
-            + "drawable wait \(Self.ms(figures.longestGapFetching)) ms, \(change.said), the main thread's longest hold \(Self.ms(held)) ms"
+            + "drawable wait \(Self.ms(figures.longestGapFetching)) ms, \(change.said), \(step.machine.said), the main thread's longest hold \(Self.ms(held)) ms"
         print("files under a flood: \(said)")
         door.setFolder(root, ["src/", "README.md", "Package.swift"].map(Self.fileEntry))
         return (missed.isEmpty, (missed.isEmpty ? "within every budget" : "missed: \(missed.joined(separator: "; "))") + "; " + said)
@@ -390,7 +390,7 @@ extension Driver {
     /// The spec's figures for the file pane, app side, the door answering at once: a 5 MB file to its
     /// first screen drawn and to typing possible, the main thread's costliest turn while it loads, a
     /// key to its glyph drawn; a clean pane's change to its new text drawn; ⌘S of 100 KB to the dot
-    /// gone. Each by ``TimingGate``'s rule over its tries (``tried(_:ended:_:)``), its budget said.
+    /// gone. Each by ``TimingGate``'s rule over its tries (``tried(_:_:)``), its budget said.
     private func fileBudgets(_ door: FakeRunnerDoor) async -> (Bool, String) {
         let line = "export const tide = { at: 42, height: 1.25, rounding: \"minutes\" };\n"
         let big = Array(String(repeating: line, count: 5_000_000 / line.utf8.count).utf8)
@@ -404,8 +404,8 @@ extension Driver {
             if pane() != nil { _ = workbench.closeFile() }
             return await waitForState(5) { pane() == nil }
         }
-        let firstScreen = TimingGate(name: "a 5 MB file chosen to its first screen drawn p95", statistic: .p95, wanted: 3, budget: 60, ceiling: 150)
-        let typing = TimingGate(name: "the same file to typing possible p95", statistic: .p95, wanted: 3, budget: 400, ceiling: 1000)
+        let firstScreen = TimingGate(name: "a 5 MB file chosen to its first screen drawn p95", statistic: .p95, tries: 3, budget: 60, ceiling: 150)
+        let typing = TimingGate(name: "the same file to typing possible p95", statistic: .p95, tries: 3, budget: 400, ceiling: 1000)
         // The costliest load turn is CoreText shaping glyphs and the layer's draw, not the 32 KiB
         // slice appended (1.5 ms at most): halving the slice did not lower its p95 (#525). These two
         // CPU figures gate at two 60 Hz frames, 32 ms: over 11 runs on hosted runners (main and
@@ -413,15 +413,15 @@ extension Driver {
         // 16.7 ms, and a 16 ms ceiling failed main itself at 17.6. The 16 and 8 ms marks are said,
         // never gated; what regresses for real is caught by the pane's structural tests (the O(1)
         // probe, the slices, no key copying the text) and by 32 ms (the 1.2 s caret walk).
-        let hold = TimingGate(name: "loading it: the main thread's own CPU in its costliest turn, the least of three", statistic: .least, wanted: 3, budget: 16, ceiling: 32)
-        let key = TimingGate(name: "a key typed in a 5 MB file to its glyph drawn, the least of three", statistic: .least, wanted: 3, budget: 16, ceiling: 32)
-        let change = TimingGate(name: "a clean pane's change to the new text drawn p95", statistic: .p95, wanted: 5, budget: 80, ceiling: 200)
-        let save = TimingGate(name: "⌘S of 100 KB to the dot gone p95", statistic: .p95, wanted: 5, budget: 40, ceiling: 100)
+        let hold = TimingGate(name: "loading it: the main thread's own CPU in its costliest turn, the least of three", statistic: .least, tries: 3, budget: 16, ceiling: 32)
+        let key = TimingGate(name: "a key typed in a 5 MB file to its glyph drawn, the least of three", statistic: .least, tries: 3, budget: 16, ceiling: 32)
+        let change = TimingGate(name: "a clean pane's change to the new text drawn p95", statistic: .p95, tries: 5, budget: 80, ceiling: 200)
+        let save = TimingGate(name: "⌘S of 100 KB to the dot gone p95", statistic: .p95, tries: 5, budget: 40, ceiling: 100)
         var loadingPhases = "", keyPhases = "", failure = ""
         func phases() -> String {
             PanePhases.phases.sorted { $0.value.total > $1.value.total }.map { "\($0.key) \(Self.ms($0.value.total * 1000)) ms in all, \(Self.ms($0.value.longest * 1000)) ms at most" }.joined(separator: ", ")
         }
-        let loads = await tried([firstScreen, typing, hold, key]) { () async -> [String: Taken]? in
+        let loads = await tried(hold.tries) { () async -> [String: Taken]? in
             guard await closed() else {
                 failure = "the file pane would not close: unsaved"
                 return nil
@@ -465,7 +465,7 @@ extension Driver {
         guard let loads else { return (false, failure) }
         guard await closed(), workbench.openFile(at: Self.filesPath("hundred.ts")), await waitForState(10, { pane()?.editable == true }) else { return (false, "hundred.ts never opened") }
         var index = 0
-        let changes = await tried([change]) { () async -> [String: Taken]? in
+        let changes = await tried(change.tries) { () async -> [String: Taken]? in
             let changed = hundred + Array("// change \(index)\n".utf8)
             index += 1
             let heard = CACurrentMediaTime()
@@ -481,7 +481,7 @@ extension Driver {
         }
         guard let changes else { return (false, failure) }
         index = 0
-        let saves = await tried([save]) { () async -> [String: Taken]? in
+        let saves = await tried(save.tries) { () async -> [String: Taken]? in
             guard let editor = pane()?.editor else {
                 failure = "hundred.ts closed before its saves"
                 return nil
@@ -501,19 +501,19 @@ extension Driver {
         _ = await closed()
         door.setFolder(Self.filesRoot, ["src/", "README.md", "Package.swift"].map(Self.fileEntry))
         let tries = loads.merging(changes) { one, _ in one }.merging(saves) { one, _ in one }
-        let cpu = judged([hold, key], tries)
-        let verdicts = judged([firstScreen, typing], tries) + cpu + judged([change, save], tries)
+        let step = judged([firstScreen, typing, hold, key, change, save], tries)
+        let cpu = step.verdicts.filter { $0.name == hold.name || $0.name == key.name }
         func all(_ gate: TimingGate) -> String {
             let values = tries[gate.name]?.map(\.value) ?? []
             return "\(Self.ms(Percentiles(milliseconds: values).p95)) ms over \(values.count) tries"
         }
-        let marks = zip([hold, key], cpu).map { gate, verdict in
-            "\(gate.name) \(Self.ms(verdict.value)) ms, \(verdict.value <= 8 ? "within" : verdict.value <= 16 ? "over the 8 ms mark, within" : "over") the 16 ms mark"
+        let marks = cpu.map { verdict in
+            "\(verdict.name) \(Self.ms(verdict.value)) ms, \(verdict.value <= 8 ? "within" : verdict.value <= 16 ? "over the 8 ms mark, within" : "over") the 16 ms mark"
         }
-        print("file figures: \(verdicts.map(\.said).joined(separator: "; ")); loading p95 \(all(hold)) and a key p95 \(all(key)); the marks, said and never gated: \(marks.joined(separator: "; "))")
+        print("file figures: \((step.verdicts.map(\.said) + [step.machine.said]).joined(separator: "; ")); loading p95 \(all(hold)) and a key p95 \(all(key)); the marks, said and never gated: \(marks.joined(separator: "; "))")
         print("file figures, where the last load's time went: \(loadingPhases)")
         print("file figures, where the last key's time went: \(keyPhases)")
-        let verdict = Self.line(verdicts)
+        let verdict = Self.line(step)
         return (verdict.ok, verdict.said + "; loading p95 \(all(hold)), a key p95 \(all(key)) (reported); " + marks.joined(separator: "; ") + " (reported)")
     }
 
@@ -547,7 +547,7 @@ extension Driver {
     }
 
     /// The spec's figures, app side, with the door answering at once, each by ``TimingGate``'s rule
-    /// over its tries (``tried(_:ended:_:)``), p95 over ten or the least of three:
+    /// over its tries (``tried(_:_:)``), p95 over ten or the least of three:
     /// ⌃⌘S to the first rows drawn; a 5,000-entry folder's whole listing heard to its rows drawn;
     /// the main thread's longest hold scrolling those rows end to end and back by the wheel; a
     /// change heard to the new row drawn with its cue; the main thread's longest hold while 2,000
@@ -563,16 +563,21 @@ extension Driver {
         door.setFolder(root, base.map(Self.fileEntry))
         door.setFolder(root + "/berths", Self.berths(5000))
         guard await waitForState(10, { self.filesShown?.list.numberOfRows == base.count }) else { return (false, "the panel never showed the root: \(filesShown?.words ?? "")") }
-        let toFirstRows = TimingGate(name: "⌃⌘S to the first rows drawn p95", statistic: .p95, wanted: 10, budget: 50, ceiling: 120)
-        let toListed = TimingGate(name: "a 5,000-entry listing heard to its rows drawn p95", statistic: .p95, wanted: 10, budget: 60, ceiling: 150)
-        let toChanged = TimingGate(name: "a change heard to the new row and its cue drawn p95", statistic: .p95, wanted: 10, budget: 50, ceiling: 120)
-        let scrollCPU = TimingGate(name: "scrolling the 5,000 rows end to end and back, the least of three: the main thread's own CPU in its most costly turn", statistic: .least, wanted: 3, budget: 24, ceiling: 40)
-        let burstCPU = TimingGate(name: "2,000 changes in a burst, the least of three: the main thread's own CPU in its most costly turn", statistic: .least, wanted: 3, budget: 24, ceiling: 40)
-        let scrollWall = TimingGate(name: "scrolling the 5,000 rows end to end and back, the least of three: the main thread's longest turn on the wall clock", statistic: .least, wanted: 3, budget: 24, ceiling: 40)
-        let burstWall = TimingGate(name: "2,000 changes in a burst, the least of three: the main thread's longest turn on the wall clock", statistic: .least, wanted: 3, budget: 24, ceiling: 40)
+        // The two scroll gates sit at three 60 Hz frames, 48 ms, 40 and the tighter marks said: over
+        // 14 runs on hosted runners (main and unrelated branches, 2026-11-21/22) the scroll's longest
+        // turn read 10.8 to 35.6 ms and its costliest turn's CPU 10.6 to 32.2 ms, inside a 40 ms
+        // ceiling's reach. Every other ceiling here and in `p-figures` is at least twice the worst
+        // those runs read.
+        let toFirstRows = TimingGate(name: "⌃⌘S to the first rows drawn p95", statistic: .p95, tries: 10, budget: 50, ceiling: 120)
+        let toListed = TimingGate(name: "a 5,000-entry listing heard to its rows drawn p95", statistic: .p95, tries: 10, budget: 60, ceiling: 150)
+        let toChanged = TimingGate(name: "a change heard to the new row and its cue drawn p95", statistic: .p95, tries: 10, budget: 50, ceiling: 120)
+        let scrollCPU = TimingGate(name: "scrolling the 5,000 rows end to end and back, the least of three: the main thread's own CPU in its most costly turn", statistic: .least, tries: 3, budget: 24, ceiling: 48)
+        let burstCPU = TimingGate(name: "2,000 changes in a burst, the least of three: the main thread's own CPU in its most costly turn", statistic: .least, tries: 3, budget: 24, ceiling: 40)
+        let scrollWall = TimingGate(name: "scrolling the 5,000 rows end to end and back, the least of three: the main thread's longest turn on the wall clock", statistic: .least, tries: 3, budget: 24, ceiling: 48)
+        let burstWall = TimingGate(name: "2,000 changes in a burst, the least of three: the main thread's longest turn on the wall clock", statistic: .least, tries: 3, budget: 24, ceiling: 40)
         var toOpen: [Double] = [], toAdmitted: [Double] = [], toListing: [Double] = []
         var worstOpen = 0.0, failure = ""
-        let openings = await tried([toFirstRows]) { () async -> [String: Taken]? in
+        let openings = await tried(toFirstRows.tries) { () async -> [String: Taken]? in
             press("s", ["control", "command"])
             guard await waitForState(5, { self.filesShown == nil }) else {
                 failure = "⌃⌘S did not put the panel away"
@@ -600,7 +605,7 @@ extension Driver {
         }
         guard let openings else { return (false, failure) }
         let berths = root + "/berths"
-        let listings = await tried([toListed]) { () async -> [String: Taken]? in
+        let listings = await tried(toListed.tries) { () async -> [String: Taken]? in
             guard let shown = filesShown, await clickName(berths, in: shown), await waitForState(5, { self.filesShown?.list.chosen == berths }) else {
                 failure = "berths could not be chosen"
                 return nil
@@ -628,7 +633,7 @@ extension Driver {
         var scrolls: [Double] = [], scrollsCPU: [Double] = [], scrollTurns: [Double] = [], scrollsBeforeCommit: [Double] = [], wheel: [String] = [], scrolledWell = true, drawsPerEntered: [Double] = [], namesPerDraw: [Double] = []
         let drawsAtStart = filesShown?.draws ?? 0, cpuAtStart = filesShown?.drawCPU.total ?? 0, madeAtStart = filesShown?.list.madeCPU ?? (rows: 0, nanoseconds: 0)
         let cellsAtStart = (made: filesShown?.list.rowsMade ?? 0, reused: filesShown?.list.rowsReused ?? 0)
-        let scrollTries = await tried([scrollCPU, scrollWall]) { () async -> [String: Taken]? in
+        let scrollTries = await tried(scrollCPU.tries) { () async -> [String: Taken]? in
             let drawsBefore = filesShown?.draws ?? 0, namesBefore = filesShown?.namesBuilt ?? 0
             mainThread.reset()
             mainTurns.reset()
@@ -658,7 +663,7 @@ extension Driver {
         press("arrowLeft", [])
         _ = await waitForState(5) { self.filesShown?.list.numberOfRows == base.count }
         var names = base
-        let changes = await tried([toChanged]) { () async -> [String: Taken]? in
+        let changes = await tried(toChanged.tries) { () async -> [String: Taken]? in
             let name = "tide-\(names.count - base.count).ts"
             names.append(name)
             door.setFolder(root, names.map(Self.fileEntry))
@@ -671,7 +676,7 @@ extension Driver {
         }
         guard let changes else { return (false, failure) }
         var bursts: [Double] = [], burstsCPU: [Double] = [], burstTurns: [Double] = [], landed = true, burstFills = 0, burstMade = 0, burstAllowed = 0, round = 0
-        let burstTries = await tried([burstCPU, burstWall]) { () async -> [String: Taken]? in
+        let burstTries = await tried(burstCPU.tries) { () async -> [String: Taken]? in
             door.setFolder(root, names.map(Self.fileEntry))
             _ = await waitForState(10) { self.filesShown?.list.numberOfRows == names.count }
             let list = filesShown?.list, fills = list?.fills ?? 0, made = list?.rowsMade ?? 0, allowed = list?.appliedRows ?? 0
@@ -708,13 +713,13 @@ extension Driver {
         func tries(_ figures: [Double]) -> String {
             "\(figures.map { Self.ms($0) }) ms (least \(Self.ms(figures.min() ?? 0)), worst \(Self.ms(figures.max() ?? 0)))"
         }
-        let byGate = [openings, listings, scrollTries, changes, burstTries].reduce(into: [String: [TimedTry]]()) { all, some in all.merge(some) { one, _ in one } }
+        let byGate = [openings, listings, scrollTries, changes, burstTries].reduce(into: [String: [Taken]]()) { all, some in all.merge(some) { one, _ in one } }
         let gates = [toFirstRows, toListed, toChanged, scrollCPU, burstCPU, scrollWall, burstWall]
-        let verdicts = judged(gates, byGate)
-        let value = Dictionary(uniqueKeysWithValues: zip(gates.map(\.name), verdicts.map(\.value)))
+        let step = judged(gates, byGate)
+        let value = Dictionary(uniqueKeysWithValues: step.verdicts.map { ($0.name, $0.value) })
         let scrolled = value[scrollCPU.name] ?? .infinity, bursting = value[burstCPU.name] ?? .infinity
         let frame120 = 1000 / 120.0
-        let promotion = "budgets 24 ms, 16 ms and a 120 Hz frame's 8.3 ms: the costliest scroll turn takes \(String(format: "%.1f", scrolled / frame120)) of them, the costliest burst turn \(String(format: "%.1f", bursting / frame120))"
+        let promotion = "marks 40 ms, 24 ms, 16 ms and a 120 Hz frame's 8.3 ms, said and never gated: the costliest scroll turn \(Self.ms(scrolled)) ms, \(scrolled <= 40 ? "within" : "over") 40 ms, takes \(String(format: "%.1f", scrolled / frame120)) of them, the costliest burst turn \(String(format: "%.1f", bursting / frame120))"
         let rowCost = "a tree row's draw on the main thread \(String(format: "%.1f", perRow)) µs on average and \(String(format: "%.1f", Double(drawCPU.most) / 1000)) µs at most, over \(drawn) rows drawn in the scrolls, 20 rows entering a turn"
         let scrollFigures = "scrolling, the main thread's own CPU in its most costly turn \(tries(scrollsCPU)), its longest turn on the wall clock \(tries(scrollTurns)), its longest hold by the heartbeat \(tries(scrolls))"
         let burst = "bursts, CPU \(tries(burstsCPU)), longest turn \(tries(burstTurns)), hold \(tries(bursts))"
@@ -725,14 +730,14 @@ extension Driver {
             + structure.keys.sorted().joined(separator: "; "))
         door.setFolder(root, base.map(Self.fileEntry))
         _ = await waitForState(10) { self.filesShown?.list.numberOfRows == base.count }
-        let over = zip(gates, verdicts).filter { $1.met && $1.clean && $1.value > $0.budget }.map { gate, _ in "\(gate.name) over its \(Int(gate.budget)) ms budget" }
-        let verdict = Self.line(verdicts, missed: structure.filter { !$0.value }.map(\.key).sorted())
+        let over = zip(gates, step.verdicts).filter { !step.machine.starved && $1.met && $1.value > $0.budget }.map { gate, _ in "\(gate.name) over its \(Int(gate.budget)) ms budget" }
+        let verdict = Self.line(step, missed: structure.filter { !$0.value }.map(\.key).sorted())
         func p95(_ samples: [Double]) -> String {
             Self.ms(Percentiles(milliseconds: samples.map { $0 * 1000 }).p95)
         }
         print("files, ⌃⌘S to the first rows split p95: the key to the connection asked \(p95(toOpen)) ms, the ticket and connect to admitted \(p95(toAdmitted)) ms, "
             + "admitted to the root's whole listing heard \(p95(toListing)) ms, of \(toOpen.count) tries")
-        print("files figures: \(verdicts.map(\.said).joined(separator: "; ")); the wheel: \(wheel.joined(separator: ", ")); the bursts landed: \(landed)")
+        print("files figures: \((step.verdicts.map(\.said) + [step.machine.said]).joined(separator: "; ")); the wheel: \(wheel.joined(separator: ", ")); the bursts landed: \(landed)")
         return (verdict.ok && scrolledWell && landed, verdict.said + (over.isEmpty ? "" : "; \(over.joined(separator: "; "))"))
     }
 }

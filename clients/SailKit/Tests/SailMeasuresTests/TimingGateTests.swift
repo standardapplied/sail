@@ -2,104 +2,62 @@
 import SailSurface
 import Testing
 
-/// The drive's one rule for a figure taken over tries on a hosted runner: a try the machine
-/// starved does not count, more are taken up to twice the count, the first that count are judged
-/// at the ceiling, and with none counting all are judged at twice it and said so.
+/// The drive's rule for a step's figures over tries on a hosted runner: the machine read once over
+/// the step's whole measuring span; starved, every gate of the step judged at twice its ceiling and
+/// said not measured cleanly; a reading too short to mean anything judges nothing.
 @Suite struct TimingGateTests {
-    static let load = TimingGate(name: "loading it, the least of three", statistic: .least, wanted: 3, budget: 8, ceiling: 16)
+    static let load = TimingGate(name: "loading it, the least of three", statistic: .least, tries: 3, budget: 16, ceiling: 32)
+    static let quiet = MachineReading.read(idle: 40, ticks: 300)
+    static let starved = MachineReading.read(idle: 2, ticks: 300)
 
-    static func clean(_ values: Double...) -> [TimedTry] {
-        values.map { TimedTry(value: $0, idle: 40) }
+    @Test func aGateJudgesItsStatisticAtItsCeilingOnAMachineNotStarved() {
+        let verdict = Self.load.judge([30, 12, 20], machine: Self.quiet)
+        #expect(verdict.met && verdict.value == 12 && verdict.said == "loading it, the least of three 12.0 ms (budget 16, ceiling 32)", "\(verdict)")
+        let over = Self.load.judge([33, 40, 35], machine: Self.quiet)
+        #expect(!over.met && over.missed == "loading it, the least of three 33.0 ms over its 32 ms ceiling")
+        let p95 = TimingGate(name: "⌃⌘S p95", statistic: .p95, tries: 10, budget: 50, ceiling: 120)
+        #expect(p95.judge([10, 11, 12, 13, 14, 15, 16, 17, 18, 130], machine: Self.quiet).value == 130)
+        #expect(!Self.load.judge([], machine: Self.quiet).met, "no try met its gate")
     }
 
-    static func starved(_ values: Double...) -> [TimedTry] {
-        values.map { TimedTry(value: $0, idle: 0) }
+    @Test func onAStarvedMachineEveryGateIsJudgedAtTwiceItsCeilingAndSaidSo() {
+        let verdict = Self.load.judge([40, 50, 45], machine: Self.starved)
+        #expect(verdict.met && verdict.value == 40)
+        #expect(verdict.said == "loading it, the least of three 40.0 ms (budget 16, ceiling 32); not measured cleanly: machine starved, judged at twice its ceiling (64 ms)")
+        let gross = Self.load.judge([1200, 1190, 1210], machine: Self.starved)
+        #expect(!gross.met && gross.missed == "loading it, the least of three 1190.0 ms over twice its ceiling (64 ms), not measured cleanly: machine starved")
     }
 
-    @Test func aStarvedTryDoesNotCount() {
-        let verdict = Self.load.judge(Self.starved(40) + Self.clean(9, 10, 11))
-        #expect(verdict.met && verdict.value == 9 && verdict.clean, "\(verdict)")
-        #expect(verdict.said == "loading it, the least of three 9.0 ms (budget 8, ceiling 16); 1 of 4 tries starved (the machine's CPUs 0% idle), not counted")
-    }
-
-    @Test func theFirstThatCountAreJudgedAndNoMore() {
-        let verdict = Self.load.judge(Self.clean(12, 13) + Self.starved(30) + Self.clean(14, 5))
-        #expect(verdict.value == 12, "a try past the first three that count was judged: \(verdict)")
-    }
-
-    @Test func moreTriesAreWantedUntilEnoughCountOrTwiceTheCount() {
-        #expect(Self.load.wantsMore([]))
-        #expect(Self.load.wantsMore(Self.clean(9, 10)))
-        #expect(!Self.load.wantsMore(Self.clean(9, 10, 11)))
-        #expect(Self.load.wantsMore(Self.clean(9, 10) + Self.starved(30)))
-        #expect(!Self.load.wantsMore(Self.clean(9, 10) + Self.starved(30) + Self.clean(11)))
-        #expect(Self.load.wantsMore(Self.starved(30, 31, 32, 33, 34)))
-        #expect(!Self.load.wantsMore(Self.starved(30, 31, 32, 33, 34, 35)), "more than six tries were wanted")
-    }
-
-    @Test func withNoTryCountingAllAreJudgedAtTwiceTheCeilingAndSaidSo() {
-        let starved = Self.load.judge(Self.starved(31, 30, 40, 35, 33, 32))
-        #expect(starved.met && starved.value == 30 && !starved.clean, "\(starved)")
-        #expect(starved.said == "loading it, the least of three 30.0 ms (budget 8, ceiling 16); not measured cleanly: machine starved in 6 of 6 tries, judged at twice its ceiling (32 ms)")
-        let gross = Self.load.judge(Self.starved(1200, 1210, 1190, 1205, 1201, 1199))
-        #expect(!gross.met && gross.missed == "loading it, the least of three 1190.0 ms over twice its ceiling (32 ms), not measured cleanly", "\(gross)")
-    }
-
-    @Test func someCountingAfterTheMostAreJudgedAtTheCeiling() {
-        let verdict = Self.load.judge(Self.starved(10, 11) + Self.clean(17) + Self.starved(12, 13) + Self.clean(18))
-        #expect(!verdict.met && verdict.value == 17 && verdict.clean, "\(verdict)")
-        #expect(verdict.missed == "loading it, the least of three 17.0 ms over its 16 ms ceiling")
-    }
-
-    @Test func aSpanReadFewerThanTwiceCountsAndSaysSo() {
-        let verdict = Self.load.judge(Self.clean(9, 10) + [TimedTry(value: 11, idle: nil)])
-        #expect(verdict.met && verdict.value == 9 && verdict.clean)
-        #expect(verdict.said == "loading it, the least of three 9.0 ms (budget 8, ceiling 16); the machine's ticks read fewer than twice in 1 of 3 tries, counted")
-    }
-
-    @Test func aP95GateTakesItsOwnCountAndTwiceIt() {
-        let gate = TimingGate(name: "⌃⌘S to the first rows drawn p95", statistic: .p95, wanted: 10, budget: 50, ceiling: 120)
-        let tries = Self.clean(10, 11, 12, 13) + Self.starved(500, 600) + Self.clean(14, 15, 16, 17, 18, 19, 900)
-        #expect(!gate.wantsMore(tries) && gate.wantsMore(Array(tries.prefix(11))))
-        #expect(gate.judge(tries).value == 19, "the p95 was not of the first ten that count")
-        #expect(gate.wantsMore(Array(repeating: TimedTry(value: 1, idle: 0), count: 19)) && !gate.wantsMore(Array(repeating: TimedTry(value: 1, idle: 0), count: 20)))
-    }
-
-    @Test func triesCutShortByTheDrivesCapAreSaidSo() {
-        let verdict = Self.load.judge(Self.clean(9) + Self.starved(30, 31))
-        #expect(verdict.met && verdict.value == 9)
-        #expect(verdict.said == "loading it, the least of three 9.0 ms (budget 8, ceiling 16); 2 of 3 tries starved (the machine's CPUs 0% idle), not counted; "
-            + "1 of 3 counting when the drive's extra tries were spent")
-    }
-
-    /// The first tries of a loop are always taken; another past them only while the drive's time
-    /// for extra tries lasts and some gate still wants one.
-    @Test func anotherTryIsTakenWithinTheDrivesCap() {
-        let key = TimingGate(name: "a key", statistic: .least, wanted: 3, budget: 8, ceiling: 16)
-        let short = ["loading it, the least of three": Self.clean(9, 10), "a key": Self.clean(8, 8)]
-        #expect(TimingGate.another([Self.load, key], tries: short, taken: 2, extraLeft: 0))
-        let starved = ["loading it, the least of three": Self.clean(9, 10) + Self.starved(30), "a key": Self.clean(8, 8, 8)]
-        #expect(TimingGate.another([Self.load, key], tries: starved, taken: 3, extraLeft: 1))
-        #expect(!TimingGate.another([Self.load, key], tries: starved, taken: 3, extraLeft: 0), "an extra try was taken with the drive's cap spent")
-        let enough = ["loading it, the least of three": Self.clean(9, 10, 11), "a key": Self.clean(8, 8, 8)]
-        #expect(!TimingGate.another([Self.load, key], tries: enough, taken: 3, extraLeft: 100))
+    /// Starved is under 5% idle from at least 100 ticks; fewer ticks is too short, judged as if
+    /// the machine were not starved.
+    @Test func aReadingIsStarvedOnlyWhenLongEnoughAndNearlyNeverIdle() {
+        #expect(MachineReading(MachineIdle(idleTicks: 4, busyTicks: 96, from: 0, to: 1)).starved)
+        #expect(!MachineReading(MachineIdle(idleTicks: 5, busyTicks: 95, from: 0, to: 1)).starved)
+        #expect(MachineReading(MachineIdle(idleTicks: 0, busyTicks: 99, from: 0, to: 1)) == .tooShort(ticks: 99))
+        #expect(MachineReading(nil) == .tooShort(ticks: 0))
+        #expect(MachineReading(MachineIdle(idleTicks: 0, busyTicks: 100, from: 0, to: 1)).said == "the machine's CPUs 0.0% idle over 100 ticks across the step's tries: starved")
+        #expect(MachineReading.tooShort(ticks: 42).said == "the machine's reading too short (42 ticks across the step's tries, 100 wanted), judged at the ceilings")
+        let tooShort = Self.load.judge([33, 34, 35], machine: .tooShort(ticks: 42))
+        #expect(!tooShort.met && tooShort.missed == "loading it, the least of three 33.0 ms over its 32 ms ceiling")
     }
 
     static func look(_ time: Double, idle: UInt32?, busy: UInt32?) -> ThreadLook {
         ThreadLook(time: time, runnable: idle != nil, cpu: 0, ourCPU: nil, idleTicks: idle, busyTicks: busy)
     }
 
-    /// The machine's idle share over a span, from its first and last looks that read the ticks:
-    /// none with fewer than two, and no share where the ticks did not move.
-    @Test func theMachinesIdleShareIsReadFromTheSpansTicks() throws {
+    /// The machine's idle share over a step's spans: each span's ticks between its first and last
+    /// looks that read them, summed, overlapping spans taken once, a span read fewer than twice
+    /// adding nothing.
+    @Test func theMachinesIdleShareIsReadOverTheUnionOfTheSpans() throws {
         let looks = [Self.look(0.9, idle: 0, busy: 0), Self.look(1.0, idle: 100, busy: 50), Self.look(1.01, idle: nil, busy: nil),
-                     Self.look(1.05, idle: 101, busy: 53), Self.look(1.1, idle: 101, busy: 56), Self.look(1.3, idle: 900, busy: 900)]
-        let idle = try #require(MachineShare.idle(in: Span(1.0, 1.1), looks: looks))
-        #expect(abs((idle.percent ?? 0) - 100.0 / 7) < 1e-9 && idle.idleTicks == 1 && idle.busyTicks == 6 && idle.from == 1.0 && idle.to == 1.1, "\(idle)")
-        #expect(MachineShare.idle(in: Span(1.06, 1.2), looks: looks) == nil, "one reading made a share")
-        let still = try #require(MachineShare.idle(in: Span(1.09, 1.11), looks: looks + [Self.look(1.11, idle: 101, busy: 56)]))
+                     Self.look(1.05, idle: 101, busy: 53), Self.look(1.1, idle: 101, busy: 56), Self.look(2.0, idle: 200, busy: 100),
+                     Self.look(2.1, idle: 203, busy: 110), Self.look(3.0, idle: 300, busy: 300)]
+        let one = try #require(MachineShare.idle(in: [Span(1.0, 1.1)], looks: looks))
+        #expect(one.idleTicks == 1 && one.busyTicks == 6 && one.from == 1.0 && one.to == 1.1 && abs((one.percent ?? 0) - 100.0 / 7) < 1e-9, "\(one)")
+        let union = try #require(MachineShare.idle(in: [Span(1.05, 1.1), Span(1.0, 1.1), Span(1.0, 1.06), Span(2.0, 2.1), Span(2.95, 3.05)], looks: looks))
+        #expect(union.idleTicks == 4 && union.busyTicks == 16 && union.from == 1.0 && union.to == 2.1, "overlapping spans counted twice, or a span read once added: \(union)")
+        #expect(MachineShare.idle(in: [Span(1.06, 1.2), Span(2.95, 3.05)], looks: looks) == nil, "spans read once made a share")
+        let still = try #require(MachineShare.idle(in: [Span(1.09, 1.11)], looks: looks + [Self.look(1.11, idle: 101, busy: 56)]))
         #expect(still.percent == nil, "ticks that did not move made a share")
-        let starved = try #require(MachineShare.idle(in: Span(1.05, 1.1), looks: looks))
-        #expect(starved.percent == 0 && TimedTry(value: 1, idle: starved.percent).starved)
     }
 }
