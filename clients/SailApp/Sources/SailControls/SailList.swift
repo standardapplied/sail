@@ -21,11 +21,13 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         public let startsGroup: Bool
         /// It destroys something: its menu item is drawn in the error ink (Delete).
         public let destructive: Bool
+        /// On the row it is this icon alone, beside ⋯ (New Session's +), its title the tooltip's.
+        public let icon: LineIcon?
         public let run: @MainActor () -> Void
 
         public init(
             _ title: String, key: String = "", modifiers: NSEvent.ModifierFlags = [], onRow: Bool = true, startsGroup: Bool = false, destructive: Bool = false,
-            run: @escaping @MainActor () -> Void
+            icon: LineIcon? = nil, run: @escaping @MainActor () -> Void
         ) {
             self.title = title
             self.key = key
@@ -33,6 +35,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             self.onRow = onRow
             self.startsGroup = startsGroup
             self.destructive = destructive
+            self.icon = icon
             self.run = run
         }
     }
@@ -749,8 +752,8 @@ final class HeadCell: NSView {
 
 /// An item's cell: what the item shows, from the row's leading inset to its actions (or to the
 /// trailing inset when it has none), and its actions at the trailing edge: the first on-row action
-/// secondary, or primary with ⏎ while the row is chosen; the rest secondary; ⋯ for the menu when some
-/// action lives only there. Hidden actions are hidden, not only clear, so they take no click and Tab
+/// secondary, or primary with ⏎ while the row is chosen; the rest secondary, or an icon of their own
+/// (+); ⋯ for the menu when some action lives only there. Hidden actions are hidden, not only clear, so they take no click and Tab
 /// passes them. Everything is placed by arithmetic, no constraint: a row scrolled into or out of a
 /// long list costs the window's layout engine nothing. A cell is reused for the next row that enters
 /// view, made over whole by ``configure(_:actionsColumn:returnKey:look:)``.
@@ -824,7 +827,8 @@ final class RowCell: NSView {
             buttons.append(first)
         }
         for other in onRow.dropFirst() {
-            buttons.append(SailButton(other.action.title, kind: .secondary, size: .small, look: look, target: other, action: #selector(Run.go(_:))))
+            let button = other.action.icon.map { SailButton(icon: $0, label: other.action.title, size: .small, look: look, target: other, action: #selector(Run.go(_:))) }
+            buttons.append(button ?? SailButton(other.action.title, kind: .secondary, size: .small, look: look, target: other, action: #selector(Run.go(_:))))
         }
         moreMenu = nil
         if rowStyle != .sidebar, runs.contains(where: { !$0.action.onRow }) {
@@ -1047,8 +1051,8 @@ final class Run: NSObject {
 /// Opens the menu a button carries, 2 pt under its box from its leading corner, as a pop-up does;
 /// right to left the menu is laid out so and hangs from the box's right corner.
 @MainActor
-final class MenuOpener: NSObject {
-    static let shared = MenuOpener()
+package final class MenuOpener: NSObject {
+    package static let shared = MenuOpener()
 
     /// AppKit hangs a popped-up menu by its first item, not its edge, so the menu's own top padding
     /// (5 pt, as the mockup's native menu has it) stands above the location given. AppKit says this
@@ -1056,7 +1060,7 @@ final class MenuOpener: NSObject {
     /// screen, so a macOS that changes it fails there.
     static let menuPadding = 5.0
 
-    @objc func open(_ sender: NSButton) {
+    @objc package func open(_ sender: NSButton) {
         sender.menu?.userInterfaceLayoutDirection = sender.userInterfaceLayoutDirection
         sender.menu?.popUp(positioning: nil, at: Self.corner(under: sender), in: sender)
     }

@@ -17,12 +17,12 @@ import SailLook
 /// outside it, the button again, a choice (but Appearance), or the window resigning key.
 @MainActor
 package final class UserMenu: NSObject {
-    static let width = 260.0, gap = 8.0, room = 24.0
+    static let width = 260.0, gap = 8.0
 
     var look: Look {
         didSet {
             view.look = look
-            shadow.look = look
+            popover.look = look
         }
     }
 
@@ -30,40 +30,18 @@ package final class UserMenu: NSObject {
     var onAppearance: @MainActor (Appearance) -> Void = { _ in }
     /// Told when it closes, so the button stops being drawn open.
     var onClose: @MainActor () -> Void = {}
-    /// What tells it its window gave up the keys (the menu then closes): the window's own notice; a
-    /// test names one of its own, so another test's window taking the keys closes nothing of its.
-    var keysLeft = NSWindow.didResignKeyNotification
-
-    /// Where the keys go when the view that held them has left the window (a tab closed, a rename
-    /// ended): the shown pane's own, or the window.
-    var fallback: @MainActor () -> NSResponder? = { nil }
 
     package let view: UserMenuView
-    package let panel: NSPanel
-    private let shadow: PopShadowView
+    package let popover: Popover
     private let keys = MenuKeys()
     private weak var anchor: NSView?
-    private weak var restore: NSResponder?
-    /// The selection of the field being edited when it opened, given back with the keys.
-    private var selection: NSRange?
-    private var withKeys = false
-    private var mouseWatch: Any?
-    private var resignWatch: (any NSObjectProtocol)?
 
     init(look: Look, mono: LabelFont) {
         self.look = look
         view = UserMenuView(look: look, mono: mono)
-        shadow = PopShadowView(look: look)
-        panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        popover = Popover(view, keys: keys, look: look)
         super.init()
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = false
-        panel.becomesKeyOnlyIfNeeded = true
-        let host = NSView()
-        host.addSubview(shadow)
-        host.addSubview(view)
-        panel.contentView = host
+        popover.onDismiss = { [weak self] in self?.close() }
         keys.owner = self
         keys.box = view
         view.onHighlight = { [weak self] element in
@@ -72,39 +50,25 @@ package final class UserMenu: NSObject {
         }
         view.onChoose = { [weak self] item in self?.choose(item) }
         view.onChanged = { [weak self] in
-            guard let self, isOpen, let anchor, let window = anchor.window else { return }
-            place(over: anchor, in: window)
+            guard let self, isOpen, let anchor else { return }
+            popover.place(box(over: anchor))
         }
         view.onAppearance = { [weak self] appearance in self?.onAppearance(appearance) }
     }
 
     package var isOpen: Bool {
-        panel.isVisible
+        popover.isOpen
     }
 
     /// Opens from `button` saying `content`, `appearance` chosen; `withKeys` when the keys opened it.
     func open(from button: NSView, saying content: UserMenuContent, appearance: Appearance, withKeys: Bool) {
         guard let window = button.window, !isOpen else { return }
         anchor = button
-        self.withKeys = withKeys
         view.direction = button.userInterfaceLayoutDirection
         view.show(content, appearance: appearance, fresh: true, highlightingFirst: withKeys)
-        place(over: button, in: window)
-        window.addChildWindow(panel, ordered: .above)
-        panel.orderFront(nil)
-        if keys.superview !== window.contentView { window.contentView?.addSubview(keys) }
-        restore = Self.holder(of: window.firstResponder)
-        selection = (window.firstResponder as? NSText).flatMap { $0.isFieldEditor ? $0.selectedRange : nil }
-        window.makeFirstResponder(keys)
+        popover.open(over: window, anchor: button, at: box(over: button), withKeys: withKeys)
         keys.setAccessibilityElement(true)
         NSAccessibility.post(element: keys, notification: NSAccessibility.Notification(rawValue: "AXMenuOpened"))
-        mouseWatch = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            MainActor.assumeIsolated { self?.clickedAnywhere(event) }
-            return event
-        }
-        resignWatch = NotificationCenter.default.addObserver(forName: keysLeft, object: window, queue: nil) { [weak self] _ in
-            MainActor.assumeIsolated { self?.close() }
-        }
     }
 
     /// Says `content` while open: who is signed in, or the control plane's state, changed.
@@ -116,61 +80,25 @@ package final class UserMenu: NSObject {
     package func close() {
         guard isOpen else { return }
         view.letGo()
-        if let mouseWatch { NSEvent.removeMonitor(mouseWatch) }
-        if let resignWatch { NotificationCenter.default.removeObserver(resignWatch) }
-        mouseWatch = nil
-        resignWatch = nil
         view.tip.hide()
-        panel.parent?.removeChildWindow(panel)
-        panel.orderOut(nil)
-        if let window = anchor?.window, window.firstResponder === keys {
-            // A window asked to focus a view that refuses the keys takes them itself and says yes,
-            // and a field was being edited through the window's field editor, not by itself.
-            let button = withKeys && anchor?.acceptsFirstResponder == true ? anchor : nil
-            let back = button ?? Self.still(restore, in: window) ?? fallback()
-            window.makeFirstResponder(back)
-            if button == nil, back === restore, let selection, let editor = (back as? NSTextField)?.currentEditor() {
-                editor.selectedRange = NSRange(location: min(selection.location, editor.string.utf16.count), length: min(selection.length, max(editor.string.utf16.count - selection.location, 0)))
-            }
-        }
+        popover.close()
         NSAccessibility.post(element: keys, notification: NSAccessibility.Notification(rawValue: "AXMenuClosed"))
         keys.setAccessibilityElement(false)
         onClose()
     }
 
-    /// The box over `button`: its leading edge on the button's, its foot `gap` above it; the panel
-    /// around it holds the shadow's room.
-    private func place(over button: NSView, in window: NSWindow) {
-        let size = view.fittingSize
+    /// The box over `button` on screen: its leading edge on the button's, its foot `gap` above it.
+    private func box(over button: NSView) -> NSRect {
+        let height = Double(view.fittingSize.height)
+        guard let window = button.window else { return .zero }
         let square = window.convertToScreen(button.convert(button.alignmentRect(forFrame: button.bounds), to: nil))
         let rightToLeft = button.userInterfaceLayoutDirection == .rightToLeft
-        let box = NSRect(x: rightToLeft ? square.maxX - Self.width : square.minX, y: square.maxY + Self.gap, width: Self.width, height: Double(size.height))
-        panel.setFrame(box.insetBy(dx: -Self.room, dy: -Self.room), display: false)
-        let inside = NSRect(x: Self.room, y: Self.room, width: Self.width, height: Double(size.height))
-        view.frame = inside
-        shadow.frame = inside
-        // Laid out now, not at the next display: only the panel's first ordering in draws it at once,
-        // and a click on a later opening's new rows would find them with no frame.
-        view.layoutSubtreeIfNeeded()
-    }
-
-    /// `responder` when it can still take the keys in `window`: the window itself, or a view shown in it.
-    static func still(_ responder: NSResponder?, in window: NSWindow) -> NSResponder? {
-        if responder === window { return responder }
-        guard let view = responder as? NSView, view.window === window, !view.isHiddenOrHasHiddenAncestor else { return nil }
-        return view
-    }
-
-    /// Who holds the keys through `responder`: a field being edited, not the window's field editor,
-    /// which forgets the field once its editing ends.
-    static func holder(of responder: NSResponder?) -> NSResponder? {
-        guard let editor = responder as? NSText, editor.isFieldEditor else { return responder }
-        return editor.delegate as? NSResponder
+        return NSRect(x: rightToLeft ? square.maxX - Self.width : square.minX, y: square.maxY + Self.gap, width: Self.width, height: height)
     }
 
     /// The box on screen, for the tests and the drive.
     var box: NSRect {
-        panel.frame.insetBy(dx: Self.room, dy: Self.room)
+        popover.frame
     }
 
     /// A press let go after the menu closed (Escape or another app while the mouse was held) chooses
@@ -179,16 +107,6 @@ package final class UserMenu: NSObject {
         guard item.enabled, isOpen else { return }
         close()
         onChoose(item)
-    }
-
-    /// A click outside the box closes the menu; one on the button is the button's own (it toggles).
-    func clickedAnywhere(_ event: NSEvent) {
-        if event.window === panel { return }
-        if let anchor, event.window === anchor.window {
-            let at = anchor.convert(event.locationInWindow, from: nil)
-            if anchor.bounds.contains(at) { return }
-        }
-        close()
     }
 
     /// A key while open: ↑ ↓ and Tab move (Tab never takes the keys out of the menu), ← → choose the

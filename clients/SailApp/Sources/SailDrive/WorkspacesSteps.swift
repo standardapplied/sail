@@ -196,6 +196,7 @@ extension Driver {
 
     func performWorkspaces(_ step: Step) async -> (Bool, String)? {
         if let files = await performFiles(step) { return files }
+        if let started = await performNewSession(step) { return started }
         let pane = shell.workspaces
         if let pair = step.golden {
             guard pair.count == 2 || pair.count == 3, let seconds = Int(pair.count == 3 ? pair[2] : "0") else {
@@ -520,6 +521,114 @@ extension Driver {
             return await inBothLooks(name) { file in await self.capture(.screen, to: file) }
         }
         return nil
+    }
+
+    /// A1's steps: a row's + and ⋯, the New Session panel and what its Start asks of the runner.
+    private func performNewSession(_ step: Step) async -> (Bool, String)? {
+        let pane = shell.workspaces, panel = pane.newSession, list = pane.project.list
+        let said = { panel.isOpen ? "the panel says: " + panel.view.words.joined(separator: " | ") : "the panel is closed" }
+        if let shows = step.rowShows, let name = shows.first {
+            guard await clickRow(name, in: list) else { return (false, "no row \(name) to click") }
+            let titles = { Self.rowButtons(name, in: list).map(\.title) }
+            let found = await waitUntil(step.seconds ?? 5) { titles() == Array(shows.dropFirst()) }
+            return (found, "\(name) shows \(titles())")
+        }
+        if let pick = step.clickRowButton, pick.count == 2 {
+            guard let button = Self.rowButtons(pick[0], in: list).first(where: { $0.title == pick[1] }) else {
+                return (false, "\(pick[0]) shows no \(pick[1]): \(Self.rowButtons(pick[0], in: list).map(\.title))")
+            }
+            guard await click(button, at: NSPoint(x: button.bounds.midX, y: button.bounds.midY)) else { return (false, "\(pick[1]) could not be clicked") }
+            return (true, "clicked \(pick[1]) on \(pick[0])")
+        }
+        if let words = step.newSessionSays {
+            let found = await waitUntil(step.seconds ?? 5) { !pane.busy && panel.isOpen && Self.inOrder(words, in: panel.view.words) }
+            return (found, said())
+        }
+        if let name = step.newSessionChosen {
+            let chosen = { panel.view.rows.first(where: \.chosen)?.name.stringValue }
+            let found = await waitUntil(step.seconds ?? 5) { panel.isOpen && chosen() == name }
+            return (found, "chosen: \(chosen() ?? "none"); " + said())
+        }
+        if let primary = step.newSessionPrimary, primary.count == 2 {
+            let button = { panel.view.primary }
+            let found = await waitUntil(step.seconds ?? 5) { button()?.title == primary[0] && button()?.isEnabled == (primary[1] == "on") }
+            return (found, "the primary: \(button().map { "\($0.title), \($0.isEnabled ? "on" : "off")" } ?? "none")")
+        }
+        if let title = step.newSessionClick {
+            let view = panel.view
+            let controls: [NSView] = view.rows + [view.primary, view.secondary, view.modes, view.storeLogin].compactMap { $0 }
+            let named = { (control: NSView) -> String in (control as? NewSessionRow)?.name.stringValue ?? (control as? NSButton)?.title ?? "" }
+            guard panel.isOpen, let target = controls.first(where: { named($0) == title }) else { return (false, "the panel shows no \(title); " + said()) }
+            guard await click(target, at: NSPoint(x: target.bounds.midX, y: target.bounds.midY)) else { return (false, "\(title) could not be clicked") }
+            return (true, "clicked \(title)")
+        }
+        if let open = step.newSessionOpen {
+            let found = await waitUntil(step.seconds ?? 5) { panel.isOpen == open }
+            let keys = shell.window.firstResponder.map { String(describing: type(of: $0)) } ?? "nothing"
+            return (found, said() + "; the keys are with \(keys)")
+        }
+        if let label = step.newSessionMode {
+            guard panel.isOpen, let menu = panel.view.modes?.menu, let index = menu.items.firstIndex(where: { $0.title == label }), let key = Keys.named("m", modifiers: ["command"]) else {
+                return (false, "no mode \(label) to choose; " + said())
+            }
+            var opened = false
+            let choose = Timer(timeInterval: 0.3, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    opened = NSApp.windows.contains { $0.isVisible && $0.level.rawValue >= NSWindow.Level.popUpMenu.rawValue }
+                    menu.cancelTracking()
+                    menu.performActionForItem(at: index)
+                }
+            }
+            RunLoop.main.add(choose, forMode: .common)
+            send(key)
+            let chosen = await waitUntil(step.seconds ?? 5) { panel.view.modes?.title == label }
+            return (opened && chosen, (opened ? "⌘M opened the modes" : "⌘M opened no menu") + "; " + said())
+        }
+        if let name = step.newSessionModesShot {
+            guard panel.isOpen, panel.view.modes != nil else { return (false, "no mode menu to shoot; " + said()) }
+            return await inBothLooks(name) { file in
+                guard let button = panel.view.modes, let menu = button.menu, let shot = Shot.begin(.menu, to: file) else { return }
+                menu.perform(#selector(NSMenu.cancelTracking), with: nil, afterDelay: 2.5, inModes: [.common])
+                MenuOpener.shared.open(button)
+                await shot.taken()
+            }
+        }
+        if let wanted = step.doorCreated, wanted.count == 3 {
+            guard let door = GoldenDesk.door, let name = workbench.focused?.name else { return (false, "no door or no focused tab") }
+            let found = await waitUntil(step.seconds ?? 10) { door.create(of: name) != nil }
+            guard found, let create = door.create(of: name) else { return (false, "the door was asked no Create for \(name)") }
+            let agent = [create.agent.harness, create.agent.mode, create.agent.inside ? "inside" : "stored"]
+            return (agent == wanted && create.command.isEmpty, "\(name)'s Create named \(agent) and the command \(create.command)")
+        }
+        if let rightToLeft = step.workspacesRightToLeft {
+            let direction: NSUserInterfaceLayoutDirection = rightToLeft ? .rightToLeft : .leftToRight
+            for view in [pane] + Self.views(in: pane) {
+                view.userInterfaceLayoutDirection = direction
+                view.needsLayout = true
+                view.needsDisplay = true
+            }
+            list.reloadData()
+            pane.layoutSubtreeIfNeeded()
+            return (true, "the section is laid out \(rightToLeft ? "right to left" : "left to right")")
+        }
+        return nil
+    }
+
+    /// The buttons row `name` shows now, in order.
+    private static func rowButtons(_ name: String, in list: SailList) -> [SailButton] {
+        guard let index = row(name, in: list), let view = list.rowView(atRow: index, makeIfNecessary: false) else { return [] }
+        view.layoutSubtreeIfNeeded()
+        return found(SailButton.self, in: view).filter { !$0.isHiddenOrHasHiddenAncestor }
+    }
+
+    /// Whether `wanted` are among `words` in that order.
+    private static func inOrder(_ wanted: [String], in words: [String]) -> Bool {
+        var rest = words[...]
+        for word in wanted {
+            guard let at = rest.firstIndex(of: word) else { return false }
+            rest = rest[(at + 1)...]
+        }
+        return true
     }
 
     /// The ticket requests the desk was sent, each as its fields.

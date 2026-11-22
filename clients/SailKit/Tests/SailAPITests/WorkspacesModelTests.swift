@@ -129,7 +129,7 @@ import Testing
         let table = try #require(Self.table(model))
         #expect(table.yours.map(\.name) == ["dock", "pier"] && table.count == table.yours.count + table.others.count)
         #expect(table.yours[0].primary == .open && table.yours[1].primary == .startAndOpen)
-        #expect(table.yours[0].menu == [.open, .copyName, .stop, .delete] && table.yours[1].menu == [.startAndOpen, .copyName, .delete])
+        #expect(table.yours[0].menu == [.open, .newSession, .copyName, .stop, .delete] && table.yours[1].menu == [.startAndOpen, .newSession, .copyName, .delete])
         #expect(!table.others.contains { $0.name == "main" }, "the project's own container is no workspace")
         #expect(table.yours.allSatisfy { $0.mine && $0.owner == nil } && table.others.allSatisfy { !$0.mine && $0.owner != nil }, "an owner is said only on someone else's row")
         let member = try #require(Self.table(Self.listed(Self.ana)))
@@ -649,14 +649,34 @@ extension WorkspacesModelTests {
 
     @Test func whoeverOpensARowMayStopOrDeleteIt() throws {
         let admin = Self.listed(Self.uday), member = Self.listed(Self.ana)
-        #expect(Self.row(admin, "dock")?.menu == [.open, .copyName, .stop, .delete])
-        #expect(Self.row(admin, "pier")?.menu == [.startAndOpen, .copyName, .delete], "a stopped row offers a stop")
+        #expect(Self.row(admin, "dock")?.menu == [.open, .newSession, .copyName, .stop, .delete])
+        #expect(Self.row(admin, "pier")?.menu == [.startAndOpen, .newSession, .copyName, .delete], "a stopped row offers a stop")
         #expect(Self.row(admin, "quay")?.menu == [.open, .copyName, .stop, .delete], "an admin may stop or delete anyone's")
         #expect(Self.row(member, "dock")?.menu == [.copyName], "a member may stop or delete another's")
         var paused = WorkspacesModel(person: Self.uday)
         let first = paused.projectsListed(Self.answer(.projects, "projects"))
         paused.listed(.success(WorkspaceList(project: "harbor", workspaces: [WorkspaceRow(name: "dock", instance: "harbor-dock", state: .known(.frozen), owner: "uday")])), request: try #require(first), at: Self.at)
-        #expect(Self.row(paused, "dock")?.menu == [.startAndOpen, .copyName, .stop, .delete], "a paused workspace, which can be stopped, offers no Stop")
+        #expect(Self.row(paused, "dock")?.menu == [.startAndOpen, .newSession, .copyName, .stop, .delete], "a paused workspace, which can be stopped, offers no Stop")
+    }
+
+    /// An agent starts only in the person's own workspace: their own rows that open offer New
+    /// Session, and, once a harness was started, that harness again before it; someone else's row
+    /// offers neither, an admin's included, nor does a row under way or one that does not open.
+    @Test func onlyThePersonsOwnRowsOfferANewSession() throws {
+        var admin = Self.listed(Self.uday)
+        #expect(Self.row(admin, "quay")?.menu.contains(.newSession) == false, "an admin is offered an agent in someone else's workspace")
+        admin.lastStarted = "Claude Code"
+        #expect(Self.row(admin, "dock")?.menu == [.open, .startLast("Claude Code"), .newSession, .copyName, .stop, .delete])
+        #expect(Self.row(admin, "quay")?.menu == [.open, .copyName, .stop, .delete])
+        var member = Self.listed(Self.ana)
+        member.lastStarted = "Claude Code"
+        #expect(Self.row(member, "dock")?.menu == [.copyName])
+        _ = admin.ask(.stop, "dock", terminals: 0)
+        #expect(Self.row(admin, "dock")?.menu == [.copyName], "a row under way offers a new session")
+        var broken = WorkspacesModel(person: Self.uday)
+        let first = broken.projectsListed(Self.answer(.projects, "projects"))
+        broken.listed(.success(WorkspaceList(project: "harbor", workspaces: [WorkspaceRow(name: "dock", instance: "harbor-dock", state: .known(.error), owner: "uday")])), request: try #require(first), at: Self.at)
+        #expect(Self.row(broken, "dock")?.menu == [.copyName, .delete], "a workspace in error offers a new session")
     }
 
     @Test func aStopOfYourOwnThatEndsNothingIsSentAtOnceAndItsRowWaits() throws {

@@ -484,7 +484,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.updateMenu()
         }
         account.onChecking = { [weak self] in self?.updateMenu() }
-        userMenu.fallback = { [weak self] in self?.restingResponder }
+        userMenu.popover.fallback = { [weak self] in self?.restingResponder }
         thisMac.signedIn = { [weak self] in self?.signedIn() }
         thisMac.onSignIn = { [weak self] in self?.select(.account) }
         thisMac.startWorkspace = { [weak self] project, name in
@@ -504,6 +504,13 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         workspaces.onOpen = { [weak self] project, name in
             self?.select(.thisMac)
             self?.thisMac.openWorkspace(project: project, name: name)
+        }
+        workspaces.memory = ModeMemory.stored(in: defaults)
+        workspaces.onStart = { [weak self] start, project, name in
+            guard let self else { return }
+            workspaces.memory.store(in: defaults)
+            select(.thisMac)
+            thisMac.openAgent(start, project: project, name: name)
         }
         thisMac.onShow = { [weak self] in
             guard let self, rail.selected != .thisMac else { return }

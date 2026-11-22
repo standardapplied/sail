@@ -196,6 +196,19 @@ public enum NewSessionWords {
         offer.kinds.map(\.label).joined(separator: " or ")
     }
 
+    /// How to make the login the server names first, in its words, which Store a Login says in
+    /// place until logins are stored in the app; nil when it names none.
+    public static func how(_ offer: AgentOffer) -> String? {
+        offer.kinds.first.map { Said.sentence($0.how) }
+    }
+
+    /// What the chosen harness's mode says under it: a harness of one mode the server's note on
+    /// why it has no other, else the mode's own words.
+    public static func about(_ offer: AgentOffer, mode: String) -> String {
+        let about = offer.modes.first { $0.mode == mode }?.about ?? ""
+        return offer.modes.count == 1 ? offer.note ?? about : about
+    }
+
     public static func signInThere(_ offer: AgentOffer, workspace: String) -> String {
         "Or start it and sign in inside \(offer.display): that login stays in \(workspace) only."
     }
@@ -209,9 +222,9 @@ public enum NewSessionWords {
         }
     }
 
-    /// The row's menu item that starts the last harness again.
-    public static func quickStart(_ last: AgentStart) -> String {
-        "New \(last.display) Session"
+    /// The row's menu item that starts the harness named `display`, the one started last, again.
+    public static func quickStart(_ display: String) -> String {
+        "New \(display) Session"
     }
 
     public static let newSession = "New Session"

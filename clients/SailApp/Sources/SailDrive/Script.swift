@@ -225,6 +225,35 @@ struct Step: Decodable {
     var skeletons: Bool?
     /// The Workspaces row of this name selected and Open pressed: a tab on the runner.
     var open: String?
+    /// `[row, titles…]`: the Workspaces row of this name, clicked, shows exactly these buttons, in
+    /// order ("Open", "New Session", "More"), within `seconds` (5 by default).
+    var rowShows: [String]?
+    /// `[row, title]`: that row's button of this title (its + is "New Session") clicked with a real
+    /// mouse-down and mouse-up through the window.
+    var clickRowButton: [String]?
+    /// The New Session panel is open and says these words among its own, in this order, within
+    /// `seconds` (5 by default).
+    var newSessionSays: [String]?
+    /// The panel's chosen row is the one of this name.
+    var newSessionChosen: String?
+    /// `[title, "on" | "off"]`: the panel's primary is titled so and offered or not.
+    var newSessionPrimary: [String]?
+    /// The panel's row, button or link of this title clicked with real mouse events through the
+    /// panel's own window.
+    var newSessionClick: String?
+    /// The panel is open (true) or closed (false), within `seconds` (5 by default).
+    var newSessionOpen: Bool?
+    /// ⌘M pressed with the panel open, and the mode of this label chosen from the menu it opens,
+    /// while AppKit tracks it.
+    var newSessionMode: String?
+    /// The panel's mode menu shot open over it, the whole screen, in both looks.
+    var newSessionModesShot: String?
+    /// `[harness, mode, "stored" | "inside"]`: the focused tab's session was asked of the runner's
+    /// door naming exactly this agent, and no command.
+    var doorCreated: [String]?
+    /// The Workspaces section laid out right to left (true), as a right-to-left Mac lays it out,
+    /// or left to right again (false).
+    var workspacesRightToLeft: Bool?
     /// The Workspaces row of this name clicked: chosen, with the list holding the keys (its Open
     /// says ⏎), within `seconds` (5 by default).
     var chooseRow: String?

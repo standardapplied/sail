@@ -83,6 +83,7 @@ import Testing
         #expect(NewSessionWords.primary(panel.readiness) == ("Start and Sign In There", true))
         #expect(NewSessionWords.storeLogin(claude) == "Store a Claude Code Login")
         #expect(NewSessionWords.kinds(claude) == claude.kinds.map(\.label).joined(separator: " or "))
+        #expect(NewSessionWords.how(claude) == "Create an API key in the Claude Console.", "Store a Login says the kind the server names first, the API key")
         let made = panel.start()
         #expect(made?.wire == SessionAgent(harness: claude.harness, mode: claude.modeDefault, inside: true))
     }
@@ -126,7 +127,7 @@ import Testing
         #expect(NewSession(agents, memory: remembered).chosen == .harness(codex.harness))
         let gone = ModeMemory(modes: [:], last: AgentStart(harness: "not-offered", display: "Gone", mode: "x"))
         #expect(NewSession(agents, memory: gone).chosen == .harness(agents.offered[0].harness))
-        #expect(NewSessionWords.quickStart(remembered.last!) == "New Codex CLI Session")
+        #expect(NewSessionWords.quickStart(codex.display) == "New Codex CLI Session")
     }
 
     @Test func upAndDownMoveThroughTheRowsAndStopAtEitherEnd() throws {
@@ -149,6 +150,15 @@ import Testing
         #expect(NewSessionWords.refused(noLogin) == noLogin.message)
         let notInstalled = HostRefusal(message: "Codex CLI is not installed in harbor's workspaces.", remedy: [.words("An admin adds codex to harbor's agent install list.")])
         #expect(NewSessionWords.refused(notInstalled) == "Codex CLI is not installed in harbor's workspaces. An admin adds codex to harbor's agent install list.")
+    }
+
+    /// A harness of one mode says the server's note on why it has no other; one of many says the
+    /// chosen mode's own words.
+    @Test func theChosenModeSaysItsWordsAndAHarnessOfOneModeItsNote() throws {
+        let agents = try Self.agents("workspace-agents-dock")
+        let claude = agents.offered[0], codex = agents.offered[1]
+        #expect(NewSessionWords.about(claude, mode: "plan") == "Researches and proposes changes, and edits nothing until you approve the plan.")
+        #expect(codex.modes.count == 1 && NewSessionWords.about(codex, mode: codex.modeDefault) == codex.note)
     }
 
     @Test func aSignedInRowNamesItsLoginAndTheKindsLabel() throws {
