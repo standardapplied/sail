@@ -290,7 +290,7 @@ package struct FilePaneShown {
 extension WorkbenchView {
     package var filePaneShown: FilePaneShown? {
         guard let tab = model.selectedTab, let pane = tabViews[tab.id]?.filePane else { return nil }
-        return FilePaneShown(view: pane, editor: pane.editor, text: pane.editor.string, clean: pane.file.clean, editable: pane.editor.isEditable, note: pane.noteWords, sentence: pane.sentenceWords, theirs: pane.file.theirs?.text)
+        return FilePaneShown(view: pane, editor: pane.editor, text: pane.editor.string, clean: !pane.unsaved, editable: pane.editor.isEditable, note: pane.noteWords, sentence: pane.sentenceWords, theirs: pane.file.theirs?.text)
     }
 
     /// Opens `path` from the selected tab's tree into its file pane, as ⏎ on its row does.

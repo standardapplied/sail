@@ -578,7 +578,7 @@ public final class WorkbenchView: NSView {
     /// Ends `tab`'s terminals, asking first when one may end a running program. Closing a tab
     /// chooses no tab: it is not selected first, so a rename open in another tab goes on.
     private func close(_ tab: Tab) {
-        guard tabViews[tab.id]?.filePane?.file.clean == false else { return closeTerminals(of: tab) }
+        guard tabViews[tab.id]?.filePane?.unsaved == true else { return closeTerminals(of: tab) }
         askAboutFile(in: tab) { [weak self] in
             self?.tabViews[tab.id]?.filePane?.finishClosing()
             self?.closeTerminals(of: tab)

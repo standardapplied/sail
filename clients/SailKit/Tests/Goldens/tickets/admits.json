@@ -1,0 +1,43 @@
+{
+  "attach": [
+    "Attach",
+    "Detach",
+    "Input",
+    "Kill",
+    "PutBegin",
+    "PutCancel",
+    "PutChunk",
+    "PutEnd",
+    "Resize",
+    "TakeWrite"
+  ],
+  "files": [
+    "FilesCancel",
+    "FilesChanges",
+    "FilesCreate",
+    "FilesDiff",
+    "FilesList",
+    "FilesMove",
+    "FilesRead",
+    "FilesRemove",
+    "FilesStat",
+    "FilesWatch",
+    "FilesWrite",
+    "PutCancel",
+    "PutChunk",
+    "PutEnd"
+  ],
+  "open": [
+    "Attach",
+    "Create",
+    "Detach",
+    "Input",
+    "Kill",
+    "PutBegin",
+    "PutCancel",
+    "PutChunk",
+    "PutEnd",
+    "Resize",
+    "TakeWrite"
+  ]
+}
