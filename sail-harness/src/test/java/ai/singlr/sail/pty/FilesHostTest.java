@@ -10,6 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedied;
@@ -230,6 +233,9 @@ class FilesHostTest {
     }
     if (script.equals(FileScripts.WRITE)) {
       return "write";
+    }
+    if (script.equals(FileScripts.CHANGES)) {
+      return "changes";
     }
     return script.equals(FileScripts.WATCH) ? "watch" : "other";
   }
@@ -1327,6 +1333,142 @@ class FilesHostTest {
     var gone = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
     while (host.writeLock("acme", "dock") != null) {
       assertTrue(System.nanoTime() < gone, "the lock outlived the workspace's last connection");
+      Thread.onSpinWait();
+    }
+  }
+
+  /**
+   * A save that still holds the workspace's write lock as its last connection goes keeps the lock
+   * until it lets go, and the lock goes then: a save answers before it releases the lock, so a
+   * client may close on its answer before the save has let go.
+   */
+  @Test
+  void aLockHeldAsTheLastConnectionGoesGoesWithTheSaveThatHeldIt() throws Exception {
+    var mine = open("tok-mady");
+    var lock = host.writeLock("acme", "dock");
+    lock.lock();
+    try {
+      mine.close();
+      var unserved = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+      while (host.changeRuns("acme", "dock") != null) {
+        assertTrue(
+            System.nanoTime() < unserved, "the workspace's last connection was never dropped");
+        Thread.onSpinWait();
+      }
+      assertSame(
+          lock, host.writeLock("acme", "dock"), "a lock a save holds went with the connection");
+    } finally {
+      lock.unlock();
+    }
+    assertNull(
+        host.writeLock("acme", "dock"),
+        "the lock outlived the save that held it past the last connection");
+  }
+
+  /**
+   * #526's m1: a closed connection's write queued on the workspace's lock makes nothing while
+   * another connection keeps that lock the host's: the lock it takes is current, so its closed
+   * connection alone refuses it.
+   */
+  @Test
+  void aClosedConnectionsWriteQueuedOnACurrentLockMakesNothing() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "base");
+    var hold = new Hold();
+    var staying = open("tok-root");
+    var first = open("tok-mady");
+    saveOn(first, 1, file, baseOf(first, file), "first's");
+    hold.reached();
+    var lock = host.writeLock("acme", "dock");
+    PtyWire.write(first, new PtyMessage.FilesCreate(2, home + "/queued.md", false));
+    awaitQueued(lock);
+    first.close();
+    var unserved = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (host.filesServed("acme", "dock") != 1) {
+      assertTrue(System.nanoTime() < unserved, "the closed connection was never dropped");
+      Thread.onSpinWait();
+    }
+    hold.release();
+    var ended = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (lock.isLocked() || lock.hasQueuedThreads()) {
+      assertTrue(System.nanoTime() < ended, "the save and the queued create ended");
+      Thread.onSpinWait();
+    }
+    assertSame(lock, host.writeLock("acme", "dock"), "the staying connection keeps the lock");
+    assertFalse(
+        Files.exists(home.resolve("queued.md")), "the closed connection's create made nothing");
+    assertEquals("first's", Files.readString(file));
+    staying.close();
+  }
+
+  /**
+   * #526's m1: a closed connection's write queued on the workspace's lock makes nothing: a create
+   * waits behind its own connection's save past its go; the connection closes, the save ends and
+   * the lock is dropped; a new connection's save is the only change.
+   */
+  @Test
+  void aClosedConnectionsWriteQueuedOnTheLockMakesNothing() throws Exception {
+    var file = Files.writeString(home.resolve("notes.md"), "base");
+    var hold = new Hold();
+    var first = open("tok-mady");
+    saveOn(first, 1, file, baseOf(first, file), "first's");
+    hold.reached();
+    var lock = host.writeLock("acme", "dock");
+    PtyWire.write(first, new PtyMessage.FilesCreate(2, home + "/queued.md", false));
+    awaitQueued(lock);
+    first.close();
+    var unserved = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (host.changeRuns("acme", "dock") != null) {
+      assertTrue(System.nanoTime() < unserved, "the connection was never dropped");
+      Thread.onSpinWait();
+    }
+    hold.release();
+    var dropped = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (host.writeLock("acme", "dock") != null) {
+      assertTrue(System.nanoTime() < dropped, "the lock outlived the writes queued on it");
+      Thread.onSpinWait();
+    }
+
+    var second = open("tok-mady");
+    saveOn(second, 3, file, baseOf(second, file), "second's");
+    assertInstanceOf(PtyMessage.FilesWritten.class, next(second));
+    assertNotSame(lock, host.writeLock("acme", "dock"), "the new connection has a lock of its own");
+    assertFalse(
+        Files.exists(home.resolve("queued.md")), "the closed connection's create made nothing");
+    assertEquals("second's", Files.readString(file));
+    second.close();
+  }
+
+  /**
+   * A changes run under way as the workspace's last connection goes is kept until it ends, and goes
+   * then, by the one rule the lock goes by: never two runs for one workspace, none kept for good.
+   */
+  @Test
+  void aChangesRunUnderWayAsTheLastConnectionGoesGoesWhenItEnds() throws Exception {
+    var go = dir.resolve("go");
+    var started = dir.resolve("started");
+    edits.put(
+        "changes",
+        script ->
+            ": > '" + started + "'; until [ -e '" + go + "' ]; do sleep 0.05; done\n" + script);
+    var mine = open("tok-mady");
+    PtyWire.write(mine, new PtyMessage.FilesChanges(1));
+    var asked = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!Files.exists(started)) {
+      assertTrue(System.nanoTime() < asked, "the run's script never started");
+      Thread.onSpinWait();
+    }
+    var runs = host.changeRuns("acme", "dock");
+    mine.close();
+    var unserved = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (host.writeLock("acme", "dock") != null) {
+      assertTrue(System.nanoTime() < unserved, "the workspace's last connection was never dropped");
+      Thread.onSpinWait();
+    }
+    assertSame(runs, host.changeRuns("acme", "dock"), "a run under way went with the connection");
+    Files.writeString(go, "");
+    var ended = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+    while (host.changeRuns("acme", "dock") != null) {
+      assertTrue(System.nanoTime() < ended, "the run outlived its end past the last connection");
       Thread.onSpinWait();
     }
   }
