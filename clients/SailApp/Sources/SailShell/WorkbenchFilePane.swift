@@ -315,22 +315,30 @@ final class DividerLine: NSView {
 }
 
 /// What the drive reads of the selected tab's file pane.
+/// Every field costs nothing in the file's size, a test holding it so: the drive reads it while it
+/// times a load, and a probe that slows what it measures hides the figures. What would cost the
+/// file's size is read only when asked (``theirs``, ``WorkbenchView/fileLines``).
 package struct FilePaneShown {
     package let view: NSView
     package let editor: NSTextView
+    /// The text, bridged from the view's storage, not copied.
     package let text: String
     package let clean: Bool
     package let editable: Bool
     package let note: String?
     package let sentence: String?
-    /// The workspace's bytes the pane holds for Compare, as text.
-    package let theirs: String?
+    let readTheirs: @MainActor () -> String?
+
+    /// The workspace's bytes the pane holds for Compare, as text, decoded when asked.
+    @MainActor package var theirs: String? {
+        readTheirs()
+    }
 }
 
 extension WorkbenchView {
     package var filePaneShown: FilePaneShown? {
         guard let tab = model.selectedTab, let pane = tabViews[tab.id]?.filePane else { return nil }
-        return FilePaneShown(view: pane, editor: pane.editor, text: pane.editor.string, clean: !pane.unsaved, editable: pane.editor.isEditable, note: pane.noteWords, sentence: pane.sentenceWords, theirs: pane.theirs?.text)
+        return FilePaneShown(view: pane, editor: pane.editor, text: pane.editor.string, clean: !pane.unsaved, editable: pane.editor.isEditable, note: pane.noteWords, sentence: pane.sentenceWords, readTheirs: { [weak pane] in pane?.theirs?.text })
     }
 
     /// The line a ⌘-click took the selected tab's file pane to, and the line its caret is on: asked

@@ -532,6 +532,21 @@ import Testing
         window.attachedSheet.map { window.endSheet($0, returnCode: .alertThirdButtonReturn) }
     }
 
+    /// What the drive reads of the pane while it times a load costs nothing in the file's size:
+    /// two thousand reads with a 4 MB file open and the caret at its end take far less than one
+    /// pass over the text would take each.
+    @Test func theDrivesViewOfThePaneCostsNothingInTheFilesSize() async throws {
+        let (_, _, bench, _, pane) = try await Self.opened(Self.large)
+        #expect(await RunnerTabTests.until(30) { pane.editor.isEditable })
+        pane.editor.setSelectedRange(NSRange(location: (pane.editor.string as NSString).length, length: 0))
+        let clock = ContinuousClock(), began = clock.now
+        for _ in 0 ..< 2000 {
+            _ = try #require(bench.filePaneShown)
+        }
+        let took = clock.now - began
+        #expect(took < .milliseconds(200), "2,000 reads took \(took): something in them walks the file")
+    }
+
     /// M17, M18: a ⌘-click on a compiler's line in the workspace's terminal is looked for on the
     /// workspace and opened in the tab's file pane at its line, the caret there and the line barred
     /// in the accent, the files panel never shown; a path that is not there is said in the
