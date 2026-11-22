@@ -281,6 +281,7 @@ public struct Workbench: Hashable, Sendable {
 
     public mutating func setFolder(_ reported: String, of pane: PaneID) {
         panes[pane]?.reportedFolder = reported
+        if panes[pane]?.firstHost == nil { panes[pane]?.firstHost = ReportedFolder.host(reported) ?? "" }
     }
 
     /// The person's name for the tab, else where its focused pane is when that is a workspace (the

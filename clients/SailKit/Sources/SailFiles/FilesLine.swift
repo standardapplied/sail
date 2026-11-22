@@ -1,3 +1,4 @@
+import Foundation
 /// The files panel's one quiet line: said only when the tree is not the workspace's live truth, and
 /// gone once that no longer applies; "Reconnecting." only while the connection truly is; of two at once, the more severe (stopped, then can't reach, then
 /// not live, then listing). Nothing is said for the first 300 ms of a listing, so a fast one never
@@ -61,25 +62,39 @@ public struct FilesLine: Equatable, Sendable {
         return moments.min()
     }
 
+    /// The files connection's state at `phase` in words a person reads, nil while it is being made
+    /// or is up: the line's words and a ⌘-click's card alike. A sentence the workspace gave (a
+    /// stop's record, a refusal) is said as given, the session's own reason never, and never
+    /// blank.
+    public static func state(of phase: FilesSession.Phase, workspace: String) -> String? {
+        func given(_ words: String, else fallback: String) -> String {
+            words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? fallback : words
+        }
+        return switch phase {
+        case .connecting, .connected: nil
+        case .reconnecting: "Reconnecting to \(workspace)'s files."
+        case .unreachable: "Can't reach \(workspace)'s files."
+        case let .stopped(record): given(record, else: "\(workspace) is stopped.")
+        case let .gone(message): given(message, else: "\(workspace) is gone.")
+        case let .refused(lines): given(lines.joined(separator: " "), else: "Sail may not open \(workspace)'s files.")
+        case let .limited(message): given(message, else: "Too many files connections are open to \(workspace).")
+        }
+    }
+
     /// The line for `tree` with its connection at `phase`, at `now` in the tree's seconds; nil when
     /// nothing is to be said. `time` names an instant in those seconds as a time of day.
     public init?(tree: FileTree, phase: FilesSession.Phase, workspace: String, at now: Double, time: (Double) -> String) {
         let shown = tree.rootKnown
+        let state = Self.state(of: phase, workspace: workspace) ?? ""
         switch phase {
-        case let .stopped(record):
-            self.init(words: record.isEmpty ? "\(workspace) is stopped." : record, mark: .quiet, action: .start, dims: true)
+        case .stopped:
+            self.init(words: state, mark: .quiet, action: .start, dims: true)
             return
-        case let .gone(message):
-            self.init(words: message, mark: .bad, dims: true)
+        case .gone, .refused:
+            self.init(words: state, mark: .bad, dims: true)
             return
-        case let .refused(lines):
-            self.init(words: lines.joined(separator: " "), mark: .bad, dims: true)
-            return
-        case let .limited(message):
-            self.init(words: message, mark: .bad, action: .tryAgain, dims: shown)
-            return
-        case .unreachable:
-            self.init(words: "Can't reach the files.", mark: .bad, action: .tryAgain, dims: shown)
+        case .limited, .unreachable:
+            self.init(words: state, mark: .bad, action: .tryAgain, dims: shown)
             return
         case .connecting, .connected, .reconnecting:
             break

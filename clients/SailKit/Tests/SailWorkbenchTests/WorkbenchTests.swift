@@ -234,6 +234,27 @@ import Testing
         #expect(bench.folderForNewPane(hostNames: ["box.local"], isFolder: folders.contains) == expected)
     }
 
+    /// A pane's shell reporting a folder on a host other than the one it first reported (the person
+    /// went to another machine from it) is elsewhere: its output is that machine's. A first report
+    /// without a host compares nothing, as before.
+    @Test func aPaneWhoseShellReportsAnotherHostIsElsewhere() throws {
+        var bench = Self.bench()
+        let pane = bench.tabs[0].focused
+        #expect(bench.panes[pane]?.elsewhere == false, "a pane with no report is elsewhere")
+        bench.setFolder("file://dock/home/dev/workspace/api", of: pane)
+        bench.setFolder("file://DOCK/home/dev/workspace", of: pane)
+        #expect(bench.panes[pane]?.elsewhere == false, "the same host, cased otherwise, is elsewhere")
+        bench.setFolder("file://build-box/srv/app", of: pane)
+        #expect(bench.panes[pane]?.elsewhere == true, "another host is not elsewhere")
+        bench.setFolder("kitty-shell-cwd://dock/home/dev", of: pane)
+        #expect(bench.panes[pane]?.elsewhere == false, "back on the first host is still elsewhere")
+        var hostless = Self.bench()
+        let other = hostless.tabs[0].focused
+        hostless.setFolder("file:///home/dev/workspace", of: other)
+        hostless.setFolder("file://build-box/srv/app", of: other)
+        #expect(hostless.panes[other]?.elsewhere == false, "a first report without a host compared hosts")
+    }
+
     @Test func noTabNoFolder() {
         #expect(Workbench().folderForNewPane(hostNames: [], isFolder: { _ in true }) == nil)
     }

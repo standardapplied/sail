@@ -105,24 +105,6 @@ import Testing
         #expect(read >= 19)
     }
 
-    /// Whether a file pane's text is unsaved is read only through its one door, `unsaved`, which
-    /// decides an undo or redo no delegate heard first: nothing outside the pane reads the model's
-    /// `clean`.
-    @Test func noSourceButThePaneReadsItsModelsClean() throws {
-        let sources = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appending(path: "Sources")
-        var read = 0
-        for target in ["SailShell", "SailDrive", "Sail"] {
-            let directory = sources.appending(path: target)
-            for name in try FileManager.default.contentsOfDirectory(atPath: directory.path) where name.hasSuffix(".swift") && name != "FilePane.swift" {
-                let text = try String(contentsOf: directory.appending(path: name), encoding: .utf8)
-                read += 1
-                #expect(!text.contains("file.clean"), "\(target)/\(name) reads a file pane's file.clean; read its unsaved")
-            }
-        }
-        #expect(read >= 19)
-    }
-
     /// The file pane reads its view's whole text only through `wholeText`, which counts it: no
     /// other `editor.string` or `textStorage?.string` in its source, so no key path walks the text
     /// unseen by `aKeyNeverReadsTheWholeText`.

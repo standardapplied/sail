@@ -22,14 +22,27 @@ extension WorkbenchView {
         set { defaults.set(newValue, forKey: Self.filePaneWidthsKey) }
     }
 
-    /// Opens `path` into the tab's file pane: an unsaved pane on another file asks first (M47).
+    /// Opens `path`, as the person chose it, into the tab's file pane (``showFile(_:_:in:line:)``):
+    /// a ⌘-click still being looked for is given up, so its find never closes or questions a file
+    /// opened since.
     func openFile(_ path: FileName, _ entry: FileEntry, in view: TabView) {
+        view.files?.giveUpLookup()
+        showFile(path, entry, in: view)
+    }
+
+    /// Shows `path` in the tab's file pane, at `line` when given: an unsaved pane on another file
+    /// asks first (M47), and the answer opens this file alone, leaving any ⌘-click made since to its
+    /// own lookup.
+    func showFile(_ path: FileName, _ entry: FileEntry, in view: TabView, line: Int? = nil) {
         guard let panel = view.files else { return }
         if let pane = view.filePane {
-            if pane.file.path == path { return focusFilePane(in: view) }
+            if pane.path == path {
+                if let line { pane.go(toLine: line) }
+                return focusFilePane(in: view)
+            }
             return pane.askToLeave(then: { [weak self, weak view, weak pane] in
                 pane?.finishClosing()
-                if let view { self?.openFile(path, entry, in: view) }
+                if let view { self?.showFile(path, entry, in: view, line: line) }
             })
         }
         let pane = FilePane(path: path, entry: entry, workspace: panel.workspace, look: look, mono: labels)
@@ -57,7 +70,45 @@ extension WorkbenchView {
         view.filePane = pane
         connectFiles()
         pane.open()
+        if let line { pane.go(toLine: line) }
         focusFilePane(in: view)
+    }
+
+    /// A ⌘-click on a path in workspace terminal `pane` (its row's `text`, the 1-based character
+    /// `column`): looked for on the workspace (``TerminalPath/Lookup``: the folder the terminal last
+    /// reported, then the root) (M17); the first file found opened in the tab's file pane at its
+    /// line, the file already open only going there; a folder, none found, a refusal or the
+    /// connection not had, the terminal's own card says so (M18). Nothing is typed into it. A
+    /// terminal whose shell is on another machine (``Pane/elsewhere``) offers no path.
+    func openTerminalPath(in text: String, at column: Int, from pane: TerminalPane) {
+        guard let found = TerminalPath.find(in: text, at: column), let shell = model.panes[pane.id], !shell.elsewhere,
+              let tab = model.tabs.first(where: { $0.layout.leaves.contains(pane.id) }), let view = tabViews[tab.id], let (project, name) = workspace(of: tab)
+        else { return }
+        let panel = view.files ?? makeFiles(project: project, name: name, in: view)
+        let cwd = Self.reportedPath(shell.reportedFolder)
+        panel.lookUp(found.path, cwd: cwd) { [weak self, weak view, weak pane] next in
+            guard let self else { return }
+            switch next {
+            case let .found(path, entry):
+                if let view { showFile(path, entry, in: view, line: found.line) }
+            case let .said(words):
+                if pane?.tell(words) != true { tell(words) }
+            case .ask, .nothing:
+                break
+            }
+            connectFiles()
+        }
+        connectFiles()
+    }
+
+    /// The path a workspace's shell reported as its folder (OSC 7): as written when absolute, else
+    /// the path of its `file://` URL, whatever host the workspace names.
+    static func reportedPath(_ reported: String) -> String? {
+        if reported.hasPrefix("/") { return reported }
+        guard reported.hasPrefix("file://") else { return nil }
+        let rest = reported.dropFirst("file://".count)
+        guard let slash = rest.firstIndex(of: "/") else { return nil }
+        return String(rest[slash...]).removingPercentEncoding
     }
 
     /// The keys to the tab's file pane, brought forward where it takes the terminals' place.
@@ -207,7 +258,7 @@ extension WorkbenchView {
     /// whatever the workspace read while it was up; nil `theirs` is a deleted file.
     func compare(_ pane: FilePane, theirs: OpenFile.Theirs?, again: Bool) {
         guard let window else { return }
-        let sheet = ConflictSheet(name: pane.file.name, theirs: theirs?.text ?? "", theirsRead: pane.theirsRead, yours: pane.editor.string, deleted: theirs == nil, again: again, look: look, mono: labels)
+        let sheet = ConflictSheet(name: pane.name, theirs: theirs?.text ?? "", theirsRead: pane.theirsRead, yours: pane.editor.string, deleted: theirs == nil, again: again, look: look, mono: labels)
         sheet.onChoice = { [weak pane, weak window, weak sheet] choice in
             if let sheet { window?.endSheet(sheet) }
             switch choice {
@@ -275,22 +326,37 @@ final class DividerLine: NSView {
 }
 
 /// What the drive reads of the selected tab's file pane.
+/// Every field costs nothing in the file's size, a test holding it so: the drive reads it while it
+/// times a load, and a probe that slows what it measures hides the figures. What would cost the
+/// file's size is read only when asked (``theirs``, ``WorkbenchView/fileLines``).
 package struct FilePaneShown {
     package let view: NSView
     package let editor: NSTextView
+    /// The text, bridged from the view's storage, not copied.
     package let text: String
     package let clean: Bool
     package let editable: Bool
     package let note: String?
     package let sentence: String?
-    /// The workspace's bytes the pane holds for Compare, as text.
-    package let theirs: String?
+    let readTheirs: @MainActor () -> String?
+
+    /// The workspace's bytes the pane holds for Compare, as text, decoded when asked.
+    @MainActor package var theirs: String? {
+        readTheirs()
+    }
 }
 
 extension WorkbenchView {
     package var filePaneShown: FilePaneShown? {
         guard let tab = model.selectedTab, let pane = tabViews[tab.id]?.filePane else { return nil }
-        return FilePaneShown(view: pane, editor: pane.editor, text: pane.editor.string, clean: !pane.unsaved, editable: pane.editor.isEditable, note: pane.noteWords, sentence: pane.sentenceWords, theirs: pane.file.theirs?.text)
+        return FilePaneShown(view: pane, editor: pane.editor, text: pane.editor.string, clean: !pane.unsaved, editable: pane.editor.isEditable, note: pane.noteWords, sentence: pane.sentenceWords, readTheirs: { [weak pane] in pane?.theirs?.text })
+    }
+
+    /// The line a ⌘-click took the selected tab's file pane to, and the line its caret is on: asked
+    /// apart from ``filePaneShown``, which the drive reads while it times a load.
+    package var fileLines: (at: Int?, caret: Int)? {
+        guard let pane = model.selectedTab.flatMap({ tabViews[$0.id]?.filePane }) else { return nil }
+        return (pane.atLine, pane.caretLine)
     }
 
     /// Opens `path` from the selected tab's tree into its file pane, as ⏎ on its row does.
@@ -321,7 +387,7 @@ extension WorkbenchView {
 
     /// Compare, as its button is pressed on the one line.
     package func compareFile() -> Bool {
-        guard let pane = model.selectedTab.flatMap({ tabViews[$0.id]?.filePane }), let theirs = pane.file.theirs else { return false }
+        guard let pane = model.selectedTab.flatMap({ tabViews[$0.id]?.filePane }), let theirs = pane.theirs else { return false }
         compare(pane, theirs: theirs, again: false)
         return true
     }

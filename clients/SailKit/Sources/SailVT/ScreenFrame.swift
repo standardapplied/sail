@@ -68,9 +68,16 @@ public struct ScreenFrame: Equatable, Sendable {
 
     public struct Row: Equatable, Sendable {
         public var cells: [Cell]
+        /// The row is soft-wrapped: its line goes on in the row below, as one line of text.
+        public var wrapped: Bool
+        /// The row goes on with the line of the row above: on the screen's first row, a line whose
+        /// start is above the screen.
+        public var continues: Bool
 
-        public init(cells: [Cell]) {
+        public init(cells: [Cell], wrapped: Bool = false, continues: Bool = false) {
             self.cells = cells
+            self.wrapped = wrapped
+            self.continues = continues
         }
     }
 

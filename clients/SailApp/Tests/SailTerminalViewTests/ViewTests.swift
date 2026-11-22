@@ -219,6 +219,123 @@ import Testing
         }
     }
 
+    /// The view finds `src/a.ts:4` as its link, as the app finds a path, wherever the row holds it.
+    static func linksPaths(_ view: TerminalView) {
+        view.linkIn = { text, column in
+            guard let range = text.range(of: "src/a.ts:4") else { return nil }
+            let start = text.distance(from: text.startIndex, to: range.lowerBound), link = start ..< start + 10
+            return link.contains(column - 1) ? link : nil
+        }
+    }
+
+    /// ⌘ held over a link underlines exactly its cells, at every font size, in both palettes and
+    /// right to left; without ⌘, or over text that is no link, nothing is underlined.
+    @Test(arguments: [("light", false), ("dark", false), ("light", true)])
+    func commandOverALinkUnderlinesExactlyItsCells(_ palette: String, _ rightToLeft: Bool) async throws {
+        for points in FontLadder.sizes {
+            let harness = try Harness()
+            harness.view.recolour(palette == "dark" ? .dark : .light)
+            harness.view.userInterfaceLayoutDirection = rightToLeft ? .rightToLeft : .leftToRight
+            harness.view.setFontSize(points)
+            harness.link.output("see src/a.ts:4 here")
+            Self.linksPaths(harness.view)
+            await harness.tick()
+            let before = try #require(try harness.view.snapshot())
+            harness.mouse(.mouseMoved, column: 6, row: 0)
+            #expect(harness.view.shownLink == nil, "\(points) pt: underlined without ⌘")
+            harness.mouse(.mouseMoved, column: 6, row: 0, flags: .command)
+            #expect(harness.view.shownLink == OverlayLink(row: 0, columns: 4 ..< 14), "\(points) pt: \(String(describing: harness.view.shownLink))")
+            await harness.tick()
+            let linked = try #require(try harness.view.snapshot())
+            let metrics = harness.view.metrics, origin = metrics.origin(of: CellPoint(x: 4, y: 0))
+            let cells = (x: origin.x ..< origin.x + 10 * metrics.width, y: origin.y ..< origin.y + metrics.height)
+            let all = (x: 0 ..< linked.width, y: 0 ..< linked.height)
+            let inside = Self.differing(linked, before, in: cells)
+            #expect(inside > 0 && Self.differing(linked, before, in: all) == inside, "\(points) pt: the underline is not exactly the link's cells")
+            harness.mouse(.mouseMoved, column: 16, row: 0, flags: .command)
+            #expect(harness.view.shownLink == nil, "\(points) pt: a word that is no link was underlined")
+        }
+    }
+
+    /// A path soft-wrapped across two rows is one line: the link sees it whole, and ⌘ over either
+    /// row underlines its cells on both.
+    @Test func aPathWrappedAcrossRowsIsReadWhole() async throws {
+        let harness = try Harness(columns: 20, rows: 4, size: NSSize(width: 200, height: 160))
+        let columns = try #require(harness.view.grid?.columns)
+        try #require(columns > 10 && columns < 32, "a grid of \(columns) columns wraps the path nowhere")
+        harness.link.output("error in src/very/long/name.ts:9 here")
+        var seen: [String] = []
+        harness.view.linkIn = { text, column in
+            seen.append(text)
+            guard let range = text.range(of: "src/very/long/name.ts:9") else { return nil }
+            let start = text.distance(from: text.startIndex, to: range.lowerBound), link = start ..< start + 23
+            return link.contains(column - 1) ? link : nil
+        }
+        await harness.tick()
+        harness.mouse(.mouseMoved, column: 1, row: 1, flags: .command)
+        #expect(seen.last?.hasPrefix("error in src/very/long/name.ts:9 here") == true, "the line was not read whole: \(seen.last ?? "")")
+        #expect(harness.view.shownLink == OverlayLink(spans: [OverlayLink.Span(row: 0, columns: 9 ..< columns), OverlayLink.Span(row: 1, columns: 0 ..< 32 - columns)]),
+                "\(String(describing: harness.view.shownLink))")
+    }
+
+    /// R2-5: a line whose start has scrolled above the screen is never read from its tail, nor one
+    /// going on below the screen from its head: no link lies in a word the edge cuts, even one
+    /// ending short of the edge (a path's closing `.` left out), so ⌘ over it underlines nothing
+    /// and a ⌘-click opens nothing.
+    @Test func aPathCutByTheScreensEdgeIsNoLink() async throws {
+        let harness = try Harness(columns: 20, rows: 4, size: NSSize(width: 200, height: 160))
+        let grid = try #require(harness.view.grid)
+        let path = "src/very/long/folder/name.ts:9 x", wraps = (path.count + grid.columns - 1) / grid.columns
+        try #require(wraps > 1, "a grid of \(grid.columns) columns wraps the path nowhere")
+        var opened: [String] = []
+        harness.view.linkIn = { text, column in
+            let end = text.firstIndex(of: " ").map { text.distance(from: text.startIndex, to: $0) } ?? text.count
+            return column - 1 < end - 1 ? 0 ..< end - 1 : nil
+        }
+        harness.view.onLink = { text, _ in opened.append(text) }
+        harness.link.output(String(repeating: "pad\r\n", count: grid.rows) + path + String(repeating: "\r\nz", count: grid.rows))
+        _ = harness.link.screen.scroll(lines: -1, x: 0, y: 0)
+        await harness.tick()
+        try #require(harness.view.lastFrame?.rows.first?.continues == true, "the path's start did not scroll above the screen")
+        harness.mouse(.mouseMoved, column: 1, row: 0, flags: .command)
+        #expect(harness.view.shownLink == nil, "the tail of a cut path was underlined")
+        harness.mouse(.leftMouseDown, column: 1, row: 0, flags: .command)
+        harness.mouse(.leftMouseUp, column: 1, row: 0, flags: .command)
+        harness.link.screen.scrollToBottom()
+        _ = harness.link.screen.scroll(lines: -(grid.rows + wraps - 1), x: 0, y: 0)
+        await harness.tick()
+        try #require(harness.view.lastFrame?.rows.last?.wrapped == true && harness.view.lastFrame?.rows.first?.continues == false, "the path's head is not on the last row")
+        harness.mouse(.mouseMoved, column: 1, row: grid.rows - 1, flags: .command)
+        #expect(harness.view.shownLink == nil, "the head of a cut path was underlined")
+        harness.mouse(.leftMouseDown, column: 1, row: grid.rows - 1, flags: .command)
+        harness.mouse(.leftMouseUp, column: 1, row: grid.rows - 1, flags: .command)
+        #expect(opened.isEmpty, "a cut path was opened: \(opened)")
+    }
+
+    /// A ⌘-click on a link, in the text drawn, goes to the link alone: nothing is selected and a
+    /// program that tracks the mouse gets nothing, its drag and release included; the same click
+    /// without ⌘ is the program's, as before.
+    @Test func aCommandClickOnALinkGoesToTheLinkAlone() async throws {
+        let harness = try Harness()
+        harness.link.output("\u{1b}[?1000h\u{1b}[?1006hsee src/a.ts:4 here")
+        Self.linksPaths(harness.view)
+        var opened: [(String, Int)] = []
+        harness.view.onLink = { opened.append(($0, $1)) }
+        await harness.tick()
+        harness.link.forget()
+        harness.mouse(.leftMouseDown, column: 6, row: 0, flags: .command)
+        harness.mouse(.leftMouseDragged, column: 8, row: 0, flags: .command)
+        harness.mouse(.leftMouseUp, column: 8, row: 0, flags: .command)
+        harness.flush()
+        #expect(opened.map(\.1) == [7] && opened.first?.0.hasPrefix("see src/a.ts:4 here") == true, "\(opened)")
+        #expect(harness.link.bytes.isEmpty, "the program got the ⌘-click: \(harness.link.bytes)")
+        #expect(harness.link.screen.selectedText() == nil)
+        harness.mouse(.leftMouseDown, column: 6, row: 0)
+        harness.mouse(.leftMouseUp, column: 6, row: 0)
+        harness.flush()
+        #expect(opened.count == 1 && String(decoding: harness.link.bytes, as: UTF8.self) == "\u{1b}[<0;7;1M\u{1b}[<0;7;1m")
+    }
+
     private static func differing(_ one: RenderedImage, _ other: RenderedImage, in area: (x: Range<Int>, y: Range<Int>)) -> Int {
         var count = 0
         for y in area.y where y < one.height {

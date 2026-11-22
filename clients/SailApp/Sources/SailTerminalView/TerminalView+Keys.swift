@@ -34,6 +34,7 @@ extension TerminalView: @preconcurrency NSTextInputClient {
     /// A modifier pressed or released alone. Such an event has no characters (asking for them
     /// raises), so only its key code and flags are read.
     override public func flagsChanged(with event: NSEvent) {
+        showLink(at: pointerCell, command: event.modifierFlags.contains(.command))
         let modifier = MacKeyEvent(keyCode: event.keyCode, modifierFlags: event.modifierFlags.rawValue)
         guard !composition.isComposing, let key = Typing.modifierKey(modifier) else { return }
         send(key, at: event.timestamp, typed: false)
