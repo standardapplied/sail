@@ -325,15 +325,19 @@ package struct FilePaneShown {
     package let sentence: String?
     /// The workspace's bytes the pane holds for Compare, as text.
     package let theirs: String?
-    /// The line a ⌘-click went to, and the line the caret is on.
-    package let atLine: Int?
-    package let caretLine: Int
 }
 
 extension WorkbenchView {
     package var filePaneShown: FilePaneShown? {
         guard let tab = model.selectedTab, let pane = tabViews[tab.id]?.filePane else { return nil }
-        return FilePaneShown(view: pane, editor: pane.editor, text: pane.editor.string, clean: !pane.unsaved, editable: pane.editor.isEditable, note: pane.noteWords, sentence: pane.sentenceWords, theirs: pane.theirs?.text, atLine: pane.atLine, caretLine: pane.caretLine)
+        return FilePaneShown(view: pane, editor: pane.editor, text: pane.editor.string, clean: !pane.unsaved, editable: pane.editor.isEditable, note: pane.noteWords, sentence: pane.sentenceWords, theirs: pane.theirs?.text)
+    }
+
+    /// The line a ⌘-click took the selected tab's file pane to, and the line its caret is on: asked
+    /// apart from ``filePaneShown``, which the drive reads while it times a load.
+    package var fileLines: (at: Int?, caret: Int)? {
+        guard let pane = model.selectedTab.flatMap({ tabViews[$0.id]?.filePane }) else { return nil }
+        return (pane.atLine, pane.caretLine)
     }
 
     /// Opens `path` from the selected tab's tree into its file pane, as ⏎ on its row does.

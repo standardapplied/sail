@@ -433,10 +433,18 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
         numbers.at
     }
 
-    /// The 1-based line the caret is on.
+    /// The 1-based line the caret is on, counted by the text's own line ranges: walking a large
+    /// file's characters through Swift took seconds.
     var caretLine: Int {
-        let text = editor.string as NSString, at = min(editor.selectedRange().location, text.length)
-        return text.substring(to: at).reduce(1) { $1 == "\n" ? $0 + 1 : $0 }
+        let text = editor.textStorage?.mutableString ?? NSMutableString(), at = min(editor.selectedRange().location, text.length)
+        var line = 1, index = 0
+        while index < text.length {
+            let next = NSMaxRange(text.lineRange(for: NSRange(location: index, length: 0)))
+            guard next <= at, next > index, next < text.length || at == text.length && next == at else { break }
+            line += 1
+            index = next
+        }
+        return line
     }
 
     /// The title's status words, empty while there are none.

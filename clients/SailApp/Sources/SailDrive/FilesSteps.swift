@@ -318,8 +318,9 @@ extension Driver {
             return (await click(terminal.terminal, at: terminal.terminal.point(of: cell), modifiers: .command), "⌘-clicked \(text.debugDescription) at column \(cell.x + 1), row \(cell.y + 1)")
         }
         if let line = step.fileAtLine {
-            let there = await waitForState(step.seconds ?? 10) { pane()?.editable == true && pane()?.atLine == line && pane()?.caretLine == line }
-            return (there, "the file pane: the bar at \(pane()?.atLine.map(String.init) ?? "no line"), the caret on line \(pane()?.caretLine ?? 0)")
+            let lines = { self.workbench.fileLines }
+            let there = await waitForState(step.seconds ?? 10) { pane()?.editable == true && lines()?.at == line && lines()?.caret == line }
+            return (there, "the file pane: the bar at \(lines()?.at.map(String.init) ?? "no line"), the caret on line \(lines()?.caret ?? 0)")
         }
         if let words = step.terminalSays {
             let said = await waitForState(step.seconds ?? 10) { self.pane?.status.says == words }

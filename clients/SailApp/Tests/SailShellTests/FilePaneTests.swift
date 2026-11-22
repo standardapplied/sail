@@ -557,6 +557,11 @@ import Testing
         let line42 = (text as NSString).range(of: "let line42 =").location
         #expect(opened.editor.selectedRange().location == line42, "the caret is at \(opened.editor.selectedRange().location), line 42 at \(line42)")
         #expect(opened.lineNumbers.rows.contains { $0.number == 42 && $0.at }, "line 42 does not carry the bar: \(opened.lineNumbers.rows.filter(\.at))")
+        #expect(opened.caretLine == 42 && opened.atLine == 42)
+        opened.editor.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+        #expect(opened.caretLine == 61, "the caret at the end is on line \(opened.caretLine)")
+        opened.editor.setSelectedRange(NSRange(location: 0, length: 0))
+        #expect(opened.caretLine == 1)
         #expect(!bench.filesPanelShown, "the files panel was shown")
         bench.openTerminalPath(in: "src/Gone.java:3: error: cannot find symbol", at: 3, from: terminal)
         #expect(await RunnerTabTests.until(10) { terminal.status.says == "No file at src/Gone.java in dock." }, "said: \(terminal.status.says ?? "nothing")")
