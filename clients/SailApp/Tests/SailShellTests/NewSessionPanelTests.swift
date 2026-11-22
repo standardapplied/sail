@@ -333,8 +333,7 @@ import Testing
     }
 
     /// At the least window the panel spans what shows of the page less 8 pt on each side, under
-    /// the row: never past the card, which there holds the section wider than itself (the drive's
-    /// least frame: 27 pt).
+    /// the row: never past the card, even where the section is laid out wider than the card shows.
     @Test func atTheLeastWindowThePanelSpansThePage() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-dock"], width: WorkspacesViewTests.narrowestCard)
         defer { window.orderOut(nil) }
