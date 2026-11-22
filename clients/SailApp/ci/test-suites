@@ -8,17 +8,34 @@
 # drops end lines on macOS). A suite that ends without a result is
 # said by how its process ended (its exit status, or the signal that ended it), with any crash
 # report macOS wrote during its run: the crashing thread printed, the report kept beside the logs.
+# On macOS a suite its alarm ended may leave its test process running (the alarm ends `script`
+# alone): every thread of it is sampled into the logs and it is ended. Then the window server is
+# asked whether it answers a new process (ci/window-server); when it does not, no later suite runs,
+# as each would only wait on it until its own alarm, and this fails at once saying so.
 set -uo pipefail
 
 [[ $# -eq 1 ]] || { echo "usage: ci/test-suites LOGDIR" >&2; exit 2; }
 readonly logs=$1
 mkdir -p "$logs"
+"$(dirname "$0")/window-server-check" || exit 1
+: > "$logs/window-server.since"
+
+outlived() {
+  local suite=$1 pids pid
+  pids=$(pgrep -f -- "$PWD/\.build/.*PackageTests" || true)
+  for pid in $pids; do
+    sample "$pid" 3 -file "$logs/$suite.outlived-$pid.txt" > /dev/null 2>&1 || true
+    echo "ci/test-suites: $suite's test process $pid outlived its alarm; its threads are in $logs/$suite.outlived-$pid.txt, and it is ended" >&2
+    kill -KILL "$pid" 2> /dev/null || true
+  done
+}
 
 tests=$(swift test list --skip-build)
 listed=$(sed -nE 's#^([A-Za-z0-9_]+\.[A-Za-z0-9_]+)/.*#\1#p' <<< "$tests" | sort -u)
 [[ -n $listed ]] || { echo "ci/test-suites: the package lists no test suite" >&2; exit 1; }
 
 failed=0
+ran=()
 if outside=$(grep -Ev '^[A-Za-z0-9_]+\.[A-Za-z0-9_]+/' <<< "$tests" | grep .); then
   echo "ci/test-suites: these tests are in no suite, so no run here would run them; put each in a @Suite: $(tr '\n' ' ' <<< "$outside")" >&2
   failed=1
@@ -38,11 +55,20 @@ for suite in $listed; do
     cat "$log"
   fi
   echo "$status" > "$logs/$suite.status"
+  ran+=("$suite")
   (( status == 0 )) || failed=1
   echo "::endgroup::"
+  if (( status == 142 )) && [[ $(uname) == Darwin ]]; then
+    outlived "$suite"
+    "$(dirname "$0")/window-server" "$logs"
+    if (( $? == 1 )); then
+      echo "ci/test-suites: no suite after $suite runs: each would wait on the window server until its own alarm" >&2
+      break
+    fi
+  fi
 done
 
-suites=($listed)
+suites=("${ran[@]}")
 for index in "${!suites[@]}"; do
   suite=${suites[$index]} next=${suites[$((index + 1))]:-}
   log=$logs/$suite.log
@@ -66,5 +92,5 @@ for index in "${!suites[@]}"; do
   fi
 done
 "$(dirname "$0")/../../SailKit/scripts/ends" "$logs"/*.events || failed=1
-echo "ci/test-suites: $(wc -w <<< "$listed" | tr -d ' ') suites: $(tr '\n' ' ' <<< "$listed")"
+echo "ci/test-suites: ${#ran[@]} of $(wc -w <<< "$listed" | tr -d ' ') suites ran: ${ran[*]}"
 exit $failed

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Proves ci/window-server on a stand-in for the process it starts (an osascript first on PATH): one
+# that answers passes; one that never answers fails as silent once its time is up, and with LOGDIR keeps
+# the window server's log there; one that fails otherwise says nothing either way; a time that is no
+# whole number of seconds is refused.
+set -euo pipefail
+
+server="$(dirname "$0")/window-server"
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+stand_in() {
+  mkdir -p "$work/$1"
+  printf '#!/usr/bin/env bash\n%s\n' "$2" > "$work/$1/osascript"
+  chmod +x "$work/$1/osascript"
+}
+
+expect() {
+  local want=$1 name=$2 bin=$3 got
+  shift 3
+  if PATH="$work/$bin:$PATH" "$server" "$@" > "$work/said" 2>&1; then got=0; else got=$?; fi
+  [[ $got == "$want" ]] || { echo "ci/window-server-check: $name: exit $got, not $want: $(cat "$work/said")" >&2; exit 1; }
+}
+
+stand_in answers 'echo 1440'
+stand_in silent 'exec sleep 30'
+stand_in fails 'echo "no such object" >&2; exit 3'
+
+expect 0 "a window server that answers" answers
+grep -q 'answers a new process' "$work/said" || { echo "ci/window-server-check: an answer was not said" >&2; exit 1; }
+began=$SECONDS
+SAIL_WINDOW_SERVER_SECONDS=1 expect 1 "a window server that never answers" silent
+(( SECONDS - began < 10 )) || { echo "ci/window-server-check: a silence of 1 s was said after $((SECONDS - began)) s" >&2; exit 1; }
+grep -q 'does not answer a new process within 1 s' "$work/said" || { echo "ci/window-server-check: the silence was not said: $(cat "$work/said")" >&2; exit 1; }
+SAIL_WINDOW_SERVER_SECONDS=1 expect 1 "a window server that never answers, told into a folder" silent "$work/logs"
+[[ -e $work/logs/window-server.log ]] || { echo "ci/window-server-check: a silence told into a folder kept no log there" >&2; exit 1; }
+expect 2 "an asking process that fails otherwise" fails
+grep -q 'exit 3), which says nothing of it: no such object' "$work/said" || { echo "ci/window-server-check: the failure was not said in its words: $(cat "$work/said")" >&2; exit 1; }
+SAIL_WINDOW_SERVER_SECONDS=soon expect 2 "a time that is no whole number" answers
+echo "ci/window-server-check: ci/window-server passed, failed and refused the 5 stand-ins as it must"
