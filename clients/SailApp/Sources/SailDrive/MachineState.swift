@@ -99,7 +99,7 @@ extension Driver {
     /// exec'd from a shell, which no person runs.
     var machineState: (Bool, String) {
         let state = MachineState.read()
-        let names = ["SAIL_DRIVE_GOLDENS", "SAIL_DRIVE_TICKET", "SAIL_DRIVE_TICKET_FILE", "SAIL_DRIVE_PASSKEY", "SAIL_DATA_DIR", "SAIL_SIGNING"]
+        let names = ["SAIL_DRIVE_GOLDENS", "SAIL_DRIVE_TICKET", "SAIL_DRIVE_TICKET_FILE", "SAIL_DRIVE_PASSKEY", "SAIL_DRIVE_PRIVATE", "SAIL_DATA_DIR", "SAIL_SIGNING"]
         let present = names.filter { ProcessInfo.processInfo.environment[$0] != nil }
         let environment = present.isEmpty ? "none of its names" : present.joined(separator: ", ")
         let departures = state.departures

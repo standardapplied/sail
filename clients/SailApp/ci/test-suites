@@ -18,16 +18,18 @@ set -uo pipefail
 readonly logs=$1
 mkdir -p "$logs"
 "$(dirname "$0")/window-server-check" || exit 1
+"$(dirname "$0")/drive-check" || exit 1
 : > "$logs/window-server.since"
 
 # Ended by a pattern, not by walking the suite's tree: once the alarm ends `script`, its children
 # are launchd's, in the session `script` gave them, so no tree or group reaches them. The pattern
-# is this checkout's own `.build` path (its characters escaped), which no other process runs from.
+# is this checkout's own `.build` path (its characters escaped), which no other process runs from,
+# and only this account's processes are looked at.
 outlived() {
   local suite=$1 build pids pid
   # shellcheck disable=SC2001
   build=$(sed 's/[][\.*^$+?(){}|]/\\&/g' <<< "$PWD/.build/")
-  pids=$(pgrep -f -- "$build.*PackageTests" || true)
+  pids=$(pgrep -U "$UID" -f -- "$build.*PackageTests" || true)
   for pid in $pids; do
     perl -e 'alarm shift; exec @ARGV or exit 127' 30 sample "$pid" 3 -file "$logs/$suite.outlived-$pid.txt" > /dev/null 2>&1 || true
     echo "ci/test-suites: $suite's test process $pid outlived its alarm; its threads are in $logs/$suite.outlived-$pid.txt, and it is ended" >&2
