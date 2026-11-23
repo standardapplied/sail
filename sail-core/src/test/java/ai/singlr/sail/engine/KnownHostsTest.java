@@ -35,4 +35,11 @@ class KnownHostsTest {
     assertEquals("localhost", InetAddress.getByName("127.0.0.1").getHostName());
     assertEquals("203.0.113.9", InetAddress.getByName("203.0.113.9").getHostName());
   }
+
+  /** As {@code /etc/hosts} has it: the machine's own name is the loopback. */
+  @Test
+  void theMachinesOwnNameIsTheLoopback() throws Exception {
+    var own = InetAddress.getLocalHost();
+    assertTrue(own.isLoopbackAddress(), own.toString());
+  }
 }

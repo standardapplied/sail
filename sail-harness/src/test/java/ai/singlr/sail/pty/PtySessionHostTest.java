@@ -1933,23 +1933,26 @@ class PtySessionHostTest {
         var first = connect();
         var second = connect()) {
       startGate = new CountDownLatch(1);
-      PtyWire.write(
-          first,
-          new PtyMessage.Create("s0", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
-      assertTrue(startGated.await(10, TimeUnit.SECONDS), "the first create is mid-admission");
-      PtyWire.write(second, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
-      PtyWire.write(
-          second,
-          new PtyMessage.Create("s1", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
-      assertInstanceOf(PtyMessage.Sessions.class, PtyWire.read(second));
-      try (var fence = connect()) {
-        PtyWire.write(fence, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
-        assertInstanceOf(
-            PtyMessage.Sessions.class,
-            PtyWire.read(fence),
-            "the second create has had a whole round trip to reach admission before the gate opens");
+      try {
+        PtyWire.write(
+            first,
+            new PtyMessage.Create("s0", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
+        assertTrue(startGated.await(10, TimeUnit.SECONDS), "the first create is mid-admission");
+        PtyWire.write(second, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+        PtyWire.write(
+            second,
+            new PtyMessage.Create("s1", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Sessions.class, PtyWire.read(second));
+        try (var fence = connect()) {
+          PtyWire.write(fence, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+          assertInstanceOf(
+              PtyMessage.Sessions.class,
+              PtyWire.read(fence),
+              "the second create has had a whole round trip to reach admission before the gate opens");
+        }
+      } finally {
+        startGate.countDown();
       }
-      startGate.countDown();
 
       assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(first));
       var refused = assertInstanceOf(PtyMessage.Err.class, PtyWire.read(second));

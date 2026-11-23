@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SpecStatus;
@@ -36,10 +37,12 @@ import ai.singlr.sail.store.TestRuns;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -504,7 +507,9 @@ class LivenessAuditTest {
                                         0644);
                                 replaced.countDown();
                                 try {
-                                  commit.await();
+                                  assertTrue(
+                                      commit.await(PATIENCE, TimeUnit.SECONDS),
+                                      "the upload was never let commit");
                                 } catch (InterruptedException e) {
                                   Thread.currentThread().interrupt();
                                   throw new IllegalStateException(e);
@@ -514,8 +519,13 @@ class LivenessAuditTest {
       assertTrue(replaced.await(PATIENCE, TimeUnit.SECONDS));
       var settlement = new Settlement(node.db, Decidability.onNode(node.db), "node");
       var settling = new FutureTask<>(settlement::settle);
-      awaitItsTurn(Thread.ofPlatform().start(settling));
-      commit.countDown();
+      var settler = Thread.ofPlatform().start(settling);
+      try {
+        awaitItsTurn(settler, settling);
+      } finally {
+        commit.countDown();
+        settler.join(Duration.ofSeconds(PATIENCE));
+      }
       upload.get(PATIENCE, TimeUnit.SECONDS);
 
       assertEquals(List.of(), settling.get(PATIENCE, TimeUnit.SECONDS));
@@ -529,13 +539,25 @@ class LivenessAuditTest {
   /**
    * Waits until {@code settler} is inside a write transaction, which it can begin but not commit
    * while the upload holds the database's write lock: past every read it makes before its turn.
+   * Fails at once when the settle has ended first, with what ended it.
    */
-  private static void awaitItsTurn(Thread settler) {
+  private static void awaitItsTurn(Thread settler, Future<?> settling) {
     var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(PATIENCE);
     while (Arrays.stream(settler.getStackTrace()).noneMatch(LivenessAuditTest::aTransaction)) {
+      if (!settler.isAlive()) {
+        failEndedFirst(settling);
+      }
       assertTrue(System.nanoTime() < deadline, "the settle never began its turn");
       Thread.onSpinWait();
     }
+  }
+
+  private static void failEndedFirst(Future<?> settled) {
+    var said = "the settle ended without taking its turn";
+    if (settled.state() == Future.State.FAILED) {
+      fail(said, settled.exceptionNow());
+    }
+    fail(said + ", answering " + settled.resultNow());
   }
 
   private static boolean aTransaction(StackTraceElement frame) {
