@@ -27,7 +27,7 @@ class CatalogRevisionBySyncTest {
       agent:
         type: claude-code
         notifications:
-          url: https://ntfy.sh/zenith
+          url: https://203.0.113.1/zenith
           events: [spec_dispatched]
       """;
 
@@ -45,19 +45,20 @@ class CatalogRevisionBySyncTest {
 
       Acting.system(() -> authored.upsert(TestDefinitions.yaml(ZENITH)));
       SyncBox.round(main, node);
-      assertEquals("https://ntfy.sh/zenith", notifications.resolve("zenith").url());
+      assertEquals("https://203.0.113.1/zenith", notifications.resolve("zenith").url());
 
       Acting.system(
           () ->
               authored.upsert(
-                  TestDefinitions.yaml(ZENITH.replace("ntfy.sh/zenith", "ntfy.sh/moved"))));
+                  TestDefinitions.yaml(ZENITH.replace("203.0.113.1/zenith", "203.0.113.1/moved"))));
       SyncBox.round(main, node);
 
-      assertEquals("https://ntfy.sh/moved", reader.require("zenith").agent().notifications().url());
       assertEquals(
-          "https://ntfy.sh/moved",
+          "https://203.0.113.1/moved", reader.require("zenith").agent().notifications().url());
+      assertEquals(
+          "https://203.0.113.1/moved",
           ReviewWiring.definitions(reader).apply("zenith").agent().notifications().url());
-      assertEquals("https://ntfy.sh/moved", notifications.resolve("zenith").url());
+      assertEquals("https://203.0.113.1/moved", notifications.resolve("zenith").url());
     }
   }
 }

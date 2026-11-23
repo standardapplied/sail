@@ -39,6 +39,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
@@ -50,6 +51,9 @@ import org.junit.jupiter.api.io.TempDir;
 class LivenessAuditTest {
 
   private static final Actor ADA = new Actor("ada", Role.MEMBER, Actor.Lane.SYNC);
+
+  /** Seconds a wait guards against a hang: none of this class's verdicts rests on it. */
+  private static final long PATIENCE = 60;
 
   @TempDir Path dir;
   private SyncBox main;
@@ -464,7 +468,10 @@ class LivenessAuditTest {
 
   /**
    * An upload that replaces an oversized offer while the round is settling it waits its turn: what
-   * the round settles is what it judged, so a replacement under the ceiling is kept and lands.
+   * the round settles is what it judged, so a replacement under the ceiling is kept and lands. The
+   * settle runs on a platform thread of its own: its wait for the upload's write lock is SQLite's,
+   * inside a native call, which would hold the only carrier a one-CPU JVM has and so keep the
+   * upload's virtual thread from ever committing.
    */
   @Test
   void aReplacementUnderTheCeilingUploadedDuringSettlementIsKept() throws Exception {
@@ -501,13 +508,14 @@ class LivenessAuditTest {
                                 }
                                 return null;
                               })));
-      assertTrue(replaced.await(5, TimeUnit.SECONDS));
+      assertTrue(replaced.await(PATIENCE, TimeUnit.SECONDS));
       var settlement = new Settlement(node.db, Decidability.onNode(node.db), "node");
-      var settling = executor.submit(settlement::settle);
+      var settling = new FutureTask<>(settlement::settle);
+      Thread.ofPlatform().start(settling);
       commit.countDown();
-      upload.get(5, TimeUnit.SECONDS);
+      upload.get(PATIENCE, TimeUnit.SECONDS);
 
-      assertEquals(List.of(), settling.get(5, TimeUnit.SECONDS));
+      assertEquals(List.of(), settling.get(PATIENCE, TimeUnit.SECONDS));
       assertEquals(2, files.find("acme", "a.txt").orElseThrow().size(), "the replacement stays");
       main.limits(new FileLimits(4));
       assertConvergedWithin(2, node, new Actor("node", Role.MEMBER, Actor.Lane.SYNC));

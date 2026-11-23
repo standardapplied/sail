@@ -56,6 +56,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -66,6 +67,10 @@ class PtySessionHostTest {
   @TempDir Path dir;
 
   private PtySessionHost host;
+
+  /** Every host a test started, each closed once it has run, whether or not the test closed it. */
+  private final List<PtySessionHost> hosts = new ArrayList<>();
+
   private final ConcurrentLinkedQueue<String> events = new ConcurrentLinkedQueue<>();
 
   /** Each minute of typing the host told, as {@code session:person}, in the order told. */
@@ -251,8 +256,14 @@ class PtySessionHostTest {
             network,
             uploads,
             FileScripts.ofContainers());
+    hosts.add(host);
     host.start();
     return host;
+  }
+
+  @AfterEach
+  void closeHosts() {
+    hosts.forEach(PtySessionHost::close);
   }
 
   /**
@@ -495,14 +506,19 @@ class PtySessionHostTest {
     }
   }
 
+  /** A connection welcomed for {@code token}; one turned away is closed, and says why. */
   private SocketChannel connect(String token) throws IOException {
     var channel = SocketChannel.open(StandardProtocolFamily.UNIX);
-    channel.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
-    var reply = hello(channel, token);
-    if (reply instanceof PtyMessage.Err err) {
-      throw new IOException(err.message());
+    try {
+      channel.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
+      if (hello(channel, token) instanceof PtyMessage.Err err) {
+        throw new IOException(err.message());
+      }
+      return channel;
+    } catch (IOException | RuntimeException refused) {
+      channel.close();
+      throw refused;
     }
-    return channel;
   }
 
   private static PtyMessage hello(SocketChannel channel, String token) throws IOException {
@@ -2105,12 +2121,18 @@ class PtySessionHostTest {
       assertEquals(List.of("here live", "in-acme live"), listedFor("tok-uday"));
 
       try (var box = connect("")) {
-        host.handoff();
-        PtyWire.write(box, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
-        assertEquals(
-            "The pty host is shutting down; reconnect and try again.",
-            assertInstanceOf(PtyMessage.Err.class, PtyWire.read(box)).message(),
-            "a listing during a handoff is refused, not a short page");
+        var masters = host.handoff();
+        try {
+          PtyWire.write(box, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+          assertEquals(
+              "The pty host is shutting down; reconnect and try again.",
+              assertInstanceOf(PtyMessage.Err.class, PtyWire.read(box)).message(),
+              "a listing during a handoff is refused, not a short page");
+        } finally {
+          for (var master : masters.values()) {
+            Pty.closeFd(master);
+          }
+        }
       }
     }
   }

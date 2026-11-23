@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
@@ -24,7 +25,6 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,6 +41,7 @@ class SailEventHelperScriptTest {
 
   private final List<Map<String, Object>> posted = new CopyOnWriteArrayList<>();
   private ServerSocketChannel daemon;
+  private Thread serving;
   private Path socketDir;
   private Path script;
 
@@ -50,7 +51,7 @@ class SailEventHelperScriptTest {
     var socket = socketDir.resolve("api.sock");
     daemon = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
     daemon.bind(UnixDomainSocketAddress.of(socket));
-    Thread.ofVirtual().start(this::serve);
+    serving = Thread.ofVirtual().start(this::serve);
     script = dir.resolve("sail-event.sh");
     Files.writeString(
         script,
@@ -60,8 +61,9 @@ class SailEventHelperScriptTest {
   }
 
   @AfterEach
-  void theDaemonStops() throws IOException {
+  void theDaemonStops() throws IOException, InterruptedException {
     daemon.close();
+    assertTrue(serving.join(Child.PATIENCE), "the daemon's thread ended");
     Files.deleteIfExists(socketDir.resolve("api.sock"));
     Files.deleteIfExists(socketDir);
   }
@@ -114,16 +116,8 @@ class SailEventHelperScriptTest {
     var builder = new ProcessBuilder(script.toString(), argument);
     builder.environment().put("SAIL_RUN_CREDENTIAL", "credential");
     builder.environment().put("SAIL_RUN_ID", "run-1");
-    builder.redirectErrorStream(true);
-    var process = builder.start();
-    try (var stdin = process.getOutputStream()) {
-      stdin.write(payload.getBytes(StandardCharsets.UTF_8));
-    }
-    if (!process.waitFor(30, TimeUnit.SECONDS)) {
-      process.destroyForcibly();
-      throw new AssertionError("the hook did not return");
-    }
-    assertEquals(0, process.exitValue(), new String(process.getInputStream().readAllBytes()));
+    var ran = Child.run(builder, payload, Child.PATIENCE);
+    assertEquals(0, ran.exit(), ran.stdout() + ran.stderr());
   }
 
   @SuppressWarnings("unchecked")

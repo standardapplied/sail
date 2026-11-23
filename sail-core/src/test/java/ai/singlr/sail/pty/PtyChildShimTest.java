@@ -9,9 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.Child;
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -71,17 +71,16 @@ class PtyChildShimTest {
   @Test
   void runOutsideAPtyHostTheShimNamesWhatIsMissingAndRunsNothing() throws Exception {
     var exit = dir.resolve("s.exit");
-    var shim = new ProcessBuilder(shim(exit, "sh", "-c", "exit 7")).redirectErrorStream(true);
+    var shim = new ProcessBuilder(shim(exit, "sh", "-c", "exit 7"));
     shim.environment().remove(Pty.TERMINAL);
-    var started = shim.start();
-    var said = new String(started.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
-    assertTrue(started.waitFor(30, TimeUnit.SECONDS));
-    assertEquals(1, started.exitValue(), "no terminal named, and none on its input");
+    var started = Child.run(shim);
+
+    assertEquals(1, started.exit(), "no terminal named, and none on its input");
     assertEquals(
         "Exception in thread \"main\" java.lang.IllegalStateException: No terminal is named in"
             + " SAIL_PTY_TERMINAL: the shim runs only as the pty host spawns it.",
-        said.lines().findFirst().orElseThrow());
+        started.stderr().lines().findFirst().orElseThrow());
     assertFalse(Files.exists(exit), "no command ran, so no status is recorded");
   }
 
@@ -95,10 +94,9 @@ class PtyChildShimTest {
             .redirectInput(new File(pty.slavePath()));
     shim.environment().remove(Pty.TERMINAL);
 
-    var started = shim.start();
+    var started = Child.run(shim);
 
-    assertTrue(started.waitFor(30, TimeUnit.SECONDS));
-    assertEquals(5, started.exitValue());
+    assertEquals(5, started.exit(), started.stdout() + started.stderr());
     assertEquals("5", Files.readString(exit));
     assertEquals(pty.slavePath() + "\n", Files.readString(out), "the command ran on that terminal");
   }

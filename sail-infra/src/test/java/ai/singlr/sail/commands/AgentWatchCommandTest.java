@@ -57,7 +57,7 @@ class AgentWatchCommandTest {
         seeded(
             "acme",
             "name: acme\nagent:\n  type: claude-code\n  notifications:\n"
-                + "    url: https://ntfy.sh/acme\n    events: [guardrail_triggered]\n");
+                + "    url: https://203.0.113.1/acme\n    events: [guardrail_triggered]\n");
     var command = new AgentWatchCommand(() -> OperationsFactory.open(dbPath));
     new CommandLine(command)
         .parseArgs(
@@ -71,7 +71,7 @@ class AgentWatchCommandTest {
             "--action",
             "stop");
 
-    assertEquals("https://ntfy.sh/acme", command.notifications().url());
+    assertEquals("https://203.0.113.1/acme", command.notifications().url());
   }
 
   @Test
@@ -358,7 +358,7 @@ class AgentWatchCommandTest {
           () ->
               command.supervise(
                   never,
-                  new Notifications("https://ntfy.sh/acme", List.of("guardrail_triggered")),
+                  new Notifications("https://203.0.113.1/acme", List.of("guardrail_triggered")),
                   Guardrails.of(null, null, "stop"),
                   Instant.parse(STARTED_AT)));
 

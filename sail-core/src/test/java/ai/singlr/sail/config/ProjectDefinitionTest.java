@@ -376,7 +376,7 @@ class ProjectDefinitionTest {
         agent:
           type: claude-code
           notifications:
-            url: "https://ntfy.sh/singlr-test"
+            url: "https://203.0.113.1/singlr-test"
             events:
               - guardrail_triggered
               - agent_session_stopped
@@ -384,7 +384,7 @@ class ProjectDefinitionTest {
     var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
     assertNotNull(config.agent().notifications());
-    assertEquals("https://ntfy.sh/singlr-test", config.agent().notifications().url());
+    assertEquals("https://203.0.113.1/singlr-test", config.agent().notifications().url());
     assertEquals(2, config.agent().notifications().events().size());
   }
 

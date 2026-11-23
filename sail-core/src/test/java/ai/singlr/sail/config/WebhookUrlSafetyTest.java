@@ -10,13 +10,30 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class WebhookUrlSafetyTest {
 
   @Test
   void requireSafeAcceptsPublicHttps() {
-    assertDoesNotThrow(() -> WebhookUrlSafety.requireSafe("https://ntfy.sh/topic"));
+    assertDoesNotThrow(
+        () -> WebhookUrlSafety.requireSafe("https://ntfy.sh/topic", KnownHosts.PUBLIC));
+  }
+
+  /**
+   * A public-looking name is judged by where it resolves: one that resolves to a private address,
+   * as a rebound name would, is refused as the address itself is.
+   */
+  @Test
+  void requireSafeRejectsANameThatResolvesToAPrivateAddress() {
+    var rebound = new KnownHosts(Map.of("hooks.example.com", "169.254.169.254"));
+
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> WebhookUrlSafety.requireSafe("https://hooks.example.com/hook", rebound));
+    assertTrue(ex.getMessage().contains("Private"));
   }
 
   @Test
@@ -24,14 +41,15 @@ class WebhookUrlSafetyTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> WebhookUrlSafety.requireSafe("file:///etc/passwd"));
+            () -> WebhookUrlSafety.requireSafe("file:///etc/passwd", KnownHosts.PUBLIC));
     assertTrue(ex.getMessage().contains("scheme"));
   }
 
   @Test
   void requireSafeRejectsMissingHost() {
     assertThrows(
-        IllegalArgumentException.class, () -> WebhookUrlSafety.requireSafe("https:///nohost"));
+        IllegalArgumentException.class,
+        () -> WebhookUrlSafety.requireSafe("https:///nohost", KnownHosts.PUBLIC));
   }
 
   @Test
@@ -39,7 +57,7 @@ class WebhookUrlSafetyTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> WebhookUrlSafety.requireSafe("http://10.1.2.3/hook"));
+            () -> WebhookUrlSafety.requireSafe("http://10.1.2.3/hook", KnownHosts.PUBLIC));
     assertTrue(ex.getMessage().contains("Private"));
   }
 
@@ -88,6 +106,6 @@ class WebhookUrlSafetyTest {
 
   @Test
   void isPrivateHostTreatsUnresolvableAsPrivate() {
-    assertTrue(WebhookUrlSafety.isPrivateHost("no-such-host.invalid"));
+    assertTrue(WebhookUrlSafety.isPrivateHost("no-such-host.invalid", KnownHosts.PUBLIC));
   }
 }

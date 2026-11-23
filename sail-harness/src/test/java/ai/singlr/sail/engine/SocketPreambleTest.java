@@ -15,7 +15,6 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -78,17 +77,9 @@ class SocketPreambleTest {
             + "printf 'the body' | sail_curl --silent -X POST --data-binary @- http://sail/x\n";
     Files.writeString(home.resolve("cred"), CREDENTIAL);
 
-    var process =
-        new ProcessBuilder(shell, "-c", script)
-            .directory(home.toFile())
-            .redirectErrorStream(true)
-            .redirectOutput(home.resolve("out").toFile());
-    process.environment().put("HOME", home.toString());
-    process.environment().put("PATH", bin + ":/usr/bin:/bin");
-    var ran = process.start();
-    assertTrue(ran.waitFor(30, TimeUnit.SECONDS));
+    var ran = run(shell, script, bin);
 
-    assertEquals(0, ran.exitValue(), Files.readString(home.resolve("out")));
+    assertEquals(0, ran.exit(), ran.stdout());
     var argv = Files.readString(home.resolve("curl.argv"));
     assertFalse(argv.contains(CREDENTIAL), argv);
     assertTrue(argv.contains("--config /dev/fd/3"), argv);
@@ -109,20 +100,19 @@ class SocketPreambleTest {
             + SocketPreamble.credentialCurl()
             + "sail_curl --silent http://sail/x; echo \"rc=$?\"\n";
 
+    var ran = run(shell, script, bin);
+
+    assertTrue(ran.stdout().contains("rc=2"), ran.stdout());
+    assertFalse(Files.exists(home.resolve("curl.argv")), "curl never ran");
+  }
+
+  /** {@code script} run by {@code shell} in {@code home}, {@code bin} first on its path. */
+  private Child.Ended run(String shell, String script, Path bin) throws Exception {
     var process =
-        new ProcessBuilder(shell, "-c", script)
-            .directory(home.toFile())
-            .redirectErrorStream(true)
-            .redirectOutput(home.resolve("out").toFile());
+        new ProcessBuilder(shell, "-c", script).directory(home.toFile()).redirectErrorStream(true);
     process.environment().put("HOME", home.toString());
     process.environment().put("PATH", bin + ":/usr/bin:/bin");
-    var ran = process.start();
-    assertTrue(ran.waitFor(30, TimeUnit.SECONDS));
-
-    assertTrue(
-        Files.readString(home.resolve("out")).contains("rc=2"),
-        Files.readString(home.resolve("out")));
-    assertFalse(Files.exists(home.resolve("curl.argv")), "curl never ran");
+    return Child.run(process);
   }
 
   private static void executable(Path path, String content) throws IOException {

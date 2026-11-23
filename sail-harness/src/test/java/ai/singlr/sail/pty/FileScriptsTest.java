@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.pty.PtyMessage.FileEntry;
 import ai.singlr.sail.pty.PtyMessage.FileKind;
 import java.io.IOException;
@@ -304,7 +305,7 @@ class FileScriptsTest {
     var unreadable = Files.writeString(home.resolve("key"), "k");
     Files.setPosixFilePermissions(unreadable, PosixFilePermissions.fromString("-w-------"));
     var pipe = home.resolve("pipe");
-    assertEquals(0, new ProcessBuilder("mkfifo", pipe.toString()).start().waitFor());
+    assertEquals(0, Child.run(new ProcessBuilder("mkfifo", pipe.toString())).exit());
 
     assertEquals(FileScripts.NOT_PERMITTED, list(locked).status(), "an unreadable folder");
     assertEquals(FileScripts.NOT_PERMITTED, list(shut).status(), "a folder it may not enter");
@@ -412,20 +413,20 @@ class FileScriptsTest {
   }
 
   /** {@code name} under {@code folder}, made by the shell, since Java names files as UTF-8. */
-  private static String shellMade(Path folder, byte[] name) throws Exception {
+  static String shellMade(Path folder, byte[] name) throws Exception {
     var octal = new StringBuilder();
     for (var b : name) {
       octal.append(String.format("\\%03o", b & 0xff));
     }
     var made =
-        new ProcessBuilder(
+        Child.run(
+            new ProcessBuilder(
                 "sh",
                 "-c",
                 "printf 'body' > \"$1/$(printf '" + octal + "')\"",
                 "sh",
-                folder.toString())
-            .start();
-    assertEquals(0, made.waitFor());
+                folder.toString()));
+    assertEquals(0, made.exit(), made.stderr());
     return folder + "/" + FileNames.decode(name);
   }
 
@@ -459,14 +460,14 @@ class FileScriptsTest {
     watch.onlyBeats(1);
     assertEquals(
         0,
-        new ProcessBuilder(
-                "sh",
-                "-c",
-                "for f in \"$1\"/bad?n; do printf more >> \"$f\"; done",
-                "sh",
-                src.toString())
-            .start()
-            .waitFor());
+        Child.run(
+                new ProcessBuilder(
+                    "sh",
+                    "-c",
+                    "for f in \"$1\"/bad?n; do printf more >> \"$f\"; done",
+                    "sh",
+                    src.toString()))
+            .exit());
     assertEquals(List.of(path), watch.changed(), "the changed name, as its bytes");
   }
 

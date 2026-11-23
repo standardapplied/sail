@@ -182,10 +182,7 @@ class BlobStoreTest {
         assertEquals(0, child.exitValue());
         assertEquals(5, collecting.get(5, TimeUnit.SECONDS));
       } finally {
-        if (child != null) {
-          child.destroyForcibly();
-          child.waitFor();
-        }
+        end(child);
       }
     }
   }
@@ -218,11 +215,17 @@ class BlobStoreTest {
         assertEquals(0, child.exitValue());
         assertFalse(blobs.has(orphan));
       } finally {
-        if (child != null) {
-          child.destroyForcibly();
-          child.waitFor();
-        }
+        end(child);
       }
+    }
+  }
+
+  /** Ends {@code child}, if it started, and closes the pipes this test spoke to it through. */
+  private static void end(Process child) throws Exception {
+    if (child != null) {
+      child.destroyForcibly().waitFor();
+      child.getOutputStream().close();
+      child.getInputStream().close();
     }
   }
 

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.Child;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.lang.foreign.FunctionDescriptor;
@@ -92,10 +93,9 @@ class PtyTest {
   }
 
   private static String ps(long pid) throws Exception {
-    var ps = new ProcessBuilder("ps", "-o", "stat=", "-p", Long.toString(pid)).start();
-    var out = new String(ps.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
-    exitOf(ps);
-    return out;
+    return Child.run(new ProcessBuilder("ps", "-o", "stat=", "-p", Long.toString(pid)))
+        .stdout()
+        .strip();
   }
 
   @Test
@@ -191,24 +191,18 @@ class PtyTest {
 
   /** What {@code host}'s {@code main}, run in a JVM of its own with {@code dir}, says. */
   static String said(Class<?> host, Path dir) throws Exception {
-    var process =
-        new ProcessBuilder(
-                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                "--enable-native-access=ALL-UNNAMED",
-                "-cp",
-                System.getProperty("java.class.path"),
-                host.getName(),
-                dir.toString())
-            .redirectErrorStream(true)
-            .start();
-    var finished = process.waitFor(60, TimeUnit.SECONDS);
-    if (!finished) {
-      process.destroyForcibly().waitFor();
-    }
-    var said = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertTrue(finished, "the host never finished: " + said);
-    assertEquals(0, process.exitValue(), said);
-    return said;
+    var ran =
+        Child.run(
+            new ProcessBuilder(
+                    Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                    "--enable-native-access=ALL-UNNAMED",
+                    "-cp",
+                    System.getProperty("java.class.path"),
+                    host.getName(),
+                    dir.toString())
+                .redirectErrorStream(true));
+    assertEquals(0, ran.exit(), ran.stdout());
+    return ran.stdout();
   }
 
   @Test

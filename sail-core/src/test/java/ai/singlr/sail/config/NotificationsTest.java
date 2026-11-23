@@ -20,8 +20,7 @@ class NotificationsTest {
   @Test
   void fromMapParsesUrlAndEvents() {
     var n =
-        Notifications.fromMap(
-            Map.of("url", "https://ntfy.sh/test", "events", List.of("agent_session_stopped")));
+        parsed(Map.of("url", "https://ntfy.sh/test", "events", List.of("agent_session_stopped")));
 
     assertEquals("https://ntfy.sh/test", n.url());
     assertEquals(List.of("agent_session_stopped"), n.events());
@@ -33,13 +32,13 @@ class NotificationsTest {
 
     assertEquals(new Notifications("https://ntfy.sh/sail", null), all);
     assertTrue(all.shouldNotify("agent_session_stopped"));
-    assertEquals(all, Notifications.fromMap(all.toMap()));
+    assertEquals(all, parsed(all.toMap()));
   }
 
   @Test
   void eventsListIsImmutable() {
     var mutable = new java.util.ArrayList<String>(List.of("agent_session_stopped"));
-    var n = Notifications.fromMap(Map.of("url", "https://ntfy.sh/test", "events", mutable));
+    var n = parsed(Map.of("url", "https://ntfy.sh/test", "events", mutable));
 
     assertThrows(UnsupportedOperationException.class, () -> n.events().add("agent_stop_nudged"));
     mutable.add("agent_stop_nudged");
@@ -51,9 +50,7 @@ class NotificationsTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                Notifications.fromMap(
-                    Map.of("url", "https://ntfy.sh/test", "events", List.of("bad_event"))));
+            () -> parsed(Map.of("url", "https://ntfy.sh/test", "events", List.of("bad_event"))));
 
     assertTrue(ex.getMessage().contains("Unknown notification event"));
     assertTrue(ex.getMessage().contains("bad_event"));
@@ -61,9 +58,7 @@ class NotificationsTest {
 
   @Test
   void fromMapAcceptsTheStopNudgeEvent() {
-    var n =
-        Notifications.fromMap(
-            Map.of("url", "https://ntfy.sh/test", "events", List.of("agent_stop_nudged")));
+    var n = parsed(Map.of("url", "https://ntfy.sh/test", "events", List.of("agent_stop_nudged")));
 
     assertTrue(n.shouldNotify("agent_stop_nudged"));
     assertFalse(n.shouldNotify("agent_session_stopped"));
@@ -71,15 +66,13 @@ class NotificationsTest {
 
   @Test
   void fromMapRequiresUrl() {
-    assertThrows(
-        IllegalArgumentException.class, () -> Notifications.fromMap(Map.of("events", List.of())));
+    assertThrows(IllegalArgumentException.class, () -> parsed(Map.of("events", List.of())));
   }
 
   @Test
   void fromMapRejectsBlankUrl() {
     assertThrows(
-        IllegalArgumentException.class,
-        () -> Notifications.fromMap(Map.of("url", "  ", "events", List.of())));
+        IllegalArgumentException.class, () -> parsed(Map.of("url", "  ", "events", List.of())));
   }
 
   @Test
@@ -89,7 +82,7 @@ class NotificationsTest {
             "https://hooks.slack.com/services/T/B/x",
             List.of("guardrail_triggered", "agent_session_completed"));
     var map = original.toMap();
-    var restored = Notifications.fromMap(map);
+    var restored = parsed(map);
 
     assertEquals(original.url(), restored.url());
     assertEquals(original.events(), restored.events());
@@ -135,7 +128,7 @@ class NotificationsTest {
   void fromMapAcceptsNewBusEventNames() {
     assertDoesNotThrow(
         () ->
-            Notifications.fromMap(
+            parsed(
                 Map.of(
                     "url",
                     "https://ntfy.sh/test",
@@ -147,8 +140,7 @@ class NotificationsTest {
   void fromMapRejectsFileScheme() {
     var ex =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> Notifications.fromMap(Map.of("url", "file:///etc/passwd")));
+            IllegalArgumentException.class, () -> parsed(Map.of("url", "file:///etc/passwd")));
     assertTrue(ex.getMessage().contains("scheme"));
   }
 
@@ -156,8 +148,7 @@ class NotificationsTest {
   void fromMapRejectsFtpScheme() {
     var ex =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> Notifications.fromMap(Map.of("url", "ftp://evil.com/data")));
+            IllegalArgumentException.class, () -> parsed(Map.of("url", "ftp://evil.com/data")));
     assertTrue(ex.getMessage().contains("scheme"));
   }
 
@@ -166,7 +157,7 @@ class NotificationsTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> Notifications.fromMap(Map.of("url", "http://localhost:8080/admin")));
+            () -> parsed(Map.of("url", "http://localhost:8080/admin")));
     assertTrue(ex.getMessage().contains("Private"));
   }
 
@@ -175,7 +166,7 @@ class NotificationsTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> Notifications.fromMap(Map.of("url", "http://127.0.0.1:9090/hook")));
+            () -> parsed(Map.of("url", "http://127.0.0.1:9090/hook")));
     assertTrue(ex.getMessage().contains("Private"));
   }
 
@@ -183,8 +174,7 @@ class NotificationsTest {
   void fromMapRejectsPrivate10Network() {
     var ex =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> Notifications.fromMap(Map.of("url", "http://10.0.0.1/hook")));
+            IllegalArgumentException.class, () -> parsed(Map.of("url", "http://10.0.0.1/hook")));
     assertTrue(ex.getMessage().contains("Private"));
   }
 
@@ -192,8 +182,7 @@ class NotificationsTest {
   void fromMapRejectsPrivate172Network() {
     var ex =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> Notifications.fromMap(Map.of("url", "http://172.16.0.1/hook")));
+            IllegalArgumentException.class, () -> parsed(Map.of("url", "http://172.16.0.1/hook")));
     assertTrue(ex.getMessage().contains("Private"));
   }
 
@@ -201,8 +190,7 @@ class NotificationsTest {
   void fromMapRejectsPrivate192Network() {
     var ex =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> Notifications.fromMap(Map.of("url", "http://192.168.1.1/hook")));
+            IllegalArgumentException.class, () -> parsed(Map.of("url", "http://192.168.1.1/hook")));
     assertTrue(ex.getMessage().contains("Private"));
   }
 
@@ -211,34 +199,31 @@ class NotificationsTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> Notifications.fromMap(Map.of("url", "http://169.254.169.254/latest/meta-data/")));
+            () -> parsed(Map.of("url", "http://169.254.169.254/latest/meta-data/")));
     assertTrue(ex.getMessage().contains("Private"));
   }
 
   @Test
   void fromMapAcceptsPublicHttpsUrl() {
-    assertDoesNotThrow(
-        () -> Notifications.fromMap(Map.of("url", "https://hooks.slack.com/services/T/B/x")));
+    assertDoesNotThrow(() -> parsed(Map.of("url", "https://hooks.slack.com/services/T/B/x")));
   }
 
   @Test
   void fromMapAcceptsPublicNtfyUrl() {
-    assertDoesNotThrow(() -> Notifications.fromMap(Map.of("url", "https://ntfy.sh/my-topic")));
+    assertDoesNotThrow(() -> parsed(Map.of("url", "https://ntfy.sh/my-topic")));
   }
 
   @Test
   void fromMapAcceptsPublicDiscordWebhook() {
     assertDoesNotThrow(
-        () ->
-            Notifications.fromMap(Map.of("url", "https://discord.com/api/webhooks/12345/abcdef")));
+        () -> parsed(Map.of("url", "https://discord.com/api/webhooks/12345/abcdef")));
   }
 
   @Test
   void fromMapRejectsIpv6UniqueLocal_fd() {
     var ex =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> Notifications.fromMap(Map.of("url", "http://[fd00::1]/hook")));
+            IllegalArgumentException.class, () -> parsed(Map.of("url", "http://[fd00::1]/hook")));
     assertTrue(ex.getMessage().contains("Private"));
   }
 
@@ -246,8 +231,7 @@ class NotificationsTest {
   void fromMapRejectsIpv6UniqueLocal_fc() {
     var ex =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> Notifications.fromMap(Map.of("url", "http://[fc00::1]/hook")));
+            IllegalArgumentException.class, () -> parsed(Map.of("url", "http://[fc00::1]/hook")));
     assertTrue(ex.getMessage().contains("Private"));
   }
 
@@ -255,14 +239,13 @@ class NotificationsTest {
   void fromMapRejectsIpv6LinkLocal() {
     var ex =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> Notifications.fromMap(Map.of("url", "http://[fe80::1]/hook")));
+            IllegalArgumentException.class, () -> parsed(Map.of("url", "http://[fe80::1]/hook")));
     assertTrue(ex.getMessage().contains("Private"));
   }
 
   @Test
   void fromMapParsesSlackChannel() {
-    var n = Notifications.fromMap(Map.of("slack", Map.of("channel", "#sail-activity")));
+    var n = parsed(Map.of("slack", Map.of("channel", "#sail-activity")));
 
     assertEquals("#sail-activity", n.slack().channel());
     assertEquals(null, n.url());
@@ -270,9 +253,7 @@ class NotificationsTest {
 
   @Test
   void fromMapParsesUrlAndSlackTogether() {
-    var n =
-        Notifications.fromMap(
-            Map.of("url", "https://ntfy.sh/test", "slack", Map.of("channel", "#ops")));
+    var n = parsed(Map.of("url", "https://ntfy.sh/test", "slack", Map.of("channel", "#ops")));
 
     assertEquals("https://ntfy.sh/test", n.url());
     assertEquals("#ops", n.slack().channel());
@@ -281,32 +262,27 @@ class NotificationsTest {
   @Test
   void fromMapRequiresUrlOrSlack() {
     var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> Notifications.fromMap(Map.of("events", List.of())));
+        assertThrows(IllegalArgumentException.class, () -> parsed(Map.of("events", List.of())));
     assertTrue(ex.getMessage().contains("url or a slack block"));
   }
 
   @Test
   void fromMapRejectsSlackWithoutChannel() {
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class, () -> Notifications.fromMap(Map.of("slack", Map.of())));
+    var ex = assertThrows(IllegalArgumentException.class, () -> parsed(Map.of("slack", Map.of())));
     assertTrue(ex.getMessage().contains("notifications.slack.channel"));
   }
 
   @Test
   void fromMapRejectsSlackWithBlankChannel() {
     assertThrows(
-        IllegalArgumentException.class,
-        () -> Notifications.fromMap(Map.of("slack", Map.of("channel", "  "))));
+        IllegalArgumentException.class, () -> parsed(Map.of("slack", Map.of("channel", "  "))));
   }
 
   @Test
   void toMapRoundTripsSlack() {
     var original = new Notifications(null, null, new SlackNotifications("#sail-activity"));
     var map = original.toMap();
-    var restored = Notifications.fromMap(map);
+    var restored = parsed(map);
 
     assertFalse(map.containsKey("url"));
     assertEquals("#sail-activity", restored.slack().channel());
@@ -330,8 +306,13 @@ class NotificationsTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                Notifications.fromMap(
+                parsed(
                     Map.of("url", "https://this-host-definitely-does-not-exist-xyz.invalid/hook")));
     assertTrue(ex.getMessage().contains("Private"));
+  }
+
+  /** {@code map} parsed with its webhook's host resolved by the tests' own table, never by DNS. */
+  private static Notifications parsed(Map<String, Object> map) {
+    return Notifications.fromMap(map, KnownHosts.PUBLIC);
   }
 }

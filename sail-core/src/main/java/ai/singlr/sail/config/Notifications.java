@@ -44,6 +44,11 @@ public record Notifications(String url, List<String> events, SlackNotifications 
           "agent_stop_nudged");
 
   static Notifications fromMap(Map<String, Object> map) {
+    return fromMap(map, WebhookUrlSafety.SYSTEM);
+  }
+
+  /** As {@link #fromMap(Map)}, a webhook's host resolved by {@code resolver}. */
+  static Notifications fromMap(Map<String, Object> map, WebhookUrlSafety.Resolver resolver) {
     Fields.only(map, "agent.notifications", List.of("url", "events", "slack"));
     var url = Fields.text(map, "url", "agent.notifications.url");
     var slackRaw = Fields.map(map, "slack", "agent.notifications.slack");
@@ -53,7 +58,7 @@ public record Notifications(String url, List<String> events, SlackNotifications 
           "agent.notifications requires a webhook url or a slack block.");
     }
     if (Strings.isNotBlank(url)) {
-      WebhookUrlSafety.requireSafe(url);
+      WebhookUrlSafety.requireSafe(url, resolver);
     } else {
       url = null;
     }

@@ -26,7 +26,6 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -72,15 +71,8 @@ class SessionLoginTest {
     process.environment().put("CODEX_HOME", dir.resolve("codex").toString());
     process.environment().put("PATH", dir.resolve("bin") + ":/usr/bin:/bin");
     Files.createDirectories(dir.resolve("home"));
-    var started = process.start();
-    try (var stdin = started.getOutputStream()) {
-      stdin.write(input.getBytes(StandardCharsets.UTF_8));
-    } catch (IOException notTaken) {
-      var unused = notTaken;
-    }
-    var output = new String(started.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertTrue(started.waitFor(30, TimeUnit.SECONDS), "the script ended");
-    return new Ran(started.exitValue(), output);
+    var ran = Child.run(process, input, Child.PATIENCE);
+    return new Ran(ran.exit(), ran.stdout());
   }
 
   private Ran hand(String file, String lines) throws Exception {

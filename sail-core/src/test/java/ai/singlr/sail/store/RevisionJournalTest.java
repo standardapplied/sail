@@ -21,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -50,6 +51,11 @@ class RevisionJournalTest {
         "CREATE TABLE widgets (id TEXT PRIMARY KEY, value TEXT, updated_by TEXT, rev TEXT,"
             + " base_rev TEXT)");
     journal = new RevisionJournal(db, new ChangeLog(db), new WidgetSchema(db), () -> ALLOW);
+  }
+
+  @AfterEach
+  void tearDown() {
+    db.close();
   }
 
   private void createWidget(String id, String value, String author) {

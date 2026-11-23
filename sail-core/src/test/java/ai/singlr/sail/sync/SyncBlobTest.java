@@ -177,8 +177,9 @@ class SyncBlobTest {
         assertTrue(
             blobs.has(new FileStore(ingestDb).find("project", "file").orElseThrow().contentHash()));
       } finally {
-        viewer.destroyForcibly();
-        viewer.waitFor();
+        viewer.destroyForcibly().waitFor();
+        viewer.getOutputStream().close();
+        viewer.getInputStream().close();
       }
       assertConverged(main, node);
     }

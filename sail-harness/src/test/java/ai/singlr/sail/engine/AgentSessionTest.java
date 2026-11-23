@@ -50,10 +50,10 @@ class AgentSessionTest {
 
     for (var file : List.of(mine, later)) {
       var forgot =
-          new ProcessBuilder(
-                  "bash", "-c", AgentSession.FORGET_PID_SCRIPT, "bash", file.toString(), "3472")
-              .start();
-      assertEquals(0, forgot.waitFor());
+          Child.run(
+              new ProcessBuilder(
+                  "bash", "-c", AgentSession.FORGET_PID_SCRIPT, "bash", file.toString(), "3472"));
+      assertEquals(0, forgot.exit(), forgot.stderr());
     }
 
     assertFalse(Files.exists(mine), "the ended terminal's file is gone");
@@ -587,12 +587,20 @@ class AgentSessionTest {
   private final List<Process> started = new ArrayList<>();
 
   @AfterEach
-  void endEveryProcess() {
-    started.forEach(Process::destroyForcibly);
+  void endEveryProcess() throws Exception {
+    for (var process : started) {
+      process.destroyForcibly().waitFor();
+      process.getInputStream().close();
+    }
   }
 
+  /** {@code command} running, its output the one pipe it is given, ended once the test has run. */
   private Process process(String... command) throws IOException {
-    var process = new ProcessBuilder(command).start();
+    var process =
+        new ProcessBuilder(command)
+            .redirectInput(Child.NO_INPUT)
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start();
     started.add(process);
     return process;
   }
@@ -862,12 +870,11 @@ class AgentSessionTest {
     }
 
     var tidy =
-        new ProcessBuilder(
-                "sh", "-c", AgentSession.REMOVE_LAUNCH_FILES, "sh", runs.toString(), "live")
-            .start();
-    assertTrue(tidy.waitFor(30, TimeUnit.SECONDS));
+        Child.run(
+            new ProcessBuilder(
+                "sh", "-c", AgentSession.REMOVE_LAUNCH_FILES, "sh", runs.toString(), "live"));
 
-    assertEquals(0, tidy.exitValue());
+    assertEquals(0, tidy.exit(), tidy.stderr());
     assertTrue(Files.exists(runs.resolve("live/launch.env")));
     assertFalse(Files.exists(runs.resolve("dead/launch.env")));
     assertTrue(Files.exists(runs.resolve("fresh/launch.env")));
@@ -1161,11 +1168,10 @@ class AgentSessionTest {
     Files.setPosixFilePermissions(found, PosixFilePermissions.fromString("rwxr-xr-x"));
     for (var task : List.of(home.resolve("runs/r1/task.md"), home.resolve("runs/r2/task.md"))) {
       var ran =
-          new ProcessBuilder("bash", "-c", script, "bash", "do it", task.toString())
-              .redirectErrorStream(true)
-              .start();
-      assertTrue(ran.waitFor(30, TimeUnit.SECONDS));
-      assertEquals(0, ran.exitValue(), new String(ran.getInputStream().readAllBytes()));
+          Child.run(
+              new ProcessBuilder("bash", "-c", script, "bash", "do it", task.toString())
+                  .redirectErrorStream(true));
+      assertEquals(0, ran.exit(), ran.stdout());
       assertEquals(
           "rwx------",
           PosixFilePermissions.toString(Files.getPosixFilePermissions(task.getParent())));

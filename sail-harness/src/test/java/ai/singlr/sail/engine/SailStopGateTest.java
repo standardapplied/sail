@@ -19,7 +19,6 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -535,14 +534,8 @@ class SailStopGateTest {
     if (pathPrefix != null) {
       env.put("PATH", pathPrefix + ":" + env.getOrDefault("PATH", "/usr/bin:/bin"));
     }
-    var process = pb.start();
-    try (var in = process.getOutputStream()) {
-      in.write(stdin.getBytes(StandardCharsets.UTF_8));
-    }
-    var stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    var stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertTrue(process.waitFor(30, TimeUnit.SECONDS), "the gate must finish well inside its 15s");
-    return new GateResult(process.exitValue(), stdout, stderr);
+    var ran = Child.run(pb, stdin, Child.PATIENCE);
+    return new GateResult(ran.exit(), ran.stdout(), ran.stderr());
   }
 
   private Path repo(String name) throws Exception {
@@ -578,10 +571,8 @@ class SailStopGateTest {
     var pb = new ProcessBuilder(cmd);
     pb.environment().put("HOME", home.toString());
     pb.environment().put("GIT_CONFIG_NOSYSTEM", "1");
-    var process = pb.start();
-    var stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertTrue(process.waitFor(30, TimeUnit.SECONDS));
-    assertEquals(0, process.exitValue(), "git " + String.join(" ", args) + " failed: " + stderr);
+    var ran = Child.run(pb);
+    assertEquals(0, ran.exit(), "git " + String.join(" ", args) + " failed: " + ran.stderr());
   }
 
   private Path fakeGh(String stderrLine, int exitCode) throws Exception {

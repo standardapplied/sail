@@ -79,7 +79,7 @@ class ProjectDefinitionJsonTest {
                 "config": {"effort": "high"},
                 "guardrails": {"max_duration": "2h", "max_idle": "10m", "action": "snapshot-and-stop"},
                 "notifications": {
-                  "url": "https://ntfy.sh/acme",
+                  "url": "https://203.0.113.1/acme",
                   "events": ["guardrail_triggered"],
                   "slack": {"channel": "#acme"}
                 },

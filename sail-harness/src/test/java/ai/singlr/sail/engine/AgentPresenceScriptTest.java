@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -30,6 +31,15 @@ class AgentPresenceScriptTest {
     }
   }
 
+  /** {@code command} running with no pipe to this test: only its pid is asked of it. */
+  private static Process started(String... command) throws IOException {
+    return new ProcessBuilder(command)
+        .redirectInput(Child.NO_INPUT)
+        .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+        .redirectError(ProcessBuilder.Redirect.DISCARD)
+        .start();
+  }
+
   private AgentUnit unitWithPidFile(String content) throws Exception {
     var pidFile = Files.writeString(dir.resolve("agent.pid"), content);
     return new AgentUnit("", "agent.log", pidFile.toString(), "agent-session.json", "task.txt");
@@ -41,7 +51,7 @@ class AgentPresenceScriptTest {
 
   @Test
   void aPidFileNamingALiveProcessIsARunningAgent() throws Exception {
-    agent = new ProcessBuilder("sleep", "300").start();
+    agent = started("sleep", "300");
 
     assertInstanceOf(
         AgentSession.Presence.Running.class, presenceOf(unitWithPidFile(agent.pid() + "\n")));
@@ -49,7 +59,7 @@ class AgentPresenceScriptTest {
 
   @Test
   void aPidFileNamingAProcessThatEndedIsAnAgentGone() throws Exception {
-    agent = new ProcessBuilder("true").start();
+    agent = started("true");
     agent.waitFor();
 
     assertInstanceOf(
@@ -108,7 +118,7 @@ class AgentPresenceScriptTest {
 
   @Test
   void aUnitItsManagerNamesALiveProcessForIsRunning() throws Exception {
-    agent = new ProcessBuilder("sleep", "300").start();
+    agent = started("sleep", "300");
     var live = managerThat("echo " + agent.pid() + "\n");
 
     assertInstanceOf(
@@ -118,7 +128,7 @@ class AgentPresenceScriptTest {
 
   @Test
   void aPidFileIsReadAsItsStatusReadsItSoThePidZeroAndAPaddedPidAreNotMisread() throws Exception {
-    agent = new ProcessBuilder("true").start();
+    agent = started("true");
     agent.waitFor();
     var silent = managerThat("exit 1\n");
     var padded =
