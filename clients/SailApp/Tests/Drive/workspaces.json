@@ -673,6 +673,7 @@
   {"name": "a-the-old-name-gone", "filesRowGone": "notes.md"},
   {"name": "a-m21-drag-it-out", "filesDropInto": ["berth.md", ""]},
   {"name": "a-m21-moved", "fileHolds": ["berth.md", ""]},
+  {"name": "a-m21-out-of-pier-by-the-watch", "filesRowGone": "pier/berth.md"},
   {"name": "a-m21-chosen-at-the-root", "filesChosen": "berth.md"},
   {"name": "a-m45-reveal", "filesAct": ["berth.md", "Reveal in Terminal"]},
   {"name": "a-m45-pasted-and-nothing-run", "terminalTyped": "/home/dev/workspace/berth.md"},

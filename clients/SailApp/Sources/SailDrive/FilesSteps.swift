@@ -332,7 +332,8 @@ extension Driver {
         }
         if let name = step.filesRowShown ?? step.filesRowGone {
             let shown = step.filesRowShown != nil
-            let there = await waitForState(step.seconds ?? 10) { (self.filesShown?.rows.contains { $0.name == name } == true) == shown }
+            let path = FileName(Self.filesPath(name)), named = { (row: FileTree.Row) in name.contains("/") ? row.path == path : row.name == name }
+            let there = await waitForState(step.seconds ?? 10) { (self.filesShown?.rows.contains(where: named) == true) == shown }
             return (there, "the tree's rows: \(filesShown?.rows.prefix(12).map(\.name) ?? [])")
         }
         if let words = step.terminalSays {
