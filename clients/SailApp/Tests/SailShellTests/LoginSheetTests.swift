@@ -44,10 +44,12 @@ import Testing
         _ = storing.store(pasted, clipboard: clipboard)
         var named = try model(logins: "logins-no-default", agents: "workspace-agents-dock-no-default")
         named.typed(holdsSomething: true)
+        var naming = named
+        naming.changeName()
         var refusedName = named
         _ = refusedName.store(pasted, clipboard: clipboard)
         refusedName.answered(try answer("refusal-invalid-request-login-name"), clipboard: 1)
-        var shown: [(String, StoreLogin)] = [("empty", try model()), ("filled", filled), ("storing", storing), ("the name asked", named), ("the name refused", refusedName)]
+        var shown: [(String, StoreLogin)] = [("empty", try model()), ("filled", filled), ("storing", storing), ("the name asked", named), ("naming", naming), ("the name refused", refusedName)]
         for golden in ["refusal-invalid-request-login-lines", "refusal-invalid-request-login-characters", "refusal-invalid-request-login-long", "refusal-invalid-request-login-empty"] {
             var refused = storing
             refused.answered(try answer(golden), clipboard: 1)
@@ -82,7 +84,8 @@ import Testing
 
     /// Each stage at 420 pt and at the least window's width, left to right and right to left: as
     /// wide as asked, nothing out of reach, every word whole; one accent fill, Store, on or off;
-    /// no tint, no grey; the error ink only on a refusal; a refusal under the field it is about.
+    /// no tint, no grey; the error ink only on a refusal; a refusal under the field it is about; the
+    /// key's field and an editable name never in the sheet together.
     @Test(arguments: [Look.light, .dark])
     func eachStageIsWholeInReachAndCalm(_ look: Look) throws {
         var faults: [String] = []
@@ -96,18 +99,25 @@ import Testing
                     if !near(content.frame.width, width) { faults.append("\(scene): \(content.frame.width) pt wide") }
                     faults += WorkspacesReachTests.outOfReach(in: content).map { "\(scene): \($0)" }
                     let count = CalmTests.Count(marks(in: content))
-                    let refused: Bool = if case .refused = model.stage { true } else { false }
-                    if count.fill != 1 || count.tint != 0 || count.neutral != 0 || (count.error > 0) != refused {
+                    let refused: String? = switch model.stage {
+                    case let .refused(said): said
+                    case let .naming(said): said
+                    default: nil
+                    }
+                    if count.fill != 1 || count.tint != 0 || count.neutral != 0 || (count.error > 0) != (refused != nil) {
                         faults.append("\(scene): \(count)")
                     }
-                    if case let .refused(said, under) = model.stage {
-                        let shown = under == .value ? sheet.field.error : sheet.name?.error
-                        let other = under == .value ? sheet.name?.error : sheet.field.error
-                        if shown != said || other != nil { faults.append("\(scene): the refusal is not under its field alone") }
+                    if let said = refused {
+                        let shown = sheet.field.superview == nil ? sheet.name?.error : sheet.field.error
+                        if shown != said { faults.append("\(scene): the refusal is not under its field") }
                     }
-                    let start = Double(sheet.store.alignmentRect(forFrame: sheet.store.frame).minX), end = Double(sheet.store.alignmentRect(forFrame: sheet.store.frame).maxX)
+                    if sheet.field.superview != nil, sheet.name?.superview != nil { faults.append("\(scene): the key and an editable name are shown together") }
+                    let naming: Bool = if case .naming = model.stage { true } else { false }
+                    if naming != (sheet.field.superview == nil) { faults.append("\(scene): the key's field is \(naming ? "shown while naming" : "missing")") }
+                    let primary = naming ? sheet.done : sheet.store
+                    let start = Double(primary.alignmentRect(forFrame: primary.frame).minX), end = Double(primary.alignmentRect(forFrame: primary.frame).maxX)
                     let wanted = rightToLeft ? start : width - end
-                    if abs(wanted - LoginSheet.footer.sides) > 0.5 { faults.append("\(scene): Store is \(wanted) pt from the trailing edge") }
+                    if abs(wanted - LoginSheet.footer.sides) > 0.5 { faults.append("\(scene): \(primary.title) is \(wanted) pt from the trailing edge") }
                 }
             }
         }
@@ -139,27 +149,35 @@ import Testing
         for (name, model) in try Self.stages() {
             let sheet = try Self.sheet(model)
             defer { sheet.orderOut(nil) }
-            let controls: [NSView] = [sheet.cancel, sheet.store, sheet.field.field] + [sheet.name?.field].compactMap(\.self)
+            let controls: [NSView] = ([sheet.cancel, sheet.store, sheet.done, sheet.field.field, sheet.name?.field, sheet.change] as [NSView?]).compactMap(\.self).filter { $0.window != nil && !$0.isHiddenOrHasHiddenAncestor }
             faults += controls.compactMap { WorkspacesReachTests.missesAClick($0).map { "\(name): \($0)" } }
         }
         #expect(faults.isEmpty, "\(faults.joined(separator: "\n"))")
     }
 
-    /// The keys start in the field; Tab goes field, name, Cancel, Store and round; Return in either
-    /// field stores, Store's key is Return and is shown, Escape cancels.
+    /// The keys start in the field; Tab goes field, Change, Cancel, Store and round; Change puts the
+    /// key away, its value with it, Tab then going name, Cancel, Done, Return in the name is Done
+    /// and the key comes back holding the keys; Return in the key stores, Store's key is Return,
+    /// Escape cancels.
     @Test func theKeysGoAsThePageSays() throws {
         let sheet = try Self.sheet(try Self.model(logins: "logins-no-default", agents: "workspace-agents-dock-no-default"))
         defer { sheet.orderOut(nil) }
-        let name = try #require(sheet.name)
-        #expect(sheet.initialFirstResponder === sheet.field.field)
-        #expect(sheet.field.field.nextKeyView === name.field && name.field.nextKeyView === sheet.cancel && sheet.cancel.nextKeyView === sheet.store && sheet.store.nextKeyView === sheet.field.field)
-        #expect(sheet.store.keyEquivalent == "\r" && sheet.cancel.keyEquivalent.isEmpty)
+        let name = try #require(sheet.name), change = try #require(sheet.change)
+        #expect(sheet.initialFirstResponder === sheet.field.field && name.superview == nil)
+        #expect(sheet.field.field.nextKeyView === change && change.nextKeyView === sheet.cancel && sheet.cancel.nextKeyView === sheet.store && sheet.store.nextKeyView === sheet.field.field)
+        #expect(sheet.store.keyEquivalent == "\r" && sheet.cancel.keyEquivalent.isEmpty && change.accessibilityLabel() == "Change name")
         sheet.send = { _ in .failure(.unreachable("not here")) }
         let editor = NSTextView()
-        sheet.field.field.stringValue = Self.pasted
-        sheet.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: sheet.field.field))
+        Self.paste(into: sheet)
+        try NewSessionPanelTests.press(change)
+        #expect(sheet.field.superview == nil && Self.cleared(sheet) && name.superview != nil && sheet.model.stage == .naming(refused: nil), "Change left the key in the sheet")
+        #expect(name.field.nextKeyView === sheet.cancel && sheet.cancel.nextKeyView === sheet.done && sheet.done.nextKeyView === name.field)
+        #expect(sheet.done.keyEquivalent == "\r" && sheet.store.keyEquivalent.isEmpty && sheet.store.isHidden && !sheet.done.isHidden)
         #expect(sheet.control(name.field, textView: editor, doCommandBy: #selector(NSResponder.insertNewline(_:))))
-        #expect(Self.cleared(sheet) && sheet.model.stage == .storing, "Return in the name did not store")
+        #expect(sheet.field.superview != nil && name.superview == nil && sheet.model.stage == .empty, "Return in the name was not Done")
+        Self.paste(into: sheet)
+        #expect(sheet.control(sheet.field.field, textView: editor, doCommandBy: #selector(NSResponder.insertNewline(_:))))
+        #expect(Self.cleared(sheet) && sheet.model.stage == .storing, "Return in the key did not store")
         var ended = 0
         sheet.onEnd = { ended += 1 }
         #expect(sheet.control(sheet.field.field, textView: editor, doCommandBy: #selector(NSResponder.cancelOperation(_:))))
@@ -308,22 +326,27 @@ extension LoginSheetTests {
         #expect(view.newSession.isOpen && !view.newSession.popover.stays && view.newSession.view.primary?.title == "Start and Sign In There")
     }
 
-    /// With a Claude Code login that is not the default, the name is asked, `work` suggested beside
-    /// the one they have, and the store names it; a name breaking the rule is refused under the
-    /// name, the key's field cleared.
+    /// With a Claude Code login that is not the default, `work` is suggested as words beside the one
+    /// they have, never in an editable field beside the key; Change names it, Done returns to the
+    /// key, and the store names it; a name breaking the rule names it again, the refusal under it,
+    /// the key's field put away and empty.
     @Test func theNameIsAskedWhereThePersonHasALoginOfTheHarness() async throws {
         let refused = try Exchange("refusal-invalid-request-login-name")
         let (_, window, server, sheet) = try await Self.asked(agents: "workspace-agents-dock-no-default", logins: "logins-no-default", stored: [refused])
         defer { window.orderOut(nil) }
         let name = try #require(sheet.name, "no name was asked of a person with a Claude Code login")
-        #expect(name.field.contentType == LoginSheet.notAUserName && !name.field.isAutomaticTextCompletionEnabled, "the name offers suggestions, or reads as a login form's user name")
-        #expect(name.field.stringValue == "work" && Driverless.words(sheet.contentView).contains("you already have “home”"))
+        #expect(name.field.contentType == LoginSheet.noSuggestion && !name.field.isAutomaticTextCompletionEnabled, "the name offers suggestions")
+        let said = Driverless.words(sheet.contentView)
+        #expect(name.superview == nil && said.range(of: #"Name\s+work\s"#, options: .regularExpression) != nil && said.contains("you already have “home”"), "\(said)")
+        try NewSessionPanelTests.press(sheet.change)
         name.field.stringValue = "Work"
         sheet.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: name.field))
+        try NewSessionPanelTests.press(sheet.done)
+        #expect(Driverless.words(sheet.contentView).range(of: #"Name\s+Work\s"#, options: .regularExpression) != nil && name.superview == nil)
         Self.paste(into: sheet)
         try NewSessionPanelTests.press(sheet.store)
         try #require(await RunnerTabTests.until { name.error != nil })
-        #expect(name.error == refused.said && sheet.field.error == nil && Self.cleared(sheet))
+        #expect(name.error == refused.said && name.superview != nil && sheet.field.superview == nil && Self.cleared(sheet))
         #expect(await server.requests.filter { $0.method == .put }.map(\.path) == ["/v1/logins/claude-code/Work"])
         sheet.withdraw()
     }

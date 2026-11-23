@@ -248,11 +248,14 @@ struct Step: Decodable {
     var loginSheetSays: [String]?
     /// The Store a Login sheet is as these facts say, within `seconds`: "closed", "Store on", "Store
     /// off", "Storing", "the field empty", "the field filled", "dots only", "the keys in the field",
-    /// "no name asked", "the name <name>", "the panel open behind", "refused: <sentence>", "the
+    /// "no name asked", "the name <name>", "naming", "no key field", "the keys in the name", "the panel open behind", "refused: <sentence>", "the
     /// name refused: <sentence>", "help: <the help line>", "over the panel" (the window server orders
     /// the sheet in front of it), "no suggestion window is showing" (none, AutoFill's included, in
     /// front of the sheet and over it).
     var loginSheetIs: [String]?
+    /// The button or link of this title in the Store a Login sheet, clicked with real mouse events;
+    /// the sheet stays.
+    var loginSheetClick: String?
     /// The pasteboard holds exactly this ("" for nothing), within `seconds`.
     var pasteboardHolds: String?
     /// This put on the pasteboard, as a copy in another app does.

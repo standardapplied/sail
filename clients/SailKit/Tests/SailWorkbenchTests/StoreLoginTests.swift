@@ -7,7 +7,7 @@ import Testing
 /// The Store a Login sheet's model and its request, read from the goldens the server recorded: the
 /// kind is the first whose how names no command, the name is `default` unless the person has a login
 /// of the harness, the store is one request holding the value in its body alone, each refusal is
-/// the server's sentence under the field it is about, and the clipboard is cleared only while it
+/// the server's sentence under the key or, for a name, the name named again, and the clipboard is cleared only while it
 /// still holds the value sent. The value is an obvious fake, never kept by the model.
 @Suite struct StoreLoginTests {
     static let pasted = "sk-ant-api03-store-login-tests-fake"
@@ -115,20 +115,37 @@ import Testing
 
     // MARK: The name
 
-    /// With no Claude Code login (a Codex one only), the name is `default` and not asked; with one
-    /// that is not the default, it is asked, `work` suggested, saying which they have; the next free
-    /// name when `work` is taken; and Store is off on an empty name.
+    /// With no Claude Code login (a Codex one only), the name is `default` and not asked, and Change
+    /// does nothing; with one that is not the default, `work` is suggested, saying which they have,
+    /// or the next free name when `work` is taken. Change names it with the key put away: Store off,
+    /// Done off on an empty name; Done returns to an empty key, the name kept, and the store names it.
     @Test func theNameIsDefaultUntilThePersonHasALoginOfTheHarness() throws {
-        let first = try Self.filled()
+        var first = try Self.filled()
         #expect(!first.asksName && first.name == "default" && first.taken.isEmpty && first.storable)
+        first.changeName()
+        #expect(first.stage == .filled, "a name not asked was named")
         var second = try Self.filled(logins: "logins-no-default")
         #expect(second.asksName && second.taken == ["home"] && second.name == "work" && second.already == "you already have “home”")
         #expect(StoreLogin.free(among: ["work", "work-2", "home"]) == "work-3" && StoreLogin.free(among: ["home"]) == "work")
+        second.named("ignored")
+        #expect(second.name == "work", "a name was typed while the key was asked")
+        second.changeName()
+        #expect(second.stage == .naming(refused: nil) && !second.storable && second.nameGiven)
+        second.typed(holdsSomething: true)
+        #expect(second.stage == .naming(refused: nil), "the key was typed while the name was named")
         second.named("")
-        #expect(!second.storable, "Store is on with no name")
+        second.doneNaming()
+        #expect(!second.nameGiven && second.stage == .naming(refused: nil), "Done left with no name")
         let unnamed = second.store(Self.pasted, clipboard: Self.elsewhere)
-        #expect(unnamed == nil && second.stage == .filled)
+        #expect(unnamed == nil, "a store went out while the name was named")
         second.named("personal")
+        second.doneNaming()
+        #expect(second.stage == .empty && second.name == "personal")
+        second.changeName()
+        second.changeName()
+        #expect(second.stage == .naming(refused: nil))
+        second.doneNaming()
+        second.typed(holdsSomething: true)
         let named = second.store(Self.pasted, clipboard: Self.elsewhere)
         let endpoint = try #require(named)
         #expect(endpoint.request.path == "/v1/logins/claude-code/personal")
@@ -167,31 +184,33 @@ import Testing
         #expect(idle.stage == .filled && idle.stored == nil, "an answer to no store was taken")
     }
 
-    static let refusals: [(golden: String, said: String, under: StoreLogin.Field)] = [
-        ("refusal-invalid-request-login-empty", "A login's value is empty: paste the key or token.", .value),
-        ("refusal-invalid-request-login-lines", "A login's value is one line: paste only the key or token.", .value),
-        ("refusal-invalid-request-login-long", "A login's value is at most 16 KiB.", .value),
-        ("refusal-invalid-request-login-characters", "A login's value is printable ASCII with no space, quote, backslash, $ or backtick.", .value),
-        ("refusal-invalid-request-login-name", "A login's name is 1 to 32 lowercase letters, digits and hyphens, starting with a letter or digit, such as work or personal.", .name),
+    static let refusals: [(golden: String, said: String, name: Bool)] = [
+        ("refusal-invalid-request-login-empty", "A login's value is empty: paste the key or token.", false),
+        ("refusal-invalid-request-login-lines", "A login's value is one line: paste only the key or token.", false),
+        ("refusal-invalid-request-login-long", "A login's value is at most 16 KiB.", false),
+        ("refusal-invalid-request-login-characters", "A login's value is printable ASCII with no space, quote, backslash, $ or backtick.", false),
+        ("refusal-invalid-request-login-name", "A login's name is 1 to 32 lowercase letters, digits and hyphens, starting with a letter or digit, such as work or personal.", true),
     ]
 
-    /// Each refusal the server gives is its sentence, under the value or, naming the name, under the
-    /// name; it stays until the field holds something again, or the name changes.
+    /// Each refusal the server gives is its sentence: the key's under the key, staying until the field
+    /// holds something again; a name's names the name again, its sentence under it until the name
+    /// changes, and Done returns to the key.
     @Test(arguments: refusals.indices)
     func aRefusalIsTheServersSentenceUnderItsField(_ index: Int) throws {
         let refusal = Self.refusals[index]
         var sheet = try Self.filled(logins: "logins-no-default")
         _ = sheet.store(Self.pasted, clipboard: Clipboard(count: 3, text: Self.pasted))
         sheet.answered(try Self.answer(refusal.golden), clipboard: 3)
-        #expect(sheet.stage == .refused(refusal.said, under: refusal.under) && !sheet.storable && sheet.stored == nil)
+        let wanted: StoreLogin.Stage = refusal.name ? .naming(refused: refusal.said) : .refused(refusal.said)
+        #expect(sheet.stage == wanted && !sheet.storable && sheet.stored == nil)
         sheet.typed(holdsSomething: false)
-        #expect(sheet.stage == .refused(refusal.said, under: refusal.under), "an empty field took the refusal away")
-        if refusal.under == .name {
-            sheet.named("work")
-            #expect(sheet.stage == .empty, "a new name kept the name's refusal")
+        #expect(sheet.stage == wanted, "an empty field took the refusal away")
+        sheet.named("work")
+        if refusal.name {
+            #expect(sheet.stage == .naming(refused: nil), "a new name kept the name's refusal")
+            sheet.doneNaming()
         } else {
-            sheet.named("work")
-            #expect(sheet.stage == .refused(refusal.said, under: .value), "a new name took the value's refusal away")
+            #expect(sheet.stage == wanted, "a name typed while the key was asked took the key's refusal away")
         }
         sheet.typed(holdsSomething: true)
         #expect(sheet.stage == .filled && sheet.storable)
@@ -203,12 +222,12 @@ import Testing
         var sheet = try Self.filled()
         _ = sheet.store(Self.pasted, clipboard: Self.elsewhere)
         sheet.answered(.failure(.unreachable("Could not connect to the server.")), clipboard: 7)
-        #expect(sheet.stage == .refused("Can't reach 127.0.0.1:7979. Nothing was stored.", under: .value))
+        #expect(sheet.stage == .refused("Can't reach 127.0.0.1:7979. Nothing was stored."))
         var proxied = try Self.filled()
         _ = proxied.store(Self.pasted, clipboard: Self.elsewhere)
         let error = SailError.unexpected(route: "PUT /v1/logins/claude-code/default", status: 502)
         proxied.answered(.failure(error), clipboard: 7)
-        #expect(proxied.stage == .refused(error.said(at: "127.0.0.1:7979"), under: .value))
+        #expect(proxied.stage == .refused(error.said(at: "127.0.0.1:7979")))
     }
 
     // MARK: The clipboard

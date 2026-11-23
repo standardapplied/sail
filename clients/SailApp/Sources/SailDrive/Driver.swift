@@ -243,7 +243,7 @@ final class Driver {
         "confirm", "sheet", "asking", "sheetShows", "answeredWhileSheetShows", "sheetClick", "fileSheet", "fileSheetUp", "fileSheetSays", "fileCompare", "fileSave", "fileWrite", "fileTheirs", "fileHolds",
         "filesShot", "shot", "shotScreen", "deletesAsked", "questionsWaiting", "releaseAnswers", "relistAs", "golden", "proxyFails",
         "press", "modifiers", "menuItem", "contextMenu", "choose", "arrangement", "at", "fontPoints", "items", "seconds", "name",
-        "pasteLogin", "loginSheetSays", "loginSheetIs", "pasteboardHolds", "setPasteboard", "holdAnswers", "unreachable",
+        "pasteLogin", "loginSheetSays", "loginSheetIs", "loginSheetClick", "pasteboardHolds", "setPasteboard", "holdAnswers", "unreachable",
     ]
 
     /// The step's keys that are set.

@@ -4,23 +4,25 @@ import SailAPI
 /// The Store a Login sheet's model for one harness (`login-store-mockup.html`): the kind it stores,
 /// the name a store takes, and where it stands. The kind is the first the server names that a
 /// person makes without running anything (``SailAPI/AgentOffer/storable``). The name is `default`
-/// and not asked while the person has no login of the harness; with one, it is asked, a free name
-/// suggested. It never holds the value: ``store(_:clipboard:)`` reads it once into the request it
+/// and not asked while the person has no login of the harness; with one, a free name is suggested
+/// and said as words beside Change, which names it with the key's field put away: a key and an
+/// editable name are never asked together, which AppKit would take for a login form and offer
+/// Passwords' AutoFill over. A name the server refuses is named again, its sentence under it. It
+/// never holds the value: ``store(_:clipboard:)`` reads it once into the request it
 /// returns and keeps only whether the clipboard held exactly it then, by the clipboard's change
 /// count, so a store that succeeds clears the clipboard only while it still holds that.
 public struct StoreLogin: Equatable, Sendable {
     public enum Stage: Equatable, Sendable {
         case empty
         case filled
+        /// The name is being named, the key's field put away; `refused`, the server's sentence on
+        /// the name sent.
+        case naming(refused: String?)
         case storing
-        /// Refused, or not sent, in these words, said under `field`.
-        case refused(String, under: Field)
+        /// The key refused, or not sent, in these words, said under its field.
+        case refused(String)
         /// Stored as `login`; `clearsClipboard`, the clipboard still held the value and is cleared.
         case stored(StoredLogin, clearsClipboard: Bool)
-    }
-
-    public enum Field: Equatable, Sendable {
-        case value, name
     }
 
     /// What the clipboard holds now: its change count and its text.
@@ -74,25 +76,45 @@ public struct StoreLogin: Equatable, Sendable {
         !taken.isEmpty
     }
 
-    /// Store is on: the field holds something, a name is given, and nothing is under way.
+    /// Store is on: the field holds something and nothing is under way.
     public var storable: Bool {
-        stage == .filled && !name.isEmpty
+        stage == .filled
     }
 
     /// The field now holds something, or nothing; a refusal stays until the field changes.
     public mutating func typed(holdsSomething: Bool) {
         switch stage {
-        case .storing, .stored: return
+        case .storing, .stored, .naming: return
         case .refused where !holdsSomething: return
         case .empty, .filled, .refused: stage = holdsSomething ? .filled : .empty
         }
     }
 
-    /// The name typed; a refusal of the name goes with the change.
+    /// Change: the name named, the key's field put away and its value gone; only where it is asked.
+    public mutating func changeName() {
+        switch stage {
+        case .empty, .filled, .refused: if asksName { stage = .naming(refused: nil) }
+        case .naming, .storing, .stored: return
+        }
+    }
+
+    /// The name typed while it is named; a refusal of it goes with the change.
     public mutating func named(_ typed: String) {
-        guard stage != .storing else { return }
+        guard case .naming = stage else { return }
         name = typed
-        if case .refused(_, .name) = stage { stage = .empty }
+        stage = .naming(refused: nil)
+    }
+
+    /// Done is on: a name is given.
+    public var nameGiven: Bool {
+        guard case .naming = stage else { return false }
+        return !name.isEmpty
+    }
+
+    /// Done: back to the key's field, empty, the name kept.
+    public mutating func doneNaming() {
+        guard nameGiven else { return }
+        stage = .empty
     }
 
     /// The store of `value`, read from the field once, when Store is on, `clipboard` holding what
@@ -105,8 +127,8 @@ public struct StoreLogin: Equatable, Sendable {
     }
 
     /// The store's answer, the clipboard's change count now: stored, the clipboard to be cleared
-    /// only while it is unchanged since it held the value; or refused, in the server's words under
-    /// the field they are about, the name's or the value's; or not sent, said so.
+    /// only while it is unchanged since it held the value; or refused, in the server's words, a
+    /// name's refusal naming the name again; or not sent, said so.
     public mutating func answered(_ answer: Result<LoginStored, SailError>, clipboard now: Int) {
         guard stage == .storing else { return }
         defer { pastedAt = nil }
@@ -114,11 +136,11 @@ public struct StoreLogin: Equatable, Sendable {
         case let .success(stored):
             stage = .stored(stored.login, clearsClipboard: pastedAt == now)
         case let .failure(.refused(refusal)):
-            stage = .refused(refusal.message, under: refusal.fieldErrors.contains { $0.field == "name" } ? .name : .value)
+            stage = refusal.fieldErrors.contains { $0.field == "name" } ? .naming(refused: refusal.message) : .refused(refusal.message)
         case .failure(.unreachable):
-            stage = .refused("Can't reach \(place). Nothing was stored.", under: .value)
+            stage = .refused("Can't reach \(place). Nothing was stored.")
         case let .failure(error):
-            stage = .refused(error.said(at: place), under: .value)
+            stage = .refused(error.said(at: place))
         }
     }
 
@@ -148,6 +170,11 @@ public struct StoreLogin: Equatable, Sendable {
     }
 
     public static let nameLabel = "Name"
+    public static let change = "Change"
+    public static let done = "Done"
+
+    /// Change as VoiceOver names it.
+    public static let changeName = "Change name"
 
     /// Beside the name: the names the person has already.
     public var already: String {

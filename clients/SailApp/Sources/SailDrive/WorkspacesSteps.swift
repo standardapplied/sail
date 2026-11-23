@@ -697,6 +697,12 @@ extension Driver {
             let found = await waitUntil(step.seconds ?? 5) { Set(wanted).isSubset(of: facts()) }
             return (found, "the sheet: " + facts().joined(separator: ", "))
         }
+        if let title = step.loginSheetClick {
+            guard let up = sheet(), let button = Self.views(in: up.contentView ?? NSView()).compactMap({ $0 as? NSButton }).first(where: { $0.title == title && !$0.isHiddenOrHasHiddenAncestor })
+            else { return (false, "the sheet shows no \(title)") }
+            guard await click(button, at: NSPoint(x: button.bounds.midX, y: button.bounds.midY)) else { return (false, "\(title) could not be clicked") }
+            return (true, "clicked \(title); the sheet: " + Self.facts(of: up, over: panel).joined(separator: ", "))
+        }
         if let held = step.pasteboardHolds {
             let now = { NSPasteboard.general.string(forType: .string) ?? "" }
             let found = await waitUntil(step.seconds ?? 5) { now() == held }
@@ -737,12 +743,15 @@ extension Driver {
         let keys = sheet.firstResponder, field = sheet.field.field
         var facts = [sheet.store.isEnabled ? "Store on" : "Store off", field.stringValue.isEmpty ? "the field empty" : "the field filled"]
         facts.append(panel.isOpen ? "the panel open behind" : "the panel closed")
-        facts.append(sheet.name.map { "the name \($0.field.stringValue)" } ?? "no name asked")
+        facts.append(sheet.model.asksName ? "the name \(sheet.model.name)" : "no name asked")
+        if case .naming = sheet.model.stage { facts.append("naming") }
+        if sheet.field.superview == nil { facts.append("no key field") }
+        if let name = sheet.name?.field, keys === name || (keys as? NSText)?.delegate === name { facts.append("the keys in the name") }
         if sheet.model.stage == .storing { facts.append("Storing") }
         if field is NSSecureTextField { facts.append("dots only") }
         if keys === field || (keys as? NSText)?.delegate === field { facts.append("the keys in the field") }
         if let error = sheet.field.error { facts.append("refused: \(error)") } else if let help = sheet.field.help { facts.append("help: \(help)") }
-        if let error = sheet.name?.error { facts.append("the name refused: \(error)") }
+        if let error = sheet.name?.error, sheet.name?.superview != nil { facts.append("the name refused: \(error)") }
         if panel.isOpen, Self.inFront(sheet.windowNumber, of: panel.popover.panel.windowNumber) { facts.append("over the panel") }
         let over = Self.inFrontOf(sheet)
         facts.append(over.isEmpty ? "no suggestion window is showing" : "in front of the sheet: " + over.joined(separator: ", "))
