@@ -50,6 +50,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -194,6 +195,12 @@ class PtySessionHostTest {
 
   private PtySessionHost startHost(PtySessionHost.Limits limits, PtySessionHost.Handoff handoff)
       throws IOException {
+    return startHost(limits, handoff, PtyUploads.intoContainers());
+  }
+
+  private PtySessionHost startHost(
+      PtySessionHost.Limits limits, PtySessionHost.Handoff handoff, PtyUploads uploads)
+      throws IOException {
     host =
         new PtySessionHost(
             dir.resolve("host.sock"),
@@ -234,7 +241,9 @@ class PtySessionHostTest {
             "0.0.0-test",
             limits,
             handoff,
-            network);
+            network,
+            uploads,
+            FileScripts.ofContainers());
     host.start();
     return host;
   }
@@ -259,6 +268,78 @@ class PtySessionHostTest {
           "the host ended the connection");
     }
     ClosesWhatItOpens.assertClosed("a host and the connection it served", before);
+  }
+
+  /**
+   * Closing the host ends a TCP connection it still serves, as it does a unix one: the door's end
+   * of the socket closes with the host, never after it.
+   */
+  @Test
+  void closingTheHostEndsATcpConnectionItStillServes() throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+    try (var started = startTcpHost();
+        var asker = connect("");
+        var tcp = admitted(started, asker)) {
+      started.close();
+
+      assertEquals(
+          -1,
+          assertTimeoutPreemptively(Duration.ofSeconds(5), () -> tcp.read(ByteBuffer.allocate(1))),
+          "the host ended the connection");
+    }
+    ClosesWhatItOpens.assertClosed("a host and the TCP connection it served", before);
+  }
+
+  /**
+   * A stop waits for the upload removals its sessions' endings started, but only until {@link
+   * UploadCleanup#CLOSING}: one that never returns is said in the log and left, so the host still
+   * stops within the time its unit gives it.
+   */
+  @Test
+  void aStopLeavesAnUploadRemovalThatNeverReturnsOnceItsDeadlinePasses() throws Exception {
+    endingLeavesAnUploadRemovalThatNeverReturns(ending -> ending.stop("stopping"));
+  }
+
+  /** So does a close. */
+  @Test
+  void aCloseLeavesAnUploadRemovalThatNeverReturnsOnceItsDeadlinePasses() throws Exception {
+    endingLeavesAnUploadRemovalThatNeverReturns(PtySessionHost::close);
+  }
+
+  private void endingLeavesAnUploadRemovalThatNeverReturns(Consumer<PtySessionHost> ending)
+      throws Exception {
+    var never = new CountDownLatch(1);
+    var copies =
+        new UploadCopy(
+            command -> {
+              if (command.contains(UploadCleanup.REMOVE)) {
+                try {
+                  never.await();
+                } catch (InterruptedException e) {
+                  Thread.currentThread().interrupt();
+                }
+              }
+              throw new IOException("no container here");
+            },
+            UploadCopy.Place.CONTAINERS);
+    try (var log = new LogCapture()) {
+      startHost(
+          PtySessionHost.Limits.DEFAULTS,
+          PtySessionHost.Handoff.NONE,
+          new PtyUploads(copies, origin -> PtyUploads.Target.own("box"), PtyUploads.SYSTEM_TIMER));
+      try (var channel = connect()) {
+        PtyWire.write(
+            channel,
+            new PtyMessage.Create("mine", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
+      }
+
+      assertTimeoutPreemptively(
+          UploadCleanup.CLOSING.plusSeconds(5), () -> ending.accept(host), "it ends in time");
+      assertTrue(log.awaitLine("upload-cleanup-left").contains("1 removal(s) or sweep(s)"));
+    } finally {
+      never.countDown();
+    }
   }
 
   private SocketChannel connect() throws IOException {

@@ -222,13 +222,6 @@ final class FilesConnection {
      * Ends its script: a save's by closing its input, so it removes its own temporary; never a save
      * past its go, which runs to its end under the workspace's lock, bounded by {@link #AFTER_GO}.
      */
-    /** Closes the pipes of its script, once the request's thread is done reading it. */
-    void close() {
-      if (script != null) {
-        script.close();
-      }
-    }
-
     void stop() {
       if (script == null || committed) {
         return;
@@ -237,6 +230,13 @@ final class FilesConnection {
         script.cut();
       } else {
         script.end();
+      }
+    }
+
+    /** Closes the pipes of its script, once the request's thread is done reading it. */
+    void close() {
+      if (script != null) {
+        script.close();
       }
     }
   }

@@ -384,6 +384,14 @@ final class PtyTcpDoor implements AutoCloseable {
       bound.close();
     }
     ListenConfig.unsay(listening);
+  }
+
+  /**
+   * Ends every connection the door took, once its accept loop has stopped taking new ones, and
+   * waits for the threads serving them. Never under the host's lock, which those threads may be
+   * waiting for: {@link #close} is called under it, so closing waits for none of them.
+   */
+  void endConnections() {
     var loop = accepting;
     if (loop != null) {
       try {

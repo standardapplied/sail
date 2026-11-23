@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.pty;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -58,6 +59,13 @@ final class UploadCleanup {
         [ -n "$keep" ] || rm -rf --one-file-system -- "$d"
       done
       """;
+
+  /**
+   * How long closing waits for the removals and sweeps still running, all of them together: each
+   * may take an {@code incus exec} up to its place's patience, and a host stopping has 15 s in all
+   * ({@code TimeoutStopSec}) for its sessions to end first.
+   */
+  static final Duration CLOSING = Duration.ofSeconds(5);
 
   private final UploadCopy copy;
   private final Map<String, ReentrantLock> containers = new ConcurrentHashMap<>();
@@ -152,17 +160,29 @@ final class UploadCleanup {
   }
 
   /**
-   * Waits for every removal and sweep still running, each bounded by its place's patience, so none
-   * outlives the host that started it; an interrupt stops the waiting and is kept.
+   * Waits for every removal and sweep still running, until {@link #CLOSING} has passed, so none
+   * outlives the host that started it; one still running then is said and left, its directory swept
+   * at the container's next session. An interrupt stops the waiting and is kept.
    */
   void close() {
+    var deadline = System.nanoTime() + CLOSING.toNanos();
     for (var thread : List.copyOf(running)) {
       try {
-        thread.join();
+        thread.join(Duration.ofNanos(Math.max(0, deadline - System.nanoTime())));
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
         return;
       }
+    }
+    if (!running.isEmpty()) {
+      PtySessionHost.log(
+          "upload-cleanup-left",
+          "-",
+          "-",
+          running.size()
+              + " removal(s) or sweep(s) still running after "
+              + CLOSING.toSeconds()
+              + " s; swept at the next session");
     }
   }
 }

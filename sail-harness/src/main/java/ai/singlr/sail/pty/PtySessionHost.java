@@ -240,7 +240,7 @@ public final class PtySessionHost implements AutoCloseable {
   private volatile byte[] dispatchCredential = new byte[0];
   private volatile boolean closed;
   private final OpenConnections connected = new OpenConnections();
-  private Thread accepting;
+  private volatile Thread accepting;
 
   private record Admitted(SocketChannel channel, Credential credential, PtyIdentity who) {}
 
@@ -2313,8 +2313,8 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   /**
-   * Ends every connection the unix socket took, once its accept loop has stopped taking new ones,
-   * and waits for the threads serving them.
+   * Ends every connection either door took, once its accept loop has stopped taking new ones, and
+   * waits for the threads serving them.
    */
   private void endConnections() {
     if (accepting != null) {
@@ -2326,6 +2326,7 @@ public final class PtySessionHost implements AutoCloseable {
       }
     }
     connected.close();
+    door.ifPresent(PtyTcpDoor::endConnections);
   }
 
   private void closeServer() {
