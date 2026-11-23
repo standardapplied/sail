@@ -1084,7 +1084,6 @@ class ChangeFeedTest {
                   return feed.page(ask);
                 }));
     var stream = box.stream(base, "/v1/events/stream", uday, null);
-    var publisher = new SailEventPublisher("127.0.0.1", box.port(), uday);
     try (var other = Sqlite.open(dir.resolve("sail.db"))) {
       written(other, "first");
       box.wake(uday);
@@ -1099,10 +1098,12 @@ class ChangeFeedTest {
     stream.awaitNew("\"agent\": \"after the burst\"");
     var afterBurst = pages.get();
 
-    for (var i = 0; i < 10; i++) {
-      publisher.publish(
-          Event.of(
-              "acme", null, Event.WellKnownTypes.BOARD_UPDATED, Event.SAIL_AGENT, "door-" + i));
+    try (var publisher = new SailEventPublisher("127.0.0.1", box.port(), uday)) {
+      for (var i = 0; i < 10; i++) {
+        publisher.publish(
+            Event.of(
+                "acme", null, Event.WellKnownTypes.BOARD_UPDATED, Event.SAIL_AGENT, "door-" + i));
+      }
     }
     stream.awaitNew("\"host\": \"door-9\"");
 
