@@ -1,1 +1,0 @@
-- **A field the person corrected stays corrected.** After a refusal, typing in the refused field clears its crimson edge, and a change of look no longer draws it refused again; a field left as it was stays refused.
