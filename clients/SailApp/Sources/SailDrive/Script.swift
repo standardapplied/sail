@@ -387,6 +387,26 @@ struct Step: Decodable {
     var filesDrop: Bool?
     /// The window in both looks, then right to left in both, saved as `window/<this>`.
     var filesShot: String?
+    /// `[row, action]`: the files panel's row's action run as its menu item runs it.
+    var filesAct: [String]?
+    /// This name typed into the open name field, and ⏎.
+    var filesName: String?
+    /// The open name field says this under it ("" nothing), within `seconds`.
+    var filesNameSays: String?
+    /// `[row, folder]`: the row dropped into the folder's row ("" the root), as a drag drops it.
+    var filesDropInto: [String]?
+    /// The files panel's row of this name drawn as under the pointer.
+    var filesHover: String?
+    /// `[row, shot]`: the row's context menu popped up as a right-click shows it, the whole screen
+    /// taken in both looks as `window/<shot>`, then the menu closed.
+    var filesMenu: [String]?
+    /// The delete question asks this, within `seconds`.
+    var filesAsks: String?
+    /// The delete question answered by its button of this title, Delete or Cancel.
+    var filesAnswer: String?
+    /// The workspace terminal focused was typed exactly this, pasted with no line break after it;
+    /// then it is shown there, as the shell echoes what it is typed.
+    var terminalTyped: String?
     /// The files panel measured against the spec's figures: opening, a 5,000-entry listing,
     /// scrolling it, a change, a burst of 2,000.
     var filesBudgets: Bool?

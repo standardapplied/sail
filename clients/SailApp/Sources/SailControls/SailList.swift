@@ -25,11 +25,14 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         public let icon: LineIcon?
         /// It is under way: its button on the row in flight under this word, taking no press.
         public let busy: String?
+        /// Whether it can be done now, asked each time its menu opens or its key comes: off, its item
+        /// is dimmed and its key does nothing (Reveal in Terminal with no terminal in the tab).
+        public let enabled: @MainActor () -> Bool
         public let run: @MainActor () -> Void
 
         public init(
             _ title: String, key: String = "", modifiers: NSEvent.ModifierFlags = [], onRow: Bool = true, startsGroup: Bool = false, destructive: Bool = false,
-            icon: LineIcon? = nil, busy: String? = nil, run: @escaping @MainActor () -> Void
+            icon: LineIcon? = nil, busy: String? = nil, enabled: @escaping @MainActor () -> Bool = { true }, run: @escaping @MainActor () -> Void
         ) {
             self.title = title
             self.key = key
@@ -39,6 +42,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             self.destructive = destructive
             self.icon = icon
             self.busy = busy
+            self.enabled = enabled
             self.run = run
         }
     }
@@ -362,15 +366,25 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         item(at: selectedRow)?.id
     }
 
+    /// Every chosen item's id, in the list's order: a tree's rows are chosen several at once.
+    public var chosenIDs: [String] {
+        selectedRowIndexes.compactMap { item(at: $0)?.id }
+    }
+
     /// Chooses the item of `id`, as a pane restoring its last choice does; nil chooses nothing.
     public func choose(_ id: String?) {
         guard let row = select(id) else { return }
         scrollRowToVisible(row)
     }
 
+    /// The row of `id` drawn as under the pointer, and no other: what the drive shows of a hover.
+    package func hover(_ id: String) {
+        enumerateAvailableRowViews { view, row in (view as? SailRowView)?.hovered = item(at: row)?.id == id }
+    }
+
     /// Chooses `id` where it stands without scrolling to it: new rows keep the person's scroll.
     @discardableResult
-    private func select(_ id: String?) -> Int? {
+    package func select(_ id: String?) -> Int? {
         guard let row = entries.indices.first(where: { item(at: $0)?.id == id }) else {
             deselectAll(nil)
             return nil
@@ -412,7 +426,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             let pressed = typed == "\u{7f}" ? "\u{8}" : typed
             let held = event.modifierFlags.intersection([.command, .option, .control, .shift])
             guard !pressed.isEmpty, let action = item(at: selectedRow)?.actions.first(where: { $0.key == pressed && $0.modifiers == held }) else { return false }
-            action.run()
+            if action.enabled() { action.run() }
             return true
         }
     }
@@ -537,6 +551,64 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     public func tableViewSelectionDidChange(_: Notification) {
         if !reloading { onChoose(chosen) }
     }
+
+    // MARK: Moving rows by a drag
+
+    /// A tree's rows moved by a drag within it: where a drop over row `over` (nil past the last row)
+    /// lands, the id of the folder row it goes into, "" for the tree's root, nil for nowhere; and the
+    /// dragged rows' ids dropped there.
+    public struct Moves {
+        public let lands: @MainActor (_ over: String?) -> String?
+        public let drop: @MainActor (_ ids: [String], _ into: String) -> Void
+
+        public init(lands: @escaping @MainActor (_ over: String?) -> String?, drop: @escaping @MainActor (_ ids: [String], _ into: String) -> Void) {
+            self.lands = lands
+            self.drop = drop
+        }
+    }
+
+    /// Rows dragged within the list move; nil, nothing is dragged.
+    public var moves: Moves? {
+        didSet {
+            registerForDraggedTypes(moves == nil ? [] : [Self.rowType])
+            setDraggingSourceOperationMask(moves == nil ? [] : .move, forLocal: true)
+        }
+    }
+
+    static let rowType = NSPasteboard.PasteboardType("sh.standardapplied.sail.row")
+    /// A dragged row's opacity while it is dragged, as the mockup's `.drag`.
+    static let dragged = 0.45
+
+    public func tableView(_: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
+        guard moves != nil, let item = item(at: row), !item.inert else { return nil }
+        let writer = NSPasteboardItem()
+        writer.setString(item.id, forType: Self.rowType)
+        return writer
+    }
+
+    public func tableView(_: NSTableView, draggingSession _: NSDraggingSession, willBeginAt _: NSPoint, forRowIndexes rows: IndexSet) {
+        rows.forEach { rowView(atRow: $0, makeIfNecessary: false)?.alphaValue = Self.dragged }
+    }
+
+    public func tableView(_: NSTableView, draggingSession _: NSDraggingSession, endedAt _: NSPoint, operation _: NSDragOperation) {
+        enumerateAvailableRowViews { row, _ in row.alphaValue = 1 }
+    }
+
+    /// A drop over a row lands on the folder `moves` says, the whole list for its root; a drag from
+    /// anywhere else lands nowhere.
+    public func tableView(_: NSTableView, validateDrop info: any NSDraggingInfo, proposedRow row: Int, proposedDropOperation _: NSTableView.DropOperation) -> NSDragOperation {
+        guard let moves, info.draggingSource as? SailList === self, let into = moves.lands(item(at: row)?.id) else { return [] }
+        setDropRow(into.isEmpty ? -1 : entries.firstIndex { Self.id($0) == into } ?? -1, dropOperation: .on)
+        return .move
+    }
+
+    public func tableView(_: NSTableView, acceptDrop info: any NSDraggingInfo, row: Int, dropOperation _: NSTableView.DropOperation) -> Bool {
+        guard let moves, info.draggingSource as? SailList === self else { return false }
+        let ids = info.draggingPasteboard.pasteboardItems?.compactMap { $0.string(forType: Self.rowType) } ?? []
+        guard !ids.isEmpty else { return false }
+        moves.drop(ids, item(at: row)?.id ?? "")
+        return true
+    }
 }
 
 /// A row as the look draws it (`RowPaint`): the fill, the accent bar
@@ -581,6 +653,7 @@ final class SailRowView: NSTableRowView {
         self.item = item
         self.first = first
         hovered = false
+        alphaValue = 1
         line?.removeFromSuperview()
         line = nil
         if item?.paint?.progress == true {
@@ -699,6 +772,15 @@ final class SailRowView: NSTableRowView {
     }
 
     override func drawSelection(in _: NSRect) {}
+
+    /// The row a drag drops into: a 1 pt ink edge inside its rounded box, as the mockup's `.drop`.
+    override func drawDraggingDestinationFeedback(in _: NSRect) {
+        let box = NSRect(x: rowStyle.margin, y: top, width: Double(bounds.width) - 2 * rowStyle.margin, height: Double(bounds.height) - top).insetBy(dx: 0.5, dy: 0.5)
+        let edge = NSBezierPath(roundedRect: box, xRadius: rowStyle.radius, yRadius: rowStyle.radius)
+        edge.lineWidth = 1
+        NSColor(look.text).setStroke()
+        edge.stroke()
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -854,7 +936,7 @@ final class RowCell: NSView {
         }
         moreMenu = nil
         if rowStyle != .sidebar, runs.contains(where: { !$0.action.onRow }) {
-            let more = SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil)
+            let more = SailButton(icon: .more, label: "More", size: rowStyle == .tree ? .row : .small, look: look, target: nil, action: nil)
             buttons.append(more)
             moreMenu = RowMenu(item.actions, look: look)
             more.target = MenuOpener.shared
@@ -1057,17 +1139,22 @@ final class RowMenu: NSMenu, NSMenuDelegate {
     }
 }
 
-/// An action as a target: buttons and menu items send `go(_:)`.
+/// An action as a target: buttons and menu items send `go(_:)`, and a menu item is on only while
+/// its action can be done.
 @MainActor
-final class Run: NSObject {
+final class Run: NSObject, NSMenuItemValidation {
     let action: SailList.Action
 
     init(_ action: SailList.Action) {
         self.action = action
     }
 
+    func validateMenuItem(_: NSMenuItem) -> Bool {
+        action.enabled()
+    }
+
     @objc func go(_: Any?) {
-        action.run()
+        if action.enabled() { action.run() }
     }
 }
 

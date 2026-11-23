@@ -241,7 +241,7 @@ final class Driver {
     /// than every step after failing under it.
     static let underASheet: Set<String> = [
         "confirm", "sheet", "asking", "sheetShows", "answeredWhileSheetShows", "sheetClick", "fileSheet", "fileSheetUp", "fileSheetSays", "fileCompare", "fileSave", "fileWrite", "fileTheirs", "fileHolds",
-        "filesShot", "shot", "shotScreen", "deletesAsked", "questionsWaiting", "releaseAnswers", "relistAs", "golden", "proxyFails",
+        "filesShot", "filesAct", "filesName", "filesNameSays", "filesDropInto", "filesHover", "filesMenu", "filesAsks", "filesAnswer", "terminalTyped", "shot", "shotScreen", "deletesAsked", "questionsWaiting", "releaseAnswers", "relistAs", "golden", "proxyFails",
         "press", "modifiers", "menuItem", "contextMenu", "choose", "arrangement", "at", "fontPoints", "items", "seconds", "name",
         "pasteLogin", "loginSheetSays", "loginSheetIs", "loginSheetClick", "pasteboardHolds", "setPasteboard", "holdAnswers", "unreachable",
     ]

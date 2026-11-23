@@ -117,7 +117,7 @@ public struct FilesLine: Equatable, Sendable {
             let name = FileTree.shownName(of: unsettled.path)
             self.init(words: unsettled.shownAsOf.map { "\(name) keeps changing; shown as of \(time($0))." } ?? "\(name) keeps changing.", mark: .waiting)
         } else if tree.folders[FileTree.root]?.entries.isEmpty == true {
-            self.init(words: "\(FileTree.rootName) is empty.", mark: .none)
+            self.init(words: "\(FileTree.rootName) is empty. ⌥⌘N makes a file.", mark: .none)
         } else if !tree.followsAll {
             self.init(words: "Following the \(FileTree.watchCap.formatted()) most recent folders live.", mark: .quiet)
         } else {

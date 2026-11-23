@@ -122,9 +122,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     private func build() {
         folderLabel.lineBreakMode = .byTruncatingHead
         nameLabel.lineBreakMode = .byTruncatingMiddle
-        let path = file.path.shown, cut = path.lastIndex(of: "/").map { path.index(after: $0) } ?? path.startIndex
-        folderLabel.stringValue = String(path[..<cut]).replacingOccurrences(of: "/home/dev/workspace/", with: "")
-        nameLabel.stringValue = file.name
+        title()
         dot.wantsLayer = true
         dot.layer?.cornerRadius = 3
         dot.isHidden = true
@@ -171,8 +169,23 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
         for view in [titleBar, note, compare, discard, scroll, sentence, copyPath] as [NSView] { addSubview(view) }
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel(file.name)
         show()
+    }
+
+    /// The title as the file is named now: its folder quiet, its name.
+    private func title() {
+        let path = file.path.shown, cut = path.lastIndex(of: "/").map { path.index(after: $0) } ?? path.startIndex
+        folderLabel.stringValue = String(path[..<cut]).replacingOccurrences(of: "/home/dev/workspace/", with: "")
+        nameLabel.stringValue = file.name
+        setAccessibilityLabel(file.name)
+        needsLayout = true
+    }
+
+    /// The person moved or renamed the file in the app (M59): the pane follows it to `path`, its text
+    /// kept, and reads it there by its own rule.
+    func moved(to path: FileName) {
+        act { $0.moved(to: path) }
+        title()
     }
 
     // MARK: The connection
@@ -228,7 +241,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
             send(upload?.acked(received) ?? [])
             return true
         default:
-            guard let answer = Self.answer(frame) else { return false }
+            guard let answer = Self.answer(frame), file.asked(answer.id) else { return false }
             if case let .written(id, _, _) = answer, id == upload?.id { upload = nil }
             if case let .conflict(id, _) = answer, id == upload?.id { upload = nil }
             if case let .refused(id, _, _) = answer, id == upload?.id { upload = nil }
@@ -278,6 +291,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
         }
     }
 
+    /// What a frame answers of the pane's requests, nil for a frame that answers none.
     static func answer(_ frame: Frame) -> OpenFile.Answer? {
         switch frame {
         case let .filesData(id, version, bytes, eof, whole, digest): .data(id: id, version: version, bytes: bytes, eof: eof, whole: whole, digest: digest)
