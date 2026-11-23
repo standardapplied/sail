@@ -32,6 +32,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -380,6 +381,39 @@ class PtySessionHostTest {
     } finally {
       never.countDown();
     }
+    awaitClosed(SessionFiles.in(dir.resolve("sessions"), "mine").ring());
+  }
+
+  /**
+   * Waits until no descriptor of this process is open on {@code file}, as once an ending a stop
+   * left has run to its end: the last thing an ending does is close its ring. Linux only, where
+   * {@code /proc/self/fd} names what each descriptor is open on, as the descriptor check is.
+   */
+  private static void awaitClosed(Path file) throws IOException {
+    var fds = Path.of("/proc/self/fd");
+    if (!Files.isDirectory(fds)) {
+      return;
+    }
+    var deadline = System.nanoTime() + Duration.ofMinutes(1).toNanos();
+    while (openOn(fds, file)) {
+      assertTrue(System.nanoTime() < deadline, file + " is still open a minute on");
+      Thread.yield();
+    }
+  }
+
+  private static boolean openOn(Path fds, Path file) throws IOException {
+    try (var open = Files.list(fds)) {
+      for (var fd : open.toList()) {
+        try {
+          if (Files.readSymbolicLink(fd).toString().startsWith(file.toString())) {
+            return true;
+          }
+        } catch (FileSystemException closedMeanwhile) {
+          var unused = closedMeanwhile;
+        }
+      }
+    }
+    return false;
   }
 
   /**
@@ -415,11 +449,7 @@ class PtySessionHostTest {
       create(channel, "stubborn", "");
     }
     var shim =
-        ProcessHandle.current()
-            .children()
-            .filter(child -> child.info().commandLine().orElse("").contains(dir.toString()))
-            .findFirst()
-            .orElseThrow();
+        ProcessHandle.current().children().filter(this::ofThisTest).findFirst().orElseThrow();
 
     var written =
         assertTimeoutPreemptively(
@@ -432,6 +462,11 @@ class PtySessionHostTest {
             "it ends in time");
 
     assertTrue(written, "the shim was gone and the record written before the stop returned");
+  }
+
+  /** Whether {@code child} is one of this test's, its command naming this test's directory. */
+  private boolean ofThisTest(ProcessHandle child) {
+    return child.info().commandLine().orElse("").contains(dir.toString());
   }
 
   /** Waits until {@code stopper} waits with a timeout, as a stop waiting for an ending does. */
@@ -2129,8 +2164,12 @@ class PtySessionHostTest {
               assertInstanceOf(PtyMessage.Err.class, PtyWire.read(box)).message(),
               "a listing during a handoff is refused, not a short page");
         } finally {
+          var shims = ProcessHandle.current().children().filter(this::ofThisTest).toList();
           for (var master : masters.values()) {
             Pty.closeFd(master);
+          }
+          for (var child : shims) {
+            child.onExit().get(1, TimeUnit.MINUTES);
           }
         }
       }
