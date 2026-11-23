@@ -99,10 +99,10 @@ extension Driver {
         if let pattern = step.kill {
             let pkill = Process()
             pkill.executableURL = URL(filePath: "/usr/bin/pkill")
-            pkill.arguments = ["-f", pattern]
+            pkill.arguments = ["-U", String(getuid()), "-f", pattern]
             try? pkill.run()
             pkill.waitUntilExit()
-            return (pkill.terminationStatus <= 1, "pkill -f \(pattern) exited \(pkill.terminationStatus)" + (pkill.terminationStatus == 1 ? " (none was running)" : ""))
+            return (pkill.terminationStatus <= 1, "pkill -U \(getuid()) -f \(pattern) exited \(pkill.terminationStatus)" + (pkill.terminationStatus == 1 ? " (none was running)" : ""))
         }
         if step.panes4 == true {
             return await fourPanes(byMenu: step.switchBy == "menu")
@@ -450,7 +450,7 @@ extension Driver {
         let tabsBefore = Set(workbench.model.tabs.map(\.id))
         _ = mainStacks
         let files = Self.floodFiles
-        let stop = "/tmp/sail-drive-flood-stop"
+        let stop = Self.privateFile("flood-stop")
         try? FileManager.default.removeItem(atPath: stop)
         mainThread.reset()
         press("t", ["command"])
