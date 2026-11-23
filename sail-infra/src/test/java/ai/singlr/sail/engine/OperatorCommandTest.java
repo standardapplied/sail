@@ -91,19 +91,22 @@ class OperatorCommandTest {
             Remedy.client("login"),
             "', then '",
             Remedy.sail("project apply", "gamma"),
+            "', after '",
+            Remedy.elsewhere("claude", "setup-token"),
             "'.");
 
     assertEquals(
         "Run 'sudo sail upgrade', then sudo sail fde update ada --scoped; or 'sudo ssh-keygen -R"
-            + " main'; from a Mac 'sail login', then 'sudo sail project apply gamma'.",
+            + " main'; from a Mac 'sail login', then 'sudo sail project apply gamma', after 'claude"
+            + " setup-token'.",
         OperatorCommand.SUDO.render(remedy));
     assertEquals(
         "Run 'sail upgrade', then sail fde update ada --scoped; or 'ssh-keygen -R main'; from a"
-            + " Mac 'sail login', then 'sail project apply gamma'.",
+            + " Mac 'sail login', then 'sail project apply gamma', after 'claude setup-token'.",
         OperatorCommand.PLAIN.render(remedy));
     assertEquals(
         "Run 'sail upgrade', then sail fde update ada --scoped; or 'ssh-keygen -R main'; from a"
-            + " Mac 'sail login', then 'sudo sail project apply gamma'.",
+            + " Mac 'sail login', then 'sudo sail project apply gamma', after 'claude setup-token'.",
         OperatorCommand.UNPRIVILEGED.render(remedy));
   }
 

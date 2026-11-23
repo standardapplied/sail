@@ -205,6 +205,7 @@ extension Driver {
     func performWorkspaces(_ step: Step) async -> (Bool, String)? {
         if let files = await performFiles(step) { return files }
         if let started = await performNewSession(step) { return started }
+        if let stored = await performLoginSheet(step) { return stored }
         let pane = shell.workspaces
         if let pair = step.golden {
             guard pair.count == 2 || pair.count == 3, let seconds = Int(pair.count == 3 ? pair[2] : "0") else {
@@ -557,10 +558,11 @@ extension Driver {
             let found = await waitUntil(step.seconds ?? 5) { panel.isOpen && chosen() == name }
             return (found, "chosen: \(chosen() ?? "none"); " + said())
         }
-        if let primary = step.newSessionPrimary, primary.count == 2 {
+        if let primary = step.newSessionPrimary, primary.count == 2 || primary.count == 3 {
             let button = { panel.view.primary }
-            let found = await waitUntil(step.seconds ?? 5) { button()?.title == primary[0] && button()?.isEnabled == (primary[1] == "on") }
-            return (found, "the primary: \(button().map { "\($0.title), \($0.isEnabled ? "on" : "off")" } ?? "none")")
+            let keys = primary.count == 3
+            let found = await waitUntil(step.seconds ?? 5) { button()?.title == primary[0] && button()?.isEnabled == (primary[1] == "on") && button()?.holdsKeys == keys }
+            return (found, "the primary: \(button().map { "\($0.title), \($0.isEnabled ? "on" : "off")\($0.holdsKeys ? ", holding the keys" : "")" } ?? "none")")
         }
         if let title = step.newSessionClick {
             let view = panel.view
@@ -670,6 +672,94 @@ extension Driver {
             return (true, "the section is laid out \(rightToLeft ? "right to left" : "left to right")")
         }
         return nil
+    }
+
+    /// Store a Login's steps: a key pasted as a person pastes it, the sheet read, and the clipboard.
+    /// A step that acts on the fake door waits for the app to have heard by the sheet's own state.
+    private func performLoginSheet(_ step: Step) async -> (Bool, String)? {
+        let panel = shell.workspaces.newSession
+        let sheet = { self.shell.window.attachedSheet as? LoginSheet }
+        if let value = step.pasteLogin {
+            guard let up = sheet(), let paste = Keys.named("v", modifiers: ["command"]) else { return (false, "no Store a Login sheet to paste into") }
+            if !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { pastedLogins.insert(value) }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(value, forType: .string)
+            send(paste)
+            let pasted = await waitUntil(step.seconds ?? 5) { up.store.isEnabled }
+            return (pasted, "pasted \(value.count) characters; the sheet: " + Self.facts(of: up, over: panel).joined(separator: ", "))
+        }
+        if let words = step.loginSheetSays {
+            let found = await waitUntil(step.seconds ?? 5) { sheet().map { Self.inOrder(words, in: Self.words(in: $0.contentView)) } == true }
+            return (found, sheet().map { "the sheet says: " + Self.words(in: $0.contentView).joined(separator: " | ") } ?? "no sheet is up")
+        }
+        if let wanted = step.loginSheetIs {
+            let facts = { sheet().map { Self.facts(of: $0, over: panel) } ?? ["closed", panel.isOpen ? "the panel open" : "the panel closed"] }
+            let found = await waitUntil(step.seconds ?? 5) { Set(wanted).isSubset(of: facts()) }
+            return (found, "the sheet: " + facts().joined(separator: ", "))
+        }
+        if let title = step.loginSheetClick {
+            guard let up = sheet(), let button = Self.views(in: up.contentView ?? NSView()).compactMap({ $0 as? NSButton }).first(where: { $0.title == title && !$0.isHiddenOrHasHiddenAncestor })
+            else { return (false, "the sheet shows no \(title)") }
+            guard await click(button, at: NSPoint(x: button.bounds.midX, y: button.bounds.midY)) else { return (false, "\(title) could not be clicked") }
+            return (true, "clicked \(title); the sheet: " + Self.facts(of: up, over: panel).joined(separator: ", "))
+        }
+        if let held = step.pasteboardHolds {
+            let now = { NSPasteboard.general.string(forType: .string) ?? "" }
+            let found = await waitUntil(step.seconds ?? 5) { now() == held }
+            let said = now().isEmpty ? "nothing" : pastedLogins.contains(now()) ? "a key the drive pasted" : "'\(now())'"
+            return (found, "the pasteboard holds \(said)")
+        }
+        if let text = step.setPasteboard {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            return (true, "")
+        }
+        return nil
+    }
+
+    /// Whether window `one` is in front of window `other`, as the window server orders them on screen.
+    private static func inFront(_ one: Int, of other: Int) -> Bool {
+        let listed = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []).compactMap { $0[kCGWindowNumber as String] as? Int }
+        guard let front = listed.firstIndex(of: one), let back = listed.firstIndex(of: other) else { return false }
+        return front < back
+    }
+
+    /// Every window the window server shows in front of `sheet` and over it, by its owner and name: a
+    /// suggestion such as Passwords' AutoFill, whoever draws it; nil when the sheet is not on screen,
+    /// so nothing was compared and nothing is claimed.
+    private static func inFrontOf(_ sheet: NSWindow) -> [String]? {
+        let listed = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        guard let at = listed.firstIndex(where: { $0[kCGWindowNumber as String] as? Int == sheet.windowNumber }), let screen = sheet.screen else { return nil }
+        let frame = sheet.frame, top = Double(screen.frame.maxY)
+        let shown = CGRect(x: Double(frame.minX), y: top - Double(frame.maxY), width: Double(frame.width), height: Double(frame.height))
+        return listed[..<at].compactMap { window in
+            guard let bounds = (window[kCGWindowBounds as String] as? NSDictionary).flatMap({ CGRect(dictionaryRepresentation: $0 as CFDictionary) }),
+                  bounds.intersects(shown), (window[kCGWindowAlpha as String] as? Double ?? 1) > 0 else { return nil }
+            return "\(window[kCGWindowOwnerName as String] as? String ?? "?") \(window[kCGWindowName as String] as? String ?? "")"
+        }
+    }
+
+    /// The sheet as the drive reads it, a fact each; never the field's text.
+    private static func facts(of sheet: LoginSheet, over panel: NewSessionPanel) -> [String] {
+        let keys = sheet.firstResponder, field = sheet.field.field
+        var facts = [sheet.store.isEnabled ? "Store on" : "Store off", field.stringValue.isEmpty ? "the field empty" : "the field filled"]
+        facts.append(panel.isOpen ? "the panel open behind" : "the panel closed")
+        facts.append(sheet.model.asksName ? "the name \(sheet.model.name)" : "no name asked")
+        if case .naming = sheet.model.stage { facts.append("naming") }
+        if sheet.field.superview == nil { facts.append("no key field") }
+        if let name = sheet.name?.field, keys === name || (keys as? NSText)?.delegate === name { facts.append("the keys in the name") }
+        if sheet.model.stage == .storing { facts.append("Storing") }
+        if field is NSSecureTextField { facts.append("dots only") }
+        if keys === field || (keys as? NSText)?.delegate === field { facts.append("the keys in the field") }
+        if let error = sheet.field.error { facts.append("refused: \(error)") } else if let help = sheet.field.help { facts.append("help: \(help)") }
+        if let error = sheet.name?.error, sheet.name?.superview != nil { facts.append("the name refused: \(error)") }
+        if panel.isOpen, Self.inFront(sheet.windowNumber, of: panel.popover.panel.windowNumber) { facts.append("over the panel") }
+        switch Self.inFrontOf(sheet) {
+        case nil: facts.append("the sheet is not on screen")
+        case let over? where over.isEmpty: facts.append("no suggestion window is showing")
+        case let over?: facts.append("in front of the sheet: " + over.joined(separator: ", "))
+        }
+        return facts
     }
 
     /// Where a screen shot shows `popover`'s shadow cut: at the middle of each side of its window, a

@@ -431,6 +431,7 @@ class ClientGoldensTest {
       box.record(http, "workspaces-made", "GET", workspaces, dana, null);
       box.recordAgents(http, ana, dana);
       box.recordDriveAgents(http);
+      box.recordLogins(http);
       box.recordTemplates(
           http, dana, box.session("ike", "Ike", "ike@example.com", Role.ADMIN), ana, vik);
 
@@ -1643,6 +1644,84 @@ class ClientGoldensTest {
       record(
           goldens, "workspace-agents-pier-owner-gone", "GET", agents.formatted("pier"), uday, null);
       logins.remove(udayId, claude, "default");
+      logins.remove(udayId, codex, "work");
+      Acting.system(() -> new ProjectStore(db).upsert(HARBOR));
+    }
+
+    /**
+     * Records a person storing a login from the app, as uday with a Codex login and none of Claude
+     * Code's, the run he started earlier ended: his logins listed; an API key stored as "default",
+     * his first (`login-stored`, no note); the same name stored again (`login-replaced`, its note
+     * on the sessions already running); each refusal of a value, and of a name; then his logins and
+     * dock's agents while he has a Claude Code login that is not the default, where the app asks a
+     * name. Every value sent is an obvious fake.
+     */
+    void recordLogins(Map<String, String> goldens) throws Exception {
+      var uday = new AuthSessionStore(db).create(idOf("uday"), Duration.ofMinutes(30)).token();
+      holders.put(uday, "uday");
+      installs("claude-code, codex");
+      var claude = Harnesses.of("claude-code");
+      var codex = Harnesses.of("codex");
+      var logins = new FdeStore(db).logins();
+      var udayId = idOf("uday");
+      logins.store(udayId, codex, "work", "api-key", "sk-proj-golden-uday-work");
+      record(goldens, "logins", "GET", "/v1/logins", uday, null);
+      var claudeLogin = "/v1/logins/claude-code/%s";
+      var fake = "sk-ant-api03-golden-fake-key";
+      Acting.system(() -> new RunStore(db).finish(RUN, "running", "completed", 0, null));
+      record(
+          goldens,
+          "login-stored",
+          "PUT",
+          claudeLogin.formatted("default"),
+          uday,
+          Map.of("kind", "api-key", "value", fake));
+      record(
+          goldens,
+          "login-replaced",
+          "PUT",
+          claudeLogin.formatted("default"),
+          uday,
+          Map.of("kind", "api-key", "value", fake));
+      logins.remove(udayId, claude, "default");
+      var refused =
+          Map.of(
+              "empty",
+              "   ",
+              "lines",
+              fake + "\n" + fake,
+              "long",
+              "k".repeat(16 * 1024 + 1),
+              "characters",
+              "sk-ant-api03 golden fake key");
+      for (var value : refused.entrySet()) {
+        record(
+            goldens,
+            "refusal-invalid-request-login-" + value.getKey(),
+            "PUT",
+            claudeLogin.formatted("default"),
+            uday,
+            Map.of("kind", "api-key", "value", value.getValue()));
+      }
+      record(
+          goldens,
+          "refusal-invalid-request-login-name",
+          "PUT",
+          claudeLogin.formatted("Work"),
+          uday,
+          Map.of("kind", "api-key", "value", fake));
+      logins.store(udayId, claude, "work", "api-key", "sk-ant-api03-golden-uday-work");
+      logins.store(udayId, claude, "home", "api-key", "sk-ant-api03-golden-uday-home");
+      logins.remove(udayId, claude, "work");
+      record(goldens, "logins-no-default", "GET", "/v1/logins", uday, null);
+      record(
+          goldens,
+          "workspace-agents-dock-no-default",
+          "GET",
+          "/v1/projects/" + PROJECT + "/workspaces/dock/agents",
+          uday,
+          null);
+      logins.remove(udayId, claude, "home");
       logins.remove(udayId, codex, "work");
       Acting.system(() -> new ProjectStore(db).upsert(HARBOR));
     }

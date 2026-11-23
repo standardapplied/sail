@@ -238,8 +238,30 @@ struct Step: Decodable {
     var newSessionSays: [String]?
     /// The panel's chosen row is the one of this name.
     var newSessionChosen: String?
-    /// `[title, "on" | "off"]`: the panel's primary is titled so and offered or not.
+    /// `[title, "on" | "off"]`: the panel's primary is titled so and offered or not; with a third,
+    /// "holds the keys", it is drawn holding them.
     var newSessionPrimary: [String]?
+    /// A login's value put on the pasteboard, then ⌘V into the Store a Login sheet's field. The drive
+    /// keeps it for the sweep to search for (a blank one is no key, and is found in any file), and
+    /// says only its length.
+    var pasteLogin: String?
+    /// The Store a Login sheet is up saying these words, in this order, within `seconds`.
+    var loginSheetSays: [String]?
+    /// The Store a Login sheet is as these facts say, within `seconds`: "closed", "Store on", "Store
+    /// off", "Storing", "the field empty", "the field filled", "dots only", "the keys in the field",
+    /// "no name asked", "the name <name>", "naming", "no key field", "the keys in the name", "the panel open behind", "refused: <sentence>", "the
+    /// name refused: <sentence>", "help: <the help line>", "over the panel" (the window server orders
+    /// the sheet in front of it), "no suggestion window is showing" (none, AutoFill's included, in
+    /// front of the sheet and over it; claimed by the steps after a shot, once a suggestion has had
+    /// the time to show, and never for a sheet the window server does not list).
+    var loginSheetIs: [String]?
+    /// The button or link of this title in the Store a Login sheet, clicked with real mouse events;
+    /// the sheet stays.
+    var loginSheetClick: String?
+    /// The pasteboard holds exactly this ("" for nothing), within `seconds`.
+    var pasteboardHolds: String?
+    /// This put on the pasteboard, as a copy in another app does.
+    var setPasteboard: String?
     /// The panel's row, button or link of this title clicked with real mouse events through the
     /// panel's own window.
     var newSessionClick: String?

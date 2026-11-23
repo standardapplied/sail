@@ -24,6 +24,8 @@ final class Driver {
     let passkey: SoftwarePasskey
     let signed: Bool
     var tokens: Set<String> = []
+    /// Every login value a step pasted, which the sweep searches for.
+    var pastedLogins: Set<String> = []
     var askedAtStart = 0
     private let steps: [Step]
     private let goesOn: Bool
@@ -226,9 +228,11 @@ final class Driver {
         }
     }
 
+    /// Every word `view` shows, a secure field's text left out: a key typed there is no word to say.
     static func words(in view: NSView?) -> [String] {
         guard let view else { return [] }
-        return ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap { words(in: $0) }
+        let said = view is NSSecureTextField ? nil : (view as? NSTextField).map { [$0.stringValue] }
+        return (said ?? []) + view.subviews.flatMap { words(in: $0) }
     }
 
     /// What a step may do while a sheet an earlier step opened is up over the window: answer it,
@@ -239,6 +243,7 @@ final class Driver {
         "confirm", "sheet", "asking", "sheetShows", "answeredWhileSheetShows", "sheetClick", "fileSheet", "fileSheetUp", "fileSheetSays", "fileCompare", "fileSave", "fileWrite", "fileTheirs", "fileHolds",
         "filesShot", "shot", "shotScreen", "deletesAsked", "questionsWaiting", "releaseAnswers", "relistAs", "golden", "proxyFails",
         "press", "modifiers", "menuItem", "contextMenu", "choose", "arrangement", "at", "fontPoints", "items", "seconds", "name",
+        "pasteLogin", "loginSheetSays", "loginSheetIs", "loginSheetClick", "pasteboardHolds", "setPasteboard", "holdAnswers", "unreachable",
     ]
 
     /// The step's keys that are set.

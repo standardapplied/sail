@@ -1,0 +1,21 @@
+{
+  "request": {
+    "body": {
+      "kind": "api-key",
+      "value": "sk-ant-api03-golden-fake-key\nsk-ant-api03-golden-fake-key"
+    },
+    "method": "PUT",
+    "path": "/v1/logins/claude-code/default"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "field_errors": [],
+        "message": "A login's value is one line: paste only the key or token."
+      },
+      "schema_version": 1
+    },
+    "status": 422
+  }
+}

@@ -82,8 +82,8 @@ import Testing
         #expect(NewSessionWords.line(claude) == "no login stored")
         #expect(NewSessionWords.primary(panel.readiness) == ("Start and Sign In There", true))
         #expect(NewSessionWords.storeLogin(claude) == "Store a Claude Code Login")
-        #expect(NewSessionWords.kinds(claude) == claude.kinds.map(\.label).joined(separator: " or "))
-        #expect(NewSessionWords.how(claude) == "Create an API key in the Claude Console.", "Store a Login says the kind the server names first, the API key")
+        #expect(claude.storable?.kind == "api-key" && claude.storable?.said == "Create an API key in the Claude Console.", "Store a Login offers the API key and says how to make it")
+        #expect(claude.kinds.map(\.said) == ["Create an API key in the Claude Console.", nil], "the long-lived token's how names a command, so it is never said")
         let made = panel.start()
         #expect(made?.wire == SessionAgent(harness: claude.harness, mode: claude.modeDefault, inside: true))
     }
@@ -118,6 +118,15 @@ import Testing
     @Test func aGoneOwnersRemedyNamesACommandSoNoneOfItIsShown() throws {
         let refusal = try #require(try Self.agents("workspace-agents-owner-gone").refusal)
         #expect(NewSessionWords.remedy(refusal) == nil)
+    }
+
+    /// A harness signed in is heard ready with its login and its kind's label, as its row says them;
+    /// one with no login is not.
+    @Test func aHarnessSignedInIsHeardReady() throws {
+        let dock = try Self.agents("workspace-agents-dock"), noLogin = try Self.agents("workspace-agents-dock-no-login")
+        #expect(NewSessionWords.ready(dock.offered[0]) == "Claude Code ready, signed in as default, API key.")
+        #expect(NewSessionWords.line(dock.offered[0]) == "login “default” · API key")
+        #expect(NewSessionWords.ready(noLogin.offered[0]) == nil)
     }
 
     @Test func theHarnessUsedLastIsChosenFirstWhileItIsOffered() throws {

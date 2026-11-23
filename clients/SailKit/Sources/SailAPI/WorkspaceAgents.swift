@@ -52,11 +52,32 @@ public struct AgentLogin: Codable, Equatable, Sendable {
     public let kind: String
 }
 
-/// A kind of login a harness takes: its name, what the harness calls it, and how to make one.
+/// A kind of login a harness takes: its name, what the harness calls it, and how to make one, as
+/// words and the commands among them.
 public struct AgentLoginKind: Codable, Equatable, Sendable {
     public let kind: String
     public let label: String
-    public let how: String
+    public let how: [RemedyPart]
+
+    /// How to make one as a sentence a person reads, its words alone; nil when it names a command,
+    /// since a person is never shown one.
+    public var said: String? {
+        var words = ""
+        for part in how {
+            guard case let .words(text) = part else { return nil }
+            words += text
+        }
+        return words.isEmpty ? nil : Said.sentence(words)
+    }
+}
+
+extension AgentOffer {
+    /// The kind a person stores from the app: the first the server names whose how names no
+    /// command, so the app says how to make it and stores what is pasted; nil when every kind is
+    /// made by running something.
+    public var storable: AgentLoginKind? {
+        kinds.first { $0.said != nil }
+    }
 }
 
 extension Endpoint where Response == WorkspaceAgents {

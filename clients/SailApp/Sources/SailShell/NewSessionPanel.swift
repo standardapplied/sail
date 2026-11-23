@@ -10,7 +10,10 @@ import SailWorkbench
 /// the least window), and over the row when the window has no room under it. It lists each harness offered in the route's order with its login, then the Shell; the
 /// chosen one alone shows its mode and the mode's words, or what stops it in the server's sentence.
 /// Start, its one primary, starts the chosen harness in its mode, signed in, or to sign in there
-/// (Start and Sign In There) when no login is stored; for the Shell it is the row's Open. Where no
+/// (Start and Sign In There) when no login is stored; for the Shell it is the row's Open. Store a
+/// Login opens its sheet over the panel (``LoginSheet``), which the panel stays open behind; once a
+/// login is stored the panel shows what the route answers then, says so in one quiet line, and
+/// draws Start holding the keys. Where no
 /// agent starts for the person it says why, with Open a Shell or Close. The window keeps the keys:
 /// ↑ ↓ choose, ⌘M opens the mode's menu, Return presses Start and Escape closes; so do a click
 /// outside it, the window giving up the keys or being resized, and the section going.
@@ -28,6 +31,7 @@ package final class NewSessionPanel: NSObject {
         didSet {
             view.look = look
             popover.look = look
+            loginSheet?.look = look
             redraw()
         }
     }
@@ -38,6 +42,8 @@ package final class NewSessionPanel: NSObject {
     var onShell: @MainActor () -> Void = {}
     /// Told when it closes, however it closes.
     var onClose: @MainActor () -> Void = {}
+    /// Told Store a Login was pressed on the chosen harness.
+    var onStoreLogin: @MainActor (AgentOffer) -> Void = { _ in }
     /// Shows the mode button's menu: the library's opener, whose menu tracks the pointer; a unit
     /// test, which runs no menu tracking, reads the menu instead.
     var popUp: @MainActor (SailButton) -> Void = { MenuOpener.shared.open($0) }
@@ -48,7 +54,15 @@ package final class NewSessionPanel: NSObject {
     /// What it shows.
     package private(set) var content: NewSessionView.Content?
     package private(set) var workspace = ""
-    private var showsHow = false
+    /// The quiet line over the foot until the panel closes: a login stored, or why none can be.
+    package private(set) var line: NewSessionView.Line?
+
+    /// The line saying a login was stored.
+    package var stored: String? {
+        if case let .stored(words) = line { words } else { nil }
+    }
+    /// The Store a Login sheet over it, while it asks.
+    package private(set) var loginSheet: LoginSheet?
     /// The box on screen, and whether it hangs under its row (its top kept as it grows) or over it.
     private var placed = NSRect.zero
     private var below = true
@@ -73,7 +87,7 @@ package final class NewSessionPanel: NSObject {
     func open(_ answer: Answer, workspace: String, memory: ModeMemory, under row: NSRect, page: NSView, narrow: Bool, anchor: NSView?) {
         guard let window = page.window, !isOpen else { return }
         self.workspace = workspace
-        showsHow = false
+        line = nil
         content = Self.content(answer, memory: memory)
         view.direction = page.userInterfaceLayoutDirection
         let area = page.convert(page.visibleRect, to: nil)
@@ -97,11 +111,55 @@ package final class NewSessionPanel: NSObject {
 
     package func close() {
         guard isOpen else { return }
+        loginSheet?.withdraw()
+        line = nil
         if let resizeWatch { NotificationCenter.default.removeObserver(resizeWatch) }
         resizeWatch = nil
         popover.close()
         keys.setAccessibilityElement(false)
         onClose()
+    }
+
+    /// Asks with `sheet` on the window, the panel staying open behind it: neither the sheet taking
+    /// the keys nor a click in it closes the panel, and the panel closing ends the sheet.
+    func present(_ sheet: LoginSheet) {
+        guard isOpen, loginSheet == nil, let window = popover.panel.parent else { return }
+        loginSheet = sheet
+        popover.stays = true
+        sheet.onEnd = { [weak self, weak sheet] in
+            guard let self, loginSheet === sheet else { return }
+            loginSheet = nil
+            popover.stays = false
+            redraw()
+        }
+        redraw()
+        window.beginSheet(sheet)
+    }
+
+    /// What the route answers once a login of `harness` was stored, `harness` chosen, `line` said
+    /// over the foot until the panel closes, Start holding the keys; VoiceOver hears it ready.
+    func show(_ answer: Answer, memory: ModeMemory, stored line: String, harness: String) {
+        guard isOpen else { return }
+        var shown = Self.content(answer, memory: memory)
+        if case var .offered(panel) = shown {
+            panel.choose(.harness(harness))
+            shown = .offered(panel)
+        }
+        content = shown
+        self.line = .stored(line)
+        redraw()
+        guard case let .offered(panel) = shown, let offer = panel.offer(harness), let start = view.primary else { return }
+        if let ready = NewSessionWords.ready(offer) {
+            NSAccessibility.post(element: view, notification: .announcementRequested, userInfo: [.announcement: ready, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+        }
+        NSAccessibility.post(element: start, notification: .layoutChanged, userInfo: [.uiElements: [start]])
+    }
+
+    /// `said` over the foot of what it shows now, until it closes; nil, none.
+    func say(_ said: NewSessionView.Line?) {
+        guard isOpen else { return }
+        line = said
+        redraw()
     }
 
     static func content(_ answer: Answer, memory: ModeMemory) -> NewSessionView.Content {
@@ -115,7 +173,7 @@ package final class NewSessionPanel: NSObject {
 
     private func draw(width: Double) {
         guard let content else { return }
-        view.show(content, workspace: workspace, showsHow: showsHow, width: width)
+        view.show(content, workspace: workspace, line: line, veiled: loginSheet != nil, width: width)
     }
 
     /// Drawn again where it is, its top kept under its row (its foot over it) as its height changes.
@@ -127,8 +185,10 @@ package final class NewSessionPanel: NSObject {
         popover.place(placed)
     }
 
+    /// What the panel's controls do; nothing while its sheet asks over the window, as the window's
+    /// own controls do nothing then.
     private func act(_ act: NewSessionView.Act) {
-        guard isOpen, let content else { return }
+        guard isOpen, loginSheet == nil, let content else { return }
         switch (act, content) {
         case let (.choose(choice), .offered(panel)):
             var chosen = panel
@@ -138,8 +198,9 @@ package final class NewSessionPanel: NSObject {
             var chosen = panel
             chosen.choose(mode: mode)
             self.content = .offered(chosen)
-        case (.how, _):
-            showsHow = true
+        case let (.storeLogin, .offered(panel)):
+            guard case let .harness(harness) = panel.chosen, let offer = panel.offer(harness) else { return }
+            return onStoreLogin(offer)
         case (.start, _):
             return start()
         case (.shell, _):
@@ -241,10 +302,10 @@ final class NewSessionKeys: NSView {
 }
 
 /// The panel's box, on the popover's surface with a strong hairline edge and 8 pt corners: its
-/// title, the stopped workspace's line, the rows with the chosen one's detail under it, and the
-/// foot with the keys and Start; or, where nothing starts for the person, why, and one button.
-/// Built whole by ``show(_:workspace:showsHow:width:)``, every frame set there, so no layout pass
-/// changes what it shows; mirrored right to left.
+/// title, the stopped workspace's line, the rows with the chosen one's detail under it, a login
+/// just stored said in one line, and the foot with the keys and Start; or, where nothing starts for
+/// the person, why, and one button. Built whole by ``show(_:workspace:line:veiled:width:)``, every frame
+/// set there, so no layout pass changes what it shows; mirrored right to left.
 @MainActor
 package final class NewSessionView: NSView {
     static let radius = 8.0, padding = 14.0, row = 30.0, gap = 7.0, about = 17.0
@@ -260,7 +321,7 @@ package final class NewSessionView: NSView {
     }
 
     enum Act: Equatable {
-        case choose(NewSession.Choice), mode(String), how, start, shell, close
+        case choose(NewSession.Choice), mode(String), storeLogin, start, shell, close
     }
 
     var look: Look {
@@ -280,10 +341,23 @@ package final class NewSessionView: NSView {
     /// The chosen harness's mode pop-up, nil for a harness of one mode or none chosen.
     package private(set) var modes: SailButton?
     package private(set) var storeLogin: LinkButton?
-    /// The hairlines across it, the chosen row's bar, and the stopped line's square, as last laid out.
+    /// Under its sheet's veil, its primary elsewhere: the sheet's.
+    package private(set) var veiled = false
+    /// The veil drawn over it while its sheet asks.
+    private var veil: NSView?
+    /// The hairlines across it, the chosen row's bar, the stopped line's square and the stored
+    /// line's, as last laid out.
     private var hairlines: [Double] = []
     private var bar: NSRect?
     private var square: NSRect?
+    private var lineSquare: NSRect?
+    private var lineFailed = false
+
+    /// The quiet line over the foot: a login stored, or why none can be stored now.
+    package enum Line: Equatable {
+        case stored(String)
+        case unread(String)
+    }
     /// The width it is being built at.
     private var boxWidth = 0.0
 
@@ -313,9 +387,11 @@ package final class NewSessionView: NSView {
         ((view as? NSTextField).map { [$0.stringValue] } ?? (view as? NSButton).map { [$0.title] } ?? []) + view.subviews.flatMap(texts)
     }
 
-    /// Builds it for `content` in workspace `workspace`, `width` wide; `showsHow` once Store a Login
-    /// was pressed.
-    func show(_ content: Content, workspace: String, showsHow: Bool, width: Double) {
+    /// Builds it for `content` in workspace `workspace`, `width` wide, saying `line` over the foot;
+    /// `veiled` while its sheet asks: its Start outlined, as a row's Open is
+    /// under the panel, the sheet's Store the one primary on screen, and the sheet's veil over it.
+    func show(_ content: Content, workspace: String, line: Line?, veiled: Bool, width: Double) {
+        self.veiled = veiled
         subviews.forEach { $0.removeFromSuperview() }
         rows = []
         primary = nil
@@ -325,6 +401,7 @@ package final class NewSessionView: NSView {
         hairlines = []
         bar = nil
         square = nil
+        lineSquare = nil
         boxWidth = width
         let edge = Look.hairline, inner = width - 2 * (Self.padding + edge)
         let title = NSMutableAttributedString(attributedString: Self.text(NewSessionWords.title(workspace).lead, .systemFont(ofSize: Look.Step.callout.points, weight: .semibold), look.text, direction: direction))
@@ -335,24 +412,21 @@ package final class NewSessionView: NSView {
         switch content {
         case let .offered(panel):
             if !panel.agents.running {
-                hairlines.append(y)
-                let start = edge + Self.padding + 6 + 8
-                let words = Self.wrapping(NewSessionWords.stopped(workspace), .systemFont(ofSize: Look.Step.footnote.points), look.textSecondary, width: width - start - Self.padding - edge, direction: direction)
-                let top = y + 7
-                y = place(words, x: start, y: top, width: width - start - Self.padding - edge) + 8
-                square = mirrored(NSRect(x: edge + Self.padding, y: top + (min(Double(words.frame.height), Self.about) - 6) / 2, width: 6, height: 6))
+                square = quietLine(NewSessionWords.stopped(workspace), y: &y, width: width)
             }
             hairlines.append(y)
             y += 4
             for choice in panel.choices {
-                y = list(choice, of: panel, workspace: workspace, showsHow: showsHow, y: y, width: width)
+                y = list(choice, of: panel, workspace: workspace, y: y, width: width)
             }
             y += 4
+            said(line, y: &y, width: width)
             hairlines.append(y)
             let (title, enabled) = NewSessionWords.primary(panel.readiness)
-            let start = SailButton(title, kind: .primary, size: .small, look: look, target: self, action: #selector(pressedStart(_:)))
+            let start = SailButton(title, kind: veiled ? .secondary : .primary, size: .small, look: look, target: self, action: #selector(pressedStart(_:)))
             start.hint("\r", mono: mono)
             start.isEnabled = enabled
+            start.holdsKeys = line.map { if case .stored = $0 { true } else { false } } == true && enabled
             start.why = enabled ? nil : Self.refusal(panel.readiness)?.message
             primary = start
             let hint = Self.label(Self.text(NewSessionWords.hint, mono.font(Look.Step.micro.points, .regular) as NSFont, look.textTertiary, direction: direction).cut(.byTruncatingTail))
@@ -365,17 +439,36 @@ package final class NewSessionView: NSView {
                 y = place(Self.wrapping(remedy, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary, width: inner, direction: direction), x: edge + Self.padding, y: y + 10, width: inner)
             }
             y += 12
+            said(line, y: &y, width: width)
             hairlines.append(y)
             let button = SailButton(shell ? NewSessionWords.openAShell : "Close", kind: .secondary, size: .small, look: look, target: self, action: shell ? #selector(pressedShell(_:)) : #selector(pressedClose(_:)))
             secondary = button
             y = foot(button, hint: nil, y: y, width: width)
         }
         height = y + edge
+        veil = veiled ? addVeil() : nil
         needsDisplay = true
     }
 
+    /// The sheet's veil laid over the whole box, above its controls. AppKit dims the window under a
+    /// sheet inside the window itself, which a child panel floats over, so the panel lays the
+    /// page's veil over itself; it takes no click.
+    private func addVeil() -> NSView {
+        let veil = Veil(frame: NSRect(x: 0, y: 0, width: boxWidth, height: height))
+        veil.wantsLayer = true
+        veil.layer?.backgroundColor = NSColor(Self.veil(look)).cgColor
+        veil.layer?.cornerRadius = Self.radius
+        addSubview(veil)
+        return veil
+    }
+
+    /// The page's veil (`login-store-mockup.html`): ink at 18 % over paper, black at 40 % in the dark.
+    static func veil(_ look: Look) -> Tint {
+        look.palette.isDark ? Tint(0x000000, alpha: 0.4) : Tint(0x0A0E11, alpha: 0.18)
+    }
+
     /// The row of `choice` at `y` and, chosen, its detail under it; where the next row starts.
-    private func list(_ choice: NewSession.Choice, of panel: NewSession, workspace: String, showsHow: Bool, y top: Double, width: Double) -> Double {
+    private func list(_ choice: NewSession.Choice, of panel: NewSession, workspace: String, y top: Double, width: Double) -> Double {
         let edge = Look.hairline, chosen = panel.chosen == choice
         let offer: AgentOffer? = if case let .harness(harness) = choice { panel.offer(harness) } else { nil }
         let name = offer?.display ?? NewSessionWords.shell.name
@@ -397,7 +490,7 @@ package final class NewSessionView: NSView {
             if let remedy = NewSessionWords.remedy(refusal) { y = place(quiet(remedy, width: inner), x: x, y: y + Self.gap, width: inner) }
         case let .signInThere(_, refusal), let .needsLogin(refusal):
             y = place(said(refusal.message, width: inner), x: x, y: y, width: inner)
-            y = logins(offer, showsHow: showsHow, x: x, y: y + Self.gap, width: inner)
+            y = logins(offer, x: x, y: y + Self.gap, width: inner)
             if offer.inside { y = place(quiet(NewSessionWords.signInThere(offer, workspace: workspace), width: inner), x: x, y: y + Self.gap, width: inner) }
         case .start, .shell:
             let mode = panel.mode(of: harness) ?? offer.modeDefault
@@ -442,26 +535,40 @@ package final class NewSessionView: NSView {
         return y + high
     }
 
-    /// Store a Login and the kinds the server takes beside it, or, once pressed, how to make the
-    /// first under it; where it ends.
-    private func logins(_ offer: AgentOffer, showsHow: Bool, x: Double, y: Double, width: Double) -> Double {
-        let link = LinkButton(NewSessionWords.storeLogin(offer), points: Look.Step.callout.points, look: look, target: self, action: #selector(pressedHow(_:)))
+    /// Store a Login, and how to make the kind it stores under it; nothing where the harness offers
+    /// no kind the app stores. Where it ends.
+    private func logins(_ offer: AgentOffer, x: Double, y: Double, width: Double) -> Double {
+        guard let how = offer.storable?.said else { return y - Self.gap }
+        let link = LinkButton(NewSessionWords.storeLogin(offer), points: Look.Step.callout.points, look: look, target: self, action: #selector(pressedStoreLogin(_:)))
         link.userInterfaceLayoutDirection = direction
         storeLogin = link
         let size = link.fittingSize
         let linkWidth = min(Double(size.width), width)
         link.frame = mirrored(NSRect(x: x + Self.labelInset, y: y, width: linkWidth, height: Double(size.height)))
         addSubview(link)
-        let end = y + Double(size.height)
-        guard !showsHow else {
-            return NewSessionWords.how(offer).map { place(said($0, width: width), x: x, y: end + Self.gap, width: width) } ?? end
+        return place(quiet(how, width: width), x: x, y: y + Double(size.height) + Self.gap, width: width)
+    }
+
+    /// `line`, if any, said at `y` after its square: the success's for a store, the error's for none.
+    private func said(_ line: Line?, y: inout Double, width: Double) {
+        guard let line else { return }
+        let (words, failed) = switch line {
+        case let .stored(words): (words, false)
+        case let .unread(words): (words, true)
         }
-        let kinds = Self.label(Self.text(NewSessionWords.kinds(offer), .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary, direction: direction).cut(.byTruncatingTail))
-        let kindsSize = kinds.fittingSize, room = width - linkWidth - 10
-        guard Double(kindsSize.width) <= room else { return place(kinds, x: x, y: end + 2, width: width) }
-        kinds.frame = mirrored(NSRect(x: x + linkWidth + 10, y: y + (Double(size.height) - Double(kindsSize.height)) / 2, width: Double(kindsSize.width), height: Double(kindsSize.height)))
-        addSubview(kinds)
-        return end
+        lineFailed = failed
+        lineSquare = quietLine(words, y: &y, width: width)
+    }
+
+    /// A quiet line across the box at `y`, under a hairline, after a square: a fact said, not a
+    /// refusal. `y` moves past it; the square's place is returned.
+    private func quietLine(_ said: String, y: inout Double, width: Double) -> NSRect {
+        let edge = Look.hairline, start = edge + Self.padding + 6 + 8
+        hairlines.append(y)
+        let words = Self.wrapping(said, .systemFont(ofSize: Look.Step.footnote.points), look.textSecondary, width: width - start - Self.padding - edge, direction: direction)
+        let top = y + 7
+        y = place(words, x: start, y: top, width: width - start - Self.padding - edge) + 8
+        return mirrored(NSRect(x: edge + Self.padding, y: top + (min(Double(words.frame.height), Self.about) - 6) / 2, width: 6, height: 6))
     }
 
     /// The foot at `y`: the keys at its leading end, its button at the trailing; where it ends.
@@ -553,8 +660,8 @@ package final class NewSessionView: NSView {
         on(.close)
     }
 
-    @objc private func pressedHow(_: Any?) {
-        on(.how)
+    @objc private func pressedStoreLogin(_: Any?) {
+        on(.storeLogin)
     }
 
     @objc private func choseMode(_ item: NSMenuItem) {
@@ -574,6 +681,10 @@ package final class NewSessionView: NSView {
         if let square {
             NSColor(look.textTertiary).setFill()
             square.fill()
+        }
+        if let lineSquare {
+            NSColor(Tint(lineFailed ? look.error : look.success)).setFill()
+            lineSquare.fill()
         }
         if let bar {
             NSColor(look.accent).setFill()
@@ -677,5 +788,13 @@ extension ModeMemory {
     func store(in defaults: UserDefaults, for person: WorkspacesModel.Person) {
         guard let data = try? JSONEncoder().encode(self) else { return }
         defaults.set(data, forKey: Self.key(for: person))
+    }
+}
+
+/// A veil over the panel: drawn, never clicked.
+@MainActor
+final class Veil: NSView {
+    override func hitTest(_: NSPoint) -> NSView? {
+        nil
     }
 }
