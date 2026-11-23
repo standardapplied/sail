@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.engine.DeviceFixtures;
 import ai.singlr.sail.engine.PoolDevices.Candidate;
 import ai.singlr.sail.engine.PoolSource;
@@ -127,7 +128,10 @@ class HostInitCommandTest {
                 "--yes"));
     command.addAll(List.of(flags));
     var builder =
-        new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(output.toFile());
+        new ProcessBuilder(command)
+            .redirectErrorStream(true)
+            .redirectOutput(output.toFile())
+            .redirectInput(Child.NO_INPUT);
     builder.environment().put("SAIL_DATA_DIR", data.toString());
     builder.environment().put("PATH", bin + ":" + System.getenv("PATH"));
     var process = builder.start();

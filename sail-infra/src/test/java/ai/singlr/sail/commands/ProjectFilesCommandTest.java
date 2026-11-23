@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.api.ProjectFiles;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.engine.FileMaterializer;
 import ai.singlr.sail.engine.FileSource;
 import ai.singlr.sail.engine.HostFileSource;
@@ -118,7 +119,8 @@ class ProjectFilesCommandTest {
                 System.getProperty("java.class.path"),
                 ProjectFilesCommandTest.class.getName())
             .redirectErrorStream(true)
-            .redirectOutput(output.toFile());
+            .redirectOutput(output.toFile())
+            .redirectInput(Child.NO_INPUT);
     builder.environment().put("SAIL_DATA_DIR", data.toString());
     var process = builder.start();
     try {

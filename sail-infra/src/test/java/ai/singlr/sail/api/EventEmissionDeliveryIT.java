@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.engine.SailEventHelper;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -25,6 +26,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -178,9 +180,7 @@ class EventEmissionDeliveryIT {
     } else {
       env.remove("SAIL_RUN_CREDENTIAL");
     }
-    var process = pb.start();
-    assertTrue(process.waitFor(30, TimeUnit.SECONDS), "the emit must finish inside its timeout");
-    return process.exitValue();
+    return Child.run(pb, "", Duration.ofSeconds(30)).exit();
   }
 
   private Path writeScript() throws IOException {

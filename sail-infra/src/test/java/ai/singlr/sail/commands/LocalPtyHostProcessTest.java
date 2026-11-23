@@ -10,12 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Main;
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.pty.Account;
 import ai.singlr.sail.pty.Locales;
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -47,7 +45,7 @@ class LocalPtyHostProcessTest {
   private Path data;
   private Path calls;
   private final Instant began = Instant.now();
-  private final List<Process> started = new ArrayList<>();
+  private final List<Run> started = new ArrayList<>();
 
   @BeforeEach
   void aMachine() throws IOException {
@@ -64,12 +62,16 @@ class LocalPtyHostProcessTest {
   }
 
   @AfterEach
-  void leaveNothing() throws IOException {
-    for (var process : started) {
-      process.descendants().forEach(ProcessHandle::destroyForcibly);
-      process.destroyForcibly();
+  void leaveNothing() throws IOException, InterruptedException {
+    for (var run : started) {
+      run.process().descendants().forEach(ProcessHandle::destroyForcibly);
+      run.process().destroyForcibly();
     }
     LocalPtyHostTest.startedSince(began).forEach(ProcessHandle::destroyForcibly);
+    for (var run : started) {
+      run.process().waitFor();
+      assertTrue(run.reader().join(LocalPtyHostTest.STEP), "its output ended with it");
+    }
     try (var left = Files.walk(root)) {
       for (var path : left.sorted(Comparator.reverseOrder()).toList()) {
         Files.deleteIfExists(path);
@@ -81,8 +83,8 @@ class LocalPtyHostProcessTest {
     return home.resolve(".sail").resolve("local").resolve("pty.sock");
   }
 
-  /** A process this test started; its standard error, line by line. */
-  private record Run(Process process, BlockingQueue<String> said) {
+  /** A process this test started; its standard error, line by line, as {@code reader} reads it. */
+  private record Run(Process process, BlockingQueue<String> said, Thread reader) {
 
     String awaitLine(String prefix) throws InterruptedException {
       while (true) {
@@ -101,17 +103,12 @@ class LocalPtyHostProcessTest {
       assertTrue(
           process.waitFor(LocalPtyHostTest.STEP.toMillis(), TimeUnit.MILLISECONDS),
           "it exited within the step");
+      reader.join(LocalPtyHostTest.STEP);
       var lines = new ArrayList<String>();
-      String line;
-      while ((line = said.poll(LocalPtyHostTest.STEP.toMillis(), TimeUnit.MILLISECONDS)) != null
-          && !line.equals(EOF)) {
-        lines.add(line);
-      }
+      said.drainTo(lines);
       return lines;
     }
   }
-
-  private static final String EOF = "\u0000";
 
   /** {@code main} of {@code entry} with {@code args}, in this machine's bare environment. */
   private Run run(Class<?> entry, String... args) throws IOException {
@@ -134,25 +131,13 @@ class LocalPtyHostProcessTest {
     env.put("SHELL", "/nonexistent/shell");
     env.put("SAIL_DATA_DIR", data.toString());
     env.put("PATH", root.resolve("bin") + ":" + System.getenv("PATH"));
-    builder.redirectInput(ProcessBuilder.Redirect.from(Path.of("/dev/null").toFile()));
+    builder.redirectInput(Child.NO_INPUT);
     builder.redirectErrorStream(true);
     var process = builder.start();
-    started.add(process);
     var said = new LinkedBlockingQueue<String>();
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              try (var lines =
-                  new BufferedReader(
-                      new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                lines.lines().forEach(said::add);
-              } catch (IOException gone) {
-                var unused = gone;
-              } finally {
-                said.add(EOF);
-              }
-            });
-    return new Run(process, said);
+    var run = new Run(process, said, Child.drain(process, said));
+    started.add(run);
+    return run;
   }
 
   private Run host() throws IOException {
@@ -288,11 +273,12 @@ class LocalPtyHostProcessTest {
   private static List<String> internetSockets(long pid) throws Exception {
     var proc = Path.of("/proc", Long.toString(pid));
     if (!Files.isDirectory(proc)) {
-      var lsof = new ProcessBuilder("lsof", "-nP", "-a", "-p", Long.toString(pid), "-i").start();
-      assertTrue(lsof.waitFor(LocalPtyHostTest.STEP.toMillis(), TimeUnit.MILLISECONDS));
-      return new String(lsof.getInputStream().readAllBytes(), StandardCharsets.UTF_8)
-          .lines()
-          .toList();
+      var lsof =
+          Child.run(
+              new ProcessBuilder("lsof", "-nP", "-a", "-p", Long.toString(pid), "-i"),
+              "",
+              LocalPtyHostTest.STEP);
+      return lsof.stdout().lines().toList();
     }
     var inodes = new ArrayList<String>();
     var socket = Pattern.compile("socket:\\[(\\d+)]");

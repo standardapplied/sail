@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.engine.ClosesWhatItOpens;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
@@ -384,13 +385,17 @@ class AgentLogStreamerTest {
     assertTimeoutPreemptively(
         Duration.ofSeconds(5),
         () -> {
-          var process = new ProcessBuilder("sh", "-c", "printf 'first\\nsecond\\n'").start();
-          var reader =
-              new BufferedReader(
-                  new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+          var process =
+              new ProcessBuilder("sh", "-c", "printf 'first\\nsecond\\n'")
+                  .redirectInput(Child.NO_INPUT)
+                  .redirectError(ProcessBuilder.Redirect.DISCARD)
+                  .start();
           var out = new ByteArrayOutputStream();
-
-          AgentLogStreamer.pump(process, reader, out, 0, NEVER_ENDS, ENDED);
+          try (var reader =
+              new BufferedReader(
+                  new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            AgentLogStreamer.pump(process, reader, out, 0, NEVER_ENDS, ENDED);
+          }
 
           var body = out.toString(StandardCharsets.UTF_8);
           assertTrue(body.contains("first"), body);
@@ -401,8 +406,7 @@ class AgentLogStreamerTest {
 
   @Test
   void pumpRelaysWhatTheTailWroteBetweenAnEmptyReadyAndItsExit() throws Exception {
-    var process = new ProcessBuilder("sh", "-c", "true").start();
-    process.waitFor();
+    var process = ended();
     var arrivedLate =
         new BufferedReader(new StringReader("first\nsecond\n")) {
           @Override
@@ -433,13 +437,15 @@ class AgentLogStreamerTest {
     assertTimeoutPreemptively(
         Duration.ofSeconds(5),
         () -> {
-          var process = new ProcessBuilder("sh", "-c", "true").start();
-          process.waitFor();
-          var reader =
-              new BufferedReader(
-                  new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+          var process = ended();
 
-          AgentLogStreamer.pump(process, reader, new ByteArrayOutputStream(), 0, NEVER_ENDS, ENDED);
+          AgentLogStreamer.pump(
+              process,
+              new BufferedReader(new StringReader("")),
+              new ByteArrayOutputStream(),
+              0,
+              NEVER_ENDS,
+              ENDED);
 
           assertFalse(process.isAlive());
         });
@@ -463,8 +469,7 @@ class AgentLogStreamerTest {
             clock);
     var exchange =
         new CapturingExchange("/v1/runs/r1/stream").as("raj", "member").scoped(scope.get());
-    var process = new ProcessBuilder("sh", "-c", "true").start();
-    process.waitFor();
+    var process = ended();
     var lines = List.of("first", "second", "third").iterator();
     var revokedAfterTheFirst =
         new BufferedReader(new StringReader("")) {
@@ -509,8 +514,7 @@ class AgentLogStreamerTest {
             () -> "node-a",
             clock);
     var exchange = new CapturingExchange("/v1/runs/r1/stream").as("raj", "member");
-    var process = new ProcessBuilder("sh", "-c", "true").start();
-    process.waitFor();
+    var process = ended();
     var recheck = streamer.recheckOf(exchange, "r1");
     clock.advance(Duration.ofSeconds(1));
     var out = new ByteArrayOutputStream();
@@ -523,6 +527,18 @@ class AgentLogStreamerTest {
             + " token's FDE 'raj' is disabled.\", \"action\": \"Ask an admin to re-enable"
             + " 'raj'.\", \"field_errors\": []}\n\n",
         out.toString(StandardCharsets.UTF_8));
+  }
+
+  /** A tail that has ended, holding no pipe of this process's. */
+  private static Process ended() throws Exception {
+    var process =
+        new ProcessBuilder("true")
+            .redirectInput(Child.NO_INPUT)
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start();
+    process.waitFor();
+    return process;
   }
 
   private static final class CapturingExchange extends HttpExchange {

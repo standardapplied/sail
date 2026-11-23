@@ -13,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -140,12 +139,12 @@ class SshSyncChannelTest {
     var line = SshSyncChannel.authorizeLine("mady", name, email, PUB, MAIN.fingerprint());
 
     var shell =
-        new ProcessBuilder("bash", "-c", "sudo() { printf '%s\\n' \"$@\"; }; " + line)
-            .directory(dir.toFile())
-            .start();
-    var argv = new String(shell.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        Child.run(
+            new ProcessBuilder("bash", "-c", "sudo() { printf '%s\\n' \"$@\"; }; " + line)
+                .directory(dir.toFile()));
+    var argv = shell.stdout();
 
-    assertEquals(0, shell.waitFor());
+    assertEquals(0, shell.exit(), shell.stderr());
     assertEquals(
         List.of(
             "sail",

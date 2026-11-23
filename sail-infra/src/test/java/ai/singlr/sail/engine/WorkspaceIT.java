@@ -1442,9 +1442,9 @@ class WorkspaceIT extends AbstractIncusIT {
     assertEquals(List.of(), workspaces.refresh(udayWith("tok-2"), project -> definition()));
     assertTrue(exec(fix.instance(), List.of("touch", "/home/dev/.sail-it-stop")).ok());
     assertTrue(watcher.waitFor(60, TimeUnit.SECONDS), "the watch ends");
-    assertEquals(
-        "watched",
-        new String(watcher.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip());
+    try (var watched = watcher.getInputStream()) {
+      assertEquals("watched", new String(watched.readAllBytes(), StandardCharsets.UTF_8).strip());
+    }
     assertEquals("https://oauth2:tok-2@example.invalid\n", pulled(fix.instance(), store));
     workspaces.stop(PROJECT, FIX, NO_RUN);
     workspaces.refresh(udayWith("tok-3"), project -> definition());
@@ -2030,7 +2030,12 @@ class WorkspaceIT extends AbstractIncusIT {
       var sweeper = sweeper(db, said, clock);
       var instance = doneSpecsWorkspace(db, HELD, SpecStatus.AWAITING_MERGE, "true");
       var box = new BoxInstances(shell);
-      var held = new ProcessBuilder("incus", "exec", instance, "--", "sleep", "600").start();
+      var held =
+          new ProcessBuilder("incus", "exec", instance, "--", "sleep", "600")
+              .redirectInput(Child.NO_INPUT)
+              .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+              .redirectError(ProcessBuilder.Redirect.DISCARD)
+              .start();
       try {
         assertTrue(until(() -> box.inUse().contains(instance)), "the exec shows as running");
         clock.set(Instant.now().plus(SpecWorkspaces.IDLE).plusSeconds(1));

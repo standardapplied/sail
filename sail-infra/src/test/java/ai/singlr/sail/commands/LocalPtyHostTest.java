@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.engine.OpenDescriptors;
 import ai.singlr.sail.pty.Account;
 import ai.singlr.sail.pty.Locales;
@@ -791,9 +792,8 @@ class LocalPtyHostTest {
   }
 
   private static void mkfifo(Path path) throws Exception {
-    var made = new ProcessBuilder("mkfifo", path.toString()).start();
-    assertTrue(made.waitFor(STEP.toMillis(), TimeUnit.MILLISECONDS), "mkfifo ran");
-    assertEquals(0, made.exitValue());
+    var made = Child.run(new ProcessBuilder("mkfifo", path.toString()), "", STEP);
+    assertEquals(0, made.exit(), made.stderr());
   }
 
   /**

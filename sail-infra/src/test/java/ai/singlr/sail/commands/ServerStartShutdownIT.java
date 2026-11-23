@@ -7,11 +7,9 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.BufferedReader;
+import ai.singlr.sail.engine.Child;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.net.ServerSocket;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -30,7 +28,6 @@ import org.junit.jupiter.api.Test;
 class ServerStartShutdownIT {
 
   private static final String MAIN_CLASS = "ai.singlr.sail.Main";
-  private static final String SENTINEL = "<<stream-closed>>";
 
   @Test
   void sigtermRunsTheShutdownHookAndClosesResources() throws Exception {
@@ -57,9 +54,7 @@ class ServerStartShutdownIT {
     process.getOutputStream().close();
 
     var lines = new LinkedBlockingQueue<String>();
-    var reader = new Thread(() -> drainInto(process, lines), "server-output-reader");
-    reader.setDaemon(true);
-    reader.start();
+    var reader = Child.drain(process, lines);
 
     var transcript = new StringBuilder();
     try {
@@ -82,6 +77,8 @@ class ServerStartShutdownIT {
               + transcript);
     } finally {
       process.destroyForcibly();
+      process.waitFor();
+      reader.join();
     }
   }
 
@@ -116,28 +113,12 @@ class ServerStartShutdownIT {
     for (var line = lines.poll(timeoutSeconds, TimeUnit.SECONDS);
         line != null;
         line = lines.poll(timeoutSeconds, TimeUnit.SECONDS)) {
-      if (line.equals(SENTINEL)) {
-        return false;
-      }
       transcript.append(line).append('\n');
       if (line.contains(needle)) {
         return true;
       }
     }
     return false;
-  }
-
-  private static void drainInto(Process process, LinkedBlockingQueue<String> lines) {
-    try (var reader =
-        new BufferedReader(
-            new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-      for (var line = reader.readLine(); line != null; line = reader.readLine()) {
-        lines.put(line);
-      }
-    } catch (IOException | InterruptedException ignored) {
-    } finally {
-      lines.add(SENTINEL);
-    }
   }
 
   private static int freePort() throws IOException {

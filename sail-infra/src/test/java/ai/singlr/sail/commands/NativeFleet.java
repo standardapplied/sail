@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SpecCliHelper;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
@@ -17,6 +18,7 @@ import ai.singlr.sail.sync.SyncedEntities;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,7 +28,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -438,22 +439,8 @@ public final class NativeFleet implements AutoCloseable {
   }
 
   private static Result run(Duration deadline, List<String> command) throws Exception {
-    var process = new ProcessBuilder(command).redirectErrorStream(true).start();
-    process.getOutputStream().close();
-    var output =
-        CompletableFuture.supplyAsync(
-            () -> {
-              try {
-                return new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-              } catch (IOException e) {
-                return "output unreadable: " + e.getMessage();
-              }
-            });
-    if (!process.waitFor(deadline.toMillis(), TimeUnit.MILLISECONDS)) {
-      process.destroyForcibly();
-      fail("timed out after " + deadline + ": " + String.join(" ", command));
-    }
-    return new Result(process.exitValue(), output.get());
+    var ran = Child.run(new ProcessBuilder(command).redirectErrorStream(true), "", deadline);
+    return new Result(ran.exit(), ran.stdout());
   }
 
   public final class Box {
@@ -703,7 +690,7 @@ public final class NativeFleet implements AutoCloseable {
           new BufferedReader(
               new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
       awaitListening(reader);
-      drain = Thread.ofVirtual().start(() -> reader.lines().forEach(log::append));
+      drain = Thread.ofVirtual().start(() -> drain(reader));
     }
 
     @Override
@@ -714,6 +701,15 @@ public final class NativeFleet implements AutoCloseable {
         fail(box.name + ": " + processName + " did not stop:\n" + log);
       }
       drain.join();
+    }
+
+    /** Keeps what the daemon says until its output ends, then closes it. */
+    private void drain(BufferedReader reader) {
+      try (reader) {
+        reader.lines().forEach(log::append);
+      } catch (IOException | UncheckedIOException gone) {
+        var unused = gone;
+      }
     }
 
     private void awaitListening(BufferedReader reader) throws IOException {

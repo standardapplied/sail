@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SailRoomRelay;
 import ai.singlr.sail.engine.SailStopGate;
@@ -24,13 +25,12 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -120,7 +120,7 @@ class RoomRelayDeliveryIT {
         Acting.system(() -> messages.append("room", "ada", "also update the docs, please", null));
 
     var relay = runScript(relayScript(), "");
-    assertEquals(0, relay.exitCode());
+    assertEquals(0, relay.exit());
     var output = YamlUtil.parseMap(relay.stdout());
     @SuppressWarnings("unchecked")
     var hookOutput = (Map<String, Object>) output.get("hookSpecificOutput");
@@ -138,7 +138,7 @@ class RoomRelayDeliveryIT {
         "the relay acknowledged what it delivered");
 
     var gate = runScript(gateScript(), "{\"stop_hook_active\": false}");
-    assertEquals(0, gate.exitCode());
+    assertEquals(0, gate.exit());
     assertEquals(
         "", gate.stdout(), "already delivered mid-run: the stop gate has nothing left to block on");
   }
@@ -151,7 +151,7 @@ class RoomRelayDeliveryIT {
 
     var relay = runScript(relayScript(), "");
 
-    assertEquals(0, relay.exitCode(), "a down API must never break a build");
+    assertEquals(0, relay.exit(), "a down API must never break a build");
     assertEquals("", relay.stdout());
     assertTrue(runStore.deliveredMessageIds(runId).isEmpty(), "nothing was delivered");
   }
@@ -174,22 +174,13 @@ class RoomRelayDeliveryIT {
     return path;
   }
 
-  private record ScriptResult(int exitCode, String stdout, String stderr) {}
-
-  private ScriptResult runScript(Path script, String stdin) throws Exception {
+  private Child.Ended runScript(Path script, String stdin) throws Exception {
     var pb = new ProcessBuilder("/bin/sh", script.toString());
     var env = pb.environment();
     env.put("HOME", home.toString());
     env.remove("SAIL_SPEC_ID");
     env.put("SAIL_RUN_ID", runId);
     env.put("SAIL_RUN_CREDENTIAL", credential);
-    var process = pb.start();
-    try (var in = process.getOutputStream()) {
-      in.write(stdin.getBytes(StandardCharsets.UTF_8));
-    }
-    var stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    var stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertTrue(process.waitFor(30, TimeUnit.SECONDS), "scripts must finish inside their timeouts");
-    return new ScriptResult(process.exitValue(), stdout, stderr);
+    return Child.run(pb, stdin, Duration.ofSeconds(30));
   }
 }
