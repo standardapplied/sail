@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.WebhookUrlSafety;
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -60,15 +61,20 @@ public final class WebhookNotifier {
               .POST(HttpRequest.BodyPublishers.ofString(payload))
               .build();
 
-      var client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
-      var response = client.send(request, HttpResponse.BodyHandlers.ofString());
-      if (response.statusCode() >= 400) {
-        System.err.println(
-            "  [webhook] Warning: HTTP " + response.statusCode() + " from " + redactedUrl(url));
+      var status = post(request);
+      if (status >= 400) {
+        System.err.println("  [webhook] Warning: HTTP " + status + " from " + redactedUrl(url));
       }
     } catch (Exception e) {
       System.err.println(
           "  [webhook] Warning: failed to notify " + redactedUrl(url) + " - " + e.getMessage());
+    }
+  }
+
+  /** Sends {@code request} on a client of its own, closed once answered, and says its status. */
+  static int post(HttpRequest request) throws IOException, InterruptedException {
+    try (var client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build()) {
+      return client.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
     }
   }
 

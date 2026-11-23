@@ -30,6 +30,14 @@ public final class ReleaseFetcher {
 
   private ReleaseFetcher() {}
 
+  /** Sends {@code request} on a client of its own, closed once the answer is read. */
+  static <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> body)
+      throws IOException, InterruptedException {
+    try (var client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build()) {
+      return client.send(request, body);
+    }
+  }
+
   /** Fetches the latest version string (e.g. {@code "0.9.2"}) from GitHub Releases. */
   @SuppressWarnings("unchecked")
   public static String fetchLatestVersion() throws IOException, InterruptedException {
@@ -41,11 +49,7 @@ public final class ReleaseFetcher {
             .timeout(META_TIMEOUT)
             .GET()
             .build();
-    var response =
-        HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build()
-            .send(request, HttpResponse.BodyHandlers.ofString());
+    var response = send(request, HttpResponse.BodyHandlers.ofString());
     if (response.statusCode() != 200) {
       throw new IOException("Failed to fetch latest release (HTTP " + response.statusCode() + ").");
     }
@@ -106,11 +110,7 @@ public final class ReleaseFetcher {
   private static String fetchText(String url, Duration timeout)
       throws IOException, InterruptedException {
     var request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(timeout).GET().build();
-    var response =
-        HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build()
-            .send(request, HttpResponse.BodyHandlers.ofString());
+    var response = send(request, HttpResponse.BodyHandlers.ofString());
     if (response.statusCode() != 200) {
       throw new IOException("Failed to fetch " + url + " (HTTP " + response.statusCode() + ").");
     }
@@ -120,11 +120,7 @@ public final class ReleaseFetcher {
   private static byte[] fetchBytes(String url, Duration timeout)
       throws IOException, InterruptedException {
     var request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(timeout).GET().build();
-    var response =
-        HttpClient.newBuilder()
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build()
-            .send(request, HttpResponse.BodyHandlers.ofByteArray());
+    var response = send(request, HttpResponse.BodyHandlers.ofByteArray());
     if (response.statusCode() != 200) {
       throw new IOException(
           "Failed to download from " + url + " (HTTP " + response.statusCode() + ").");

@@ -62,6 +62,21 @@ class UploadCleanupTest {
     return directory;
   }
 
+  /**
+   * Closing waits for a removal still running, so none outlives the host that started it: the
+   * directory is gone and its script has ended by the time {@code close} returns.
+   */
+  @Test
+  void closingWaitsForARemovalStillRunning() throws Exception {
+    var session = directory(ID);
+
+    cleanup.remove("acme", ID, null);
+    cleanup.close();
+
+    assertEquals(List.of(UploadCleanup.REMOVE), List.copyOf(c.finished));
+    assertFalse(Files.exists(session, LinkOption.NOFOLLOW_LINKS));
+  }
+
   /** Major 5: links a session's directory holds are removed as links, never followed. */
   @Test
   void aSessionsDirectoryGoesWithItsLinksRemovedAsLinks() throws Exception {

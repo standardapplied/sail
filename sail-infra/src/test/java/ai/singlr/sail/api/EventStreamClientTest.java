@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
+import ai.singlr.sail.engine.ClosesWhatItOpens;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
@@ -303,5 +304,33 @@ class EventStreamClientTest {
         }
       }
     }
+  }
+
+  /** However a subscription ends, refused or closed once it was on, its client is closed. */
+  @Test
+  void everyWayASubscriptionEndsLeavesNothingOpen(@TempDir Path tmp) throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+    var queue = new LinkedBlockingQueue<Event>();
+
+    assertThrows(
+        IOException.class, () -> EventStreamClient.subscribe("127.0.0.1", 1, "tok", "any", queue));
+    try (var bus = new EventBus();
+        var server =
+            new SailApiServer(
+                "127.0.0.1",
+                0,
+                new SailOperations(),
+                new FixedTokenTestAuth("tok"),
+                bus,
+                null,
+                tmp.resolve("api.sock"))) {
+      server.start();
+      assertThrows(
+          SailApiClient.Refused.class,
+          () -> EventStreamClient.subscribe("127.0.0.1", server.port(), "wrong", "any", queue));
+      EventStreamClient.subscribe("127.0.0.1", server.port(), "tok", "any", queue).close();
+    }
+
+    ClosesWhatItOpens.assertClosed("a subscriber", before);
   }
 }

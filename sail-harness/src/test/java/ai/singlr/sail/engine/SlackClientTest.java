@@ -11,8 +11,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.sun.net.httpserver.HttpServer;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.http.HttpRequest;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -273,5 +279,33 @@ class SlackClientTest {
       System.setErr(original);
     }
     return buffer.toString();
+  }
+
+  /** A post's client lives for its one request: nothing of it is open once answered. */
+  @Test
+  void aPostLeavesNoClientOpen() throws Exception {
+    var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+    server.createContext(
+        "/",
+        exchange -> {
+          var ok = "{\"ok\":true}".getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(200, ok.length);
+          exchange.getResponseBody().write(ok);
+          exchange.close();
+        });
+    server.start();
+    var before = ClosesWhatItOpens.baseline();
+    try {
+      var request =
+          HttpRequest.newBuilder(
+                  URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/chat"))
+              .POST(HttpRequest.BodyPublishers.ofString("{}"))
+              .build();
+
+      assertEquals(new SlackClient.HttpReply(200, "{\"ok\":true}"), SlackClient.post(request));
+    } finally {
+      server.stop(0);
+    }
+    ClosesWhatItOpens.assertClosed("a Slack post", before);
   }
 }

@@ -84,6 +84,8 @@ final class PtyTcpDoor implements AutoCloseable {
   private final Map<String, Integer> refusals = new LinkedHashMap<>();
   volatile ServerSocketChannel listener;
   private volatile boolean closed;
+  private final OpenConnections connected = new OpenConnections();
+  private volatile Thread accepting;
 
   /**
    * The door on {@code address}, serving at most {@code cap} connections at once on {@code clock},
@@ -161,7 +163,7 @@ final class PtyTcpDoor implements AutoCloseable {
       throw new IOException("the host is shutting down");
     }
     ListenConfig.say(listening, (InetSocketAddress) channel.getLocalAddress());
-    Thread.ofVirtual().name("pty-host-tcp-accept").start(() -> acceptLoop(channel));
+    accepting = Thread.ofVirtual().name("pty-host-tcp-accept").start(() -> acceptLoop(channel));
   }
 
   /**
@@ -215,7 +217,7 @@ final class PtyTcpDoor implements AutoCloseable {
    */
   private void taken(SocketChannel channel) {
     var refusal = open.incrementAndGet() > cap ? "connection cap " + cap : registered(channel);
-    Thread.ofVirtual().name("pty-host-tcp-conn").start(() -> serve(channel, refusal));
+    connected.serve("pty-host-tcp-conn", channel, taken -> serve(taken, refusal));
   }
 
   /** Why {@code channel} has no place in the pool, or null once it has one. */
@@ -382,5 +384,15 @@ final class PtyTcpDoor implements AutoCloseable {
       bound.close();
     }
     ListenConfig.unsay(listening);
+    var loop = accepting;
+    if (loop != null) {
+      try {
+        loop.join();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return;
+      }
+    }
+    connected.close();
   }
 }

@@ -150,16 +150,16 @@ class CommitAnnouncerTest {
       Thread.ofVirtual()
           .start(
               () -> {
-                try {
-                  var taken = silent.accept();
+                String read;
+                try (var taken = silent.accept()) {
                   var reader =
                       new BufferedReader(
                           new InputStreamReader(taken.getInputStream(), StandardCharsets.US_ASCII));
-                  request.add(
-                      reader.readLine() + " | " + reader.readLine() + " | " + reader.readLine());
+                  read = reader.readLine() + " | " + reader.readLine() + " | " + reader.readLine();
                 } catch (IOException closed) {
-                  request.add("closed: " + closed);
+                  read = "closed: " + closed;
                 }
+                request.add(read);
               });
       var announcer =
           new CommitAnnouncer(

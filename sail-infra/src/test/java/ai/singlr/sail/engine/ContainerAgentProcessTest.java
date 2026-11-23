@@ -14,11 +14,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
 import java.util.function.UnaryOperator;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -38,6 +40,23 @@ class ContainerAgentProcessTest {
       argv -> argv.subList(argv.indexOf("--") + 1, argv.size());
 
   @TempDir Path dir;
+
+  private final List<AgentProcess.Handle> handles = new ArrayList<>();
+
+  /** {@code handle}, released when the test ends. */
+  private AgentProcess.Handle held(AgentProcess.Handle handle) {
+    handles.add(handle);
+    return handle;
+  }
+
+  /** Ends each process's input and reads its output to the end, where the handle closes it. */
+  @AfterEach
+  void release() throws IOException {
+    for (var handle : handles) {
+      handle.stdin().close();
+      while (handle.stdout().read() != null) {}
+    }
+  }
 
   private static Map<String, String> env() {
     var env = new LinkedHashMap<String, String>();
@@ -103,15 +122,16 @@ class ContainerAgentProcessTest {
             + " exit 7";
 
     var handle =
-        new ContainerAgentProcess(shell, LOCALLY)
-            .start(
-                "acme",
-                dir.toString(),
-                Map.of(),
-                List.of("bash", "-c", echo),
-                pidFile.toString(),
-                logFile.toString(),
-                launchEnv("SAIL_RUN_CREDENTIAL=c1"));
+        held(
+            new ContainerAgentProcess(shell, LOCALLY)
+                .start(
+                    "acme",
+                    dir.toString(),
+                    Map.of(),
+                    List.of("bash", "-c", echo),
+                    pidFile.toString(),
+                    logFile.toString(),
+                    launchEnv("SAIL_RUN_CREDENTIAL=c1")));
 
     var announced = handle.stdout().read();
     handle.stdin().write("{\"type\":\"user\"}");
@@ -134,20 +154,21 @@ class ContainerAgentProcessTest {
   void theCommandStartsWithTheLaunchFilesValuesAndTheFileGone() throws Exception {
     var file = launchEnv("SAIL_RUN_CREDENTIAL=c1\nCLAUDE_CODE_OAUTH_TOKEN=t-1");
     var handle =
-        new ContainerAgentProcess(new ScriptedShellExecutor(), LOCALLY)
-            .start(
-                "acme",
-                dir.toString(),
-                Map.of(),
-                List.of(
-                    "bash",
-                    "-c",
-                    "echo \"$SAIL_RUN_CREDENTIAL $CLAUDE_CODE_OAUTH_TOKEN\"; test -e "
-                        + file
-                        + " && echo present || echo gone"),
-                dir.resolve("agent.pid").toString(),
-                dir.resolve("agent.log").toString(),
-                file);
+        held(
+            new ContainerAgentProcess(new ScriptedShellExecutor(), LOCALLY)
+                .start(
+                    "acme",
+                    dir.toString(),
+                    Map.of(),
+                    List.of(
+                        "bash",
+                        "-c",
+                        "echo \"$SAIL_RUN_CREDENTIAL $CLAUDE_CODE_OAUTH_TOKEN\"; test -e "
+                            + file
+                            + " && echo present || echo gone"),
+                    dir.resolve("agent.pid").toString(),
+                    dir.resolve("agent.log").toString(),
+                    file));
 
     assertEquals("c1 t-1", handle.stdout().read());
     assertEquals("gone", handle.stdout().read());
@@ -164,31 +185,33 @@ class ContainerAgentProcessTest {
   @EnabledOnOs(OS.LINUX)
   void aProcessStillRunningHasNoExitCodeYet() throws Exception {
     var handle =
-        new ContainerAgentProcess(new ScriptedShellExecutor(), LOCALLY)
-            .start(
-                "acme",
-                dir.toString(),
-                Map.of(),
-                List.of("cat"),
-                dir.resolve("agent.pid").toString(),
-                dir.resolve("agent.log").toString(),
-                launchEnv("SAIL_RUN_CREDENTIAL=c1"));
+        held(
+            new ContainerAgentProcess(new ScriptedShellExecutor(), LOCALLY)
+                .start(
+                    "acme",
+                    dir.toString(),
+                    Map.of(),
+                    List.of("cat"),
+                    dir.resolve("agent.pid").toString(),
+                    dir.resolve("agent.log").toString(),
+                    launchEnv("SAIL_RUN_CREDENTIAL=c1")));
 
     assertEquals(OptionalInt.empty(), handle.waitFor(Duration.ZERO));
     handle.stdin().close();
     assertEquals(OptionalInt.of(0), handle.waitFor(PATIENCE));
   }
 
-  private static AgentProcess.Handle idle(ShellExec shell) throws IOException {
-    return new ContainerAgentProcess(shell, argv -> List.of("true"))
-        .start(
-            "acme",
-            "/w",
-            Map.of(),
-            List.of("claude"),
-            "/p/agent.pid",
-            "/p/agent.log",
-            "/p/launch.env");
+  private AgentProcess.Handle idle(ShellExec shell) throws IOException {
+    return held(
+        new ContainerAgentProcess(shell, argv -> List.of("true"))
+            .start(
+                "acme",
+                "/w",
+                Map.of(),
+                List.of("claude"),
+                "/p/agent.pid",
+                "/p/agent.log",
+                "/p/launch.env"));
   }
 
   @Test
@@ -288,5 +311,39 @@ class ContainerAgentProcessTest {
   @Test
   void aShellIsRequired() {
     assertThrows(NullPointerException.class, () -> new ContainerAgentProcess(null));
+  }
+
+  /**
+   * The end of stdout closes its pipe at once, the process still running on: its pipe never waits
+   * for the JDK's reaper, which closes a child's pipes only after it has woken those waiting for
+   * it.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void theEndOfStdoutClosesItsPipeWhileTheProcessRunsOn() throws Exception {
+    var before = OpenDescriptors.list();
+    var handle =
+        held(
+            new ContainerAgentProcess(
+                    new ScriptedShellExecutor(),
+                    argv -> List.of("sh", "-c", "exec >&-; read line; exit 0"))
+                .start(
+                    "acme",
+                    "/w",
+                    Map.of(),
+                    List.of("claude"),
+                    "/p/agent.pid",
+                    "/p/agent.log",
+                    "/p/launch.env"));
+
+    assertNull(handle.stdout().read());
+    assertNull(handle.stdout().read(), "an ended stdout stays ended");
+
+    assertEquals(
+        1,
+        OpenDescriptors.opened(before, OpenDescriptors.list()).size(),
+        "the running process's stdin alone is open");
+    handle.stdin().close();
+    assertEquals(OptionalInt.of(0), handle.waitFor(PATIENCE));
   }
 }

@@ -89,6 +89,7 @@ public final class ContainerAgentProcess implements AgentProcess {
     private final Process process;
     private final BufferedWriter in;
     private final BufferedReader out;
+    private volatile boolean ended;
 
     private Piped(String container, String pidFile, Process process) {
       this.container = container;
@@ -128,9 +129,21 @@ public final class ContainerAgentProcess implements AgentProcess {
       }
     }
 
+    /**
+     * The next line of stdout, or {@code null} once it has ended; at its end the handle closes it,
+     * so its pipe goes with the reading rather than whenever the JDK's reaper gets to it.
+     */
     @Override
     public String read() throws IOException {
-      return out.readLine();
+      if (ended) {
+        return null;
+      }
+      var line = out.readLine();
+      if (line == null) {
+        ended = true;
+        out.close();
+      }
+      return line;
     }
 
     @Override

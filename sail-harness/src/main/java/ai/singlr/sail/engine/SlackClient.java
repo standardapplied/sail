@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -148,7 +149,6 @@ public final class SlackClient implements SlackPoster {
   }
 
   static HttpPoster defaultHttp(String token) {
-    var client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
     return body -> {
       var request =
           HttpRequest.newBuilder()
@@ -158,9 +158,16 @@ public final class SlackClient implements SlackPoster {
               .timeout(TIMEOUT)
               .POST(HttpRequest.BodyPublishers.ofString(body))
               .build();
+      return post(request);
+    };
+  }
+
+  /** Sends {@code request} on a client of its own, closed once answered. */
+  static HttpReply post(HttpRequest request) throws IOException, InterruptedException {
+    try (var client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build()) {
       var response = client.send(request, HttpResponse.BodyHandlers.ofString());
       return new HttpReply(response.statusCode(), response.body());
-    };
+    }
   }
 
   private static String envOrProperty(String name) {

@@ -37,7 +37,7 @@ class ApiCoverageEdgesTest {
 
   @Test
   void webhookReactorDefaultSenderBuildsRealNotifier() {
-    var sender = WebhookReactor.defaultSender("https://ntfy.sh/test");
+    var sender = WebhookReactor.defaultSender("http://127.0.0.1:1/hook");
     assertNotNull(sender);
     sender.send("any", "p", "title", "msg");
   }

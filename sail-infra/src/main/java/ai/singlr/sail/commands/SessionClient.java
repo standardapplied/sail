@@ -47,10 +47,15 @@ public final class SessionClient implements AutoCloseable {
       throw new IOException(
           "No session host at " + socket + ". Is the sail-pty-host service running?", e);
     }
-    var client = new SessionClient(channel);
-    PtyWire.write(channel, new PtyMessage.Hello(token));
-    client.hostBootId = client.expectWelcome();
-    return client;
+    try {
+      var client = new SessionClient(channel);
+      PtyWire.write(channel, new PtyMessage.Hello(token));
+      client.hostBootId = client.expectWelcome();
+      return client;
+    } catch (IOException | RuntimeException unwelcome) {
+      channel.close();
+      throw unwelcome;
+    }
   }
 
   private String expectWelcome() throws IOException {

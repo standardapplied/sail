@@ -127,6 +127,13 @@ final class PtyUploads {
     return new PtyUploads(UploadCopy.intoContainers(), PtyUploads::targetOf, SYSTEM_TIMER);
   }
 
+  /**
+   * Waits for the removals and sweeps of sessions' uploads still running ({@link UploadCleanup}).
+   */
+  void close() {
+    cleanup.close();
+  }
+
   /** Where a file pasted into {@code origin}'s session goes. */
   Target target(PtySession.Origin origin) {
     return targets.apply(origin);

@@ -746,7 +746,11 @@ class WorkspaceCredentialsTest {
                   List.of("bash", "-c", path + "; command -v " + String.join(" ", tools)))
               .redirectErrorStream(true)
               .start();
-      var found = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+      process.getOutputStream().close();
+      String found;
+      try (var output = process.getInputStream()) {
+        found = new String(output.readAllBytes(), StandardCharsets.UTF_8);
+      }
       assertTrue(process.waitFor(30, TimeUnit.SECONDS));
       assertEquals(tools.size(), found.lines().count(), path + " finds only:\n" + found);
     }
@@ -773,7 +777,11 @@ class WorkspaceCredentialsTest {
                         "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "PATH=" + empty)))
             .redirectErrorStream(true)
             .start();
-    var said = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    process.getOutputStream().close();
+    String said;
+    try (var output = process.getInputStream()) {
+      said = new String(output.readAllBytes(), StandardCharsets.UTF_8);
+    }
     var ended = process.waitFor(10, TimeUnit.SECONDS);
     process.destroyForcibly();
     assertTrue(ended, "it does not wait the bound");

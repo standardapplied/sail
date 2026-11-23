@@ -12,6 +12,7 @@ import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.channels.ServerSocketChannel;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -209,8 +210,15 @@ public final class SailApiServer implements AutoCloseable {
     server.setExecutor(executor);
   }
 
-  /** Binds the private address and serves there every context loopback serves. */
+  /**
+   * Binds the private address and serves there every context loopback serves. The JDK's server
+   * keeps the socket it could not bind open for good, so the address is first tried with a channel
+   * this closes either way: a try while another holds the address leaves nothing open.
+   */
   private void listenPrivately(InetSocketAddress address) throws IOException {
+    try (var trial = ServerSocketChannel.open()) {
+      trial.bind(address);
+    }
     var listener = HttpServer.create(address, 32);
     for (var each : mounts) {
       mount(listener, each.path(), each.handler());

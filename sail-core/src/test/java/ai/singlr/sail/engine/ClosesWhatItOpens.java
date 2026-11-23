@@ -22,9 +22,10 @@ import org.junit.jupiter.api.extension.ExtensionContext;
  * Fails a test class that leaves open a descriptor it opened: an HTTP client's selector, a server's
  * socket, a store's database files. What a class leaves open is closed when it is collected, at a
  * moment no one chooses and inside whichever class runs then, or not before the fork ends.
- * Registered for every sail-infra class through JUnit's extension auto-detection, it checks once
- * the class's own {@code @AfterAll} has run. Linux only, where {@code /proc/self/fd} names what
- * each descriptor is open on; elsewhere it does nothing.
+ * Registered for every sail-infra class through JUnit's extension auto-detection (sail-infra's test
+ * resources name it; it lives here so every module's tests can assert with it), it checks once the
+ * class's own {@code @AfterAll} has run. Linux only, where {@code /proc/self/fd} names what each
+ * descriptor is open on; elsewhere it does nothing.
  */
 public final class ClosesWhatItOpens implements BeforeAllCallback, AfterAllCallback {
 
@@ -63,11 +64,19 @@ public final class ClosesWhatItOpens implements BeforeAllCallback, AfterAllCallb
   @Override
   public void beforeAll(ExtensionContext context) throws IOException, ClassNotFoundException {
     if (Files.isDirectory(PROC_FD)) {
-      for (var name : THE_JDKS) {
-        Class.forName(name);
-      }
-      context.getStore(NAMESPACE).put(Before.class, new Before(OpenDescriptors.list()));
+      context.getStore(NAMESPACE).put(Before.class, new Before(baseline()));
     }
+  }
+
+  /**
+   * What is open before a stretch of work that {@link #assertClosed} then checks, once the JDK has
+   * opened {@link #THE_JDKS what it keeps for the fork's life}.
+   */
+  public static Map<String, Object> baseline() throws IOException, ClassNotFoundException {
+    for (var name : THE_JDKS) {
+      Class.forName(name);
+    }
+    return OpenDescriptors.list();
   }
 
   @Override
@@ -80,9 +89,13 @@ public final class ClosesWhatItOpens implements BeforeAllCallback, AfterAllCallb
 
   /**
    * Fails, naming each with its number and what it is open on, if a descriptor not open on the same
-   * thing {@code before} is open now and is not {@link #THE_FORKS the fork's own}.
+   * thing {@code before} is open now and is not {@link #THE_FORKS the fork's own}; does nothing
+   * where no {@code /proc/self/fd} names targets.
    */
-  static void assertClosed(String owner, Map<String, Object> before) throws IOException {
+  public static void assertClosed(String owner, Map<String, Object> before) throws IOException {
+    if (!Files.isDirectory(PROC_FD)) {
+      return;
+    }
     var left = new ArrayList<String>();
     for (var number : OpenDescriptors.opened(before, OpenDescriptors.list()).keySet()) {
       try {

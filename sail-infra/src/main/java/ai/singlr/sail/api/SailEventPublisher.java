@@ -42,7 +42,6 @@ public final class SailEventPublisher {
   private final String host;
   private final int port;
   private final String token;
-  private final HttpClient client;
 
   public SailEventPublisher(String host, int port, String token) {
     Objects.requireNonNull(host, "host");
@@ -57,7 +56,6 @@ public final class SailEventPublisher {
     this.host = host;
     this.port = port;
     this.token = token;
-    this.client = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
   }
 
   /**
@@ -96,7 +94,8 @@ public final class SailEventPublisher {
 
   /**
    * Publishes the event over HTTP and returns the bus-stamped version (with the id assigned by the
-   * server). Throws if the server rejects the request or the connection fails.
+   * server). Throws if the server rejects the request or the connection fails. The client lives for
+   * this one request, so a publisher holds nothing open between them.
    */
   public Event publish(Event event) throws IOException, InterruptedException {
     Objects.requireNonNull(event, "event");
@@ -108,7 +107,10 @@ public final class SailEventPublisher {
             .timeout(REQUEST_TIMEOUT)
             .POST(HttpRequest.BodyPublishers.ofString(event.toJsonLine()))
             .build();
-    var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+    HttpResponse<String> response;
+    try (var client = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build()) {
+      response = client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
     if (response.statusCode() / 100 != 2) {
       throw new IOException(
           "POST "

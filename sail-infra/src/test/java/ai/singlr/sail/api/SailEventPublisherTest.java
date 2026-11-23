@@ -10,13 +10,19 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.ClosesWhatItOpens;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.file.Path;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 class SailEventPublisherTest {
@@ -178,5 +184,30 @@ class SailEventPublisherTest {
       System.clearProperty("SAIL_TOKEN");
       System.clearProperty("SAIL_SERVER");
     }
+  }
+
+  /** A publisher holds no client between requests: what a request opens, it closes. */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aPublisherHoldsNothingOpenOnceItsRequestIsAnswered() throws Exception {
+    var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+    server.createContext(
+        "/v1/events",
+        exchange -> {
+          exchange.sendResponseHeaders(503, -1);
+          exchange.close();
+        });
+    server.start();
+    var before = ClosesWhatItOpens.baseline();
+    try {
+      var publisher = new SailEventPublisher("127.0.0.1", server.getAddress().getPort(), "tok");
+      assertThrows(
+          IOException.class,
+          () -> publisher.publish(Event.of("light", null, "spec_dispatched", "sail", "h")));
+    } finally {
+      server.stop(0);
+    }
+
+    ClosesWhatItOpens.assertClosed("a publisher", before);
   }
 }

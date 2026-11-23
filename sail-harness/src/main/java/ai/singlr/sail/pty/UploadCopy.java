@@ -418,7 +418,11 @@ final class UploadCopy {
     try {
       var process = processes.start(command);
       process.getOutputStream().close();
-      return finish(process);
+      try {
+        return finish(process);
+      } finally {
+        process.getInputStream().close();
+      }
     } catch (IOException e) {
       return 1;
     }

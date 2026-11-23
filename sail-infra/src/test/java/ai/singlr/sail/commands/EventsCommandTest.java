@@ -15,6 +15,7 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.engine.ClosesWhatItOpens;
 import ai.singlr.sail.engine.OperatorCommand;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -167,8 +168,9 @@ class EventsCommandTest {
 
   @ParameterizedTest
   @ValueSource(booleans = {false, true})
-  void followingAStreamTheApiClosesExitsOneNamingTheCommandAsTyped(boolean dropped)
-      throws Exception {
+  void followingAStreamTheApiClosesExitsOneNamingTheCommandAsTypedAndLeavesNothingOpen(
+      boolean dropped) throws Exception {
+    var before = ClosesWhatItOpens.baseline();
     var frames = ": subscribed\n\n";
     var token = System.getProperty("SAIL_TOKEN");
     System.setProperty("SAIL_TOKEN", "tok");
@@ -191,5 +193,6 @@ class EventsCommandTest {
         System.setProperty("SAIL_TOKEN", token);
       }
     }
+    ClosesWhatItOpens.assertClosed("sail events", before);
   }
 }

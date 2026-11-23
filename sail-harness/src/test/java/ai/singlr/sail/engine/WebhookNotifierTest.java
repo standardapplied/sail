@@ -11,8 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.sun.net.httpserver.HttpServer;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 
@@ -186,5 +191,31 @@ class WebhookNotifierTest {
     var logged = captured.toString(StandardCharsets.UTF_8);
     assertTrue(logged.contains("refusing to send"), logged);
     assertFalse(logged.contains("127.0.0.1:9/hook"), "Must not log the unredacted URL");
+  }
+
+  /** A notification's client lives for its one request: nothing of it is open once answered. */
+  @Test
+  void aPostLeavesNoClientOpen() throws Exception {
+    var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+    server.createContext(
+        "/",
+        exchange -> {
+          exchange.sendResponseHeaders(204, -1);
+          exchange.close();
+        });
+    server.start();
+    var before = ClosesWhatItOpens.baseline();
+    try {
+      var request =
+          HttpRequest.newBuilder(
+                  URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/hook"))
+              .POST(HttpRequest.BodyPublishers.ofString("{}"))
+              .build();
+
+      assertEquals(204, WebhookNotifier.post(request));
+    } finally {
+      server.stop(0);
+    }
+    ClosesWhatItOpens.assertClosed("a webhook post", before);
   }
 }

@@ -46,13 +46,18 @@ public final class EventStreamClient implements AutoCloseable {
   private static final String SUBSCRIBED_LINE = ": subscribed";
   private static final Duration SUBSCRIBED_TIMEOUT = Duration.ofSeconds(5);
 
+  private final HttpClient client;
   private final Stream<String> lineStream;
   private final Thread reader;
   private final CountDownLatch subscribedLatch = new CountDownLatch(1);
   private volatile boolean stopped;
 
   private EventStreamClient(
-      HttpResponse<Stream<String>> response, BlockingQueue<Event> queue, String project) {
+      HttpClient client,
+      HttpResponse<Stream<String>> response,
+      BlockingQueue<Event> queue,
+      String project) {
+    this.client = client;
     this.lineStream = response.body();
     this.reader =
         Thread.ofVirtual()
@@ -72,7 +77,6 @@ public final class EventStreamClient implements AutoCloseable {
     Objects.requireNonNull(host, "host");
     Objects.requireNonNull(token, "token");
     Objects.requireNonNull(queue, "queue");
-    var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     var request =
         HttpRequest.newBuilder(streamUri(host, port, projectFilter))
             .header("Authorization", "Bearer " + token)
@@ -80,6 +84,19 @@ public final class EventStreamClient implements AutoCloseable {
             .timeout(Duration.ofHours(24))
             .GET()
             .build();
+    var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+    try {
+      return subscribed(client, request, queue, projectFilter);
+    } catch (IOException | InterruptedException | RuntimeException failed) {
+      release(client);
+      throw failed;
+    }
+  }
+
+  /** The stream {@code client} opens with {@code request}, once the server has said it is on. */
+  private static EventStreamClient subscribed(
+      HttpClient client, HttpRequest request, BlockingQueue<Event> queue, String projectFilter)
+      throws IOException, InterruptedException {
     var response = answer(client, request);
     if (response.statusCode() != 200) {
       try (var body = response.body()) {
@@ -87,7 +104,7 @@ public final class EventStreamClient implements AutoCloseable {
             response.statusCode(), body.collect(Collectors.joining("\n")));
       }
     }
-    var stream = new EventStreamClient(response, queue, projectFilter);
+    var stream = new EventStreamClient(client, response, queue, projectFilter);
     if (!stream.subscribedLatch.await(SUBSCRIBED_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
       stream.close();
       throw new IOException(
@@ -191,6 +208,16 @@ public final class EventStreamClient implements AutoCloseable {
     } catch (Exception ignored) {
     }
     reader.interrupt();
+    release(client);
+  }
+
+  /**
+   * Aborts what {@code client} still has in flight, a stream above all, and waits until it has let
+   * go of its connections and its selector.
+   */
+  private static void release(HttpClient client) {
+    client.shutdownNow();
+    client.close();
   }
 
   private static URI streamUri(String host, int port, String project) {

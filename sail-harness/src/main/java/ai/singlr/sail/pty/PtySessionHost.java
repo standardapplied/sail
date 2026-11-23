@@ -239,6 +239,8 @@ public final class PtySessionHost implements AutoCloseable {
   private volatile ServerSocketChannel server;
   private volatile byte[] dispatchCredential = new byte[0];
   private volatile boolean closed;
+  private final OpenConnections connected = new OpenConnections();
+  private Thread accepting;
 
   private record Admitted(SocketChannel channel, Credential credential, PtyIdentity who) {}
 
@@ -471,7 +473,7 @@ public final class PtySessionHost implements AutoCloseable {
     server = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
     server.bind(UnixDomainSocketAddress.of(socketPath));
     ownerOnly(socketPath);
-    Thread.ofVirtual().name("pty-host-accept").start(() -> acceptLoop(server));
+    accepting = Thread.ofVirtual().name("pty-host-accept").start(() -> acceptLoop(server));
     tick(network.clock().getAsLong());
   }
 
@@ -693,8 +695,7 @@ public final class PtySessionHost implements AutoCloseable {
   void acceptLoop(ServerSocketChannel listener) {
     while (!closed) {
       try {
-        var channel = listener.accept();
-        Thread.ofVirtual().name("pty-host-conn").start(() -> serveLocal(channel));
+        connected.serve("pty-host-conn", listener.accept(), this::serveLocal);
       } catch (IOException e) {
         if (closed) {
           return;
@@ -2272,7 +2273,12 @@ public final class PtySessionHost implements AutoCloseable {
    * all of them at once, so the last one is told within the same seconds as the first. This is the
    * loud path a {@code systemctl stop} takes; a restart takes {@link #handoff()}.
    */
-  public synchronized void stop(String reason) {
+  public void stop(String reason) {
+    endSessions(reason);
+    uploads.close();
+  }
+
+  private synchronized void endSessions(String reason) {
     endEveryFiles();
     closeServer();
     var endings =
@@ -2289,11 +2295,37 @@ public final class PtySessionHost implements AutoCloseable {
     sessions.clear();
   }
 
+  /**
+   * Closes the host, then, outside its lock, which the threads it waits for may need, ends the
+   * connections still open and waits for the upload removals its sessions started.
+   */
   @Override
-  public synchronized void close() {
+  public void close() {
+    closeSessions();
+    endConnections();
+    uploads.close();
+  }
+
+  private synchronized void closeSessions() {
     closeServer();
     sessions.forEach((name, session) -> session.close());
     sessions.clear();
+  }
+
+  /**
+   * Ends every connection the unix socket took, once its accept loop has stopped taking new ones,
+   * and waits for the threads serving them.
+   */
+  private void endConnections() {
+    if (accepting != null) {
+      try {
+        accepting.join();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return;
+      }
+    }
+    connected.close();
   }
 
   private void closeServer() {

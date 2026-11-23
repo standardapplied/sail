@@ -17,6 +17,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Secrets;
+import ai.singlr.sail.engine.ClosesWhatItOpens;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
@@ -236,6 +237,28 @@ class PtySessionHostTest {
             network);
     host.start();
     return host;
+  }
+
+  /**
+   * Closing the host ends a connection it still serves, whose thread is blocked reading the
+   * client's hello: the host's end of the socket closes with the host, never after it.
+   */
+  @Test
+  void closingTheHostEndsAConnectionItStillServes() throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+    try (var client = SocketChannel.open(StandardProtocolFamily.UNIX)) {
+      try (var started = startHost()) {
+        client.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
+        PtyWire.handshake(client, client);
+      }
+
+      assertEquals(
+          -1,
+          assertTimeoutPreemptively(
+              Duration.ofSeconds(5), () -> client.read(ByteBuffer.allocate(1))),
+          "the host ended the connection");
+    }
+    ClosesWhatItOpens.assertClosed("a host and the connection it served", before);
   }
 
   private SocketChannel connect() throws IOException {
