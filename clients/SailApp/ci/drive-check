@@ -1,30 +1,46 @@
 #!/usr/bin/env bash
 # Proves that ci/drive looks only at this account's processes, does not run beside a Sail terminal
-# host this account already has, and saves this account's Sail settings before it starts anything:
-# run on stand-ins first on PATH (codesign, osascript, plutil, a defaults holding one domain or
-# none, and a pgrep answering from a table of accounts, pids and command lines, which fails any ask
-# without -U), with a home of its own and a mktemp that marks how far ci/drive got. Another
-# account's Sail host and this account's host run from elsewhere let it go on, with this account's
-# Sail settings or none; this account's Sail host stops it before anything starts, naming that
-# host's pid and no other, and so do settings that cannot be saved.
+# host this account already has, and keeps this account's Sail settings: run on stand-ins first on
+# PATH (codesign, osascript, plutil, curl and sleep, a defaults holding Sail's domain or none whose
+# import can fail, a mktemp that can mark how far ci/drive got and stop it there, and a pgrep
+# answering from a table of accounts, pids and command lines, which fails any ask without -U), with
+# a home of its own and a bundled sail that never answers, so a run that goes past mktemp ends at
+# its control planes and its trap. Another account's Sail host and this account's host run from
+# elsewhere let it go on, with this account's Sail settings or none, and a run stopped before
+# anything changed leaves no save; this account's Sail host, settings that cannot be saved, and a
+# save a drive that did not end left (settings, or that there were none) stop it before anything
+# starts, the last naming its file and the command that puts them back. A run that ends puts the
+# settings back as they were and removes the save, and keeps the save, said, when they cannot be.
 set -euo pipefail
 
 drive="$(dirname "$0")/drive"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 me=$(id -u)
+saved="$work/home/Library/Application Support/Sail/drive-saved-settings.plist"
 
-mkdir -p "$work/bin" "$work/home" "$work/Sail.app/Contents/MacOS"
+mkdir -p "$work/bin" "$work/home" "$work/Sail.app/Contents/MacOS" "$work/Sail.app/Contents/Helpers"
 printf '#!/usr/bin/env bash\n' > "$work/Sail.app/Contents/MacOS/SailDrive"
-chmod +x "$work/Sail.app/Contents/MacOS/SailDrive"
+printf '#!/usr/bin/env bash\nexit 1\n' > "$work/Sail.app/Contents/Helpers/sail"
+chmod +x "$work/Sail.app/Contents/MacOS/SailDrive" "$work/Sail.app/Contents/Helpers/sail"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$work/bin/codesign"
 printf '#!/usr/bin/env bash\necho 1440\n' > "$work/bin/osascript"
 printf '#!/usr/bin/env bash\necho sh.standardapplied.sail\n' > "$work/bin/plutil"
+printf '#!/usr/bin/env bash\nexit 7\n' > "$work/bin/curl"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$work/bin/sleep"
 # shellcheck disable=SC2016
 printf '%s\n' '#!/usr/bin/env bash' \
-  '[[ $2 == sh.standardapplied.sail && -n $DEFAULTS_HELD ]] || exit 1' \
-  'case $1 in read) exit 0 ;; export) [[ $DEFAULTS_HELD == saves ]] && echo "<plist/>" ;; *) exit 2 ;; esac' > "$work/bin/defaults"
-printf '#!/usr/bin/env bash\n: > "%s/went-on"\nexit 3\n' "$work" > "$work/bin/mktemp"
+  'echo "$*" >> "$DEFAULTS_LOG"' \
+  '[[ $2 == sh.standardapplied.sail ]] || exit 1' \
+  'case $1 in' \
+  '  read) [[ -n $DEFAULTS_HELD ]] ;;' \
+  '  export) [[ $DEFAULTS_HELD == saves ]] && echo "<plist/>" > "$3" ;;' \
+  '  delete) exit 0 ;;' \
+  '  import) [[ $DEFAULTS_IMPORT != fails ]] ;;' \
+  '  *) exit 2 ;;' \
+  'esac' > "$work/bin/defaults"
+# shellcheck disable=SC2016
+printf '#!/usr/bin/env bash\n[[ -z $MKTEMP_STOPS ]] || { : > "%s/went-on"; exit 3; }\nexec %s "$@"\n' "$work" "$(command -v mktemp)" > "$work/bin/mktemp"
 # shellcheck disable=SC2016
 printf '%s\n' '#!/usr/bin/env bash' \
   'account= full=0' \
@@ -38,11 +54,20 @@ printf '%s\n' '#!/usr/bin/env bash' \
 chmod +x "$work/bin/"*
 
 host() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$work/table"; }
+fail() {
+  echo "ci/drive-check: $1: $(cat "$work/said")" >&2
+  exit 1
+}
 
+# run HELD WHERE [IMPORT]: ci/drive with Sail's settings held (saves), held and not exportable
+# (fails) or none (""), stopped at its first mktemp when WHERE is "stop" or let on to its control
+# planes and its trap when "end", its import failing when IMPORT is "fails".
 run() {
-  rm -f "$work/went-on" "$work/refused" "$work/said"
-  if HOME=$work/home PATH="$work/bin:$PATH" PGREP_TABLE=$work/table PGREP_REFUSED=$work/refused DEFAULTS_HELD=${1:-} \
-    "$drive" "$work/Sail.app" "$work/out" > "$work/said" 2>&1; then got=0; else got=$?; fi
+  local stops=
+  [[ $2 == stop ]] && stops=1
+  rm -f "$work/went-on" "$work/refused" "$work/said" "$work/defaults.log"
+  if HOME=$work/home PATH="$work/bin:$PATH" PGREP_TABLE=$work/table PGREP_REFUSED=$work/refused DEFAULTS_HELD=$1 MKTEMP_STOPS=$stops \
+    DEFAULTS_IMPORT=${3:-} DEFAULTS_LOG=$work/defaults.log "$drive" "$work/Sail.app" "$work/out" > "$work/said" 2>&1; then got=0; else got=$?; fi
   [[ ! -e $work/refused ]] || { echo "ci/drive-check: ci/drive asked pgrep beyond this account: $(cat "$work/refused")" >&2; exit 1; }
 }
 
@@ -51,20 +76,41 @@ host $((me + 1)) 4242 "/Users/someone/Library/Application Support/Sail/Host/0123
 host "$me" 4343 "/opt/runner/sail/sail _pty-host --local"
 host "$me" 4444 "$work/home/Library/Application Support/Sail/Host/0123abcd/sail _pty-host --local-not"
 for held in "" saves; do
-  run "$held"
-  [[ $got == 3 && -e $work/went-on ]] \
-    || { echo "ci/drive-check: another account's host, or one not a Sail app's, stopped ci/drive (settings ${held:-none}; exit $got): $(cat "$work/said")" >&2; exit 1; }
+  run "$held" stop
+  [[ $got == 3 && -e $work/went-on ]] || fail "another account's host, or one not a Sail app's, stopped ci/drive (settings ${held:-none}; exit $got)"
+  [[ ! -e $saved ]] || fail "a run stopped before anything changed left a save (settings ${held:-none})"
 done
-run fails
-[[ $got == 1 && ! -e $work/went-on ]] \
-  || { echo "ci/drive-check: settings that could not be saved did not stop ci/drive before it started anything (exit $got): $(cat "$work/said")" >&2; exit 1; }
-grep -qF "this account's Sail settings (sh.standardapplied.sail) could not be saved" "$work/said" \
-  || { echo "ci/drive-check: the refusal did not say the settings could not be saved: $(cat "$work/said")" >&2; exit 1; }
+run fails stop
+[[ $got == 1 && ! -e $work/went-on && ! -e $saved ]] || fail "settings that could not be saved did not stop ci/drive before it started anything (exit $got)"
+grep -qF "this account's Sail settings (sh.standardapplied.sail) could not be saved" "$work/said" || fail "the refusal did not say the settings could not be saved"
+
+for left in "<plist/>" none; do
+  mkdir -p "$(dirname "$saved")"
+  echo "$left" > "$saved"
+  run saves stop
+  [[ $got == 1 && ! -e $work/went-on && $(cat "$saved") == "$left" ]] || fail "a save a drive that did not end left ($left) did not stop ci/drive with the save kept (exit $got)"
+  if [[ $left == none ]]; then command="defaults delete sh.standardapplied.sail; rm '$saved'"
+  else command="defaults delete sh.standardapplied.sail; defaults import sh.standardapplied.sail '$saved' && rm '$saved'"; fi
+  grep -qF "a drive that did not end left this account's Sail settings saved in $saved: put them back with \`$command\`" "$work/said" \
+    || fail "the refusal for a save left ($left) did not name its file and the command"
+  rm -f "$saved"
+done
+
+run saves end
+[[ $got == 1 && ! -e $saved ]] || fail "a run that ended did not remove the save once the settings were back (exit $got)"
+[[ $(grep -E '^(delete|import) sh\.standardapplied\.sail' "$work/defaults.log" | tail -2 | paste -sd '|' -) == "delete sh.standardapplied.sail|import sh.standardapplied.sail $saved" ]] \
+  || fail "a run that ended did not put the settings back from the save: $(cat "$work/defaults.log")"
+run "" end
+[[ $got == 1 && ! -e $saved ]] || fail "a run that ended with no settings before did not remove its save (exit $got)"
+[[ $(grep -E '^(delete|import) sh\.standardapplied\.sail' "$work/defaults.log" | tail -1) == "delete sh.standardapplied.sail" ]] \
+  || fail "a run that ended with no settings before did not leave none: $(cat "$work/defaults.log")"
+run saves end fails
+[[ $got == 1 && -e $saved ]] || fail "settings that could not be put back did not keep the save (exit $got)"
+grep -qF "could not be put back; they are kept in $saved" "$work/said" || fail "settings that could not be put back were not said kept"
+rm -f "$saved"
 
 host "$me" 4545 "$work/home/Library/Application Support/Sail/Host/0123abcd/sail _pty-host --local"
-run
-[[ $got == 1 && ! -e $work/went-on ]] \
-  || { echo "ci/drive-check: this account's Sail host did not stop ci/drive before it started anything (exit $got): $(cat "$work/said")" >&2; exit 1; }
-grep -qF 'this account already runs a Sail terminal host (pid 4545)' "$work/said" \
-  || { echo "ci/drive-check: the refusal did not name this account's host, and it alone: $(cat "$work/said")" >&2; exit 1; }
-echo "ci/drive-check: ci/drive went on beside another account's host, with this account's Sail settings saved or none, and stopped for this account's own host and for settings it could not save"
+run "" stop
+[[ $got == 1 && ! -e $work/went-on ]] || fail "this account's Sail host did not stop ci/drive before it started anything (exit $got)"
+grep -qF 'this account already runs a Sail terminal host (pid 4545)' "$work/said" || fail "the refusal did not name this account's host, and it alone"
+echo "ci/drive-check: ci/drive went on beside another account's host and stopped for this account's own, for settings it could not save and for a save left behind; a run that ended put the settings back and removed its save, and kept the save when they could not be put back"

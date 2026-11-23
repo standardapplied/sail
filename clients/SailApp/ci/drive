@@ -24,7 +24,10 @@
 # those, it does not run while this account already has one (a person's Sail, whose terminals would
 # end with it). The drive build is Sail's own identifier (its signed runs need the App ID, its
 # Keychain access group and passkeys), so it shares Sail's settings: those of this account are saved
-# before the runs and put back when it ends, and it does not run when they cannot be saved.
+# to a file of the account's own before the runs (or that there were none) and put back as soon as
+# the drive app has gone, the file removed only once they are; it does not run when they cannot be
+# saved, nor while a drive that did not end has left that file, which it names with the command
+# that puts the settings back.
 set -euo pipefail
 
 [[ $# -eq 2 ]] || { echo "usage: ci/drive DRIVE_APP OUT" >&2; exit 2; }
@@ -61,19 +64,38 @@ running=$(hosts)
 }
 bundle_id=$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")
 readonly bundle_id
+readonly saved="$HOME/Library/Application Support/Sail/drive-saved-settings.plist"
+# The command that puts this account's Sail settings back from the saved file: "none" in it says
+# there were none.
+putting_back() {
+  if [[ $(cat "$saved") == none ]]; then echo "defaults delete $bundle_id; rm '$saved'"
+  else echo "defaults delete $bundle_id; defaults import $bundle_id '$saved' && rm '$saved'"; fi
+}
+[[ ! -e $saved ]] || {
+  echo "ci/drive: a drive that did not end left this account's Sail settings saved in $saved: put them back with \`$(putting_back)\`, then run again" >&2
+  exit 1
+}
+mkdir -p "$(dirname "$saved")"
 if defaults read "$bundle_id" > /dev/null 2>&1; then
-  settings_were=$(defaults export "$bundle_id" -) || {
+  (umask 077 && defaults export "$bundle_id" "$saved" && chmod 600 "$saved") || {
+    rm -f "$saved"
     echo "ci/drive: this account's Sail settings ($bundle_id) could not be saved, and the drive replaces them while it runs: it does not run" >&2
     exit 1
   }
 else
-  settings_were=
+  (umask 077 && echo none > "$saved")
 fi
-# Puts this account's Sail settings back as they were before the runs: none, when there were none.
+# Nothing of the settings has changed yet: a run that ends before its own trap leaves no save.
+trap 'rm -f "$saved"' EXIT
+# Puts this account's Sail settings back as they were before the runs (none, when there were none),
+# and only then removes the saved file; one that could not be put back is kept, and said.
 restore_settings() {
   defaults delete "$bundle_id" 2> /dev/null || true
-  [[ -z $settings_were ]] || defaults import "$bundle_id" - <<< "$settings_were" \
-    || echo "ci/drive: this account's Sail settings ($bundle_id) could not be put back" >&2
+  if [[ $(cat "$saved") == none ]] || defaults import "$bundle_id" "$saved"; then
+    rm -f "$saved"
+  else
+    echo "ci/drive: this account's Sail settings ($bundle_id) could not be put back; they are kept in $saved: \`$(putting_back)\`" >&2
+  fi
 }
 # Ends the hosts this run's apps started (none ran when it began), by their pids.
 end_hosts() {
@@ -119,7 +141,7 @@ stop_drive() {
     { kill -0 "$pid" 2> /dev/null && kill -KILL "$pid" 2> /dev/null; } || true
   done
 }
-trap 'stop_drive; end_hosts || true; [[ ! -s $feeder ]] || kill "$(< "$feeder")" 2> /dev/null || true; declare -F stop_shots > /dev/null && stop_shots; kill "${servers[@]}" 2>/dev/null || true; restore_settings; rm -rf "$passkeys" "$plain" "$private_dir"; restore_keyboard' EXIT
+trap 'stop_drive; restore_settings; end_hosts || true; [[ ! -s $feeder ]] || kill "$(< "$feeder")" 2> /dev/null || true; declare -F stop_shots > /dev/null && stop_shots; kill "${servers[@]}" 2>/dev/null || true; rm -rf "$passkeys" "$plain" "$private_dir"; restore_keyboard' EXIT
 for port in 7979 7980; do
   for _ in $(seq 1 60); do
     curl -fsS "http://127.0.0.1:$port/v1/health" > /dev/null 2>&1 && break
