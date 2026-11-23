@@ -24,9 +24,9 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -952,7 +952,8 @@ class LocalPtyHostTest {
   /**
    * The descriptors this process holds open, as {@code /dev/fd} lists them on both systems, each
    * with what it is open on (its file key, which a reused number does not share); the listing's own
-   * descriptor is left out.
+   * descriptor is left out, and so is one closed while it is listed (gone on Linux, a bad
+   * descriptor on macOS).
    */
   private static Map<String, Object> openDescriptors() throws IOException {
     var listing = Files.readAttributes(Path.of("/dev/fd"), BasicFileAttributes.class).fileKey();
@@ -964,7 +965,7 @@ class LocalPtyHostTest {
           if (!Objects.equals(key, listing)) {
             open.put(fd.getFileName().toString(), Objects.requireNonNullElse(key, "unkeyed"));
           }
-        } catch (NoSuchFileException closedMeanwhile) {
+        } catch (FileSystemException closedMeanwhile) {
           var unused = closedMeanwhile;
         }
       }
