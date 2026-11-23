@@ -8,12 +8,14 @@ package ai.singlr.sail.pty;
 import static ai.singlr.sail.pty.ContainerDirectory.held;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
@@ -75,6 +77,27 @@ class UploadCleanupTest {
 
     assertEquals(List.of(UploadCleanup.REMOVE), List.copyOf(c.finished));
     assertFalse(Files.exists(session, LinkOption.NOFOLLOW_LINKS));
+  }
+
+  /**
+   * Closing gives every removal still running one deadline together, not one each: three that never
+   * return, closed with a second, take about that second, never three.
+   */
+  @Test
+  void closingWaitsForEveryRemovalWithinOneDeadline() throws Exception {
+    var session = new ReentrantLock();
+    session.lock();
+    try {
+      for (var id : List.of(ID, STALE, "0a0b0c0d-1111-1111-1111-111111111111")) {
+        cleanup.remove("acme", id, session);
+      }
+
+      assertTimeoutPreemptively(
+          Duration.ofSeconds(2), () -> cleanup.close(Duration.ofSeconds(1)), "one second in all");
+    } finally {
+      session.unlock();
+    }
+    cleanup.close(UploadCleanup.CLOSING);
   }
 
   /** Major 5: links a session's directory holds are removed as links, never followed. */

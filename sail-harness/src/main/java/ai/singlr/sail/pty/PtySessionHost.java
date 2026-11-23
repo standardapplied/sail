@@ -270,9 +270,10 @@ public final class PtySessionHost implements AutoCloseable {
 
   /**
    * How long a {@link #stop} waits at most, every wait in it drawing from one deadline taken as it
-   * begins, so the host exits inside its unit's {@code TimeoutStopSec} of 15 s with 3 s to spare.
+   * begins: long enough for the slowest ending a session can have short of a busy database, and
+   * inside its unit's {@code TimeoutStopSec} of 15 s with 1 s left for the JVM's exit.
    */
-  static final Duration STOPPING = Duration.ofSeconds(12);
+  static final Duration STOPPING = Duration.ofSeconds(14);
 
   /** How long a files connection being ended may take to hear why before it is closed anyway. */
   static final Duration TOLD = Duration.ofSeconds(5);
@@ -2279,12 +2280,14 @@ public final class PtySessionHost implements AutoCloseable {
    * all of them at once, so the last one is told within the same seconds as the first. This is the
    * loud path a {@code systemctl stop} takes; a restart takes {@link #handoff()}.
    *
-   * <p>Every wait draws from one deadline, {@link #STOPPING} (12 s) after the stop begins: files
-   * connections are told within its first second; sessions' endings get what is left (a child
-   * ignoring its hangup and {@code SIGTERM} is killed 6 s into its ending, whose record may then
-   * wait 5 s on a busy database, and its senders 1 s); the upload removals get what is left after
-   * them, never more than {@link UploadCleanup#CLOSING}. An ending or a removal still running at
-   * the deadline is said in the log and left.
+   * <p>Every wait draws from one deadline, {@link #STOPPING} (14 s) after the stop begins. Files
+   * connections are told within its first second. Sessions' endings then get what is left: a
+   * command ignoring its hangup is sent {@code SIGTERM} 1 s into its ending and, still ignoring
+   * that, killed with everything under its shim 5 s later; the shim then has up to 5 s to exit
+   * before it is killed too, 12 s into the stop; the record may wait up to 5 s on a busy database,
+   * and the senders get 1 s, so the slowest ending short of a busy database ends 13 s in. The
+   * upload removals get what is left after them, never more than {@link UploadCleanup#CLOSING}. An
+   * ending or a removal still running at the deadline is said in the log and left.
    */
   public void stop(String reason) {
     var deadline = network.clock().getAsLong() + STOPPING.toNanos();

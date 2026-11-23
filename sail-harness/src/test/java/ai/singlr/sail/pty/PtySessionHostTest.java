@@ -50,8 +50,10 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import org.junit.jupiter.api.Test;
@@ -320,10 +322,10 @@ class PtySessionHostTest {
   }
 
   /**
-   * Every wait of a stop draws from one deadline, 12 s after it begins: its sessions' endings took
-   * 11 s of it (a session ignoring its hangup and {@code SIGTERM}, 6 s, then its record waiting 5 s
-   * on a busy database), so the upload removals, two of them hung, get the second left between
-   * them, not {@link UploadCleanup#CLOSING} each.
+   * Every wait of a stop draws from one deadline, 14 s after it begins: its sessions' endings took
+   * 13 s of it (files told in a second, a session ignoring its hangup and {@code SIGTERM} 6 s, its
+   * shim not exiting 5 s more, then its senders 1 s), so the upload removals, two of them hung, get
+   * the second left between them, not {@link UploadCleanup#CLOSING} each.
    */
   @Test
   void aStopDrawsEveryWaitFromOneDeadline() throws Exception {
@@ -331,7 +333,7 @@ class PtySessionHostTest {
     whenEnded =
         () -> {
           if (ended.incrementAndGet() == 2) {
-            now.addAndGet(Duration.ofSeconds(11).toNanos());
+            now.addAndGet(Duration.ofSeconds(13).toNanos());
           }
         };
     network = clocked(now::get);
@@ -366,6 +368,67 @@ class PtySessionHostTest {
       assertTrue(log.awaitLine("stop-left").contains("1 session ending(s) still running"));
     } finally {
       never.countDown();
+    }
+  }
+
+  /**
+   * A stop leaves the worst ending main lived through its whole time: files told in a second, then
+   * a command ignoring its hangup and {@code SIGTERM} (1 + 5 s) and a shim not exiting in the 5 s
+   * it is then given, killed 12 s into the stop. The stop's clock says those 12 s have passed once
+   * the ending reaches its record, which lands only once the stop is waiting for it: the stop
+   * returns with the shim gone and the record written.
+   */
+  @Test
+  void aStopWaitsForTheRecordOfAnEndingWhoseShimWasKilledLast() throws Exception {
+    var stopper = new AtomicReference<Thread>();
+    var atRecord = new CountDownLatch(1);
+    var recorded = new AtomicBoolean();
+    whenEnded =
+        () -> {
+          atRecord.countDown();
+          awaitWaiting(stopper);
+          recorded.set(true);
+        };
+    var reads = new AtomicInteger();
+    network =
+        clocked(
+            () -> {
+              if (Thread.currentThread() == stopper.get() && reads.incrementAndGet() == 2) {
+                awaitQuietly(atRecord);
+                return now.addAndGet(Duration.ofSeconds(12).toNanos());
+              }
+              return now.get();
+            });
+    startHost();
+    try (var channel = connect()) {
+      create(channel, "stubborn", "");
+    }
+    var shim =
+        ProcessHandle.current()
+            .children()
+            .filter(child -> child.info().commandLine().orElse("").contains(dir.toString()))
+            .findFirst()
+            .orElseThrow();
+
+    var written =
+        assertTimeoutPreemptively(
+            Duration.ofSeconds(5),
+            () -> {
+              stopper.set(Thread.currentThread());
+              host.stop("stopping");
+              return recorded.get() && !shim.isAlive();
+            },
+            "it ends in time");
+
+    assertTrue(written, "the shim was gone and the record written before the stop returned");
+  }
+
+  /** Waits until {@code stopper} waits with a timeout, as a stop waiting for an ending does. */
+  private static void awaitWaiting(AtomicReference<Thread> stopper) {
+    var guard = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+    while (System.nanoTime() < guard
+        && (stopper.get() == null || stopper.get().getState() != Thread.State.TIMED_WAITING)) {
+      Thread.onSpinWait();
     }
   }
 
