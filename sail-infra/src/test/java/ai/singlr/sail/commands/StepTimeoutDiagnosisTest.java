@@ -14,7 +14,6 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import ai.singlr.sail.engine.CommandTimedOut;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
-import ai.singlr.sail.engine.ShellExecutor;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -289,7 +288,7 @@ class StepTimeoutDiagnosisTest {
     public Result exec(List<String> command, Path workDir, Duration timeout)
         throws IOException, InterruptedException, TimeoutException {
       return command.getFirst().equals(program)
-          ? new ShellExecutor(false).exec(List.of("sleep", "30"), null, timeout)
+          ? ScriptedShellExecutor.hang(command, timeout)
           : box.exec(command, workDir, timeout);
     }
 
