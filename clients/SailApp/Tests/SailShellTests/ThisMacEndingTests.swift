@@ -52,7 +52,7 @@ import Testing
             fonts: TerminalFonts(directory: LookTests.fonts), points: 15, look: .light
         )
         pane.begin()
-        #expect(await RunnerTabTests.until(10) { pane.attachedOnce && pane.status.says == nil }, "attached: \(pane.status.says ?? "nothing said")")
+        try #require(await RunnerTabTests.until(10) { pane.attachedOnce && pane.status.says == nil }, "attached: \(pane.status.says ?? "nothing said")")
         return pane
     }
 
@@ -163,7 +163,7 @@ import Testing
         #expect(bench.focused === pane, "shown, so what it says is seen")
         #expect(pane.status.says == EndOutcome.mayStillRun("This terminal", [words], onThisMac: true) + " Close Anyway leaves it there.")
         #expect(door.sessions.contains(pane.name))
-        #expect(bench.strip.tabs.map(\.showsUnended) == [false, true], "its tab is marked")
+        try #require(bench.strip.tabs.map(\.showsUnended) == [false, true], "its tab is marked")
         #expect(bench.strip.tabs[1].accessibilityLabel()?.hasSuffix("a terminal in it may still be running") == true, "and VoiceOver says so")
         door.refuseKills(saying: nil)
         #expect(pane.press("End Again"))

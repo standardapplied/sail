@@ -528,6 +528,7 @@ import Testing
         let view = shell.userMenu.view, width = Double(view.bounds.width)
         #expect(near(view.avatarDisc.maxX, width - 16) && near(view.planeSquare?.maxX ?? 0, width - 16), "the disc is at \(view.avatarDisc)")
         let rects = view.segments.rects
+        try #require(rects.count == 3, "the segments are \(rects)")
         #expect(rects[0].minX > rects[1].minX && rects[1].minX > rects[2].minX, "the segments run \(rects)")
         try Self.press(Self.down, in: shell)
         try Self.press(Self.left, in: shell)

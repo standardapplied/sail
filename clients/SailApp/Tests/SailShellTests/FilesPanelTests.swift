@@ -252,8 +252,8 @@ import Testing
             FileEntry(name: FileName(bytes), kind: .known(.folder), target: .known(.none), size: 0, mtimeNanos: 0, mode: 0o755)
         }
         let panel = try Self.played([folder([0x61, 0xFF]), folder([0x61, 0xFE])])
-        #expect(panel.list.numberOfRows == 2)
         let paths = panel.tree.rows.map(\.path)
+        try #require(panel.list.numberOfRows == 2 && paths.count == 2, "the look-alikes are not two rows: \(paths)")
         panel.list.choose(paths[1].key)
         #expect(panel.chosenPath == paths[1] && panel.chosenPath != paths[0], "the choice went to the look-alike")
         panel.list.keyDown(with: try Self.key(124))
