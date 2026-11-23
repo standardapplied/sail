@@ -488,7 +488,8 @@ func + (folder: FileName, rest: String) -> FileName {
             FileEntry(name: FileName(bytes), kind: .known(.folder), target: .known(.none), size: 0, mtimeNanos: 0, mode: 0o755)
         }
         var tree = try Self.listed([folder([0x61, 0xFF]), folder([0x61, 0xFE])])
-        #expect(tree.rows.count == 2 && tree.rows[0].name == tree.rows[1].name && tree.rows[0].path != tree.rows[1].path, "\(tree.rows)")
+        try #require(tree.rows.count == 2, "\(tree.rows)")
+        #expect(tree.rows[0].name == tree.rows[1].name && tree.rows[0].path != tree.rows[1].path, "\(tree.rows)")
         #expect(tree.rows[0].path.key != tree.rows[1].path.key && tree.rows[0].name == "a\u{FFFD}")
         let first = tree.rows[0].path
         let id = try #require(Self.id(listing: first, in: tree.expand(first)))

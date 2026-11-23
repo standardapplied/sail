@@ -174,10 +174,10 @@ import Testing
     }
 
     /// Three looks in a row are as likely a thread caught on its way into a wait; four prove it.
-    @Test func itTakesFourLooksInARow() {
+    @Test func itTakesFourLooksInARow() throws {
         #expect(MachineShare.starvation(in: Self.wait, looks: Self.looks(count: 3)).isEmpty)
         let four = MachineShare.starvation(in: Self.wait, looks: Self.looks(count: 4))
-        #expect(four.count == 1)
+        try #require(four.count == 1)
         #expect(abs(four[0].machines - 0.03) < 1e-9)
     }
 
@@ -189,20 +189,20 @@ import Testing
     }
 
     /// Each excused stretch says what proved it, so a reader can check it.
-    @Test func anExcusedStretchSaysItsEvidence() {
+    @Test func anExcusedStretchSaysItsEvidence() throws {
         let proven = MachineShare.starvation(in: Self.wait, looks: Self.looks(processPerLook: 0.015))
-        #expect(proven.count == 1)
+        try #require(proven.count == 1)
         #expect(proven[0].told(cpus: 3) == "100.0 ms excused at 10.000–10.200 s: 21 looks at most 10.0 ms apart, run state running at each, the thread's CPU +0.00 ms, the machine's idle ticks +0 and busy ticks +60 (3 CPUs make 60.0 over the stretch), our processes 50% of that busy CPU")
     }
 
     /// A tail budget's samples, each net of the own thread's stall over it alone.
-    @Test func eachSampleIsNetOfTheStallOverItAlone() {
+    @Test func eachSampleIsNetOfTheStallOverItAlone() throws {
         var own = Stalls(tick: 0.01)
         own.record(Span(10.0, 10.04))
         own.record(Span(10.04, 10.0505))
         let samples = [Span(10.0, 10.035), Span(10.0505, 10.0535), Span(10.02, 10.025), Span(10.0, 10.005), Span(10.0495, 10.0505), Span(10.03, 10.0505)]
         let nets = MachineShare.net(samples, own: own)
-        #expect(nets.count == 6)
+        try #require(nets.count == 6)
         #expect(abs(nets[0] - 0.01) < 1e-9, "a 35 ms sample over the 30 ms held keeps the 10 ms the thread slept")
         #expect(abs(nets[1] - 0.003) < 1e-9, "a sample after the stall keeps all its time")
         #expect(nets[2] == 0, "a sample wholly inside the held part keeps nothing")

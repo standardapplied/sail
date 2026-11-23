@@ -16,6 +16,7 @@ import Testing
             .stream([Array(stream[fourth.lowerBound...])], .close),
         ])
         let updates = try await read(follow(server))
+        try #require(updates.count >= 4, "\(updates)")
         #expect(updates.prefix(4).map(\.lastEventID) == ["", ids[0], ids[1], ids[1]])
         #expect(updates[0] == .connected(lastEventID: ""))
         #expect(updates[3] == .connected(lastEventID: ids[1]))

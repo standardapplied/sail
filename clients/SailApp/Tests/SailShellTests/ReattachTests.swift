@@ -47,7 +47,7 @@ import Testing
         let tickets = DoorTickets(runner)
         bench.signedIn = { who.handle.map { ($0, tickets) } }
         bench.shown()
-        #expect(await RunnerTabTests.until(10) { bench.restored }, "the workbench restored")
+        try #require(await RunnerTabTests.until(10) { bench.restored }, "the workbench restored")
         return bench
     }
 

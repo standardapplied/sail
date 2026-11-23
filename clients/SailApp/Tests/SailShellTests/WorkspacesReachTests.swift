@@ -251,7 +251,7 @@ import Testing
     static func shown(_ transport: any Transport, width: Double, panel: Double, saying words: String) async throws -> (WorkspacesView, KeyWindow) {
         let (view, window) = try Self.view(transport, width: width, panel: panel)
         view.shown()
-        #expect(await RunnerTabTests.until { !view.busy && view.text.contains(words) }, "never said \(words): \(view.text)")
+        try #require(await RunnerTabTests.until { !view.busy && view.text.contains(words) }, "never said \(words): \(view.text)")
         return (view, window)
     }
 

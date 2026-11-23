@@ -34,7 +34,7 @@ import Testing
                 "looks that read starved across 25 ms excuse nothing of a frame whose thread used all 25 ms")
     }
 
-    @Test func aSeriesSaysEachFrameOverTheLimitAndCountsItsExcuses() {
+    @Test func aSeriesSaysEachFrameOverTheLimitAndCountsItsExcuses() throws {
         let measured = Bench.Measured(
             frames: [.microseconds(600), .milliseconds(24), .microseconds(7500)],
             waits: [Span(0.900, 0.9001), Span(1.000, 1.0001), Span(2.000, 2.0001)],
@@ -46,7 +46,7 @@ import Testing
         #expect(series.frames.map(\.cpuMilliseconds).map { ($0 * 1000).rounded() / 1000 } == [0.5, 0.6, 7.4])
         let said = Bench.told(series, realTime: true)
         #expect(said.first == "frame(): 3 frames, 1 excused, 20.0 ms in all; 7 looks at the frame thread, the looker real-time", "\(said)")
-        #expect(said.count == 4, "each frame over 4 ms said: \(said)")
+        try #require(said.count == 4, "each frame over 4 ms said: \(said)")
         #expect(said[1] == "  INCONCLUSIVE: frames excused: 1, more than the p95's tail of 0: a measurement that excused most of itself measured nothing")
         #expect(said[2].hasPrefix("  frame 1 at 1.000 s: 24.00 ms, its thread's CPU 0.60 ms, its wait for the lock 0.10 ms; 20.0 ms excused: 20.0 ms excused at 1.002–1.022 s"), "\(said[2])")
         #expect(said[3] == "  frame 2 at 2.000 s: 7.50 ms, its thread's CPU 7.40 ms, its wait for the lock 0.10 ms; nothing excused: 2 looks in it, runnable at 2", "\(said[3])")
