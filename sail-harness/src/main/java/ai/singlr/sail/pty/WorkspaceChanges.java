@@ -154,6 +154,7 @@ final class WorkspaceChanges {
       bound.cancel(false);
     }
     var status = reading.failed ? -1 : script.status();
+    script.close();
     var took = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
     if (overdue.get()) {
       return new Answer(List.of(), took, -1, patience, reading.root);

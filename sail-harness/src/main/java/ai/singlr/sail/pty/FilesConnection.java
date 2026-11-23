@@ -222,6 +222,13 @@ final class FilesConnection {
      * Ends its script: a save's by closing its input, so it removes its own temporary; never a save
      * past its go, which runs to its end under the workspace's lock, bounded by {@link #AFTER_GO}.
      */
+    /** Closes the pipes of its script, once the request's thread is done reading it. */
+    void close() {
+      if (script != null) {
+        script.close();
+      }
+    }
+
     void stop() {
       if (script == null || committed) {
         return;
@@ -574,6 +581,8 @@ final class FilesConnection {
       }
     } catch (IOException | RuntimeException failed) {
       var unused = failed;
+    } finally {
+      loop.close();
     }
     if (!isClosed()) {
       var why = ended.get();
@@ -893,6 +902,7 @@ final class FilesConnection {
     } catch (IOException | RuntimeException failed) {
       fail(request, running);
     } finally {
+      running.close();
       pass(request.turn());
       synchronized (this) {
         underWay.remove(request.id(), running);
@@ -1377,30 +1387,32 @@ final class FilesConnection {
             .filter(saving -> saving.startsWith(mine))
             .map(saving -> saving.substring(mine.length()))
             .toList();
-    var stuck =
+    try (var stuck =
         files.start(
-            container, FileScripts.STUCK, running, false, "" + writes.afterGo().toSeconds());
-    var held = stuck.field();
-    while (stuck.field() != null) {
-      continue;
+            container, FileScripts.STUCK, running, false, "" + writes.afterGo().toSeconds())) {
+      var held = stuck.field();
+      while (stuck.field() != null) {
+        continue;
+      }
+      var status = stuck.status();
+      if (status == FileScripts.STILL_HELD && held != null) {
+        return held;
+      }
+      if (status != 0) {
+        throw new IOException("the stuck probe exited " + status);
+      }
+      return null;
     }
-    var status = stuck.status();
-    if (status == FileScripts.STILL_HELD && held != null) {
-      return held;
-    }
-    if (status != 0) {
-      throw new IOException("the stuck probe exited " + status);
-    }
-    return null;
   }
 
   private int probe(String temporary) {
     try {
-      var held = files.start(container, FileScripts.HELD, List.of(temporary), false);
-      while (held.field() != null) {
-        continue;
+      try (var held = files.start(container, FileScripts.HELD, List.of(temporary), false)) {
+        while (held.field() != null) {
+          continue;
+        }
+        return held.status();
       }
-      return held.status();
     } catch (IOException unasked) {
       return FileScripts.STILL_HELD;
     }

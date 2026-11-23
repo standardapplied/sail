@@ -73,6 +73,16 @@ class FileScriptsTest {
       List<List<String>> commands,
       Map<String, String> env,
       java.util.function.UnaryOperator<String> edit) {
+    return over(home, commands, env, edit, java.util.function.UnaryOperator.identity());
+  }
+
+  /** As above, each process the scripts start handed out as {@code started} wraps it. */
+  static FileScripts over(
+      Path home,
+      List<List<String>> commands,
+      Map<String, String> env,
+      java.util.function.UnaryOperator<String> edit,
+      java.util.function.UnaryOperator<Process> started) {
     var place =
         new UploadCopy.Place(
             container -> List.of("incus", "exec", container, "--"),
@@ -96,7 +106,7 @@ class FileScriptsTest {
           var builder =
               new ProcessBuilder(onASocket(inner)).redirectError(ProcessBuilder.Redirect.DISCARD);
           builder.environment().putAll(env);
-          return builder.start();
+          return started.apply(builder.start());
         },
         place,
         home.toString());
