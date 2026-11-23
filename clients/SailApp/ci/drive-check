@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Proves that ci/drive looks only at this account's processes and does not run beside a Sail
-# terminal host this account already has: run on stand-ins first on PATH (codesign, osascript, and a
-# pgrep answering from a table of accounts, pids and command lines, which fails any ask without -U),
-# with a home of its own and a mktemp that marks how far ci/drive got. Another account's Sail host
-# and this account's host run from elsewhere let it go on; this account's Sail host stops it before
-# anything starts, naming that host's pid and no other.
+# Proves that ci/drive looks only at this account's processes, does not run beside a Sail terminal
+# host this account already has, and saves this account's Sail settings before it starts anything:
+# run on stand-ins first on PATH (codesign, osascript, plutil, a defaults holding one domain or
+# none, and a pgrep answering from a table of accounts, pids and command lines, which fails any ask
+# without -U), with a home of its own and a mktemp that marks how far ci/drive got. Another
+# account's Sail host and this account's host run from elsewhere let it go on, with this account's
+# Sail settings or none; this account's Sail host stops it before anything starts, naming that
+# host's pid and no other, and so do settings that cannot be saved.
 set -euo pipefail
 
 drive="$(dirname "$0")/drive"
@@ -17,6 +19,11 @@ printf '#!/usr/bin/env bash\n' > "$work/Sail.app/Contents/MacOS/SailDrive"
 chmod +x "$work/Sail.app/Contents/MacOS/SailDrive"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$work/bin/codesign"
 printf '#!/usr/bin/env bash\necho 1440\n' > "$work/bin/osascript"
+printf '#!/usr/bin/env bash\necho sh.standardapplied.sail\n' > "$work/bin/plutil"
+# shellcheck disable=SC2016
+printf '%s\n' '#!/usr/bin/env bash' \
+  '[[ $2 == sh.standardapplied.sail && -n $DEFAULTS_HELD ]] || exit 1' \
+  'case $1 in read) exit 0 ;; export) [[ $DEFAULTS_HELD == saves ]] && echo "<plist/>" ;; *) exit 2 ;; esac' > "$work/bin/defaults"
 printf '#!/usr/bin/env bash\n: > "%s/went-on"\nexit 3\n' "$work" > "$work/bin/mktemp"
 # shellcheck disable=SC2016
 printf '%s\n' '#!/usr/bin/env bash' \
@@ -34,7 +41,7 @@ host() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" >> "$work/table"; }
 
 run() {
   rm -f "$work/went-on" "$work/refused" "$work/said"
-  if HOME=$work/home PATH="$work/bin:$PATH" PGREP_TABLE=$work/table PGREP_REFUSED=$work/refused \
+  if HOME=$work/home PATH="$work/bin:$PATH" PGREP_TABLE=$work/table PGREP_REFUSED=$work/refused DEFAULTS_HELD=${1:-} \
     "$drive" "$work/Sail.app" "$work/out" > "$work/said" 2>&1; then got=0; else got=$?; fi
   [[ ! -e $work/refused ]] || { echo "ci/drive-check: ci/drive asked pgrep beyond this account: $(cat "$work/refused")" >&2; exit 1; }
 }
@@ -43,9 +50,16 @@ run() {
 host $((me + 1)) 4242 "/Users/someone/Library/Application Support/Sail/Host/0123abcd/sail _pty-host --local"
 host "$me" 4343 "/opt/runner/sail/sail _pty-host --local"
 host "$me" 4444 "$work/home/Library/Application Support/Sail/Host/0123abcd/sail _pty-host --local-not"
-run
-[[ $got == 3 && -e $work/went-on ]] \
-  || { echo "ci/drive-check: another account's host, or one not a Sail app's, stopped ci/drive (exit $got): $(cat "$work/said")" >&2; exit 1; }
+for held in "" saves; do
+  run "$held"
+  [[ $got == 3 && -e $work/went-on ]] \
+    || { echo "ci/drive-check: another account's host, or one not a Sail app's, stopped ci/drive (settings ${held:-none}; exit $got): $(cat "$work/said")" >&2; exit 1; }
+done
+run fails
+[[ $got == 1 && ! -e $work/went-on ]] \
+  || { echo "ci/drive-check: settings that could not be saved did not stop ci/drive before it started anything (exit $got): $(cat "$work/said")" >&2; exit 1; }
+grep -qF "this account's Sail settings (sh.standardapplied.sail) could not be saved" "$work/said" \
+  || { echo "ci/drive-check: the refusal did not say the settings could not be saved: $(cat "$work/said")" >&2; exit 1; }
 
 host "$me" 4545 "$work/home/Library/Application Support/Sail/Host/0123abcd/sail _pty-host --local"
 run
@@ -53,4 +67,4 @@ run
   || { echo "ci/drive-check: this account's Sail host did not stop ci/drive before it started anything (exit $got): $(cat "$work/said")" >&2; exit 1; }
 grep -qF 'this account already runs a Sail terminal host (pid 4545)' "$work/said" \
   || { echo "ci/drive-check: the refusal did not name this account's host, and it alone: $(cat "$work/said")" >&2; exit 1; }
-echo "ci/drive-check: ci/drive went on beside another account's host and stopped for this account's own"
+echo "ci/drive-check: ci/drive went on beside another account's host, with this account's Sail settings saved or none, and stopped for this account's own host and for settings it could not save"

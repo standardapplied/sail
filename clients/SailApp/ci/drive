@@ -20,8 +20,11 @@
 # Everything the drive makes for its steps goes in this run's private folder (SAIL_DRIVE_PRIVATE),
 # removed when it ends, so two runs on one Mac never share a path. It ends only this account's
 # processes and, of those, only what this run started: the drives writing into this OUT and the
-# terminal hosts Sail apps start from Application Support; since it ends those, it does not run
-# while this account already has one (a person's Sail, whose terminals would end with it).
+# terminal hosts Sail apps start from Application Support, which it ends when it ends; since it ends
+# those, it does not run while this account already has one (a person's Sail, whose terminals would
+# end with it). The drive build is Sail's own identifier (its signed runs need the App ID, its
+# Keychain access group and passkeys), so it shares Sail's settings: those of this account are saved
+# before the runs and put back when it ends, and it does not run when they cannot be saved.
 set -euo pipefail
 
 [[ $# -eq 2 ]] || { echo "usage: ci/drive DRIVE_APP OUT" >&2; exit 2; }
@@ -56,6 +59,22 @@ running=$(hosts)
   echo "ci/drive: this account already runs a Sail terminal host (pid ${running//$'\n'/, }), which the drive would end with its terminals: quit that Sail and end its host, or drive as another user" >&2
   exit 1
 }
+bundle_id=$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")
+readonly bundle_id
+if defaults read "$bundle_id" > /dev/null 2>&1; then
+  settings_were=$(defaults export "$bundle_id" -) || {
+    echo "ci/drive: this account's Sail settings ($bundle_id) could not be saved, and the drive replaces them while it runs: it does not run" >&2
+    exit 1
+  }
+else
+  settings_were=
+fi
+# Puts this account's Sail settings back as they were before the runs: none, when there were none.
+restore_settings() {
+  defaults delete "$bundle_id" 2> /dev/null || true
+  [[ -z $settings_were ]] || defaults import "$bundle_id" - <<< "$settings_were" \
+    || echo "ci/drive: this account's Sail settings ($bundle_id) could not be put back" >&2
+}
 # Ends the hosts this run's apps started (none ran when it began), by their pids.
 end_hosts() {
   local pids=() pid
@@ -65,7 +84,7 @@ end_hosts() {
   gone_within 30 "${pids[@]}" || { echo "ci/drive: the terminal hosts this run started (pid ${pids[*]}) did not end within 30 s" >&2; return 1; }
 }
 
-passkeys=$(mktemp -d) plain=$(mktemp -d) private_dir=$(mktemp -d /tmp/sail-drive.XXXXXX) shooter=
+passkeys=$(mktemp -d) plain=$(mktemp -d) private_dir=$(mktemp -d /tmp/sail-drive.XXXXXX) shooter='' feeder=''
 SAIL_DATA_DIR=$passkeys "$sail" server start --port 7979 --rp-id sail.standardapplied.com --origin https://sail.standardapplied.com \
   > "$out/server-7979.log" 2>&1 &
 servers=($!)
@@ -97,7 +116,7 @@ stop_drive() {
     { kill -0 "$pid" 2> /dev/null && kill -KILL "$pid" 2> /dev/null; } || true
   done
 }
-trap 'stop_drive; declare -F stop_shots > /dev/null && stop_shots; kill "${servers[@]}" 2>/dev/null || true; rm -rf "$passkeys" "$plain" "$private_dir"; restore_keyboard' EXIT
+trap 'stop_drive; end_hosts || true; [[ -z $feeder ]] || kill "$feeder" 2> /dev/null || true; declare -F stop_shots > /dev/null && stop_shots; kill "${servers[@]}" 2>/dev/null || true; restore_settings; rm -rf "$passkeys" "$plain" "$private_dir"; restore_keyboard' EXIT
 for port in 7979 7980; do
   for _ in $(seq 1 60); do
     curl -fsS "http://127.0.0.1:$port/v1/health" > /dev/null 2>&1 && break
@@ -287,7 +306,10 @@ for run in first second third shots workspaces kit kit-rtl; do
     ("$other/sail" _pty-host --local > "$out/other-host.log" 2>&1 &)
     perl -e 'alarm shift; exec @ARGV' 30 bash -c 'until "$1" session ls --socket "$2" > /dev/null 2>&1; do :; done' _ "$other/sail" "$socket"
     "$other/sail" session new held --socket "$socket" --command cat > /dev/null
-    (tail -f /dev/null | script -q /dev/null "$other/sail" session attach held --socket "$socket" > /dev/null 2>&1 &)
+    mkfifo -m 600 "$private_dir/attach-input"
+    tail -f /dev/null > "$private_dir/attach-input" &
+    feeder=$!
+    (script -q /dev/null "$other/sail" session attach held --socket "$socket" < "$private_dir/attach-input" > /dev/null 2>&1 &)
     perl -e 'alarm shift; exec @ARGV' 30 bash -c 'until "$1" session ls --socket "$2" --json | grep -Eq "\"attached\" *: *1"; do :; done' _ "$other/sail" "$socket"
   fi
   if [[ $run == shots || $run == workspaces ]]; then
@@ -296,7 +318,7 @@ for run in first second third shots workspaces kit kit-rtl; do
   fi
   if [[ $run != second ]]; then
     echo "ci/drive: none of the app's settings for the $run"
-    defaults delete "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" 2> /dev/null || true
+    defaults delete "$bundle_id" 2> /dev/null || true
   fi
   echo "ci/drive: $run"
   goldens=off
@@ -314,7 +336,7 @@ for run in first second third shots workspaces kit kit-rtl; do
   status=0
   open_drive "$run" "$goldens" --drive "$scripts/$script.json" --out "$out_dir/$run" ${directions[@]+"${directions[@]}"} || status=$?
   echo "ci/drive: the arrangement the $run saved, which the next launch restores; a live This Mac session it does not hold is an extra tab then:"
-  defaults export "$(plutil -extract CFBundleIdentifier raw "$app/Contents/Info.plist")" - 2> /dev/null \
+  defaults export "$bundle_id" - 2> /dev/null \
     | python3 -c 'import plistlib, sys; print(plistlib.loads(sys.stdin.buffer.read()).get("workbench.arrangement", b"none saved").decode())' 2>&1 || true
   (( status == 0 )) || {
     echo "ci/drive: the sessions this Mac's host holds now:"
