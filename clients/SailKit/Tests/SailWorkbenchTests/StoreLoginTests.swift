@@ -40,8 +40,8 @@ import Testing
     }
 
     static let elsewhere = Clipboard(count: 7, text: "something else")
-    /// What the recorded store says once of runs on the login it replaced.
-    static let note = " 1 live run finishes on the old `default`."
+    /// What the recorded store of a name stored again says once of the sessions already running.
+    static let note = " An agent session already running keeps the login it started with until it ends; no workspace keeps any of it."
 
     typealias Clipboard = StoreLogin.Clipboard
 
@@ -184,7 +184,11 @@ import Testing
         guard case let .stored(answer, cleared) = sheet.stage else { Issue.record("not stored: \(sheet.stage)"); return }
         let login = answer.login
         #expect(login.name == "default" && login.kind == "api-key" && login.harness == "claude-code" && login.isDefault && !cleared)
-        #expect(sheet.stored == "Stored Claude Code login “default”." + Self.note, "the server's note on the runs of a login it replaced is not said")
+        #expect(sheet.stored == "Stored Claude Code login “default”.")
+        var replacing = try Self.filled()
+        _ = replacing.store(Self.pasted, clipboard: Self.elsewhere)
+        replacing.answered(try Self.answer("login-replaced"), clipboard: 7)
+        #expect(replacing.stored == "Stored Claude Code login “default”." + Self.note, "the server's note on the login it replaced is not said")
         sheet.typed(holdsSomething: true)
         sheet.answered(try Self.answer("login-stored"), clipboard: 7)
         #expect(sheet.stage == .stored(answer, clearsClipboard: false), "a stored sheet changed")
@@ -265,7 +269,7 @@ import Testing
             sheet.answered(try Self.answer(each.answer), clipboard: each.now)
             guard case let .stored(_, cleared) = sheet.stage else { Issue.record("case \(index) not stored"); continue }
             #expect(cleared == each.clears, "case \(index): cleared \(cleared)")
-            #expect(sheet.stored == "Stored Claude Code login “default”." + (each.clears ? " Removed the key from the clipboard." : "") + Self.note, "case \(index)")
+            #expect(sheet.stored == "Stored Claude Code login “default”." + (each.clears ? " Removed the key from the clipboard." : ""), "case \(index)")
         }
         var refused = try Self.filled()
         _ = refused.store(Self.pasted, clipboard: Clipboard(count: 4, text: Self.pasted))

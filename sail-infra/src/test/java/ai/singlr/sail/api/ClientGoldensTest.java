@@ -1650,9 +1650,11 @@ class ClientGoldensTest {
 
     /**
      * Records a person storing a login from the app, as uday with a Codex login and none of Claude
-     * Code's: his logins listed; an API key stored as "default"; each refusal of a value, and of a
-     * name; then his logins and dock's agents while he has a Claude Code login that is not the
-     * default, where the app asks a name. Every value sent is an obvious fake.
+     * Code's, the run he started earlier ended: his logins listed; an API key stored as "default",
+     * his first (`login-stored`, no note); the same name stored again (`login-replaced`, its note
+     * on the sessions already running); each refusal of a value, and of a name; then his logins and
+     * dock's agents while he has a Claude Code login that is not the default, where the app asks a
+     * name. Every value sent is an obvious fake.
      */
     void recordLogins(Map<String, String> goldens) throws Exception {
       var uday = new AuthSessionStore(db).create(idOf("uday"), Duration.ofMinutes(30)).token();
@@ -1666,9 +1668,17 @@ class ClientGoldensTest {
       record(goldens, "logins", "GET", "/v1/logins", uday, null);
       var claudeLogin = "/v1/logins/claude-code/%s";
       var fake = "sk-ant-api03-golden-fake-key";
+      Acting.system(() -> new RunStore(db).finish(RUN, "running", "completed", 0, null));
       record(
           goldens,
           "login-stored",
+          "PUT",
+          claudeLogin.formatted("default"),
+          uday,
+          Map.of("kind", "api-key", "value", fake));
+      record(
+          goldens,
+          "login-replaced",
           "PUT",
           claudeLogin.formatted("default"),
           uday,

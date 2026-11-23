@@ -18,7 +18,6 @@
         "name": "default",
         "stored_at": "2026-11-11T09:00:00.656Z"
       },
-      "note": "1 live run finishes on the old `default`.",
       "schema_version": 1
     },
     "status": 200

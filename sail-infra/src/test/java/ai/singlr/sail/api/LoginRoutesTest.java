@@ -276,6 +276,12 @@ class LoginRoutesTest {
     var spaced = store(sam, "default", "token", "sk-ant-oat01 TOKEN_value-0001");
     var badName = store(sam, "Work", "token", TOKEN);
     var badKind = store(sam, "default", "session", TOKEN);
+    var badHarness =
+        ask(
+            sam,
+            "PUT",
+            "/v1/logins/gemini/default",
+            YamlUtil.dumpJson(Map.of("kind", "api-key", "value", TOKEN)));
     var missing = ask(sam, "POST", "/v1/logins/claude-code/work:use", null);
     var plain = ask(sam, "POST", "/v1/logins/claude-code/work", null);
 
@@ -299,6 +305,12 @@ class LoginRoutesTest {
     assertEquals(
         "Claude Code takes no login of kind 'session'; it takes token, api-key.",
         ((Map<?, ?>) badKind.map().get("error")).get("message"));
+    assertEquals(422, badHarness.status());
+    assertEquals(
+        "A login is stored for claude-code, codex or as a git token, not for 'gemini'.",
+        ((Map<?, ?>) badHarness.map().get("error")).get("message"),
+        "a harness no login is stored for is refused in words about logins");
+    assertFalse(badHarness.body().contains("TOKEN_value"));
     assertEquals(404, missing.status());
     assertEquals(
         "No Claude Code login named 'work' is stored.",

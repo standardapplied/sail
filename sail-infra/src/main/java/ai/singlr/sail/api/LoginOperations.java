@@ -88,7 +88,7 @@ public final class LoginOperations {
       return new LoginResponse(view(person, row), unreached(person));
     }
     var named = named(name);
-    var known = Harnesses.of(harness);
+    var known = harness(harness);
     var still = liveOn(person, known, named);
     var replacing =
         logins().list(person.id()).stream()
@@ -245,6 +245,24 @@ public final class LoginOperations {
               Remedy.NONE,
               List.of(FieldError.of("name", refused.getMessage())),
               refused));
+    }
+  }
+
+  /**
+   * The harness a login is stored for, refused in words about logins: the harnesses one is stored
+   * for, not a project's install list.
+   */
+  private static Harness harness(String name) {
+    try {
+      return Harnesses.of(name);
+    } catch (IllegalArgumentException unknown) {
+      throw new ApiException(
+          ErrorCode.INVALID_REQUEST,
+          "A login is stored for "
+              + String.join(", ", Harnesses.names())
+              + " or as a git token, not for '"
+              + name
+              + "'.");
     }
   }
 
