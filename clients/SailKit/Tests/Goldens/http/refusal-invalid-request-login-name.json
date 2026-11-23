@@ -1,0 +1,26 @@
+{
+  "request": {
+    "body": {
+      "kind": "api-key",
+      "value": "sk-ant-api03-golden-fake-key"
+    },
+    "method": "PUT",
+    "path": "/v1/logins/claude-code/Work"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_request",
+        "field_errors": [
+          {
+            "field": "name",
+            "message": "A login's name is 1 to 32 lowercase letters, digits and hyphens, starting with a letter or digit, such as work or personal."
+          }
+        ],
+        "message": "A login's name is 1 to 32 lowercase letters, digits and hyphens, starting with a letter or digit, such as work or personal."
+      },
+      "schema_version": 1
+    },
+    "status": 422
+  }
+}

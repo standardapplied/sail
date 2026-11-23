@@ -1,0 +1,25 @@
+{
+  "request": {
+    "body": {
+      "kind": "api-key",
+      "value": "sk-ant-api03-golden-fake-key"
+    },
+    "method": "PUT",
+    "path": "/v1/logins/claude-code/default"
+  },
+  "response": {
+    "body": {
+      "login": {
+        "default": true,
+        "fde": "uday",
+        "fingerprint": "584e1bc1",
+        "harness": "claude-code",
+        "kind": "api-key",
+        "name": "default",
+        "stored_at": "2026-11-11T09:00:00.656Z"
+      },
+      "schema_version": 1
+    },
+    "status": 200
+  }
+}

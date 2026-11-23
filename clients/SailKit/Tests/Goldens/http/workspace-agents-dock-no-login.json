@@ -12,12 +12,30 @@
           "inside": true,
           "kinds": [
             {
-              "how": "Create an API key in the Claude Console",
+              "how": [
+                {
+                  "text": "Create an API key in the Claude Console"
+                }
+              ],
               "kind": "api-key",
               "label": "API key"
             },
             {
-              "how": "Run claude setup-token on a machine where Claude Code is signed in",
+              "how": [
+                {
+                  "text": "Run "
+                },
+                {
+                  "args": [
+                    "setup-token"
+                  ],
+                  "run": "elsewhere",
+                  "verb": "claude"
+                },
+                {
+                  "text": " on a machine where Claude Code is signed in"
+                }
+              ],
               "kind": "token",
               "label": "long-lived token"
             }
@@ -41,7 +59,17 @@
                 "verb": "agent login"
               },
               {
-                "text": ". Or: Run claude setup-token on a machine where Claude Code is signed in, then "
+                "text": ". Or: Run "
+              },
+              {
+                "args": [
+                  "setup-token"
+                ],
+                "run": "elsewhere",
+                "verb": "claude"
+              },
+              {
+                "text": " on a machine where Claude Code is signed in, then "
               },
               {
                 "args": [
@@ -100,7 +128,11 @@
           "inside": true,
           "kinds": [
             {
-              "how": "Create an API key at platform.openai.com/api-keys",
+              "how": [
+                {
+                  "text": "Create an API key at platform.openai.com/api-keys"
+                }
+              ],
               "kind": "api-key",
               "label": "API key"
             }

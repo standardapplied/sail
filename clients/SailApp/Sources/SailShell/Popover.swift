@@ -8,7 +8,8 @@ import SailLook
 /// the window's keys; they go back where they were when it closes: to the anchor when the keys
 /// opened it and the anchor takes them, else to what held them (a field being edited, its selection
 /// given back), else, when that view has left the window, to `fallback`. A click outside it (one on
-/// the anchor is the anchor's own) or the window giving up the keys tells `onDismiss`.
+/// the anchor is the anchor's own) or the window giving up the keys tells `onDismiss`, except while
+/// it ``stays``.
 @MainActor
 package final class Popover: NSObject {
     /// Clear room around the box, as far as the pop shadow reaches in either look.
@@ -28,6 +29,9 @@ package final class Popover: NSObject {
     /// What tells it its window gave up the keys: the window's own notice; a test names one of its
     /// own, so another test's window taking the keys closes nothing of its.
     var keysLeft = NSWindow.didResignKeyNotification
+    /// While a sheet of its owner's asks over its window it stays: neither a click nor the window
+    /// giving its keys to the sheet tells `onDismiss`.
+    var stays = false
     /// Where the keys go when the view that held them has left the window (a tab closed, a rename
     /// ended): the shown pane's own, or the window.
     var fallback: @MainActor () -> NSResponder? = { nil }
@@ -89,7 +93,10 @@ package final class Popover: NSObject {
             return event
         }
         resignWatch = NotificationCenter.default.addObserver(forName: keysLeft, object: window, queue: nil) { [weak self] _ in
-            MainActor.assumeIsolated { self?.onDismiss() }
+            MainActor.assumeIsolated {
+                guard self?.stays == false else { return }
+                self?.onDismiss()
+            }
         }
     }
 
@@ -127,6 +134,7 @@ package final class Popover: NSObject {
     /// A click outside the box dismisses it, on its shadow too; one on the anchor is the anchor's own
     /// (it toggles).
     func clickedAnywhere(_ event: NSEvent) {
+        if stays { return }
         if event.window === panel, box.frame.contains(event.locationInWindow) { return }
         if let anchor, event.window === window {
             let at = anchor.convert(event.locationInWindow, from: nil)

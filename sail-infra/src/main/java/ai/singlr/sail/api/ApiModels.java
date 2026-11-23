@@ -2182,7 +2182,7 @@ record AgentOffer(
                   var shown = new LinkedHashMap<String, Object>();
                   shown.put("kind", kind.kind());
                   shown.put("label", kind.noun());
-                  shown.put("how", kind.howToMake().described());
+                  shown.put("how", kind.howToMake().toMaps());
                   return shown;
                 })
             .toList());

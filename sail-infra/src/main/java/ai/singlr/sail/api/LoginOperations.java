@@ -10,6 +10,7 @@ import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.harness.Harness;
@@ -86,8 +87,8 @@ public final class LoginOperations {
       announce(STORED, person, row);
       return new LoginResponse(view(person, row), unreached(person));
     }
-    var named = LoginStore.requireName(name);
-    var known = Harnesses.of(harness);
+    var named = named(name);
+    var known = harness(harness);
     var still = liveOn(person, known, named);
     var replacing =
         logins().list(person.id()).stream()
@@ -107,7 +108,8 @@ public final class LoginOperations {
           ErrorCode.BAD_REQUEST,
           "A git token is no default: each host has its own, and each is used.");
     }
-    var row = found(() -> logins().use(person.id(), Harnesses.of(harness), name));
+    var known = harness(harness);
+    var row = found(() -> logins().use(person.id(), known, name));
     announce(DEFAULT, person, row);
     return new LoginResponse(view(person, row), SESSIONS_KEEP);
   }
@@ -121,7 +123,7 @@ public final class LoginOperations {
     if (LoginStore.GIT.equals(harness)) {
       return removeGit(person, name);
     }
-    var known = Harnesses.of(harness);
+    var known = harness(harness);
     var removed = logins().remove(person.id(), known, name);
     if (removed.isEmpty()) {
       return new LoginResponse(
@@ -226,6 +228,38 @@ public final class LoginOperations {
   private static void refuseUnless(Decision decision) {
     if (decision instanceof Decision.Refused(var refusal)) {
       throw Refusals.exception(refusal);
+    }
+  }
+
+  /**
+   * {@code name} once it is a login's name; refused naming the field, so a client says the rule
+   * under the name and not under the value.
+   */
+  private static String named(String name) {
+    try {
+      return LoginStore.requireName(name);
+    } catch (IllegalArgumentException refused) {
+      throw ApiException.of(
+          new Result.Failure<>(
+              ErrorCode.INVALID_REQUEST,
+              refused.getMessage(),
+              Remedy.NONE,
+              List.of(FieldError.of("name", refused.getMessage())),
+              refused));
+    }
+  }
+
+  /**
+   * The harness a login is stored for, refused in words about logins: the harnesses one is stored
+   * for, not a project's install list, and not the path's own segment, which is the caller's.
+   */
+  private static Harness harness(String name) {
+    try {
+      return Harnesses.of(name);
+    } catch (IllegalArgumentException unknown) {
+      throw new ApiException(
+          ErrorCode.INVALID_REQUEST,
+          "A login is stored for " + String.join(", ", Harnesses.names()) + " or as a git token.");
     }
   }
 

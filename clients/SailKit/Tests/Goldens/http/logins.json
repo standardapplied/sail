@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/logins"
+  },
+  "response": {
+    "body": {
+      "fde": "uday",
+      "logins": [
+        {
+          "default": true,
+          "fde": "uday",
+          "fingerprint": "191b148d",
+          "harness": "codex",
+          "kind": "api-key",
+          "name": "work",
+          "stored_at": "2026-11-11T09:00:00.656Z"
+        }
+      ],
+      "schema_version": 1
+    },
+    "status": 200
+  }
+}

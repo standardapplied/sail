@@ -340,7 +340,8 @@
   "remedy_runners": [
     "sail",
     "client",
-    "program"
+    "program",
+    "elsewhere"
   ],
   "roles": [
     "admin",

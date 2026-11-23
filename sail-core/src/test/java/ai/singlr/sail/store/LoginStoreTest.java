@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.PrivateDirectory;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
@@ -17,6 +18,9 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -51,17 +55,21 @@ class LoginStoreTest {
 
   @Test
   void theFirstLoginStoredIsTheDefaultAndItsValueIsNeverShown() {
-    var stored = store().store(UDAY, CLAUDE, null, null, TOKEN);
+    var clock = DateTimeUtils.clock;
+    var at = Instant.parse("2026-11-11T09:00:00Z");
+    DateTimeUtils.clock = Clock.fixed(at, ZoneOffset.UTC);
+    LoginStore.Row stored;
+    try {
+      stored = store().store(UDAY, CLAUDE, null, null, TOKEN);
+    } finally {
+      DateTimeUtils.clock = clock;
+    }
 
     assertEquals(
         new LoginStore.Row(
-            "claude-code",
-            "default",
-            "token",
-            true,
-            stored.storedAt(),
-            LoginStore.fingerprint(TOKEN)),
-        stored);
+            "claude-code", "default", "token", true, at, LoginStore.fingerprint(TOKEN)),
+        stored,
+        "stored when the box's clock says, as every other time it answers");
     assertEquals(List.of(stored), store().list(UDAY));
     assertEquals(8, stored.fingerprint().length());
     assertTrue(stored.fingerprint().matches("[0-9a-f]{8}"));

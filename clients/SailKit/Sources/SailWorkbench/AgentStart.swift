@@ -175,8 +175,18 @@ public enum NewSessionWords {
         if offer.refusal?.code == .known(.harnessNotInstalled) { return "not installed here" }
         if let refusal = offer.refusal { return refusal.message }
         guard let login = offer.login else { return offer.loginRefusal == nil ? "" : "no login stored" }
-        let label = offer.kinds.first { $0.kind == login.kind }?.label ?? login.kind
-        return "login “\(login.name)” · \(label)"
+        return "login “\(login.name)” · \(label(of: login, in: offer))"
+    }
+
+    /// What VoiceOver hears of a harness ready to start signed in: its login and the kind's label;
+    /// nil with none.
+    public static func ready(_ offer: AgentOffer) -> String? {
+        offer.login.map { "\(offer.display) ready, signed in as \($0.name), \(label(of: $0, in: offer))." }
+    }
+
+    /// The server's label of `login`'s kind, its kind's name where the server labels it not.
+    private static func label(of login: AgentLogin, in offer: AgentOffer) -> String {
+        offer.kinds.first { $0.kind == login.kind }?.label ?? login.kind
     }
 
     /// A refusal's remedy as a person reads it: its words when it names no command, else nothing,
@@ -201,17 +211,6 @@ public enum NewSessionWords {
 
     public static func storeLogin(_ offer: AgentOffer) -> String {
         "Store a \(offer.display) Login"
-    }
-
-    /// The kinds a person stores, by the server's labels, in its order.
-    public static func kinds(_ offer: AgentOffer) -> String {
-        offer.kinds.map(\.label).joined(separator: " or ")
-    }
-
-    /// How to make the login the server names first, in its words, which Store a Login says in
-    /// place until logins are stored in the app; nil when it names none.
-    public static func how(_ offer: AgentOffer) -> String? {
-        offer.kinds.first.map { Said.sentence($0.how) }
     }
 
     /// What the chosen harness's mode says under it: a harness of one mode the server's note on
