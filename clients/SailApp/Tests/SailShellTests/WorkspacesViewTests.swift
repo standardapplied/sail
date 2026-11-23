@@ -8,7 +8,12 @@ import Testing
 
 /// The Workspaces section drawn from the server's recorded answers: the left panel and a project's
 /// list, what a refresh holds (nothing), and the panel hidden under a narrow card.
-@MainActor @Suite struct WorkspacesViewTests {
+///
+/// One test at a time: each waits, within a bound of the clock, on the one main actor every AppKit
+/// test shares, while the sweeps beside it hold that actor; on the owner's Mac on its efficiency
+/// cores the suite was red in 10 of 10 runs side by side (listings never shown within 5 s) and
+/// green in 3 of 3 one at a time.
+@MainActor @Suite(.serialized) struct WorkspacesViewTests {
     init() {
         ExitWatch.install()
     }
@@ -30,7 +35,7 @@ import Testing
         let server = RecordedServer([try Exchange("projects"), try Exchange(golden)])
         let (view, window) = try Self.view(server)
         view.shown()
-        #expect(await RunnerTabTests.until { view.text.contains("dock") }, "nothing listed: \(view.text)")
+        try #require(await RunnerTabTests.until { view.text.contains("dock") }, "nothing listed: \(view.text)")
         return (view, window, server)
     }
 

@@ -241,7 +241,7 @@ import Testing
         var builder = try InstanceBuilder(metrics: metrics(points: 15))
         let glyphs = Glyphs()
         let drawn = builder.build(try screen.frame(), overlay: Overlay(marked: "にほ"), glyphs: glyphs)
-        #expect(drawn.decorations.count == 6)
+        try #require(drawn.decorations.count == 6)
         #expect(drawn.decorations[1].rect == SIMD4(56, 16, 36, 40))
         #expect(drawn.decorations[4].rect == SIMD4(92, 16, 36, 40))
         #expect(glyphs.asked.contains(.glyph("に", .regular, wide: true)))

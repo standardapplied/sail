@@ -39,7 +39,7 @@ import Testing
             let card = Self.card(saying: "harbor is still running.", width: 420)
             card.show("harbor is still running.", tone: tone)
             let contents = try #require(card.markContents as CFTypeRef?, "the \(tone) card's mark has no contents")
-            #expect(CFGetTypeID(contents) == CGImage.typeID, "the \(tone) card's mark is \(type(of: card.markContents!)), not a bitmap")
+            try #require(CFGetTypeID(contents) == CGImage.typeID, "the \(tone) card's mark is \(String(describing: card.markContents)), not a bitmap")
             #expect((contents as! CGImage).width == Int(Banner.mark * 2), "the \(tone) card's mark is not at the scale of 2")
         }
     }

@@ -107,6 +107,7 @@ import Testing
             .stream([Array(golden[third.lowerBound...])], .close),
         ])
         let (updates, _) = await read(SailClient(transport: server, token: "tok").events(EventFilter(), sleep: Naps().sleep))
+        try #require(updates.count >= 7, "\(updates.map(\.summary))")
         #expect(updates.prefix(7).map(\.summary) == [
             "connected after nil", "change \(seqs[0])", "change \(seqs[1])", "failed", "failed",
             "connected after \(ids[1])", "change \(seqs[2])",

@@ -42,7 +42,7 @@ import Testing
         view.project.list.pointer = { nil }
         view.newSession.popover.keysLeft = Notification.Name("sail.tests.keys-left.\(UUID().uuidString)")
         view.shown()
-        #expect(await RunnerTabTests.until { !view.busy && view.text.contains(words) }, "nothing listed: \(view.text)")
+        try #require(await RunnerTabTests.until { !view.busy && view.text.contains(words) }, "nothing listed: \(view.text)")
         view.layoutSubtreeIfNeeded()
         return (view, window, server)
     }
@@ -158,7 +158,7 @@ import Testing
         let menu = try Self.menu(row, in: view)
         let index = try #require(menu.items.firstIndex { $0.title == "New \(last.display) Session" })
         menu.performActionForItem(at: index)
-        #expect(await RunnerTabTests.until { !view.busy }, "the quick item's ask never ended")
+        try #require(await RunnerTabTests.until { !view.busy }, "the quick item's ask never ended")
         let asked = await server.requests.filter { $0.route.hasSuffix("/agents") }.count
         return (view, window, started, asked)
     }
@@ -459,7 +459,7 @@ import Testing
         let (view, window, _) = try await Self.listed(["workspace-agents-dock-not-installed"])
         defer { window.orderOut(nil) }
         let panel = try await Self.open("dock", in: view)
-        #expect(panel.view.rows.map(\.line.stringValue)[1] == "not installed here")
+        #expect(panel.view.rows.map(\.line.stringValue).dropFirst().first == "not installed here")
         try Self.press(try Self.down(), in: window)
         #expect(panel.view.words.contains("Codex CLI is not installed in harbor's workspaces; its agent installation lists Claude Code."))
         #expect(panel.view.words.contains("An admin adds codex to harbor's agent install list and builds its template again."))
