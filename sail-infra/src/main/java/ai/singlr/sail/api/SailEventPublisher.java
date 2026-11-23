@@ -30,7 +30,7 @@ import java.util.Objects;
  * policy — the dispatch hot path wraps in try/catch so a sail-api outage doesn't block the dispatch
  * itself.
  */
-public final class SailEventPublisher {
+public final class SailEventPublisher implements AutoCloseable {
 
   private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
   private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
@@ -42,6 +42,7 @@ public final class SailEventPublisher {
   private final String host;
   private final int port;
   private final String token;
+  private final HttpClient client;
 
   public SailEventPublisher(String host, int port, String token) {
     Objects.requireNonNull(host, "host");
@@ -56,6 +57,7 @@ public final class SailEventPublisher {
     this.host = host;
     this.port = port;
     this.token = token;
+    this.client = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
   }
 
   /**
@@ -67,6 +69,16 @@ public final class SailEventPublisher {
     var uri = URI.create(config.serverUrl());
     var port = uri.getPort() == -1 ? 7070 : uri.getPort();
     return new SailEventPublisher(uri.getHost(), port, config.token());
+  }
+
+  /**
+   * Publishes {@code event} to this box's API ({@link #localDefault}) on a publisher of its own,
+   * closed once answered: the way for a process that publishes a few events in its life.
+   */
+  public static Event publishToThisBox(Event event) throws IOException, InterruptedException {
+    try (var publisher = localDefault()) {
+      return publisher.publish(event);
+    }
   }
 
   /**
@@ -94,8 +106,7 @@ public final class SailEventPublisher {
 
   /**
    * Publishes the event over HTTP and returns the bus-stamped version (with the id assigned by the
-   * server). Throws if the server rejects the request or the connection fails. The client lives for
-   * this one request, so a publisher holds nothing open between them.
+   * server). Throws if the server rejects the request or the connection fails.
    */
   public Event publish(Event event) throws IOException, InterruptedException {
     Objects.requireNonNull(event, "event");
@@ -107,10 +118,7 @@ public final class SailEventPublisher {
             .timeout(REQUEST_TIMEOUT)
             .POST(HttpRequest.BodyPublishers.ofString(event.toJsonLine()))
             .build();
-    HttpResponse<String> response;
-    try (var client = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build()) {
-      response = client.send(request, HttpResponse.BodyHandlers.ofString());
-    }
+    var response = client.send(request, HttpResponse.BodyHandlers.ofString());
     if (response.statusCode() / 100 != 2) {
       throw new IOException(
           "POST "
@@ -120,6 +128,12 @@ public final class SailEventPublisher {
               + (response.body().isEmpty() ? "" : ": " + response.body()));
     }
     return parseStamped(response.body());
+  }
+
+  /** Closes the client every publish shares, once the requests still under way are answered. */
+  @Override
+  public void close() {
+    client.close();
   }
 
   /**

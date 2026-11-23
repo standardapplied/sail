@@ -314,19 +314,19 @@ class ContainerAgentProcessTest {
   }
 
   /**
-   * The end of stdout closes its pipe at once, the process still running on: its pipe never waits
-   * for the JDK's reaper, which closes a child's pipes only after it has woken those waiting for
-   * it.
+   * The end of stdout closes its pipe and stdin's at once, the process still running on: a process
+   * done speaking takes no more input, and neither pipe waits for the JDK's reaper, which closes a
+   * child's pipes only after it has woken those waiting for it.
    */
   @Test
   @EnabledOnOs(OS.LINUX)
-  void theEndOfStdoutClosesItsPipeWhileTheProcessRunsOn() throws Exception {
+  void theEndOfStdoutClosesBothPipesWhileTheProcessRunsOn() throws Exception {
     var before = OpenDescriptors.list();
     var handle =
         held(
             new ContainerAgentProcess(
                     new ScriptedShellExecutor(),
-                    argv -> List.of("sh", "-c", "exec >&-; read line; exit 0"))
+                    argv -> List.of("sh", "-c", "exec >&-; read line || exit 3; exit 0"))
                 .start(
                     "acme",
                     "/w",
@@ -339,11 +339,7 @@ class ContainerAgentProcessTest {
     assertNull(handle.stdout().read());
     assertNull(handle.stdout().read(), "an ended stdout stays ended");
 
-    assertEquals(
-        1,
-        OpenDescriptors.opened(before, OpenDescriptors.list()).size(),
-        "the running process's stdin alone is open");
-    handle.stdin().close();
-    assertEquals(OptionalInt.of(0), handle.waitFor(PATIENCE));
+    assertEquals(Map.of(), OpenDescriptors.opened(before, OpenDescriptors.list()));
+    assertEquals(OptionalInt.of(3), handle.waitFor(PATIENCE), "its input ended with its output");
   }
 }

@@ -11,13 +11,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.ClosesWhatItOpens;
+import ai.singlr.sail.engine.CountingHttpServer;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
-import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.nio.file.Path;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -47,8 +45,9 @@ class SailEventPublisherTest {
 
   @Test
   void publishRejectsNullEvent() {
-    var publisher = new SailEventPublisher("127.0.0.1", 7070, "tok");
-    assertThrows(NullPointerException.class, () -> publisher.publish(null));
+    try (var publisher = new SailEventPublisher("127.0.0.1", 7070, "tok")) {
+      assertThrows(NullPointerException.class, () -> publisher.publish(null));
+    }
   }
 
   @Test
@@ -72,17 +71,18 @@ class SailEventPublisherTest {
               null,
               tmp.resolve("api.sock"))) {
         server.start();
-        var publisher = new SailEventPublisher("127.0.0.1", server.port(), "tok");
-
-        var stamped =
-            publisher.publish(
-                Event.of(
-                    "light-grid",
-                    "oauth-flow",
-                    Event.WellKnownTypes.SPEC_DISPATCHED,
-                    Event.SAIL_AGENT,
-                    "host-01",
-                    Map.of("mode", "background")));
+        Event stamped;
+        try (var publisher = new SailEventPublisher("127.0.0.1", server.port(), "tok")) {
+          stamped =
+              publisher.publish(
+                  Event.of(
+                      "light-grid",
+                      "oauth-flow",
+                      Event.WellKnownTypes.SPEC_DISPATCHED,
+                      Event.SAIL_AGENT,
+                      "host-01",
+                      Map.of("mode", "background")));
+        }
 
         assertNotNull(stamped);
         assertTrue(stamped.id() > 0, "bus must assign a positive id");
@@ -108,19 +108,20 @@ class SailEventPublisherTest {
               null,
               tmp.resolve("api.sock"))) {
         server.start();
-        var publisher = new SailEventPublisher("127.0.0.1", server.port(), "wrong-token");
-
-        var ex =
-            assertThrows(
-                IOException.class,
-                () ->
-                    publisher.publish(
-                        Event.of(
-                            "p",
-                            null,
-                            Event.WellKnownTypes.SPEC_DISPATCHED,
-                            Event.SAIL_AGENT,
-                            "h")));
+        IOException ex;
+        try (var publisher = new SailEventPublisher("127.0.0.1", server.port(), "wrong-token")) {
+          ex =
+              assertThrows(
+                  IOException.class,
+                  () ->
+                      publisher.publish(
+                          Event.of(
+                              "p",
+                              null,
+                              Event.WellKnownTypes.SPEC_DISPATCHED,
+                              Event.SAIL_AGENT,
+                              "h")));
+        }
 
         assertTrue(
             ex.getMessage().contains("HTTP 401") || ex.getMessage().contains("HTTP 403"),
@@ -131,13 +132,14 @@ class SailEventPublisherTest {
 
   @Test
   void publishThrowsOnConnectionRefused() {
-    var publisher = new SailEventPublisher("127.0.0.1", 1, "tok");
-
-    assertThrows(
-        IOException.class,
-        () ->
-            publisher.publish(
-                Event.of("p", null, Event.WellKnownTypes.SPEC_DISPATCHED, Event.SAIL_AGENT, "h")));
+    try (var publisher = new SailEventPublisher("127.0.0.1", 1, "tok")) {
+      assertThrows(
+          IOException.class,
+          () ->
+              publisher.publish(
+                  Event.of(
+                      "p", null, Event.WellKnownTypes.SPEC_DISPATCHED, Event.SAIL_AGENT, "h")));
+    }
   }
 
   @Test
@@ -178,36 +180,58 @@ class SailEventPublisherTest {
     System.setProperty("SAIL_TOKEN", "test-token");
     System.setProperty("SAIL_SERVER", "http://127.0.0.1:7070");
     try {
-      var publisher = SailEventPublisher.localDefault();
-      assertNotNull(publisher);
+      try (var publisher = SailEventPublisher.localDefault()) {
+        assertNotNull(publisher);
+      }
     } finally {
       System.clearProperty("SAIL_TOKEN");
       System.clearProperty("SAIL_SERVER");
     }
   }
 
-  /** A publisher holds no client between requests: what a request opens, it closes. */
+  /**
+   * A publisher's requests share one client, held from one to the next, and closing the publisher
+   * leaves nothing of it open.
+   */
   @Test
   @EnabledOnOs(OS.LINUX)
-  void aPublisherHoldsNothingOpenOnceItsRequestIsAnswered() throws Exception {
-    var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
-    server.createContext(
-        "/v1/events",
-        exchange -> {
-          exchange.sendResponseHeaders(503, -1);
-          exchange.close();
-        });
-    server.start();
-    var before = ClosesWhatItOpens.baseline();
-    try {
-      var publisher = new SailEventPublisher("127.0.0.1", server.getAddress().getPort(), "tok");
-      assertThrows(
-          IOException.class,
-          () -> publisher.publish(Event.of("light", null, "spec_dispatched", "sail", "h")));
-    } finally {
-      server.stop(0);
-    }
+  void aPublishersRequestsShareOneClientThatClosingReleases() throws Exception {
+    Map<String, Object> before;
+    try (var server = CountingHttpServer.answering(503, "")) {
+      before = ClosesWhatItOpens.baseline();
+      try (var publisher = new SailEventPublisher("127.0.0.1", server.port(), "tok")) {
+        for (var i = 0; i < 2; i++) {
+          assertThrows(
+              IOException.class,
+              () -> publisher.publish(Event.of("light", null, "spec_dispatched", "sail", "h")));
+        }
+      }
 
+      assertEquals(1, server.connections(), "both requests came on the one client's connection");
+    }
     ClosesWhatItOpens.assertClosed("a publisher", before);
+  }
+
+  /** One event to this box's API goes on a publisher of its own, closed once it is answered. */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void anEventPublishedToThisBoxLeavesNothingOpen() throws Exception {
+    Map<String, Object> before;
+    try (var server = CountingHttpServer.answering(503, "")) {
+      System.setProperty("SAIL_SERVER", server.uri("").toString());
+      System.setProperty("SAIL_TOKEN", "tok");
+      before = ClosesWhatItOpens.baseline();
+      try {
+        assertThrows(
+            IOException.class,
+            () ->
+                SailEventPublisher.publishToThisBox(
+                    Event.of("light", null, "spec_dispatched", "sail", "h")));
+      } finally {
+        System.clearProperty("SAIL_SERVER");
+        System.clearProperty("SAIL_TOKEN");
+      }
+    }
+    ClosesWhatItOpens.assertClosed("an event published to this box", before);
   }
 }

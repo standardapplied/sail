@@ -267,6 +267,9 @@ public final class ShellExecutor implements ShellExec {
         stdout.append(line).append('\n');
         lines.accept(line);
       }
+    } catch (IOException | RuntimeException failed) {
+      destroyWithDescendants(process);
+      throw failed;
     }
     var exit = process.waitFor();
     stderrThread.join();

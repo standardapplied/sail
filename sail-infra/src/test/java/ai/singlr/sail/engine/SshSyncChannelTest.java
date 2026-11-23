@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.ssh.SshPublicKey;
@@ -18,6 +19,8 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 class SshSyncChannelTest {
@@ -222,5 +225,24 @@ class SshSyncChannelTest {
 
     Files.writeString(receipt(), written.substring(0, written.length() / 2));
     assertEquals(Optional.empty(), authorisation("mady", pinned()));
+  }
+
+  /**
+   * A close whose input fails, ssh having stopped reading it, still closes ssh's output and waits
+   * for it: nothing of the channel is left running or open.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aCloseWhoseInputFailsStillEndsTheChannel() throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+    var ssh = new ProcessBuilder("sh", "-c", "exec 0<&-; exec yes").start();
+    var channel = new SshSyncChannel(ssh, handle -> Optional.empty());
+    assertEquals('y', channel.reader().read(), "ssh closed its input before it spoke");
+    channel.writer().write('x');
+
+    assertThrows(IOException.class, channel::close);
+
+    assertFalse(ssh.isAlive());
+    ClosesWhatItOpens.assertClosed("a channel whose close failed", before);
   }
 }

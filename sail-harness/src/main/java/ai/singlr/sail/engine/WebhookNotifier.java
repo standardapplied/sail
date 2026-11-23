@@ -19,7 +19,7 @@ import java.time.Duration;
  * formats the payload accordingly. All calls are best-effort: failures are logged to stderr but
  * never thrown.
  */
-public final class WebhookNotifier {
+public final class WebhookNotifier implements AutoCloseable {
 
   private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
@@ -33,11 +33,13 @@ public final class WebhookNotifier {
 
   private final String url;
   private final Provider provider;
+  private final HttpClient client;
 
   public WebhookNotifier(String url) {
     requireHttpScheme(url);
     this.url = url;
     this.provider = detectProvider(url);
+    this.client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
   }
 
   /** Sends a notification. Best-effort — never throws. */
@@ -71,11 +73,15 @@ public final class WebhookNotifier {
     }
   }
 
-  /** Sends {@code request} on a client of its own, closed once answered, and says its status. */
-  static int post(HttpRequest request) throws IOException, InterruptedException {
-    try (var client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build()) {
-      return client.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
-    }
+  /** Sends {@code request} on the client every notification shares, and says its status. */
+  int post(HttpRequest request) throws IOException, InterruptedException {
+    return client.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
+  }
+
+  /** Closes the shared client, once the notifications still under way are answered. */
+  @Override
+  public void close() {
+    client.close();
   }
 
   /** Detects provider from URL hostname. Package-private for testing. */

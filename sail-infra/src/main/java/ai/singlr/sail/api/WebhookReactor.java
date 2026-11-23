@@ -7,9 +7,11 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.Notifications;
 import ai.singlr.sail.engine.WebhookNotifier;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
@@ -38,7 +40,8 @@ public final class WebhookReactor implements EventSubscriber {
 
   private final ProjectNotificationsResolver resolver;
   private final Function<String, WebhookSender> senderFactory;
-  private final ConcurrentHashMap<String, WebhookSender> senders = new ConcurrentHashMap<>();
+  private final Map<String, WebhookSender> senders = new HashMap<>();
+  private boolean closed;
 
   /** The reactor sending over real HTTP what {@code resolver} says each project wants. */
   public static WebhookReactor sending(ProjectNotificationsResolver resolver) {
@@ -54,7 +57,17 @@ public final class WebhookReactor implements EventSubscriber {
   /** Test seam: returns a real outbound-HTTPS sender backed by {@link WebhookNotifier}. */
   static WebhookSender defaultSender(String url) {
     var notifier = new WebhookNotifier(url);
-    return notifier::notify;
+    return new WebhookSender() {
+      @Override
+      public void send(String event, String project, String title, String message) {
+        notifier.notify(event, project, title, message);
+      }
+
+      @Override
+      public void close() {
+        notifier.close();
+      }
+    };
   }
 
   @Override
@@ -79,13 +92,32 @@ public final class WebhookReactor implements EventSubscriber {
     if (!notifications.shouldNotify(event.type())) {
       return;
     }
-    var message = WebhookMessage.forEvent(event);
     var sender = senderFor(notifications.url());
+    if (sender == null) {
+      return;
+    }
+    var message = WebhookMessage.forEvent(event);
     sender.send(event.type(), event.project(), message.title(), message.message());
   }
 
-  private WebhookSender senderFor(String url) {
-    return senders.computeIfAbsent(url, senderFactory);
+  /** The sender cached for {@code url}, or null once the subscription has closed. */
+  private synchronized WebhookSender senderFor(String url) {
+    return closed ? null : senders.computeIfAbsent(url, senderFactory);
+  }
+
+  /**
+   * Closes every sender cached, so no client outlives the subscription; a notification already
+   * under way is answered first, within its own timeout.
+   */
+  @Override
+  public void closed() {
+    List<WebhookSender> open;
+    synchronized (this) {
+      closed = true;
+      open = List.copyOf(senders.values());
+      senders.clear();
+    }
+    open.forEach(WebhookSender::close);
   }
 
   /**

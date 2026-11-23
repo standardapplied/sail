@@ -130,8 +130,9 @@ public final class ContainerAgentProcess implements AgentProcess {
     }
 
     /**
-     * The next line of stdout, or {@code null} once it has ended; at its end the handle closes it,
-     * so its pipe goes with the reading rather than whenever the JDK's reaper gets to it.
+     * The next line of stdout, or {@code null} once it has ended; at its end the handle closes it
+     * and stdin, for a process done speaking takes no more input, so its pipes go with the reading
+     * rather than whenever the JDK's reaper gets to them.
      */
     @Override
     public String read() throws IOException {
@@ -142,6 +143,7 @@ public final class ContainerAgentProcess implements AgentProcess {
       if (line == null) {
         ended = true;
         out.close();
+        close();
       }
       return line;
     }

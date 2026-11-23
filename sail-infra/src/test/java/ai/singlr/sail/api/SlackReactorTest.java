@@ -426,10 +426,28 @@ class SlackReactorTest {
   void defaultPosterBuildsClientWhenTokenPresent() {
     System.setProperty("SAIL_SLACK_TOKEN", "xoxb-test");
     try {
-      assertNotNull(SlackReactor.defaultPoster());
+      try (var poster = SlackReactor.defaultPoster()) {
+        assertNotNull(poster);
+      }
     } finally {
       System.clearProperty("SAIL_SLACK_TOKEN");
     }
+  }
+
+  /**
+   * Closing the reactor's subscription closes its Slack client, so it does not outlive the API; a
+   * reactor with no client has nothing to close.
+   */
+  @Test
+  void closingTheSubscriptionClosesTheSlackClient() {
+    var poster = new RecordingPoster();
+
+    try (var bus = new EventBus()) {
+      bus.subscribe(reactor(poster)).close();
+      bus.subscribe(reactor(null)).close();
+    }
+
+    assertTrue(poster.closed);
   }
 
   @Test
@@ -453,11 +471,17 @@ class SlackReactorTest {
     final List<Post> posts = new ArrayList<>();
     String nextTs = "1.100";
     boolean failAll;
+    boolean closed;
 
     @Override
     public Result post(Post post) {
       posts.add(post);
       return failAll ? null : new Result("C123", nextTs);
+    }
+
+    @Override
+    public void close() {
+      closed = true;
     }
   }
 }

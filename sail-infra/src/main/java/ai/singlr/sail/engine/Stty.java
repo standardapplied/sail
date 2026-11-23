@@ -36,10 +36,7 @@ public final class Stty {
    */
   public static boolean printsToTerminal() {
     try {
-      var process =
-          new ProcessBuilder("sh", "-c", "[ -t 1 ]")
-              .redirectOutput(ProcessBuilder.Redirect.INHERIT)
-              .start();
+      var process = new ProcessBuilder("sh", "-c", "[ -t 1 ]").inheritIO().start();
       return process.waitFor() == 0;
     } catch (IOException e) {
       return false;
@@ -66,9 +63,13 @@ public final class Stty {
     try {
       var process =
           new ProcessBuilder("sh", "-c", "stty " + args + " </dev/tty")
-              .redirectErrorStream(false)
+              .redirectError(ProcessBuilder.Redirect.DISCARD)
               .start();
-      var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+      process.getOutputStream().close();
+      String output;
+      try (var printed = process.getInputStream()) {
+        output = new String(printed.readAllBytes(), StandardCharsets.UTF_8);
+      }
       process.waitFor();
       return output;
     } catch (IOException e) {

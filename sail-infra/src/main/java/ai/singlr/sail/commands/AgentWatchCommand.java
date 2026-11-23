@@ -196,16 +196,17 @@ public final class AgentWatchCommand implements Runnable {
     requireRunning(shell);
 
     var notifications = notifications();
-    var notifier = buildNotifier(notifications);
+    try (var notifier = buildNotifier(notifications);
+        var events = localPublisher()) {
+      RunWatch.StopPublisher publisher = events == null ? null : events::publish;
+      if (!watchable(shell, publisher)) {
+        return;
+      }
+      announceStart(guardrails, RunWatch.deadline(started, guardrails.maxDuration()));
 
-    var publisher = resolvePublisher();
-    if (!watchable(shell, publisher)) {
-      return;
-    }
-    announceStart(guardrails, RunWatch.deadline(started, guardrails.maxDuration()));
-
-    try (var feed = new StreamFeed(ServerConnectionConfig.resolve().token())) {
-      watch(shell, feed, publisher, narrator(notifier, notifications), DateTimeUtils::now).run();
+      try (var feed = new StreamFeed(ServerConnectionConfig.resolve().token())) {
+        watch(shell, feed, publisher, narrator(notifier, notifications), DateTimeUtils::now).run();
+      }
     }
   }
 
@@ -279,10 +280,10 @@ public final class AgentWatchCommand implements Runnable {
     }
   }
 
-  private RunWatch.StopPublisher resolvePublisher() {
+  /** The publisher to this box's API for the watch's life, or null when none is configured. */
+  private static SailEventPublisher localPublisher() {
     try {
-      var publisher = SailEventPublisher.localDefault();
-      return publisher::publish;
+      return SailEventPublisher.localDefault();
     } catch (Exception e) {
       return null;
     }

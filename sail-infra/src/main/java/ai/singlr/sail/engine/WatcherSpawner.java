@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.engine.SystemdServiceInstaller.Mode;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -132,9 +133,13 @@ public final class WatcherSpawner {
     return List.copyOf(command);
   }
 
-  /** Starts a detached process, mirroring the historic fallback spawn. */
+  /**
+   * Starts a detached process, mirroring the historic fallback spawn. It outlives this one, so it
+   * is given no pipe of ours: its input is empty and its output goes to {@code logPath}.
+   */
   public static long spawnProcess(List<String> command, Path logPath) throws IOException {
     return new ProcessBuilder(command)
+        .redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")))
         .redirectOutput(ProcessBuilder.Redirect.to(logPath.toFile()))
         .redirectErrorStream(true)
         .start()

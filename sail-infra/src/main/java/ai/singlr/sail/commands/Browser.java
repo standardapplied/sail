@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
@@ -22,9 +23,21 @@ final class Browser {
     var os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
     var command = os.contains("mac") ? List.of("open", url) : List.of("xdg-open", url);
     try {
-      new ProcessBuilder(command).start();
+      start(command);
     } catch (IOException ignored) {
       System.out.println("  (Could not open a browser automatically — open the URL above.)");
     }
+  }
+
+  /**
+   * Starts the opener {@code command}, which may outlive this process with the browser it starts,
+   * so it is given no pipe of ours: its input is empty and what it prints is dropped.
+   */
+  static Process start(List<String> command) throws IOException {
+    return new ProcessBuilder(command)
+        .redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")))
+        .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+        .redirectError(ProcessBuilder.Redirect.DISCARD)
+        .start();
   }
 }

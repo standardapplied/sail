@@ -71,7 +71,7 @@ import picocli.CommandLine.Help.Ansi;
  * others suppressed, so a broken type never silences the materialization of the ones that
  * succeeded.
  */
-public final class SyncOperations {
+public final class SyncOperations implements AutoCloseable {
   public interface Channel extends AutoCloseable {
     InputStream reader();
 
@@ -1033,7 +1033,7 @@ public final class SyncOperations {
     }
   }
 
-  private void publishQuietly(Event event) {
+  private synchronized void publishQuietly(Event event) {
     try {
       if (publisher == null) {
         publisher = SailEventPublisher.localDefault();
@@ -1046,6 +1046,15 @@ public final class SyncOperations {
           Ansi.AUTO.string(
               "  @|faint Event notification skipped — sail-api isn't running here; the sync is"
                   + " unaffected.|@"));
+    }
+  }
+
+  /** Closes the publisher a round opened to the local API, if one did. */
+  @Override
+  public synchronized void close() {
+    if (publisher != null) {
+      publisher.close();
+      publisher = null;
     }
   }
 

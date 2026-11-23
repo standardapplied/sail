@@ -37,9 +37,10 @@ class ApiCoverageEdgesTest {
 
   @Test
   void webhookReactorDefaultSenderBuildsRealNotifier() {
-    var sender = WebhookReactor.defaultSender("http://127.0.0.1:1/hook");
-    assertNotNull(sender);
-    sender.send("any", "p", "title", "msg");
+    try (var sender = WebhookReactor.defaultSender("http://127.0.0.1:1/hook")) {
+      assertNotNull(sender);
+      sender.send("any", "p", "title", "msg");
+    }
   }
 
   @Test

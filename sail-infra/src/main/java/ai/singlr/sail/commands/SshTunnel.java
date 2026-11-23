@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
@@ -65,8 +66,8 @@ public final class SshTunnel implements AutoCloseable {
     this.drainer =
         Thread.startVirtualThread(
             () -> {
-              try {
-                process.getErrorStream().transferTo(stderr);
+              try (var said = process.getErrorStream()) {
+                said.transferTo(stderr);
               } catch (IOException ignored) {
                 return;
               }
@@ -75,13 +76,7 @@ public final class SshTunnel implements AutoCloseable {
 
   /** Opens the tunnel to {@code host} and blocks until the forwarded control plane is healthy. */
   public static SshTunnel open(String host) throws IOException, InterruptedException {
-    return open(
-        host,
-        PORT,
-        command -> new ProcessBuilder(command).start(),
-        healthProbe(PORT),
-        HEALTH_ATTEMPTS,
-        HEALTH_INTERVAL);
+    return open(host, PORT, SshTunnel::launch, healthProbe(PORT), HEALTH_ATTEMPTS, HEALTH_INTERVAL);
   }
 
   static SshTunnel open(
@@ -97,6 +92,17 @@ public final class SshTunnel implements AutoCloseable {
       throw e;
     }
     return tunnel;
+  }
+
+  /**
+   * Starts {@code command}, an {@code ssh -N} that reads nothing and prints nothing: its input is
+   * empty and its output dropped, so only its stderr, kept for diagnostics, is a pipe of ours.
+   */
+  static Process launch(List<String> command) throws IOException {
+    return new ProcessBuilder(command)
+        .redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")))
+        .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+        .start();
   }
 
   static List<String> command(String host, int port) {

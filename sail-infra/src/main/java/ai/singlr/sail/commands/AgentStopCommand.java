@@ -62,8 +62,6 @@ public final class AgentStopCommand implements Runnable {
 
   @Mixin private SyncOptions syncOptions;
 
-  private SailEventPublisher eventPublisher;
-
   @Override
   public void run() {
     CliCommand.run(json, this::execute);
@@ -242,10 +240,7 @@ public final class AgentStopCommand implements Runnable {
    */
   private void publishLifecycle(Event event) {
     try {
-      if (eventPublisher == null) {
-        eventPublisher = SailEventPublisher.localDefault();
-      }
-      eventPublisher.publish(event);
+      SailEventPublisher.publishToThisBox(event);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       warnLifecyclePublishFailed(event.type(), e);

@@ -250,13 +250,16 @@ public final class SshSyncChannel implements SyncOperations.Channel {
   /** Closes this node's end of the pipe and waits for the remote {@code _sync} to exit. */
   @Override
   public void close() throws IOException {
-    writer.close();
-    reader.close();
-    try {
-      process.waitFor();
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      process.destroy();
+    try (reader) {
+      writer.close();
+    } finally {
+      try {
+        process.waitFor();
+        drain.join(EXIT_GRACE);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        process.destroy();
+      }
     }
   }
 }

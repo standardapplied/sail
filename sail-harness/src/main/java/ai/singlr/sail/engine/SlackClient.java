@@ -36,8 +36,11 @@ public final class SlackClient implements SlackPoster {
   private static final long RETRY_BACKOFF_MILLIS = 500;
 
   @FunctionalInterface
-  interface HttpPoster {
+  interface HttpPoster extends AutoCloseable {
     HttpReply send(String jsonBody) throws Exception;
+
+    @Override
+    default void close() {}
   }
 
   record HttpReply(int status, String body) {}
@@ -46,7 +49,9 @@ public final class SlackClient implements SlackPoster {
   private final LongConsumer sleeper;
 
   public SlackClient(String token) {
-    this(defaultHttp(Objects.requireNonNull(token, "token")), SlackClient::sleep);
+    this(
+        defaultHttp(Objects.requireNonNull(token, "token"), URI.create(API_URL)),
+        SlackClient::sleep);
   }
 
   SlackClient(HttpPoster http, LongConsumer sleeper) {
@@ -90,6 +95,12 @@ public final class SlackClient implements SlackPoster {
     }
     warn("giving up posting to " + post.channel() + " after " + MAX_ATTEMPTS + " attempts");
     return null;
+  }
+
+  /** Closes the client every post shares, once the posts still under way are answered. */
+  @Override
+  public void close() {
+    http.close();
   }
 
   /** Builds the exact chat.postMessage JSON body. Package-private for testing. */
@@ -148,26 +159,29 @@ public final class SlackClient implements SlackPoster {
     }
   }
 
-  static HttpPoster defaultHttp(String token) {
-    return body -> {
-      var request =
-          HttpRequest.newBuilder()
-              .uri(URI.create(API_URL))
-              .header("Authorization", "Bearer " + token)
-              .header("Content-Type", "application/json; charset=utf-8")
-              .timeout(TIMEOUT)
-              .POST(HttpRequest.BodyPublishers.ofString(body))
-              .build();
-      return post(request);
-    };
-  }
+  /** Posts to {@code api} with {@code token}, every post on one client the poster's close ends. */
+  static HttpPoster defaultHttp(String token, URI api) {
+    var client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
+    return new HttpPoster() {
+      @Override
+      public HttpReply send(String body) throws IOException, InterruptedException {
+        var request =
+            HttpRequest.newBuilder()
+                .uri(api)
+                .header("Authorization", "Bearer " + token)
+                .header("Content-Type", "application/json; charset=utf-8")
+                .timeout(TIMEOUT)
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        return new HttpReply(response.statusCode(), response.body());
+      }
 
-  /** Sends {@code request} on a client of its own, closed once answered. */
-  static HttpReply post(HttpRequest request) throws IOException, InterruptedException {
-    try (var client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build()) {
-      var response = client.send(request, HttpResponse.BodyHandlers.ofString());
-      return new HttpReply(response.statusCode(), response.body());
-    }
+      @Override
+      public void close() {
+        client.close();
+      }
+    };
   }
 
   private static String envOrProperty(String name) {

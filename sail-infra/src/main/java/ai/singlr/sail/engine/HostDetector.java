@@ -132,8 +132,11 @@ public final class HostDetector {
       var pb = new ProcessBuilder("hostname");
       pb.redirectErrorStream(true);
       var process = pb.start();
-      var output =
-          new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
+      process.getOutputStream().close();
+      String output;
+      try (var printed = process.getInputStream()) {
+        output = new String(printed.readAllBytes(), StandardCharsets.UTF_8).strip();
+      }
       process.waitFor();
       if (!output.isEmpty()) {
         return output;

@@ -202,7 +202,7 @@ public final class ServerStartCommand implements Runnable {
               System.out.println(SyncCommand.render(round, false, Remedy::plain));
             });
     operations.useSyncScheduler(syncScheduler);
-    shutdown.register(syncScheduler);
+    shutdown.register(operations).register(syncScheduler);
     var reader = ProjectReader.ofCatalog(projectStore);
     var notifications = new CatalogNotificationsResolver(reader);
     var reviewController =

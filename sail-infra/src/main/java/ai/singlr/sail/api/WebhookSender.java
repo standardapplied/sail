@@ -11,8 +11,12 @@ package ai.singlr.sail.api;
  * implementation.
  */
 @FunctionalInterface
-public interface WebhookSender {
+public interface WebhookSender extends AutoCloseable {
 
   /** Send a notification — implementations must be best-effort and never throw. */
   void send(String event, String project, String title, String message);
+
+  /** Lets go of what the sender holds open; one that holds nothing does nothing. */
+  @Override
+  default void close() {}
 }

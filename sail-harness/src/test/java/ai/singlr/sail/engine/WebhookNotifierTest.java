@@ -11,14 +11,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.sun.net.httpserver.HttpServer;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.URI;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class WebhookNotifierTest {
@@ -150,7 +147,7 @@ class WebhookNotifierTest {
 
   @Test
   void constructorAcceptsHttpsUrl() {
-    assertDoesNotThrow(() -> new WebhookNotifier("https://hooks.slack.com/services/T/B/x"));
+    assertDoesNotThrow(() -> new WebhookNotifier("https://hooks.slack.com/services/T/B/x").close());
   }
 
   @Test
@@ -179,11 +176,10 @@ class WebhookNotifierTest {
 
   @Test
   void notifyRefusesToSendWhenHostResolvesPrivateAtSendTime() {
-    var notifier = new WebhookNotifier("http://127.0.0.1:9/hook");
     var captured = new ByteArrayOutputStream();
     var originalErr = System.err;
     System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
-    try {
+    try (var notifier = new WebhookNotifier("http://127.0.0.1:9/hook")) {
       notifier.notify("guardrail_triggered", "acme", "Title", "Message");
     } finally {
       System.setErr(originalErr);
@@ -193,29 +189,28 @@ class WebhookNotifierTest {
     assertFalse(logged.contains("127.0.0.1:9/hook"), "Must not log the unredacted URL");
   }
 
-  /** A notification's client lives for its one request: nothing of it is open once answered. */
+  /**
+   * A notifier's posts share one client, held from one to the next, and closing the notifier leaves
+   * nothing of it open.
+   */
   @Test
-  void aPostLeavesNoClientOpen() throws Exception {
-    var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
-    server.createContext(
-        "/",
-        exchange -> {
-          exchange.sendResponseHeaders(204, -1);
-          exchange.close();
-        });
-    server.start();
-    var before = ClosesWhatItOpens.baseline();
-    try {
-      var request =
-          HttpRequest.newBuilder(
-                  URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/hook"))
-              .POST(HttpRequest.BodyPublishers.ofString("{}"))
-              .build();
+  void aNotifiersPostsShareOneClientThatClosingReleases() throws Exception {
+    Map<String, Object> before;
+    try (var server = CountingHttpServer.answering(204, "")) {
+      before = ClosesWhatItOpens.baseline();
+      try (var notifier = new WebhookNotifier(server.uri("/hook").toString())) {
+        for (var i = 0; i < 2; i++) {
+          assertEquals(
+              204,
+              notifier.post(
+                  HttpRequest.newBuilder(server.uri("/hook"))
+                      .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                      .build()));
+        }
+      }
 
-      assertEquals(204, WebhookNotifier.post(request));
-    } finally {
-      server.stop(0);
+      assertEquals(1, server.connections(), "both posts came on the one client's connection");
     }
-    ClosesWhatItOpens.assertClosed("a webhook post", before);
+    ClosesWhatItOpens.assertClosed("a webhook notifier", before);
   }
 }

@@ -101,6 +101,7 @@ class EventPublishersTest {
   private SailOperations serverOperations;
   private SailApiServer server;
   private SailEventPublisher publisher;
+  private SyncServerCommand.TransitionBridge bridge;
   private final List<Event> landed = new CopyOnWriteArrayList<>();
   private final Semaphore delivered = new Semaphore(0);
   private long consumed;
@@ -109,6 +110,12 @@ class EventPublishersTest {
   void tearDown() {
     System.clearProperty("SAIL_SERVER");
     System.clearProperty("SAIL_TOKEN");
+    if (bridge != null) {
+      bridge.close();
+    }
+    if (publisher != null) {
+      publisher.close();
+    }
     if (server != null) {
       server.close();
     }
@@ -233,8 +240,10 @@ class EventPublishersTest {
                           SyncTransitionSink.NONE,
                           "1.0.0")),
               SyncOperations.PLAIN_NOTICES);
-
-      Acting.by(new Actor(ME, Role.MEMBER, Actor.Lane.CLI), () -> sync.sync(new SyncRequest(null)));
+      try (var owner = new SailOperations().useControlPlane(box.db, tempDir, sync)) {
+        Acting.by(
+            new Actor(ME, Role.MEMBER, Actor.Lane.CLI), () -> owner.sync(new SyncRequest(null)));
+      }
 
       var announcements = landedSoFar();
       assertEquals(
@@ -312,7 +321,8 @@ class EventPublishersTest {
     var fde = new FdeStore(box.db).add(pusher, null, null, "member");
     System.setProperty(
         "SAIL_TOKEN", new TokenStore(box.db).create(pusher, "member", fde.id(), null).token());
-    box.transitions(SyncServerCommand.transitionBridge(box.db, "main"));
+    bridge = SyncServerCommand.transitionBridge(box.db, "main");
+    box.transitions(bridge);
   }
 
   private static String startRunOn(RunStore runs, String spec) {

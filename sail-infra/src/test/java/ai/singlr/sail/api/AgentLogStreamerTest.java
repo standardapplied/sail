@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.ClosesWhatItOpens;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -30,6 +31,7 @@ import com.sun.net.httpserver.HttpPrincipal;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -43,9 +45,12 @@ import java.time.InstantSource;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 class AgentLogStreamerTest {
 
@@ -526,6 +531,7 @@ class AgentLogStreamerTest {
     private final ByteArrayOutputStream responseBody = new ByteArrayOutputStream();
     private final java.util.Map<String, Object> attributes = new java.util.HashMap<>();
     private int status = -1;
+    private boolean hungUp;
 
     private CapturingExchange(String path) {
       this.uri = URI.create(path);
@@ -540,6 +546,12 @@ class AgentLogStreamerTest {
 
     private CapturingExchange scoped(ProjectScope scope) {
       attributes.put(ApiAuth.ACTOR, ApiAuth.actorOf(this).withScope(scope));
+      return this;
+    }
+
+    /** An exchange whose client has gone before its headers are sent. */
+    private CapturingExchange hungUp() {
+      hungUp = true;
       return this;
     }
 
@@ -568,7 +580,10 @@ class AgentLogStreamerTest {
     }
 
     @Override
-    public void sendResponseHeaders(int rCode, long responseLength) {
+    public void sendResponseHeaders(int rCode, long responseLength) throws IOException {
+      if (hungUp) {
+        throw new IOException("the client hung up");
+      }
       this.status = rCode;
     }
 
@@ -627,5 +642,49 @@ class AgentLogStreamerTest {
     public HttpPrincipal getPrincipal() {
       throw new UnsupportedOperationException();
     }
+  }
+
+  /**
+   * The tail is given no input to wait on, so a tail that reads it ends, and so does the stream.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aTailThatReadsItsInputFindsItEmptyAndTheStreamEnds() {
+    var exchange = new CapturingExchange("/v1/runs/r1/stream");
+
+    assertTimeoutPreemptively(
+        Duration.ofSeconds(5),
+        () ->
+            streamer(id -> Optional.empty(), "node-a")
+                .streamLog(exchange, "acme", new String[] {"cat"}, 0, NEVER_ENDS, ENDED));
+
+    assertEquals(200, exchange.status);
+    assertTrue(exchange.body().contains("event: error"), exchange.body());
+  }
+
+  /** A client gone before the stream's headers are sent leaves the tail with no pipe of ours. */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aClientGoneBeforeTheHeadersLeavesNothingOpen() throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+    var running = ProcessHandle.current().children().toList();
+    var exchange = new CapturingExchange("/v1/runs/r1/stream").hungUp();
+
+    assertThrows(
+        IOException.class,
+        () ->
+            streamer(id -> Optional.empty(), "node-a")
+                .streamLog(
+                    exchange,
+                    "acme",
+                    new String[] {"tail", "-f", "/dev/null"},
+                    0,
+                    NEVER_ENDS,
+                    ENDED));
+
+    for (var tail : ProcessHandle.current().children().filter(c -> !running.contains(c)).toList()) {
+      tail.onExit().get(10, TimeUnit.SECONDS);
+    }
+    ClosesWhatItOpens.assertClosed("a stream whose client had gone", before);
   }
 }
