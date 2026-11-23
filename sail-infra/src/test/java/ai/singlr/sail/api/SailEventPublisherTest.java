@@ -217,16 +217,21 @@ class SailEventPublisherTest {
   @EnabledOnOs(OS.LINUX)
   void anEventPublishedToThisBoxLeavesNothingOpen() throws Exception {
     Map<String, Object> before;
-    try (var server = CountingHttpServer.answering(503, "")) {
+    try (var server =
+        CountingHttpServer.answering(
+            200,
+            "{\"event\": {\"v\": 1, \"id\": 7, \"ts\": \"2026-05-22T12:00:00Z\","
+                + " \"project\": \"light\", \"type\": \"spec_dispatched\","
+                + " \"agent\": \"sail\", \"host\": \"h\"}}")) {
       System.setProperty("SAIL_SERVER", server.uri("").toString());
       System.setProperty("SAIL_TOKEN", "tok");
       before = ClosesWhatItOpens.baseline();
       try {
-        assertThrows(
-            IOException.class,
-            () ->
-                SailEventPublisher.publishToThisBox(
-                    Event.of("light", null, "spec_dispatched", "sail", "h")));
+        assertEquals(
+            7L,
+            SailEventPublisher.publishToThisBox(
+                    Event.of("light", null, "spec_dispatched", "sail", "h"))
+                .id());
       } finally {
         System.clearProperty("SAIL_SERVER");
         System.clearProperty("SAIL_TOKEN");

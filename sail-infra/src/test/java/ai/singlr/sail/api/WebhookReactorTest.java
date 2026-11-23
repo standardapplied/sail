@@ -219,6 +219,18 @@ class WebhookReactorTest {
     assertEquals(List.of(1, 1), built.stream().map(sender -> sender.calls).toList());
   }
 
+  /** A sender that holds nothing open has nothing to let go of when closed. */
+  @Test
+  void aSenderThatHoldsNothingClosesQuietly() {
+    var calls = new ArrayList<String>();
+    var sender = recorder(calls);
+
+    sender.close();
+    sender.send("spec_dispatched", "p", "t", "m");
+
+    assertEquals(1, calls.size(), "closing it changed nothing");
+  }
+
   @Test
   void sendingDoesNotThrow() {
     assertNotNull(WebhookReactor.sending(project -> null));
