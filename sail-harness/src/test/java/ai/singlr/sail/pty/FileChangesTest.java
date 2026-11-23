@@ -606,12 +606,14 @@ class FileChangesTest {
     assertEquals(FileScripts.FILTERED, diff(sail, workspace.resolve("c.g"), 1 << 20).status());
     assertEquals(0, diff(sail, workspace.resolve("d.md"), 1 << 20).status());
     diff(sail, lazy.resolve("f.txt"), 1 << 20);
-    var read =
-        sail.start(CONTAINER, FileScripts.READ, workspace.resolve("a.txt").toString(), "0", "100");
-    while (read.field() != null) {
-      continue;
+    try (var read =
+        sail.start(
+            CONTAINER, FileScripts.READ, workspace.resolve("a.txt").toString(), "0", "100")) {
+      while (read.field() != null) {
+        continue;
+      }
+      assertEquals(0, read.status(), "a read, with its stat and its digests");
     }
-    assertEquals(0, read.status(), "a read, with its stat and its digests");
 
     assertEquals(List.of(), left(markers), "nothing planted ran");
   }
@@ -850,12 +852,13 @@ class FileChangesTest {
   }
 
   private static Ran diff(FileScripts with, Path path, long cap) throws Exception {
-    var script = with.start(CONTAINER, FileScripts.DIFF, path.toString(), "" + cap);
-    var bytes = new ByteArrayOutputStream();
-    for (var chunk = script.bytes(1 << 16); chunk.length > 0; chunk = script.bytes(1 << 16)) {
-      bytes.write(chunk);
+    try (var script = with.start(CONTAINER, FileScripts.DIFF, path.toString(), "" + cap)) {
+      var bytes = new ByteArrayOutputStream();
+      for (var chunk = script.bytes(1 << 16); chunk.length > 0; chunk = script.bytes(1 << 16)) {
+        bytes.write(chunk);
+      }
+      return new Ran(bytes.toByteArray(), script.status());
     }
-    return new Ran(bytes.toByteArray(), script.status());
   }
 
   private static String text(Ran ran) {

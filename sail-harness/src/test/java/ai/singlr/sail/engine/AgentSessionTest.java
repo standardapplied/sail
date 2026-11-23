@@ -589,8 +589,7 @@ class AgentSessionTest {
   @AfterEach
   void endEveryProcess() throws Exception {
     for (var process : started) {
-      process.destroyForcibly().waitFor();
-      process.getInputStream().close();
+      Child.end(process);
     }
   }
 

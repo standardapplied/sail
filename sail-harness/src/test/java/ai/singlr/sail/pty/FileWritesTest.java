@@ -69,8 +69,11 @@ class FileWritesTest {
   }
 
   @AfterEach
-  void tearDown() throws IOException {
+  void tearDown() throws Exception {
     started.forEach(FileScripts.Script::end);
+    for (var process : processes) {
+      Child.end(process);
+    }
     try (var all = Files.walk(dir)) {
       for (var path : all.toList()) {
         if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {

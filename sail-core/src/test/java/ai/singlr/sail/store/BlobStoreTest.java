@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.identity.ActingAs;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -223,9 +224,7 @@ class BlobStoreTest {
   /** Ends {@code child}, if it started, and closes the pipes this test spoke to it through. */
   private static void end(Process child) throws Exception {
     if (child != null) {
-      child.destroyForcibly().waitFor();
-      child.getOutputStream().close();
-      child.getInputStream().close();
+      Child.end(child);
     }
   }
 
