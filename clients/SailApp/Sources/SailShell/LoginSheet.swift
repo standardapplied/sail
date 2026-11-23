@@ -22,6 +22,10 @@ package final class LoginSheet: NSPanel, NSTextFieldDelegate {
     /// The content type that offers no suggestion: neither field is a login form's, so neither the
     /// key nor the name is offered Passwords' AutoFill.
     static let noSuggestion = NSTextContentType(rawValue: "")
+    /// The name's content type: one AppKit cannot read as a credential's user name, so the name and
+    /// the key are no login form to it (an empty type left the name read as one: Passwords' AutoFill
+    /// showed over the key whenever the name was asked).
+    static let notAUserName = NSTextContentType.oneTimeCode
 
     var look: Look {
         didSet {
@@ -88,8 +92,9 @@ package final class LoginSheet: NSPanel, NSTextFieldDelegate {
         store.setAccessibilityLabel(model.storeName)
         field.field.delegate = self
         field.field.setAccessibilityLabel(model.fieldName)
+        field.field.contentType = Self.noSuggestion
+        name?.field.contentType = Self.notAUserName
         for each in [field.field] + (name.map { [$0.field] } ?? []) {
-            each.contentType = Self.noSuggestion
             each.isAutomaticTextCompletionEnabled = false
         }
         if let name {

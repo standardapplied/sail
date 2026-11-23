@@ -316,7 +316,7 @@ extension LoginSheetTests {
         let (_, window, server, sheet) = try await Self.asked(agents: "workspace-agents-dock-no-default", logins: "logins-no-default", stored: [refused])
         defer { window.orderOut(nil) }
         let name = try #require(sheet.name, "no name was asked of a person with a Claude Code login")
-        #expect(name.field.contentType == LoginSheet.noSuggestion && !name.field.isAutomaticTextCompletionEnabled, "the name offers suggestions, or reads as a login form's user name")
+        #expect(name.field.contentType == LoginSheet.notAUserName && !name.field.isAutomaticTextCompletionEnabled, "the name offers suggestions, or reads as a login form's user name")
         #expect(name.field.stringValue == "work" && Driverless.words(sheet.contentView).contains("you already have “home”"))
         name.field.stringValue = "Work"
         sheet.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: name.field))
