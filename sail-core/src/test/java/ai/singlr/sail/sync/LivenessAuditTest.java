@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SpecStatus;
@@ -36,9 +37,13 @@ import ai.singlr.sail.store.TestRuns;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
@@ -50,6 +55,12 @@ import org.junit.jupiter.api.io.TempDir;
 class LivenessAuditTest {
 
   private static final Actor ADA = new Actor("ada", Role.MEMBER, Actor.Lane.SYNC);
+
+  /** Seconds a wait guards against a hang: none of this class's verdicts rests on it. */
+  private static final long PATIENCE = 60;
+
+  /** How long a thread a failed test interrupts is given to end. */
+  private static final Duration ENDING = Duration.ofSeconds(5);
 
   @TempDir Path dir;
   private SyncBox main;
@@ -464,7 +475,12 @@ class LivenessAuditTest {
 
   /**
    * An upload that replaces an oversized offer while the round is settling it waits its turn: what
-   * the round settles is what it judged, so a replacement under the ceiling is kept and lands.
+   * the round settles is what it judged, so a replacement under the ceiling is kept and lands. The
+   * upload holds its replacement uncommitted until the settle has begun its first write
+   * transaction, every read it makes before its turn already made, so every run commits the
+   * replacement during the settlement. The settle runs on a platform thread of its own: its wait
+   * for the upload's write lock is SQLite's, inside a native call, which would hold the only
+   * carrier a one-CPU JVM has and so keep the upload's virtual thread from ever committing.
    */
   @Test
   void aReplacementUnderTheCeilingUploadedDuringSettlementIsKept() throws Exception {
@@ -494,25 +510,77 @@ class LivenessAuditTest {
                                         0644);
                                 replaced.countDown();
                                 try {
-                                  commit.await();
+                                  assertTrue(
+                                      commit.await(PATIENCE, TimeUnit.SECONDS),
+                                      "the upload was never let commit");
                                 } catch (InterruptedException e) {
                                   Thread.currentThread().interrupt();
                                   throw new IllegalStateException(e);
                                 }
                                 return null;
                               })));
-      assertTrue(replaced.await(5, TimeUnit.SECONDS));
+      assertTrue(replaced.await(PATIENCE, TimeUnit.SECONDS));
       var settlement = new Settlement(node.db, Decidability.onNode(node.db), "node");
-      var settling = executor.submit(settlement::settle);
+      var settling = new FutureTask<>(settlement::settle);
+      var settler = Thread.ofPlatform().name("the settle").start(settling);
+      try {
+        awaitItsTurn(settler, settling);
+      } catch (Throwable failed) {
+        commit.countDown();
+        endAfter(failed, settler);
+        throw failed;
+      }
       commit.countDown();
-      upload.get(5, TimeUnit.SECONDS);
+      upload.get(PATIENCE, TimeUnit.SECONDS);
 
-      assertEquals(List.of(), settling.get(5, TimeUnit.SECONDS));
+      assertEquals(List.of(), settling.get(PATIENCE, TimeUnit.SECONDS));
       assertEquals(2, files.find("acme", "a.txt").orElseThrow().size(), "the replacement stays");
       main.limits(new FileLimits(4));
       assertConvergedWithin(2, node, new Actor("node", Role.MEMBER, Actor.Lane.SYNC));
       assertEquals(2, new FileStore(main.db).find("acme", "a.txt").orElseThrow().size());
     }
+  }
+
+  /**
+   * Waits until {@code settler} is inside a write transaction, which it can begin but not commit
+   * while the upload holds the database's write lock: past every read it makes before its turn.
+   * Fails at once when the settle has ended first, with what ended it.
+   */
+  private static void awaitItsTurn(Thread settler, Future<?> settling) {
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(PATIENCE);
+    while (Arrays.stream(settler.getStackTrace()).noneMatch(LivenessAuditTest::aTransaction)) {
+      if (!settler.isAlive()) {
+        failEndedFirst(settling);
+      }
+      assertTrue(System.nanoTime() < deadline, "the settle never began its turn");
+      Thread.onSpinWait();
+    }
+  }
+
+  /**
+   * Ends {@code settler} once the test has failed, the upload released: interrupted, then given a
+   * short while. One still running is named on {@code failed} with where it is, never left unsaid.
+   */
+  private static void endAfter(Throwable failed, Thread settler) throws InterruptedException {
+    settler.interrupt();
+    if (!settler.join(ENDING)) {
+      var running = new AssertionError(settler.getName() + " is still running after the failure");
+      running.setStackTrace(settler.getStackTrace());
+      failed.addSuppressed(running);
+    }
+  }
+
+  private static void failEndedFirst(Future<?> settled) {
+    var said = "the settle ended without taking its turn";
+    if (settled.state() == Future.State.FAILED) {
+      fail(said, settled.exceptionNow());
+    }
+    fail(said + ", answering " + settled.resultNow());
+  }
+
+  private static boolean aTransaction(StackTraceElement frame) {
+    return frame.getClassName().equals(Sqlite.class.getName())
+        && frame.getMethodName().equals("transaction");
   }
 
   /** A reply to a narrator post main accepted under another FDE's run lands as the replier. */

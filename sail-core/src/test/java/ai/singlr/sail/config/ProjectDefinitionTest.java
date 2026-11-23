@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.KnownHosts;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -366,6 +367,35 @@ class ProjectDefinitionTest {
     var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
     assertNull(config.agent().guardrails());
+  }
+
+  /**
+   * A definition whose webhook is not public, by its address, its scheme or where its name
+   * resolves, is refused as it is read: the rule runs on the path every stored definition takes.
+   */
+  @Test
+  void aWebhookThatIsNotPublicIsRefusedWhereADefinitionIsRead() {
+    for (var url :
+        List.of(
+            "http://169.254.169.254/latest/meta-data/",
+            "http://10.0.0.1/hook",
+            "file:///etc/passwd",
+            "https://" + KnownHosts.REBOUND + "/hook")) {
+      var yaml =
+          """
+          name: test
+          agent:
+            type: claude-code
+            notifications:
+              url: "%s"
+          """
+              .formatted(url);
+
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> ProjectDefinition.fromMap(YamlUtil.parseMap(yaml)),
+          url);
+    }
   }
 
   @Test

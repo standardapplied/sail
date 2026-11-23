@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.Child;
 import java.io.IOException;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
@@ -262,7 +263,12 @@ class PtySessionTest {
             Map.of("TERM", "dumb"),
             dir);
     assertTrue(child.waitFor(10, TimeUnit.SECONDS), "the first child exits");
-    var stranger = new ProcessBuilder("sleep", "60").start();
+    var stranger =
+        new ProcessBuilder("sleep", "60")
+            .redirectInput(Child.NO_INPUT)
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start();
     try {
       var createdLongBeforeTheStranger = System.currentTimeMillis() - 60_000;
       var meta =

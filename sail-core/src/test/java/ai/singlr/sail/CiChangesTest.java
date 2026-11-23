@@ -7,13 +7,13 @@ package ai.singlr.sail;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import ai.singlr.sail.engine.Child;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -47,7 +47,6 @@ class CiChangesTest {
       List.of("clients=true", "ci=true", "terminal=true");
 
   @TempDir Path repo;
-  @TempDir Path output;
   private String base;
 
   @BeforeEach
@@ -160,20 +159,11 @@ class CiChangesTest {
   }
 
   private String run(List<String> command) throws Exception {
-    var out = output.resolve("out");
-    var builder =
-        new ProcessBuilder(command)
-            .directory(repo.toFile())
-            .redirectOutput(out.toFile())
-            .redirectError(ProcessBuilder.Redirect.DISCARD);
+    var builder = new ProcessBuilder(command).directory(repo.toFile());
     builder.environment().put("GIT_CONFIG_GLOBAL", "/dev/null");
     builder.environment().put("GIT_CONFIG_NOSYSTEM", "1");
-    var process = builder.start();
-    if (!process.waitFor(30, TimeUnit.SECONDS)) {
-      process.destroyForcibly();
-      throw new AssertionError(String.join(" ", command) + " did not end within 30 s");
-    }
-    assertEquals(0, process.exitValue(), String.join(" ", command) + " failed");
-    return Files.readString(out);
+    var ran = Child.run(builder);
+    assertEquals(0, ran.exit(), String.join(" ", command) + " failed: " + ran.stderr());
+    return ran.stdout();
   }
 }

@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.engine.Child;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -68,8 +69,11 @@ class FileWritesTest {
   }
 
   @AfterEach
-  void tearDown() throws IOException {
+  void tearDown() throws Exception {
     started.forEach(FileScripts.Script::end);
+    for (var process : processes) {
+      Child.end(process);
+    }
     try (var all = Files.walk(dir)) {
       for (var path : all.toList()) {
         if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
@@ -406,12 +410,7 @@ class FileWritesTest {
     assertEquals("first", Files.readString(fresh));
     assertEquals(version(fresh), saved.last());
     var umask =
-        Integer.parseInt(
-            new String(
-                    new ProcessBuilder("sh", "-c", "umask").start().getInputStream().readAllBytes(),
-                    StandardCharsets.US_ASCII)
-                .strip(),
-            8);
+        Integer.parseInt(Child.run(new ProcessBuilder("sh", "-c", "umask")).stdout().strip(), 8);
     assertEquals(
         0666 & ~umask,
         (int) Files.getAttribute(fresh, "unix:mode") & 0777,
@@ -514,9 +513,9 @@ class FileWritesTest {
     }
     assertEquals(
         0,
-        new ProcessBuilder("touch", "-h", "-d", "-10 min", link.toString()).start().waitFor(),
+        Child.run(new ProcessBuilder("touch", "-h", "-d", "-10 min", link.toString())).exit(),
         "the link itself older than the patience");
-    var holder = new ProcessBuilder("sleep", "30").redirectInput(held.toFile()).start();
+    var holder = holding(held);
     try {
       assertEquals(
           0, save(src.resolve("App.java"), PtyMessage.ABSENT, "", "class App {}").status());
@@ -808,8 +807,12 @@ class FileWritesTest {
   }
 
   /** A process holding {@code file} open, as a save's process a hung disk holds would. */
-  private static Process holding(Path file) throws IOException {
-    return new ProcessBuilder("sleep", "30").redirectInput(file.toFile()).start();
+  static Process holding(Path file) throws IOException {
+    return new ProcessBuilder("sleep", "30")
+        .redirectInput(file.toFile())
+        .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+        .redirectError(ProcessBuilder.Redirect.DISCARD)
+        .start();
   }
 
   /**
@@ -980,7 +983,7 @@ class FileWritesTest {
     var file = Files.writeString(home.resolve("notes.md"), "base");
     var at = dir.resolve("at-rename");
     var release = dir.resolve("release");
-    assertEquals(0, new ProcessBuilder("mkfifo", release.toString()).start().waitFor());
+    assertEquals(0, Child.run(new ProcessBuilder("mkfifo", release.toString())).exit());
     var held =
         edited(
             script ->
@@ -1023,7 +1026,7 @@ class FileWritesTest {
     save.script.input().flush();
     assertEquals("copied", save.script.field());
     save.script.field();
-    assertEquals(0, new ProcessBuilder("rm", "-rf", folder.toString()).start().waitFor());
+    assertEquals(0, Child.run(new ProcessBuilder("rm", "-rf", folder.toString())).exit());
     save.script.input().write(FileScripts.nul("go"));
     save.script.input().close();
     assertNull(save.script.field());
@@ -1105,7 +1108,7 @@ class FileWritesTest {
   @Test
   void aSaveOntoAPipeOrAFolderIsRefusedAndNothingWaits() throws Exception {
     var pipe = home.resolve("pipe");
-    assertEquals(0, new ProcessBuilder("mkfifo", pipe.toString()).start().waitFor());
+    assertEquals(0, Child.run(new ProcessBuilder("mkfifo", pipe.toString())).exit());
     var folder = Files.createDirectory(home.resolve("folder"));
 
     assertEquals(
@@ -1225,9 +1228,9 @@ class FileWritesTest {
   @Test
   void aNameThatIsNotUtf8IsSavedMovedAndRemovedByItsBytes() throws Exception {
     var src = Files.createDirectory(home.resolve("src"));
-    var saved = shellMade(src, new byte[] {'b', 'a', 'd', (byte) 0xff, 'n'});
-    var removed = shellMade(src, new byte[] {'b', 'a', 'd', (byte) 0xfe, 'n'});
-    var lookalike = shellMade(src, "bad\uFFFDn".getBytes(StandardCharsets.UTF_8));
+    var saved = FileScriptsTest.shellMade(src, new byte[] {'b', 'a', 'd', (byte) 0xff, 'n'});
+    var removed = FileScriptsTest.shellMade(src, new byte[] {'b', 'a', 'd', (byte) 0xfe, 'n'});
+    var lookalike = FileScriptsTest.shellMade(src, "bad\uFFFDn".getBytes(StandardCharsets.UTF_8));
 
     assertEquals(
         0,
@@ -1241,24 +1244,6 @@ class FileWritesTest {
     try (var names = Files.list(src)) {
       assertEquals(2, names.count(), "the renamed file and the look-alike, nothing else");
     }
-  }
-
-  /** {@code name} under {@code folder}, made by the shell, since Java names files as UTF-8. */
-  private static String shellMade(Path folder, byte[] name) throws Exception {
-    var octal = new StringBuilder();
-    for (var b : name) {
-      octal.append(String.format("\\%03o", b & 0xff));
-    }
-    var made =
-        new ProcessBuilder(
-                "sh",
-                "-c",
-                "printf 'body' > \"$1/$(printf '" + octal + "')\"",
-                "sh",
-                folder.toString())
-            .start();
-    assertEquals(0, made.waitFor());
-    return folder + "/" + FileNames.decode(name);
   }
 
   @Test

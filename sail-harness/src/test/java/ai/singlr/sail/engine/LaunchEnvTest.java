@@ -18,7 +18,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -227,10 +226,8 @@ class LaunchEnvTest {
   }
 
   private static String run(List<String> argv) throws Exception {
-    var process = new ProcessBuilder(argv).redirectErrorStream(true).start();
-    var out = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertTrue(process.waitFor(30, TimeUnit.SECONDS));
-    var lines = out.lines().filter(line -> !line.contains("No such file")).toList();
-    return process.exitValue() + ":" + String.join("\n", lines) + (lines.isEmpty() ? "" : "\n");
+    var ran = Child.run(new ProcessBuilder(argv).redirectErrorStream(true));
+    var lines = ran.stdout().lines().filter(line -> !line.contains("No such file")).toList();
+    return ran.exit() + ":" + String.join("\n", lines) + (lines.isEmpty() ? "" : "\n");
   }
 }

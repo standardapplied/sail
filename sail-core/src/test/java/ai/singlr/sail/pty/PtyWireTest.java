@@ -20,11 +20,30 @@ import java.nio.channels.Channels;
 import java.nio.channels.Pipe;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 class PtyWireTest {
+
+  private final List<Pipe> pipes = new ArrayList<>();
+
+  @AfterEach
+  void closePipes() throws IOException {
+    for (var pipe : pipes) {
+      pipe.source().close();
+      pipe.sink().close();
+    }
+  }
+
+  /** A pipe both of whose ends close once the test has run. */
+  private Pipe pipe() throws IOException {
+    var pipe = Pipe.open();
+    pipes.add(pipe);
+    return pipe;
+  }
 
   private static PtyMessage roundTrip(PtyMessage message) throws IOException {
     var bytes = new java.io.ByteArrayOutputStream();
@@ -628,7 +647,7 @@ class PtyWireTest {
 
   @Test
   void aFrameLongerThanTheCapTheReaderSetsIsRefusedBeforeItsPayloadIsRead() throws Exception {
-    var pipe = Pipe.open();
+    var pipe = pipe();
     pipe.sink().write(ByteBuffer.allocate(4).putInt(257).flip());
 
     assertEquals(
@@ -678,8 +697,8 @@ class PtyWireTest {
 
   @Test
   void handshakeAcceptsItselfAndRefusesStrangers() throws Exception {
-    var aToB = Pipe.open();
-    var bToA = Pipe.open();
+    var aToB = pipe();
+    var bToA = pipe();
     var serverDone = new java.util.concurrent.CompletableFuture<Void>();
     Thread.ofVirtual()
         .start(
@@ -694,13 +713,13 @@ class PtyWireTest {
     PtyWire.handshake(bToA.source(), aToB.sink());
     serverDone.join();
 
-    var evil = Pipe.open();
-    var reply = Pipe.open();
+    var evil = pipe();
+    var reply = pipe();
     evil.sink().write(ByteBuffer.wrap("NOTSAIL1".getBytes(StandardCharsets.US_ASCII)));
     assertThrows(IOException.class, () -> PtyWire.handshake(evil.source(), reply.sink()));
 
-    var v2 = Pipe.open();
-    var v2Reply = Pipe.open();
+    var v2 = pipe();
+    var v2Reply = pipe();
     v2.sink().write(ByteBuffer.wrap("SAILPTY6".getBytes(StandardCharsets.US_ASCII)));
     var skew =
         assertThrows(IOException.class, () -> PtyWire.handshake(v2.source(), v2Reply.sink()));
@@ -712,11 +731,11 @@ class PtyWireTest {
 
   @Test
   void oversizedAndUnknownFramesAreRefusedLoudly() throws Exception {
-    var pipe = Pipe.open();
+    var pipe = pipe();
     pipe.sink().write(ByteBuffer.allocate(4).putInt(PtyWire.MAX_FRAME + 1).flip());
     assertThrows(IOException.class, () -> PtyWire.read(pipe.source()));
 
-    var unknown = Pipe.open();
+    var unknown = pipe();
     unknown.sink().write(ByteBuffer.allocate(5).putInt(1).put((byte) 99).flip());
     var error = assertThrows(IOException.class, () -> PtyWire.read(unknown.source()));
     org.junit.jupiter.api.Assertions.assertTrue(error.getMessage().contains("99"));
@@ -724,7 +743,7 @@ class PtyWireTest {
 
   @Test
   void aClosedChannelMidFrameIsEofNotGarbage() throws Exception {
-    var pipe = Pipe.open();
+    var pipe = pipe();
     pipe.sink().write(ByteBuffer.allocate(4).putInt(100).flip());
     pipe.sink().close();
     assertThrows(java.io.EOFException.class, () -> PtyWire.read(pipe.source()));
@@ -749,11 +768,11 @@ class PtyWireTest {
         "a negative inner length must fail loud, never throw NegativeArraySizeException");
   }
 
-  private static void readFramed(ByteBuffer payload) throws IOException {
+  private void readFramed(ByteBuffer payload) throws IOException {
     payload.flip();
     var frame = ByteBuffer.allocate(4 + payload.remaining());
     frame.putInt(payload.remaining()).put(payload).flip();
-    var pipe = Pipe.open();
+    var pipe = pipe();
     pipe.sink().write(frame);
     pipe.sink().close();
     PtyWire.read(pipe.source());
