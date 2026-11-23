@@ -248,7 +248,7 @@ struct Step: Decodable {
     /// The Store a Login sheet is as these facts say, within `seconds`: "closed", "Store on", "Store
     /// off", "Storing", "the field empty", "the field filled", "dots only", "the keys in the field",
     /// "no name asked", "the name <name>", "the panel open behind", "refused: <sentence>", "the
-    /// name refused: <sentence>".
+    /// name refused: <sentence>", "over the panel" (the window server orders the sheet in front of it).
     var loginSheetIs: [String]?
     /// The pasteboard holds exactly this ("" for nothing), within `seconds`.
     var pasteboardHolds: String?

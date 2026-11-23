@@ -711,15 +711,26 @@ extension Driver {
         return nil
     }
 
+    /// Whether window `one` is in front of window `other`, as the window server orders them on screen.
+    private static func inFront(_ one: Int, of other: Int) -> Bool {
+        let listed = (CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []).compactMap { $0[kCGWindowNumber as String] as? Int }
+        guard let front = listed.firstIndex(of: one), let back = listed.firstIndex(of: other) else { return false }
+        return front < back
+    }
+
     /// The sheet as the drive reads it, a fact each; never the field's text.
     private static func facts(of sheet: LoginSheet, over panel: NewSessionPanel) -> [String] {
-        let keys = sheet.firstResponder
-        let inField = keys === sheet.field.field || (keys as? NSText)?.delegate === sheet.field.field
-        return [
-            sheet.store.isEnabled ? "Store on" : "Store off", sheet.field.field.stringValue.isEmpty ? "the field empty" : "the field filled",
-            panel.isOpen ? "the panel open behind" : "the panel closed", sheet.name.map { "the name \($0.field.stringValue)" } ?? "no name asked",
-        ] + (sheet.model.stage == .storing ? ["Storing"] : []) + (sheet.field.field is NSSecureTextField ? ["dots only"] : [])
-            + (inField ? ["the keys in the field"] : []) + (sheet.field.error.map { ["refused: \($0)"] } ?? []) + (sheet.name?.error.map { ["the name refused: \($0)"] } ?? [])
+        let keys = sheet.firstResponder, field = sheet.field.field
+        var facts = [sheet.store.isEnabled ? "Store on" : "Store off", field.stringValue.isEmpty ? "the field empty" : "the field filled"]
+        facts.append(panel.isOpen ? "the panel open behind" : "the panel closed")
+        facts.append(sheet.name.map { "the name \($0.field.stringValue)" } ?? "no name asked")
+        if sheet.model.stage == .storing { facts.append("Storing") }
+        if field is NSSecureTextField { facts.append("dots only") }
+        if keys === field || (keys as? NSText)?.delegate === field { facts.append("the keys in the field") }
+        if let error = sheet.field.error { facts.append("refused: \(error)") }
+        if let error = sheet.name?.error { facts.append("the name refused: \(error)") }
+        if panel.isOpen, Self.inFront(sheet.windowNumber, of: panel.popover.panel.windowNumber) { facts.append("over the panel") }
+        return facts
     }
 
     /// Where a screen shot shows `popover`'s shadow cut: at the middle of each side of its window, a

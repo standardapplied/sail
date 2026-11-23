@@ -31,7 +31,8 @@ import Testing
     static func model(logins: String = "logins", agents: String = "workspace-agents-dock-no-login") throws -> StoreLogin {
         let offered = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: try Exchange(agents).body)).offered
         let listed = try Endpoint.logins.decode(HTTPResponse(status: 200, headers: [:], body: try Exchange(logins).body)).logins
-        return try #require(StoreLogin(try #require(offered.first), logins: listed, address: "http://127.0.0.1:7979"))
+        let claude = try #require(offered.first)
+        return try #require(StoreLogin(claude, logins: listed, address: "http://127.0.0.1:7979"))
     }
 
     /// The model at each stage the page draws, by name.
@@ -45,11 +46,11 @@ import Testing
         named.typed(holdsSomething: true)
         var refusedName = named
         _ = refusedName.store(pasted, clipboard: clipboard)
-        refusedName.answered(answer("refusal-invalid-request-login-name"), clipboard: 1)
+        refusedName.answered(try answer("refusal-invalid-request-login-name"), clipboard: 1)
         var shown: [(String, StoreLogin)] = [("empty", try model()), ("filled", filled), ("storing", storing), ("the name asked", named), ("the name refused", refusedName)]
         for golden in ["refusal-invalid-request-login-lines", "refusal-invalid-request-login-characters", "refusal-invalid-request-login-long", "refusal-invalid-request-login-empty"] {
             var refused = storing
-            refused.answered(answer(golden), clipboard: 1)
+            refused.answered(try answer(golden), clipboard: 1)
             shown.append((golden, refused))
         }
         var unreached = storing
@@ -58,14 +59,12 @@ import Testing
         return shown
     }
 
-    static func answer(_ golden: String) -> Result<LoginStored, SailError> {
+    static func answer(_ golden: String) throws -> Result<LoginStored, SailError> {
+        let exchange = try Exchange(golden)
         do throws(SailError) {
-            let exchange = try Exchange(golden)
             return .success(try Endpoint.storeLogin(pasted, kind: "api-key", harness: "claude-code", name: "default").decode(HTTPResponse(status: exchange.status, headers: [:], body: exchange.body)))
-        } catch let error as SailError {
-            return .failure(error)
         } catch {
-            return .failure(.unreachable("\(golden) could not be read: \(error)"))
+            return .failure(error)
         }
     }
 
@@ -315,7 +314,8 @@ extension LoginSheetTests {
     }
 
     /// The panel closing, its section hidden, ends the sheet; a click in the sheet and the sheet
-    /// taking the window's keys leave the panel open; the sheet is drawn over the panel.
+    /// taking the window's keys leave the panel open, and its controls do nothing under the sheet.
+    /// That the sheet is drawn over the panel is the window server's order, which the drive reads.
     @Test func theSheetGoesWithThePanelAndThePanelStaysUnderIt() async throws {
         let (view, window, _, sheet) = try await Self.asked()
         defer { window.orderOut(nil) }
@@ -324,7 +324,6 @@ extension LoginSheetTests {
         panel.popover.clickedAnywhere(inside)
         NotificationCenter.default.post(name: panel.popover.keysLeft, object: window)
         #expect(panel.isOpen, "a click in the sheet or the sheet taking the keys closed the panel")
-        #expect(sheet.orderedIndex < panel.popover.panel.orderedIndex, "the panel is drawn over the sheet: \(sheet.orderedIndex), \(panel.popover.panel.orderedIndex)")
         var started = 0
         view.onStart = { _, _, _ in started += 1 }
         try NewSessionPanelTests.press(panel.view.primary)

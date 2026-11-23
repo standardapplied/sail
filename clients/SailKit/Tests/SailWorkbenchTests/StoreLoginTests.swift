@@ -47,7 +47,8 @@ import Testing
 
     @Test func theStoreIsOneRequestHoldingTheValueInItsBodyAlone() throws {
         var sheet = try Self.filled()
-        let endpoint = try #require(sheet.store(Self.pasted, clipboard: Self.elsewhere))
+        let stored = sheet.store(Self.pasted, clipboard: Self.elsewhere)
+        let endpoint = try #require(stored)
         let request = endpoint.request
         #expect(request.method == .put && request.path == "/v1/logins/claude-code/default")
         let body = try #require(request.body)
@@ -127,7 +128,8 @@ import Testing
         let unnamed = second.store(Self.pasted, clipboard: Self.elsewhere)
         #expect(unnamed == nil && second.stage == .filled)
         second.named("personal")
-        let endpoint = try #require(second.store(Self.pasted, clipboard: Self.elsewhere))
+        let named = second.store(Self.pasted, clipboard: Self.elsewhere)
+        let endpoint = try #require(named)
         #expect(endpoint.request.path == "/v1/logins/claude-code/personal")
     }
 

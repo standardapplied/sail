@@ -335,7 +335,7 @@
   {"name": "ls-store-a-login", "newSessionClick": "Store a Claude Code Login"},
   {"name": "ls-the-sheet", "loginSheetIs": ["the keys in the field", "Store off", "the field empty", "the panel open behind"]},
   {"name": "ls-the-sheet-says", "loginSheetSays": ["Store a Claude Code login", "API key", "Create an API key in the Claude Console.", "Kept on 127.0.0.1:7979 for your sessions only. Sail never shows it again."]},
-  {"name": "ls-no-name-asked", "loginSheetIs": ["no name asked", "dots only"]},
+  {"name": "ls-no-name-asked", "loginSheetIs": ["no name asked", "dots only", "over the panel"]},
   {"name": "ls-opened", "shotScreen": "ls-the-sheet"},
   {"name": "ls-paste", "pasteLogin": "sk-ant-api03-drive-pasted-fake-key-one"},
   {"name": "ls-pasted", "loginSheetIs": ["Store on", "the field filled", "the keys in the field"]},
