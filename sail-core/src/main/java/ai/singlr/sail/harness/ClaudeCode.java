@@ -9,7 +9,6 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.BoxCredentialFile;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.SailPaths;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,7 +16,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.SequencedMap;
-import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -29,24 +27,30 @@ final class ClaudeCode implements Harness {
   private static final String INIT = "\"subtype\":\"init\"";
 
   /**
-   * The {@code apiKeySource} values that, for a login of each kind, name another credential than
-   * the one Sail gave: the sources Claude Code declares ({@code ANTHROPIC_API_KEY}, the configured
-   * {@code apiKeyHelper}, a {@code /login managed key}; 2.1.322's own schema) other than the
-   * kind's. Any other value, {@code none} and names never seen among them, says nothing.
+   * The {@code apiKeySource} values Claude Code declares ({@code ANTHROPIC_API_KEY}, the configured
+   * {@code apiKeyHelper}, a {@code /login managed key}; 2.1.322's own schema): each but the one a
+   * kind's own variable is names another credential than the one Sail gave. Any other value, {@code
+   * none} and names never seen among them, says nothing.
    */
-  private static final Map<String, Set<String>> OTHER_SOURCES =
-      Map.of(
-          "token", Set.of("ANTHROPIC_API_KEY", "apiKeyHelper", "/login managed key"),
-          "api-key", Set.of("apiKeyHelper", "/login managed key"));
+  private static final List<String> SOURCES =
+      List.of("ANTHROPIC_API_KEY", "apiKeyHelper", "/login managed key");
+
+  /** Where Claude Code sends its requests, which every stored kind fixes to its own service. */
+  private static final String BASE_URL = "ANTHROPIC_BASE_URL";
+
+  /**
+   * Set, Claude Code takes its address, provider and credential from its environment alone and
+   * ignores those any settings file names, a managed one included (2.1.327, measured): what makes a
+   * kind's address hold whatever the container's settings say. It also ignores an {@code
+   * apiKeyHelper}.
+   */
+  private static final String HOST_MANAGED = "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST";
 
   /** A result that says the login's account is out of quota, and when it resets, if it says. */
   private static final Pattern LIMIT =
       Pattern.compile("You['\u2019]ve hit your .*?limit(?:\\s*\u00b7\\s*resets\\s+(.+))?");
 
   private static final List<String> EFFORTS = List.of("low", "medium", "high", "xhigh");
-
-  /** How long a token {@code claude setup-token} makes lasts from the day it is made. */
-  private static final Duration TOKEN_LIFETIME = Duration.ofDays(365);
 
   /**
    * The sail-owned settings file, passed to {@code claude} via {@code --settings} only when sail
@@ -241,10 +245,13 @@ final class ClaudeCode implements Harness {
   /**
    * An API key in {@code ANTHROPIC_API_KEY} makes an interactive session ask the person to approve
    * it, showing its first 7 and last 20 characters, and keep those last 20 in {@code
-   * ~/.claude.json} once approved (2.1.327, seen with a throwaway key). A key a session's own
-   * {@code apiKeyHelper} prints is neither asked about nor kept, so the key moves to a variable of
-   * Sail's own, which the helper prints. A long-lived token is read from its variable, which asks
-   * nothing and keeps nothing.
+   * ~/.claude.json} once approved (2.1.327, seen with a throwaway key, with or without {@link
+   * #HOST_MANAGED}). A key a session's own {@code apiKeyHelper} prints is neither asked about nor
+   * kept, so the key moves to a variable of Sail's own, which the helper prints. {@link
+   * #HOST_MANAGED} ignores a helper, so this session goes without it and pins the kind's address in
+   * the same {@code --settings}, which outranks the user's and the project's settings but not
+   * managed ones. A GLM key is read from {@code ANTHROPIC_AUTH_TOKEN}, which asks nothing and keeps
+   * nothing.
    */
   @Override
   public InteractiveLogin interactiveLogin(LoginKind kind) {
@@ -252,8 +259,22 @@ final class ClaudeCode implements Harness {
       return InteractiveLogin.READS_ITS_VARIABLE;
     }
     return new InteractiveLogin(
-        "export SAIL_ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\"; unset ANTHROPIC_API_KEY",
-        " --settings '{\"apiKeyHelper\": \"printenv SAIL_ANTHROPIC_API_KEY\"}'");
+        "export SAIL_ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\"; unset ANTHROPIC_API_KEY "
+            + HOST_MANAGED,
+        " --settings '{\"apiKeyHelper\": \"printenv SAIL_ANTHROPIC_API_KEY\", \"env\": {\""
+            + BASE_URL
+            + "\": \""
+            + kind.fixed().get(BASE_URL)
+            + "\"}}'");
+  }
+
+  /** Claude Code's own {@code /login}, which a subscription signs in with. */
+  @Override
+  public Remedy signIn() {
+    return Remedy.of(
+        "Start Claude Code here and run ",
+        Remedy.elsewhere("/login"),
+        " in it to sign in with your Claude subscription");
   }
 
   /**
@@ -399,7 +420,8 @@ final class ClaudeCode implements Harness {
             .line();
     return init != null
             && init.get("apiKeySource") instanceof String source
-            && OTHER_SOURCES.getOrDefault(given.kind(), Set.of()).contains(source)
+            && SOURCES.contains(source)
+            && !source.equals(given.variable())
         ? Optional.of(source)
         : Optional.empty();
   }
@@ -454,43 +476,41 @@ final class ClaudeCode implements Harness {
   }
 
   /**
-   * A token {@code claude setup-token} makes, which lasts a year and is read from {@code
-   * CLAUDE_CODE_OAUTH_TOKEN}; or a Console API key, read from {@code ANTHROPIC_API_KEY}. Either
-   * outranks a login made by hand with {@code /login}, which the harness refreshes and so is never
-   * stored.
+   * A Console API key, read from {@code ANTHROPIC_API_KEY} and sent to the Anthropic API; or a GLM
+   * Coding Plan key, read from {@code ANTHROPIC_AUTH_TOKEN} and sent to Z.AI's Anthropic endpoint,
+   * which maps Claude Code's models to its own unless told otherwise (docs.z.ai, Claude Code). Each
+   * outranks a sign-in made with {@code /login}, the subscription's, which Sail never holds.
    */
   @Override
   public List<LoginKind> loginKinds() {
     return List.of(
-        new LoginKind(
-            "token",
-            "CLAUDE_CODE_OAUTH_TOKEN",
-            "long-lived token",
-            Remedy.of(
-                "Run ",
-                Remedy.elsewhere("claude", "setup-token"),
-                " on a machine where Claude Code is signed in"),
-            TOKEN_LIFETIME),
-        new LoginKind(
+        key(
             "api-key",
             "ANTHROPIC_API_KEY",
             "API key",
-            Remedy.of("Create an API key in the Claude Console"),
-            null));
+            "Create an API key in the Claude Console",
+            "https://api.anthropic.com"),
+        key(
+            "glm",
+            "ANTHROPIC_AUTH_TOKEN",
+            "GLM Coding Plan key",
+            "Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list",
+            "https://api.z.ai/api/anthropic"));
+  }
+
+  /** A kind whose key Claude Code sends to {@code address} alone ({@link #HOST_MANAGED}). */
+  private static LoginKind key(
+      String kind, String variable, String noun, String howToMake, String address) {
+    var fixed = new LinkedHashMap<String, String>();
+    fixed.put(BASE_URL, address);
+    fixed.put(HOST_MANAGED, "1");
+    return new LoginKind(kind, variable, noun, Remedy.of(howToMake), fixed);
   }
 
   /**
-   * An API key first: the commands Claude Code runs inherit an API key and not a subscription's
-   * token, so an agent that runs {@code claude} or calls the API itself needs the key.
-   */
-  @Override
-  public List<LoginKind> offeredKinds() {
-    return loginKinds().reversed();
-  }
-
-  /**
-   * Its kinds' variables and {@code ANTHROPIC_AUTH_TOKEN}, a gateway's token, which outranks both.
-   * Claude Code takes an empty variable as unset.
+   * Its kinds' variables, the gateway token outranking the API key, and {@code
+   * CLAUDE_CODE_OAUTH_TOKEN}, a subscription's token a container may export. Claude Code takes an
+   * empty variable as unset.
    */
   @Override
   public List<String> loginVariables() {

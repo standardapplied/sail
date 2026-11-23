@@ -95,22 +95,21 @@ class RunUsageStoreTest {
   void aLaunchRecordsItsLoginAndWhoAskedAndTheFinishCarriesThemToEveryBox() {
     var id = run(null);
     store.recordLaunch(
-        id,
-        new RunStore.Launched("opus", null, null, new RunStore.RunLogin("work", "token"), "ana"));
+        id, new RunStore.Launched("opus", null, null, new RunStore.RunLogin("work", "glm"), "ana"));
 
     assertTrue(store.finish(id, "running", "completed", 0, read(REPORTED)));
 
     var row = store.findById(id).orElseThrow();
-    assertEquals(new RunStore.RunLogin("work", "token"), row.login());
+    assertEquals(new RunStore.RunLogin("work", "glm"), row.login());
     assertEquals("ana", row.dispatchedBy());
     var finished = journaled(id);
     assertEquals("work", finished.get("login"));
-    assertEquals("token", finished.get("login_kind"));
+    assertEquals("glm", finished.get("login_kind"));
     assertEquals("ana", finished.get("dispatched_by"));
     var adopted = DateTimeUtils.newId().toString();
     store.applyRevision(adopted, store.comparableSnapshot(id), "1-remote");
     var copy = store.findById(adopted).orElseThrow();
-    assertEquals(new RunStore.RunLogin("work", "token"), copy.login());
+    assertEquals(new RunStore.RunLogin("work", "glm"), copy.login());
     assertEquals("ana", copy.dispatchedBy());
   }
 
@@ -167,10 +166,13 @@ class RunUsageStoreTest {
     assertEquals(RunStore.RunLogin.CONTAINER, store.findById(id).orElseThrow().login());
     assertEquals(null, store.findById(id).orElseThrow().dispatchedBy());
     assertEquals(null, store.findById(unlaunched).orElseThrow().login());
-    assertThrows(IllegalArgumentException.class, () -> new RunStore.RunLogin(" ", "token"));
+    assertThrows(IllegalArgumentException.class, () -> new RunStore.RunLogin(" ", "glm"));
   }
 
-  /** A run records only a kind of login a harness takes, whether launched here or synced. */
+  /**
+   * A run records only a kind of login a harness takes, whether launched here or synced: the
+   * subscription token no harness takes any more included.
+   */
   @Test
   void aLoginOfAKindNoHarnessTakesIsRefusedAndNothingIsRecorded() {
     var id = run(null);
@@ -181,11 +183,11 @@ class RunUsageStoreTest {
             store.recordLaunch(
                 id,
                 new RunStore.Launched(
-                    null, null, null, new RunStore.RunLogin("work", "bogus"), null)));
+                    null, null, null, new RunStore.RunLogin("work", "token"), null)));
     assertNull(store.findById(id).orElseThrow().login());
     var snapshot = new LinkedHashMap<>(store.comparableSnapshot(id));
     snapshot.put("login", "work");
-    snapshot.put("login_kind", "bogus");
+    snapshot.put("login_kind", "token");
     var adopted = DateTimeUtils.newId().toString();
     assertThrows(SqliteException.class, () -> store.applyRevision(adopted, snapshot, "1-remote"));
     assertTrue(store.findById(adopted).isEmpty());

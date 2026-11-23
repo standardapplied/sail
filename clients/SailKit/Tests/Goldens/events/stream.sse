@@ -58,35 +58,33 @@ data: {"agent": "sail", "host": "box", "id": 28, "project": "harbor", "spec": "h
 
 data: {"agent": "sail", "host": "box", "id": 29, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_stranded", "v": 1}
 
-data: {"agent": "claude-code", "data": {"detail": "Claude Code refused uday's login 'default' (long-lived token), so its run stopped. Run claude setup-token on a machine where Claude Code is signed in, then sail agent login claude-code. Then build it again: sail spec dispatch -p harbor --spec harbor-docks --restart.", "login": "default", "login_kind": "token", "outcome": "refused", "run_id": "run-1", "run_role": "build"}, "host": "box", "id": 30, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_login_outcome", "v": 1}
+data: {"agent": "claude-code", "data": {"detail": "Claude Code refused uday's login 'default' (API key), so its run stopped. Create an API key in the Claude Console, then sail agent login claude-code. Then build it again: sail spec dispatch -p harbor --spec harbor-docks --restart.", "login": "default", "login_kind": "api-key", "outcome": "refused", "run_id": "run-1", "run_role": "build"}, "host": "box", "id": 30, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_login_outcome", "v": 1}
 
-data: {"agent": "claude-code", "data": {"detail": "Claude Code refused the credential from apiKeyHelper, so its run stopped; it never used uday's login 'default' (long-lived token), which its container's own settings outrank.", "login": "default", "login_kind": "token", "outcome": "refused_other", "run_id": "run-1", "run_role": "build"}, "host": "box", "id": 31, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_login_outcome", "v": 1}
+data: {"agent": "claude-code", "data": {"detail": "Claude Code refused the credential from apiKeyHelper, so its run stopped; it never used uday's login 'default' (API key), which its container's own settings outrank.", "login": "default", "login_kind": "api-key", "outcome": "refused_other", "run_id": "run-1", "run_role": "build"}, "host": "box", "id": 31, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_login_outcome", "v": 1}
 
-data: {"agent": "claude-code", "data": {"detail": "Claude Code says the account behind uday's login 'default' (long-lived token) is out of quota until 15:00 UTC, so its run stopped; what it committed stays on branch agent/harbor-docks.", "login": "default", "login_kind": "token", "outcome": "limited", "run_id": "run-1", "run_role": "build"}, "host": "box", "id": 32, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_login_outcome", "v": 1}
+data: {"agent": "claude-code", "data": {"detail": "Claude Code says the account behind uday's login 'default' (API key) is out of quota until 15:00 UTC, so its run stopped; what it committed stays on branch agent/harbor-docks.", "login": "default", "login_kind": "api-key", "outcome": "limited", "run_id": "run-1", "run_role": "build"}, "host": "box", "id": 32, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_login_outcome", "v": 1}
 
-data: {"agent": "claude-code", "data": {"detail": "Claude Code ran on a credential from ANTHROPIC_API_KEY, not on uday's login 'default' (long-lived token): its container's own settings outrank the login Sail gave it.", "login": "default", "login_kind": "token", "outcome": "overridden", "run_id": "run-1", "run_role": "build"}, "host": "box", "id": 33, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_login_outcome", "v": 1}
+data: {"agent": "claude-code", "data": {"detail": "Claude Code ran on a credential from ANTHROPIC_API_KEY, not on uday's login 'default' (API key): its container's own settings outrank the login Sail gave it.", "login": "default", "login_kind": "api-key", "outcome": "overridden", "run_id": "run-1", "run_role": "build"}, "host": "box", "id": 33, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_login_outcome", "v": 1}
 
-data: {"agent": "claude-code", "data": {"detail": "Claude Code will refuse uday's login 'default' (long-lived token) from 2026-11-16, in 5 days. Run claude setup-token on a machine where Claude Code is signed in, then sail agent login claude-code.", "login": "default", "login_kind": "token", "outcome": "ending", "run_id": "run-1", "run_role": "build"}, "host": "box", "id": 34, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_login_outcome", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 34, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_engaged", "v": 1}
 
-data: {"agent": "sail", "host": "box", "id": 35, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_engaged", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 35, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_disengaged", "v": 1}
 
-data: {"agent": "sail", "host": "box", "id": 36, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_disengaged", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 36, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_engage_failed", "v": 1}
 
-data: {"agent": "sail", "host": "box", "id": 37, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "spec_engage_failed", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 37, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_turn_began", "v": 1}
 
-data: {"agent": "sail", "host": "box", "id": 38, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_turn_began", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 38, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_text_delta", "v": 1}
 
-data: {"agent": "sail", "host": "box", "id": 39, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_text_delta", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 39, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_tool_call", "v": 1}
 
-data: {"agent": "sail", "host": "box", "id": 40, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_tool_call", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 40, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_turn_ended", "v": 1}
 
-data: {"agent": "sail", "host": "box", "id": 41, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "agent_turn_ended", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 41, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "pty_session_started", "v": 1}
 
-data: {"agent": "sail", "host": "box", "id": 42, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "pty_session_started", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 42, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "pty_session_attached", "v": 1}
 
-data: {"agent": "sail", "host": "box", "id": 43, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "pty_session_attached", "v": 1}
-
-data: {"agent": "sail", "host": "box", "id": 44, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "pty_session_ended", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 43, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.656Z", "type": "pty_session_ended", "v": 1}
 
 : keepalive
 

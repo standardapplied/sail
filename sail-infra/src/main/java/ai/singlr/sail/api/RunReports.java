@@ -38,9 +38,6 @@ import java.util.function.Predicate;
  */
 public final class RunReports {
 
-  /** The {@code outcome} of the warning that a login ends soon ({@link RunLogins#ending}). */
-  static final String ENDING = "ending";
-
   private final Function<RunStore.RunRow, RunReport> reader;
   private final RunLauncher.Room room;
   private final DispatchOperations.EventSink events;

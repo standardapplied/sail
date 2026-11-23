@@ -176,9 +176,6 @@ public final class DispatchOperations {
     default void runsPruned(int count) {}
 
     default void sailSetupUpdated(boolean updated) {}
-
-    /** The run's login ends soon, or has ended: {@code said} is the warning, with its remedy. */
-    default void loginEnding(String said) {}
   }
 
   private final ShellExec shell;
@@ -255,14 +252,7 @@ public final class DispatchOperations {
             reports);
     this.runReservation =
         new RunReservation(
-            runStore,
-            shell,
-            listener,
-            sessionYield,
-            this::endLiveHolder,
-            fdeStore,
-            this::tellRoom,
-            this.events);
+            runStore, shell, listener, sessionYield, this::endLiveHolder, fdeStore, this::tellRoom);
     var places =
         new RunPlaces(
             projects,

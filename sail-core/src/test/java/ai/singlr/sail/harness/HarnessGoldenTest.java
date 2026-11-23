@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.harness.Harness.Launch;
 import ai.singlr.sail.harness.Harness.LiveLaunch;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
@@ -49,18 +50,23 @@ class HarnessGoldenTest {
           + " /home/dev/.sail/claude-settings.json --setting-sources \"\" --strict-mcp-config"
           + READ_ONLY_RULES;
 
+  private static final String PINNED_OPENAI =
+      " -c model_provider=sail -c 'model_providers.sail={name=\"OpenAI\","
+          + " base_url=\"https://api.openai.com/v1\", env_key=\"CODEX_API_KEY\","
+          + " wire_api=\"responses\"}' -c 'shell_environment_policy.set.CODEX_API_KEY=\"\"'";
+
   private static String claudeHeadless(
       boolean full, String model, String effort, String resume, boolean stream) {
-    return CLAUDE_CODE.headless(new Launch(TASK, full, model, effort, resume, stream));
+    return CLAUDE_CODE.headless(new Launch(TASK, full, model, effort, resume, stream, null));
   }
 
   private static String codexHeadless(
       boolean full, String model, String effort, String resume, boolean stream) {
-    return CODEX.headless(new Launch(TASK, full, model, effort, resume, stream));
+    return CODEX.headless(new Launch(TASK, full, model, effort, resume, stream, null));
   }
 
   private static String claudeReadOnly(String model, String resume, boolean stream) {
-    return CLAUDE_CODE.readOnly(new Launch(TASK, false, model, null, resume, stream));
+    return CLAUDE_CODE.readOnly(new Launch(TASK, false, model, null, resume, stream, null));
   }
 
   @Test
@@ -118,6 +124,40 @@ class HarnessGoldenTest {
         codexHeadless(false, null, "high", null, false));
   }
 
+  /**
+   * L2: a run on a stored key gives Codex the key through the provider of Sail's own, on the
+   * command line, which fixes the OpenAI API as its address over any config file of the
+   * container's; a run on its container's own login gets no provider.
+   */
+  @Test
+  void codexHeadlessOnAStoredKeySendsItToTheOpenAiApiAlone() {
+    assertEquals(
+        "codex exec --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust"
+            + PINNED_OPENAI
+            + " --model gpt-5.5"
+            + CODEX_TASK,
+        CODEX.headless(
+            new Launch(TASK, true, "gpt-5.5", null, null, true, CODEX.loginKind("api-key"))));
+    assertEquals(
+        "codex exec resume --dangerously-bypass-approvals-and-sandbox"
+            + " --dangerously-bypass-hook-trust"
+            + PINNED_OPENAI
+            + " sess-42"
+            + CODEX_TASK,
+        CODEX.headless(
+            new Launch(TASK, true, null, null, "sess-42", false, CODEX.loginKind("api-key"))));
+  }
+
+  /** Claude Code's address is fixed in its environment, so a stored login adds nothing here. */
+  @Test
+  void claudeCodeHeadlessIsTheSameOnAStoredKeyAsOnItsContainersOwnLogin() {
+    for (var kind : CLAUDE_CODE.loginKinds()) {
+      assertEquals(
+          claudeHeadless(true, "opus", "high", "sess-42", true),
+          CLAUDE_CODE.headless(new Launch(TASK, true, "opus", "high", "sess-42", true, kind)));
+    }
+  }
+
   @Test
   void codexHeadlessResumed() {
     assertEquals(
@@ -152,10 +192,11 @@ class HarnessGoldenTest {
   void claudeCodeReadOnlyIgnoresFullPermissionsAndPassesTheEffort() {
     assertEquals(
         CLAUDE_ROOM + " --effort high" + PROMPT,
-        CLAUDE_CODE.readOnly(new Launch(TASK, true, null, "high", null, false)));
+        CLAUDE_CODE.readOnly(new Launch(TASK, true, null, "high", null, false, null)));
     assertEquals(
         CLAUDE_ROOM_STREAMED + " --model claude-opus-4 --effort high --resume sess-42" + PROMPT,
-        CLAUDE_CODE.readOnly(new Launch(TASK, true, "claude-opus-4", "high", "sess-42", true)));
+        CLAUDE_CODE.readOnly(
+            new Launch(TASK, true, "claude-opus-4", "high", "sess-42", true, null)));
   }
 
   @Test
@@ -169,7 +210,7 @@ class HarnessGoldenTest {
     var ex =
         assertThrows(
             IllegalStateException.class,
-            () -> CODEX.readOnly(new Launch(TASK, false, null, null, null, false)));
+            () -> CODEX.readOnly(new Launch(TASK, false, null, null, null, false, null)));
     assertEquals(
         "Codex CLI has no harness-enforced read-only session inside a sail container; the room"
             + " lane refuses to launch it.",
@@ -355,30 +396,51 @@ class HarnessGoldenTest {
   }
 
   /**
-   * How an interactive session takes each kind, so the harness keeps nothing of it: Claude Code's
-   * token from its variable; its API key through a helper of the session's own settings, so it is
-   * neither asked about nor kept; Codex's key through a provider of its own config reading the
-   * variable, never its store.
+   * How an interactive session takes each kind, so the harness keeps nothing of it and sends it
+   * nowhere but its service: Claude Code's GLM key from its variable; its API key through a helper
+   * of the session's own settings, so it is neither asked about nor kept, which the host flag would
+   * ignore, so the session drops the flag and fixes the address in the same settings; Codex's key
+   * through a provider of its own config reading the variable, never its store.
    */
   @Test
   void anInteractiveSessionTakesEachLoginWithoutTheHarnessKeepingIt() {
     assertEquals(
         Harness.InteractiveLogin.READS_ITS_VARIABLE,
-        CLAUDE_CODE.interactiveLogin(CLAUDE_CODE.loginKind("token")));
+        CLAUDE_CODE.interactiveLogin(CLAUDE_CODE.loginKind("glm")));
     assertEquals(
         new Harness.InteractiveLogin(
-            "export SAIL_ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\"; unset ANTHROPIC_API_KEY",
-            " --settings '{\"apiKeyHelper\": \"printenv SAIL_ANTHROPIC_API_KEY\"}'"),
+            "export SAIL_ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\"; unset ANTHROPIC_API_KEY"
+                + " CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
+            " --settings '{\"apiKeyHelper\": \"printenv SAIL_ANTHROPIC_API_KEY\", \"env\":"
+                + " {\"ANTHROPIC_BASE_URL\": \"https://api.anthropic.com\"}}'"),
         CLAUDE_CODE.interactiveLogin(CLAUDE_CODE.loginKind("api-key")));
     assertEquals(
-        new Harness.InteractiveLogin(
-            "",
-            " -c model_provider=sail -c 'model_providers.sail={name=\"OpenAI\","
-                + " base_url=\"https://api.openai.com/v1\", env_key=\"CODEX_API_KEY\","
-                + " wire_api=\"responses\"}' -c 'shell_environment_policy.set.CODEX_API_KEY=\"\"'"),
+        new Harness.InteractiveLogin("", PINNED_OPENAI),
         CODEX.interactiveLogin(CODEX.loginKind("api-key")));
     assertEquals(List.of(".claude/.credentials.json", ".claude.json"), CLAUDE_CODE.storedLogins());
     assertEquals(List.of(".codex/auth.json"), CODEX.storedLogins());
+  }
+
+  /**
+   * L4: a subscription signs in inside the harness's own session, in words true for it: Claude
+   * Code's {@code /login}, typed in it; Codex's device code, after the ChatGPT setting it needs.
+   */
+  @Test
+  void eachHarnessSaysHowASubscriptionSignsInInsideIt() {
+    assertEquals(
+        List.of(
+            Map.of("text", "Start Claude Code here and run "),
+            Map.of("run", "elsewhere", "verb", "/login", "args", List.of()),
+            Map.of("text", " in it to sign in with your Claude subscription")),
+        CLAUDE_CODE.signIn().toMaps());
+    assertEquals(
+        List.of(
+            Map.of(
+                "text",
+                "Turn on device code login in your ChatGPT security settings (in a ChatGPT"
+                    + " workspace, its admin turns it on in the workspace's permissions), then"
+                    + " start Codex CLI here and choose Sign in with Device Code")),
+        CODEX.signIn().toMaps());
   }
 
   @Test
@@ -418,13 +480,19 @@ class HarnessGoldenTest {
   void eachHarnessReadsItsStaticLoginsFromTheVariablesItsReleaseDocuments() {
     assertEquals(
         List.of(
-            "token CLAUDE_CODE_OAUTH_TOKEN Run claude setup-token on a machine where Claude Code is"
-                + " signed in",
-            "api-key ANTHROPIC_API_KEY Create an API key in the Claude Console"),
-        described(CLAUDE_CODE));
+            "api-key ANTHROPIC_API_KEY Create an API key in the Claude Console"
+                + " {ANTHROPIC_BASE_URL=https://api.anthropic.com,"
+                + " CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1}",
+            "glm ANTHROPIC_AUTH_TOKEN Create a GLM Coding Plan API key at"
+                + " z.ai/manage-apikey/apikey-list {ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic,"
+                + " CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1}"),
+        described(CLAUDE_CODE),
+        "each key fixes the address it is sent to, and makes Claude Code take it from its"
+            + " environment alone");
     assertEquals(
-        List.of("api-key CODEX_API_KEY Create an API key at platform.openai.com/api-keys"),
-        described(CODEX));
+        List.of("api-key CODEX_API_KEY Create an API key at platform.openai.com/api-keys {}"),
+        described(CODEX),
+        "Codex reads no address from its environment: its provider on the command line fixes it");
     assertEquals(
         List.of("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"),
         CLAUDE_CODE.loginVariables(),
@@ -442,7 +510,15 @@ class HarnessGoldenTest {
 
   private static List<String> described(Harness harness) {
     return harness.loginKinds().stream()
-        .map(kind -> kind.kind() + " " + kind.variable() + " " + kind.howToMake().described())
+        .map(
+            kind ->
+                kind.kind()
+                    + " "
+                    + kind.variable()
+                    + " "
+                    + kind.howToMake().described()
+                    + " "
+                    + kind.fixed())
         .toList();
   }
 }

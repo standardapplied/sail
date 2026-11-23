@@ -30,7 +30,7 @@ class HarnessLoginOutcomeTest {
 
   private static final Harness CLAUDE_CODE = Harnesses.of("claude-code");
   private static final Harness CODEX = Harnesses.of("codex");
-  private static final LoginKind TOKEN = CLAUDE_CODE.loginKind("token");
+  private static final LoginKind GLM_KEY = CLAUDE_CODE.loginKind("glm");
   private static final LoginKind ANTHROPIC_KEY = CLAUDE_CODE.loginKind("api-key");
   private static final LoginKind CODEX_KEY = CODEX.loginKind("api-key");
 
@@ -79,30 +79,30 @@ class HarnessLoginOutcomeTest {
 
   static Stream<Object[]> outcomes() {
     return Stream.of(
-        new Object[] {CLAUDE_CODE, TOKEN, CLAUDE_TOKEN_REFUSED, new LoginOutcome.Refused()},
+        new Object[] {CLAUDE_CODE, GLM_KEY, CLAUDE_TOKEN_REFUSED, new LoginOutcome.Refused()},
         new Object[] {CLAUDE_CODE, ANTHROPIC_KEY, CLAUDE_KEY_REFUSED, new LoginOutcome.Refused()},
-        new Object[] {CLAUDE_CODE, TOKEN, CLAUDE_NOT_LOGGED_IN, new LoginOutcome.Undelivered()},
+        new Object[] {CLAUDE_CODE, GLM_KEY, CLAUDE_NOT_LOGGED_IN, new LoginOutcome.Undelivered()},
         new Object[] {
           CLAUDE_CODE,
-          TOKEN,
+          GLM_KEY,
           CLAUDE_HELPER_INIT + afterInit(CLAUDE_LOG),
           new LoginOutcome.Overridden("apiKeyHelper")
         },
         new Object[] {
           CLAUDE_CODE,
-          TOKEN,
+          GLM_KEY,
           CLAUDE_HELPER_INIT + afterInit(CLAUDE_TOKEN_REFUSED),
           new LoginOutcome.RefusedOther("apiKeyHelper")
         },
         new Object[] {
           CLAUDE_CODE,
-          TOKEN,
+          GLM_KEY,
           withSource(CLAUDE_TOKEN_REFUSED, "/login managed key"),
           new LoginOutcome.RefusedOther("/login managed key")
         },
         new Object[] {
           CLAUDE_CODE,
-          TOKEN,
+          GLM_KEY,
           withSource(CLAUDE_LOG, "/login managed key"),
           new LoginOutcome.Overridden("/login managed key")
         },
@@ -114,7 +114,7 @@ class HarnessLoginOutcomeTest {
         },
         new Object[] {
           CLAUDE_CODE,
-          TOKEN,
+          GLM_KEY,
           CLAUDE_TOKEN_REFUSED.lines().findFirst().orElseThrow()
               + "\n"
               + claudeLimited("3pm (UTC)"),
@@ -122,7 +122,7 @@ class HarnessLoginOutcomeTest {
         },
         new Object[] {
           CLAUDE_CODE,
-          TOKEN,
+          GLM_KEY,
           claudeLimited("Nov 16 at 9:30am"),
           new LoginOutcome.Limited("11-16 09:30")
         },
@@ -152,26 +152,26 @@ class HarnessLoginOutcomeTest {
 
   static Stream<Object[]> ordinary() {
     return Stream.of(
-        new Object[] {CLAUDE_CODE, TOKEN, CLAUDE_LOG},
-        new Object[] {CLAUDE_CODE, TOKEN, CLAUDE_TOKEN_REFUSED + CLAUDE_LOG},
-        new Object[] {CLAUDE_CODE, TOKEN, null},
-        new Object[] {CLAUDE_CODE, TOKEN, ""},
+        new Object[] {CLAUDE_CODE, GLM_KEY, CLAUDE_LOG},
+        new Object[] {CLAUDE_CODE, GLM_KEY, CLAUDE_TOKEN_REFUSED + CLAUDE_LOG},
+        new Object[] {CLAUDE_CODE, GLM_KEY, null},
+        new Object[] {CLAUDE_CODE, GLM_KEY, ""},
         new Object[] {
           CLAUDE_CODE,
-          TOKEN,
+          GLM_KEY,
           "{\"type\":\"result\",\"is_error\":true,\"api_error_status\":500,"
               + "\"result\":\"API Error: 500 Internal server error\"}"
         },
         new Object[] {
           CLAUDE_CODE,
-          TOKEN,
+          GLM_KEY,
           "{\"type\":\"result\",\"is_error\":false,\"result\":\"Not logged in yet, so it asked\"}"
         },
         new Object[] {CLAUDE_CODE, ANTHROPIC_KEY, CLAUDE_LOG},
-        new Object[] {CLAUDE_CODE, TOKEN, withSource(CLAUDE_LOG, "CLAUDE_CODE_OAUTH_TOKEN")},
-        new Object[] {CLAUDE_CODE, TOKEN, withSource(CLAUDE_LOG, "oauth_token")},
+        new Object[] {CLAUDE_CODE, GLM_KEY, withSource(CLAUDE_LOG, "CLAUDE_CODE_OAUTH_TOKEN")},
+        new Object[] {CLAUDE_CODE, GLM_KEY, withSource(CLAUDE_LOG, "oauth_token")},
         new Object[] {
-          CLAUDE_CODE, TOKEN, withSource(CLAUDE_LOG, "sk-ant-api03-AbCdEf0123456789xyz")
+          CLAUDE_CODE, GLM_KEY, withSource(CLAUDE_LOG, "sk-ant-api03-AbCdEf0123456789xyz")
         },
         new Object[] {CODEX, CODEX_KEY, CODEX_ROLLOUT},
         new Object[] {CODEX, CODEX_KEY, null},
@@ -215,14 +215,14 @@ class HarnessLoginOutcomeTest {
         Optional.of(new LoginOutcome.Refused()),
         CLAUDE_CODE.loginOutcome(
             refusedResult.replace("\"is_error\":true", "\"is_error\":true,\"retryable\":{\"x\":1}"),
-            TOKEN));
+            GLM_KEY));
     assertEquals(
         Optional.empty(),
         CLAUDE_CODE.loginOutcome(
-            refusedResult.replace("\"api_error_status\"", "\"apiErrorStatus\""), TOKEN));
+            refusedResult.replace("\"api_error_status\"", "\"apiErrorStatus\""), GLM_KEY));
     assertEquals(
         Optional.empty(),
-        CLAUDE_CODE.loginOutcome(refusedResult.replace("\"is_error\":true,", ""), TOKEN));
+        CLAUDE_CODE.loginOutcome(refusedResult.replace("\"is_error\":true,", ""), GLM_KEY));
     assertEquals(
         Optional.of(new LoginOutcome.Refused()),
         CODEX.loginOutcome(
@@ -259,7 +259,7 @@ class HarnessLoginOutcomeTest {
         }) {
       assertEquals(
           Optional.of(new LoginOutcome.Limited(null)),
-          CLAUDE_CODE.loginOutcome(claudeLimited(hostile), TOKEN),
+          CLAUDE_CODE.loginOutcome(claudeLimited(hostile), GLM_KEY),
           hostile);
       assertEquals(
           Optional.of(new LoginOutcome.Limited(null)),

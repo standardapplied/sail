@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.harness;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -27,9 +28,10 @@ public interface Harness {
   /**
    * One headless launch: the task file the prompt is read from, whether every action is
    * auto-approved, an optional model and reasoning effort, the recorded conversation to resume
-   * ({@code null} for a fresh session) and whether the harness should stream its output as it runs.
-   * A background dispatch streams; the foreground paths parse the harness's final output and do
-   * not. A launch with no task file to read is refused.
+   * ({@code null} for a fresh session), whether the harness should stream its output as it runs,
+   * and the kind of the stored login its run starts with ({@code null} for its container's own). A
+   * background dispatch streams; the foreground paths parse the harness's final output and do not.
+   * A launch with no task file to read is refused.
    */
   record Launch(
       String taskFile,
@@ -37,7 +39,8 @@ public interface Harness {
       String model,
       String reasoningEffort,
       String resumeSessionId,
-      boolean stream) {
+      boolean stream,
+      LoginKind login) {
 
     private static final Pattern SAFE_SESSION_ID =
         Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
@@ -223,6 +226,13 @@ public interface Harness {
   }
 
   /**
+   * How a person signs in to this harness with their own subscription, in a session of it in their
+   * workspace: the harness's own flow, whose sign-in stays in that workspace and which Sail never
+   * holds.
+   */
+  Remedy signIn();
+
+  /**
    * Where, under the dev user's home, this harness keeps a login, or a part of one, that a person
    * made in its session: the files a workspace loses when it leaves its person.
    */
@@ -304,18 +314,11 @@ public interface Harness {
   Optional<LoginOutcome> loginOutcome(String report, LoginKind given);
 
   /**
-   * The static credentials this harness reads from its environment, the first its default kind. A
-   * spec run starts with one its person stored; a login the harness refreshes is never one.
+   * The keys this harness reads from its environment, in the order a person is shown them, the
+   * first its default kind. A spec run starts with one its person stored; a subscription's sign-in
+   * is never one ({@link #signIn}).
    */
   List<LoginKind> loginKinds();
-
-  /**
-   * Its {@link #loginKinds()} in the order a person is shown them: what an app lists and a remedy
-   * names first. The default kind stays the first of {@link #loginKinds()}.
-   */
-  default List<LoginKind> offeredKinds() {
-    return loginKinds();
-  }
 
   /**
    * Every variable this harness takes a credential from, its kinds' and any that outranks them: a

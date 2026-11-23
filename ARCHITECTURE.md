@@ -4294,10 +4294,11 @@ a link included, and first removing any session directory there older than a min
 runs `bash -lc` with `LaunchEnv.read` of that file (exported line by line with tracing off, the
 file removed), its directory removed, a check that the workspace holds the harness's binary (else
 exit 127 with a sentence), and `exec` of the harness with what `Harness.interactiveLogin` gives so
-the harness keeps nothing of the login: Claude Code's token from its variable; its API key moved to
-`SAIL_ANTHROPIC_API_KEY` and printed by the session's own `apiKeyHelper` (`--settings`), since a key
-in `ANTHROPIC_API_KEY` is asked about, shown as `sk-ant-…` and its last 20 characters, and those 20
-kept in `~/.claude.json`; Codex's key read from `CODEX_API_KEY` by a provider of its own config
+the harness keeps nothing of the login: Claude Code's GLM key from its variable; its API key moved
+to `SAIL_ANTHROPIC_API_KEY` and printed by the session's own `apiKeyHelper` (`--settings`), since a
+key in `ANTHROPIC_API_KEY` is asked about, shown as `sk-ant-…` and its last 20 characters, and
+those 20 kept in `~/.claude.json`; since `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` ignores a helper,
+that session unsets it and fixes the key's address in the same `--settings` (`env`); Codex's key read from `CODEX_API_KEY` by a provider of its own config
 (`-c model_provider=sail -c model_providers.sail={…, env_key="CODEX_API_KEY", …}`), since its
 built-in provider takes an interactive key only from `auth.json`, and set empty in the shell
 Codex starts for its commands (`shell_environment_policy.set.CODEX_API_KEY`, one key by its dotted
@@ -4333,13 +4334,14 @@ nothing offered and nothing of that person's logins) is refused whole; otherwise
 knows is offered with its modes (`Harness.modes()`, `mode_default` the first) and `note`, the kinds
 of login it takes and how to make one, and either the login it starts signed in with (`{name,
 kind}`, never a value) or why none (`login_refusal`: `login_not_stored`, with the remedy that
-stores one or makes one the default), with `inside` true; a harness the project does not install
-carries `harness_not_installed` and `inside` false. Each refusal is the API's error shape (`code`,
+stores one or makes one the default), with `inside` true and `sign_in`, how a subscription signs in
+inside the harness's own session (`Harness.signIn`, a remedy: Claude Code's `/login`, run
+`elsewhere`; Codex's "Sign in with Device Code" once device code login is on in ChatGPT); a harness
+the project does not install carries `harness_not_installed` and `inside` false. Each refusal is the API's error shape (`code`,
 `message`, `action`, `remedy`).
 
-What a command the agent runs can read, measured on Claude Code 2.1.329 and Codex 0.170: Claude
-Code keeps a token (`CLAUDE_CODE_OAUTH_TOKEN`) out of the commands its shell runs, but an API key,
-under `SAIL_ANTHROPIC_API_KEY` as under `ANTHROPIC_API_KEY`, is in every command's environment;
+What a command the agent runs can read, measured on Claude Code 2.1.329 and Codex 0.170: an API
+key, under `SAIL_ANTHROPIC_API_KEY` as under `ANTHROPIC_API_KEY`, is in every command's environment;
 Codex's shell commands get `CODEX_API_KEY` empty, and its policy governs only that shell. Every
 process in a workspace is the dev user, so any command, any session there and an admin's shell in
 it can read a running harness's own `/proc/<pid>/environ`, the login included, as they can the
@@ -4715,16 +4717,34 @@ no pairing is removed through the gateway as before, and no key file is touched.
 - **Harness logins.** A run of a spec starts its harness with a login its person stored; a run
   that names no spec (an ad-hoc run, a spec-less room's member) uses whatever login its container
   has and records `login = container`. The one fact that decides it is the run's `spec_id`.
-  - *What is stored.* Only static credentials a harness declares (`Harness.loginKinds`): Claude
-    Code's `token` from `claude setup-token` (`CLAUDE_CODE_OAUTH_TOKEN`) or `api-key`
-    (`ANTHROPIC_API_KEY`); Codex's `api-key` (`CODEX_API_KEY`, which `codex exec`, every Sail
-    launch of Codex, reads first), the one kind Codex takes: a `CODEX_ACCESS_TOKEN` is read by
-    Codex as an agent identity, so a run is never started on one, but it is in Codex's
-    `Harness.loginVariables`, so a container's own value is set empty. A login a harness refreshes
-    (Claude Code's `/login`, Codex's "Sign in with ChatGPT") rotates a single-use refresh token, so
-    a second copy logs the first out: it is never stored, copied, mounted or adopted, and stays in
-    the shell it was made in. A login is (person, harness, name); the first stored is the
-    default, and a switch applies to launches after it.
+  - *What is stored.* Only keys a service issues for programs (`Harness.loginKinds`), each with
+    the address it is sent to (`LoginKind.fixed`): Claude Code's `api-key` (`ANTHROPIC_API_KEY`,
+    `https://api.anthropic.com`), its default, or `glm`, a GLM Coding Plan key
+    (`ANTHROPIC_AUTH_TOKEN`, `https://api.z.ai/api/anthropic`, which maps Claude Code's models to
+    GLM's itself); Codex's `api-key` (`CODEX_API_KEY`, which `codex exec`, every Sail launch of
+    Codex, reads first), the one kind Codex takes: a `CODEX_ACCESS_TOKEN` is read by Codex as an
+    agent identity, so a run is never started on one, but it is in Codex's
+    `Harness.loginVariables`, so a container's own value is set empty. A subscription's sign-in
+    (Claude Code's `/login`, Codex's "Sign in with ChatGPT") is never stored, copied, mounted or
+    adopted: Anthropic's terms forbid a developer to "collect, store, or intermediate Claude.ai
+    credentials or session tokens", so the person signs in inside the harness's own session
+    (`Harness.signIn`) and the sign-in stays in that workspace. A login is (person, harness,
+    name); the first stored is the default, and a switch applies to launches after it.
+  - *Where it is sent.* A stored key goes only to its own service, whatever the container says.
+    Claude Code: each kind's lines set `ANTHROPIC_BASE_URL` to its address and
+    `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1`, after every profile, so Claude Code takes its
+    address, provider and credential from that environment and ignores what any settings file's
+    `env` names, a managed one included (2.1.327, measured with a fake key: without the flag a
+    user's or a project's `env.ANTHROPIC_BASE_URL` overwrites the shell's). An interactive API-key
+    session, whose `apiKeyHelper` the flag would ignore, pins the address in its own `--settings`
+    instead, which the user's and the project's settings cannot outrank and managed settings can.
+    Codex reads no address from its environment (`OPENAI_BASE_URL` is not read, 0.163), but its
+    user config's `openai_base_url` or a `model_provider` naming `CODEX_API_KEY` would send the key
+    elsewhere, so every launch on a stored key, headless (`Launch.login`) or interactive, declares
+    Sail's provider on the command line with the OpenAI API as its address, which outranks every
+    config file but `/etc/codex/managed_config.toml`. A container's root (the dev user has `sudo`)
+    can still write that file, replace either binary, or read a running harness's environment:
+    only a key that never enters the container is beyond it.
   - *Where.* `LoginStore`, beside the database (`/var/lib/sail/logins/<fde-id>/<harness>/<name>`
     on a box): `0700` directories, `0600` files, each written whole as a temporary file and renamed,
     the kind on the first line and the value on the second; `<harness>/.default` names the default
@@ -4773,8 +4793,9 @@ no pairing is removed through the gateway as before, and no key file is touched.
     exports cannot outrank the stored login (each harness treats an empty variable as unset); it
     sets empty too every switch that sends the harness to a cloud provider's account
     (`Harness.credentialSwitches`: Claude Code's Bedrock, Vertex and Foundry switches), since
-    cloud-provider credentials are not supported for runs. A repo's own `apiKeyHelper` still
-    outranks a token; the run goes on and its report says so (*What came of it*, below). Every launch shape (the background unit, the
+    cloud-provider credentials are not supported for runs, and then the kind's fixed values (*Where
+    it is sent*, above). With them a settings file's own credential, `apiKeyHelper` included, is
+    ignored; a report naming another source still says so (*What came of it*, below). Every launch shape (the background unit, the
     foreground task, the live member) starts with the same fixed text, `LaunchEnv.read`, which
     turns tracing off (`set +x`, so a profile's `set -x` prints no value), exports each line as it
     is (`export "$kv"` evaluates nothing), removes the file and only then
@@ -4860,14 +4881,9 @@ no pairing is removed through the gateway as before, and no key file is touched.
     runs that serve a review first, newest first and starting none after ten seconds
     (`MissedStopReconciler.READ_FIRST`, `READ_FIRST_FOR`), skipping any whose early read went
     unanswered on the pass before, so a late read's mark lands before a replay however one
-    container hangs, and every other unread report last. A build's login
-    of a kind with a known lifetime (Claude Code's token: 365 days from the day it was stored,
-    `LoginKind.lifetime`) is warned in its last 14 days at each build reservation, a resumed
-    build's included (`RunLogins.ending`), its days counted by date in UTC: in the dispatch's own
-    output (`Listener.loginEnding`), as an `agent_login_outcome` event (`outcome` `ending`) and in
-    the room. It is said once the run is reserved, so on a node the run supports the room's line
-    and the node's sync keeps it, at a spec's first dispatch there too. `GET /v1/runs` (and `sail
-    agent sessions --json`) carries `login_overridden`.
+    container hangs, and every other unread report last. No stored kind has a known end, so no
+    login is warned before it ends. `GET /v1/runs` (and `sail agent sessions --json`) carries
+    `login_overridden`.
   - *What it cannot hide.* A run's harness holds its person's login in its environment for the
     run's whole life. Whoever can prompt an agent acting for a person (a room's members, a spec's
     author, a repo's files the agent reads) can try to make it reveal that login, and Sail's

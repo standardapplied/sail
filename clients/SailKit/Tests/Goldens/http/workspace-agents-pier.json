@@ -23,21 +23,11 @@
             {
               "how": [
                 {
-                  "text": "Run "
-                },
-                {
-                  "args": [
-                    "setup-token"
-                  ],
-                  "run": "elsewhere",
-                  "verb": "claude"
-                },
-                {
-                  "text": " on a machine where Claude Code is signed in"
+                  "text": "Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list"
                 }
               ],
-              "kind": "token",
-              "label": "long-lived token"
+              "kind": "glm",
+              "label": "GLM Coding Plan key"
             }
           ],
           "login": {
@@ -81,6 +71,19 @@
               "label": "Bypass permissions",
               "mode": "bypassPermissions"
             }
+          ],
+          "sign_in": [
+            {
+              "text": "Start Claude Code here and run "
+            },
+            {
+              "args": [],
+              "run": "elsewhere",
+              "verb": "/login"
+            },
+            {
+              "text": " in it to sign in with your Claude subscription"
+            }
           ]
         },
         {
@@ -110,7 +113,12 @@
               "mode": "full-access"
             }
           ],
-          "note": "Sail starts Codex CLI in a workspace with full access, running every command without asking and without its sandbox: that sandbox, bubblewrap, cannot start in a workspace's container."
+          "note": "Sail starts Codex CLI in a workspace with full access, running every command without asking and without its sandbox: that sandbox, bubblewrap, cannot start in a workspace's container.",
+          "sign_in": [
+            {
+              "text": "Turn on device code login in your ChatGPT security settings (in a ChatGPT workspace, its admin turns it on in the workspace's permissions), then start Codex CLI here and choose Sign in with Device Code"
+            }
+          ]
         }
       ],
       "owner": "uday",

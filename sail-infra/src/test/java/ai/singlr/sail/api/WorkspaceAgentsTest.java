@@ -256,17 +256,21 @@ class WorkspaceAgentsTest {
                 List.of(Map.of("text", "Create an API key in the Claude Console"))),
             Map.of(
                 "kind",
-                "token",
+                "glm",
                 "label",
-                "long-lived token",
+                "GLM Coding Plan key",
                 "how",
                 List.of(
-                    Map.of("text", "Run "),
-                    Map.of("run", "elsewhere", "verb", "claude", "args", List.of("setup-token")),
-                    Map.of("text", " on a machine where Claude Code is signed in")))),
+                    Map.of(
+                        "text",
+                        "Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list")))),
         claude.get("kinds"),
-        "the kinds in the order a person is shown them, an API key first, each how as words and"
-            + " the commands among them");
+        "the kinds in the order a person is shown them, an API key first, each a key whose how is"
+            + " words");
+    assertEquals(
+        Harnesses.of("claude-code").signIn().toMaps(),
+        claude.get("sign_in"),
+        "a subscription signs in inside the harness's own session, as the harness says it");
     var codex = answer.offer("codex");
     assertEquals(
         refusal(
@@ -276,6 +280,7 @@ class WorkspaceAgentsTest {
             "An admin adds codex to acme's agent install list and builds its template again."),
         codex.get("refusal"));
     assertEquals(false, codex.get("inside"));
+    assertFalse(codex.containsKey("sign_in"), "a harness that does not start says no sign-in");
     assertFalse(codex.containsKey("login"));
     assertEquals("full-access", codex.get("mode_default"));
     assertEquals(Harnesses.of("codex").modesNote().orElseThrow(), codex.get("note"));

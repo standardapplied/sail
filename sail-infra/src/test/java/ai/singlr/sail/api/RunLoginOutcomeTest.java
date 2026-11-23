@@ -91,16 +91,17 @@ class RunLoginOutcomeTest {
   void aBuildWhoseTokenClaudeCodeRefusedSaysSoOnceInTheRoomAndAsItsEvent() {
     loop = ReviewLoop.staged(tempDir, "codex");
     loop.spec("auth", "api");
-    var build = launched("build", "claude-code", "default", "token");
+    var build = launched("build", "claude-code", "default", "glm");
     loop.container.wrote(build, fixture("claude-code-refused-token.jsonl"));
 
     loop.onEvent(stop(build, "claude-code", "build", 1));
     loop.onEvent(stop(build, "claude-code", "build", 1));
 
     var sentence =
-        "Claude Code refused node-a's login 'default' (long-lived token), so its run stopped."
-            + " Run claude setup-token on a machine where Claude Code is signed in, then sail"
-            + " agent login claude-code. Then build it again: sail spec dispatch -p test-project"
+        "Claude Code refused node-a's login 'default' (GLM Coding Plan key), so"
+            + " its run stopped. Create a GLM Coding Plan API key at"
+            + " z.ai/manage-apikey/apikey-list, then sail agent login claude-code"
+            + " --kind glm. Then build it again: sail spec dispatch -p test-project"
             + " --spec auth --restart.";
     assertEquals(List.of(sentence), said());
     assertEquals(
@@ -110,7 +111,7 @@ class RunLoginOutcomeTest {
                 "run_role", "build",
                 "outcome", "refused",
                 "login", "default",
-                "login_kind", "token",
+                "login_kind", "glm",
                 "detail", sentence)),
         outcomes());
     assertEquals(
@@ -145,7 +146,7 @@ class RunLoginOutcomeTest {
   void aBuildThatRanOnAnotherCredentialIsSaidOnceRecordedAndReviewedAsAnyOther() {
     loop = ReviewLoop.staged(tempDir, "codex");
     loop.spec("auth", "api");
-    var build = launched("build", "claude-code", "default", "token");
+    var build = launched("build", "claude-code", "default", "glm");
     var log = fixture("claude-code-agent.jsonl");
     loop.container.wrote(
         build, fixture("claude-code-helper-init.jsonl") + log.substring(log.indexOf('\n') + 1));
@@ -154,9 +155,9 @@ class RunLoginOutcomeTest {
 
     assertEquals(
         List.of(
-            "Claude Code ran on a credential from apiKeyHelper, not on node-a's login 'default'"
-                + " (long-lived token): its container's own settings outrank the login Sail gave"
-                + " it."),
+            "Claude Code ran on a credential from apiKeyHelper, not on node-a's login"
+                + " 'default' (GLM Coding Plan key): its container's own settings outrank"
+                + " the login Sail gave it."),
         said().stream().filter(line -> line.startsWith("Claude Code ran")).toList());
     assertEquals("apiKeyHelper", loop.runs.findById(build).orElseThrow().loginOverridden());
     assertEquals(SpecStatus.REVIEW, loop.specStatus("auth"), "the build is reviewed as it ran");
@@ -167,7 +168,7 @@ class RunLoginOutcomeTest {
   void aBuildTheAccountsQuotaStoppedSaysUntilWhenAndWhereItsWorkIs() {
     loop = ReviewLoop.staged(tempDir, "codex");
     loop.spec("auth", "api");
-    var build = launched("build", "claude-code", "default", "token");
+    var build = launched("build", "claude-code", "default", "glm");
     loop.container.wrote(
         build,
         "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":null,"
@@ -177,9 +178,9 @@ class RunLoginOutcomeTest {
 
     assertEquals(
         List.of(
-            "Claude Code says the account behind node-a's login 'default' (long-lived token) is"
-                + " out of quota until 15:00 UTC, so its run stopped; what it committed stays on"
-                + " branch feat/test."),
+            "Claude Code says the account behind node-a's login 'default' (GLM Coding"
+                + " Plan key) is out of quota until 15:00 UTC, so its run stopped; what it"
+                + " committed stays on branch feat/test."),
         said());
   }
 
@@ -199,7 +200,7 @@ class RunLoginOutcomeTest {
             "Authorization: Bearer sk-proj-abcdef0123456789");
     var runs = new ArrayList<String>();
     for (var value : hostile) {
-      var limited = launched("build", "claude-code", "default", "token");
+      var limited = launched("build", "claude-code", "default", "glm");
       loop.container.wrote(
           limited,
           "{\"type\":\"result\",\"is_error\":true,\"api_error_status\":null,"
@@ -207,7 +208,7 @@ class RunLoginOutcomeTest {
               + value
               + "\"}\n");
       loop.onEvent(stop(limited, "claude-code", "build", 1));
-      var sourced = launched("build", "claude-code", "default", "token");
+      var sourced = launched("build", "claude-code", "default", "glm");
       var log = fixture("claude-code-agent.jsonl");
       loop.container.wrote(
           sourced, log.replace("\"apiKeySource\":\"none\"", "\"apiKeySource\":\"" + value + "\""));
@@ -223,8 +224,9 @@ class RunLoginOutcomeTest {
       assertNull(loop.runs.findById(run).orElseThrow().loginOverridden(), run);
     }
     assertEquals(
-        "Claude Code says the account behind node-a's login 'default' (long-lived token) is out"
-            + " of quota, so its run stopped; what it committed stays on branch feat/test.",
+        "Claude Code says the account behind node-a's login 'default' (GLM Coding"
+            + " Plan key) is out of quota, so its run stopped; what it committed stays"
+            + " on branch feat/test.",
         said().getFirst());
   }
 
@@ -233,7 +235,7 @@ class RunLoginOutcomeTest {
   void aFailureNoHarnessCalledALoginsSaysNothingOfIt() {
     loop = ReviewLoop.staged(tempDir, "codex");
     loop.spec("auth", "api");
-    var build = launched("build", "claude-code", "default", "token");
+    var build = launched("build", "claude-code", "default", "glm");
     loop.container.wrote(
         build,
         "{\"type\":\"result\",\"is_error\":true,\"api_error_status\":500,"
@@ -253,7 +255,7 @@ class RunLoginOutcomeTest {
   void aReportReadLateIsSaidOnceByTheReadThatRecordedIt() {
     loop = ReviewLoop.staged(tempDir, "codex");
     loop.spec("auth", "api");
-    var build = launched("build", "claude-code", "default", "token");
+    var build = launched("build", "claude-code", "default", "glm");
     loop.container.wrote(build, fixture("claude-code-refused-token.jsonl"));
     loop.container.unreachable(true);
 
@@ -269,9 +271,10 @@ class RunLoginOutcomeTest {
 
     assertEquals(
         List.of(
-            "Claude Code refused node-a's login 'default' (long-lived token), so its run stopped."
-                + " Run claude setup-token on a machine where Claude Code is signed in, then sail"
-                + " agent login claude-code. Then build it again: sail spec dispatch -p test-project"
+            "Claude Code refused node-a's login 'default' (GLM Coding Plan key), so"
+                + " its run stopped. Create a GLM Coding Plan API key at"
+                + " z.ai/manage-apikey/apikey-list, then sail agent login claude-code"
+                + " --kind glm. Then build it again: sail spec dispatch -p test-project"
                 + " --spec auth --restart."),
         said());
     assertEquals(1, outcomes().size());

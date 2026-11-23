@@ -991,6 +991,7 @@ class AgentSessionTest {
             RUN_UNIT.logPath(),
             RUN_ID,
             "room",
+            null,
             null);
     var foreground =
         AgentSession.buildForegroundTaskCommand(
@@ -1005,7 +1006,8 @@ class AgentSessionTest {
             "claude-code",
             RUN_UNIT.logPath(),
             RUN_ID,
-            "adhoc");
+            "adhoc",
+            null);
 
     assertTrue(String.join(" ", background).contains("SAIL_RUN_ROLE=$9"));
     assertEquals("room", background.getLast(), "the role rides as the ninth positional argument");
@@ -1038,7 +1040,8 @@ class AgentSessionTest {
             RUN_UNIT.logPath(),
             RUN_ID,
             "room",
-            "sess-42");
+            "sess-42",
+            null);
 
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("--resume sess-42"), joined);
@@ -1063,6 +1066,7 @@ class AgentSessionTest {
             RUN_UNIT.logPath(),
             RUN_ID,
             "room",
+            null,
             null);
     var resumed =
         AgentSession.buildBackgroundLaunchCommand(
@@ -1078,7 +1082,8 @@ class AgentSessionTest {
             RUN_UNIT.logPath(),
             RUN_ID,
             "room",
-            "sess-42");
+            "sess-42",
+            null);
 
     for (var joined : List.of(String.join(" ", fresh), String.join(" ", resumed))) {
       assertFalse(joined.contains("--dangerously-skip-permissions"), joined);
@@ -1102,6 +1107,7 @@ class AgentSessionTest {
                 RUN_UNIT.logPath(),
                 RUN_ID,
                 "build",
+                null,
                 null));
     assertTrue(
         build.contains("--dangerously-skip-permissions"),
@@ -1362,7 +1368,8 @@ class AgentSessionTest {
             RUN_UNIT.logPath(),
             RUN_ID,
             "room-full",
-            "sess-42");
+            "sess-42",
+            null);
 
     assertTrue(
         String.join(" ", cmd)

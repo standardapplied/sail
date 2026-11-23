@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.authority.WriteRefused;
-import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinition;
@@ -90,14 +89,13 @@ public final class RunReservation {
       SessionYield sessionYield,
       Displaceable displaceable,
       FdeStore fdes,
-      RunLauncher.Room room,
-      DispatchOperations.EventSink events) {
+      RunLauncher.Room room) {
     this.runStore = runStore;
     this.shell = shell;
     this.listener = listener;
     this.sessionYield = Objects.requireNonNull(sessionYield, "sessionYield");
     this.displaceable = Objects.requireNonNull(displaceable, "displaceable");
-    this.logins = new RunLogins(fdes, room, listener, events, DateTimeUtils::now);
+    this.logins = new RunLogins(fdes, room);
     this.fdes = fdes;
   }
 
@@ -225,37 +223,29 @@ public final class RunReservation {
       AgentUnit unit,
       ProjectDefinition config,
       Runnable alongside) {
-    var login = logins.forRun(specId, boxHandle, agentType);
-    var claim =
-        claim(
-            runId,
-            project,
-            specId,
-            role,
-            repos,
-            login,
-            () ->
-                runStore.reserveDispatch(
-                    runId,
-                    project,
-                    specId,
-                    roomId,
-                    boxHandle,
-                    role,
-                    repos,
-                    agentType,
-                    branch,
-                    task,
-                    unit.logPath(),
-                    unit.unitName(),
-                    configuredMaxDuration(config, role),
-                    alongside));
-    whenClaimed(
-        claim,
+    return claim(
+        runId,
+        project,
+        specId,
+        role,
+        repos,
+        logins.forRun(specId, boxHandle, agentType),
         () ->
-            login.ifPresent(
-                stored -> runStore.findById(runId).ifPresent(run -> logins.ending(run, stored))));
-    return claim;
+            runStore.reserveDispatch(
+                runId,
+                project,
+                specId,
+                roomId,
+                boxHandle,
+                role,
+                repos,
+                agentType,
+                branch,
+                task,
+                unit.logPath(),
+                unit.unitName(),
+                configuredMaxDuration(config, role),
+                alongside));
   }
 
   /** How a claim on a spec's repos was answered. */

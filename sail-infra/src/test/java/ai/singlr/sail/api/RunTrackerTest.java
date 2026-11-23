@@ -440,7 +440,7 @@ class RunTrackerTest {
             runStore.recordLaunch(
                 id,
                 new RunStore.Launched(
-                    null, null, null, new RunStore.RunLogin("default", "token"), null)));
+                    null, null, null, new RunStore.RunLogin("default", "glm"), null)));
     var told = new ArrayList<String>();
     var refused = new RunReport(RunUsage.NONE, new LoginOutcome.Refused());
     var losing =
@@ -463,7 +463,7 @@ class RunTrackerTest {
             runStore.recordLaunch(
                 next,
                 new RunStore.Launched(
-                    null, null, null, new RunStore.RunLogin("default", "token"), null)));
+                    null, null, null, new RunStore.RunLogin("default", "glm"), null)));
     assertTrue(Acting.system(() -> RunTracker.finish(runStore, winning, next, "stopped", 1)));
     assertEquals(List.of("winner"), told);
   }

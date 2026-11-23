@@ -23,25 +23,15 @@
             {
               "how": [
                 {
-                  "text": "Run "
-                },
-                {
-                  "args": [
-                    "setup-token"
-                  ],
-                  "run": "elsewhere",
-                  "verb": "claude"
-                },
-                {
-                  "text": " on a machine where Claude Code is signed in"
+                  "text": "Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list"
                 }
               ],
-              "kind": "token",
-              "label": "long-lived token"
+              "kind": "glm",
+              "label": "GLM Coding Plan key"
             }
           ],
           "login_refusal": {
-            "action": "Create an API key in the Claude Console, then agent login claude-code --kind api-key. Or: Run claude setup-token on a machine where Claude Code is signed in, then agent login claude-code.",
+            "action": "Create an API key in the Claude Console, then agent login claude-code. Or: Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, then agent login claude-code --kind glm.",
             "code": "login_not_stored",
             "field_errors": [],
             "message": "No Claude Code login stored for uday, so a Claude Code session cannot start in dock.",
@@ -51,29 +41,19 @@
               },
               {
                 "args": [
-                  "claude-code",
-                  "--kind",
-                  "api-key"
+                  "claude-code"
                 ],
                 "run": "sail",
                 "verb": "agent login"
               },
               {
-                "text": ". Or: Run "
+                "text": ". Or: Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, then "
               },
               {
                 "args": [
-                  "setup-token"
-                ],
-                "run": "elsewhere",
-                "verb": "claude"
-              },
-              {
-                "text": " on a machine where Claude Code is signed in, then "
-              },
-              {
-                "args": [
-                  "claude-code"
+                  "claude-code",
+                  "--kind",
+                  "glm"
                 ],
                 "run": "sail",
                 "verb": "agent login"
@@ -120,6 +100,19 @@
               "label": "Bypass permissions",
               "mode": "bypassPermissions"
             }
+          ],
+          "sign_in": [
+            {
+              "text": "Start Claude Code here and run "
+            },
+            {
+              "args": [],
+              "run": "elsewhere",
+              "verb": "/login"
+            },
+            {
+              "text": " in it to sign in with your Claude subscription"
+            }
           ]
         },
         {
@@ -149,7 +142,12 @@
               "mode": "full-access"
             }
           ],
-          "note": "Sail starts Codex CLI in a workspace with full access, running every command without asking and without its sandbox: that sandbox, bubblewrap, cannot start in a workspace's container."
+          "note": "Sail starts Codex CLI in a workspace with full access, running every command without asking and without its sandbox: that sandbox, bubblewrap, cannot start in a workspace's container.",
+          "sign_in": [
+            {
+              "text": "Turn on device code login in your ChatGPT security settings (in a ChatGPT workspace, its admin turns it on in the workspace's permissions), then start Codex CLI here and choose Sign in with Device Code"
+            }
+          ]
         }
       ],
       "owner": "uday",

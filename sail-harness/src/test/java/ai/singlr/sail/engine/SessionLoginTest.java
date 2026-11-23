@@ -41,7 +41,7 @@ import org.junit.jupiter.api.io.TempDir;
 @EnabledOnOs(OS.LINUX)
 class SessionLoginTest {
 
-  private static final String TOKEN = "sk-ant-oat01-test-token-value";
+  private static final String GLM = "fake-glm-coding-plan-key-value";
   private static final String KEY = "sk-proj-test-key-value";
 
   @TempDir Path dir;
@@ -105,7 +105,7 @@ class SessionLoginTest {
   void theLoginIsWrittenAsAPrivateFileOfItsOwnAndNothingThroughANameAlreadyThere()
       throws Exception {
     var file = file("i-1");
-    var lines = LaunchEnv.loginLines(login("claude-code", "token", TOKEN));
+    var lines = LaunchEnv.loginLines(login("claude-code", "glm", GLM));
 
     assertEquals(0, hand(file, lines).status());
     assertEquals(lines, Files.readString(Path.of(file)));
@@ -155,23 +155,24 @@ class SessionLoginTest {
             + Path.of(file).getParent()
             + "' ] && echo still-there\n"
             + "echo \"args: $*\"\n"
-            + "echo \"token: $(fp \"$CLAUDE_CODE_OAUTH_TOKEN\")\"\n"
+            + "echo \"key: $(fp \"$ANTHROPIC_AUTH_TOKEN\")\"\n"
+            + "echo \"to: $ANTHROPIC_BASE_URL $CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST\"\n"
             + "echo \"api key: [${ANTHROPIC_API_KEY}]\"\n");
-    var stored = login("claude-code", "token", TOKEN);
+    var stored = login("claude-code", "glm", GLM);
     assertEquals(0, hand(file, LaunchEnv.loginLines(stored)).status());
     var command =
         new ArrayList<>(
             SessionLogin.command(
                 Harnesses.of("claude-code"), "bypassPermissions", Optional.of(stored), file));
 
-    assertFalse(String.join(" ", command).contains(TOKEN), "the login is on no command line");
+    assertFalse(String.join(" ", command).contains(GLM), "the login is on no command line");
     var ran = run(command, "");
 
     assertEquals(0, ran.status(), ran.output());
     assertEquals(
-        "args: --permission-mode bypassPermissions\ntoken: "
-            + fingerprint(TOKEN)
-            + "\napi key: []\n",
+        "args: --permission-mode bypassPermissions\nkey: "
+            + fingerprint(GLM)
+            + "\nto: https://api.z.ai/api/anthropic 1\napi key: []\n",
         ran.output());
     assertFalse(Files.exists(Path.of(file).getParent(), LinkOption.NOFOLLOW_LINKS));
     assertEquals(
@@ -189,8 +190,8 @@ class SessionLoginTest {
     stub("claude", "env > \"$HOME/claude.env\"\n");
 
     assertEquals(
-        List.of("CLAUDE_CODE_OAUTH_TOKEN"),
-        namesItsEnvironmentHolds(login("claude-code", "token", TOKEN), "i-t"));
+        List.of("ANTHROPIC_AUTH_TOKEN"),
+        namesItsEnvironmentHolds(login("claude-code", "glm", GLM), "i-t"));
     assertEquals(
         List.of("SAIL_ANTHROPIC_API_KEY"),
         namesItsEnvironmentHolds(login("claude-code", "api-key", KEY), "i-a"));
@@ -249,17 +250,20 @@ class SessionLoginTest {
   /**
    * Claude Code's API key is printed by the session's own {@code apiKeyHelper} from a variable of
    * Sail's, so the key is never in {@code ANTHROPIC_API_KEY}, which would have it ask and keep a
-   * part of the key.
+   * part of the key. The host flag, which would ignore the helper, is gone, and the same settings
+   * fix the key's address over the user's and the project's.
    */
   @Test
   void claudeCodesApiKeyComesFromItsHelperNeverFromTheVariableItAsksAbout() throws Exception {
     stub(
         "claude",
         FINGERPRINT
-            + "helper=$(printf %s \"$4\" | sed -n 's/.*\"apiKeyHelper\": \"\\(.*\\)\"}/\\1/p')\n"
+            + "helper=$(printf %s \"$4\" | sed -n 's/.*\"apiKeyHelper\": \"\\([^\"]*\\)\".*/\\1/p')\n"
             + "echo \"args: $1 $2 $3\"\n"
+            + "echo \"settings: ${4#*\\\"env\\\": }\"\n"
             + "echo \"helper prints: $(fp \"$(sh -c \"$helper\")\")\"\n"
-            + "echo \"api key: [${ANTHROPIC_API_KEY-unset}]\"\n");
+            + "echo \"api key: [${ANTHROPIC_API_KEY-unset}]\"\n"
+            + "echo \"host managed: [${CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST-unset}]\"\n");
     var file = file("i-k");
     var stored = login("claude-code", "api-key", KEY);
     assertEquals(0, hand(file, LaunchEnv.loginLines(stored)).status());
@@ -273,9 +277,11 @@ class SessionLoginTest {
     assertEquals(
         new Ran(
             0,
-            "args: --permission-mode bypassPermissions --settings\nhelper prints: "
+            "args: --permission-mode bypassPermissions --settings\n"
+                + "settings: {\"ANTHROPIC_BASE_URL\": \"https://api.anthropic.com\"}}\n"
+                + "helper prints: "
                 + fingerprint(KEY)
-                + "\napi key: [unset]\n"),
+                + "\napi key: [unset]\nhost managed: [unset]\n"),
         ran);
   }
 
@@ -302,12 +308,12 @@ class SessionLoginTest {
 
   @Test
   void aSessionThatSignsInInsideIsHandedNoLogin() throws Exception {
-    stub("claude", "echo \"args: $*\"; echo \"token: [${CLAUDE_CODE_OAUTH_TOKEN-unset}]\"\n");
+    stub("claude", "echo \"args: $*\"; echo \"key: [${ANTHROPIC_API_KEY-unset}]\"\n");
     Harness claude = Harnesses.of("claude-code");
 
     var command = SessionLogin.command(claude, "default", Optional.empty(), file("i-n"));
 
     assertFalse(command.getLast().contains("login.env"), command.getLast());
-    assertEquals(new Ran(0, "args: \ntoken: [unset]\n"), run(command, ""));
+    assertEquals(new Ran(0, "args: \nkey: [unset]\n"), run(command, ""));
   }
 }

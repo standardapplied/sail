@@ -279,7 +279,7 @@ class RunReportReaderTest {
 
     assertEquals(
         new RunReport(RunUsage.NONE, new LoginOutcome.Refused()),
-        reader.read(run("claude-code", null, new RunStore.RunLogin("default", "token"))));
+        reader.read(run("claude-code", null, new RunStore.RunLogin("default", "glm"))));
     assertEquals(1, container.asked.size(), "one read");
     assertEquals(
         RunReport.NONE, reader.read(run("claude-code", null, RunStore.RunLogin.CONTAINER)));

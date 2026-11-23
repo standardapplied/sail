@@ -90,9 +90,9 @@ class LiveMemberTest {
         "the process holds its run's own credential, so the spec CLI speaks for it");
     assertEquals(
         TestLogins.VALUE,
-        started.secrets().get("CLAUDE_CODE_OAUTH_TOKEN"),
+        started.secrets().get("ANTHROPIC_API_KEY"),
         "a member of a spec's room starts with its person's stored login");
-    assertEquals(new RunStore.RunLogin("default", "token"), run.login());
+    assertEquals(new RunStore.RunLogin("default", "api-key"), run.login());
     assertEquals(LiveRoom.HANDLE, run.dispatchedBy(), "the person whose message woke it");
     assertEquals(null, room.container.file(unit.launchEnvPath()), "read and removed");
     assertEquals(unit.pidPath(), started.pidFile());
@@ -309,9 +309,8 @@ class LiveMemberTest {
         List.of(
             "sail: Claude Code refused "
                 + LiveRoom.HANDLE
-                + "'s login 'default' (long-lived token). Run claude"
-                + " setup-token on a machine where Claude Code is signed in, then sail agent login"
-                + " claude-code."),
+                + "'s login 'default' (API key). Create an API key in the Claude Console, then"
+                + " sail agent login claude-code."),
         room.conversation(SPEC).stream().filter(line -> line.startsWith("sail: ")).toList());
     assertEquals(1, room.events(Event.WellKnownTypes.AGENT_LOGIN_OUTCOME).size());
 

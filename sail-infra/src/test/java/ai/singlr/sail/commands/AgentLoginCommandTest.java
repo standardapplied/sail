@@ -113,11 +113,13 @@ class AgentLoginCommandTest {
             + ".\n",
         stored.out());
 
-    assertEquals(0, sail("tok-2", "login", "claude-code", "--name", "personal").exit());
+    assertEquals(
+        0,
+        sail("fake-glm-2", "login", "claude-code", "--name", "personal", "--kind", "glm").exit());
     var listed = sail("", "login", "list", "--json");
     var logins = (List<Map<String, Object>>) YamlUtil.parseMap(listed.out()).get("logins");
     assertEquals(
-        List.of("default api-key true", "personal token false"),
+        List.of("default api-key true", "personal glm false"),
         logins.stream()
             .map(row -> row.get("name") + " " + row.get("kind") + " " + row.get("default"))
             .toList());
@@ -126,21 +128,21 @@ class AgentLoginCommandTest {
     var removed = sail("", "login", "remove", "claude-code", "default");
 
     assertEquals(0, used.exit(), used.err());
-    assertTrue(used.out().contains("Using claude-code login 'personal' (token, the default)"));
+    assertTrue(used.out().contains("Using claude-code login 'personal' (glm, the default)"));
     assertEquals(0, removed.exit(), removed.err());
     assertTrue(sail("", "login", "list").out().contains("personal"));
   }
 
   /**
    * Every command a run's login outcome names works as pasted: the refusal's for a named API key
-   * and the ending token's for the default replace exactly the login they name, which stays as it
-   * was otherwise (the default stays the default).
+   * and for the default GLM key replace exactly the login they name, which stays as it was
+   * otherwise (the default stays the default).
    */
   @Test
   void theCommandARefusalNamesReplacesTheLoginItNamesWhenPastedAsPrinted() {
     var uday = new FdeStore(db).byHandle("uday").orElseThrow().id();
     var claude = Harnesses.of("claude-code");
-    new FdeStore(db).logins().store(uday, claude, null, "token", "sk-ant-oat01-old");
+    new FdeStore(db).logins().store(uday, claude, null, "glm", "fake-glm-old");
     new FdeStore(db).logins().store(uday, claude, "work", "api-key", "sk-ant-api03-old");
     var told = new ArrayList<String>();
     var refused = new RunReport(RunUsage.NONE, new LoginOutcome.Refused());
@@ -148,7 +150,7 @@ class AgentLoginCommandTest {
     var runs = new RunStore(db);
     for (var login :
         List.of(
-            new RunStore.RunLogin("work", "api-key"), new RunStore.RunLogin("default", "token"))) {
+            new RunStore.RunLogin("work", "api-key"), new RunStore.RunLogin("default", "glm"))) {
       var id = DateTimeUtils.newId().toString();
       Acting.system(
           () -> {
@@ -190,9 +192,9 @@ class AgentLoginCommandTest {
 
     var logins = new FdeStore(db).logins();
     assertEquals(KEY, logins.defaultFor(uday, claude).orElseThrow().value());
-    assertEquals("token", logins.defaultFor(uday, claude).orElseThrow().row().kind());
+    assertEquals("glm", logins.defaultFor(uday, claude).orElseThrow().row().kind());
     assertEquals(
-        List.of("default token true", "work api-key false"),
+        List.of("default glm true", "work api-key false"),
         logins.list(uday).stream()
             .filter(row -> row.harness().equals("claude-code"))
             .map(row -> row.name() + " " + row.kind() + " " + row.isDefault())
@@ -218,7 +220,7 @@ class AgentLoginCommandTest {
 
     assertEquals(0, first.exit(), first.err());
     assertEquals(
-        "  Would store claude-code login 'default' (token, the default); nothing was stored.\n",
+        "  Would store claude-code login 'default' (api-key, the default); nothing was stored.\n",
         first.out());
     assertEquals(KEY.length(), unread, "a dry run reads no value");
     assertEquals("", first.err());
@@ -234,7 +236,7 @@ class AgentLoginCommandTest {
             "name",
             "default",
             "kind",
-            "token",
+            "api-key",
             "default",
             true,
             "replaces",

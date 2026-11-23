@@ -22,7 +22,7 @@ class HarnessesTest {
   private static final Harness CODEX = Harnesses.of("codex");
 
   private static Launch fresh(boolean full) {
-    return new Launch(TASK, full, null, null, null, false);
+    return new Launch(TASK, full, null, null, null, false, null);
   }
 
   @Test
@@ -77,7 +77,7 @@ class HarnessesTest {
 
   @Test
   void headlessResumeClaudeCodeResumesTheRecordedSession() {
-    var cmd = CLAUDE_CODE.headless(new Launch(TASK, true, null, null, "sess-42", true));
+    var cmd = CLAUDE_CODE.headless(new Launch(TASK, true, null, null, "sess-42", true, null));
 
     assertTrue(cmd.startsWith("claude --print"), cmd);
     assertTrue(cmd.contains("--output-format stream-json --verbose"), cmd);
@@ -88,7 +88,7 @@ class HarnessesTest {
 
   @Test
   void headlessResumeCodexUsesExecResumeWithTheTaskAsPrompt() {
-    var cmd = CODEX.headless(new Launch(TASK, true, "gpt-5", "high", "sess-42", true));
+    var cmd = CODEX.headless(new Launch(TASK, true, "gpt-5", "high", "sess-42", true, null));
 
     assertTrue(cmd.startsWith("codex exec resume"), cmd);
     assertTrue(cmd.contains("--dangerously-bypass-approvals-and-sandbox"), cmd);
@@ -119,7 +119,7 @@ class HarnessesTest {
 
   @Test
   void headlessClaudeCodeStreamingAddsStreamJson() {
-    var cmd = CLAUDE_CODE.headless(new Launch(TASK, true, null, null, null, true));
+    var cmd = CLAUDE_CODE.headless(new Launch(TASK, true, null, null, null, true, null));
 
     assertTrue(
         cmd.contains("claude --print --output-format stream-json --verbose"),
@@ -134,7 +134,7 @@ class HarnessesTest {
 
   @Test
   void headlessCodexIgnoresStreamFlag() {
-    var streamed = CODEX.headless(new Launch(TASK, true, null, null, null, true));
+    var streamed = CODEX.headless(new Launch(TASK, true, null, null, null, true, null));
     var plain = CODEX.headless(fresh(true));
 
     assertEquals(plain, streamed, "Codex streams readable text already; the flag is a no-op");
@@ -143,7 +143,8 @@ class HarnessesTest {
 
   @Test
   void headlessClaudeCodeToleratesModelAndReasoningEffort() {
-    var cmd = CLAUDE_CODE.headless(new Launch(TASK, true, "claude-opus-4", "high", null, false));
+    var cmd =
+        CLAUDE_CODE.headless(new Launch(TASK, true, "claude-opus-4", "high", null, false, null));
 
     assertTrue(cmd.contains("claude --print"));
     assertTrue(cmd.contains("--model claude-opus-4"), "an explicit model choice is honored");
@@ -153,7 +154,7 @@ class HarnessesTest {
 
   @Test
   void headlessClaudeCodeToleratesReasoningEffortNone() {
-    var cmd = CLAUDE_CODE.headless(new Launch(TASK, true, null, "none", null, false));
+    var cmd = CLAUDE_CODE.headless(new Launch(TASK, true, null, "none", null, false, null));
 
     assertTrue(cmd.contains("claude --print"));
     assertFalse(cmd.contains("--model"), "no model flag when model is null");
@@ -162,7 +163,7 @@ class HarnessesTest {
 
   @Test
   void headlessCodexStillReceivesModelAndReasoningEffort() {
-    var cmd = CODEX.headless(new Launch(TASK, true, "gpt-5.5", "high", null, false));
+    var cmd = CODEX.headless(new Launch(TASK, true, "gpt-5.5", "high", null, false, null));
 
     assertTrue(cmd.contains("--model gpt-5.5"));
     assertTrue(cmd.contains("model_reasoning_effort='\"high\"'"));
@@ -230,7 +231,7 @@ class HarnessesTest {
 
   @Test
   void readOnlyIsHarnessRestrictedNeverFullPermission() {
-    var cmd = CLAUDE_CODE.readOnly(new Launch(TASK, true, null, null, null, true));
+    var cmd = CLAUDE_CODE.readOnly(new Launch(TASK, true, null, null, null, true, null));
 
     assertTrue(cmd.startsWith("claude --print"), cmd);
     assertTrue(cmd.contains("--output-format stream-json --verbose"), cmd);
@@ -252,7 +253,7 @@ class HarnessesTest {
 
   @Test
   void readOnlyExcludesAmbientSettingsSoNoWorkspaceFileCanWidenPermissions() {
-    var cmd = CLAUDE_CODE.readOnly(new Launch(TASK, false, null, null, null, true));
+    var cmd = CLAUDE_CODE.readOnly(new Launch(TASK, false, null, null, null, true, null));
 
     assertTrue(
         cmd.contains("--setting-sources \"\""),
@@ -269,7 +270,7 @@ class HarnessesTest {
 
   @Test
   void readOnlyResumeKeepsTheRestrictionsOnTheRecordedSession() {
-    var cmd = CLAUDE_CODE.readOnly(new Launch(TASK, false, "opus", null, "sess-42", true));
+    var cmd = CLAUDE_CODE.readOnly(new Launch(TASK, false, "opus", null, "sess-42", true, null));
 
     assertFalse(cmd.contains("--dangerously-skip-permissions"), cmd);
     assertTrue(cmd.contains("--tools \"Bash,Read,Grep,Glob\""), cmd);
@@ -284,7 +285,7 @@ class HarnessesTest {
     assertThrows(IllegalStateException.class, () -> CODEX.readOnly(fresh(false)));
     assertThrows(
         IllegalStateException.class,
-        () -> CODEX.readOnly(new Launch(TASK, false, null, null, "sess-42", true)));
+        () -> CODEX.readOnly(new Launch(TASK, false, null, null, "sess-42", true, null)));
   }
 
   @Test

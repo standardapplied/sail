@@ -53,7 +53,6 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FeedPositions;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.HeldProjects;
-import ai.singlr.sail.store.LoginStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.PendingChallengeStore;
 import ai.singlr.sail.store.ProjectStore;
@@ -1310,7 +1309,7 @@ class ClientGoldensTest {
               runs.recordLaunch(
                   run.id(),
                   new RunStore.Launched(
-                      null, null, null, new RunStore.RunLogin("default", "token"), null)));
+                      null, null, null, new RunStore.RunLogin("default", "api-key"), null)));
       var launched = runs.findById(run.id()).orElseThrow();
       Stream.of(
               new LoginOutcome.Refused(),
@@ -1322,21 +1321,6 @@ class ClientGoldensTest {
               report ->
                   new RunReports(read -> report, RunLauncher.Room.NONE, bus::publish)
                       .finish(runs, launched, recorded -> true));
-      var kind = Harnesses.of("claude-code").loginKind("token");
-      new RunLogins(
-              null, RunLauncher.Room.NONE, DispatchOperations.Listener.NONE, bus::publish, () -> AT)
-          .ending(
-              launched,
-              new LoginStore.Login(
-                  new LoginStore.Row(
-                      "claude-code",
-                      "default",
-                      "token",
-                      true,
-                      AT.minus(Duration.ofDays(360)),
-                      "0123abcd"),
-                  kind,
-                  "unused"));
       return Stream.of(
               WellKnownTypes.SPEC_ENGAGED,
               WellKnownTypes.SPEC_DISENGAGED,
@@ -1582,7 +1566,7 @@ class ClientGoldensTest {
       record(goldens, "workspace-agents", "GET", agents.formatted("berth"), dana, null);
       record(
           goldens, "workspace-agents-stopped-no-login", "GET", agents.formatted("quay"), ana, null);
-      logins.store(idOf("ana"), claude, "work", "token", "sk-ant-oat01-golden-ana-work");
+      logins.store(idOf("ana"), claude, "work", "glm", "fake-glm-golden-ana-work");
       logins.store(idOf("ana"), claude, "home", "api-key", "sk-ant-api03-golden-ana-home");
       logins.remove(idOf("ana"), claude, "work");
       record(goldens, "workspace-agents-no-default", "GET", agents.formatted("quay"), ana, null);

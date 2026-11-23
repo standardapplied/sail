@@ -95,10 +95,10 @@ class RunReportsTest {
 
     assertEquals(
         List.of(
-            "auth: Claude Code refused eng's login 'work' (API key), so its run stopped. Create an"
-                + " API key in the Claude Console, then sail agent login claude-code --kind api-key"
-                + " --name work. Then build it again: sail spec dispatch -p acme --spec auth"
-                + " --restart.",
+            "auth: Claude Code refused eng's login 'work' (API key), so its run"
+                + " stopped. Create an API key in the Claude Console, then sail agent login"
+                + " claude-code --name work. Then build it again: sail spec dispatch -p"
+                + " acme --spec auth --restart.",
             "auth: Claude Code says the account behind eng's login 'work' (API key) is out of"
                 + " quota, so its run stopped."),
         told);
@@ -130,16 +130,16 @@ class RunReportsTest {
 
     assertEquals(
         List.of(
-            "auth: Claude Code refused eng's login 'work' (API key), so its run stopped. Create an"
-                + " API key in the Claude Console, then sail agent login claude-code --kind api-key"
-                + " --name work. Its spec is done; to work on it again, reopen it with sail spec"
-                + " dispatch -p acme --spec auth --restart."),
+            "auth: Claude Code refused eng's login 'work' (API key), so its run"
+                + " stopped. Create an API key in the Claude Console, then sail agent login"
+                + " claude-code --name work. Its spec is done; to work on it again, reopen"
+                + " it with sail spec dispatch -p acme --spec auth --restart."),
         told);
   }
 
   @Test
   void aLimitSaysTheBranchOnlyForALaneThatCommitsAndHoldsNoLane() {
-    var token = new RunStore.RunLogin("default", "token");
+    var token = new RunStore.RunLogin("default", "glm");
     var limited = reporting(new LoginOutcome.Limited("15:04"));
     var runs =
         List.of(
@@ -150,8 +150,8 @@ class RunReportsTest {
     runs.forEach(run -> finished(limited, run));
 
     var quota =
-        "auth: Claude Code says the account behind eng's login 'default' (long-lived token) is out"
-            + " of quota until 15:04, so its run stopped";
+        "auth: Claude Code says the account behind eng's login 'default' (GLM"
+            + " Coding Plan key) is out of quota until 15:04, so its run stopped";
     assertEquals(
         List.of(
             quota + "; what it committed stays on branch feat/auth.",
@@ -172,15 +172,15 @@ class RunReportsTest {
    */
   @Test
   void aRefusedCredentialOfAnotherSourceIsNamedAndTheStoredLoginIsNotToldToBeReplaced() {
-    var run = run("auth", "feat/auth", new RunStore.RunLogin("default", "token"), "review");
+    var run = run("auth", "feat/auth", new RunStore.RunLogin("default", "glm"), "review");
 
     assertTrue(finished(reporting(new LoginOutcome.RefusedOther("apiKeyHelper")), run));
 
     assertEquals(
         List.of(
-            "auth: Claude Code refused the credential from apiKeyHelper, so its run stopped; it"
-                + " never used eng's login 'default' (long-lived token), which its container's own"
-                + " settings outrank."),
+            "auth: Claude Code refused the credential from apiKeyHelper, so its run"
+                + " stopped; it never used eng's login 'default' (GLM Coding Plan key),"
+                + " which its container's own settings outrank."),
         told);
     assertFalse(told.getFirst().contains("sail agent login"), "no replace command");
     assertEquals(
@@ -197,14 +197,13 @@ class RunReportsTest {
   @Test
   void eachOutcomeHasTheNameItsEventCarries() {
     assertEquals(
-        List.of("refused", "refused_other", "limited", "overridden", "undelivered", "ending"),
+        List.of("refused", "refused_other", "limited", "overridden", "undelivered"),
         List.of(
             RunReports.outcome(new LoginOutcome.Refused()),
             RunReports.outcome(new LoginOutcome.RefusedOther("apiKeyHelper")),
             RunReports.outcome(new LoginOutcome.Limited(null)),
             RunReports.outcome(new LoginOutcome.Overridden("apiKeyHelper")),
-            RunReports.outcome(new LoginOutcome.Undelivered()),
-            RunReports.ENDING));
+            RunReports.outcome(new LoginOutcome.Undelivered())));
   }
 
   /** A run given no stored login, or a report of nothing, or none read, says nothing. */
@@ -214,13 +213,13 @@ class RunReportsTest {
 
     finished(refused, run("auth", "b", RunStore.RunLogin.CONTAINER));
     finished(refused, run("auth", "b", null));
-    finished(refused, run(null, "b", new RunStore.RunLogin("default", "token")));
+    finished(refused, run(null, "b", new RunStore.RunLogin("default", "glm")));
     finished(
         new RunReports(run -> RunReport.NONE, (spec, body) -> told.add(body), published::add),
-        run("auth", "b", new RunStore.RunLogin("default", "token")));
+        run("auth", "b", new RunStore.RunLogin("default", "glm")));
     finished(
         new RunReports(run -> null, (spec, body) -> told.add(body), published::add),
-        run("auth", "b", new RunStore.RunLogin("default", "token")));
+        run("auth", "b", new RunStore.RunLogin("default", "glm")));
 
     assertEquals(List.of(), told);
     assertEquals(List.of(), published);
@@ -229,7 +228,7 @@ class RunReportsTest {
   /** A write that does not record the report says nothing: another finisher's write did. */
   @Test
   void aFinishWhoseWriteRecordsNothingSaysNothing() {
-    var run = run("auth", "b", new RunStore.RunLogin("default", "token"));
+    var run = run("auth", "b", new RunStore.RunLogin("default", "glm"));
 
     assertFalse(
         Acting.system(
@@ -248,9 +247,9 @@ class RunReportsTest {
   @Test
   void theRoomsLineCommitsWithTheFinishAndARoomThatThrowsStillLetsTheEventOut() {
     var messages = new MessageStore(db);
-    var run = run("auth", "b", new RunStore.RunLogin("default", "token"));
+    var run = run("auth", "b", new RunStore.RunLogin("default", "glm"));
     var seenElsewhere = new ArrayList<String>();
-    var first = run("auth", "b", new RunStore.RunLogin("default", "token"));
+    var first = run("auth", "b", new RunStore.RunLogin("default", "glm"));
     try (var other = Sqlite.open(tempDir.resolve("test.db"))) {
       var asTold =
           new RunReports(
@@ -293,7 +292,7 @@ class RunReportsTest {
               throw new IllegalStateException("database is locked");
             },
             published::add);
-    assertTrue(finished(throwing, run("auth", "b", new RunStore.RunLogin("default", "token"))));
+    assertTrue(finished(throwing, run("auth", "b", new RunStore.RunLogin("default", "glm"))));
     assertEquals(
         List.of("overridden"), published.stream().map(e -> e.data().get("outcome")).toList());
   }
@@ -306,7 +305,7 @@ class RunReportsTest {
     System.setErr(new PrintStream(log, true, StandardCharsets.UTF_8));
     RunStore.RunRow run;
     try {
-      run = run("auth", "b", new RunStore.RunLogin("default", "token"));
+      run = run("auth", "b", new RunStore.RunLogin("default", "glm"));
       finished(reporting(new LoginOutcome.Undelivered()), run);
     } finally {
       System.setErr(original);
@@ -317,8 +316,9 @@ class RunReportsTest {
     assertEquals(
         "  [api] run "
             + run.id()
-            + ": Claude Code saw no login, though Sail gave it eng's login 'default' (long-lived"
-            + " token): Sail's delivery of it failed, and the login itself was never tried.\n",
+            + ": Claude Code saw no login, though Sail gave it eng's login 'default'"
+            + " (GLM Coding Plan key): Sail's delivery of it failed, and the login"
+            + " itself was never tried.\n",
         log.toString(StandardCharsets.UTF_8));
     assertFalse(runs.findById(run.id()).orElseThrow().stoppedForLogin(), "an ordinary failure");
   }
@@ -326,7 +326,7 @@ class RunReportsTest {
   /** m6: an override is said once a spec; another source is said again. */
   @Test
   void anOverrideIsSaidOnceASpecUntilItsSourceChanges() {
-    var token = new RunStore.RunLogin("default", "token");
+    var token = new RunStore.RunLogin("default", "glm");
     var helper = reporting(new LoginOutcome.Overridden("apiKeyHelper"));
 
     finished(helper, run("auth", "b", token));
@@ -335,12 +335,12 @@ class RunReportsTest {
 
     assertEquals(
         List.of(
-            "auth: Claude Code ran on a credential from apiKeyHelper, not on eng's login 'default'"
-                + " (long-lived token): its container's own settings outrank the login Sail gave"
-                + " it.",
-            "auth: Claude Code ran on a credential from ANTHROPIC_API_KEY, not on eng's login"
-                + " 'default' (long-lived token): its container's own settings outrank the login"
-                + " Sail gave it."),
+            "auth: Claude Code ran on a credential from apiKeyHelper, not on eng's"
+                + " login 'default' (GLM Coding Plan key): its container's own settings"
+                + " outrank the login Sail gave it.",
+            "auth: Claude Code ran on a credential from ANTHROPIC_API_KEY, not on"
+                + " eng's login 'default' (GLM Coding Plan key): its container's own"
+                + " settings outrank the login Sail gave it."),
         told);
   }
 }

@@ -2039,6 +2039,14 @@ class SailOperationsTest {
     assertEquals(123, recorded.pid(), "the session's pid is stamped from its run-scoped pid file");
   }
 
+  /** A spec's Codex run on its person's stored key, the provider fixing the key's address. */
+  private static final String CODEX_ON_ITS_PERSONS_KEY =
+      "codex exec --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust -c"
+          + " model_provider=sail -c 'model_providers.sail={name=\"OpenAI\","
+          + " base_url=\"https://api.openai.com/v1\", env_key=\"CODEX_API_KEY\","
+          + " wire_api=\"responses\"}' -c 'shell_environment_policy.set.CODEX_API_KEY=\"\"'"
+          + " --model gpt-5.5";
+
   @Test
   void dispatchUsesSpecAgentWhenPresent() throws Exception {
     var shell =
@@ -2048,9 +2056,7 @@ class SailOperationsTest {
             .on("mkdir -p /home/dev/workspace/specs", "")
             .on("printf '%s'", "")
             .on("mkdir -p /home/dev/.sail", "")
-            .on(
-                "codex exec --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust --model gpt-5.5",
-                "");
+            .on(CODEX_ON_ITS_PERSONS_KEY, "");
     var operations =
         operationsWithStore(
             baseYaml(),
@@ -2079,9 +2085,9 @@ class SailOperationsTest {
         shell.invocations().stream()
             .anyMatch(
                 command ->
-                    command.contains(
-                            "codex exec --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust --model gpt-5.5")
-                        && command.contains("model_reasoning_effort='\"high\"'")));
+                    command.contains(CODEX_ON_ITS_PERSONS_KEY)
+                        && command.contains("model_reasoning_effort='\"high\"'")),
+        "the run's key goes to the OpenAI API alone, by the provider on its command line");
     assertFalse(
         shell.invocations().stream().anyMatch(command -> command.contains("claude --print")));
   }

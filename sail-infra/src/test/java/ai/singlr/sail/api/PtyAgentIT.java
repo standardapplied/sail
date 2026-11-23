@@ -54,7 +54,7 @@ class PtyAgentIT extends AbstractIncusIT {
   private static final String PROJECT = "sail-it-agent";
   private static final String WORKSPACE = "w";
   private static final String INSTANCE = PROJECT + "-" + WORKSPACE;
-  private static final String TOKEN = "sk-ant-oat01-pty-agent-it-" + System.nanoTime();
+  private static final String GLM = "fake-glm-pty-agent-it-" + System.nanoTime();
   private static final String KEY = "sk-proj-pty-agent-it-" + System.nanoTime();
 
   /**
@@ -67,8 +67,8 @@ class PtyAgentIT extends AbstractIncusIT {
       #!/bin/sh
       fp() { printf %s "$1" | sha256sum | cut -c1-8; }
       if [ "$1" = login ]; then echo "the harness's own login ran" > /tmp/report; exit 1; fi
-      given=${CLAUDE_CODE_OAUTH_TOKEN:-$CODEX_API_KEY}
-      set=$(env | sed -n 's/^\\(CODEX_API_KEY\\|CODEX_ACCESS_TOKEN\\|ANTHROPIC_[A-Z_]*\\|CLAUDE_CODE_OAUTH_TOKEN\\)=..*/\\1/p' | sort | tr '\\n' ' ')
+      given=${ANTHROPIC_AUTH_TOKEN:-$CODEX_API_KEY}
+      set=$(env | sed -n 's/^\\(CODEX_API_KEY\\|CODEX_ACCESS_TOKEN\\|ANTHROPIC_[A-Z_]*\\|CLAUDE_CODE_[A-Z_]*\\)=..*/\\1/p' | sort | tr '\\n' ' ')
       printf '%s\\n%s\\nset:%s\\n' "$(basename "$0") $*" "$(fp "$given")" "$set" > /tmp/report.part
       mv /tmp/report.part /tmp/report
       exec cat
@@ -183,7 +183,7 @@ class PtyAgentIT extends AbstractIncusIT {
     var pattern =
         shell.execWithInput(
             List.of("incus", "exec", INSTANCE, "--", "sh", "-c", "umask 077; cat > /root/pattern"),
-            TOKEN + "\n" + KEY + "\n",
+            GLM + "\n" + KEY + "\n",
             Duration.ofSeconds(60));
     assertTrue(pattern.ok(), pattern.stderr());
   }
@@ -220,7 +220,7 @@ class PtyAgentIT extends AbstractIncusIT {
   private static long hereArguments() {
     return ProcessHandle.allProcesses()
         .map(process -> String.join(" ", process.info().arguments().orElse(new String[0])))
-        .filter(line -> line.contains(TOKEN) || line.contains(KEY))
+        .filter(line -> line.contains(GLM) || line.contains(KEY))
         .count();
   }
 
@@ -233,7 +233,7 @@ class PtyAgentIT extends AbstractIncusIT {
               file -> {
                 try {
                   var held = new String(Files.readAllBytes(file), StandardCharsets.ISO_8859_1);
-                  return held.contains(TOKEN) || held.contains(KEY);
+                  return held.contains(GLM) || held.contains(KEY);
                 } catch (IOException unreadable) {
                   return true;
                 }
@@ -262,7 +262,7 @@ class PtyAgentIT extends AbstractIncusIT {
       var lane = lane(db);
       adaId = Acting.system(() -> fdes.add("ada", "Ada", null, "member")).id();
       Acting.system(() -> fdes.add("root", "Root", null, "admin"));
-      fdes.logins().store(adaId, Harnesses.of("claude-code"), "work", "token", TOKEN);
+      fdes.logins().store(adaId, Harnesses.of("claude-code"), "work", "glm", GLM);
       fdes.logins().store(adaId, Harnesses.of("codex"), "work", "api-key", KEY);
       var claude = fdes.logins().defaultFor(adaId, Harnesses.of("claude-code")).orElseThrow();
       var codex = fdes.logins().defaultFor(adaId, Harnesses.of("codex")).orElseThrow();
@@ -291,7 +291,8 @@ class PtyAgentIT extends AbstractIncusIT {
               List.of(
                   "claude --permission-mode bypassPermissions",
                   fingerprint(claude),
-                  "set:CLAUDE_CODE_OAUTH_TOKEN"),
+                  "set:ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL"
+                      + " CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"),
               report());
           assertEquals(
               "gone", inInstance("ls -A /home/dev/.sail/sessions | wc -l | sed 's/^0$/gone/'"));
@@ -326,7 +327,7 @@ class PtyAgentIT extends AbstractIncusIT {
           assertTrue(
               listed.sessions().stream()
                   .noneMatch(
-                      info -> info.toString().contains(TOKEN) || info.toString().contains(KEY)));
+                      info -> info.toString().contains(GLM) || info.toString().contains(KEY)));
           assertEquals(
               List.of(
                   new PtyMessage.Agent("claude-code", "bypassPermissions", false),

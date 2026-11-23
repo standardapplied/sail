@@ -35,29 +35,44 @@ class LaunchEnvTest {
 
   @TempDir Path dir;
 
-  private static LoginStore.Login token(String value) {
-    var claude = Harnesses.of("claude-code");
+  private static LoginStore.Login claude(String kind, String value) {
     return new LoginStore.Login(
-        new LoginStore.Row("claude-code", "work", "token", true, Instant.EPOCH, "0123abcd"),
-        claude.loginKind("token"),
+        new LoginStore.Row("claude-code", "work", kind, true, Instant.EPOCH, "0123abcd"),
+        Harnesses.of("claude-code").loginKind(kind),
         value);
   }
 
+  /**
+   * L2, L3: each Claude Code kind's lines in full: every other credential and cloud switch set
+   * empty, then the address its key goes to and the switch that makes Claude Code take that address
+   * from its environment alone, then the key under its own variable.
+   */
   @Test
-  void theFileHoldsTheCredentialAndTheVariableTheLoginsKindNames() {
-    var env = new LaunchEnv("cred-1", token("sk-ant-oat01-x"));
+  void theFileHoldsTheCredentialTheKindsFixedAddressAndTheVariableTheKindNames() {
+    var glm = new LaunchEnv("cred-1", claude("glm", "fake-glm-key"));
 
     assertEquals(
-        "SAIL_RUN_CREDENTIAL=cred-1\nANTHROPIC_AUTH_TOKEN=\nANTHROPIC_API_KEY=\n"
+        "SAIL_RUN_CREDENTIAL=cred-1\nANTHROPIC_API_KEY=\nCLAUDE_CODE_OAUTH_TOKEN=\n"
             + "CLAUDE_CODE_USE_BEDROCK=\nCLAUDE_CODE_USE_VERTEX=\nCLAUDE_CODE_USE_FOUNDRY=\n"
-            + "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-x\n",
-        env.lines(),
+            + "ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic\n"
+            + "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1\n"
+            + "ANTHROPIC_AUTH_TOKEN=fake-glm-key\n",
+        glm.lines(),
         "every other variable Claude Code takes a credential from is set empty");
-    assertEquals(new RunStore.RunLogin("work", "token"), env.login());
-    assertEquals("LaunchEnv[login=RunLogin[name=work, kind=token]]", env.toString());
-    assertFalse(env.toString().contains("cred-1"));
+    assertEquals(
+        "SAIL_RUN_CREDENTIAL=cred-1\nANTHROPIC_AUTH_TOKEN=\nCLAUDE_CODE_OAUTH_TOKEN=\n"
+            + "CLAUDE_CODE_USE_BEDROCK=\nCLAUDE_CODE_USE_VERTEX=\nCLAUDE_CODE_USE_FOUNDRY=\n"
+            + "ANTHROPIC_BASE_URL=https://api.anthropic.com\n"
+            + "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1\n"
+            + "ANTHROPIC_API_KEY=fake-anthropic-key\n",
+        new LaunchEnv("cred-1", claude("api-key", "fake-anthropic-key")).lines());
+    assertEquals(new RunStore.RunLogin("work", "glm"), glm.login());
+    assertEquals(Harnesses.of("claude-code").loginKind("glm"), glm.kind());
+    assertEquals("LaunchEnv[login=RunLogin[name=work, kind=glm]]", glm.toString());
+    assertFalse(glm.toString().contains("cred-1"));
     assertEquals("SAIL_RUN_CREDENTIAL=\n", new LaunchEnv(null, null).lines());
     assertEquals(RunStore.RunLogin.CONTAINER, new LaunchEnv(null, null).login());
+    assertEquals(null, new LaunchEnv(null, null).kind());
   }
 
   @Test
@@ -104,14 +119,14 @@ class LaunchEnvTest {
     var marker = dir.resolve("evaluated");
     Files.writeString(
         file,
-        "SAIL_RUN_CREDENTIAL=cred=1\nCLAUDE_CODE_OAUTH_TOKEN=$(touch " + marker + ")\n",
+        "SAIL_RUN_CREDENTIAL=cred=1\nANTHROPIC_AUTH_TOKEN=$(touch " + marker + ")\n",
         StandardCharsets.UTF_8);
 
     var shown =
         run(
             LaunchEnv.wrap(
                 file.toString(),
-                "sh -c 'printf \"%s|%s|\" \"$SAIL_RUN_CREDENTIAL\" \"$CLAUDE_CODE_OAUTH_TOKEN\";"
+                "sh -c 'printf \"%s|%s|\" \"$SAIL_RUN_CREDENTIAL\" \"$ANTHROPIC_AUTH_TOKEN\";"
                     + " test -e "
                     + file
                     + " && echo present || echo gone'"));
@@ -122,26 +137,35 @@ class LaunchEnvTest {
   }
 
   /**
-   * The reviewer's probe as a unit test: a key the container's profile exports beside a stored
-   * token is set empty by the file, so the harness sees the stored token alone.
+   * L2 as the harness's shell sees it: a container whose profile exports another address, another
+   * key and a cloud switch has each replaced by the file, so the harness sees the stored key, its
+   * kind's own address and the switch that keeps that address, whatever the container said.
    */
   @Test
   @EnabledOnOs(OS.LINUX)
-  void aCredentialTheContainerExportsIsSetEmptySoTheStoredLoginIsTheOneSeen() throws Exception {
+  void anAddressOrCredentialTheContainerExportsIsReplacedSoTheKeyGoesToItsOwnService()
+      throws Exception {
+    var container =
+        "export ANTHROPIC_BASE_URL=http://127.0.0.1:9 CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST="
+            + " ANTHROPIC_API_KEY=fake-container-key ANTHROPIC_AUTH_TOKEN=fake-gateway"
+            + " CLAUDE_CODE_USE_BEDROCK=1; ";
+    var shown =
+        "sh -c 'printf \"[%s][%s][%s][%s][%s]\" \"$ANTHROPIC_BASE_URL\""
+            + " \"$CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST\" \"$ANTHROPIC_API_KEY\""
+            + " \"$ANTHROPIC_AUTH_TOKEN\" \"$CLAUDE_CODE_USE_BEDROCK\"'";
+
+    assertEquals(
+        "0:[https://api.anthropic.com][1][fake-stored-key][][]\n",
+        runOn(claude("api-key", "fake-stored-key"), container, shown));
+    assertEquals(
+        "0:[https://api.z.ai/api/anthropic][1][][fake-stored-glm][]\n",
+        runOn(claude("glm", "fake-stored-glm"), container, shown));
+  }
+
+  private String runOn(LoginStore.Login stored, String container, String command) throws Exception {
     var file = dir.resolve("launch.env");
-    Files.writeString(file, new LaunchEnv("c", token("sk-ant-oat01-stored")).lines());
-
-    var seen =
-        run(
-            "export ANTHROPIC_API_KEY=sk-ant-api03-container ANTHROPIC_AUTH_TOKEN=gw"
-                + " CLAUDE_CODE_USE_BEDROCK=1; "
-                + LaunchEnv.wrap(
-                    file.toString(),
-                    "sh -c 'printf \"[%s][%s][%s][%s]\" \"$ANTHROPIC_API_KEY\""
-                        + " \"$ANTHROPIC_AUTH_TOKEN\" \"$CLAUDE_CODE_USE_BEDROCK\""
-                        + " \"$CLAUDE_CODE_OAUTH_TOKEN\"'"));
-
-    assertEquals("0:[][][][sk-ant-oat01-stored]\n", seen);
+    Files.writeString(file, new LaunchEnv("c", stored).lines());
+    return run(container + LaunchEnv.wrap(file.toString(), command));
   }
 
   /** A profile's {@code set -x} never traces a value the file holds. */
@@ -149,12 +173,13 @@ class LaunchEnvTest {
   @EnabledOnOs(OS.LINUX)
   void tracingAProfileTurnedOnPrintsNoValue() throws Exception {
     var file = dir.resolve("launch.env");
-    Files.writeString(file, new LaunchEnv("cred-secret-9", token("sk-ant-oat01-traced")).lines());
+    Files.writeString(
+        file, new LaunchEnv("cred-secret-9", claude("api-key", "fake-traced-key")).lines());
 
     var shown = run("set -x; " + LaunchEnv.wrap(file.toString(), "true"));
 
     assertFalse(shown.contains("cred-secret-9"), shown);
-    assertFalse(shown.contains("sk-ant-oat01-traced"), shown);
+    assertFalse(shown.contains("fake-traced-key"), shown);
   }
 
   @Test

@@ -8,6 +8,7 @@ package ai.singlr.sail.store;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.sync.SyncTransportException;
 import java.util.List;
 import java.util.Map;
@@ -40,7 +41,7 @@ public final class SchemaManager {
    * The version this release stamps and opens. It lies beyond every version a release before v1
    * stamped, so no older database is ever read as this one.
    */
-  public static final int CURRENT_VERSION = 1004;
+  public static final int CURRENT_VERSION = 1005;
 
   private static final String SCHEMA_VERSION_TABLE =
       """
@@ -487,11 +488,17 @@ public final class SchemaManager {
               usage_source TEXT
                   CHECK (usage_source IN ('result', 'transcript', 'none', 'unattributable')),
               login TEXT,
-              login_kind TEXT CHECK (login_kind IN ('api-key', 'token')),
+              login_kind TEXT CHECK (login_kind IN (%s)),
               dispatched_by TEXT,
               login_overridden TEXT CHECK (login_overridden IN
                   ('ANTHROPIC_API_KEY', 'apiKeyHelper', '/login managed key'))
-          )""",
+          )"""
+              .formatted(
+                  Harnesses.all().stream()
+                      .flatMap(harness -> harness.loginKinds().stream())
+                      .map(kind -> "'" + kind.kind() + "'")
+                      .distinct()
+                      .collect(Collectors.joining(", "))),
           RUN_COUNTED,
           RUN_RECOUNTED_FROM,
           RUN_RECOUNTED_INTO,
@@ -746,39 +753,11 @@ public final class SchemaManager {
    * Creates the schema on a fresh database and stamps it, atomically; on a database this release
    * made, adds only the feed's indexes it lacks ({@link #FEED_INDEXES}). Any other database is
    * refused naming what to do: an older one was made by a release before v1 and is replaced, as is
-   * one holding tables but no version, or one stamped v1004 by a build before {@code
-   * runs.login_overridden}, {@code fdes.main_id} or {@code run_delivered_messages.state}, or before
-   * {@code sync_health.last_error_kind} took every kind a failure is recorded as, and a newer one
-   * needs a newer binary.
+   * one holding tables but no version, and a newer one needs a newer binary.
    */
   public void migrate() {
     db.execute(SCHEMA_VERSION_TABLE);
     if (currentVersion() == CURRENT_VERSION) {
-      for (var added :
-          List.of("runs.login_overridden", "fdes.main_id", "run_delivered_messages.state")) {
-        if (lacks(added)) {
-          throw Remedied.state(
-              "Database "
-                  + db.path()
-                  + " was made by a build of schema v1004 before "
-                  + added
-                  + ", and none is converted: the box is reinstalled.",
-              freshStart());
-        }
-      }
-      var refused =
-          SyncTransportException.KINDS.stream()
-              .filter(kind -> !syncHealthDefinition().contains("'" + kind + "'"))
-              .toList();
-      if (!refused.isEmpty()) {
-        throw Remedied.state(
-            "Database "
-                + db.path()
-                + " was made by a build of schema v1004 before sync_health.last_error_kind took "
-                + String.join(", ", refused)
-                + ", and none is converted: the box is reinstalled.",
-            freshStart());
-      }
       FEED_INDEXES.forEach(db::execute);
       return;
     }
@@ -802,24 +781,6 @@ public final class SchemaManager {
     BASELINE.forEach(db::execute);
     FEED_INDEXES.forEach(db::execute);
     stamp(CURRENT_VERSION);
-  }
-
-  private String syncHealthDefinition() {
-    return db.queryOne(
-            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sync_health'",
-            row -> row.text(0))
-        .orElse("");
-  }
-
-  private boolean lacks(String column) {
-    var named = column.split("\\.");
-    return db.queryOne(
-                "SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
-                row -> row.integer(0),
-                named[0],
-                named[1])
-            .orElse(0L)
-        == 0;
   }
 
   private boolean holdsOtherTables() {
