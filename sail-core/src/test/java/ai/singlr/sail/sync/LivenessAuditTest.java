@@ -59,6 +59,9 @@ class LivenessAuditTest {
   /** Seconds a wait guards against a hang: none of this class's verdicts rests on it. */
   private static final long PATIENCE = 60;
 
+  /** How long a thread a failed test interrupts is given to end. */
+  private static final Duration ENDING = Duration.ofSeconds(5);
+
   @TempDir Path dir;
   private SyncBox main;
   private SyncBox ada;
@@ -519,13 +522,15 @@ class LivenessAuditTest {
       assertTrue(replaced.await(PATIENCE, TimeUnit.SECONDS));
       var settlement = new Settlement(node.db, Decidability.onNode(node.db), "node");
       var settling = new FutureTask<>(settlement::settle);
-      var settler = Thread.ofPlatform().start(settling);
+      var settler = Thread.ofPlatform().name("the settle").start(settling);
       try {
         awaitItsTurn(settler, settling);
-      } finally {
+      } catch (Throwable failed) {
         commit.countDown();
-        settler.join(Duration.ofSeconds(PATIENCE));
+        endAfter(failed, settler);
+        throw failed;
       }
+      commit.countDown();
       upload.get(PATIENCE, TimeUnit.SECONDS);
 
       assertEquals(List.of(), settling.get(PATIENCE, TimeUnit.SECONDS));
@@ -549,6 +554,19 @@ class LivenessAuditTest {
       }
       assertTrue(System.nanoTime() < deadline, "the settle never began its turn");
       Thread.onSpinWait();
+    }
+  }
+
+  /**
+   * Ends {@code settler} once the test has failed, the upload released: interrupted, then given a
+   * short while. One still running is named on {@code failed} with where it is, never left unsaid.
+   */
+  private static void endAfter(Throwable failed, Thread settler) throws InterruptedException {
+    settler.interrupt();
+    if (!settler.join(ENDING)) {
+      var running = new AssertionError(settler.getName() + " is still running after the failure");
+      running.setStackTrace(settler.getStackTrace());
+      failed.addSuppressed(running);
     }
   }
 
