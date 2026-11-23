@@ -20,17 +20,23 @@ import java.io.IOException;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -296,7 +302,11 @@ class LocalPtyHostTest {
   /**
    * Scenario 6. Stopping hangs every session up, as a closing terminal does, so an interactive
    * shell ends at once and writes its history; a cycle of the host first opens what the JDK opens
-   * once (its pollers, its process reaper), so the count after the measured cycle is exact.
+   * once (its pollers, its process reaper), so no descriptor open after the measured cycle was not
+   * open before it. What closes meanwhile is no concern of the host's: in a test fork that ran
+   * other classes first, a client they left is closed when it is collected (an HTTP client's
+   * selector, two descriptors), and a count of the whole process fell by two on CI; a channel
+   * closed during the cycle here stands for it.
    */
   @Test
   void stoppingTheHostEndsBothSessionsAtOnceWithTheirHistoryAndLeavesNoProcessOrDescriptor()
@@ -305,9 +315,11 @@ class LocalPtyHostTest {
     var warmUp = cycle(work, "warm", 1);
     stop(warmUp.host());
     warmUp.clients().forEach(Client::close);
+    var elsewhere = FileChannel.open(Files.writeString(dir.resolve("elsewhere"), ""));
     var descriptors = openDescriptors();
 
     var measured = cycle(work, "shell", 2);
+    elsewhere.close();
     var processes = startedSince(began);
     var stopping = System.nanoTime();
     stop(measured.host());
@@ -328,7 +340,7 @@ class LocalPtyHostTest {
     }
     assertEquals(
         List.of(), processes.stream().filter(ProcessHandle::isAlive).toList(), "nothing is left");
-    assertEquals(descriptors, openDescriptors());
+    assertEquals(Map.of(), opened(descriptors, openDescriptors()), "the host left these open");
   }
 
   private record Cycle(LocalPtyHost host, List<Client> clients) {}
@@ -937,11 +949,35 @@ class LocalPtyHostTest {
         .toList();
   }
 
-  /** The descriptors this process holds open, as {@code /dev/fd} lists them on both systems. */
-  private static long openDescriptors() throws IOException {
+  /**
+   * The descriptors this process holds open, as {@code /dev/fd} lists them on both systems, each
+   * with what it is open on (its file key, which a reused number does not share); the listing's own
+   * descriptor is left out, and so is one closed while it is listed (gone on Linux, a bad
+   * descriptor on macOS).
+   */
+  private static Map<String, Object> openDescriptors() throws IOException {
+    var listing = Files.readAttributes(Path.of("/dev/fd"), BasicFileAttributes.class).fileKey();
+    var open = new TreeMap<String, Object>();
     try (var fds = Files.list(Path.of("/dev/fd"))) {
-      return fds.count();
+      for (var fd : fds.toList()) {
+        try {
+          var key = Files.readAttributes(fd, BasicFileAttributes.class).fileKey();
+          if (!Objects.equals(key, listing)) {
+            open.put(fd.getFileName().toString(), Objects.requireNonNullElse(key, "unkeyed"));
+          }
+        } catch (FileSystemException closedMeanwhile) {
+          var unused = closedMeanwhile;
+        }
+      }
     }
+    return open;
+  }
+
+  /** What is open {@code now} that was not open on the same thing {@code before}. */
+  private static Map<String, Object> opened(Map<String, Object> before, Map<String, Object> now) {
+    var opened = new TreeMap<String, Object>(now);
+    opened.entrySet().removeIf(entry -> entry.getValue().equals(before.get(entry.getKey())));
+    return opened;
   }
 
   /** A unix connection to the local host, every read of which is bounded by {@link #STEP}. */
