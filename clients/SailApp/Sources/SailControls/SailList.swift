@@ -664,13 +664,6 @@ final class SailRowView: NSTableRowView {
         setAccessibilityLabel(item?.voice)
         setAccessibilitySubrole(item?.outline == nil ? nil : .outlineRow)
         setAccessibilityDisclosureLevel(item?.outline?.level ?? 0)
-        setAccessibilityCustomActions(item?.actions.map { action in
-            let run = Run(action)
-            return NSAccessibilityCustomAction(name: action.title) {
-                MainActor.assumeIsolated { run.go(nil) }
-                return true
-            }
-        })
         refresh()
         needsLayout = true
     }
@@ -678,6 +671,18 @@ final class SailRowView: NSTableRowView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
+    }
+
+    /// Its actions as VoiceOver offers them, made when VoiceOver asks: a row scrolled into a long
+    /// tree makes none.
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
+        item?.actions.map { action in
+            let run = Run(action)
+            return NSAccessibilityCustomAction(name: action.title) {
+                MainActor.assumeIsolated { run.go(nil) }
+                return true
+            }
+        }
     }
 
     /// A tree row is open or shut as its item says: a table's row answers false on its own, so the
@@ -875,7 +880,9 @@ final class RowCell: NSView {
     private var first: SailButton?
     private var runs: [Run] = []
     private var shown = false
-    private var moreMenu: NSMenu?
+    /// A tree row's menu-only actions, its ⋯ made the first time its actions show: a row scrolled
+    /// into a long tree makes no button and no menu (the drive's scroll and burst budgets).
+    private var moreOwed: (actions: [SailList.Action], look: Look)?
     /// What it keeps clear at its trailing end for every row's actions, nil none; 0 for a full row.
     private var column: Double?
     /// The gap between the content and the actions: 8 pt with buttons or a note, else none.
@@ -934,14 +941,9 @@ final class RowCell: NSView {
             if let busy = other.action.busy { button.fly(busy) }
             buttons.append(button)
         }
-        moreMenu = nil
+        moreOwed = nil
         if rowStyle != .sidebar, runs.contains(where: { !$0.action.onRow }) {
-            let more = SailButton(icon: .more, label: "More", size: rowStyle == .tree ? .row : .small, look: look, target: nil, action: nil)
-            buttons.append(more)
-            moreMenu = RowMenu(item.actions, look: look)
-            more.target = MenuOpener.shared
-            more.action = #selector(MenuOpener.open(_:))
-            more.menu = moreMenu
+            if rowStyle == .tree { moreOwed = (item.actions, look) } else { buttons.append(Self.more(item.actions, rowStyle: rowStyle, look: look)) }
         }
         let note = item.note.map { words -> NSTextField in
             let label = NSTextField(labelWithAttributedString: Draw.text(words, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary).cut(.byTruncatingTail))
@@ -1019,6 +1021,12 @@ final class RowCell: NSView {
             if first.kind != kind { first.kind = kind }
             if first.keyEquivalent != key { first.keyEquivalent = key }
         }
+        if shown, let owed = moreOwed {
+            moreOwed = nil
+            actions.append(Self.more(owed.actions, rowStyle: rowStyle, look: owed.look))
+            gap = 8
+            needsLayout = true
+        }
         guard shown != self.shown else { return }
         self.shown = shown
         if shown, actions.isHidden { actions.isHidden = false }
@@ -1037,6 +1045,15 @@ final class RowCell: NSView {
                 self.actions.isHidden = true
             }
         }
+    }
+}
+
+extension RowCell {
+    /// ⋯, opening the menu of `actions` under it.
+    static func more(_ actions: [SailList.Action], rowStyle: RowStyle, look: Look) -> SailButton {
+        let more = SailButton(icon: .more, label: "More", size: rowStyle == .tree ? .row : .small, look: look, target: MenuOpener.shared, action: #selector(MenuOpener.open(_:)))
+        more.menu = RowMenu(actions, look: look)
+        return more
     }
 }
 
@@ -1061,6 +1078,13 @@ final class RowActions: NSView {
         self.views = views
         self.note = note
         views.forEach { addSubview($0) }
+        needsLayout = true
+    }
+
+    /// `view` added at the trailing end.
+    func append(_ view: NSView) {
+        views.append(view)
+        addSubview(view)
         needsLayout = true
     }
 

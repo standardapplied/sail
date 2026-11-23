@@ -245,6 +245,20 @@ import Testing
         #expect(!panel.validateMenuItem(item(#selector(FilesPanel.newFolder(_:)))), "a menu item acts while the tree does not hold the keys")
     }
 
+    /// A change of look or direction draws every row again, and an open name field keeps the keys
+    /// through it.
+    @Test func aChangeOfLookDrawsTheRowsAgainAndTheFieldKeepsTheKeys() throws {
+        let played = try Played([Self.file("README.md")])
+        let panel = played.panel
+        let fills = panel.list.fills
+        panel.look = .dark
+        #expect(panel.list.fills > fills, "a change of look left the rows drawn in the old look")
+        panel.newFile(nil)
+        let filled = panel.list.fills
+        panel.userInterfaceLayoutDirection = .rightToLeft
+        #expect(panel.list.fills > filled && panel.naming != nil && panel.nameRow?.holdsKeys == true, "the field lost the keys to a change of direction")
+    }
+
     /// M59, F10 against the door: renaming the open file with unsaved text takes the pane with it,
     /// read at the new name, its text kept and still unsaved, its dot on the new row.
     @Test func aRenamedOpenFileKeepsItsUnsavedText() async throws {

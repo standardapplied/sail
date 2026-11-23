@@ -348,7 +348,7 @@ final class FilesPanel: NSView {
         shownUnsaved = unsaved
         var changed = Set(rows.filter { row in before[row.path].map { $0 != row } ?? false || wasNew.contains(row.path) != new.contains(row.path) || dotted.contains(row.path) }.map(\.path.key))
         if naming != shownNaming { changed.formUnion([naming?.id, shownNaming?.id].compactMap { $0 }) }
-        let fresh = list.entries.isEmpty
+        let fresh = shownRows.isEmpty && (!rows.isEmpty || list.entries.isEmpty)
         let focus = naming.map { $0.id != shownNaming?.id || $0.refusal != nil && $0.refusal != shownNaming?.refusal } ?? false
         shownRows = rows
         shownNaming = naming
@@ -504,6 +504,7 @@ final class FilesPanel: NSView {
     override var userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection {
         didSet {
             guard userInterfaceLayoutDirection != oldValue else { return }
+            let held = nameRow?.holdsKeys == true
             for view in [list, scroll, line] as [NSView] {
                 view.userInterfaceLayoutDirection = userInterfaceLayoutDirection
             }
@@ -511,6 +512,7 @@ final class FilesPanel: NSView {
             shownRevision = nil
             shownRows = []
             refresh()
+            if held { named(focus: true) }
         }
     }
 
@@ -522,6 +524,8 @@ final class FilesPanel: NSView {
     // MARK: Drawing
 
     private func relook() {
+        let held = nameRow?.holdsKeys == true
+        defer { if held { named(focus: true) } }
         list.look = look
         scroll.look = look
         line.look = look
@@ -1062,6 +1066,7 @@ extension FilesPanel {
         list.noteHeightOfRows(withIndexesChanged: IndexSet(integer: at))
         guard focus else { return }
         list.scrollRowToVisible(at)
+        list.layoutSubtreeIfNeeded()
         _ = list.view(atColumn: 0, row: at, makeIfNecessary: true)
         field.focus(stem: naming.refusal == nil)
     }
