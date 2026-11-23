@@ -26,6 +26,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,13 @@ import org.junit.jupiter.api.io.TempDir;
  * admin reads who is scoped to what.
  */
 class ScopedRosterApiTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   @TempDir Path tempDir;
   private Sqlite db;
@@ -199,12 +207,11 @@ class ScopedRosterApiTest {
   @SuppressWarnings("unchecked")
   private List<Map<String, Object>> roster(String bearer) throws Exception {
     var response =
-        HttpClient.newHttpClient()
-            .send(
-                HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1/fdes"))
-                    .header("Authorization", "Bearer " + bearer)
-                    .build(),
-                HttpResponse.BodyHandlers.ofString());
+        CLIENT.send(
+            HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1/fdes"))
+                .header("Authorization", "Bearer " + bearer)
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
     assertEquals(200, response.statusCode(), response.body());
     return (List<Map<String, Object>>) YamlUtil.parseMap(response.body()).get("fdes");
   }

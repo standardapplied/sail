@@ -16,6 +16,7 @@ import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.Databases;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
@@ -39,11 +40,19 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 @ActingAs
 class StopOperationsTest {
+
+  private final Databases databases = new Databases();
+
+  @AfterEach
+  void closeDatabases() {
+    databases.close();
+  }
 
   private static final String R1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   private static final String R2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -2018,7 +2027,7 @@ class StopOperationsTest {
         agent:
           type: claude-code
         """);
-    db = Sqlite.open(tempDir.resolve("stop-" + System.nanoTime() + ".db"));
+    db = databases.open(tempDir.resolve("stop-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     specStore = new SpecStore(db);

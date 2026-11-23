@@ -26,12 +26,20 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class SessionAwareAuthTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   @TempDir Path tempDir;
   private Sqlite db;
@@ -152,7 +160,7 @@ class SessionAwareAuthTest {
             .header("Authorization", "Bearer " + session)
             .GET()
             .build();
-    var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+    var response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
     assertEquals(403, response.statusCode());
   }
 
@@ -167,6 +175,6 @@ class SessionAwareAuthTest {
         "POST".equals(method)
             ? HttpRequest.BodyPublishers.ofString("{}")
             : HttpRequest.BodyPublishers.noBody());
-    return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    return CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
   }
 }

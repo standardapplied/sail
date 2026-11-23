@@ -122,6 +122,7 @@ class ApiCoverageEdgesTest {
               bus,
               null,
               tmp.resolve("api.sock"))) {
+        server.start();
         assertSame(bus, server.eventBus());
         assertNotNull(server.sseHandler());
         assertNotNull(server.socketListener());
@@ -147,6 +148,7 @@ class ApiCoverageEdgesTest {
               null,
               new SpecStore(db),
               null)) {
+        server.start();
         assertSame(bus, server.eventBus());
       }
     }
@@ -180,6 +182,7 @@ class ApiCoverageEdgesTest {
               null,
               new SpecStore(db),
               controller)) {
+        server.start();
         assertSame(bus, server.eventBus());
       }
     }
@@ -196,6 +199,7 @@ class ApiCoverageEdgesTest {
             null,
             null,
             null)) {
+      server.start();
       assertNull(server.eventBus());
       assertNull(server.sseHandler());
       assertNull(server.socketListener());
@@ -214,6 +218,7 @@ class ApiCoverageEdgesTest {
               bus,
               null,
               null)) {
+        server.start();
         assertNotNull(server.eventBus());
         assertNull(server.socketListener());
       }

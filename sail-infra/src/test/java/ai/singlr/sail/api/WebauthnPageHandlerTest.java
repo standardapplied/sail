@@ -17,12 +17,20 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class WebauthnPageHandlerTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   @TempDir Path tempDir;
   private Sqlite db;
@@ -58,7 +66,7 @@ class WebauthnPageHandlerTest {
         HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
             .method(method, HttpRequest.BodyPublishers.noBody())
             .build();
-    return HttpClient.newHttpClient().send(req, HttpResponse.BodyHandlers.ofString());
+    return CLIENT.send(req, HttpResponse.BodyHandlers.ofString());
   }
 
   @Test

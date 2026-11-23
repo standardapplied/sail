@@ -15,6 +15,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.time.Duration;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -27,6 +28,13 @@ import org.junit.jupiter.api.io.TempDir;
  * generic {@code not_found}.
  */
 class AgentLogStreamerWiringTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   private static HttpRequest streamRequest(int port, String token) {
     var builder =
@@ -59,9 +67,8 @@ class AgentLogStreamerWiringTest {
           try (var server = server(tmp)) {
             server.start();
             var response =
-                HttpClient.newHttpClient()
-                    .send(
-                        streamRequest(server.port(), "tok"), HttpResponse.BodyHandlers.ofString());
+                CLIENT.send(
+                    streamRequest(server.port(), "tok"), HttpResponse.BodyHandlers.ofString());
             assertEquals(404, response.statusCode());
             assertTrue(
                 response.body().contains("run_not_found"),
@@ -79,10 +86,8 @@ class AgentLogStreamerWiringTest {
           try (var server = server(tmp)) {
             server.start();
             var response =
-                HttpClient.newHttpClient()
-                    .send(
-                        streamRequest(server.port(), null),
-                        HttpResponse.BodyHandlers.ofInputStream());
+                CLIENT.send(
+                    streamRequest(server.port(), null), HttpResponse.BodyHandlers.ofInputStream());
             try (var body = response.body()) {
               assertEquals(401, response.statusCode());
             }
@@ -96,14 +101,13 @@ class AgentLogStreamerWiringTest {
     try (var server = server(tmp)) {
       server.start();
       var response =
-          HttpClient.newHttpClient()
-              .send(
-                  HttpRequest.newBuilder(
-                          URI.create("http://127.0.0.1:" + server.port() + "/v1/runs/nope/stream"))
-                      .header("Authorization", "Bearer tok")
-                      .POST(HttpRequest.BodyPublishers.noBody())
-                      .build(),
-                  HttpResponse.BodyHandlers.ofString());
+          CLIENT.send(
+              HttpRequest.newBuilder(
+                      URI.create("http://127.0.0.1:" + server.port() + "/v1/runs/nope/stream"))
+                  .header("Authorization", "Bearer tok")
+                  .POST(HttpRequest.BodyPublishers.noBody())
+                  .build(),
+              HttpResponse.BodyHandlers.ofString());
 
       assertEquals(405, response.statusCode());
       assertEquals(

@@ -314,17 +314,23 @@ class RouteGateSweepTest {
     }
   }
 
-  /** A web server mounting every context it serves: the API, passkeys, their pages, the stream. */
+  /**
+   * A web server mounting every context it serves: the API, passkeys, their pages, the stream;
+   * started, since the JDK's server releases its socket and selector on its own thread only.
+   */
   private SailApiServer everyContext() throws IOException {
-    return new SailApiServer(
-        "127.0.0.1",
-        0,
-        operations,
-        TestAuth.sessions(db),
-        new EventBus(),
-        null,
-        null,
-        new WebauthnAuthHandler(null, null, TestAuth.sessions(db), null));
+    var server =
+        new SailApiServer(
+            "127.0.0.1",
+            0,
+            operations,
+            TestAuth.sessions(db),
+            new EventBus(),
+            null,
+            null,
+            new WebauthnAuthHandler(null, null, TestAuth.sessions(db), null));
+    server.start();
+    return server;
   }
 
   @Test

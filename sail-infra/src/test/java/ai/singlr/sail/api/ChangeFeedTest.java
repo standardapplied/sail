@@ -1588,7 +1588,7 @@ class ChangeFeedTest {
     private final UnaryOperator<Operations> wrap;
     private final List<Stream> streams = new CopyOnWriteArrayList<>();
     private final List<HttpServer> servers = new CopyOnWriteArrayList<>();
-    private final HttpClient client = HttpClient.newHttpClient();
+    private HttpClient client;
     private Sqlite db;
     private EventBus bus;
     private SailOperations operations;
@@ -1601,6 +1601,7 @@ class ChangeFeedTest {
     }
 
     private void open() throws IOException {
+      client = HttpClient.newHttpClient();
       db = Sqlite.open(dir.resolve("sail.db"));
       new SchemaManager(db).migrate();
       HeldProjects.hold(db, "acme", "beta");
@@ -2015,6 +2016,7 @@ class ChangeFeedTest {
       operations.close();
       bus.close();
       db.close();
+      client.close();
     }
   }
 

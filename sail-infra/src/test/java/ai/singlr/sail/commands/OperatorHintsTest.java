@@ -649,9 +649,12 @@ class OperatorHintsTest {
     var process = new ProcessBuilder("bash", "-c", script).redirectErrorStream(true);
     process.environment().put("UID_UNDER_TEST", String.valueOf(uid));
     var running = process.start();
-    var printed = new String(running.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertEquals(0, running.waitFor(), printed);
-    return printed;
+    running.getOutputStream().close();
+    try (var output = running.getInputStream()) {
+      var printed = new String(output.readAllBytes(), StandardCharsets.UTF_8);
+      assertEquals(0, running.waitFor(), printed);
+      return printed;
+    }
   }
 
   /**

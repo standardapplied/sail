@@ -16,11 +16,19 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.concurrent.TimeoutException;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class LoopbackCallbackServerTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   private LoopbackCallbackServer callback;
 
@@ -38,7 +46,7 @@ class LoopbackCallbackServerTest {
   private HttpResponse<String> hit(String query) throws Exception {
     var request =
         HttpRequest.newBuilder(URI.create(callback.redirectUri() + "?" + query)).GET().build();
-    return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+    return CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
   }
 
   @Test

@@ -36,6 +36,7 @@ import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.function.Predicate;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,11 +50,17 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class LoginRoutesTest {
 
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
+
   private static final String TOKEN = "sk-ant-oat01-TOKEN_value-0001";
   private static final String KEY = "sk-ant-api03-KEY_value-0002";
 
   @TempDir Path tempDir;
-  private final HttpClient client = HttpClient.newHttpClient();
   private final List<Event> events = new CopyOnWriteArrayList<>();
   private Sqlite db;
   private EventBus bus;
@@ -160,7 +167,7 @@ class LoginRoutesTest {
                 json == null
                     ? HttpRequest.BodyPublishers.noBody()
                     : HttpRequest.BodyPublishers.ofString(json));
-    var response = client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    var response = CLIENT.send(request.build(), HttpResponse.BodyHandlers.ofString());
     var answer = new Answer(response.statusCode(), response.body());
     assertFalse(answer.body().contains(TOKEN), "no answer holds a value: " + answer.body());
     assertFalse(answer.body().contains(KEY), "no answer holds a value: " + answer.body());

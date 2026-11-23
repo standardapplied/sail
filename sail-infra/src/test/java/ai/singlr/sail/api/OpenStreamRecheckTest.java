@@ -40,6 +40,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,13 @@ import org.junit.jupiter.api.io.TempDir;
  * the caller's next request. The clock is moved by hand; events are published on the real bus.
  */
 class OpenStreamRecheckTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   private static final SyncConfig MAIN = new SyncConfig("main", null, "mady", "main-box");
   private static final String END = "end of stream";
@@ -176,8 +184,7 @@ class OpenStreamRecheckTest {
             .header("Authorization", "Bearer " + token)
             .GET()
             .build();
-    var response =
-        HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofInputStream());
+    var response = CLIENT.send(request, HttpResponse.BodyHandlers.ofInputStream());
     assertEquals(200, response.statusCode());
     var body = response.body();
     bodies.add(body);

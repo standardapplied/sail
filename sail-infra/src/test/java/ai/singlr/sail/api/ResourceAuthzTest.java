@@ -28,6 +28,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,6 +41,13 @@ import org.junit.jupiter.api.io.TempDir;
  * lane and the passkey/session (gateway) lane, plus the host-admin (no-fde) regression.
  */
 class ResourceAuthzTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   @TempDir Path tempDir;
   private Sqlite db;
@@ -306,6 +314,6 @@ class ResourceAuthzTest {
     if (body != null) {
       builder.header("Content-Type", "application/json");
     }
-    return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    return CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
   }
 }

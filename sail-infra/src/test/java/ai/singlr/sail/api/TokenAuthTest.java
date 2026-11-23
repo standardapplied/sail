@@ -27,12 +27,20 @@ import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class TokenAuthTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   @TempDir Path tempDir;
   private Sqlite db;
@@ -97,9 +105,7 @@ class TokenAuthTest {
         HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1/specs/board"));
     request.header("Authorization", "Bearer " + validToken);
     request.header("Authorization", "Bearer " + validToken);
-    var response =
-        HttpClient.newHttpClient()
-            .send(request.GET().build(), HttpResponse.BodyHandlers.ofString());
+    var response = CLIENT.send(request.GET().build(), HttpResponse.BodyHandlers.ofString());
     assertEquals(403, response.statusCode());
     assertTrue(response.body().contains("invalid_bearer_token"));
   }
@@ -228,7 +234,7 @@ class TokenAuthTest {
   private HttpResponse<String> get(String path, String token) throws Exception {
     var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path));
     if (token != null) builder.header("Authorization", "Bearer " + token);
-    return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    return CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
   }
 
   private static final class FakeOps extends TestOperations {}

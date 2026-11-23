@@ -34,6 +34,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -44,6 +45,13 @@ import org.junit.jupiter.api.io.TempDir;
  * "burst" is two requests rather than six hundred.
  */
 class RateLimitGateTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   private static final ApiAuth AUTH = new FixedTokenTestAuth("tok");
 
@@ -102,11 +110,11 @@ class RateLimitGateTest {
   @Test
   @Timeout(60)
   void establishedStreamIsNotMeteredPerEvent(@TempDir Path tmp) throws Exception {
-    try (var bus = new EventBus();
+    try (var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        var bus = new EventBus();
         var server = server(tmp, null, bus, oneRequest())) {
       server.start();
 
-      var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
       var stream =
           client.send(streamRequest(server).build(), HttpResponse.BodyHandlers.ofInputStream());
       assertEquals(200, stream.statusCode());
@@ -407,7 +415,7 @@ class RateLimitGateTest {
   }
 
   private static HttpResponse<String> send(HttpRequest.Builder builder) throws Exception {
-    return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    return CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
   }
 
   private static URI uri(SailApiServer server, String path) {

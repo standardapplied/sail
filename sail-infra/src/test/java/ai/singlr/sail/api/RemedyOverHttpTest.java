@@ -33,6 +33,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,6 +46,13 @@ import org.junit.jupiter.api.io.TempDir;
  * account or root logged in directly.
  */
 class RemedyOverHttpTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   private static final String TAKEN =
       "{\"id\": \"taken\", \"project\": \"acme\", \"title\": \"T\"}";
@@ -101,15 +109,13 @@ class RemedyOverHttpTest {
   @Test
   void theRefusalCarriesItsRemedyAsDataAndNoSailSentence() throws Exception {
     var response =
-        HttpClient.newHttpClient()
-            .send(
-                HttpRequest.newBuilder(
-                        URI.create("http://127.0.0.1:" + server.port() + "/v1/specs"))
-                    .header("Authorization", "Bearer " + token)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(TAKEN))
-                    .build(),
-                HttpResponse.BodyHandlers.ofString());
+        CLIENT.send(
+            HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1/specs"))
+                .header("Authorization", "Bearer " + token)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(TAKEN))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
 
     assertEquals(409, response.statusCode());
     var error = YamlUtil.parseMap(response.body()).get("error");
@@ -162,14 +168,13 @@ class RemedyOverHttpTest {
   void aStoreIntegrityFailureIsAnInternalErrorThatNamesNoRepair() throws Exception {
     db.execute("UPDATE specs SET body_hash = NULL WHERE id = 'taken'");
     var response =
-        HttpClient.newHttpClient()
-            .send(
-                HttpRequest.newBuilder(
-                        URI.create("http://127.0.0.1:" + server.port() + "/v1/specs/taken/content"))
-                    .header("Authorization", "Bearer " + token)
-                    .GET()
-                    .build(),
-                HttpResponse.BodyHandlers.ofString());
+        CLIENT.send(
+            HttpRequest.newBuilder(
+                    URI.create("http://127.0.0.1:" + server.port() + "/v1/specs/taken/content"))
+                .header("Authorization", "Bearer " + token)
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
 
     assertEquals(500, response.statusCode());
     assertNull(
@@ -189,16 +194,15 @@ class RemedyOverHttpTest {
   void anIfMatchCheckFailingBelowTheDoorReachesTheReaderWithItsReason() throws Exception {
     db.execute("UPDATE specs SET body_hash = NULL WHERE id = 'taken'");
     var response =
-        HttpClient.newHttpClient()
-            .send(
-                HttpRequest.newBuilder(
-                        URI.create("http://127.0.0.1:" + server.port() + "/v1/specs/taken"))
-                    .header("Authorization", "Bearer " + token)
-                    .header("Content-Type", "application/json")
-                    .header("If-Match", "\"2026-10-22T00:00:00Z\"")
-                    .PUT(HttpRequest.BodyPublishers.ofString("{\"title\": \"U\"}"))
-                    .build(),
-                HttpResponse.BodyHandlers.ofString());
+        CLIENT.send(
+            HttpRequest.newBuilder(
+                    URI.create("http://127.0.0.1:" + server.port() + "/v1/specs/taken"))
+                .header("Authorization", "Bearer " + token)
+                .header("Content-Type", "application/json")
+                .header("If-Match", "\"2026-10-22T00:00:00Z\"")
+                .PUT(HttpRequest.BodyPublishers.ofString("{\"title\": \"U\"}"))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
 
     assertEquals(500, response.statusCode(), response.body());
     assertNull(

@@ -356,7 +356,9 @@ class ContainerSailSetupTest {
         ContainerSailSetup.ensureInstalled(probe, new ShellExecutor(true), CONTAINER, locks);
 
     assertEquals(ContainerSailSetup.Result.UPDATED, result);
-    assertEquals(List.of(), Files.list(locks).toList(), "nothing changes, so nothing is held");
+    try (var held = Files.list(locks)) {
+      assertEquals(List.of(), held.toList(), "nothing changes, so nothing is held");
+    }
   }
 
   @Test

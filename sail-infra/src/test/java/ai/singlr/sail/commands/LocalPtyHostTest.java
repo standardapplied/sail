@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.OpenDescriptors;
 import ai.singlr.sail.pty.Account;
 import ai.singlr.sail.pty.Locales;
 import ai.singlr.sail.pty.PtyMessage;
@@ -24,19 +25,15 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -316,7 +313,7 @@ class LocalPtyHostTest {
     stop(warmUp.host());
     warmUp.clients().forEach(Client::close);
     var elsewhere = FileChannel.open(Files.writeString(dir.resolve("elsewhere"), ""));
-    var descriptors = openDescriptors();
+    var descriptors = OpenDescriptors.list();
 
     var measured = cycle(work, "shell", 2);
     elsewhere.close();
@@ -340,7 +337,10 @@ class LocalPtyHostTest {
     }
     assertEquals(
         List.of(), processes.stream().filter(ProcessHandle::isAlive).toList(), "nothing is left");
-    assertEquals(Map.of(), opened(descriptors, openDescriptors()), "the host left these open");
+    assertEquals(
+        Map.of(),
+        OpenDescriptors.opened(descriptors, OpenDescriptors.list()),
+        "the host left these open");
   }
 
   private record Cycle(LocalPtyHost host, List<Client> clients) {}
@@ -947,37 +947,6 @@ class LocalPtyHostTest {
             process ->
                 process.info().startInstant().map(start -> !start.isBefore(instant)).orElse(true))
         .toList();
-  }
-
-  /**
-   * The descriptors this process holds open, as {@code /dev/fd} lists them on both systems, each
-   * with what it is open on (its file key, which a reused number does not share); the listing's own
-   * descriptor is left out, and so is one closed while it is listed (gone on Linux, a bad
-   * descriptor on macOS).
-   */
-  private static Map<String, Object> openDescriptors() throws IOException {
-    var listing = Files.readAttributes(Path.of("/dev/fd"), BasicFileAttributes.class).fileKey();
-    var open = new TreeMap<String, Object>();
-    try (var fds = Files.list(Path.of("/dev/fd"))) {
-      for (var fd : fds.toList()) {
-        try {
-          var key = Files.readAttributes(fd, BasicFileAttributes.class).fileKey();
-          if (!Objects.equals(key, listing)) {
-            open.put(fd.getFileName().toString(), Objects.requireNonNullElse(key, "unkeyed"));
-          }
-        } catch (FileSystemException closedMeanwhile) {
-          var unused = closedMeanwhile;
-        }
-      }
-    }
-    return open;
-  }
-
-  /** What is open {@code now} that was not open on the same thing {@code before}. */
-  private static Map<String, Object> opened(Map<String, Object> before, Map<String, Object> now) {
-    var opened = new TreeMap<String, Object>(now);
-    opened.entrySet().removeIf(entry -> entry.getValue().equals(before.get(entry.getKey())));
-    return opened;
   }
 
   /** A unix connection to the local host, every read of which is bounded by {@link #STEP}. */

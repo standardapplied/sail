@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executors;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,8 +48,14 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class WorkspaceAgentsTest {
 
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
+
   @TempDir Path tempDir;
-  private final HttpClient client = HttpClient.newHttpClient();
   private HttpServer server;
   private Sqlite db;
   private ScriptedShellExecutor incus;
@@ -187,7 +194,7 @@ class WorkspaceAgentsTest {
                         + "/agents"))
             .header("Authorization", "Bearer " + token)
             .GET();
-    var response = client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    var response = CLIENT.send(request.build(), HttpResponse.BodyHandlers.ofString());
     return new Answer(response.statusCode(), YamlUtil.parseMap(response.body()));
   }
 

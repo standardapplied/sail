@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,13 @@ import org.junit.jupiter.api.io.TempDir;
  */
 @ActingAs
 class RoomStreamIT {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   private static final String SPEC = "stream-spec";
 
@@ -65,24 +73,32 @@ class RoomStreamIT {
         Duration.ofSeconds(BusTesting.DELIVERY_TIMEOUT_SECONDS),
         () -> {
           serve();
-          assertEquals(Map.of("open", false), firstData(open()), "no member yet");
+          try (var first = open()) {
+            assertEquals(Map.of("open", false), firstData(first), "no member yet");
+          }
 
           var process = room.prompted(SPEC, "full", "first");
           room.says(process, Lines.init("sess-1"), Lines.delta("Half"));
           var run = room.memberRun();
-          var midTurn = open();
-          assertEquals(LiveRoom.live(run, SPEC, 1, Map.of("open", true)), firstData(midTurn));
+          try (var midTurn = open()) {
+            assertEquals(LiveRoom.live(run, SPEC, 1, Map.of("open", true)), firstData(midTurn));
 
-          room.says(process, Lines.result("Half done"));
-          assertEquals(
-              "agent_turn_ended", type(nextData(midTurn)), "the turn's end follows the frame");
+            room.says(process, Lines.result("Half done"));
+            assertEquals(
+                "agent_turn_ended", type(nextData(midTurn)), "the turn's end follows the frame");
+          }
 
           var reply = room.messages.list(SPEC, null, 20).getLast();
-          assertEquals(
-              LiveRoom.live(
-                  run, SPEC, 1, Map.of("open", false, "message_id", reply.id(), "is_error", false)),
-              firstData(open()),
-              "a reader who came back after the turn is told the message it became");
+          try (var back = open()) {
+            assertEquals(
+                LiveRoom.live(
+                    run,
+                    SPEC,
+                    1,
+                    Map.of("open", false, "message_id", reply.id(), "is_error", false)),
+                firstData(back),
+                "a reader who came back after the turn is told the message it became");
+          }
         });
   }
 
@@ -109,8 +125,7 @@ class RoomStreamIT {
                         + "agent_turn_ended"))
             .GET()
             .build();
-    var response =
-        HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofInputStream());
+    var response = CLIENT.send(request, HttpResponse.BodyHandlers.ofInputStream());
     assertEquals(200, response.statusCode());
     return new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8));
   }

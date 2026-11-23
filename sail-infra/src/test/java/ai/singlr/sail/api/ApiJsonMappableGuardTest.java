@@ -126,7 +126,7 @@ class ApiJsonMappableGuardTest {
         var name = pkg + "." + relative.replace(File.separatorChar, '.');
         name = name.substring(0, name.length() - ".class".length());
         try {
-          var clazz = Class.forName(name);
+          var clazz = Class.forName(name, false, ApiJsonMappableGuardTest.class.getClassLoader());
           // Skip test-only inner records: they're inner classes of *Test fixtures and have
           // 'Test$' in their FQN. This keeps the guard focused on production API records.
           if (clazz.isRecord() && !clazz.getName().contains("Test$")) {

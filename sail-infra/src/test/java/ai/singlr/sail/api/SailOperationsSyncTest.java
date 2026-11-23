@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ConnectEnvironment;
+import ai.singlr.sail.engine.Databases;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
@@ -21,7 +22,6 @@ import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TestLogins;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -42,6 +43,13 @@ import org.junit.jupiter.api.io.TempDir;
  */
 @ActingAs
 class SailOperationsSyncTest {
+
+  private final Databases databases = new Databases();
+
+  @AfterEach
+  void closeDatabases() {
+    databases.close();
+  }
 
   private static final String RUNNING_JSON =
       """
@@ -243,7 +251,7 @@ class SailOperationsSyncTest {
         agent:
           type: claude-code
         """);
-    var db = Sqlite.open(tempDir.resolve("sync-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("sync-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var specStore = new SpecStore(db);

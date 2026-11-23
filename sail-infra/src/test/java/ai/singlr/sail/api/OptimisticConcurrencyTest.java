@@ -25,12 +25,20 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.util.List;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class OptimisticConcurrencyTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   @TempDir Path tempDir;
   private Sqlite db;
@@ -186,6 +194,6 @@ class OptimisticConcurrencyTest {
   }
 
   private static HttpResponse<String> send(HttpRequest request) throws Exception {
-    return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+    return CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
   }
 }

@@ -97,19 +97,18 @@ class HostReadsAsTheOperatorTest {
                 "[{\"name\": \"alpha\", \"status\": \"Running\", \"state\": {}},"
                     + " {\"name\": \"beta\", \"status\": \"Running\", \"state\": {}}]");
 
-    var shown =
-        CommandRun.as(
-            ADA,
-            new AgentStatusCommand(
-                operator ->
-                    OperationsFactory.create(
-                        Sqlite.open(database),
-                        incus,
-                        null,
-                        SyncScheduler.disabled(),
-                        SessionYield.NONE),
-                incus),
-            "--json");
+    CommandRun shown;
+    try (var db = Sqlite.open(database)) {
+      shown =
+          CommandRun.as(
+              ADA,
+              new AgentStatusCommand(
+                  operator ->
+                      OperationsFactory.create(
+                          db, incus, null, SyncScheduler.disabled(), SessionYield.NONE),
+                  incus),
+              "--json");
+    }
 
     assertEquals(0, shown.exit(), shown.err());
     assertEquals(
