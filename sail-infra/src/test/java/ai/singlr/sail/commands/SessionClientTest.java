@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.ClosesWhatItOpens;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
@@ -21,16 +22,28 @@ import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyAdmissions;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtySessionHost;
+import ai.singlr.sail.pty.PtyWire;
 import java.io.IOException;
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 @EnabledOnOs(OS.LINUX)
 @Timeout(value = 120, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
@@ -159,5 +172,59 @@ class SessionClientTest {
     var error =
         assertThrows(IOException.class, () -> SessionClient.connect(dir.resolve("absent.sock")));
     assertTrue(error.getMessage().contains("session host"), error.getMessage());
+  }
+
+  /** What a stand-in host does with the one connection it takes. */
+  @FunctionalInterface
+  private interface Answer {
+    void to(SocketChannel connection) throws IOException;
+  }
+
+  private static Stream<Arguments> hostsThatTurnTheClientAway() {
+    Answer refuses =
+        connection -> {
+          PtyWire.handshake(connection, connection);
+          PtyWire.read(connection);
+          PtyWire.write(connection, new PtyMessage.Err("Session token is not valid."));
+        };
+    Answer answersSomethingElse =
+        connection -> {
+          PtyWire.handshake(connection, connection);
+          PtyWire.read(connection);
+          PtyWire.write(connection, new PtyMessage.Hello("not a welcome"));
+        };
+    Answer hangsUpAfterTheHandshake = connection -> PtyWire.handshake(connection, connection);
+    Answer speaksAnotherProtocol = connection -> connection.write(ByteBuffer.wrap(new byte[64]));
+    return Stream.of(
+        Arguments.of("refuses the token", refuses),
+        Arguments.of("answers the hello with something else", answersSomethingElse),
+        Arguments.of("hangs up after the handshake", hangsUpAfterTheHandshake),
+        Arguments.of("speaks another protocol", speaksAnotherProtocol));
+  }
+
+  /** However a host turns the client away after its socket opened, the socket is closed. */
+  @ParameterizedTest(name = "a host that {0}")
+  @MethodSource("hostsThatTurnTheClientAway")
+  void aClientTurnedAwayLeavesNoSocketOpen(String what, Answer answer, @TempDir Path dir)
+      throws Exception {
+    var socket = dir.resolve("h.sock");
+    try (var host = ServerSocketChannel.open(StandardProtocolFamily.UNIX)) {
+      host.bind(UnixDomainSocketAddress.of(socket));
+      var before = ClosesWhatItOpens.baseline();
+      var answered =
+          CompletableFuture.runAsync(
+              () -> {
+                try (var connection = host.accept()) {
+                  answer.to(connection);
+                } catch (IOException gone) {
+                  var unused = gone;
+                }
+              });
+
+      assertThrows(IOException.class, () -> SessionClient.connect(socket, "tok"), what);
+      answered.get(10, TimeUnit.SECONDS);
+
+      ClosesWhatItOpens.assertClosed("a client turned away by a host that " + what, before);
+    }
   }
 }

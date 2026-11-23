@@ -226,6 +226,9 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public void close() {
+    if (syncOperations != null) {
+      syncOperations.close();
+    }
     closeAction.run();
   }
 

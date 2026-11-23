@@ -40,6 +40,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -54,6 +55,13 @@ import org.junit.jupiter.api.io.TempDir;
  * minute) pairs.
  */
 class AttentionTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   private static final Instant T0 = Instant.parse("2026-11-13T09:00:00Z");
   private static final ShellExec NO_CONTAINERS =
@@ -72,7 +80,6 @@ class AttentionTest {
       };
 
   @TempDir Path tempDir;
-  private final HttpClient client = HttpClient.newHttpClient();
   private Clock clock;
   private Sqlite db;
   private EventBus bus;
@@ -167,7 +174,7 @@ class AttentionTest {
 
   private HttpResponse<String> send(String token, String method, String path, String body)
       throws Exception {
-    return client.send(
+    return CLIENT.send(
         HttpRequest.newBuilder(
                 URI.create("http://127.0.0.1:" + server.getAddress().getPort() + path))
             .header("Authorization", "Bearer " + token)

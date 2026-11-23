@@ -9,14 +9,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -103,6 +107,30 @@ class SlackClientTest {
 
     assertEquals(1, calls.size());
     assertTrue(err.contains("channel_not_found"));
+  }
+
+  /**
+   * A post on a closed client is dropped at its first failure, without a retry or a word: the
+   * reactor's drain thread may still hand its last event to a client its subscription has closed.
+   */
+  @Test
+  void aPostOnAClosedClientIsDroppedWithoutARetryOrAWord() {
+    var calls = new ArrayList<String>();
+    var sleeps = new ArrayList<Long>();
+    var client =
+        new SlackClient(
+            body -> {
+              calls.add(body);
+              throw new IOException("closed");
+            },
+            sleeps::add);
+    client.close();
+
+    var err = captureStderr(() -> assertNull(client.post(post())));
+
+    assertEquals(1, calls.size());
+    assertEquals(List.of(), sleeps);
+    assertEquals("", err);
   }
 
   @Test
@@ -240,12 +268,9 @@ class SlackClientTest {
 
   @Test
   void productionConstructorBuildsWithoutNetwork() {
-    assertNotNull(new SlackClient("xoxb-test"));
-  }
-
-  @Test
-  void defaultHttpBuildsPoster() {
-    assertNotNull(SlackClient.defaultHttp("xoxb-test"));
+    try (var client = new SlackClient("xoxb-test")) {
+      assertNotNull(client);
+    }
   }
 
   @Test
@@ -273,5 +298,56 @@ class SlackClientTest {
       System.setErr(original);
     }
     return buffer.toString();
+  }
+
+  /**
+   * A client's posts share one HTTP client, held from one to the next, and closing the Slack client
+   * leaves nothing of it open.
+   */
+  @Test
+  void aClientsPostsShareOneHttpClientThatClosingReleases() throws Exception {
+    var answer = "{\"ok\":true,\"channel\":\"C9\",\"ts\":\"5.5\"}";
+    Map<String, Object> before;
+    try (var server = CountingHttpServer.answering(200, answer)) {
+      before = ClosesWhatItOpens.baseline();
+      try (var client =
+          new SlackClient(
+              SlackClient.defaultHttp("xoxb-test", server.uri("/api/chat.postMessage")),
+              millis -> {})) {
+        for (var i = 0; i < 2; i++) {
+          assertEquals(
+              new SlackPoster.Result("C9", "5.5"),
+              client.post(new SlackPoster.Post("#ops", "hi", null, false)));
+        }
+      }
+
+      assertEquals(1, server.connections(), "both posts came on the one client's connection");
+    }
+    ClosesWhatItOpens.assertClosed("a Slack client", before);
+  }
+
+  /**
+   * Closing a client waits on no Slack answer that never finishes: a post still under way is
+   * dropped, so it never holds the shutdown of the subscription that owns it.
+   */
+  @Test
+  void closingAClientDropsAPostWhoseAnswerNeverEnds() throws Exception {
+    try (var server = CountingHttpServer.trickling()) {
+      var poster = SlackClient.defaultHttp("xoxb-test", server.uri("/api/chat.postMessage"));
+      var posting =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    try {
+                      poster.send("{}");
+                    } catch (Exception dropped) {
+                      var unused = dropped;
+                    }
+                  });
+      assertTrue(server.asked(Duration.ofSeconds(10)), "Slack was asked");
+
+      assertTimeoutPreemptively(Duration.ofSeconds(5), poster::close, "closing waits on it");
+      assertTrue(posting.join(Duration.ofSeconds(10)), "the post under way was dropped");
+    }
   }
 }

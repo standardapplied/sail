@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -35,17 +36,23 @@ public final class SlackClient implements SlackPoster {
   private static final long RETRY_BACKOFF_MILLIS = 500;
 
   @FunctionalInterface
-  interface HttpPoster {
+  interface HttpPoster extends AutoCloseable {
     HttpReply send(String jsonBody) throws Exception;
+
+    @Override
+    default void close() {}
   }
 
   record HttpReply(int status, String body) {}
 
   private final HttpPoster http;
   private final LongConsumer sleeper;
+  private volatile boolean closed;
 
   public SlackClient(String token) {
-    this(defaultHttp(Objects.requireNonNull(token, "token")), SlackClient::sleep);
+    this(
+        defaultHttp(Objects.requireNonNull(token, "token"), URI.create(API_URL)),
+        SlackClient::sleep);
   }
 
   SlackClient(HttpPoster http, LongConsumer sleeper) {
@@ -73,6 +80,9 @@ public final class SlackClient implements SlackPoster {
                 + MAX_ATTEMPTS
                 + ")");
       } catch (Exception e) {
+        if (closed) {
+          return null;
+        }
         warn(
             "could not reach Slack posting to "
                 + post.channel()
@@ -89,6 +99,17 @@ public final class SlackClient implements SlackPoster {
     }
     warn("giving up posting to " + post.channel() + " after " + MAX_ATTEMPTS + " attempts");
     return null;
+  }
+
+  /**
+   * Closes the client every post shares, dropping a post still under way, or one begun after, at
+   * its first failure, without a retry or a word: Slack may trickle its answer past any timeout,
+   * and a post is best effort.
+   */
+  @Override
+  public void close() {
+    closed = true;
+    http.close();
   }
 
   /** Builds the exact chat.postMessage JSON body. Package-private for testing. */
@@ -147,19 +168,29 @@ public final class SlackClient implements SlackPoster {
     }
   }
 
-  static HttpPoster defaultHttp(String token) {
+  /** Posts to {@code api} with {@code token}, every post on one client the poster's close ends. */
+  static HttpPoster defaultHttp(String token, URI api) {
     var client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
-    return body -> {
-      var request =
-          HttpRequest.newBuilder()
-              .uri(URI.create(API_URL))
-              .header("Authorization", "Bearer " + token)
-              .header("Content-Type", "application/json; charset=utf-8")
-              .timeout(TIMEOUT)
-              .POST(HttpRequest.BodyPublishers.ofString(body))
-              .build();
-      var response = client.send(request, HttpResponse.BodyHandlers.ofString());
-      return new HttpReply(response.statusCode(), response.body());
+    return new HttpPoster() {
+      @Override
+      public HttpReply send(String body) throws IOException, InterruptedException {
+        var request =
+            HttpRequest.newBuilder()
+                .uri(api)
+                .header("Authorization", "Bearer " + token)
+                .header("Content-Type", "application/json; charset=utf-8")
+                .timeout(TIMEOUT)
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        return new HttpReply(response.statusCode(), response.body());
+      }
+
+      @Override
+      public void close() {
+        client.shutdownNow();
+        client.close();
+      }
     };
   }
 

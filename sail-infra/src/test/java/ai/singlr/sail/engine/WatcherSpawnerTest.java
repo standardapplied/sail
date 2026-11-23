@@ -23,7 +23,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 class WatcherSpawnerTest {
@@ -405,6 +408,46 @@ class WatcherSpawnerTest {
     @Override
     public boolean isDryRun() {
       return false;
+    }
+  }
+
+  /**
+   * A detached watcher outlives the process that spawned it, so it is given no pipe of ours: its
+   * input is empty, and one that reads it ends at once.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aDetachedWatcherIsGivenNoPipeOfOurs() throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+
+    var pid = WatcherSpawner.spawnProcess(List.of("cat"), tempDir.resolve("watch.log"));
+    var watcher = ProcessHandle.of(pid);
+    if (watcher.isPresent()) {
+      watcher.get().onExit().get(10, TimeUnit.SECONDS);
+    }
+
+    ClosesWhatItOpens.assertClosed("a detached watcher", before);
+  }
+
+  /**
+   * A detached watcher that runs on holds no pipe of ours while it runs: not even the one the JDK
+   * opens for a stderr merged into its log.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aRunningDetachedWatcherHoldsNoPipeOfOurs() throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+
+    var watcher =
+        ProcessHandle.of(
+                WatcherSpawner.spawnProcess(List.of("sleep", "600"), tempDir.resolve("watch.log")))
+            .orElseThrow();
+    try {
+      assertTrue(watcher.isAlive());
+      ClosesWhatItOpens.assertClosed("a running detached watcher", before);
+    } finally {
+      watcher.destroyForcibly();
+      watcher.onExit().get(10, TimeUnit.SECONDS);
     }
   }
 }

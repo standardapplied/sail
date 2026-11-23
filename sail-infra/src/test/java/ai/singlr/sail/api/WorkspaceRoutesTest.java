@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executors;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,6 +44,13 @@ import org.junit.jupiter.api.io.TempDir;
  * admin anyone's; a delete of one that holds work is refused with its code until forced.
  */
 class WorkspaceRoutesTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   private static final ProjectDefinition ACME =
       new ProjectDefinition(
@@ -59,7 +67,6 @@ class WorkspaceRoutesTest {
           null);
 
   @TempDir Path tempDir;
-  private final HttpClient client = HttpClient.newHttpClient();
   private Sqlite db;
   private HttpServer server;
   private ScriptedShellExecutor incus;
@@ -157,7 +164,7 @@ class WorkspaceRoutesTest {
                 json == null
                     ? HttpRequest.BodyPublishers.noBody()
                     : HttpRequest.BodyPublishers.ofString(json));
-    var response = client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    var response = CLIENT.send(request.build(), HttpResponse.BodyHandlers.ofString());
     return new Answer(response.statusCode(), YamlUtil.parseMap(response.body()));
   }
 

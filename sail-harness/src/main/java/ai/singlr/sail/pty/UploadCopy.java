@@ -8,6 +8,7 @@ package ai.singlr.sail.pty;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.pty.PtyMessage.PutRefusal;
 import java.io.BufferedReader;
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -279,9 +280,26 @@ final class UploadCopy {
             CompletableFuture.delayedExecutor(place.patience().toMillis(), TimeUnit.MILLISECONDS));
     var output =
         new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
-    var line = output.readLine();
-    unanswered.cancel(false);
+    String line;
+    try {
+      line = output.readLine();
+    } catch (IOException unread) {
+      process.destroyForcibly();
+      closeQuietly(process.getOutputStream());
+      closeQuietly(output);
+      throw unread;
+    } finally {
+      unanswered.cancel(false);
+    }
     return new Copy(container, place.root() + "/" + instanceId, name, size, process, output, line);
+  }
+
+  private static void closeQuietly(Closeable pipe) {
+    try {
+      pipe.close();
+    } catch (IOException alreadyGone) {
+      var unused = alreadyGone;
+    }
   }
 
   /** One copy into a container: the process whose input takes its bytes, and its number. */
@@ -294,6 +312,8 @@ final class UploadCopy {
     private final BufferedReader output;
     private final String first;
     private final int number;
+    private Integer status;
+    private String said;
 
     private Copy(
         String container,
@@ -334,7 +354,31 @@ final class UploadCopy {
 
     /** What the copy's script refused, once it has ended. */
     PutRefusal refusal() {
-      return refusalOf(finish(process));
+      return refusalOf(end());
+    }
+
+    /**
+     * Its script's status once it has ended, its pipes then closed, once: what it said after its
+     * number when it refused for space, which {@link #free} reads, is kept first.
+     */
+    private synchronized int end() {
+      if (status == null) {
+        status = finish(process);
+        said = first;
+        if (opened()) {
+          said = null;
+          if (status == NO_SPACE) {
+            try {
+              said = output.readLine();
+            } catch (IOException e) {
+              said = null;
+            }
+          }
+        }
+        closeQuietly(process.getOutputStream());
+        closeQuietly(output);
+      }
+      return status;
     }
 
     /**
@@ -342,27 +386,18 @@ final class UploadCopy {
      * PutRefusal#NO_SPACE}, once it has ended; 0 when it said none.
      */
     long free() {
-      var said = first;
-      if (opened()) {
-        try {
-          said = output.readLine();
-        } catch (IOException e) {
-          said = null;
-        }
-      }
+      end();
       return said != null && said.matches("free [0-9]{1,18}")
           ? Long.parseLong(said.substring(5))
           : 0;
     }
 
-    /** Ends the copy: its input closed, its script's status once it exits. */
+    /**
+     * Ends the copy: its input closed, its script's status once it exits, its pipes then closed.
+     */
     int close() {
-      try {
-        process.getOutputStream().close();
-      } catch (IOException e) {
-        var unused = e;
-      }
-      return finish(process);
+      closeQuietly(process.getOutputStream());
+      return end();
     }
 
     /**
@@ -418,7 +453,11 @@ final class UploadCopy {
     try {
       var process = processes.start(command);
       process.getOutputStream().close();
-      return finish(process);
+      try {
+        return finish(process);
+      } finally {
+        process.getInputStream().close();
+      }
     } catch (IOException e) {
       return 1;
     }

@@ -104,7 +104,6 @@ public final class DispatchCommand implements Runnable {
   private final Function<Boolean, ShellExec> shells;
   private final BiFunction<ShellExec, OperationHooks, HostOperations> operations;
   private final Supplier<String> handle;
-  private SailEventPublisher eventPublisher;
 
   public DispatchCommand() {
     this(
@@ -445,10 +444,7 @@ public final class DispatchCommand implements Runnable {
       return;
     }
     try {
-      if (eventPublisher == null) {
-        eventPublisher = SailEventPublisher.localDefault();
-      }
-      eventPublisher.publish(event);
+      SailEventPublisher.publishToThisBox(event);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       warnLifecyclePublishFailed(event.type(), e);

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.TrackedProcess;
 import ai.singlr.sail.pty.PtyMessage.PutRefusal;
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -21,6 +22,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +46,7 @@ class UploadCopyTest {
 
   private ContainerDirectory c;
   private UploadCopy copies;
+  private final List<TrackedProcess> started = new CopyOnWriteArrayList<>();
 
   @BeforeEach
   void container() throws Exception {
@@ -104,6 +107,66 @@ class UploadCopyTest {
         "a host before this one stored it", Files.readString(session().resolve("2-a.png")));
     assertEquals("two", Files.readString(Path.of(next.path())));
     assertFalse(Files.exists(target), "nothing was written through a planted link");
+  }
+
+  /** Copies whose every process says whether the copy closed its stdin and stdout. */
+  private UploadCopy tracked() throws IOException {
+    return new UploadCopy(
+        command -> {
+          var process = TrackedProcess.of(c.processes.start(command));
+          started.add(process);
+          return process;
+        },
+        c.place());
+  }
+
+  private void assertEveryPipeClosed() {
+    assertFalse(started.isEmpty(), "a script ran");
+    for (var process : started) {
+      assertTrue(process.inputClosed(), "stdin closed by the copy");
+      assertTrue(process.outputClosed(), "stdout closed by the copy");
+    }
+  }
+
+  /** A copy stored and committed closes the pipes of every script it ran, once each ended. */
+  @Test
+  void aStoredCopyClosesThePipesOfEveryScriptItRan() throws Exception {
+    copies = tracked();
+
+    stored("a", new byte[] {1, 2, 3});
+
+    assertEveryPipeClosed();
+  }
+
+  /**
+   * A copy the container refused for space closes its script's pipes once the script has ended, and
+   * still says what is free.
+   */
+  @Test
+  void aCopyRefusedForSpaceClosesItsPipesAndStillSaysWhatIsFree() throws Exception {
+    copies = tracked();
+
+    var noRoom = copies.open("acme", ID, "c", 1L << 60, process -> {});
+
+    assertEquals(PutRefusal.NO_SPACE, noRoom.refusal());
+    var free = noRoom.free();
+    assertTrue(free > 0 && free < 1L << 60, "the refusal says what is free: " + free);
+    assertEveryPipeClosed();
+  }
+
+  /** A copy given up partway, as an upload that fails is, closes the pipes of every script. */
+  @Test
+  void aCopyGivenUpClosesThePipesOfEveryScript() throws Exception {
+    copies = tracked();
+    var copy = copies.open("acme", ID, "a", 3, process -> {});
+    assertTrue(copy.opened());
+    copy.write(new byte[] {1});
+
+    copy.close();
+    assertEquals(PutRefusal.FAILED, copy.refusal());
+    assertEquals(0, copy.abort());
+
+    assertEveryPipeClosed();
   }
 
   /** Major 1: a copy that kept fewer bytes than were sent never takes the file's name. */

@@ -194,18 +194,28 @@ public final class AgentWatchCommand implements Runnable {
     var started = parseStartedAt(startedAt);
     var shell = new ShellExecutor(dryRun);
     requireRunning(shell);
+    supervise(shell, notifications(), guardrails, started);
+  }
 
-    var notifications = notifications();
-    var notifier = buildNotifier(notifications);
+  /**
+   * Watches the run on {@code shell} under {@code guardrails} from {@code started}, with a notifier
+   * for {@code notifications} and a publisher to this box's API, both held for the watch's life and
+   * closed with it however it ends.
+   */
+  void supervise(
+      ShellExec shell, Notifications notifications, Guardrails guardrails, Instant started)
+      throws Exception {
+    try (var notifier = buildNotifier(notifications);
+        var events = localPublisher()) {
+      RunWatch.StopPublisher publisher = events == null ? null : events::publish;
+      if (!watchable(shell, publisher)) {
+        return;
+      }
+      announceStart(guardrails, RunWatch.deadline(started, guardrails.maxDuration()));
 
-    var publisher = resolvePublisher();
-    if (!watchable(shell, publisher)) {
-      return;
-    }
-    announceStart(guardrails, RunWatch.deadline(started, guardrails.maxDuration()));
-
-    try (var feed = new StreamFeed(ServerConnectionConfig.resolve().token())) {
-      watch(shell, feed, publisher, narrator(notifier, notifications), DateTimeUtils::now).run();
+      try (var feed = new StreamFeed(ServerConnectionConfig.resolve().token())) {
+        watch(shell, feed, publisher, narrator(notifier, notifications), DateTimeUtils::now).run();
+      }
     }
   }
 
@@ -279,10 +289,10 @@ public final class AgentWatchCommand implements Runnable {
     }
   }
 
-  private RunWatch.StopPublisher resolvePublisher() {
+  /** The publisher to this box's API for the watch's life, or null when none is configured. */
+  private static SailEventPublisher localPublisher() {
     try {
-      var publisher = SailEventPublisher.localDefault();
-      return publisher::publish;
+      return SailEventPublisher.localDefault();
     } catch (Exception e) {
       return null;
     }

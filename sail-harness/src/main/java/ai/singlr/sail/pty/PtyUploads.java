@@ -127,6 +127,14 @@ final class PtyUploads {
     return new PtyUploads(UploadCopy.intoContainers(), PtyUploads::targetOf, SYSTEM_TIMER);
   }
 
+  /**
+   * Waits for the removals and sweeps of sessions' uploads still running ({@link UploadCleanup}),
+   * {@code within} at most.
+   */
+  void close(Duration within) {
+    cleanup.close(within);
+  }
+
   /** Where a file pasted into {@code origin}'s session goes. */
   Target target(PtySession.Origin origin) {
     return targets.apply(origin);
@@ -307,8 +315,8 @@ final class PtyUploads {
       upload.copy = copy;
       if (ended(upload.record) || !copy.opened()) {
         var kind = ended(upload.record) ? PutRefusal.SESSION_ENDED : copy.refusal();
+        copy.close();
         if (copy.opened()) {
-          copy.close();
           copy.abort();
         }
         refuse(upload, kind, reply);

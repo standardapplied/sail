@@ -5,10 +5,12 @@
 
 package ai.singlr.sail.pty;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
@@ -58,8 +60,16 @@ final class UploadCleanup {
       done
       """;
 
+  /**
+   * The most closing waits for the removals and sweeps still running, all of them together: each
+   * may take an {@code incus exec} up to its place's patience, and a host stopping gives them only
+   * what is left of its own deadline ({@link PtySessionHost#STOPPING}).
+   */
+  static final Duration CLOSING = Duration.ofSeconds(5);
+
   private final UploadCopy copy;
   private final Map<String, ReentrantLock> containers = new ConcurrentHashMap<>();
+  private final Set<Thread> running = ConcurrentHashMap.newKeySet();
 
   UploadCleanup(UploadCopy copy) {
     this.copy = copy;
@@ -76,31 +86,29 @@ final class UploadCleanup {
    * holds it lands before. A removal that fails is logged; the next session's sweep takes it.
    */
   void remove(String container, String instanceId, ReentrantLock session) {
-    Thread.ofVirtual()
-        .name("pty-upload-remove")
-        .start(
-            () -> {
-              if (session != null) {
-                session.lock();
-              }
-              try {
-                var root = copy.place();
-                var status =
-                    copy.run(
-                        container, root.asRoot(), REMOVE, root.root(), instanceId, root.rootUid());
-                if (status != 0) {
-                  PtySessionHost.log(
-                      "upload-cleanup-failed",
-                      "-",
-                      instanceId,
-                      UploadCopy.reason(status) + "; swept at the next session");
-                }
-              } finally {
-                if (session != null) {
-                  session.unlock();
-                }
-              }
-            });
+    start(
+        "pty-upload-remove",
+        () -> {
+          if (session != null) {
+            session.lock();
+          }
+          try {
+            var root = copy.place();
+            var status =
+                copy.run(container, root.asRoot(), REMOVE, root.root(), instanceId, root.rootUid());
+            if (status != 0) {
+              PtySessionHost.log(
+                  "upload-cleanup-failed",
+                  "-",
+                  instanceId,
+                  UploadCopy.reason(status) + "; swept at the next session");
+            }
+          } finally {
+            if (session != null) {
+              session.unlock();
+            }
+          }
+        });
   }
 
   /**
@@ -111,27 +119,72 @@ final class UploadCleanup {
    * what a live session made or is making.
    */
   void sweep(String container, Supplier<Collection<String>> live) {
-    Thread.ofVirtual()
-        .name("pty-upload-sweep")
-        .start(
-            () -> {
-              var lock = lockOf(container);
-              lock.lock();
-              try {
-                var root = copy.place();
-                var args = new ArrayList<>(List.of(root.root(), root.rootUid()));
-                args.addAll(live.get());
-                var status = copy.run(container, root.asRoot(), SWEEP, args.toArray(String[]::new));
-                if (status != 0) {
-                  PtySessionHost.log(
-                      "upload-sweep-failed",
-                      "-",
-                      container,
-                      UploadCopy.reason(status) + "; kept until the next session");
-                }
-              } finally {
-                lock.unlock();
-              }
-            });
+    start(
+        "pty-upload-sweep",
+        () -> {
+          var lock = lockOf(container);
+          lock.lock();
+          try {
+            var root = copy.place();
+            var args = new ArrayList<>(List.of(root.root(), root.rootUid()));
+            args.addAll(live.get());
+            var status = copy.run(container, root.asRoot(), SWEEP, args.toArray(String[]::new));
+            if (status != 0) {
+              PtySessionHost.log(
+                  "upload-sweep-failed",
+                  "-",
+                  container,
+                  UploadCopy.reason(status) + "; kept until the next session");
+            }
+          } finally {
+            lock.unlock();
+          }
+        });
+  }
+
+  /** Runs {@code work} on a virtual thread named {@code name}, one {@link #close} waits for. */
+  private void start(String name, Runnable work) {
+    var thread =
+        Thread.ofVirtual()
+            .name(name)
+            .unstarted(
+                () -> {
+                  try {
+                    work.run();
+                  } finally {
+                    running.remove(Thread.currentThread());
+                  }
+                });
+    running.add(thread);
+    thread.start();
+  }
+
+  /**
+   * Waits for every removal and sweep still running, all of them together, for {@code within} but
+   * never more than {@link #CLOSING}, so none outlives the host that started it; one still running
+   * then is said and left, its directory swept at the container's next session. An interrupt stops
+   * the waiting and is kept.
+   */
+  void close(Duration within) {
+    var wait = within.compareTo(CLOSING) < 0 ? within : CLOSING;
+    var deadline = System.nanoTime() + wait.toNanos();
+    for (var thread : List.copyOf(running)) {
+      try {
+        thread.join(Duration.ofNanos(Math.max(0, deadline - System.nanoTime())));
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return;
+      }
+    }
+    if (!running.isEmpty()) {
+      PtySessionHost.log(
+          "upload-cleanup-left",
+          "-",
+          "-",
+          running.size()
+              + " removal(s) or sweep(s) still running after "
+              + Math.max(0, wait.toMillis())
+              + " ms; swept at the next session");
+    }
   }
 }

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.ClosesWhatItOpens;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -24,6 +25,8 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 class SshTunnelTest {
 
@@ -220,5 +223,24 @@ class SshTunnelTest {
     public boolean isAlive() {
       return alive;
     }
+  }
+
+  /**
+   * The tunnel's ssh reads nothing and prints nothing, so its stderr, kept for diagnostics, is its
+   * one pipe of ours: its input is empty, so one that reads it ends at once.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void theTunnelsSshHasOnlyItsStderrAsAPipeOfOurs() throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+
+    var ssh = SshTunnel.launch(List.of("cat"));
+    try (var stderr = ssh.getErrorStream()) {
+      assertTrue(ssh.waitFor(10, TimeUnit.SECONDS), "it read an empty input");
+    } finally {
+      ssh.destroyForcibly();
+    }
+
+    ClosesWhatItOpens.assertClosed("a tunnel's ssh", before);
   }
 }

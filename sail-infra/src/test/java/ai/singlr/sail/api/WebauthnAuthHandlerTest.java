@@ -39,12 +39,20 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class WebauthnAuthHandlerTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   private static final String RP_ID = "sail.acme.dev";
   private static final String ORIGIN = "https://sail.acme.dev";
@@ -109,7 +117,7 @@ class WebauthnAuthHandlerTest {
         body == null
             ? HttpRequest.BodyPublishers.noBody()
             : HttpRequest.BodyPublishers.ofString(body));
-    return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    return CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
   }
 
   @Test
@@ -607,7 +615,7 @@ class WebauthnAuthHandlerTest {
     builder.header("X-Enrollment-Ticket", ticket);
     builder.header("Content-Type", "application/json");
     builder.method("POST", HttpRequest.BodyPublishers.ofString(body));
-    return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    return CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
   }
 
   private static String registerFinishBody(

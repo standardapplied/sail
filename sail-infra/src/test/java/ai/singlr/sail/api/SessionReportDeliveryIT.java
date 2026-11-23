@@ -7,10 +7,10 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.commands.AgentAttachCommand;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SailSessionReport;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -26,12 +26,11 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -122,7 +121,7 @@ class SessionReportDeliveryIT {
             {"session_id": "0199aaaa-1111-7000-8000-000000000001", "source": "startup",
              "transcript_path": "/home/dev/.claude/projects/w/s.jsonl",
              "hook_event_name": "SessionStart"}""");
-    assertEquals(0, report.exitCode());
+    assertEquals(0, report.exit());
     assertEquals("", report.stdout(), "SessionStart stdout joins the agent context: stay mute");
 
     var run = runStore.findById(runId).orElseThrow();
@@ -142,7 +141,7 @@ class SessionReportDeliveryIT {
   void aCompactRestartOverwritesTheRecordedConversation() throws Exception {
     runScript("{\"session_id\": \"first-111\", \"source\": \"startup\"}");
     var second = runScript("{\"session_id\": \"second-222\", \"source\": \"compact\"}");
-    assertEquals(0, second.exitCode());
+    assertEquals(0, second.exit());
 
     var run = runStore.findById(runId).orElseThrow();
     assertEquals("second-222", run.sessionId(), "last write wins: the newest conversation");
@@ -156,7 +155,7 @@ class SessionReportDeliveryIT {
 
     var late = runScript("{\"session_id\": \"stale-999\", \"source\": \"resume\"}");
 
-    assertEquals(0, late.exitCode(), "the report swallows the 401 — never blocks an agent");
+    assertEquals(0, late.exit(), "the report swallows the 401 — never blocks an agent");
     assertEquals(
         "live-111",
         runStore.findById(runId).orElseThrow().sessionId(),
@@ -170,29 +169,19 @@ class SessionReportDeliveryIT {
 
     var report = runScript("{\"session_id\": \"abc\", \"source\": \"startup\"}");
 
-    assertEquals(0, report.exitCode(), "a down API must never block a session start");
+    assertEquals(0, report.exit(), "a down API must never block a session start");
     assertEquals("", report.stdout());
     assertNull(runStore.findById(runId).orElseThrow().sessionId());
   }
 
-  private record ScriptResult(int exitCode, String stdout, String stderr) {}
-
-  private ScriptResult runScript(String stdin) throws Exception {
-    var script = writeScript();
-    var pb = new ProcessBuilder("/bin/sh", script.toString());
+  private Child.Ended runScript(String stdin) throws Exception {
+    var pb = new ProcessBuilder("/bin/sh", writeScript().toString());
     var env = pb.environment();
     env.put("HOME", home.toString());
     env.remove("SAIL_SPEC_ID");
     env.put("SAIL_RUN_ID", runId);
     env.put("SAIL_RUN_CREDENTIAL", credential);
-    var process = pb.start();
-    try (var in = process.getOutputStream()) {
-      in.write(stdin.getBytes(StandardCharsets.UTF_8));
-    }
-    var stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    var stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertTrue(process.waitFor(30, TimeUnit.SECONDS), "the report must finish inside its timeout");
-    return new ScriptResult(process.exitValue(), stdout, stderr);
+    return Child.run(pb, stdin, Duration.ofSeconds(30));
   }
 
   private Path writeScript() throws IOException {

@@ -89,6 +89,7 @@ public final class ContainerAgentProcess implements AgentProcess {
     private final Process process;
     private final BufferedWriter in;
     private final BufferedReader out;
+    private volatile boolean ended;
 
     private Piped(String container, String pidFile, Process process) {
       this.container = container;
@@ -128,9 +129,38 @@ public final class ContainerAgentProcess implements AgentProcess {
       }
     }
 
+    /**
+     * The next line of stdout, or {@code null} once it has ended; at its end, or when it cannot be
+     * read, the handle closes it and stdin, for a process done speaking takes no more input, so its
+     * pipes go with the reading rather than whenever the JDK's reaper gets to them.
+     */
     @Override
     public String read() throws IOException {
-      return out.readLine();
+      if (ended) {
+        return null;
+      }
+      String line;
+      try {
+        line = out.readLine();
+      } catch (IOException broken) {
+        endOutput();
+        throw broken;
+      }
+      if (line == null) {
+        endOutput();
+      }
+      return line;
+    }
+
+    private void endOutput() {
+      ended = true;
+      try {
+        out.close();
+      } catch (IOException alreadyGone) {
+        var unused = alreadyGone;
+      } finally {
+        close();
+      }
     }
 
     @Override

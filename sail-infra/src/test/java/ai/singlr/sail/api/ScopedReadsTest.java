@@ -72,6 +72,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -91,6 +92,13 @@ import org.junit.jupiter.api.io.TempDir;
  * a read added to the API without a row here fails the sweep.
  */
 class ScopedReadsTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   private static final String A_RUN = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   private static final String B_RUN = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -308,7 +316,6 @@ class ScopedReadsTest {
   private final List<String> containers = new CopyOnWriteArrayList<>();
   private String samId;
   private final Set<String> reached = new ConcurrentSkipListSet<>();
-  private final HttpClient client = HttpClient.newHttpClient();
   private Sqlite db;
   private String since;
   private EventBus bus;
@@ -1332,7 +1339,7 @@ class ScopedReadsTest {
 
   private String send(String token, String method, String route, String body) throws Exception {
     var response =
-        client.send(
+        CLIENT.send(
             HttpRequest.newBuilder(
                     URI.create("http://127.0.0.1:" + server.getAddress().getPort() + route))
                 .header("Authorization", "Bearer " + token)
@@ -1544,7 +1551,7 @@ class ScopedReadsTest {
             .header("Authorization", "Bearer " + token)
             .timeout(Duration.ofSeconds(30));
     var response =
-        client.send(
+        CLIENT.send(
             post
                 ? request.POST(HttpRequest.BodyPublishers.noBody()).build()
                 : request.GET().build(),

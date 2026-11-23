@@ -52,7 +52,9 @@ class BlobStreamingTest {
                 dir.toString())
             .redirectErrorStream(true)
             .redirectOutput(log.toFile())
+            .redirectInput(Child.NO_INPUT)
             .start();
+    process.getErrorStream().close();
     try {
       assertTrue(process.waitFor(2, TimeUnit.MINUTES), "streaming probe timed out");
       assertEquals(

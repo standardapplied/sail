@@ -16,6 +16,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
@@ -102,6 +104,18 @@ public final class ScriptedShellExecutor implements ShellExec {
   public ScriptedShellExecutor onceOn(String pattern, Result result) {
     consumable.add(pattern);
     return on(pattern, result);
+  }
+
+  /**
+   * Hangs as a command that never answers does, until {@code timeout}, then times out as {@link
+   * ShellExecutor} says it; an interrupt ends it as it ends a command. No process is started, so
+   * nothing it opened is left closing once its caller has stopped waiting for it.
+   */
+  public static Result hang(List<String> command, Duration timeout)
+      throws InterruptedException, CommandTimedOut {
+    new CountDownLatch(1).await(timeout.toNanos(), TimeUnit.NANOSECONDS);
+    throw new CommandTimedOut(
+        "Command timed out after " + timeout.toSeconds() + "s: " + String.join(" ", command), "");
   }
 
   /**

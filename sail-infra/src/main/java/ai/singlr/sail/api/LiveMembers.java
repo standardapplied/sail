@@ -568,9 +568,21 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
           : new ApiException(
               ErrorCode.AGENT_LAUNCH_FAILED, "Failed to start the room's live member.", failed);
     }
-    var started =
-        new Member(
-            seat, config, runStore.findById(runId).orElseThrow(), unit, handle, full, localHandle);
+    Member started;
+    try {
+      started =
+          new Member(
+              seat,
+              config,
+              runStore.findById(runId).orElseThrow(),
+              unit,
+              handle,
+              full,
+              localHandle);
+    } catch (RuntimeException failed) {
+      abandon(handle, runId);
+      throw failed;
+    }
     members.put(seat.roomId(), started);
     reading.add(started);
     Thread.ofVirtual().name("sail-live-" + runId).start(started::read);
@@ -592,6 +604,26 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     started.admit();
     markDelivered(runId, tail.stream().filter(message -> !unread.contains(message)).toList());
     hand(started, pages);
+  }
+
+  /**
+   * Ends a process no member came to own: its input closed, so it reads its end, it is asked to
+   * stop, and its output is read to its end on a thread of its own, where its handle closes its
+   * pipes.
+   */
+  private static void abandon(AgentProcess.Handle handle, String runId) {
+    handle.stdin().close();
+    handle.signal(AgentProcess.Signal.TERM);
+    Thread.ofVirtual()
+        .name("sail-live-abandoned-" + runId)
+        .start(
+            () -> {
+              try {
+                while (handle.stdout().read() != null) {}
+              } catch (IOException gone) {
+                var unused = gone;
+              }
+            });
   }
 
   /**

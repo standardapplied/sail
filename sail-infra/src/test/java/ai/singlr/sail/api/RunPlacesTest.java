@@ -17,6 +17,7 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerConfig;
+import ai.singlr.sail.engine.Databases;
 import ai.singlr.sail.engine.DeviceFixtures;
 import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.RunPlace;
@@ -28,7 +29,6 @@ import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TestRuns;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -43,6 +43,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -52,6 +53,13 @@ import org.junit.jupiter.api.io.TempDir;
  * a create that fails, a box whose memory cannot be read, and the remedy each lane is told.
  */
 class RunPlacesTest {
+
+  private final Databases databases = new Databases();
+
+  @AfterEach
+  void closeDatabases() {
+    databases.close();
+  }
 
   private static final String YAML =
       """
@@ -93,7 +101,7 @@ class RunPlacesTest {
   }
 
   private RunStore runs(String file) {
-    var db = Sqlite.open(dir.resolve(file));
+    var db = databases.open(dir.resolve(file));
     new SchemaManager(db).migrate();
     return new RunStore(db);
   }

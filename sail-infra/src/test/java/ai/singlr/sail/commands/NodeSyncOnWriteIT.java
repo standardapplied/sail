@@ -7,13 +7,13 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.Main;
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxDatabase;
@@ -22,10 +22,7 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncDatabase;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.net.ServerSocket;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -79,9 +76,7 @@ class NodeSyncOnWriteIT {
     var port = freePort();
     var server = startNodeServer(nodeHome, shim.getParent(), port);
     var lines = new LinkedBlockingQueue<String>();
-    var reader = new Thread(() -> drainInto(server, lines), "node-server-output");
-    reader.setDaemon(true);
-    reader.start();
+    var reader = Child.drain(server, lines);
     try {
       awaitListening(server, lines);
       finishJoin(nodeHome, shim.getParent());
@@ -91,7 +86,11 @@ class NodeSyncOnWriteIT {
       awaitSpecOnMain(server, mainDb);
     } finally {
       server.destroy();
-      server.waitFor(10, TimeUnit.SECONDS);
+      if (!server.waitFor(10, TimeUnit.SECONDS)) {
+        server.destroyForcibly();
+      }
+      server.waitFor();
+      reader.join();
     }
   }
 
@@ -150,14 +149,19 @@ class NodeSyncOnWriteIT {
    * which pulls main's roster, so the node knows its own FDE.
    */
   private static void finishJoin(Path nodeHome, Path shimDir) throws Exception {
-    var sync = startNode(nodeHome, shimDir, "sync");
-    var output = new String(sync.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertTrue(sync.waitFor(60, TimeUnit.SECONDS), "the first sync never finished: " + output);
-    assertEquals(0, sync.exitValue(), output);
+    var sync = Child.run(node(nodeHome, shimDir, "sync"));
+    assertEquals(0, sync.exit(), sync.stdout());
   }
 
   /** A child JVM running {@code sail <args>} as this node, with the ssh shim on {@code PATH}. */
   private static Process startNode(Path nodeHome, Path shimDir, String... args) throws Exception {
+    var process = node(nodeHome, shimDir, args).start();
+    process.getOutputStream().close();
+    return process;
+  }
+
+  /** How {@link #startNode} starts {@code sail <args>} as this node. */
+  private static ProcessBuilder node(Path nodeHome, Path shimDir, String... args) {
     var command = new ArrayList<String>();
     command.addAll(
         List.of(
@@ -175,9 +179,7 @@ class NodeSyncOnWriteIT {
     env.remove("SAIL_TOKEN");
     env.remove("SAIL_DATA_DIR");
     env.remove("SAIL_NO_SYNC");
-    var process = builder.start();
-    process.getOutputStream().close();
-    return process;
+    return builder;
   }
 
   private static void awaitListening(Process server, LinkedBlockingQueue<String> lines)
@@ -239,18 +241,6 @@ class NodeSyncOnWriteIT {
       var spec = new SpecStore(db).findById(SPEC_ID);
       spec.ifPresent(row -> assertEquals("acme", row.project()));
       return spec.isPresent();
-    }
-  }
-
-  private static void drainInto(Process process, LinkedBlockingQueue<String> lines) {
-    try (var reader =
-        new BufferedReader(
-            new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-      String line;
-      while ((line = reader.readLine()) != null) {
-        lines.add(line);
-      }
-    } catch (Exception ignored) {
     }
   }
 

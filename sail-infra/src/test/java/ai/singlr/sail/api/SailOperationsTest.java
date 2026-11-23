@@ -21,6 +21,7 @@ import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.Databases;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailSkills;
@@ -71,6 +72,7 @@ import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -78,6 +80,13 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 @ActingAs
 class SailOperationsTest {
+
+  private final Databases databases = new Databases();
+
+  @AfterEach
+  void closeDatabases() {
+    databases.close();
+  }
 
   private static final String RUNNING_JSON =
       """
@@ -331,7 +340,7 @@ class SailOperationsTest {
   @Test
   void catalogConstructorServesTheProjectList() throws Exception {
     var yaml = baseYamlPath(tempDir);
-    var db = Sqlite.open(tempDir.resolve("catalog-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("catalog-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     var projectStore = new ProjectStore(db);
     projectStore.upsert(TestDefinitions.yaml("name: beta"));
@@ -352,7 +361,7 @@ class SailOperationsTest {
   @Test
   @SuppressWarnings("unchecked")
   void fdesReturnsTheRosterSortedByHandle() throws Exception {
-    var db = Sqlite.open(tempDir.resolve("roster-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("roster-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var fdeStore = new FdeStore(db);
@@ -625,7 +634,7 @@ class SailOperationsTest {
   }
 
   private Sqlite dryRunDatabase() throws Exception {
-    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     seedAuthBillingSetup(new SpecStore(db));
@@ -1015,7 +1024,7 @@ class SailOperationsTest {
       HeldProjects.hold(db, "acme");
       var specStore = new SpecStore(db);
       seedAuthBillingSetup(specStore);
-      var brokenDb = Sqlite.open(tempDir.resolve("runs-broken.db"));
+      var brokenDb = databases.open(tempDir.resolve("runs-broken.db"));
       new SchemaManager(brokenDb).migrate();
       HeldProjects.hold(brokenDb, "acme");
       var brokenRuns = new RunStore(brokenDb);
@@ -2112,7 +2121,7 @@ class SailOperationsTest {
   void serverStartConstructorWiresTheRunLane() throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, baseYaml());
-    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var operations =
@@ -2137,7 +2146,7 @@ class SailOperationsTest {
   void serverStartConstructorWiresTheMessageLane() throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, baseYaml());
-    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var specStore = new SpecStore(db);
@@ -2214,7 +2223,7 @@ class SailOperationsTest {
   @Test
   void boxCredentialResolvesToTheBoxsOwnPersonWhenAskedAndFailsClosed() throws Exception {
     var box = new AtomicReference<>("uday");
-    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     var operations = nodeOf(db, box::get);
     var boxStore = new BoxCredentialStore(db);
 
@@ -2244,7 +2253,7 @@ class SailOperationsTest {
 
   @Test
   void aRunActingForNoFdeSeesWhatTheBoxsPersonSees() throws Exception {
-    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     var operations = nodeOf(db, () -> "ada");
     var ownerless =
         new RunStore.RunRow(
@@ -2330,7 +2339,7 @@ class SailOperationsTest {
   void serverStartConstructorRestartsADoneSpecOntoItsPriorBranch() throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, branchYaml());
-    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var store = new SpecStore(db);
@@ -2511,7 +2520,7 @@ class SailOperationsTest {
   void dispatchRecordsTheWatcherPidOnTheSessionStartedEvent() throws Exception {
     var yaml = tempDir.resolve("sail-watcher-pid.yaml");
     Files.writeString(yaml, guardrailsYaml());
-    var db = Sqlite.open(tempDir.resolve("watcher-pid.db"));
+    var db = databases.open(tempDir.resolve("watcher-pid.db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var store = new SpecStore(db);
@@ -3039,7 +3048,7 @@ class SailOperationsTest {
   @Test
   @SuppressWarnings("unchecked")
   void specEventsServesTheScopedRecordOldestFirst() throws Exception {
-    var db = Sqlite.open(tempDir.resolve("events-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("events-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var events = new EventStore(db);
@@ -3066,7 +3075,7 @@ class SailOperationsTest {
   @Test
   @SuppressWarnings("unchecked")
   void specEventsSinceCursorIsExclusiveAndLimitBounds() throws Exception {
-    var db = Sqlite.open(tempDir.resolve("events-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("events-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var events = new EventStore(db);
@@ -3088,7 +3097,7 @@ class SailOperationsTest {
   @Test
   @SuppressWarnings("unchecked")
   void specEventsServesARowWhoseDataNoLongerParses() throws Exception {
-    var db = Sqlite.open(tempDir.resolve("events-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("events-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var events = new EventStore(db);
@@ -3196,7 +3205,7 @@ class SailOperationsTest {
   void reviewDetailDismissAndApproveSucceedForSeededReview() throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, baseYaml());
-    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var specStore = new SpecStore(db);
@@ -3488,7 +3497,7 @@ class SailOperationsTest {
   }
 
   private SailOperations eventOperations(Path dir, EventBus bus) throws IOException {
-    var db = Sqlite.open(dir.resolve("events.db"));
+    var db = databases.open(dir.resolve("events.db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     return TestControlPlane.standalone(
@@ -3589,7 +3598,7 @@ class SailOperationsTest {
       throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, yamlContent);
-    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var specStore = new SpecStore(db);
@@ -3627,7 +3636,7 @@ class SailOperationsTest {
       throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, baseYaml());
-    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var specStore = new SpecStore(db);
@@ -3669,7 +3678,7 @@ class SailOperationsTest {
       throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, yamlContent);
-    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var store = new SpecStore(db);

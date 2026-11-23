@@ -66,8 +66,9 @@ public final class EventsCommand implements Runnable {
 
   private void execute() throws Exception {
     var token = ServerConnectionConfig.resolve().token();
-    var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
-    streamEvents(client, token, System.out);
+    try (var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()) {
+      streamEvents(client, token, System.out);
+    }
   }
 
   private void streamEvents(HttpClient client, String token, PrintStream out) throws Exception {

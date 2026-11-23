@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -1575,11 +1574,9 @@ class WorkspacesTest {
     for (var i = 0; i < resolves.length; i++) {
       process.environment().put("RESOLVE_" + (i + 1), resolves[i]);
     }
-    var running = process.start();
-    var out = new String(running.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    var err = new String(running.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+    var ran = Child.run(process);
     return new ShellExec.Result(
-        running.waitFor(), "asks=" + Files.readString(tries).strip() + " " + out, err);
+        ran.exit(), "asks=" + Files.readString(tries).strip() + " " + ran.stdout(), ran.stderr());
   }
 
   /**
@@ -1943,9 +1940,9 @@ class WorkspacesTest {
     var script = tempDir.resolve("prepare.sh");
     Files.writeString(script, Workspaces.PREPARE, StandardCharsets.UTF_8);
 
-    var checked = new ProcessBuilder("bash", "-n", script.toString()).start();
+    var checked = Child.run(new ProcessBuilder("bash", "-n", script.toString()));
 
-    assertSame(0, checked.waitFor());
+    assertEquals(0, checked.exit(), checked.stderr());
   }
 
   /**

@@ -6,12 +6,11 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.Child;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.channels.FileChannel;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
@@ -50,39 +49,39 @@ final class LockProbe {
 
   /** What another JVM finds of {@code lock}. */
   static String from(Path lock) throws Exception {
-    var probe = start(lock.toString());
-    assertTrue(
-        probe.waitFor(LocalPtyHostTest.STEP.toMillis(), TimeUnit.MILLISECONDS), "the probe ran");
-    assertEquals(0, probe.exitValue());
-    return new String(probe.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
+    var probe = Child.run(probe(lock.toString()), "", LocalPtyHostTest.STEP);
+    assertEquals(0, probe.exit());
+    return probe.stdout().strip();
   }
 
   /** Another JVM holding {@code lock} until the returned holder is closed. */
   static AutoCloseable holding(Path lock) throws Exception {
-    var holder = start("hold", lock.toString());
+    var holder = probe("hold", lock.toString()).start();
     var said = new LinkedBlockingQueue<String>();
-    Thread.ofVirtual()
-        .start(
-            () -> {
-              try (var lines = holder.inputReader(StandardCharsets.UTF_8)) {
-                lines.lines().forEach(said::add);
-              } catch (IOException gone) {
-                var unused = gone;
-              }
-            });
-    assertEquals(
-        "HOLDING",
-        said.poll(LocalPtyHostTest.STEP.toMillis(), TimeUnit.MILLISECONDS),
-        "the holder took the lock");
-    return () -> {
-      holder.getOutputStream().close();
-      if (!holder.waitFor(LocalPtyHostTest.STEP.toMillis(), TimeUnit.MILLISECONDS)) {
-        holder.destroyForcibly();
-      }
-    };
+    var reader = Child.drain(holder, said);
+    AutoCloseable release =
+        () -> {
+          holder.getOutputStream().close();
+          if (!holder.waitFor(LocalPtyHostTest.STEP.toMillis(), TimeUnit.MILLISECONDS)) {
+            holder.destroyForcibly();
+          }
+          holder.waitFor();
+          reader.join();
+        };
+    try {
+      assertEquals(
+          "HOLDING",
+          said.poll(LocalPtyHostTest.STEP.toMillis(), TimeUnit.MILLISECONDS),
+          "the holder took the lock");
+    } catch (AssertionError | InterruptedException notHolding) {
+      release.close();
+      throw notHolding;
+    }
+    return release;
   }
 
-  private static Process start(String... args) throws IOException {
+  /** This class run in another JVM with {@code args}, its output and errors as one. */
+  private static ProcessBuilder probe(String... args) {
     var command =
         new ArrayList<>(
             List.of(
@@ -91,6 +90,6 @@ final class LockProbe {
                 System.getProperty("java.class.path"),
                 LockProbe.class.getName()));
     command.addAll(List.of(args));
-    return new ProcessBuilder(command).redirectErrorStream(true).start();
+    return new ProcessBuilder(command).redirectErrorStream(true);
   }
 }

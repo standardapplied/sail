@@ -14,6 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.ClosesWhatItOpens;
+import ai.singlr.sail.engine.CountingHttpServer;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -56,6 +58,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -425,11 +429,37 @@ class SyncServerCommandTest {
 
     Acting.as("uday", () -> mainSpecs.updateStatus("followup", SpecStatus.DONE));
 
-    SyncServerCommand.transitionBridge(mainDb, "main")
-        .onTransition(new SyncTransition("spec", "followup", "pending", "done", Map.of()));
+    try (var bridge = SyncServerCommand.transitionBridge(mainDb, "main")) {
+      bridge.onTransition(new SyncTransition("spec", "followup", "pending", "done", Map.of()));
+    }
 
     assertEquals(
         Finding.Resolution.FIXED, reviews.findingsForReview(review).getFirst().resolution());
+  }
+
+  /**
+   * A session's bridge hands every event to the local sail-api on one publisher, held from one to
+   * the next, and the bridge closing with its session leaves nothing of it open.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aSessionsBridgePublishesOnOneClientThatTheSessionsEndCloses() throws Exception {
+    Map<String, Object> before;
+    try (var api = CountingHttpServer.answering(503, "")) {
+      System.setProperty("SAIL_SERVER", api.uri("").toString());
+      System.setProperty("SAIL_TOKEN", "tok");
+      before = ClosesWhatItOpens.baseline();
+      try (var bridge = SyncServerCommand.transitionBridge(mainDb, "main")) {
+        bridge.onTransition(
+            new SyncTransition("spec", "fix", "done", "in_progress", Map.of("project", "acme")));
+      } finally {
+        System.clearProperty("SAIL_SERVER");
+        System.clearProperty("SAIL_TOKEN");
+      }
+
+      assertEquals(1, api.connections(), "the restart and its dispatch came on one connection");
+    }
+    ClosesWhatItOpens.assertClosed("a session's bridge", before);
   }
 
   @Test

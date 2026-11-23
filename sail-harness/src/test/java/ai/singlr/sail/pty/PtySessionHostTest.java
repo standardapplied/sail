@@ -17,6 +17,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Secrets;
+import ai.singlr.sail.engine.ClosesWhatItOpens;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
@@ -41,6 +42,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -48,7 +50,12 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -65,6 +72,7 @@ class PtySessionHostTest {
   private final LinkedBlockingQueue<String> typed = new LinkedBlockingQueue<>();
 
   private volatile CountDownLatch startGate;
+  private volatile Runnable whenEnded = () -> {};
   private final CountDownLatch startGated = new CountDownLatch(1);
 
   private final Set<String> revoked = ConcurrentHashMap.newKeySet();
@@ -193,6 +201,12 @@ class PtySessionHostTest {
 
   private PtySessionHost startHost(PtySessionHost.Limits limits, PtySessionHost.Handoff handoff)
       throws IOException {
+    return startHost(limits, handoff, PtyUploads.intoContainers());
+  }
+
+  private PtySessionHost startHost(
+      PtySessionHost.Limits limits, PtySessionHost.Handoff handoff, PtyUploads uploads)
+      throws IOException {
     host =
         new PtySessionHost(
             dir.resolve("host.sock"),
@@ -223,6 +237,7 @@ class PtySessionHostTest {
               @Override
               public void sessionEnded(PtySession.Origin origin, String reason) {
                 events.add("ended:" + origin.name());
+                whenEnded.run();
               }
 
               @Override
@@ -233,9 +248,232 @@ class PtySessionHostTest {
             "0.0.0-test",
             limits,
             handoff,
-            network);
+            network,
+            uploads,
+            FileScripts.ofContainers());
     host.start();
     return host;
+  }
+
+  /**
+   * Closing the host ends a connection it still serves, whose thread is blocked reading the
+   * client's hello: the host's end of the socket closes with the host, never after it.
+   */
+  @Test
+  void closingTheHostEndsAConnectionItStillServes() throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+    try (var client = SocketChannel.open(StandardProtocolFamily.UNIX)) {
+      try (var started = startHost()) {
+        client.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
+        PtyWire.handshake(client, client);
+      }
+
+      assertEquals(
+          -1,
+          assertTimeoutPreemptively(
+              Duration.ofSeconds(5), () -> client.read(ByteBuffer.allocate(1))),
+          "the host ended the connection");
+    }
+    ClosesWhatItOpens.assertClosed("a host and the connection it served", before);
+  }
+
+  /**
+   * Closing the host ends a TCP connection it still serves, as it does a unix one: the door's end
+   * of the socket closes with the host, never after it.
+   */
+  @Test
+  void closingTheHostEndsATcpConnectionItStillServes() throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+    try (var started = startTcpHost();
+        var asker = connect("");
+        var tcp = admitted(started, asker)) {
+      started.close();
+
+      assertEquals(
+          -1,
+          assertTimeoutPreemptively(Duration.ofSeconds(5), () -> tcp.read(ByteBuffer.allocate(1))),
+          "the host ended the connection");
+    }
+    ClosesWhatItOpens.assertClosed("a host and the TCP connection it served", before);
+  }
+
+  /**
+   * A stop waits for the upload removals its sessions' endings started, but only until {@link
+   * UploadCleanup#CLOSING}: one that never returns is said in the log and left, so the host still
+   * stops within the time its unit gives it.
+   */
+  @Test
+  void aStopLeavesAnUploadRemovalThatNeverReturnsOnceItsDeadlinePasses() throws Exception {
+    endingLeavesUploadRemovalsThatNeverReturn(
+        1,
+        UploadCleanup.CLOSING.plusSeconds(5),
+        ending -> ending.stop("stopping"),
+        "1 removal(s) or sweep(s) still running after 5000 ms");
+  }
+
+  /** So does a close. */
+  @Test
+  void aCloseLeavesAnUploadRemovalThatNeverReturnsOnceItsDeadlinePasses() throws Exception {
+    endingLeavesUploadRemovalsThatNeverReturn(
+        1,
+        UploadCleanup.CLOSING.plusSeconds(5),
+        PtySessionHost::close,
+        "1 removal(s) or sweep(s) still running after 5000 ms");
+  }
+
+  /**
+   * Every wait of a stop draws from one deadline, 14 s after it begins: its sessions' endings took
+   * 13 s of it (files told in a second, a session ignoring its hangup and {@code SIGTERM} 6 s, its
+   * shim not exiting 5 s more, then its senders 1 s), so the upload removals, two of them hung, get
+   * the second left between them, not {@link UploadCleanup#CLOSING} each.
+   */
+  @Test
+  void aStopDrawsEveryWaitFromOneDeadline() throws Exception {
+    var ended = new AtomicInteger();
+    whenEnded =
+        () -> {
+          if (ended.incrementAndGet() == 2) {
+            now.addAndGet(Duration.ofSeconds(13).toNanos());
+          }
+        };
+    network = clocked(now::get);
+
+    endingLeavesUploadRemovalsThatNeverReturn(
+        2,
+        UploadCleanup.CLOSING,
+        ending -> ending.stop("stopping"),
+        "2 removal(s) or sweep(s) still running after 1000 ms");
+  }
+
+  /**
+   * A stop waits for no session's ending past its deadline: one whose record never lands, its
+   * database never answering, is said in the log and left. Each read of this host's clock comes a
+   * whole budget after the one before it once the stop begins.
+   */
+  @Test
+  void aStopLeavesASessionEndingThatNeverReturnsOnceItsDeadlinePasses() throws Exception {
+    var never = new CountDownLatch(1);
+    whenEnded = () -> awaitQuietly(never);
+    var late = new AtomicLong();
+    network = clocked(() -> now.addAndGet(late.get()));
+    try (var log = new LogCapture()) {
+      startHost();
+      try (var channel = connect()) {
+        create(channel, "mine", "");
+      }
+      late.set(PtySessionHost.STOPPING.toNanos());
+
+      assertTimeoutPreemptively(
+          Duration.ofSeconds(5), () -> host.stop("stopping"), "it ends in time");
+      assertTrue(log.awaitLine("stop-left").contains("1 session ending(s) still running"));
+    } finally {
+      never.countDown();
+    }
+  }
+
+  /**
+   * A stop leaves the worst ending main lived through its whole time: files told in a second, then
+   * a command ignoring its hangup and {@code SIGTERM} (1 + 5 s) and a shim not exiting in the 5 s
+   * it is then given, killed 12 s into the stop. The stop's clock says those 12 s have passed once
+   * the ending reaches its record, which lands only once the stop is waiting for it: the stop
+   * returns with the shim gone and the record written.
+   */
+  @Test
+  void aStopWaitsForTheRecordOfAnEndingWhoseShimWasKilledLast() throws Exception {
+    var stopper = new AtomicReference<Thread>();
+    var atRecord = new CountDownLatch(1);
+    var recorded = new AtomicBoolean();
+    whenEnded =
+        () -> {
+          atRecord.countDown();
+          awaitWaiting(stopper);
+          recorded.set(true);
+        };
+    var reads = new AtomicInteger();
+    network =
+        clocked(
+            () -> {
+              if (Thread.currentThread() == stopper.get() && reads.incrementAndGet() == 2) {
+                awaitQuietly(atRecord);
+                return now.addAndGet(Duration.ofSeconds(12).toNanos());
+              }
+              return now.get();
+            });
+    startHost();
+    try (var channel = connect()) {
+      create(channel, "stubborn", "");
+    }
+    var shim =
+        ProcessHandle.current()
+            .children()
+            .filter(child -> child.info().commandLine().orElse("").contains(dir.toString()))
+            .findFirst()
+            .orElseThrow();
+
+    var written =
+        assertTimeoutPreemptively(
+            Duration.ofSeconds(5),
+            () -> {
+              stopper.set(Thread.currentThread());
+              host.stop("stopping");
+              return recorded.get() && !shim.isAlive();
+            },
+            "it ends in time");
+
+    assertTrue(written, "the shim was gone and the record written before the stop returned");
+  }
+
+  /** Waits until {@code stopper} waits with a timeout, as a stop waiting for an ending does. */
+  private static void awaitWaiting(AtomicReference<Thread> stopper) {
+    var guard = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+    while (System.nanoTime() < guard
+        && (stopper.get() == null || stopper.get().getState() != Thread.State.TIMED_WAITING)) {
+      Thread.onSpinWait();
+    }
+  }
+
+  private static PtySessionHost.Network clocked(LongSupplier clock) {
+    return new PtySessionHost.Network(
+        Optional.empty(), clock, PtyIdentity.Holders.NONE, PtySessionHost.Network.NONE.closed());
+  }
+
+  private static void awaitQuietly(CountDownLatch latch) {
+    try {
+      latch.await();
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
+  private void endingLeavesUploadRemovalsThatNeverReturn(
+      int sessions, Duration within, Consumer<PtySessionHost> ending, String left)
+      throws Exception {
+    var never = new CountDownLatch(1);
+    var copies =
+        new UploadCopy(
+            command -> {
+              if (command.contains(UploadCleanup.REMOVE)) {
+                awaitQuietly(never);
+              }
+              throw new IOException("no container here");
+            },
+            UploadCopy.Place.CONTAINERS);
+    try (var log = new LogCapture()) {
+      startHost(
+          PtySessionHost.Limits.DEFAULTS,
+          PtySessionHost.Handoff.NONE,
+          new PtyUploads(copies, origin -> PtyUploads.Target.own("box"), PtyUploads.SYSTEM_TIMER));
+      try (var channel = connect()) {
+        for (var i = 1; i <= sessions; i++) {
+          create(channel, "mine-" + i, "");
+        }
+      }
+
+      assertTimeoutPreemptively(within, () -> ending.accept(host), "it ends in time");
+      assertTrue(log.awaitLine("upload-cleanup-left").contains(left));
+    } finally {
+      never.countDown();
+    }
   }
 
   private SocketChannel connect() throws IOException {

@@ -118,6 +118,8 @@ public final class AgentLogCommand implements Runnable {
       try (var reader =
           new BufferedReader(
               new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+        process.getOutputStream().close();
+        process.getErrorStream().close();
         String line;
         while ((line = reader.readLine()) != null) {
           var out = renderForLog(line, json);

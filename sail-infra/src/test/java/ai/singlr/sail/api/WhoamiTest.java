@@ -22,12 +22,20 @@ import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class WhoamiTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   @TempDir Path tempDir;
   private Sqlite db;
@@ -141,7 +149,6 @@ class WhoamiTest {
     if (token != null) {
       builder.header("Authorization", "Bearer " + token);
     }
-    return HttpClient.newHttpClient()
-        .send(builder.GET().build(), HttpResponse.BodyHandlers.ofString());
+    return CLIENT.send(builder.GET().build(), HttpResponse.BodyHandlers.ofString());
   }
 }

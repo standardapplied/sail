@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.WebhookUrlSafety;
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -18,7 +19,7 @@ import java.time.Duration;
  * formats the payload accordingly. All calls are best-effort: failures are logged to stderr but
  * never thrown.
  */
-public final class WebhookNotifier {
+public final class WebhookNotifier implements AutoCloseable {
 
   private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
@@ -32,11 +33,13 @@ public final class WebhookNotifier {
 
   private final String url;
   private final Provider provider;
+  private final HttpClient client;
 
   public WebhookNotifier(String url) {
     requireHttpScheme(url);
     this.url = url;
     this.provider = detectProvider(url);
+    this.client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
   }
 
   /** Sends a notification. Best-effort — never throws. */
@@ -60,16 +63,29 @@ public final class WebhookNotifier {
               .POST(HttpRequest.BodyPublishers.ofString(payload))
               .build();
 
-      var client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
-      var response = client.send(request, HttpResponse.BodyHandlers.ofString());
-      if (response.statusCode() >= 400) {
-        System.err.println(
-            "  [webhook] Warning: HTTP " + response.statusCode() + " from " + redactedUrl(url));
+      var status = post(request);
+      if (status >= 400) {
+        System.err.println("  [webhook] Warning: HTTP " + status + " from " + redactedUrl(url));
       }
     } catch (Exception e) {
       System.err.println(
           "  [webhook] Warning: failed to notify " + redactedUrl(url) + " - " + e.getMessage());
     }
+  }
+
+  /** Sends {@code request} on the client every notification shares, and says its status. */
+  int post(HttpRequest request) throws IOException, InterruptedException {
+    return client.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
+  }
+
+  /**
+   * Closes the shared client, dropping a notification still under way: an endpoint may trickle its
+   * answer past any timeout, and a notification is best effort.
+   */
+  @Override
+  public void close() {
+    client.shutdownNow();
+    client.close();
   }
 
   /** Detects provider from URL hostname. Package-private for testing. */

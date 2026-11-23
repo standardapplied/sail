@@ -530,4 +530,33 @@ class ShellExecutorTest {
           "the interrupted command was ended");
     }
   }
+
+  /** A consumer of lines that fails ends the command: nothing it started runs on after it. */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aLineConsumerThatFailsEndsTheCommand() throws Exception {
+    var before = ProcessHandle.current().children().toList();
+    var started = new ArrayList<ProcessHandle>();
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            new ShellExecutor(false)
+                .run(
+                    List.of("sh", "-c", "echo one; exec sleep 600"),
+                    line -> {
+                      ProcessHandle.current()
+                          .children()
+                          .filter(child -> !before.contains(child))
+                          .forEach(started::add);
+                      throw new IllegalStateException("refused " + line);
+                    }));
+
+    assertEquals(1, started.size(), started.toString());
+    try {
+      started.getFirst().onExit().get(10, TimeUnit.SECONDS);
+    } finally {
+      started.forEach(ProcessHandle::destroyForcibly);
+    }
+  }
 }

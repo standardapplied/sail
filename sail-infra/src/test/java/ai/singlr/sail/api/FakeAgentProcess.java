@@ -271,6 +271,11 @@ final class FakeAgentProcess implements AgentProcess {
       await(() -> writeBlocked, "nothing was written to the fake process of run " + runId);
     }
 
+    /** Blocks until a read of the process's stdout has met its end or its failure. */
+    void awaitEndSeen() {
+      await(() -> endSeen, "nothing read the fake process of run " + runId + " to its end");
+    }
+
     /** Blocks until the process's stdin has been closed. */
     void awaitStdinClosed() {
       await(() -> stdinClosed, "nothing closed the stdin of the fake process of run " + runId);

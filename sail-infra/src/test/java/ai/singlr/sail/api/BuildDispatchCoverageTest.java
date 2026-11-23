@@ -16,6 +16,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.Databases;
 import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
@@ -50,6 +51,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -64,6 +66,13 @@ import org.junit.jupiter.params.provider.CsvSource;
  */
 @ActingAs
 class BuildDispatchCoverageTest {
+
+  private final Databases databases = new Databases();
+
+  @AfterEach
+  void closeDatabases() {
+    databases.close();
+  }
 
   private static final String HANDLE = "me";
   private static final Actor ADMIN = new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI);
@@ -1136,7 +1145,7 @@ class BuildDispatchCoverageTest {
   private Sqlite seedDb(String room) {
     return Acting.system(
         () -> {
-          var db = Sqlite.open(tempDir.resolve("sail.db"));
+          var db = databases.open(tempDir.resolve("sail.db"));
           new SchemaManager(db).migrate();
           HeldProjects.hold(db, "acme");
           if (room != null) {

@@ -37,10 +37,18 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class SseHandlerTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   private static final ApiAuth AUTH = new FixedTokenTestAuth("test-token");
   private static final Actor ANYONE = new Actor(null, Role.ADMIN, Actor.Lane.API);
@@ -202,8 +210,7 @@ class SseHandlerTest {
             .header("Authorization", "Bearer " + token)
             .GET()
             .build();
-    var response =
-        HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofInputStream());
+    var response = CLIENT.send(request, HttpResponse.BodyHandlers.ofInputStream());
     assertEquals(200, response.statusCode());
     var subscribed = new CountDownLatch(1);
     var received = new CountDownLatch(frames);
@@ -267,8 +274,7 @@ class SseHandlerTest {
               .header("Accept", "text/event-stream")
               .GET()
               .build();
-      var response =
-          HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofInputStream());
+      var response = CLIENT.send(request, HttpResponse.BodyHandlers.ofInputStream());
       var reader =
           new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8));
       assertEquals(": subscribed", reader.readLine());
@@ -297,7 +303,6 @@ class SseHandlerTest {
               tmp.resolve("api.sock"))) {
         server.start();
 
-        var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
         var request =
             HttpRequest.newBuilder(
                     URI.create(
@@ -308,7 +313,7 @@ class SseHandlerTest {
                 .GET()
                 .build();
 
-        var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        var response = CLIENT.send(request, HttpResponse.BodyHandlers.ofInputStream());
         assertEquals(200, response.statusCode());
 
         var reader =
@@ -367,9 +372,8 @@ class SseHandlerTest {
               null,
               tmp.resolve("api.sock"))) {
         server.start();
-        var client = HttpClient.newHttpClient();
         var response =
-            client.send(
+            CLIENT.send(
                 HttpRequest.newBuilder(
                         URI.create("http://127.0.0.1:" + server.port() + "/v1/events/stream"))
                     .header("Authorization", "Bearer tok")
@@ -395,11 +399,10 @@ class SseHandlerTest {
               null,
               tmp.resolve("api.sock"))) {
         server.start();
-        var client = HttpClient.newHttpClient();
         var base = "http://127.0.0.1:" + server.port();
         for (var path : List.of("/v1/events/stream/x", "/v1/events/streamx")) {
           var notThere =
-              client.send(
+              CLIENT.send(
                   HttpRequest.newBuilder(URI.create(base + path))
                       .header("Authorization", "Bearer tok")
                       .GET()
@@ -409,7 +412,7 @@ class SseHandlerTest {
           assertTrue(notThere.body().contains("API endpoint was not found."), notThere.body());
         }
         var anonymousPost =
-            client.send(
+            CLIENT.send(
                 HttpRequest.newBuilder(URI.create(base + "/v1/events/stream"))
                     .POST(HttpRequest.BodyPublishers.ofString(""))
                     .build(),
@@ -419,7 +422,7 @@ class SseHandlerTest {
             anonymousPost.body().contains("missing_bearer_token"),
             "the refusal names the missing credential, not the method: " + anonymousPost.body());
         var forgedPost =
-            client.send(
+            CLIENT.send(
                 HttpRequest.newBuilder(URI.create(base + "/v1/events/stream"))
                     .header("Authorization", "Bearer forged")
                     .POST(HttpRequest.BodyPublishers.ofString(""))
@@ -449,13 +452,12 @@ class SseHandlerTest {
       for (var path :
           List.of("/v1/events/stream/", "/v1/events/stream//", "/v1/events/stream%2F")) {
         var response =
-            HttpClient.newHttpClient()
-                .send(
-                    HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
-                        .header("Authorization", "Bearer tok")
-                        .GET()
-                        .build(),
-                    HttpResponse.BodyHandlers.ofInputStream());
+            CLIENT.send(
+                HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
+                    .header("Authorization", "Bearer tok")
+                    .GET()
+                    .build(),
+                HttpResponse.BodyHandlers.ofInputStream());
         var reader =
             new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8));
         readers.add(reader);
@@ -490,13 +492,12 @@ class SseHandlerTest {
               tmp.resolve("api.sock"))) {
         server.start();
         var response =
-            HttpClient.newHttpClient()
-                .send(
-                    HttpRequest.newBuilder(
-                            URI.create("http://127.0.0.1:" + server.port() + "/v1/events/stream"))
-                        .GET()
-                        .build(),
-                    HttpResponse.BodyHandlers.ofString());
+            CLIENT.send(
+                HttpRequest.newBuilder(
+                        URI.create("http://127.0.0.1:" + server.port() + "/v1/events/stream"))
+                    .GET()
+                    .build(),
+                HttpResponse.BodyHandlers.ofString());
         assertEquals(401, response.statusCode());
       }
     }
@@ -513,14 +514,13 @@ class SseHandlerTest {
       httpServer.start();
       try {
         var port = httpServer.getAddress().getPort();
-        var client = HttpClient.newHttpClient();
 
         var firstReq =
             HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/v1/events/stream"))
                 .header("Authorization", "Bearer test-token")
                 .GET()
                 .build();
-        var firstFuture = client.sendAsync(firstReq, HttpResponse.BodyHandlers.ofInputStream());
+        var firstFuture = CLIENT.sendAsync(firstReq, HttpResponse.BodyHandlers.ofInputStream());
         var firstResponse = firstFuture.get(5, TimeUnit.SECONDS);
         assertEquals(200, firstResponse.statusCode());
         assertEquals(1, handler.openConnections());
@@ -531,11 +531,11 @@ class SseHandlerTest {
                 .header("Authorization", "Bearer test-token")
                 .GET()
                 .build();
-        var second = client.send(secondReq, HttpResponse.BodyHandlers.ofString());
+        var second = CLIENT.send(secondReq, HttpResponse.BodyHandlers.ofString());
         assertEquals(503, second.statusCode());
         assertTrue(handler.rejectedCount() >= 1);
 
-        firstFuture.cancel(true);
+        firstResponse.body().close();
       } finally {
         httpServer.stop(0);
       }
@@ -564,31 +564,33 @@ class SseHandlerTest {
                 bus,
                 turns,
                 port -> {
-                  var lounge = open(port, "all", "?room=lounge");
-                  assertEquals(List.of("data: " + state.toJsonLine()), frame(lounge));
-                  var stamped = bus.publish(later);
-                  assertEquals(
-                      List.of("data: " + stamped.toJsonLine()),
-                      frame(lounge),
-                      "what the bus publishes follows, with no id: only a row change moves a cursor");
+                  try (var lounge = open(port, "all", "?room=lounge")) {
+                    assertEquals(List.of("data: " + state.toJsonLine()), frame(lounge));
+                    var stamped = bus.publish(later);
+                    assertEquals(
+                        List.of("data: " + stamped.toJsonLine()),
+                        frame(lounge),
+                        "what the bus publishes follows, with no id: only a row change moves a cursor");
+                  }
 
-                  var kitchen = open(port, "all", "?room=kitchen");
-                  var shut = open(port, "dark-only", "?room=lounge");
-                  var everything = open(port, "all", "");
-                  var inKitchen = bus.publish(Event.of("light", "kitchen", "t", "a", "h"));
-                  var darkInLounge = bus.publish(Event.of("dark", "lounge", "t", "a", "h"));
-                  assertEquals(
-                      List.of("data: " + inKitchen.toJsonLine()),
-                      frame(kitchen),
-                      "a room this box does not know is told nothing first");
-                  assertEquals(
-                      List.of("data: " + darkInLounge.toJsonLine()),
-                      frame(shut),
-                      "nor is a reader whose scope keeps the room's project out");
-                  assertEquals(
-                      List.of("data: " + inKitchen.toJsonLine()),
-                      frame(everything),
-                      "nor a stream of no room");
+                  try (var kitchen = open(port, "all", "?room=kitchen");
+                      var shut = open(port, "dark-only", "?room=lounge");
+                      var everything = open(port, "all", "")) {
+                    var inKitchen = bus.publish(Event.of("light", "kitchen", "t", "a", "h"));
+                    var darkInLounge = bus.publish(Event.of("dark", "lounge", "t", "a", "h"));
+                    assertEquals(
+                        List.of("data: " + inKitchen.toJsonLine()),
+                        frame(kitchen),
+                        "a room this box does not know is told nothing first");
+                    assertEquals(
+                        List.of("data: " + darkInLounge.toJsonLine()),
+                        frame(shut),
+                        "nor is a reader whose scope keeps the room's project out");
+                    assertEquals(
+                        List.of("data: " + inKitchen.toJsonLine()),
+                        frame(everything),
+                        "nor a stream of no room");
+                  }
                 });
           }
         });
@@ -620,12 +622,13 @@ class SseHandlerTest {
                 bus,
                 turns,
                 port -> {
-                  var lounge = open(port, "all", "?room=lounge");
-                  assertEquals(List.of("data: " + state.toJsonLine()), frame(lounge));
-                  assertEquals(
-                      List.of("data: " + during.get().toJsonLine()),
-                      frame(lounge),
-                      "the stream subscribed before it read the state, so nothing is lost");
+                  try (var lounge = open(port, "all", "?room=lounge")) {
+                    assertEquals(List.of("data: " + state.toJsonLine()), frame(lounge));
+                    assertEquals(
+                        List.of("data: " + during.get().toJsonLine()),
+                        frame(lounge),
+                        "the stream subscribed before it read the state, so nothing is lost");
+                  }
                 });
           }
         });
@@ -649,20 +652,24 @@ class SseHandlerTest {
                 bus,
                 SseHandler.RoomTurns.NONE,
                 port -> {
-                  var reader = open(port, "all", "");
-                  for (var i = 0; i < flood; i++) {
-                    bus.publish(Event.of("light", null, "t", "a", "h", Map.of("text", payload)));
-                  }
-                  var delivered = 0;
-                  String line;
-                  while ((line = reader.readLine()) != null) {
-                    if (line.startsWith("data: ")) {
-                      delivered++;
+                  try (var reader = open(port, "all", "")) {
+                    for (var i = 0; i < flood; i++) {
+                      bus.publish(Event.of("light", null, "t", "a", "h", Map.of("text", payload)));
                     }
+                    var delivered = 0;
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                      if (line.startsWith("data: ")) {
+                        delivered++;
+                      }
+                    }
+                    assertTrue(
+                        delivered < flood,
+                        "the stream ended behind what was published: "
+                            + delivered
+                            + " of "
+                            + flood);
                   }
-                  assertTrue(
-                      delivered < flood,
-                      "the stream ended behind what was published: " + delivered + " of " + flood);
                 });
           }
         });
@@ -708,8 +715,7 @@ class SseHandlerTest {
             .header("Authorization", "Bearer " + token)
             .GET()
             .build();
-    var response =
-        HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofInputStream());
+    var response = CLIENT.send(request, HttpResponse.BodyHandlers.ofInputStream());
     assertEquals(200, response.statusCode());
     var reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8));
     assertEquals(": subscribed", reader.readLine());

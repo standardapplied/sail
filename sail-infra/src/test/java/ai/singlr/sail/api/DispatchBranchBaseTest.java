@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.Databases;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -24,7 +25,6 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TestLogins;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -35,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -46,6 +47,13 @@ import org.junit.jupiter.api.io.TempDir;
  */
 @ActingAs
 class DispatchBranchBaseTest {
+
+  private final Databases databases = new Databases();
+
+  @AfterEach
+  void closeDatabases() {
+    databases.close();
+  }
 
   private static final String HANDLE = "me";
   private static final Actor ADMIN = new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI);
@@ -118,7 +126,7 @@ class DispatchBranchBaseTest {
   private void dispatch(RecordingShell shell) throws IOException {
     var yaml = tempDir.resolve("sail.yaml");
     Files.writeString(yaml, YAML);
-    var db = Sqlite.open(tempDir.resolve("sail.db"));
+    var db = databases.open(tempDir.resolve("sail.db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var specStore = new SpecStore(db);

@@ -216,7 +216,7 @@ public final class AgentLogStreamer {
         : Optional.empty();
   }
 
-  private void streamLog(
+  void streamLog(
       HttpExchange exchange,
       String project,
       String[] tailCommand,
@@ -232,12 +232,20 @@ public final class AgentLogStreamer {
       return;
     }
 
-    var headers = exchange.getResponseHeaders();
-    headers.set("Content-Type", "text/event-stream; charset=utf-8");
-    headers.set("Cache-Control", "no-cache");
-    headers.set("Connection", "keep-alive");
-    headers.set("X-Accel-Buffering", "no");
-    exchange.sendResponseHeaders(200, 0);
+    try {
+      tailProcess.getOutputStream().close();
+      tailProcess.getErrorStream().close();
+      var headers = exchange.getResponseHeaders();
+      headers.set("Content-Type", "text/event-stream; charset=utf-8");
+      headers.set("Cache-Control", "no-cache");
+      headers.set("Connection", "keep-alive");
+      headers.set("X-Accel-Buffering", "no");
+      exchange.sendResponseHeaders(200, 0);
+    } catch (IOException | RuntimeException unsent) {
+      tailProcess.destroyForcibly();
+      tailProcess.getInputStream().close();
+      throw unsent;
+    }
 
     activeStreams.increment();
     try (var out = exchange.getResponseBody();

@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.SyncRequest;
@@ -17,18 +18,25 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncTransportException;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** A sync whose ssh dies before main replies says why, in ssh's own words. */
+/**
+ * A sync whose ssh dies before main replies says why, in ssh's own words; and closing the sync
+ * waits for no round still in progress.
+ */
 class SyncDiagnosticTest {
 
   @TempDir Path home;
@@ -84,6 +92,69 @@ class SyncDiagnosticTest {
       @Override
       public void close() {}
     };
+  }
+
+  /**
+   * Closing waits for no round in progress: a round holds the sync's lock while it waits on main,
+   * and closing takes only its publisher's own.
+   */
+  @Test
+  void closingWaitsForNoRoundInProgress() throws Exception {
+    var inRound = new CountDownLatch(1);
+    var mainAnswers = new CountDownLatch(1);
+    var waiting =
+        new InputStream() {
+          @Override
+          public int read() throws IOException {
+            inRound.countDown();
+            try {
+              mainAnswers.await();
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+            }
+            return -1;
+          }
+        };
+    try (var db = Sqlite.open(home.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
+      var config = new SyncConfig("node", "sail@main", "mady", "box-1");
+      var operations =
+          new SyncOperations(
+              db,
+              "node",
+              home,
+              () -> config,
+              target ->
+                  new SyncOperations.Channel() {
+                    @Override
+                    public InputStream reader() {
+                      return waiting;
+                    }
+
+                    @Override
+                    public OutputStream writer() {
+                      return new ByteArrayOutputStream();
+                    }
+
+                    @Override
+                    public void close() {}
+                  });
+      var round =
+          Thread.ofVirtual()
+              .start(
+                  () ->
+                      assertThrows(
+                          SyncTransportException.class,
+                          () -> operations.sync(new SyncRequest(null))));
+      try {
+        assertTrue(inRound.await(10, TimeUnit.SECONDS), "the round is waiting on main");
+
+        assertTimeoutPreemptively(Duration.ofSeconds(5), operations::close, "closing waits on it");
+      } finally {
+        mainAnswers.countDown();
+        assertTrue(round.join(Duration.ofSeconds(10)), "the round ended");
+      }
+    }
   }
 
   @Test
@@ -282,9 +353,10 @@ class SyncDiagnosticTest {
                       "read -r hello; echo 'sail@10.128.0.29: Permission denied (publickey).' >&2;"
                           + " exit 255"))
               .start();
-      refused =
-          failure(
-              new SshSyncChannel(ssh, handle -> Optional.of(AUTHORISE.replace("mady", handle))));
+      try (var channel =
+          new SshSyncChannel(ssh, handle -> Optional.of(AUTHORISE.replace("mady", handle)))) {
+        refused = failure(channel);
+      }
     } finally {
       System.setErr(err);
     }

@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.Databases;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -20,9 +21,9 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -33,6 +34,13 @@ import org.junit.jupiter.api.io.TempDir;
 @ActingAs
 class DispatchOperationsResolveSpecTest {
 
+  private final Databases databases = new Databases();
+
+  @AfterEach
+  void closeDatabases() {
+    databases.close();
+  }
+
   private static final String PROJECT = "acme-health";
   private static final String FDE = "me";
   private static final Actor OPERATOR = new Actor(FDE, Role.ADMIN, Actor.Lane.CLI);
@@ -40,7 +48,7 @@ class DispatchOperationsResolveSpecTest {
   @TempDir Path dbDir;
 
   private SpecStore store() {
-    var db = Sqlite.open(dbDir.resolve("sail.db"));
+    var db = databases.open(dbDir.resolve("sail.db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme-health");
     return new SpecStore(db);

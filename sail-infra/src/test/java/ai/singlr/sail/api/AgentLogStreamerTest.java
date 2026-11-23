@@ -14,6 +14,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.Child;
+import ai.singlr.sail.engine.ClosesWhatItOpens;
+import ai.singlr.sail.engine.OpenDescriptors;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -30,6 +33,7 @@ import com.sun.net.httpserver.HttpPrincipal;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -42,10 +46,14 @@ import java.time.Instant;
 import java.time.InstantSource;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 class AgentLogStreamerTest {
 
@@ -379,13 +387,17 @@ class AgentLogStreamerTest {
     assertTimeoutPreemptively(
         Duration.ofSeconds(5),
         () -> {
-          var process = new ProcessBuilder("sh", "-c", "printf 'first\\nsecond\\n'").start();
-          var reader =
-              new BufferedReader(
-                  new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+          var process =
+              new ProcessBuilder("sh", "-c", "printf 'first\\nsecond\\n'")
+                  .redirectInput(Child.NO_INPUT)
+                  .redirectError(ProcessBuilder.Redirect.DISCARD)
+                  .start();
           var out = new ByteArrayOutputStream();
-
-          AgentLogStreamer.pump(process, reader, out, 0, NEVER_ENDS, ENDED);
+          try (var reader =
+              new BufferedReader(
+                  new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            AgentLogStreamer.pump(process, reader, out, 0, NEVER_ENDS, ENDED);
+          }
 
           var body = out.toString(StandardCharsets.UTF_8);
           assertTrue(body.contains("first"), body);
@@ -396,8 +408,7 @@ class AgentLogStreamerTest {
 
   @Test
   void pumpRelaysWhatTheTailWroteBetweenAnEmptyReadyAndItsExit() throws Exception {
-    var process = new ProcessBuilder("sh", "-c", "true").start();
-    process.waitFor();
+    var process = ended();
     var arrivedLate =
         new BufferedReader(new StringReader("first\nsecond\n")) {
           @Override
@@ -428,13 +439,15 @@ class AgentLogStreamerTest {
     assertTimeoutPreemptively(
         Duration.ofSeconds(5),
         () -> {
-          var process = new ProcessBuilder("sh", "-c", "true").start();
-          process.waitFor();
-          var reader =
-              new BufferedReader(
-                  new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+          var process = ended();
 
-          AgentLogStreamer.pump(process, reader, new ByteArrayOutputStream(), 0, NEVER_ENDS, ENDED);
+          AgentLogStreamer.pump(
+              process,
+              new BufferedReader(new StringReader("")),
+              new ByteArrayOutputStream(),
+              0,
+              NEVER_ENDS,
+              ENDED);
 
           assertFalse(process.isAlive());
         });
@@ -458,8 +471,7 @@ class AgentLogStreamerTest {
             clock);
     var exchange =
         new CapturingExchange("/v1/runs/r1/stream").as("raj", "member").scoped(scope.get());
-    var process = new ProcessBuilder("sh", "-c", "true").start();
-    process.waitFor();
+    var process = ended();
     var lines = List.of("first", "second", "third").iterator();
     var revokedAfterTheFirst =
         new BufferedReader(new StringReader("")) {
@@ -504,8 +516,7 @@ class AgentLogStreamerTest {
             () -> "node-a",
             clock);
     var exchange = new CapturingExchange("/v1/runs/r1/stream").as("raj", "member");
-    var process = new ProcessBuilder("sh", "-c", "true").start();
-    process.waitFor();
+    var process = ended();
     var recheck = streamer.recheckOf(exchange, "r1");
     clock.advance(Duration.ofSeconds(1));
     var out = new ByteArrayOutputStream();
@@ -520,12 +531,26 @@ class AgentLogStreamerTest {
         out.toString(StandardCharsets.UTF_8));
   }
 
+  /** A tail that has ended, holding no pipe of this process's. */
+  private static Process ended() throws Exception {
+    var process =
+        new ProcessBuilder("true")
+            .redirectInput(Child.NO_INPUT)
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
+            .start();
+    process.waitFor();
+    return process;
+  }
+
   private static final class CapturingExchange extends HttpExchange {
     private final URI uri;
     private final Headers responseHeaders = new Headers();
     private final ByteArrayOutputStream responseBody = new ByteArrayOutputStream();
     private final java.util.Map<String, Object> attributes = new java.util.HashMap<>();
     private int status = -1;
+    private boolean hungUp;
+    private OutputStream body = responseBody;
 
     private CapturingExchange(String path) {
       this.uri = URI.create(path);
@@ -540,6 +565,18 @@ class AgentLogStreamerTest {
 
     private CapturingExchange scoped(ProjectScope scope) {
       attributes.put(ApiAuth.ACTOR, ApiAuth.actorOf(this).withScope(scope));
+      return this;
+    }
+
+    /** An exchange whose client has gone before its headers are sent. */
+    private CapturingExchange hungUp() {
+      hungUp = true;
+      return this;
+    }
+
+    /** An exchange whose body is written to {@code into}. */
+    private CapturingExchange writingTo(OutputStream into) {
+      body = into;
       return this;
     }
 
@@ -568,13 +605,16 @@ class AgentLogStreamerTest {
     }
 
     @Override
-    public void sendResponseHeaders(int rCode, long responseLength) {
+    public void sendResponseHeaders(int rCode, long responseLength) throws IOException {
+      if (hungUp) {
+        throw new IOException("the client hung up");
+      }
       this.status = rCode;
     }
 
     @Override
     public OutputStream getResponseBody() {
-      return responseBody;
+      return body;
     }
 
     @Override
@@ -627,5 +667,86 @@ class AgentLogStreamerTest {
     public HttpPrincipal getPrincipal() {
       throw new UnsupportedOperationException();
     }
+  }
+
+  /**
+   * The tail is given no input to wait on, so a tail that reads it ends, and so does the stream.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aTailThatReadsItsInputFindsItEmptyAndTheStreamEnds() {
+    var exchange = new CapturingExchange("/v1/runs/r1/stream");
+
+    assertTimeoutPreemptively(
+        Duration.ofSeconds(5),
+        () ->
+            streamer(id -> Optional.empty(), "node-a")
+                .streamLog(exchange, "acme", new String[] {"cat"}, 0, NEVER_ENDS, ENDED));
+
+    assertEquals(200, exchange.status);
+    assertTrue(exchange.body().contains("event: error"), exchange.body());
+  }
+
+  /**
+   * A tail being streamed holds one pipe of ours, the output that is read: its input and its merged
+   * error output, which the JDK still opens a pipe for, are closed before the stream begins.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aTailBeingStreamedHoldsOnlyTheOutputThatIsRead() throws Exception {
+    var streamer = streamer(id -> Optional.empty(), "node-a");
+    var running = ProcessHandle.current().children().toList();
+    var before = ClosesWhatItOpens.baseline();
+    var held = new AtomicReference<Map<String, Object>>();
+    var exchange =
+        new CapturingExchange("/v1/runs/r1/stream")
+            .writingTo(
+                new OutputStream() {
+                  @Override
+                  public void write(int b) throws IOException {
+                    write(new byte[] {(byte) b}, 0, 1);
+                  }
+
+                  @Override
+                  public void write(byte[] bytes, int offset, int length) throws IOException {
+                    held.compareAndSet(
+                        null, OpenDescriptors.opened(before, OpenDescriptors.list()));
+                    throw new IOException("the client hung up");
+                  }
+                });
+
+    streamer.streamLog(
+        exchange, "acme", new String[] {"tail", "-f", "/dev/null"}, 0, NEVER_ENDS, ENDED);
+    for (var tail : ProcessHandle.current().children().filter(c -> !running.contains(c)).toList()) {
+      tail.onExit().get(10, TimeUnit.SECONDS);
+    }
+
+    assertEquals(1, held.get().size(), "only the tail's output is held: " + held.get());
+  }
+
+  /** A client gone before the stream's headers are sent leaves the tail with no pipe of ours. */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aClientGoneBeforeTheHeadersLeavesNothingOpen() throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+    var running = ProcessHandle.current().children().toList();
+    var exchange = new CapturingExchange("/v1/runs/r1/stream").hungUp();
+
+    assertThrows(
+        IOException.class,
+        () ->
+            streamer(id -> Optional.empty(), "node-a")
+                .streamLog(
+                    exchange,
+                    "acme",
+                    new String[] {"tail", "-f", "/dev/null"},
+                    0,
+                    NEVER_ENDS,
+                    ENDED));
+
+    for (var tail : ProcessHandle.current().children().filter(c -> !running.contains(c)).toList()) {
+      tail.onExit().get(10, TimeUnit.SECONDS);
+    }
+    ClosesWhatItOpens.assertClosed("a stream whose client had gone", before);
   }
 }

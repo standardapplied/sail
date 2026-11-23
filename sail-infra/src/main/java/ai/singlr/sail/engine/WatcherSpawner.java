@@ -132,13 +132,21 @@ public final class WatcherSpawner {
     return List.copyOf(command);
   }
 
-  /** Starts a detached process, mirroring the historic fallback spawn. */
+  /**
+   * Starts a detached process, mirroring the historic fallback spawn. It outlives this one, so it
+   * is given no pipe of ours: its input is empty and its output goes to {@code logPath}. The JDK
+   * still opens a pipe for a stderr merged into stdout, which the child never writes and this
+   * process would otherwise hold for the child's whole life, so it is closed here.
+   */
   public static long spawnProcess(List<String> command, Path logPath) throws IOException {
-    return new ProcessBuilder(command)
-        .redirectOutput(ProcessBuilder.Redirect.to(logPath.toFile()))
-        .redirectErrorStream(true)
-        .start()
-        .pid();
+    var process =
+        new ProcessBuilder(command)
+            .redirectInput(ShellExecutor.NO_INPUT)
+            .redirectOutput(ProcessBuilder.Redirect.to(logPath.toFile()))
+            .redirectErrorStream(true)
+            .start();
+    process.getErrorStream().close();
+    return process.pid();
   }
 
   /**

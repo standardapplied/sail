@@ -25,12 +25,20 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class StreamRefusalTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   private static final String REASON =
       "This box does not know its FDE's role ('ada'), so it cannot tell what you may do.";
@@ -88,10 +96,9 @@ class StreamRefusalTest {
 
     for (var door : doors.entrySet()) {
       var response =
-          HttpClient.newHttpClient()
-              .send(
-                  door.getValue().header("Authorization", "Bearer " + token).build(),
-                  HttpResponse.BodyHandlers.ofString());
+          CLIENT.send(
+              door.getValue().header("Authorization", "Bearer " + token).build(),
+              HttpResponse.BodyHandlers.ofString());
 
       var error = (Map<?, ?>) YamlUtil.parseMap(response.body()).get("error");
       assertEquals(409, response.statusCode(), door.getKey());
@@ -114,13 +121,12 @@ class StreamRefusalTest {
   void aStreamRefusedAtTheDoorCarriesItsRemedyAsData() throws Exception {
     for (var path : List.of("/v1/events/stream", "/v1/runs/r1/stream")) {
       var response =
-          HttpClient.newHttpClient()
-              .send(
-                  HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
-                      .header("Authorization", "Bearer " + token)
-                      .GET()
-                      .build(),
-                  HttpResponse.BodyHandlers.ofString());
+          CLIENT.send(
+              HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
+                  .header("Authorization", "Bearer " + token)
+                  .GET()
+                  .build(),
+              HttpResponse.BodyHandlers.ofString());
 
       assertEquals(409, response.statusCode(), path);
       assertEquals(

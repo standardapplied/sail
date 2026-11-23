@@ -56,12 +56,15 @@ class Here implements ShellExec {
       }
     }
     var process = builder.start();
-    if (!process.waitFor(PATIENCE.toSeconds(), TimeUnit.SECONDS)) {
-      process.destroyForcibly();
-      throw new TimeoutException(command + " was still running after " + PATIENCE);
+    process.getOutputStream().close();
+    try (var output = process.getInputStream()) {
+      if (!process.waitFor(PATIENCE.toSeconds(), TimeUnit.SECONDS)) {
+        process.destroyForcibly();
+        throw new TimeoutException(command + " was still running after " + PATIENCE);
+      }
+      var stdout = new String(output.readAllBytes(), StandardCharsets.UTF_8);
+      return new Result(process.exitValue(), stdout, "");
     }
-    var stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    return new Result(process.exitValue(), stdout, "");
   }
 
   @Override

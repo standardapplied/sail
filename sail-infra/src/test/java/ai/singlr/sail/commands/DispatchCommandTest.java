@@ -13,12 +13,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.Databases;
 import ai.singlr.sail.engine.WorkPrompt;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
@@ -36,6 +36,13 @@ import picocli.CommandLine;
 
 @Execution(ExecutionMode.SAME_THREAD)
 class DispatchCommandTest {
+
+  private final Databases databases = new Databases();
+
+  @AfterEach
+  void closeDatabases() {
+    databases.close();
+  }
 
   private PrintStream originalOut;
   private PrintStream originalErr;
@@ -341,7 +348,7 @@ class DispatchCommandTest {
 
   @Test
   void projectSpecsOnlyReturnsTheRequestedBucket() {
-    var db = Sqlite.open(dbDir.resolve("sail.db"));
+    var db = databases.open(dbDir.resolve("sail.db"));
     new SchemaManager(db).migrate();
     var store = new SpecStore(db);
     Acting.system(() -> store.create(row("mine", "acme", SpecStatus.PENDING)));

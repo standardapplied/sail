@@ -741,7 +741,7 @@ class ContainerManagerTest {
     @Override
     public Result exec(List<String> asked, Path workDir, Duration timeout)
         throws IOException, InterruptedException, TimeoutException {
-      return new ShellExecutor(false).exec(List.of("sleep", "30"), null, timeout);
+      return ScriptedShellExecutor.hang(asked, timeout);
     }
 
     @Override
@@ -762,7 +762,7 @@ class ContainerManagerTest {
     public Result exec(List<String> asked, Path workDir, Duration timeout)
         throws IOException, InterruptedException, TimeoutException {
       return String.join(" ", asked).contains(fragment)
-          ? new ShellExecutor(false).exec(List.of("sleep", "30"), null, timeout)
+          ? ScriptedShellExecutor.hang(asked, timeout)
           : box.exec(asked, workDir, timeout);
     }
 

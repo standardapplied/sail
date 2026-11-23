@@ -107,6 +107,14 @@ public final class SlackReactor implements EventSubscriber {
                 || Event.WellKnownTypes.SYNC_RECOVERED.equals(e.type()));
   }
 
+  /** Closes the Slack client, so it does not outlive the subscription. */
+  @Override
+  public void closed() {
+    if (poster != null) {
+      poster.close();
+    }
+  }
+
   @Override
   public void onEvent(Event event) {
     try {

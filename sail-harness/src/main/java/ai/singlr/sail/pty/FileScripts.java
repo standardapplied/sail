@@ -9,6 +9,7 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.pty.PtyMessage.FileKind;
 import ai.singlr.sail.pty.PtyMessage.FilesRefusal;
 import java.io.ByteArrayOutputStream;
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -707,12 +708,18 @@ final class FileScripts {
     command.addAll(List.of(args));
     var process = processes.start(command);
     var running = new Script(process);
-    for (var field : fields) {
-      running.input().write(nul(field));
-    }
-    running.input().flush();
-    if (!keepOpen) {
-      running.input().close();
+    try {
+      for (var field : fields) {
+        running.input().write(nul(field));
+      }
+      running.input().flush();
+      if (!keepOpen) {
+        running.input().close();
+      }
+    } catch (IOException unwritten) {
+      running.end();
+      running.close();
+      throw unwritten;
     }
     return running;
   }
@@ -747,8 +754,12 @@ final class FileScripts {
     };
   }
 
-  /** One script under way in a container: its output read field by field, its end awaited. */
-  final class Script {
+  /**
+   * One script under way in a container: its output read field by field, its end awaited, its pipes
+   * closed by the thread that read it once it is done with it. {@link #end} and {@link #cut} never
+   * close its output, as another thread may be blocked reading it then.
+   */
+  final class Script implements AutoCloseable {
     private final Process process;
     private final InputStream output;
     private final CompletableFuture<Void> answered = new CompletableFuture<>();
@@ -852,6 +863,21 @@ final class FileScripts {
         var unused = closed;
       }
       process.destroyForcibly();
+    }
+
+    /** Closes its input and its output; its process is left to end as it was told to. */
+    @Override
+    public void close() {
+      closeQuietly(process.getOutputStream());
+      closeQuietly(output);
+    }
+
+    private static void closeQuietly(Closeable pipe) {
+      try {
+        pipe.close();
+      } catch (IOException alreadyGone) {
+        var unused = alreadyGone;
+      }
     }
 
     /**

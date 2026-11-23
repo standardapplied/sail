@@ -21,6 +21,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,13 @@ import org.junit.jupiter.api.Test;
  * context (as 25 does, and as the tests' {@code jdk.httpserver.attributes=context} makes 26 do).
  */
 class PrivateAttributesTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   private HttpServer server;
   private HttpContext context;
@@ -83,7 +91,7 @@ class PrivateAttributesTest {
             .header("X-Probe", "probe")
             .POST(HttpRequest.BodyPublishers.ofString("body"))
             .build();
-    var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+    var response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
     assertEquals(200, response.statusCode());
     return response.body();
   }

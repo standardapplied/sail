@@ -7,17 +7,19 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 class SshSyncChannelTest {
@@ -137,12 +139,12 @@ class SshSyncChannelTest {
     var line = SshSyncChannel.authorizeLine("mady", name, email, PUB, MAIN.fingerprint());
 
     var shell =
-        new ProcessBuilder("bash", "-c", "sudo() { printf '%s\\n' \"$@\"; }; " + line)
-            .directory(dir.toFile())
-            .start();
-    var argv = new String(shell.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        Child.run(
+            new ProcessBuilder("bash", "-c", "sudo() { printf '%s\\n' \"$@\"; }; " + line)
+                .directory(dir.toFile()));
+    var argv = shell.stdout();
 
-    assertEquals(0, shell.waitFor());
+    assertEquals(0, shell.exit(), shell.stderr());
     assertEquals(
         List.of(
             "sail",
@@ -222,5 +224,37 @@ class SshSyncChannelTest {
 
     Files.writeString(receipt(), written.substring(0, written.length() / 2));
     assertEquals(Optional.empty(), authorisation("mady", pinned()));
+  }
+
+  private static void closeQuietly(SshSyncChannel channel) {
+    try {
+      channel.close();
+    } catch (IOException closedAlready) {
+      var unused = closedAlready;
+    }
+  }
+
+  /**
+   * A close whose input fails, ssh having stopped reading it, still closes ssh's output and waits
+   * for it: nothing of the channel is left running or open.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aCloseWhoseInputFailsStillEndsTheChannel() throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+    var ssh = new ProcessBuilder("sh", "-c", "exec 0<&-; exec yes").start();
+    var channel = new SshSyncChannel(ssh, handle -> Optional.empty());
+    try {
+      assertEquals('y', channel.reader().read(), "ssh closed its input before it spoke");
+      channel.writer().write('x');
+
+      assertThrows(IOException.class, channel::close);
+    } finally {
+      ssh.destroyForcibly();
+      closeQuietly(channel);
+    }
+
+    assertFalse(ssh.isAlive());
+    ClosesWhatItOpens.assertClosed("a channel whose close failed", before);
   }
 }

@@ -13,7 +13,7 @@ import ai.singlr.sail.common.Strings;
  * {@code null} after logging why.
  */
 @FunctionalInterface
-public interface SlackPoster {
+public interface SlackPoster extends AutoCloseable {
 
   /**
    * One message to post.
@@ -42,4 +42,8 @@ public interface SlackPoster {
 
   /** Posts the message. Returns {@code null} when the post could not be delivered. */
   Result post(Post post);
+
+  /** Lets go of what the poster holds open; one that holds nothing does nothing. */
+  @Override
+  default void close() {}
 }

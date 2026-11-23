@@ -9,12 +9,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.EventSubscriber;
+import ai.singlr.sail.engine.GracefulShutdown;
+import ai.singlr.sail.store.Sqlite;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Server start: exactly one Slack notifier per fleet (main or a lone box narrates, a node never
@@ -74,5 +82,29 @@ class ServerStartCommandTest {
         List.of("missed", "closed"),
         narrated.subList(2, 4).stream().map(Event::type).toList(),
         "a dropped event and the end reach the reactor whatever the role");
+  }
+
+  /**
+   * The server's operations are closed at its shutdown: their sync publishes this box's events to
+   * its own API over HTTP, on a client held until they close.
+   */
+  @Test
+  void theServersOperationsAreClosedAtItsShutdown(@TempDir Path dir) throws Exception {
+    var shutdown = new GracefulShutdown();
+    var said = new ByteArrayOutputStream();
+    var out = System.out;
+    try (var db = Sqlite.open(dir.resolve("sail.db"));
+        var bus = new EventBus()) {
+      ServerStartCommand.operations(db, bus, shutdown);
+      System.setOut(new PrintStream(said, true, StandardCharsets.UTF_8));
+      try {
+        shutdown.shutdown();
+      } finally {
+        System.setOut(out);
+      }
+    }
+
+    assertEquals(
+        "[shutdown] closed 1 resource(s) cleanly", said.toString(StandardCharsets.UTF_8).strip());
   }
 }

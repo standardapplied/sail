@@ -79,7 +79,9 @@ class ContainerConfigTest {
   void aDryRunWritesUnderNoLock() throws Exception {
     new ContainerConfig(new ShellExecutor(true), locks).set("acme", List.of("limits.cpu=2"));
 
-    assertEquals(List.of(), Files.list(locks).toList(), "nothing changes, so nothing is held");
+    try (var held = Files.list(locks)) {
+      assertEquals(List.of(), held.toList(), "nothing changes, so nothing is held");
+    }
   }
 
   @Test

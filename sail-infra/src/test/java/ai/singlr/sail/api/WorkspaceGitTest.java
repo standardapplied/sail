@@ -8,13 +8,13 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.nio.charset.StandardCharsets;
+import ai.singlr.sail.engine.Child;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -412,9 +412,7 @@ class WorkspaceGitTest {
                 "GIT_CONFIG_GLOBAL", "/dev/null",
                 "GIT_CONFIG_NOSYSTEM", "1",
                 "LC_ALL", "C"));
-    var process = builder.start();
-    var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertTrue(process.waitFor(90, TimeUnit.SECONDS), String.join(" ", command));
-    return new Ran(process.exitValue(), output);
+    var ran = Child.run(builder, "", Duration.ofSeconds(90));
+    return new Ran(ran.exit(), ran.stdout());
   }
 }

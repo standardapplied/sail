@@ -28,6 +28,7 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.ShippedFollowUps;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncRpcServer;
+import ai.singlr.sail.sync.SyncTransition;
 import ai.singlr.sail.sync.SyncTransitionSink;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -79,17 +80,11 @@ public final class SyncServerCommand implements Callable<Integer> {
       System.err.println(Remedied.whole(e).plain());
       return 1;
     }
-    try (mainDb) {
+    try (mainDb;
+        var bridge = transitionBridge(mainDb.db(), HostInfo.hostname())) {
       var in = new BufferedInputStream(System.in);
       var out = new BufferedOutputStream(new FileOutputStream(FileDescriptor.out));
-      return serve(
-          mainDb,
-          boxId,
-          System.getenv("SAIL_TOKEN"),
-          in,
-          out,
-          transitionBridge(mainDb.db(), HostInfo.hostname()),
-          () -> box);
+      return serve(mainDb, boxId, System.getenv("SAIL_TOKEN"), in, out, bridge, () -> box);
     }
   }
 
@@ -168,12 +163,30 @@ public final class SyncServerCommand implements Callable<Integer> {
    * node marked done resolves its source findings here first ({@link ShippedFollowUps}), main being
    * the one box that may write any review.
    */
-  static SyncTransitionSink transitionBridge(Sqlite db, String host) {
-    var specs = new SpecStore(db);
-    var reviews = new ReviewStore(db);
-    var shipped = new ShippedFollowUps(db);
-    var publisher = new SailEventPublisher[1];
-    return transition -> {
+  static TransitionBridge transitionBridge(Sqlite db, String host) {
+    return new TransitionBridge(db, host);
+  }
+
+  /**
+   * The bridge of one session: its publisher to the local sail-api, opened at the first event it
+   * hands over, closed with the session.
+   */
+  static final class TransitionBridge implements SyncTransitionSink, AutoCloseable {
+    private final SpecStore specs;
+    private final ReviewStore reviews;
+    private final ShippedFollowUps shipped;
+    private final String host;
+    private SailEventPublisher publisher;
+
+    private TransitionBridge(Sqlite db, String host) {
+      this.specs = new SpecStore(db);
+      this.reviews = new ReviewStore(db);
+      this.shipped = new ShippedFollowUps(db);
+      this.host = host;
+    }
+
+    @Override
+    public void onTransition(SyncTransition transition) {
       shipped.onTransition(transition);
       var events =
           SyncTransitionEvents.eventsFor(
@@ -186,25 +199,32 @@ public final class SyncServerCommand implements Callable<Integer> {
                       .orElse(null),
               host);
       for (var event : events) {
-        publish(publisher, event);
+        publish(event);
       }
-    };
-  }
+    }
 
-  private static void publish(SailEventPublisher[] publisher, Event event) {
-    try {
-      if (publisher[0] == null) {
-        publisher[0] = SailEventPublisher.localDefault();
+    private void publish(Event event) {
+      try {
+        if (publisher == null) {
+          publisher = SailEventPublisher.localDefault();
+        }
+        publisher.publish(event);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      } catch (Exception e) {
+        System.err.println(
+            "  [sync] could not hand "
+                + event.type()
+                + " to the local sail-api; the sync is unaffected: "
+                + e.getMessage());
       }
-      publisher[0].publish(event);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-    } catch (Exception e) {
-      System.err.println(
-          "  [sync] could not hand "
-              + event.type()
-              + " to the local sail-api; the sync is unaffected: "
-              + e.getMessage());
+    }
+
+    @Override
+    public void close() {
+      if (publisher != null) {
+        publisher.close();
+      }
     }
   }
 

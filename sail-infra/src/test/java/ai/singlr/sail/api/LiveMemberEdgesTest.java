@@ -35,6 +35,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * The edges of a live member: what the agent writes that sail must bound or ignore, a start that
@@ -617,6 +619,32 @@ class LiveMemberEdgesTest {
     assertEquals(ErrorCode.AGENT_LAUNCH_FAILED, failed.failure().errorCode());
     assertEquals("Failed to start the room's live member.", failed.getMessage());
     assertEquals(List.of("failed"), statuses(), "the claim is released: the room is free");
+  }
+
+  /**
+   * A process started for a member that could not then be made, its run gone meanwhile, is ended at
+   * once: its input closed, asked to stop, and its output read to its end, whether it ends or
+   * breaks.
+   */
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void aProcessNoMemberCameToOwnIsEnded(boolean breaks) {
+    room.engage(SPEC, "claude-code", "full");
+    posted(SPEC, "first");
+    room.processes.onStart(
+        starting -> room.db.execute("DELETE FROM runs WHERE id = ?", starting.runId));
+
+    assertThrows(RuntimeException.class, () -> room.live.deliver(SPEC, HANDLE));
+
+    var abandoned = room.processes.latest();
+    assertTrue(abandoned.stdinClosed(), "its input is closed");
+    assertEquals(List.of(AgentProcess.Signal.TERM), abandoned.signals);
+    if (breaks) {
+      abandoned.breaks(new IOException("its pipe broke"));
+    } else {
+      abandoned.exits(143);
+    }
+    abandoned.awaitEndSeen();
   }
 
   @Test

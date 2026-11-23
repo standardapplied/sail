@@ -11,12 +11,12 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.Databases;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,11 +26,19 @@ import java.util.List;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 @ActingAs
 class SnapshotOperationsTest {
+
+  private final Databases databases = new Databases();
+
+  @AfterEach
+  void closeDatabases() {
+    databases.close();
+  }
 
   private static final String RUNNING_JSON =
       """
@@ -295,7 +303,7 @@ class SnapshotOperationsTest {
 
   @Test
   void aFailedLeaseReleaseStillClearsTheInFlightClaim() throws Exception {
-    var db = Sqlite.open(tempDir.resolve("lease-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("lease-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     var runs = new RunStore(db);
     var executor = new HoldingExecutorService();
@@ -427,7 +435,7 @@ class SnapshotOperationsTest {
   }
 
   private RunStore runStore() throws Exception {
-    var db = Sqlite.open(tempDir.resolve("runs-" + System.nanoTime() + ".db"));
+    var db = databases.open(tempDir.resolve("runs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     return new RunStore(db);
   }

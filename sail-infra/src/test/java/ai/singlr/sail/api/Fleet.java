@@ -20,6 +20,7 @@ import ai.singlr.sail.config.SlackNotifications;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
@@ -151,14 +152,9 @@ public final class Fleet implements AutoCloseable {
     env.remove("SAIL_DATA_DIR");
     env.remove("SAIL_NO_SYNC");
     env.remove("SAIL_TOKEN");
-    var process = command.start();
-    process.getOutputStream().close();
-    if (!process.waitFor(PROCESS_DEADLINE.toMillis(), TimeUnit.MILLISECONDS)) {
-      process.destroyForcibly();
-      fail("sync timed out for " + node.handle);
-    }
-    var output = new String(process.getInputStream().readAllBytes());
-    assertEquals(0, process.exitValue(), () -> "sync failed for " + node.handle + ":\n" + output);
+    var synced = Child.run(command, "", PROCESS_DEADLINE);
+    assertEquals(
+        0, synced.exit(), () -> "sync failed for " + node.handle + ":\n" + synced.stdout());
   }
 
   public void syncAll(Box... nodes) throws Exception {

@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -82,14 +83,29 @@ public final class CommitAnnouncer implements Runnable, AutoCloseable {
     }
   }
 
-  /** Sends the announcement still owed, waiting at most {@link #DRAIN}, and stops. */
+  /**
+   * Sends the announcement still owed, then closes the publisher on the announcing thread, after
+   * every announcement that used it, waiting at most {@link #DRAIN}, and stops.
+   */
   @Override
   public void close() {
+    try {
+      announcing.execute(this::release);
+    } catch (RejectedExecutionException closedAlready) {
+      var unused = closedAlready;
+    }
     announcing.shutdown();
     try {
       announcing.awaitTermination(DRAIN.toMillis(), TimeUnit.MILLISECONDS);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+    }
+  }
+
+  private void release() {
+    if (publisher != null) {
+      publisher.close();
+      publisher = null;
     }
   }
 }

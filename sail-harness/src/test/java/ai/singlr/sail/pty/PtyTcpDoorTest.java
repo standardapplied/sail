@@ -12,9 +12,12 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ListenConfig;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.io.UncheckedIOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -30,8 +33,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -72,6 +77,7 @@ class PtyTcpDoorTest {
   @AfterEach
   void closeTheDoor() throws IOException {
     door.close();
+    door.endConnections();
     for (var channel : opened) {
       channel.close();
     }
@@ -167,6 +173,63 @@ class PtyTcpDoorTest {
           () -> handshaken(address).close(),
           "the slot is free again once the one that held it is gone");
     }
+  }
+
+  /**
+   * Closing the door waits for no connection it serves: the host closes it holding its own lock,
+   * which a connection's thread may be waiting for, so the door's connections are ended and waited
+   * for only by {@link PtyTcpDoor#endConnections}, once that lock is let go.
+   */
+  @Test
+  void closingTheDoorWaitsForNoConnectionItServesSinceOneMayWaitForTheClosersLock()
+      throws Exception {
+    var tickets = new PtyTickets(8);
+    var hostLock = new ReentrantLock();
+    var serving = new CountDownLatch(1);
+    var guarded =
+        new PtyTcpDoor(
+            LOOPBACK,
+            8,
+            now::get,
+            tickets,
+            hash -> new PtyIdentity.Person(new Actor("uday", Role.MEMBER, Actor.Lane.API)),
+            dir.resolve("guarded.listening"),
+            (channel, admission) -> {
+              serving.countDown();
+              hostLock.lock();
+              hostLock.unlock();
+            });
+    guarded.tick(now.get());
+    var ticket =
+        tickets.issue(
+            new PtyTickets.Ticket(PtyMessage.TicketAction.OPEN, "acme", "uday"), now.get());
+    try (var client = handshaken(guarded.address().orElseThrow())) {
+      var closed = new CountDownLatch(1);
+      Thread.ofPlatform()
+          .daemon()
+          .start(
+              () -> {
+                hostLock.lock();
+                try {
+                  PtyWire.write(client, new PtyMessage.Hello(ticket));
+                  if (serving.await(10, TimeUnit.SECONDS)) {
+                    guarded.close();
+                    closed.countDown();
+                  }
+                } catch (IOException e) {
+                  throw new UncheckedIOException(e);
+                } catch (InterruptedException e) {
+                  Thread.currentThread().interrupt();
+                } finally {
+                  hostLock.unlock();
+                }
+              });
+
+      assertTrue(
+          closed.await(10, TimeUnit.SECONDS),
+          "closing returned while a connection waited for the lock its closer held");
+    }
+    guarded.endConnections();
   }
 
   @Test

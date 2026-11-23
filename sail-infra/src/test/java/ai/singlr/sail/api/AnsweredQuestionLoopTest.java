@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -40,6 +41,13 @@ class AnsweredQuestionLoopTest {
   private final List<String> builds = new CopyOnWriteArrayList<>();
   private final List<String> fixes = new CopyOnWriteArrayList<>();
   private ReviewLoop loop;
+
+  @AfterEach
+  void tearDown() {
+    if (loop != null) {
+      loop.close();
+    }
+  }
 
   private void start(List<String> reviews) {
     var reviewed = new AtomicInteger();

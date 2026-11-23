@@ -9,11 +9,16 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
+import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class WebhookNotifierTest {
@@ -145,7 +150,7 @@ class WebhookNotifierTest {
 
   @Test
   void constructorAcceptsHttpsUrl() {
-    assertDoesNotThrow(() -> new WebhookNotifier("https://hooks.slack.com/services/T/B/x"));
+    assertDoesNotThrow(() -> new WebhookNotifier("https://hooks.slack.com/services/T/B/x").close());
   }
 
   @Test
@@ -174,11 +179,10 @@ class WebhookNotifierTest {
 
   @Test
   void notifyRefusesToSendWhenHostResolvesPrivateAtSendTime() {
-    var notifier = new WebhookNotifier("http://127.0.0.1:9/hook");
     var captured = new ByteArrayOutputStream();
     var originalErr = System.err;
     System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
-    try {
+    try (var notifier = new WebhookNotifier("http://127.0.0.1:9/hook")) {
       notifier.notify("guardrail_triggered", "acme", "Title", "Message");
     } finally {
       System.setErr(originalErr);
@@ -186,5 +190,58 @@ class WebhookNotifierTest {
     var logged = captured.toString(StandardCharsets.UTF_8);
     assertTrue(logged.contains("refusing to send"), logged);
     assertFalse(logged.contains("127.0.0.1:9/hook"), "Must not log the unredacted URL");
+  }
+
+  /**
+   * A notifier's posts share one client, held from one to the next, and closing the notifier leaves
+   * nothing of it open.
+   */
+  @Test
+  void aNotifiersPostsShareOneClientThatClosingReleases() throws Exception {
+    Map<String, Object> before;
+    try (var server = CountingHttpServer.answering(204, "")) {
+      before = ClosesWhatItOpens.baseline();
+      try (var notifier = new WebhookNotifier(server.uri("/hook").toString())) {
+        for (var i = 0; i < 2; i++) {
+          assertEquals(
+              204,
+              notifier.post(
+                  HttpRequest.newBuilder(server.uri("/hook"))
+                      .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                      .build()));
+        }
+      }
+
+      assertEquals(1, server.connections(), "both posts came on the one client's connection");
+    }
+    ClosesWhatItOpens.assertClosed("a webhook notifier", before);
+  }
+
+  /**
+   * Closing a notifier waits on no endpoint that answers and then never finishes: a notification
+   * still under way is dropped, so it never holds the shutdown of the subscription that owns it.
+   */
+  @Test
+  void closingANotifierDropsANotificationWhoseAnswerNeverEnds() throws Exception {
+    try (var server = CountingHttpServer.trickling()) {
+      var notifier = new WebhookNotifier(server.uri("/hook").toString());
+      var posting =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    try {
+                      notifier.post(
+                          HttpRequest.newBuilder(server.uri("/hook"))
+                              .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                              .build());
+                    } catch (IOException | InterruptedException dropped) {
+                      var unused = dropped;
+                    }
+                  });
+      assertTrue(server.asked(Duration.ofSeconds(10)), "the endpoint was asked");
+
+      assertTimeoutPreemptively(Duration.ofSeconds(5), notifier::close, "closing waits on it");
+      assertTrue(posting.join(Duration.ofSeconds(10)), "the notification under way was dropped");
+    }
   }
 }

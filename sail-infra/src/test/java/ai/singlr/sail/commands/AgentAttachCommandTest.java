@@ -18,6 +18,7 @@ import ai.singlr.sail.api.TestWorkspaces;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.RunPlace;
@@ -40,7 +41,6 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -432,9 +432,9 @@ class AgentAttachCommandTest {
             .orElseThrow();
     var line = AgentAttachCommand.printed(exec);
 
-    var shell = new ProcessBuilder("bash", "-c", "printf '%s\\0' " + line).start();
-    var argv = new String(shell.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertEquals(0, shell.waitFor());
+    var shell = Child.run(new ProcessBuilder("bash", "-c", "printf '%s\\0' " + line));
+    var argv = shell.stdout();
+    assertEquals(0, shell.exit(), shell.stderr());
 
     assertEquals(exec, List.of(argv.substring(0, argv.length() - 1).split("\0", -1)));
   }

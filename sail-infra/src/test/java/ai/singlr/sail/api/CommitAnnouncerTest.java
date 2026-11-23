@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.ClosesWhatItOpens;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.RoomStore;
@@ -35,6 +36,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -150,16 +153,16 @@ class CommitAnnouncerTest {
       Thread.ofVirtual()
           .start(
               () -> {
-                try {
-                  var taken = silent.accept();
+                String read;
+                try (var taken = silent.accept()) {
                   var reader =
                       new BufferedReader(
                           new InputStreamReader(taken.getInputStream(), StandardCharsets.US_ASCII));
-                  request.add(
-                      reader.readLine() + " | " + reader.readLine() + " | " + reader.readLine());
+                  read = reader.readLine() + " | " + reader.readLine() + " | " + reader.readLine();
                 } catch (IOException closed) {
-                  request.add("closed: " + closed);
+                  read = "closed: " + closed;
                 }
+                request.add(read);
               });
       var announcer =
           new CommitAnnouncer(
@@ -176,6 +179,22 @@ class CommitAnnouncerTest {
     }
     assertThrows(
         IllegalArgumentException.class, () -> new SailEventPublisher("127.0.0.1", 1, "a\r\nX: y"));
+  }
+
+  /**
+   * Closing closes the publisher the announcer opened, on the thread that used it, once its last
+   * wake is sent: nothing of it is left open.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void closingClosesThePublisherTheAnnouncerOpened() throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+    var announcer = new CommitAnnouncer(() -> new SailEventPublisher("127.0.0.1", 1, "token"));
+
+    announcer.run();
+    announcer.close();
+
+    ClosesWhatItOpens.assertClosed("an announcer", before);
   }
 
   @Test

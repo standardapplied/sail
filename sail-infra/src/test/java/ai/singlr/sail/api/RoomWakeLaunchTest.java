@@ -19,6 +19,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.Databases;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailSkills;
@@ -75,6 +76,13 @@ import org.junit.jupiter.api.io.TempDir;
  * HEAD into a loud guardrail event instead of a review.
  */
 class RoomWakeLaunchTest {
+
+  private final Databases databases = new Databases();
+
+  @AfterEach
+  void closeDatabases() {
+    databases.close();
+  }
 
   private static final String HANDLE = "uday";
 
@@ -147,7 +155,7 @@ class RoomWakeLaunchTest {
       throws IOException {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, yamlContent);
-    db = Sqlite.open(tempDir.resolve("wake-" + System.nanoTime() + ".db"));
+    db = databases.open(tempDir.resolve("wake-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     specStore = new SpecStore(db);
@@ -178,7 +186,7 @@ class RoomWakeLaunchTest {
   void aWakeWithoutAMessageStoreLaunchesWithAnEmptyRoom() throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, YAML);
-    db = Sqlite.open(tempDir.resolve("wake-" + System.nanoTime() + ".db"));
+    db = databases.open(tempDir.resolve("wake-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     specStore = new SpecStore(db);

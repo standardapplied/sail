@@ -21,6 +21,7 @@ import ai.singlr.sail.api.RunActivityStamper;
 import ai.singlr.sail.api.RunPresenceEmitter;
 import ai.singlr.sail.api.RunTracker;
 import ai.singlr.sail.api.SailApiServer;
+import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionAwareAuth;
 import ai.singlr.sail.api.SlackReactor;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
@@ -152,6 +153,18 @@ public final class ServerStartCommand implements Runnable {
     ScopedValue.where(Sqlite.ANNOUNCING, none).call(this::serve);
   }
 
+  /**
+   * The server's operations, closed by {@code shutdown}: their sync publishes this box's events to
+   * its own API over HTTP, on a client held until they close.
+   */
+  static SailOperations operations(Sqlite db, EventBus bus, GracefulShutdown shutdown) {
+    var operations =
+        OperationsFactory.create(
+            db, new ShellExecutor(false), bus, SyncScheduler.disabled(), new PtyHostYield());
+    shutdown.register(operations);
+    return operations;
+  }
+
   private Void serve() throws Exception {
     BindPolicy.requireBindable(host, allowRemote);
     var listen = ListenConfig.load();
@@ -190,9 +203,7 @@ public final class ServerStartCommand implements Runnable {
     try (var rounds = FileMutex.holdRounds(db.path())) {
       provisionBoxCredential(boxCredentialStore);
     }
-    var operations =
-        OperationsFactory.create(
-            db, new ShellExecutor(false), bus, SyncScheduler.disabled(), new PtyHostYield());
+    var operations = operations(db, bus, shutdown);
     var syncScheduler =
         NodeSync.serverScheduler(
             HostSync::config,

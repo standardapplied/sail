@@ -71,7 +71,7 @@ import picocli.CommandLine.Help.Ansi;
  * others suppressed, so a broken type never silences the materialization of the ones that
  * succeeded.
  */
-public final class SyncOperations {
+public final class SyncOperations implements AutoCloseable {
   public interface Channel extends AutoCloseable {
     InputStream reader();
 
@@ -114,7 +114,9 @@ public final class SyncOperations {
   private final Consumer<Remedy> notice;
   private final ShellExec shell;
   private final AuthorizedKeysSync gatewayKeys;
+  private final Object publishing = new Object();
   private SailEventPublisher publisher;
+  private boolean closed;
 
   /** A round whose notices print as {@link #PLAIN_NOTICES} prints them. */
   public SyncOperations(
@@ -1033,12 +1035,22 @@ public final class SyncOperations {
     }
   }
 
+  /**
+   * Publishes {@code event} on the one publisher to the local API every round shares, opened by the
+   * first to publish, under its lock, so no publish runs on a publisher {@link #close} closed and
+   * none opens another after it: a round's events after the close are dropped.
+   */
   private void publishQuietly(Event event) {
     try {
-      if (publisher == null) {
-        publisher = SailEventPublisher.localDefault();
+      synchronized (publishing) {
+        if (publisher == null) {
+          if (closed) {
+            return;
+          }
+          publisher = SailEventPublisher.localDefault();
+        }
+        publisher.publish(event);
       }
-      publisher.publish(event);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     } catch (Exception ignored) {
@@ -1046,6 +1058,24 @@ public final class SyncOperations {
           Ansi.AUTO.string(
               "  @|faint Event notification skipped — sail-api isn't running here; the sync is"
                   + " unaffected.|@"));
+    }
+  }
+
+  /**
+   * Closes the publisher a round opened to the local API, if one did, for good. It takes only the
+   * publisher's own lock, never this object's, which a round holds while it runs, so it waits for a
+   * publish under way (its request's timeout at most), never for a whole round.
+   */
+  @Override
+  public void close() {
+    SailEventPublisher open;
+    synchronized (publishing) {
+      closed = true;
+      open = publisher;
+      publisher = null;
+    }
+    if (open != null) {
+      open.close();
     }
   }
 

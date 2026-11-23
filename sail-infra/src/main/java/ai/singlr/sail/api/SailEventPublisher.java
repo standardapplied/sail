@@ -30,7 +30,7 @@ import java.util.Objects;
  * policy — the dispatch hot path wraps in try/catch so a sail-api outage doesn't block the dispatch
  * itself.
  */
-public final class SailEventPublisher {
+public final class SailEventPublisher implements AutoCloseable {
 
   private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
   private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
@@ -69,6 +69,16 @@ public final class SailEventPublisher {
     var uri = URI.create(config.serverUrl());
     var port = uri.getPort() == -1 ? 7070 : uri.getPort();
     return new SailEventPublisher(uri.getHost(), port, config.token());
+  }
+
+  /**
+   * Publishes {@code event} to this box's API ({@link #localDefault}) on a publisher of its own,
+   * closed once answered: the way for a process that publishes a few events in its life.
+   */
+  public static Event publishToThisBox(Event event) throws IOException, InterruptedException {
+    try (var publisher = localDefault()) {
+      return publisher.publish(event);
+    }
   }
 
   /**
@@ -118,6 +128,12 @@ public final class SailEventPublisher {
               + (response.body().isEmpty() ? "" : ": " + response.body()));
     }
     return parseStamped(response.body());
+  }
+
+  /** Closes the client every publish shares, once the requests still under way are answered. */
+  @Override
+  public void close() {
+    client.close();
   }
 
   /**

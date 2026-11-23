@@ -188,6 +188,49 @@ class WebhookReactorTest {
     assertEquals(1, built.get("https://example.com/b"));
   }
 
+  /**
+   * Closing the reactor's subscription closes every sender it cached, so no client outlives it, and
+   * an event delivered after that builds no new one.
+   */
+  @Test
+  void closingTheSubscriptionClosesEverySenderItCachedAndBuildsNoMore() {
+    var built = new ArrayList<RecordingSender>();
+    var notificationsFor =
+        Map.of(
+            "a", new Notifications("https://example.com/a", List.of("spec_dispatched")),
+            "b", new Notifications("https://example.com/b", List.of("spec_dispatched")));
+    var reactor =
+        new WebhookReactor(
+            notificationsFor::get,
+            url -> {
+              var sender = new RecordingSender();
+              built.add(sender);
+              return sender;
+            });
+    reactor.onEvent(Event.of("a", null, "spec_dispatched", "sail", "h").withId(1L));
+    reactor.onEvent(Event.of("b", null, "spec_dispatched", "sail", "h").withId(2L));
+
+    try (var bus = new EventBus()) {
+      bus.subscribe(reactor).close();
+    }
+    reactor.onEvent(Event.of("a", null, "spec_dispatched", "sail", "h").withId(3L));
+
+    assertEquals(List.of(true, true), built.stream().map(sender -> sender.closed).toList());
+    assertEquals(List.of(1, 1), built.stream().map(sender -> sender.calls).toList());
+  }
+
+  /** A sender that holds nothing open has nothing to let go of when closed. */
+  @Test
+  void aSenderThatHoldsNothingClosesQuietly() {
+    var calls = new ArrayList<String>();
+    var sender = recorder(calls);
+
+    sender.close();
+    sender.send("spec_dispatched", "p", "t", "m");
+
+    assertEquals(1, calls.size(), "closing it changed nothing");
+  }
+
   @Test
   void sendingDoesNotThrow() {
     assertNotNull(WebhookReactor.sending(project -> null));
@@ -203,10 +246,16 @@ class WebhookReactorTest {
 
   private static final class RecordingSender implements WebhookSender {
     int calls;
+    boolean closed;
 
     @Override
     public void send(String event, String project, String title, String message) {
       calls++;
+    }
+
+    @Override
+    public void close() {
+      closed = true;
     }
   }
 }

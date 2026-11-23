@@ -105,7 +105,6 @@ public final class RunCommand implements Runnable {
   private final BiFunction<ShellExec, OperationHooks, HostOperations> launches;
   private final Function<Boolean, ShellExec> shells;
   private final DispatchOperations.AgentLauncher terminal;
-  private SailEventPublisher eventPublisher;
 
   public RunCommand() {
     this(
@@ -452,10 +451,7 @@ public final class RunCommand implements Runnable {
    */
   private void publishLifecycle(Event event) {
     try {
-      if (eventPublisher == null) {
-        eventPublisher = SailEventPublisher.localDefault();
-      }
-      eventPublisher.publish(event);
+      SailEventPublisher.publishToThisBox(event);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     } catch (Exception e) {

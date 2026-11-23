@@ -21,6 +21,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.engine.DemoProject;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.HandleChange;
@@ -177,11 +178,13 @@ class SyncCliTest {
                 SyncCliTest.class.getName(),
                 scenario)
             .redirectErrorStream(true)
-            .redirectOutput(output.toFile());
+            .redirectOutput(output.toFile())
+            .redirectInput(Child.NO_INPUT);
     builder.environment().put("SAIL_DATA_DIR", data.toString());
     builder.environment().put("PATH", bin + ":" + System.getenv("PATH"));
     builder.environment().remove("SAIL_NO_SYNC");
     var process = builder.start();
+    process.getErrorStream().close();
     try {
       assertTrue(process.waitFor(30, TimeUnit.SECONDS), "isolated sync check timed out");
       assertEquals(0, process.exitValue(), Files.readString(output));

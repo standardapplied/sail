@@ -29,6 +29,7 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.Databases;
 import ai.singlr.sail.engine.DeviceFixtures;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
@@ -61,6 +62,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -71,6 +73,13 @@ import org.junit.jupiter.api.io.TempDir;
  * route can answer from — no store silently dropped.
  */
 class DispatchCommandWiringTest {
+
+  private final Databases databases = new Databases();
+
+  @AfterEach
+  void closeDatabases() {
+    databases.close();
+  }
 
   private static final String HANDLE = "me";
 
@@ -127,7 +136,7 @@ class DispatchCommandWiringTest {
   private void seed() throws Exception {
     Acting.system(
         () -> {
-          db = Sqlite.open(tempDir.resolve("control-plane.db"));
+          db = databases.open(tempDir.resolve("control-plane.db"));
           new SchemaManager(db).migrate();
           new ProjectStore(db).upsert(TestDefinitions.yaml(YAML));
           var specStore = new SpecStore(db);

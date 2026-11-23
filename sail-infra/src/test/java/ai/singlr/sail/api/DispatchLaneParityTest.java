@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.Databases;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -40,6 +41,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -50,6 +52,13 @@ import org.junit.jupiter.api.io.TempDir;
  */
 @ActingAs
 class DispatchLaneParityTest {
+
+  private final Databases databases = new Databases();
+
+  @AfterEach
+  void closeDatabases() {
+    databases.close();
+  }
 
   private static final String HANDLE = "me";
   private static final Actor ADMIN = new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI);
@@ -93,7 +102,7 @@ class DispatchLaneParityTest {
   private Lane lane(String name) throws IOException {
     var yaml = tempDir.resolve(name + "-sail.yaml");
     Files.writeString(yaml, YAML);
-    var db = Sqlite.open(tempDir.resolve(name + ".db"));
+    var db = databases.open(tempDir.resolve(name + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var specStore = new SpecStore(db);

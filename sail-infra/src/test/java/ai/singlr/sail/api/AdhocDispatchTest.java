@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.Databases;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.engine.SailSkills;
@@ -44,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -54,6 +56,13 @@ import org.junit.jupiter.api.io.TempDir;
  */
 @ActingAs
 class AdhocDispatchTest {
+
+  private final Databases databases = new Databases();
+
+  @AfterEach
+  void closeDatabases() {
+    databases.close();
+  }
 
   private static final String HANDLE = "me";
   private static final Actor ADMIN = new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI);
@@ -108,7 +117,7 @@ class AdhocDispatchTest {
       throws IOException {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, yamlContent);
-    db = Sqlite.open(tempDir.resolve("adhoc-" + System.nanoTime() + ".db"));
+    db = databases.open(tempDir.resolve("adhoc-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     specStore = new SpecStore(db);
@@ -488,7 +497,7 @@ class AdhocDispatchTest {
     var launchedCommands = new ArrayList<List<String>>();
     var yaml = tempDir.resolve("dry.yaml");
     Files.writeString(yaml, YAML);
-    db = Sqlite.open(tempDir.resolve("dry.db"));
+    db = databases.open(tempDir.resolve("dry.db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     runStore = new RunStore(db);
@@ -623,7 +632,7 @@ class AdhocDispatchTest {
     var commands = new ArrayList<List<String>>();
     var yaml = tempDir.resolve("path.yaml");
     Files.writeString(yaml, YAML);
-    db = Sqlite.open(tempDir.resolve("path.db"));
+    db = databases.open(tempDir.resolve("path.db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     runStore = new RunStore(db);

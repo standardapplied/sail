@@ -140,7 +140,10 @@ class ProjectSkillInstallerTest {
 
   /** Whether a launch holds the lock a replacement is made under. */
   private boolean replacing() throws IOException, InterruptedException {
-    return new ProcessBuilder("flock", "--nonblock", skillsDir.toString(), "true").start().waitFor()
+    return new ProcessBuilder("flock", "--nonblock", skillsDir.toString(), "true")
+            .inheritIO()
+            .start()
+            .waitFor()
         != 0;
   }
 
@@ -830,7 +833,9 @@ class ProjectSkillInstallerTest {
     var folder = skillsDir.resolve("spec-board");
     Files.createDirectories(folder);
     for (var file : files) {
-      Files.copy(legacyFile(file), folder.resolve(file));
+      try (var legacy = legacyFile(file)) {
+        Files.copy(legacy, folder.resolve(file));
+      }
     }
     return folder;
   }
@@ -913,7 +918,9 @@ class ProjectSkillInstallerTest {
   void aLinkUnderOneOfSailsFileNamesIsNotSailsFileWhateverItPointsAt() throws Exception {
     var folder = legacySpecBoard("SKILL.md");
     var elsewhere = home.resolve("spec-template.md");
-    Files.copy(legacyFile("spec-template.md"), elsewhere);
+    try (var legacy = legacyFile("spec-template.md")) {
+      Files.copy(legacy, elsewhere);
+    }
     Files.createSymbolicLink(folder.resolve("spec-template.md"), elsewhere);
 
     assertSpecBoardIsNotSailsAndIsLeft(
@@ -1055,24 +1062,28 @@ class ProjectSkillInstallerTest {
         builder.environment().compute("PATH", (name, path) -> shims + ":" + path);
       }
       var process = builder.start();
-      var stderr = new StringBuilder();
-      try (var lines = process.errorReader(StandardCharsets.UTF_8)) {
+      try (var input = process.getOutputStream();
+          var output = process.getInputStream();
+          var lines = process.errorReader(StandardCharsets.UTF_8)) {
+        var stderr = new StringBuilder();
         for (var line = lines.readLine(); line != null; line = lines.readLine()) {
           if (line.equals(STOPPED)) {
-            try (var input = process.getOutputStream()) {
+            try {
               stopped.run();
+            } finally {
+              input.close();
             }
           } else {
             stderr.append(line).append('\n');
           }
         }
+        var stdout = new String(output.readAllBytes(), StandardCharsets.UTF_8);
+        var exit = process.waitFor();
+        return new Result(
+            failingReads && inner(command).getFirst().equals("cat") ? 1 : exit,
+            stdout,
+            stderr.toString());
       }
-      var stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-      var exit = process.waitFor();
-      return new Result(
-          failingReads && inner(command).getFirst().equals("cat") ? 1 : exit,
-          stdout,
-          stderr.toString());
     }
 
     private static Result push(List<String> command) {

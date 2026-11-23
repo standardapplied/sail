@@ -27,6 +27,7 @@ import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.ClosesWhatItOpens;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.pty.PtyAdmission;
@@ -231,6 +232,27 @@ class DirectTerminalTest {
                 IllegalArgumentException.class,
                 () -> ListenConfig.fromMap(Map.of("terminal", "[::]:7072")).terminalAddress())
             .getMessage());
+  }
+
+  /**
+   * A private address another process holds is tried again at each tick, and a try that fails
+   * leaves nothing open: one socket a try, for as long as the address is held, was the leak.
+   */
+  @Test
+  void aTryAtAPrivateAddressAnotherHoldsLeavesNothingOpen() throws Exception {
+    try (var held = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+      var address = new InetSocketAddress(InetAddress.getLoopbackAddress(), held.getLocalPort());
+      var socket = Files.createDirectories(dir.resolve("held")).resolve("host.sock");
+      try (var api = apiServer(Optional.of(address), address, socket)) {
+        api.start();
+        var before = ClosesWhatItOpens.baseline();
+
+        api.tick(System.nanoTime() + Duration.ofMinutes(2).toNanos());
+
+        assertEquals(Optional.empty(), api.privateAddress());
+        ClosesWhatItOpens.assertClosed("a try at a held private address", before);
+      }
+    }
   }
 
   /**

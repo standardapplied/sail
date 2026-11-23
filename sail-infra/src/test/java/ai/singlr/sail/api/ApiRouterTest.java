@@ -71,6 +71,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -78,6 +79,13 @@ import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class ApiRouterTest {
+
+  private static final HttpClient CLIENT = HttpClient.newHttpClient();
+
+  @AfterAll
+  static void closeClient() {
+    CLIENT.close();
+  }
 
   @Test
   void syncAndConflictsAreAvailableThroughTheOperationsRoutes() throws Exception {
@@ -421,7 +429,7 @@ class ApiRouterTest {
                   HttpRequest.BodyPublishers.ofInputStream(
                       () -> new ByteArrayInputStream(new byte[] {1})))
               .build();
-      var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+      var response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
       assertEquals(422, response.statusCode());
       assertTrue(response.body().contains("Content-Length is required"));
       try (var socket = new Socket("127.0.0.1", server.port())) {
@@ -648,7 +656,7 @@ class ApiRouterTest {
               .GET()
               .build();
 
-      var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+      var response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
 
       assertEquals(401, response.statusCode());
       assertTrue(response.body().contains("missing_bearer_token"));
@@ -665,7 +673,7 @@ class ApiRouterTest {
               .GET()
               .build();
 
-      var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+      var response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
 
       assertEquals(403, response.statusCode());
       assertTrue(response.body().contains("invalid_bearer_token"));
@@ -1044,7 +1052,7 @@ class ApiRouterTest {
               .POST(HttpRequest.BodyPublishers.ofString("{}"))
               .build();
 
-      var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+      var response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
 
       assertEquals(415, response.statusCode());
       assertTrue(response.body().contains("unsupported_media_type"));
@@ -1286,7 +1294,7 @@ class ApiRouterTest {
               .header("If-Match", "\"3f2a\"")
               .PUT(HttpRequest.BodyPublishers.ofString("{\"value\": \"ubuntu/24.04\"}"))
               .build();
-      var section = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+      var section = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
       var unset =
           put(server, "/v1/projects/acme/definition/pipeline", "token", "{\"value\": null}");
       var valueless = put(server, "/v1/projects/acme/definition/image", "token", "{}");
@@ -1669,7 +1677,7 @@ class ApiRouterTest {
               .header("Authorization", "Bearer token")
               .method("DELETE", HttpRequest.BodyPublishers.noBody())
               .build();
-      var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+      var response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
       assertEquals(405, response.statusCode());
     }
   }
@@ -2442,7 +2450,7 @@ class ApiRouterTest {
               .GET()
               .build();
 
-      var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+      var response = CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
 
       assertEquals(200, response.statusCode());
       assertTrue(ops.sawNoSync);
@@ -2527,7 +2535,7 @@ class ApiRouterTest {
     if (token != null) {
       builder.header("Authorization", "Bearer " + token);
     }
-    return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    return CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
   }
 
   private static HttpResponse<String> post(
@@ -2539,7 +2547,7 @@ class ApiRouterTest {
     if (token != null) {
       builder.header("Authorization", "Bearer " + token);
     }
-    return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    return CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
   }
 
   private static HttpResponse<String> put(
@@ -2551,7 +2559,7 @@ class ApiRouterTest {
     if (token != null) {
       builder.header("Authorization", "Bearer " + token);
     }
-    return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    return CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
   }
 
   private static HttpResponse<String> delete(SailApiServer server, String path, String token)
@@ -2562,7 +2570,7 @@ class ApiRouterTest {
     if (token != null) {
       builder.header("Authorization", "Bearer " + token);
     }
-    return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    return CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
   }
 
   /** Sends {@code asked}, a method and a path, with {@code token} when there is one. */
@@ -2575,7 +2583,7 @@ class ApiRouterTest {
     if (token != null) {
       builder.header("Authorization", "Bearer " + token);
     }
-    return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    return CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofString());
   }
 
   private static URI uri(SailApiServer server, String path) {

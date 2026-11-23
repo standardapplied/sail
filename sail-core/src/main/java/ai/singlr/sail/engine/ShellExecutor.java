@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -36,6 +37,10 @@ public final class ShellExecutor implements ShellExec {
 
   /** How long a command may run when its caller names no timeout. */
   public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(120);
+
+  /** A child's stdin with nothing to read: no pipe for anyone to close. */
+  public static final ProcessBuilder.Redirect NO_INPUT =
+      ProcessBuilder.Redirect.from(new File("/dev/null"));
 
   private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(3);
   private static final AtomicInteger LISTING_SCOPES = new AtomicInteger();
@@ -267,6 +272,9 @@ public final class ShellExecutor implements ShellExec {
         stdout.append(line).append('\n');
         lines.accept(line);
       }
+    } catch (IOException | RuntimeException failed) {
+      destroyWithDescendants(process);
+      throw failed;
     }
     var exit = process.waitFor();
     stderrThread.join();
