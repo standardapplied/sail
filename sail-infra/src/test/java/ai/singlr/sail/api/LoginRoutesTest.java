@@ -280,8 +280,10 @@ class LoginRoutesTest {
         ask(
             sam,
             "PUT",
-            "/v1/logins/gemini/default",
+            "/v1/logins/gem%0Aini" + "x".repeat(4000) + "/default",
             YamlUtil.dumpJson(Map.of("kind", "api-key", "value", TOKEN)));
+    var useBadHarness = ask(sam, "POST", "/v1/logins/gemini/default:use", null);
+    var removeBadHarness = ask(sam, "DELETE", "/v1/logins/gemini/default", null);
     var missing = ask(sam, "POST", "/v1/logins/claude-code/work:use", null);
     var plain = ask(sam, "POST", "/v1/logins/claude-code/work", null);
 
@@ -305,11 +307,20 @@ class LoginRoutesTest {
     assertEquals(
         "Claude Code takes no login of kind 'session'; it takes token, api-key.",
         ((Map<?, ?>) badKind.map().get("error")).get("message"));
+    var noSuchHarness = "A login is stored for claude-code, codex or as a git token.";
     assertEquals(422, badHarness.status());
     assertEquals(
-        "A login is stored for claude-code, codex or as a git token, not for 'gemini'.",
+        noSuchHarness,
         ((Map<?, ?>) badHarness.map().get("error")).get("message"),
-        "a harness no login is stored for is refused in words about logins");
+        "a harness no login is stored for is refused in words about logins, never echoing the path");
+    assertEquals(
+        noSuchHarness,
+        ((Map<?, ?>) useBadHarness.map().get("error")).get("message"),
+        "making a login of no such harness the default is refused in words about logins");
+    assertEquals(
+        noSuchHarness,
+        ((Map<?, ?>) removeBadHarness.map().get("error")).get("message"),
+        "removing a login of no such harness is refused in words about logins");
     assertFalse(badHarness.body().contains("TOKEN_value"));
     assertEquals(404, missing.status());
     assertEquals(

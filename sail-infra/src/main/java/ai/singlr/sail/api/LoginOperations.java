@@ -108,7 +108,8 @@ public final class LoginOperations {
           ErrorCode.BAD_REQUEST,
           "A git token is no default: each host has its own, and each is used.");
     }
-    var row = found(() -> logins().use(person.id(), Harnesses.of(harness), name));
+    var known = harness(harness);
+    var row = found(() -> logins().use(person.id(), known, name));
     announce(DEFAULT, person, row);
     return new LoginResponse(view(person, row), SESSIONS_KEEP);
   }
@@ -122,7 +123,7 @@ public final class LoginOperations {
     if (LoginStore.GIT.equals(harness)) {
       return removeGit(person, name);
     }
-    var known = Harnesses.of(harness);
+    var known = harness(harness);
     var removed = logins().remove(person.id(), known, name);
     if (removed.isEmpty()) {
       return new LoginResponse(
@@ -250,7 +251,7 @@ public final class LoginOperations {
 
   /**
    * The harness a login is stored for, refused in words about logins: the harnesses one is stored
-   * for, not a project's install list.
+   * for, not a project's install list, and not the path's own segment, which is the caller's.
    */
   private static Harness harness(String name) {
     try {
@@ -258,11 +259,7 @@ public final class LoginOperations {
     } catch (IllegalArgumentException unknown) {
       throw new ApiException(
           ErrorCode.INVALID_REQUEST,
-          "A login is stored for "
-              + String.join(", ", Harnesses.names())
-              + " or as a git token, not for '"
-              + name
-              + "'.");
+          "A login is stored for " + String.join(", ", Harnesses.names()) + " or as a git token.");
     }
   }
 

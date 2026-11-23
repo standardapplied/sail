@@ -463,6 +463,7 @@ public final class WorkspacesView: NSView {
             case let .success(list): logins = list.logins
             case let .failure(error): return newSession.say(.unread(StoreLogin.unread(error, address: address)))
             }
+            if case .unread = newSession.line { newSession.say(nil) }
             guard let asked = StoreLogin(offer, logins: logins, address: address) else { return }
             let width = project.narrow ? Double(window.contentLayoutRect.width) - 2 * LoginSheet.inset : LoginSheet.width
             let sheet = LoginSheet(asked, width: width, direction: project.userInterfaceLayoutDirection, look: look, titleFont: titleFont, mono: mono, pasteboard: pasteboard)

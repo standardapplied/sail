@@ -155,8 +155,8 @@ package final class NewSessionPanel: NSObject {
         NSAccessibility.post(element: start, notification: .layoutChanged, userInfo: [.uiElements: [start]])
     }
 
-    /// `said` over the foot of what it shows now, until it closes.
-    func say(_ said: NewSessionView.Line) {
+    /// `said` over the foot of what it shows now, until it closes; nil, none.
+    func say(_ said: NewSessionView.Line?) {
         guard isOpen else { return }
         line = said
         redraw()
