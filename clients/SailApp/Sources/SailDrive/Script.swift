@@ -251,7 +251,8 @@ struct Step: Decodable {
     /// "no name asked", "the name <name>", "naming", "no key field", "the keys in the name", "the panel open behind", "refused: <sentence>", "the
     /// name refused: <sentence>", "help: <the help line>", "over the panel" (the window server orders
     /// the sheet in front of it), "no suggestion window is showing" (none, AutoFill's included, in
-    /// front of the sheet and over it).
+    /// front of the sheet and over it; claimed by the steps after a shot, once a suggestion has had
+    /// the time to show, and never for a sheet the window server does not list).
     var loginSheetIs: [String]?
     /// The button or link of this title in the Store a Login sheet, clicked with real mouse events;
     /// the sheet stays.

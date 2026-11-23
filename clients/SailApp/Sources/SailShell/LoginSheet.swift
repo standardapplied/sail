@@ -14,18 +14,14 @@ import SailWorkbench
 /// something (Done while naming). Return stores (or is Done), Escape cancels, Tab goes field,
 /// Change, Cancel, Store. The value is read from the field once, into the store's
 /// request, and the field is cleared at once and again when the sheet ends; nothing else holds it.
-/// A store that succeeds clears the clipboard where it still holds the value, ends the sheet and
-/// tells ``onStored``, also when the sheet was cancelled while it went. Built whole by ``show()``,
+/// A store that succeeds ends the sheet and tells ``onStored``, also when the sheet was cancelled
+/// while it went; the panel, saying so, clears the clipboard where it still holds the value. Built whole by ``show()``,
 /// every frame set there, so no layout pass changes what it shows; mirrored right to left.
 @MainActor
 package final class LoginSheet: NSPanel, NSTextFieldDelegate {
     static let width = 420.0, inset = 12.0
     static let padding = (top: 20.0, sides: 22.0, bottom: 14.0), gap = 12.0, helpGap = 8.0, footer = (vertical: 14.0, sides: 16.0), buttonGap = 8.0
     static let nameWidth = 180.0
-    /// The content type of a field that wants no suggestion. Alone it does not keep AppKit from
-    /// reading a name beside a key as a login form (the drive saw Passwords' AutoFill over the key
-    /// with an empty type, and with `.oneTimeCode` on the name), so the two are never shown together.
-    static let noSuggestion = NSTextContentType(rawValue: "")
 
     var look: Look {
         didSet {
@@ -109,10 +105,6 @@ package final class LoginSheet: NSPanel, NSTextFieldDelegate {
         change?.setAccessibilityLabel(StoreLogin.changeName)
         field.field.delegate = self
         field.field.setAccessibilityLabel(model.fieldName)
-        for each in [field.field] + (name.map { [$0.field] } ?? []) {
-            each.contentType = Self.noSuggestion
-            each.isAutomaticTextCompletionEnabled = false
-        }
         if let name {
             name.field.stringValue = model.name
             name.field.font = mono.font(Look.Step.callout.points) as NSFont
@@ -148,6 +140,7 @@ package final class LoginSheet: NSPanel, NSTextFieldDelegate {
             label.attributedStringValue = text(model.label, Look.Step.footnote, look.textSecondary)
             y = place(label, x: x, y: y, width: inner) + Self.gap
             field.error = if case let .refused(said) = model.stage { said } else { nil }
+            field.help = model.help
             field.isEnabled = model.stage != .storing
             y = place(field, x: x, y: y, width: inner) + Self.gap
             if name != nil { y = nameLine(words: true, x: x, y: y, width: inner) - FieldSize.gap + Self.gap }
@@ -296,12 +289,11 @@ package final class LoginSheet: NSPanel, NSTextFieldDelegate {
 
     private func answered(_ answer: Result<LoginStored, SailError>) {
         model.answered(answer, clipboard: pasteboard.changeCount)
-        guard case let .stored(_, clears) = model.stage else {
+        guard case .stored = model.stage else {
             show()
             makeFirstResponder(field.superview == nil ? name?.field : field.field)
             return
         }
-        if clears { pasteboard.clearContents() }
         end()
         onStored(model)
     }

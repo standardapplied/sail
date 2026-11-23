@@ -447,18 +447,23 @@ public final class WorkspacesView: NSView {
     }
 
     /// Store a Login on `offer`: the person's logins asked, so the sheet asks a name only where they
-    /// have one of the harness (none listed, it asks none: the store's own answer says what the
-    /// server holds), then the sheet over the panel, 420 pt or the window less 12 pt each side on a
-    /// narrow page. Asked for a workspace the panel no longer shows, nothing opens.
+    /// have one of the harness; not read, the panel says why and no sheet opens (a name not asked
+    /// could replace one they have). Then the sheet over the panel, 420 pt or the window less 12 pt
+    /// each side on a narrow page. Asked for a workspace the panel no longer shows, nothing opens.
     private func storeLogin(_ offer: AgentOffer) {
         guard let client, let place = startingIn else { return }
         let era = self.era
         byAPerson { [weak self] in
             guard let self else { return }
-            let logins = (try? await client.send(.logins))?.logins ?? []
-            guard era == self.era, newSession.isOpen, startingIn.map({ $0 == place }) == true, let window,
-                  let asked = StoreLogin(offer, logins: logins, address: model.person.controlPlane)
-            else { return }
+            let listed = await Self.result { () async throws(SailError) in try await client.send(.logins) }
+            guard era == self.era, newSession.isOpen, startingIn.map({ $0 == place }) == true, let window else { return }
+            let address = model.person.controlPlane
+            let logins: [StoredLogin]
+            switch listed {
+            case let .success(list): logins = list.logins
+            case let .failure(error): return newSession.say(.unread(StoreLogin.unread(error, address: address)))
+            }
+            guard let asked = StoreLogin(offer, logins: logins, address: address) else { return }
             let width = project.narrow ? Double(window.contentLayoutRect.width) - 2 * LoginSheet.inset : LoginSheet.width
             let sheet = LoginSheet(asked, width: width, direction: project.userInterfaceLayoutDirection, look: look, titleFont: titleFont, mono: mono, pasteboard: pasteboard)
             sheet.send = { endpoint in await Self.result { () async throws(SailError) in try await client.send(endpoint) } }
@@ -467,10 +472,14 @@ public final class WorkspacesView: NSView {
         }
     }
 
-    /// A login stored: the panel, still open on its workspace, shows what the route answers now,
-    /// the harness chosen and the store said.
+    /// A login stored: where the panel is still open on its workspace, it says so at once, the
+    /// clipboard cleared there and then when it still held the key, so the line that says so shows;
+    /// then it shows what the route answers now, the harness chosen. With the panel gone, nothing
+    /// says it, so the clipboard is left as it is.
     private func loginStored(_ stored: StoreLogin, in place: (project: String, name: String), era: Int) {
-        guard let client, let line = stored.stored else { return }
+        guard let client, let line = stored.stored, era == self.era, newSession.isOpen, startingIn.map({ $0 == place }) == true else { return }
+        if case .stored(_, clearsClipboard: true) = stored.stage { pasteboard.clearContents() }
+        newSession.say(.stored(line))
         byAPerson { [weak self] in
             guard let self else { return }
             let answer = await Self.result { () async throws(SailError) in try await client.send(.agents(workspace: place.name, project: place.project)) }

@@ -175,6 +175,7 @@ import Testing
         #expect(sheet.done.keyEquivalent == "\r" && sheet.store.keyEquivalent.isEmpty && sheet.store.isHidden && !sheet.done.isHidden)
         #expect(sheet.control(name.field, textView: editor, doCommandBy: #selector(NSResponder.insertNewline(_:))))
         #expect(sheet.field.superview != nil && name.superview == nil && sheet.model.stage == .empty, "Return in the name was not Done")
+        #expect(sheet.field.help == "Paste the key again.", "the key Change put away is not asked again")
         Self.paste(into: sheet)
         #expect(sheet.control(sheet.field.field, textView: editor, doCommandBy: #selector(NSResponder.insertNewline(_:))))
         #expect(Self.cleared(sheet) && sheet.model.stage == .storing, "Return in the key did not store")
@@ -228,7 +229,6 @@ import Testing
         let underSheet = CalmTests.Count(marks(in: window))
         #expect(underSheet.fill == 1 && underSheet.tint == 0 && underSheet.neutral == 0, "the window with the sheet up draws \(underSheet): one primary on screen, the sheet's Store")
         #expect(panel.view.primary?.kind == .secondary && panel.view.veiled, "the panel behind the sheet keeps its primary or is not under the sheet's veil")
-        #expect(sheet.field.field.contentType == LoginSheet.noSuggestion && sheet.field.field.isAutomaticTextCompletionEnabled == false, "the key's field offers suggestions")
         Self.paste(into: sheet)
         #expect(sheet.store.isEnabled)
         view.client = SailClient(transport: RecordedServer([try Exchange("workspace-agents-dock")]), token: "tok")
@@ -242,7 +242,7 @@ import Testing
         #expect(sent, "the request's body is not the kind and the key")
         #expect(panel.isOpen && !panel.popover.stays && panel.loginSheet == nil && !panel.view.veiled)
         #expect(panel.view.rows.first?.line.stringValue == "login “default” · API key" && panel.view.rows.first?.chosen == true)
-        #expect(panel.view.words.contains("Stored Claude Code login “default”.") && !panel.view.words.contains { $0.hasPrefix("No Claude Code login stored") })
+        #expect(panel.view.words.contains("Stored Claude Code login “default”. 1 live run finishes on the old `default`.") && !panel.view.words.contains { $0.hasPrefix("No Claude Code login stored") }, "the store, and the server's note on the login it replaced, are not said: \(panel.view.words)")
         let start = try #require(panel.view.primary)
         #expect(start.title == "Start" && start.isEnabled && start.holdsKeys)
         var started: [AgentStart] = []
@@ -278,7 +278,7 @@ import Testing
         }
         try NewSessionPanelTests.press(sheet.store)
         try #require(await RunnerTabTests.until { view.newSession.stored != nil && !view.busy })
-        let line = "Stored Claude Code login “default”." + (unchanged ? " Removed the key from the clipboard." : "")
+        let line = "Stored Claude Code login “default”." + (unchanged ? " Removed the key from the clipboard." : "") + " 1 live run finishes on the old `default`."
         #expect(view.newSession.stored == line && view.newSession.view.words.contains(line))
         let left = view.pasteboard.string(forType: .string) == (unchanged ? nil : Self.pasted)
         #expect(left, unchanged ? "the clipboard still holds the key" : "the clipboard changed meanwhile was cleared")
@@ -335,7 +335,6 @@ extension LoginSheetTests {
         let (_, window, server, sheet) = try await Self.asked(agents: "workspace-agents-dock-no-default", logins: "logins-no-default", stored: [refused])
         defer { window.orderOut(nil) }
         let name = try #require(sheet.name, "no name was asked of a person with a Claude Code login")
-        #expect(name.field.contentType == LoginSheet.noSuggestion && !name.field.isAutomaticTextCompletionEnabled, "the name offers suggestions")
         let said = Driverless.words(sheet.contentView)
         #expect(name.superview == nil && said.range(of: #"Name\s+work\s"#, options: .regularExpression) != nil && said.contains("you already have “home”"), "\(said)")
         try NewSessionPanelTests.press(sheet.change)
@@ -347,6 +346,10 @@ extension LoginSheetTests {
         try NewSessionPanelTests.press(sheet.store)
         try #require(await RunnerTabTests.until { name.error != nil })
         #expect(name.error == refused.said && name.superview != nil && sheet.field.superview == nil && Self.cleared(sheet))
+        #expect(!sheet.done.isEnabled, "Done is on with the refused name unchanged")
+        name.field.stringValue = "work"
+        sheet.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: name.field))
+        #expect(sheet.done.isEnabled && name.error == nil, "a new name kept Done off or its refusal")
         #expect(await server.requests.filter { $0.method == .put }.map(\.path) == ["/v1/logins/claude-code/Work"])
         sheet.withdraw()
     }
@@ -387,5 +390,65 @@ extension Exchange {
     /// The sentence this recorded refusal says.
     var said: String? {
         try? (JSONSerialization.jsonObject(with: body) as? [String: Any]).flatMap { ($0["error"] as? [String: Any])?["message"] as? String }
+    }
+}
+
+extension LoginSheetTests {
+    /// The person's logins not read: the panel says why, in the server's words where it gives them,
+    /// and no sheet opens (a name not asked could replace one they have).
+    @Test func loginsNotReadOpenNoSheetAndSayWhy() async throws {
+        let (view, window, _) = try await NewSessionPanelTests.listed(["workspace-agents-dock-no-login"])
+        defer { window.orderOut(nil) }
+        let panel = try await NewSessionPanelTests.open("dock", in: view)
+        try NewSessionPanelTests.press(panel.view.storeLogin)
+        try #require(await RunnerTabTests.until { !view.busy }, "the ask of the logins never ended")
+        #expect(window.attachedSheet == nil && panel.isOpen, "a sheet opened with the logins not read")
+        #expect(panel.line == .unread("Can't reach 127.0.0.1. Nothing can be stored now.") && panel.view.words.contains("Can't reach 127.0.0.1. Nothing can be stored now."), "\(panel.view.words)")
+        #expect(panel.view.primary?.holdsKeys == false && panel.stored == nil)
+        let refused = try Exchange("refusal-forbidden")
+        let forbidden = Exchange(method: "GET", path: "/v1/logins", status: refused.status, body: refused.body)
+        let (other, otherWindow, _) = try await NewSessionPanelTests.listed(["workspace-agents-dock-no-login"], also: [forbidden])
+        defer { otherWindow.orderOut(nil) }
+        let again = try await NewSessionPanelTests.open("dock", in: other)
+        try NewSessionPanelTests.press(again.view.storeLogin)
+        try #require(await RunnerTabTests.until { !other.busy })
+        let said = try #require(refused.said)
+        #expect(otherWindow.attachedSheet == nil && again.line == .unread(said), "the server's refusal of the listing is not its words: \(String(describing: again.line))")
+    }
+
+    /// Cancel while storing, then the store succeeds: with the panel still open it says so, and the
+    /// clipboard still holding the key is cleared and said; with the panel gone under the sheet,
+    /// nothing says it, so the clipboard is left as it was.
+    @Test(arguments: [true, false])
+    func aStoreAnsweredAfterTheSheetEndedClearsTheClipboardOnlyWhereItIsSaid(_ panelOpen: Bool) async throws {
+        let (view, window, _, sheet) = try await Self.asked()
+        defer { window.orderOut(nil) }
+        view.pasteboard.clearContents()
+        view.pasteboard.setString(Self.pasted, forType: .string)
+        Self.paste(into: sheet)
+        view.client = SailClient(transport: RecordedServer([try Exchange("workspace-agents-dock")]), token: "tok")
+        let stored = try Exchange("login-stored"), gate = Gate()
+        sheet.send = { endpoint in
+            await gate.wait()
+            do throws(SailError) {
+                return .success(try endpoint.decode(HTTPResponse(status: stored.status, headers: [:], body: stored.body)))
+            } catch {
+                return .failure(error)
+            }
+        }
+        try NewSessionPanelTests.press(sheet.store)
+        sheet.cancelOperation(nil)
+        #expect(window.attachedSheet == nil && sheet.model.stage == .storing)
+        if !panelOpen { view.isHidden = true }
+        gate.open()
+        try #require(await RunnerTabTests.until { if case .stored = sheet.model.stage { true } else { false } }, "the store never answered")
+        if panelOpen {
+            try #require(await RunnerTabTests.until { view.newSession.stored != nil && !view.busy })
+            #expect(view.newSession.stored == "Stored Claude Code login “default”. Removed the key from the clipboard. 1 live run finishes on the old `default`.")
+            #expect(view.pasteboard.string(forType: .string) == nil, "the clipboard said cleared still holds the key")
+        } else {
+            let kept = view.pasteboard.string(forType: .string) == Self.pasted
+            #expect(kept && !view.newSession.isOpen, "the clipboard was cleared with nothing to say so")
+        }
     }
 }

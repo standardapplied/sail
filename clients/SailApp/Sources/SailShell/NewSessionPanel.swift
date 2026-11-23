@@ -54,8 +54,13 @@ package final class NewSessionPanel: NSObject {
     /// What it shows.
     package private(set) var content: NewSessionView.Content?
     package private(set) var workspace = ""
-    /// The quiet line saying a login was stored, until the panel closes.
-    package private(set) var stored: String?
+    /// The quiet line over the foot until the panel closes: a login stored, or why none can be.
+    package private(set) var line: NewSessionView.Line?
+
+    /// The line saying a login was stored.
+    package var stored: String? {
+        if case let .stored(words) = line { words } else { nil }
+    }
     /// The Store a Login sheet over it, while it asks.
     package private(set) var loginSheet: LoginSheet?
     /// The box on screen, and whether it hangs under its row (its top kept as it grows) or over it.
@@ -82,7 +87,7 @@ package final class NewSessionPanel: NSObject {
     func open(_ answer: Answer, workspace: String, memory: ModeMemory, under row: NSRect, page: NSView, narrow: Bool, anchor: NSView?) {
         guard let window = page.window, !isOpen else { return }
         self.workspace = workspace
-        stored = nil
+        line = nil
         content = Self.content(answer, memory: memory)
         view.direction = page.userInterfaceLayoutDirection
         let area = page.convert(page.visibleRect, to: nil)
@@ -107,7 +112,7 @@ package final class NewSessionPanel: NSObject {
     package func close() {
         guard isOpen else { return }
         loginSheet?.withdraw()
-        stored = nil
+        line = nil
         if let resizeWatch { NotificationCenter.default.removeObserver(resizeWatch) }
         resizeWatch = nil
         popover.close()
@@ -141,13 +146,20 @@ package final class NewSessionPanel: NSObject {
             shown = .offered(panel)
         }
         content = shown
-        stored = line
+        self.line = .stored(line)
         redraw()
         guard case let .offered(panel) = shown, let offer = panel.offer(harness), let start = view.primary else { return }
         if let ready = NewSessionWords.ready(offer) {
             NSAccessibility.post(element: view, notification: .announcementRequested, userInfo: [.announcement: ready, .priority: NSAccessibilityPriorityLevel.high.rawValue])
         }
         NSAccessibility.post(element: start, notification: .layoutChanged, userInfo: [.uiElements: [start]])
+    }
+
+    /// `said` over the foot of what it shows now, until it closes.
+    func say(_ said: NewSessionView.Line) {
+        guard isOpen else { return }
+        line = said
+        redraw()
     }
 
     static func content(_ answer: Answer, memory: ModeMemory) -> NewSessionView.Content {
@@ -161,7 +173,7 @@ package final class NewSessionPanel: NSObject {
 
     private func draw(width: Double) {
         guard let content else { return }
-        view.show(content, workspace: workspace, stored: stored, veiled: loginSheet != nil, width: width)
+        view.show(content, workspace: workspace, line: line, veiled: loginSheet != nil, width: width)
     }
 
     /// Drawn again where it is, its top kept under its row (its foot over it) as its height changes.
@@ -292,7 +304,7 @@ final class NewSessionKeys: NSView {
 /// The panel's box, on the popover's surface with a strong hairline edge and 8 pt corners: its
 /// title, the stopped workspace's line, the rows with the chosen one's detail under it, a login
 /// just stored said in one line, and the foot with the keys and Start; or, where nothing starts for
-/// the person, why, and one button. Built whole by ``show(_:workspace:stored:veiled:width:)``, every frame
+/// the person, why, and one button. Built whole by ``show(_:workspace:line:veiled:width:)``, every frame
 /// set there, so no layout pass changes what it shows; mirrored right to left.
 @MainActor
 package final class NewSessionView: NSView {
@@ -338,7 +350,14 @@ package final class NewSessionView: NSView {
     private var hairlines: [Double] = []
     private var bar: NSRect?
     private var square: NSRect?
-    private var storedSquare: NSRect?
+    private var lineSquare: NSRect?
+    private var lineFailed = false
+
+    /// The quiet line over the foot: a login stored, or why none can be stored now.
+    package enum Line: Equatable {
+        case stored(String)
+        case unread(String)
+    }
     /// The width it is being built at.
     private var boxWidth = 0.0
 
@@ -368,10 +387,10 @@ package final class NewSessionView: NSView {
         ((view as? NSTextField).map { [$0.stringValue] } ?? (view as? NSButton).map { [$0.title] } ?? []) + view.subviews.flatMap(texts)
     }
 
-    /// Builds it for `content` in workspace `workspace`, `width` wide, saying `stored` over the foot
-    /// once a login was stored; `veiled` while its sheet asks: its Start outlined, as a row's Open is
+    /// Builds it for `content` in workspace `workspace`, `width` wide, saying `line` over the foot;
+    /// `veiled` while its sheet asks: its Start outlined, as a row's Open is
     /// under the panel, the sheet's Store the one primary on screen, and the sheet's veil over it.
-    func show(_ content: Content, workspace: String, stored: String?, veiled: Bool, width: Double) {
+    func show(_ content: Content, workspace: String, line: Line?, veiled: Bool, width: Double) {
         self.veiled = veiled
         subviews.forEach { $0.removeFromSuperview() }
         rows = []
@@ -382,7 +401,7 @@ package final class NewSessionView: NSView {
         hairlines = []
         bar = nil
         square = nil
-        storedSquare = nil
+        lineSquare = nil
         boxWidth = width
         let edge = Look.hairline, inner = width - 2 * (Self.padding + edge)
         let title = NSMutableAttributedString(attributedString: Self.text(NewSessionWords.title(workspace).lead, .systemFont(ofSize: Look.Step.callout.points, weight: .semibold), look.text, direction: direction))
@@ -401,13 +420,13 @@ package final class NewSessionView: NSView {
                 y = list(choice, of: panel, workspace: workspace, y: y, width: width)
             }
             y += 4
-            if let stored { storedSquare = quietLine(stored, y: &y, width: width) }
+            said(line, y: &y, width: width)
             hairlines.append(y)
             let (title, enabled) = NewSessionWords.primary(panel.readiness)
             let start = SailButton(title, kind: veiled ? .secondary : .primary, size: .small, look: look, target: self, action: #selector(pressedStart(_:)))
             start.hint("\r", mono: mono)
             start.isEnabled = enabled
-            start.holdsKeys = stored != nil && enabled
+            start.holdsKeys = line.map { if case .stored = $0 { true } else { false } } == true && enabled
             start.why = enabled ? nil : Self.refusal(panel.readiness)?.message
             primary = start
             let hint = Self.label(Self.text(NewSessionWords.hint, mono.font(Look.Step.micro.points, .regular) as NSFont, look.textTertiary, direction: direction).cut(.byTruncatingTail))
@@ -420,7 +439,7 @@ package final class NewSessionView: NSView {
                 y = place(Self.wrapping(remedy, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary, width: inner, direction: direction), x: edge + Self.padding, y: y + 10, width: inner)
             }
             y += 12
-            if let stored { storedSquare = quietLine(stored, y: &y, width: width) }
+            said(line, y: &y, width: width)
             hairlines.append(y)
             let button = SailButton(shell ? NewSessionWords.openAShell : "Close", kind: .secondary, size: .small, look: look, target: self, action: shell ? #selector(pressedShell(_:)) : #selector(pressedClose(_:)))
             secondary = button
@@ -528,6 +547,17 @@ package final class NewSessionView: NSView {
         link.frame = mirrored(NSRect(x: x + Self.labelInset, y: y, width: linkWidth, height: Double(size.height)))
         addSubview(link)
         return place(quiet(how, width: width), x: x, y: y + Double(size.height) + Self.gap, width: width)
+    }
+
+    /// `line`, if any, said at `y` after its square: the success's for a store, the error's for none.
+    private func said(_ line: Line?, y: inout Double, width: Double) {
+        guard let line else { return }
+        let (words, failed) = switch line {
+        case let .stored(words): (words, false)
+        case let .unread(words): (words, true)
+        }
+        lineFailed = failed
+        lineSquare = quietLine(words, y: &y, width: width)
     }
 
     /// A quiet line across the box at `y`, under a hairline, after a square: a fact said, not a
@@ -652,9 +682,9 @@ package final class NewSessionView: NSView {
             NSColor(look.textTertiary).setFill()
             square.fill()
         }
-        if let storedSquare {
-            NSColor(Tint(look.success)).setFill()
-            storedSquare.fill()
+        if let lineSquare {
+            NSColor(Tint(lineFailed ? look.error : look.success)).setFill()
+            lineSquare.fill()
         }
         if let bar {
             NSColor(look.accent).setFill()

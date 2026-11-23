@@ -21,8 +21,9 @@ public struct StoreLogin: Equatable, Sendable {
         case storing
         /// The key refused, or not sent, in these words, said under its field.
         case refused(String)
-        /// Stored as `login`; `clearsClipboard`, the clipboard still held the value and is cleared.
-        case stored(StoredLogin, clearsClipboard: Bool)
+        /// Stored, as the server answered; `clearsClipboard`, the clipboard still held the value and is
+        /// cleared where the panel says so.
+        case stored(LoginStored, clearsClipboard: Bool)
     }
 
     /// What the clipboard holds now: its change count and its text.
@@ -47,6 +48,8 @@ public struct StoreLogin: Equatable, Sendable {
     public private(set) var name: String
     /// The clipboard's change count when it held exactly the value sent; nil when it did not.
     private var pastedAt: Int?
+    /// The key was put away by Change, or sent with a name the server refused: it is pasted again.
+    public private(set) var keyDropped = false
 
     /// The sheet for `offer` of a person whose logins are `logins`, on the control plane at
     /// `address`; nil when the harness offers no kind the app stores.
@@ -56,11 +59,26 @@ public struct StoreLogin: Equatable, Sendable {
         display = offer.display
         self.kind = kind
         taken = logins.filter { $0.harness == offer.harness }.map(\.name)
-        place = address.range(of: "://").map { String(address[$0.upperBound...]) } ?? address
+        place = Self.place(address)
         name = taken.isEmpty ? Self.defaultName : Self.free(among: taken)
     }
 
     static let defaultName = "default"
+
+    /// The control plane at `address` as a person names it: its address without the scheme.
+    public static func place(_ address: String) -> String {
+        address.range(of: "://").map { String(address[$0.upperBound...]) } ?? address
+    }
+
+    /// Why no sheet opens when the person's logins could not be read, at the control plane at
+    /// `address`: the server's sentence, or that it did not answer.
+    public static func unread(_ error: SailError, address: String) -> String {
+        switch error {
+        case let .refused(refusal): refusal.message
+        case .unreachable: "Can't reach \(place(address)). Nothing can be stored now."
+        default: error.said(at: place(address))
+        }
+    }
 
     /// `work`, or the first of `work-2`, `work-3`… none of `taken` is.
     static func free(among taken: [String]) -> String {
@@ -86,14 +104,19 @@ public struct StoreLogin: Equatable, Sendable {
         switch stage {
         case .storing, .stored, .naming: return
         case .refused where !holdsSomething: return
-        case .empty, .filled, .refused: stage = holdsSomething ? .filled : .empty
+        case .empty, .filled, .refused:
+            stage = holdsSomething ? .filled : .empty
+            if holdsSomething { keyDropped = false }
         }
     }
 
     /// Change: the name named, the key's field put away and its value gone; only where it is asked.
     public mutating func changeName() {
         switch stage {
-        case .empty, .filled, .refused: if asksName { stage = .naming(refused: nil) }
+        case .empty, .filled, .refused:
+            guard asksName else { return }
+            if stage == .filled { keyDropped = true }
+            stage = .naming(refused: nil)
         case .naming, .storing, .stored: return
         }
     }
@@ -105,10 +128,9 @@ public struct StoreLogin: Equatable, Sendable {
         stage = .naming(refused: nil)
     }
 
-    /// Done is on: a name is given.
+    /// Done is on: a name is given, and not one the server refused unchanged.
     public var nameGiven: Bool {
-        guard case .naming = stage else { return false }
-        return !name.isEmpty
+        stage == .naming(refused: nil) && !name.isEmpty
     }
 
     /// Done: back to the key's field, empty, the name kept.
@@ -134,9 +156,12 @@ public struct StoreLogin: Equatable, Sendable {
         defer { pastedAt = nil }
         switch answer {
         case let .success(stored):
-            stage = .stored(stored.login, clearsClipboard: pastedAt == now)
+            stage = .stored(stored, clearsClipboard: pastedAt == now)
+        case let .failure(.refused(refusal)) where refusal.fieldErrors.contains(where: { $0.field == "name" }):
+            stage = .naming(refused: refusal.message)
+            keyDropped = true
         case let .failure(.refused(refusal)):
-            stage = refusal.fieldErrors.contains { $0.field == "name" } ? .naming(refused: refusal.message) : .refused(refusal.message)
+            stage = .refused(refusal.message)
         case .failure(.unreachable):
             stage = .refused("Can't reach \(place). Nothing was stored.")
         case let .failure(error):
@@ -159,10 +184,12 @@ public struct StoreLogin: Equatable, Sendable {
         "Paste your \(kind.label)"
     }
 
-    /// How to make one, the one line under the field.
+    /// The one line under the field: how to make one, or that the key put away is pasted again.
     public var help: String {
-        kind.said ?? ""
+        keyDropped ? Self.pasteAgain : kind.said ?? ""
     }
+
+    public static let pasteAgain = "Paste the key again."
 
     /// The field as VoiceOver names it.
     public var fieldName: String {
@@ -193,9 +220,11 @@ public struct StoreLogin: Equatable, Sendable {
         "Store \(display) login"
     }
 
-    /// The panel's one quiet line once stored, the clipboard's sentence when it was cleared.
+    /// The panel's one quiet line once stored: the clipboard's sentence when it was cleared, and
+    /// what the server says once of runs on a login it replaced.
     public var stored: String? {
-        guard case let .stored(login, cleared) = stage else { return nil }
-        return "Stored \(display) login “\(login.name)”." + (cleared ? " Removed the key from the clipboard." : "")
+        guard case let .stored(answer, cleared) = stage else { return nil }
+        let clipboard = cleared ? " Removed the key from the clipboard." : ""
+        return "Stored \(display) login “\(answer.login.name)”." + clipboard + (answer.note.map { " " + $0 } ?? "")
     }
 }

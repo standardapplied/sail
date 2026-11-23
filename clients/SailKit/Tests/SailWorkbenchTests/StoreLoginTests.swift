@@ -40,6 +40,8 @@ import Testing
     }
 
     static let elsewhere = Clipboard(count: 7, text: "something else")
+    /// What the recorded store says once of runs on the login it replaced.
+    static let note = " 1 live run finishes on the old `default`."
 
     typealias Clipboard = StoreLogin.Clipboard
 
@@ -141,11 +143,13 @@ import Testing
         second.named("personal")
         second.doneNaming()
         #expect(second.stage == .empty && second.name == "personal")
+        #expect(second.keyDropped && second.help == "Paste the key again.", "the key Change put away is not asked again")
         second.changeName()
         second.changeName()
         #expect(second.stage == .naming(refused: nil))
         second.doneNaming()
         second.typed(holdsSomething: true)
+        #expect(!second.keyDropped && second.help == "Create an API key in the Claude Console.", "the key pasted again still says to paste it")
         let named = second.store(Self.pasted, clipboard: Self.elsewhere)
         let endpoint = try #require(named)
         #expect(endpoint.request.path == "/v1/logins/claude-code/personal")
@@ -172,13 +176,18 @@ import Testing
         sheet.typed(holdsSomething: false)
         sheet.named("other")
         #expect(sheet.stage == .storing && sheet.name == "default")
+        var asking = try Self.filled(logins: "logins-no-default")
+        _ = asking.store(Self.pasted, clipboard: Self.elsewhere)
+        asking.changeName()
+        #expect(asking.stage == .storing, "Change acted while the store went")
         sheet.answered(try Self.answer("login-stored"), clipboard: 7)
-        guard case let .stored(login, cleared) = sheet.stage else { Issue.record("not stored: \(sheet.stage)"); return }
+        guard case let .stored(answer, cleared) = sheet.stage else { Issue.record("not stored: \(sheet.stage)"); return }
+        let login = answer.login
         #expect(login.name == "default" && login.kind == "api-key" && login.harness == "claude-code" && login.isDefault && !cleared)
-        #expect(sheet.stored == "Stored Claude Code login “default”.")
+        #expect(sheet.stored == "Stored Claude Code login “default”." + Self.note, "the server's note on the runs of a login it replaced is not said")
         sheet.typed(holdsSomething: true)
         sheet.answered(try Self.answer("login-stored"), clipboard: 7)
-        #expect(sheet.stage == .stored(login, clearsClipboard: false), "a stored sheet changed")
+        #expect(sheet.stage == .stored(answer, clearsClipboard: false), "a stored sheet changed")
         var idle = try Self.filled()
         idle.answered(try Self.answer("login-stored"), clipboard: 7)
         #expect(idle.stage == .filled && idle.stored == nil, "an answer to no store was taken")
@@ -205,9 +214,14 @@ import Testing
         #expect(sheet.stage == wanted && !sheet.storable && sheet.stored == nil)
         sheet.typed(holdsSomething: false)
         #expect(sheet.stage == wanted, "an empty field took the refusal away")
+        if refusal.name {
+            #expect(!sheet.nameGiven && sheet.keyDropped && sheet.help == StoreLogin.pasteAgain, "Done is on with the refused name unchanged, or the key sent is not asked again")
+            sheet.doneNaming()
+            #expect(sheet.stage == wanted, "Done left with the refused name unchanged")
+        }
         sheet.named("work")
         if refusal.name {
-            #expect(sheet.stage == .naming(refused: nil), "a new name kept the name's refusal")
+            #expect(sheet.stage == .naming(refused: nil) && sheet.nameGiven, "a new name kept the name's refusal")
             sheet.doneNaming()
         } else {
             #expect(sheet.stage == wanted, "a name typed while the key was asked took the key's refusal away")
@@ -217,7 +231,7 @@ import Testing
     }
 
     /// No answer: nothing was stored, said with the control plane's name; any other failure in its
-    /// own words.
+    /// own words. The person's logins not read say why no sheet opens, in the same way.
     @Test func noAnswerSaysNothingWasStored() throws {
         var sheet = try Self.filled()
         _ = sheet.store(Self.pasted, clipboard: Self.elsewhere)
@@ -228,6 +242,10 @@ import Testing
         let error = SailError.unexpected(route: "PUT /v1/logins/claude-code/default", status: 502)
         proxied.answered(.failure(error), clipboard: 7)
         #expect(proxied.stage == .refused(error.said(at: "127.0.0.1:7979")))
+        let refused = Refusal(code: .known(.forbidden), message: "This credential acts for no person, so it keeps no logins.")
+        #expect(StoreLogin.unread(.refused(refused), address: Self.address) == refused.message)
+        #expect(StoreLogin.unread(.unreachable("Could not connect to the server."), address: Self.address) == "Can't reach 127.0.0.1:7979. Nothing can be stored now.")
+        #expect(StoreLogin.unread(error, address: Self.address) == error.said(at: "127.0.0.1:7979"))
     }
 
     // MARK: The clipboard
@@ -247,7 +265,7 @@ import Testing
             sheet.answered(try Self.answer(each.answer), clipboard: each.now)
             guard case let .stored(_, cleared) = sheet.stage else { Issue.record("case \(index) not stored"); continue }
             #expect(cleared == each.clears, "case \(index): cleared \(cleared)")
-            #expect(sheet.stored == "Stored Claude Code login “default”." + (each.clears ? " Removed the key from the clipboard." : ""), "case \(index)")
+            #expect(sheet.stored == "Stored Claude Code login “default”." + (each.clears ? " Removed the key from the clipboard." : "") + Self.note, "case \(index)")
         }
         var refused = try Self.filled()
         _ = refused.store(Self.pasted, clipboard: Clipboard(count: 4, text: Self.pasted))
@@ -256,6 +274,6 @@ import Testing
         again.typed(holdsSomething: true)
         _ = again.store(Self.pasted, clipboard: Clipboard(count: 9, text: "other"))
         again.answered(try Self.answer("login-stored"), clipboard: 4)
-        #expect(again.stage == .stored(try #require(try? Self.answer("login-stored").get()).login, clearsClipboard: false), "a refused store's clipboard was cleared by the next")
+        #expect(again.stage == .stored(try #require(try? Self.answer("login-stored").get()), clearsClipboard: false), "a refused store's clipboard was cleared by the next")
     }
 }

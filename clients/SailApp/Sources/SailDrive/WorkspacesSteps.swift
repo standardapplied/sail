@@ -725,10 +725,11 @@ extension Driver {
     }
 
     /// Every window the window server shows in front of `sheet` and over it, by its owner and name: a
-    /// suggestion such as Passwords' AutoFill, whoever draws it. None of the app's own is in front.
-    private static func inFrontOf(_ sheet: NSWindow) -> [String] {
+    /// suggestion such as Passwords' AutoFill, whoever draws it; nil when the sheet is not on screen,
+    /// so nothing was compared and nothing is claimed.
+    private static func inFrontOf(_ sheet: NSWindow) -> [String]? {
         let listed = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
-        guard let at = listed.firstIndex(where: { $0[kCGWindowNumber as String] as? Int == sheet.windowNumber }), let screen = sheet.screen else { return [] }
+        guard let at = listed.firstIndex(where: { $0[kCGWindowNumber as String] as? Int == sheet.windowNumber }), let screen = sheet.screen else { return nil }
         let frame = sheet.frame, top = Double(screen.frame.maxY)
         let shown = CGRect(x: Double(frame.minX), y: top - Double(frame.maxY), width: Double(frame.width), height: Double(frame.height))
         return listed[..<at].compactMap { window in
@@ -753,8 +754,11 @@ extension Driver {
         if let error = sheet.field.error { facts.append("refused: \(error)") } else if let help = sheet.field.help { facts.append("help: \(help)") }
         if let error = sheet.name?.error, sheet.name?.superview != nil { facts.append("the name refused: \(error)") }
         if panel.isOpen, Self.inFront(sheet.windowNumber, of: panel.popover.panel.windowNumber) { facts.append("over the panel") }
-        let over = Self.inFrontOf(sheet)
-        facts.append(over.isEmpty ? "no suggestion window is showing" : "in front of the sheet: " + over.joined(separator: ", "))
+        switch Self.inFrontOf(sheet) {
+        case nil: facts.append("the sheet is not on screen")
+        case let over? where over.isEmpty: facts.append("no suggestion window is showing")
+        case let over?: facts.append("in front of the sheet: " + over.joined(separator: ", "))
+        }
         return facts
     }
 
