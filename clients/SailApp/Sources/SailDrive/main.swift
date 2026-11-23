@@ -8,7 +8,8 @@ import SailTestPasskey
 
 /// The app, driven: `--drive <script.json> --out <directory>`, the software passkey in the
 /// platform's place, its credentials kept in `SAIL_DRIVE_PASSKEY` (beside the output when unset)
-/// so a later launch signs in with them; `SAIL_SIGNING=on` says the build is signed;
+/// so a later launch signs in with them; `SAIL_DRIVE_PRIVATE` names the run's private folder, where
+/// the drive makes the files its steps use; `SAIL_SIGNING=on` says the build is signed;
 /// `SAIL_DRIVE_GOLDENS=on` answers every control-plane call from the server's goldens. Never shipped:
 /// it is its own executable, bundled only for CI's drive runs.
 LineBuffered.standardOutput()
@@ -24,6 +25,11 @@ guard let scriptPath = value(after: "--drive"), let outPath = value(after: "--ou
 }
 let out = URL(filePath: outPath)
 let environment = ProcessInfo.processInfo.environment
+var isFolder: ObjCBool = false
+guard Driver.privateFolder.hasPrefix("/"), FileManager.default.fileExists(atPath: Driver.privateFolder, isDirectory: &isFolder), isFolder.boolValue else {
+    FileHandle.standardError.write(Data("SAIL_DRIVE_PRIVATE names no folder: the drive makes its steps' files in the run's private folder, which ci/drive makes\n".utf8))
+    exit(2)
+}
 let script: Script
 do {
     try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)

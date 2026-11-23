@@ -367,12 +367,27 @@ jobs:
           SAIL_SIGNING: ${{ env.SIGNING }}
         # The Dock hides, so every runner leaves windows the screen less its menu bar: AppKit keeps a
         # window inside the screen's visible frame, and a runner whose Dock stood 2 pt taller cut the
-        # design's 684 pt window to 682.
+        # design's 684 pt window to 682. A person's Sail setting stands in this account's settings
+        # before the drive, and after it they must be exactly as they were, no attach feeder may be
+        # left, and a second ci/drive on this account must start: get past its start-up checks (the
+        # account's Sail hosts and settings) to its first mktemp, which a stand-in ends with 3.
         run: |
           defaults write -g AppleAccentColor -int -1
           defaults write com.apple.dock autohide -bool true
           killall Dock
+          defaults write sh.standardapplied.sail drive.a-persons-setting -string kept
+          defaults export sh.standardapplied.sail "$RUNNER_TEMP/settings-before.plist"
           ci/drive "$RUNNER_TEMP/drive/Sail.app" "$RUNNER_TEMP/drive-out"
+          defaults export sh.standardapplied.sail "$RUNNER_TEMP/settings-after.plist"
+          diff "$RUNNER_TEMP/settings-before.plist" "$RUNNER_TEMP/settings-after.plist" \
+            || { echo "the drive did not put this account's Sail settings back as they were" >&2; exit 1; }
+          if pgrep -U "$UID" -fx 'tail -f /dev/null'; then echo "the drive left its attach feeder running" >&2; exit 1; fi
+          stand_in=$(mktemp -d)
+          printf '#!/bin/sh\nexit 3\n' > "$stand_in/mktemp"
+          chmod +x "$stand_in/mktemp"
+          again=0
+          PATH="$stand_in:$PATH" ci/drive "$RUNNER_TEMP/drive/Sail.app" "$RUNNER_TEMP/drive-again" || again=$?
+          [[ $again == 3 ]] || { echo "a second ci/drive on this account did not start (exit $again)" >&2; exit 1; }
 
       - name: Sign the shipped app with Developer ID
         if: env.SIGNING == 'on'

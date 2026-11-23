@@ -11,7 +11,8 @@ struct Script: Decodable {
 
 struct Step: Decodable {
     var name: String?
-    /// Text typed one key at a time, through the window's `sendEvent` and the input context.
+    /// Text typed one key at a time, through the window's `sendEvent` and the input context;
+    /// `{private}` in it is the run's private folder (``Driver/privateFolder``).
     var type: String?
     /// A key pressed with `modifiers` ("control", "option", "shift", "command"): a letter, a digit,
     /// or "enter", "escape", "tab", "backspace", "arrowUp", "arrowDown", "arrowLeft", "arrowRight".
@@ -503,7 +504,8 @@ struct Step: Decodable {
     var shotMenu: String?
     /// The window in full screen, the whole screen taken, in both looks; then out of full screen.
     var fullScreen: String?
-    /// Every process whose command line holds this is ended (`pkill -f`); none running is no failure.
+    /// Every process of this account whose command line holds this is ended (`pkill -U <uid> -f`);
+    /// none running is no failure.
     var kill: String?
     /// The tab strip's hit testing: a tab's middle reaches the tab, the empty end moves the window.
     var stripHits: Bool?

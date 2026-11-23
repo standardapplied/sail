@@ -275,7 +275,8 @@ final class Driver {
         if let kit = await performKit(step) {
             return kit
         }
-        if let text = step.type {
+        if let typed = step.type {
+            let text = typed.replacingOccurrences(of: "{private}", with: Self.privateFolder)
             for character in text {
                 key(character)
                 await Task.yield()
@@ -641,6 +642,15 @@ final class Driver {
         ours(mainThread.stalls.longest(in: span), less: Heartbeat.interval)
     }
 
+    /// The run's private folder, which ci/drive makes for each run and removes after, handed in
+    /// `SAIL_DRIVE_PRIVATE` (main.swift refuses to start without it): every file the drive makes
+    /// for its steps goes there, so two runs on one Mac never share a path.
+    nonisolated static let privateFolder = ProcessInfo.processInfo.environment["SAIL_DRIVE_PRIVATE"] ?? ""
+
+    nonisolated static func privateFile(_ name: String) -> String {
+        privateFolder + "/" + name
+    }
+
     /// The bytes the spec's flood prints, made once so that one `cat` gives them (`head -c 20971520
     /// /dev/zero | tr '\0' x | fold -w 150` printed nine processes' worth of CPU beside the
     /// terminal it measured): 20 MiB of `x` folded at 150 columns in `lines`, its last 20 bytes
@@ -651,9 +661,10 @@ final class Driver {
         var bytes = [UInt8]()
         bytes.reserveCapacity(lines * 151)
         for _ in 0 ..< lines { bytes += line }
-        FileManager.default.createFile(atPath: "/tmp/sail-drive-flood-lines", contents: Data(bytes))
-        FileManager.default.createFile(atPath: "/tmp/sail-drive-flood-tail", contents: Data(repeating: UInt8(ascii: "x"), count: 20_971_520 - lines * 150))
-        return ("/tmp/sail-drive-flood-lines", "/tmp/sail-drive-flood-tail")
+        let files = (lines: privateFile("flood-lines"), tail: privateFile("flood-tail"))
+        FileManager.default.createFile(atPath: files.lines, contents: Data(bytes))
+        FileManager.default.createFile(atPath: files.tail, contents: Data(repeating: UInt8(ascii: "x"), count: 20_971_520 - lines * 150))
+        return files
     }()
 
     /// A program asking the terminal for its colours, run by the system's perl in a pane. `ask`
@@ -662,7 +673,7 @@ final class Driver {
     /// colour 5 to `rgb:12/34/56` as a program's own. `watch` subscribes to colour scheme reports
     /// (mode 2031), prints `subscribed`, and once a report comes prints `scheme report <scheme>`.
     static let colourAsker: String = {
-        let path = "/tmp/sail-drive-colours.pl"
+        let path = privateFile("colours.pl")
         let script = #"""
             use strict;
             use IO::Select;
@@ -710,7 +721,7 @@ final class Driver {
     /// it writes as fast as the pty takes them. Blocks are whole lines, so the tail after it ends
     /// starts a line.
     static let floodPacer: String = {
-        let path = "/tmp/sail-drive-flood-pace.pl"
+        let path = privateFile("flood-pace.pl")
         let script = """
             use strict;
             use Time::HiRes qw(time sleep);
