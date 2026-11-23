@@ -241,14 +241,16 @@ struct Step: Decodable {
     /// "holds the keys", it is drawn holding them.
     var newSessionPrimary: [String]?
     /// A login's value put on the pasteboard, then ⌘V into the Store a Login sheet's field. The drive
-    /// keeps it for the sweep to search for, and says only its length.
+    /// keeps it for the sweep to search for (a blank one is no key, and is found in any file), and
+    /// says only its length.
     var pasteLogin: String?
     /// The Store a Login sheet is up saying these words, in this order, within `seconds`.
     var loginSheetSays: [String]?
     /// The Store a Login sheet is as these facts say, within `seconds`: "closed", "Store on", "Store
     /// off", "Storing", "the field empty", "the field filled", "dots only", "the keys in the field",
     /// "no name asked", "the name <name>", "the panel open behind", "refused: <sentence>", "the
-    /// name refused: <sentence>", "over the panel" (the window server orders the sheet in front of it).
+    /// name refused: <sentence>", "help: <the help line>", "over the panel" (the window server orders
+    /// the sheet in front of it).
     var loginSheetIs: [String]?
     /// The pasteboard holds exactly this ("" for nothing), within `seconds`.
     var pasteboardHolds: String?

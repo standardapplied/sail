@@ -681,7 +681,7 @@ extension Driver {
         let sheet = { self.shell.window.attachedSheet as? LoginSheet }
         if let value = step.pasteLogin {
             guard let up = sheet(), let paste = Keys.named("v", modifiers: ["command"]) else { return (false, "no Store a Login sheet to paste into") }
-            pastedLogins.insert(value)
+            if !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { pastedLogins.insert(value) }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(value, forType: .string)
             send(paste)
@@ -727,7 +727,7 @@ extension Driver {
         if sheet.model.stage == .storing { facts.append("Storing") }
         if field is NSSecureTextField { facts.append("dots only") }
         if keys === field || (keys as? NSText)?.delegate === field { facts.append("the keys in the field") }
-        if let error = sheet.field.error { facts.append("refused: \(error)") }
+        if let error = sheet.field.error { facts.append("refused: \(error)") } else if let help = sheet.field.help { facts.append("help: \(help)") }
         if let error = sheet.name?.error { facts.append("the name refused: \(error)") }
         if panel.isOpen, Self.inFront(sheet.windowNumber, of: panel.popover.panel.windowNumber) { facts.append("over the panel") }
         return facts
