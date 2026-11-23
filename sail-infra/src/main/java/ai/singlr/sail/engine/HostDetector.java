@@ -133,6 +133,7 @@ public final class HostDetector {
       pb.redirectErrorStream(true);
       var process = pb.start();
       process.getOutputStream().close();
+      process.getErrorStream().close();
       String output;
       try (var printed = process.getInputStream()) {
         output = new String(printed.readAllBytes(), StandardCharsets.UTF_8).strip();

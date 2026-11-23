@@ -316,6 +316,7 @@ class PoolDevicesIT extends AbstractIncusIT {
                   "sudo", "-n", "bash", "-c", "exec 3<>\"$1\"; echo held; read -r _", "bash", node)
               .redirectErrorStream(true)
               .start();
+      holder.getErrorStream().close();
       List<String> held;
       try (var input = holder.getOutputStream();
           var said = new BufferedReader(new InputStreamReader(holder.getInputStream()))) {
@@ -375,6 +376,7 @@ class PoolDevicesIT extends AbstractIncusIT {
                   "sudo", "-n", "bash", "-c", "exec 3<>\"$1\"; echo held; read -r _", "bash", node)
               .redirectErrorStream(true)
               .start();
+      holder.getErrorStream().close();
       List<String> held;
       try (var input = holder.getOutputStream();
           var said = new BufferedReader(new InputStreamReader(holder.getInputStream()))) {

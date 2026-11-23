@@ -1429,6 +1429,7 @@ class WorkspaceIT extends AbstractIncusIT {
             .redirectErrorStream(true)
             .start();
     watcher.getOutputStream().close();
+    watcher.getErrorStream().close();
     try (var watched = watcher.getInputStream()) {
       var watching =
           exec(

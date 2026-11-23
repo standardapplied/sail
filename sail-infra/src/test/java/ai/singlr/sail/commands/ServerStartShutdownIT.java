@@ -101,6 +101,7 @@ class ServerStartShutdownIT {
     builder.environment().put("SAIL_DATA_DIR", data.toString());
     var process = builder.start();
     process.getOutputStream().close();
+    process.getErrorStream().close();
     return process;
   }
 

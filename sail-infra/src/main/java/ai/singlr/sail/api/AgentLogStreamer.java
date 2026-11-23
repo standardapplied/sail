@@ -234,6 +234,7 @@ public final class AgentLogStreamer {
 
     try {
       tailProcess.getOutputStream().close();
+      tailProcess.getErrorStream().close();
       var headers = exchange.getResponseHeaders();
       headers.set("Content-Type", "text/event-stream; charset=utf-8");
       headers.set("Cache-Control", "no-cache");

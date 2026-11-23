@@ -428,4 +428,26 @@ class WatcherSpawnerTest {
 
     ClosesWhatItOpens.assertClosed("a detached watcher", before);
   }
+
+  /**
+   * A detached watcher that runs on holds no pipe of ours while it runs: not even the one the JDK
+   * opens for a stderr merged into its log.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aRunningDetachedWatcherHoldsNoPipeOfOurs() throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+
+    var watcher =
+        ProcessHandle.of(
+                WatcherSpawner.spawnProcess(List.of("sleep", "600"), tempDir.resolve("watch.log")))
+            .orElseThrow();
+    try {
+      assertTrue(watcher.isAlive());
+      ClosesWhatItOpens.assertClosed("a running detached watcher", before);
+    } finally {
+      watcher.destroyForcibly();
+      watcher.onExit().get(10, TimeUnit.SECONDS);
+    }
+  }
 }

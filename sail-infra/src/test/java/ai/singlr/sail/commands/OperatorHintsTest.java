@@ -650,6 +650,7 @@ class OperatorHintsTest {
     process.environment().put("UID_UNDER_TEST", String.valueOf(uid));
     var running = process.start();
     running.getOutputStream().close();
+    running.getErrorStream().close();
     try (var output = running.getInputStream()) {
       var printed = new String(output.readAllBytes(), StandardCharsets.UTF_8);
       assertEquals(0, running.waitFor(), printed);

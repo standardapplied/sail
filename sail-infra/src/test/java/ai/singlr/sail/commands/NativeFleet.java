@@ -686,6 +686,7 @@ public final class NativeFleet implements AutoCloseable {
       exec.addAll(command);
       process = new ProcessBuilder(exec).redirectErrorStream(true).start();
       process.getOutputStream().close();
+      process.getErrorStream().close();
       var reader =
           new BufferedReader(
               new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));

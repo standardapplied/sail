@@ -123,6 +123,7 @@ class ProjectFilesCommandTest {
             .redirectInput(Child.NO_INPUT);
     builder.environment().put("SAIL_DATA_DIR", data.toString());
     var process = builder.start();
+    process.getErrorStream().close();
     try {
       assertTrue(process.waitFor(30, TimeUnit.SECONDS), "isolated add timed out");
       assertEquals(0, process.exitValue(), Files.readString(output));

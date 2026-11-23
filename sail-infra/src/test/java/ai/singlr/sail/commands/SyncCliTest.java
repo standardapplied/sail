@@ -184,6 +184,7 @@ class SyncCliTest {
     builder.environment().put("PATH", bin + ":" + System.getenv("PATH"));
     builder.environment().remove("SAIL_NO_SYNC");
     var process = builder.start();
+    process.getErrorStream().close();
     try {
       assertTrue(process.waitFor(30, TimeUnit.SECONDS), "isolated sync check timed out");
       assertEquals(0, process.exitValue(), Files.readString(output));

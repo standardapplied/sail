@@ -77,15 +77,18 @@ public final class Child {
 
   /**
    * Reads {@code process}'s stdout line by line into {@code lines} on a thread of its own, which
-   * closes it at its end; the caller ends the child and joins the returned thread.
+   * closes it at its end, and its stderr with it: merged into stdout, it is still a pipe the JDK
+   * opened and holds for the child's life. The caller ends the child and joins the returned thread.
    */
   public static Thread drain(Process process, BlockingQueue<String> lines) {
     return Thread.ofVirtual()
         .start(
             () -> {
-              try (var reader =
-                  new BufferedReader(
-                      new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+              try (var merged = process.getErrorStream();
+                  var reader =
+                      new BufferedReader(
+                          new InputStreamReader(
+                              process.getInputStream(), StandardCharsets.UTF_8))) {
                 for (var line = reader.readLine(); line != null; line = reader.readLine()) {
                   lines.add(line);
                 }

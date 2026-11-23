@@ -135,6 +135,7 @@ class HostInitCommandTest {
     builder.environment().put("SAIL_DATA_DIR", data.toString());
     builder.environment().put("PATH", bin + ":" + System.getenv("PATH"));
     var process = builder.start();
+    process.getErrorStream().close();
     try {
       assertTrue(process.waitFor(60, TimeUnit.SECONDS), "the dry run timed out");
       var said = Files.readString(output);

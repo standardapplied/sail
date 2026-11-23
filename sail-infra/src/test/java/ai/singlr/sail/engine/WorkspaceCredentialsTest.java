@@ -120,6 +120,7 @@ class WorkspaceCredentialsTest {
             .redirectErrorStream(true)
             .redirectOutput(said.toFile())
             .start();
+    process.getErrorStream().close();
     try (var in = process.getOutputStream()) {
       in.write(stdin.getBytes(StandardCharsets.UTF_8));
     }
@@ -747,6 +748,7 @@ class WorkspaceCredentialsTest {
               .redirectErrorStream(true)
               .start();
       process.getOutputStream().close();
+      process.getErrorStream().close();
       String found;
       try (var output = process.getInputStream()) {
         found = new String(output.readAllBytes(), StandardCharsets.UTF_8);
@@ -778,6 +780,7 @@ class WorkspaceCredentialsTest {
             .redirectErrorStream(true)
             .start();
     process.getOutputStream().close();
+    process.getErrorStream().close();
     String said;
     try (var output = process.getInputStream()) {
       said = new String(output.readAllBytes(), StandardCharsets.UTF_8);
