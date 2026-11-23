@@ -397,13 +397,14 @@ extension Driver {
     /// every process's arguments and the pasteboard; and every login value a step pasted into Store
     /// a Login, in all of those but the pasteboard, where the drive itself put it (a step checks
     /// that the app cleared it). Each place found is reported with which kind of secret was in it
-    /// (a session token, `sess_`, the ticket, a login's value), never the secret. An image is
+    /// (a session token, the session prefix, the ticket, a login's value), never the secret, nor
+    /// the prefix's own letters: an earlier run's report that spelled them was found by a later sweep. An image is
     /// searched as its bytes, which a drawn token would not be; the pasteboard is never written by
     /// the drive but for a login's value, so it shows only that the app did not write there.
     private func sweep() -> (Bool, String) {
         let ticket = Self.secret("SAIL_DRIVE_TICKET").map { [Data($0.utf8)] } ?? []
         var needles: [(name: String, bytes: Data)] = tokens.map { (name: "a session token", bytes: Data($0.utf8)) }
-        needles.append((name: "sess_", bytes: Data("sess_".utf8)))
+        needles.append((name: "the session prefix", bytes: Data("sess_".utf8)))
         needles += ticket.map { (name: "the ticket", bytes: $0) }
         let logins = pastedLogins.map { (name: "a login's value", bytes: Data($0.utf8)) }
         var places: [String] = []
@@ -429,7 +430,7 @@ extension Driver {
         search(Self.output(of: "/usr/bin/defaults", ["export", "sh.standardapplied.sail", "-"]), at: "defaults export sh.standardapplied.sail")
         search(Self.output(of: "/bin/ps", ["-axww", "-o", "args"]), at: "ps -axww -o args")
         search(Data((NSPasteboard.general.string(forType: .string) ?? "").utf8), at: "the pasteboard", pasted: false)
-        let scope = "\(tokens.count) token(s), sess_, \(ticket.count) ticket and \(logins.count) login value(s) in \(files) files, the log, the defaults, the processes and the pasteboard"
+        let scope = "\(tokens.count) token(s), the session prefix, \(ticket.count) ticket and \(logins.count) login value(s) in \(files) files, the log, the defaults, the processes and the pasteboard"
         return (places.isEmpty, places.isEmpty ? "found in none of \(scope)" : "found in \(places.joined(separator: ", ")) of \(scope)")
     }
 

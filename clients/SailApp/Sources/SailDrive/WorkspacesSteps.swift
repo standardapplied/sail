@@ -744,7 +744,8 @@ extension Driver {
         if let error = sheet.field.error { facts.append("refused: \(error)") } else if let help = sheet.field.help { facts.append("help: \(help)") }
         if let error = sheet.name?.error { facts.append("the name refused: \(error)") }
         if panel.isOpen, Self.inFront(sheet.windowNumber, of: panel.popover.panel.windowNumber) { facts.append("over the panel") }
-        if Self.inFrontOf(sheet).isEmpty { facts.append("no suggestion window is showing") }
+        let over = Self.inFrontOf(sheet)
+        facts.append(over.isEmpty ? "no suggestion window is showing" : "in front of the sheet: " + over.joined(separator: ", "))
         return facts
     }
 
