@@ -14,7 +14,13 @@ import Testing
 /// server's words, where it hangs at every width and right to left, what each key does, what Start
 /// starts and what is remembered; every refusal said in place and never a command; every control in
 /// reach in the turn it shows, in both looks, with one accent primary and no grey.
-@MainActor @Suite struct NewSessionPanelTests {
+///
+/// One test at a time: each waits on the one main actor every AppKit test shares for the route's
+/// answer, within a bound of the clock, while the sweeps beside it (every scene at every width,
+/// both directions) hold that actor in long stretches. Side by side on a loaded runner the bound
+/// ran out on waits that take a fraction of it alone (CI; and the owner's Mac on its efficiency
+/// cores, red in 6 of 6 runs in parallel and green in 3 of 3 one at a time).
+@MainActor @Suite(.serialized) struct NewSessionPanelTests {
     init() {
         ExitWatch.install()
     }
@@ -57,7 +63,7 @@ import Testing
         view.project.list.choose(name)
         view.window?.makeFirstResponder(view.project.list)
         #expect(view.project.list.onKey?(try optionCommandT()) == true, "⌥⌘T was not the list's")
-        #expect(await RunnerTabTests.until { view.newSession.isOpen }, "⌥⌘T on \(name) opened nothing: \(view.text)")
+        try #require(await RunnerTabTests.until { view.newSession.isOpen }, "⌥⌘T on \(name) opened nothing: \(view.text)")
         return view.newSession
     }
 
