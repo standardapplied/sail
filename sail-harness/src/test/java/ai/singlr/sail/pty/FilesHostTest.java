@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Secrets;
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import java.io.IOException;
@@ -90,6 +91,9 @@ class FilesHostTest {
   private final LinkedBlockingQueue<String> started = new LinkedBlockingQueue<>();
 
   private final List<Process> processes = new CopyOnWriteArrayList<>();
+
+  /** Every connection a test opened to the host, each closed once it has run. */
+  private final List<SocketChannel> channels = new CopyOnWriteArrayList<>();
 
   /** The save scripts among {@link #processes}, in the order started. */
   private final List<Process> saves = new CopyOnWriteArrayList<>();
@@ -265,13 +269,16 @@ class FilesHostTest {
   }
 
   @AfterEach
-  void tearDown() {
+  void tearDown() throws IOException {
+    for (var channel : channels) {
+      channel.close();
+    }
     host.close();
     processes.forEach(Process::destroyForcibly);
   }
 
   private SocketChannel unix(String token) throws IOException {
-    var channel = SocketChannel.open(StandardProtocolFamily.UNIX);
+    var channel = opened(SocketChannel.open(StandardProtocolFamily.UNIX));
     channel.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
     PtyWire.handshake(channel, channel);
     PtyWire.write(channel, new PtyMessage.Hello(token));
@@ -310,9 +317,14 @@ class FilesHostTest {
   }
 
   private SocketChannel present(PtyMessage.Ticket ticket) throws IOException {
-    var channel = SocketChannel.open(host.tcpAddress().orElseThrow());
+    var channel = opened(SocketChannel.open(host.tcpAddress().orElseThrow()));
     PtyWire.handshake(channel, channel);
     PtyWire.write(channel, new PtyMessage.Hello(ticket.ticket()));
+    return channel;
+  }
+
+  private SocketChannel opened(SocketChannel channel) {
+    channels.add(channel);
     return channel;
   }
 
@@ -956,7 +968,7 @@ class FilesHostTest {
    */
   private void splitRead(Path paused, Path go) throws Exception {
     for (var pipe : List.of(paused, go)) {
-      assertEquals(0, new ProcessBuilder("mkfifo", pipe.toString()).start().waitFor());
+      assertEquals(0, Child.run(new ProcessBuilder("mkfifo", pipe.toString())).exit());
     }
     edits.put(
         "read",
@@ -1182,7 +1194,7 @@ class FilesHostTest {
     Hold() throws Exception {
       at = dir.resolve("at-compare");
       release = dir.resolve("release");
-      assertEquals(0, new ProcessBuilder("mkfifo", release.toString()).start().waitFor());
+      assertEquals(0, Child.run(new ProcessBuilder("mkfifo", release.toString())).exit());
       var once = new java.util.concurrent.atomic.AtomicBoolean();
       edits.put(
           "write",
@@ -1515,7 +1527,7 @@ class FilesHostTest {
     var old = Files.writeString(home.resolve(FileScripts.SAVING + "Stuck00001.part"), "x");
     Files.setLastModifiedTime(
         old, java.nio.file.attribute.FileTime.from(java.time.Instant.now().minusSeconds(60)));
-    var holder = new ProcessBuilder("sleep", "30").redirectInput(old.toFile()).start();
+    var holder = FileWritesTest.holding(old);
     var refusal =
         "A save in dock has not ended since Sail ended it: a process there still holds "
             + old

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.pty.PtyMessage.Change;
 import ai.singlr.sail.pty.PtyMessage.ChangeState;
 import java.io.ByteArrayOutputStream;
@@ -119,28 +120,23 @@ class FileChangesTest {
     return all;
   }
 
-  /** Runs git in {@code at} as the workspace's user would, answering its exit status. */
-  private int gitStatus(Path at, String... args) throws Exception {
+  /** Runs git in {@code at} as the workspace's user would: how it ended, and what it said. */
+  private Child.Ended gitRun(Path at, String... args) throws Exception {
     var command = new ArrayList<>(List.of("git", "-C", at.toString()));
     command.addAll(List.of(args));
-    var builder =
-        new ProcessBuilder(command)
-            .redirectErrorStream(true)
-            .redirectOutput(dir.resolve("git.out").toFile());
+    var builder = new ProcessBuilder(command).redirectErrorStream(true);
     builder.environment().putAll(env);
-    return builder.start().waitFor();
+    return Child.run(builder);
+  }
+
+  /** Runs git in {@code at} as the workspace's user would, answering its exit status. */
+  private int gitStatus(Path at, String... args) throws Exception {
+    return gitRun(at, args).exit();
   }
 
   private void git(Path at, String... args) throws Exception {
-    assertEquals(0, gitStatus(at, args), () -> "git " + String.join(" ", args) + ": " + out());
-  }
-
-  private String out() {
-    try {
-      return Files.readString(dir.resolve("git.out"));
-    } catch (IOException unread) {
-      return "";
-    }
+    var ran = gitRun(at, args);
+    assertEquals(0, ran.exit(), () -> "git " + String.join(" ", args) + ": " + ran.stdout());
   }
 
   /** Makes {@code name} in {@code folder} through the shell, so its bytes need not be UTF-8. */
@@ -150,15 +146,15 @@ class FileChangesTest {
       hex.append(String.format("\\x%02x", b & 0xff));
     }
     var made =
-        new ProcessBuilder(
-                "bash",
-                "-c",
-                "cd \"$1\" && : > \"$(printf \"$2\")\"",
-                "touch",
-                folder.toString(),
-                hex.toString())
-            .start()
-            .waitFor();
+        Child.run(
+                new ProcessBuilder(
+                    "bash",
+                    "-c",
+                    "cd \"$1\" && : > \"$(printf \"$2\")\"",
+                    "touch",
+                    folder.toString(),
+                    hex.toString()))
+            .exit();
     assertEquals(0, made);
   }
 
@@ -460,8 +456,9 @@ class FileChangesTest {
     Files.writeString(lazy.resolve("f.txt"), "f\n");
     git(lazy, "add", ".");
     git(lazy, "commit", "-qm", "base");
-    assertEquals(0, gitStatus(lazy, "rev-parse", "HEAD:f.txt"));
-    var blob = Files.readString(dir.resolve("git.out")).strip();
+    var parsed = gitRun(lazy, "rev-parse", "HEAD:f.txt");
+    assertEquals(0, parsed.exit(), parsed.stdout());
+    var blob = parsed.stdout().strip();
     Files.delete(lazy.resolve(".git/objects/" + blob.substring(0, 2) + "/" + blob.substring(2)));
     for (var kv :
         List.of(
@@ -573,7 +570,7 @@ class FileChangesTest {
     }
     var proof = new ProcessBuilder("sh", "-c", "git --version > /dev/null");
     proof.environment().put("PATH", shims + ":/usr/bin:/bin");
-    assertEquals(0, proof.start().waitFor());
+    assertEquals(0, Child.run(proof).exit());
     assertEquals(List.of("shim-git"), left(markers), "a shim earlier on PATH runs for plain git");
     Files.delete(markers.resolve("shim-git"));
     var poisoned = new HashMap<>(env);
@@ -609,12 +606,14 @@ class FileChangesTest {
     assertEquals(FileScripts.FILTERED, diff(sail, workspace.resolve("c.g"), 1 << 20).status());
     assertEquals(0, diff(sail, workspace.resolve("d.md"), 1 << 20).status());
     diff(sail, lazy.resolve("f.txt"), 1 << 20);
-    var read =
-        sail.start(CONTAINER, FileScripts.READ, workspace.resolve("a.txt").toString(), "0", "100");
-    while (read.field() != null) {
-      continue;
+    try (var read =
+        sail.start(
+            CONTAINER, FileScripts.READ, workspace.resolve("a.txt").toString(), "0", "100")) {
+      while (read.field() != null) {
+        continue;
+      }
+      assertEquals(0, read.status(), "a read, with its stat and its digests");
     }
-    assertEquals(0, read.status(), "a read, with its stat and its digests");
 
     assertEquals(List.of(), left(markers), "nothing planted ran");
   }
@@ -853,12 +852,13 @@ class FileChangesTest {
   }
 
   private static Ran diff(FileScripts with, Path path, long cap) throws Exception {
-    var script = with.start(CONTAINER, FileScripts.DIFF, path.toString(), "" + cap);
-    var bytes = new ByteArrayOutputStream();
-    for (var chunk = script.bytes(1 << 16); chunk.length > 0; chunk = script.bytes(1 << 16)) {
-      bytes.write(chunk);
+    try (var script = with.start(CONTAINER, FileScripts.DIFF, path.toString(), "" + cap)) {
+      var bytes = new ByteArrayOutputStream();
+      for (var chunk = script.bytes(1 << 16); chunk.length > 0; chunk = script.bytes(1 << 16)) {
+        bytes.write(chunk);
+      }
+      return new Ran(bytes.toByteArray(), script.status());
     }
-    return new Ran(bytes.toByteArray(), script.status());
   }
 
   private static String text(Ran ran) {

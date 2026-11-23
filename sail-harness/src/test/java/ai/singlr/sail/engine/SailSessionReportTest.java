@@ -15,13 +15,11 @@ import java.io.IOException;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.channels.ServerSocketChannel;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -360,25 +358,8 @@ class SailSessionReportTest {
     }
     env.put("PATH", pathPrefix + ":" + env.getOrDefault("PATH", "/usr/bin:/bin"));
     env.putAll(extraEnv);
-    var process = pb.start();
-    writeStdinToleratingEarlyExit(process, stdin);
-    var stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    var stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertTrue(process.waitFor(30, TimeUnit.SECONDS), "the report must finish well inside its 10s");
-    return new ReportResult(process.exitValue(), stdout, stderr);
-  }
-
-  /**
-   * Feeds the report's stdin, swallowing the broken pipe a script that exits before reading — the
-   * inert no-run-id and no-credential paths — legitimately produces. Whether the child consumed its
-   * stdin is never the assertion; every test verifies exit code and output, and a child that
-   * wrongly died early fails those checks instead.
-   */
-  private static void writeStdinToleratingEarlyExit(Process process, String stdin) {
-    try (var in = process.getOutputStream()) {
-      in.write(stdin.getBytes(StandardCharsets.UTF_8));
-    } catch (IOException earlyExit) {
-    }
+    var ran = Child.run(pb, stdin, Child.PATIENCE);
+    return new ReportResult(ran.exit(), ran.stdout(), ran.stderr());
   }
 
   private static void writeExecutable(Path path, String content) throws IOException {

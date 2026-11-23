@@ -8,6 +8,7 @@ package ai.singlr.sail;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.Child;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,7 +16,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -36,7 +36,6 @@ class CiChangelogTest {
           + " they would read under the version heading (changes/README.md).\n";
 
   @TempDir Path repo;
-  @TempDir Path output;
   private String base;
 
   private record Ran(int exit, String out, String err) {}
@@ -336,21 +335,11 @@ class CiChangelogTest {
   }
 
   private Ran run(List<String> command, Map<String, String> env) throws Exception {
-    var out = output.resolve("out");
-    var err = output.resolve("err");
-    var builder =
-        new ProcessBuilder(command)
-            .directory(repo.toFile())
-            .redirectOutput(out.toFile())
-            .redirectError(err.toFile());
+    var builder = new ProcessBuilder(command).directory(repo.toFile());
     builder.environment().put("GIT_CONFIG_GLOBAL", "/dev/null");
     builder.environment().put("GIT_CONFIG_NOSYSTEM", "1");
     builder.environment().putAll(env);
-    var process = builder.start();
-    if (!process.waitFor(30, TimeUnit.SECONDS)) {
-      process.destroyForcibly();
-      throw new AssertionError(String.join(" ", command) + " did not end within 30 s");
-    }
-    return new Ran(process.exitValue(), Files.readString(out), Files.readString(err));
+    var ran = Child.run(builder);
+    return new Ran(ran.exit(), ran.stdout(), ran.stderr());
   }
 }

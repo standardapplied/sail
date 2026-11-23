@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.Databases;
 import ai.singlr.sail.engine.RunPlace;
 import ai.singlr.sail.harness.RunReport;
 import ai.singlr.sail.identity.ActingAs;
@@ -53,6 +54,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 class RunStoreTest {
 
   @TempDir Path tempDir;
+  private final Databases databases = new Databases();
   private Sqlite db;
   private RunStore store;
 
@@ -66,6 +68,7 @@ class RunStoreTest {
   @AfterEach
   void tearDown() {
     if (db != null) db.close();
+    databases.close();
   }
 
   private void offer(String id, Map<String, Object> from) {
@@ -1422,7 +1425,7 @@ class RunStoreTest {
   }
 
   private RunStore freshStore(String file) {
-    var freshDb = Sqlite.open(tempDir.resolve(file));
+    var freshDb = databases.open(tempDir.resolve(file));
     new SchemaManager(freshDb).migrate();
     return new RunStore(freshDb);
   }

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -177,8 +178,7 @@ class SyncBlobTest {
         assertTrue(
             blobs.has(new FileStore(ingestDb).find("project", "file").orElseThrow().contentHash()));
       } finally {
-        viewer.destroyForcibly();
-        viewer.waitFor();
+        Child.end(viewer);
       }
       assertConverged(main, node);
     }

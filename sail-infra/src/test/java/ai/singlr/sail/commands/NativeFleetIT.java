@@ -10,8 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.ClosesWhatItOpens;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -28,6 +32,22 @@ class NativeFleetIT {
 
   private static final int BODY_BYTES = 48_000;
   private static final int CUT_AFTER_BYTES = 3_000_000;
+
+  private Map<String, Object> before;
+
+  @BeforeEach
+  void listWhatIsOpen() throws Exception {
+    before = ClosesWhatItOpens.baseline();
+  }
+
+  /**
+   * Each test's fleet is closed by its end, and with it every process it ran: their pipes closed
+   * before {@code close} returned, not by a reader thread a moment after.
+   */
+  @AfterEach
+  void aClosedFleetLeftNothingOpen() throws Exception {
+    ClosesWhatItOpens.assertClosed("a closed fleet", before);
+  }
 
   @Test
   void a058FleetConvertsMainThenItsNodeKeepingProjectsFilesAndOpenWorkOnly() throws Exception {

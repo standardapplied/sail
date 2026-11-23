@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.engine.TrackedProcess;
 import ai.singlr.sail.pty.PtyMessage.PutRefusal;
 import java.io.IOException;
@@ -224,7 +225,7 @@ class UploadCopyTest {
     var name = Path.of(copy.path());
     var part = name.resolveSibling("." + name.getFileName() + ".part");
     Files.delete(part);
-    assertEquals(0, new ProcessBuilder("mkfifo", part.toString()).start().waitFor());
+    assertEquals(0, Child.run(new ProcessBuilder("mkfifo", part.toString())).exit());
 
     assertNotEquals(0, copy.commit());
 
@@ -275,6 +276,9 @@ class UploadCopyTest {
                 "while :; do sleep 600 >> \"$1\" & wait; done",
                 "respawn",
                 part.toString())
+            .redirectInput(Child.NO_INPUT)
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .redirectError(ProcessBuilder.Redirect.DISCARD)
             .start();
     try (var log = new LogCapture()) {
       assertEquals(UploadCopy.HELD, copy.abort());
@@ -345,7 +349,9 @@ class UploadCopyTest {
   /** A process that holds {@code file} open for writing, as a copy holds its temporary. */
   private static Process holding(Path file) throws IOException {
     return new ProcessBuilder("sleep", "600")
+        .redirectInput(Child.NO_INPUT)
         .redirectOutput(ProcessBuilder.Redirect.appendTo(file.toFile()))
+        .redirectError(ProcessBuilder.Redirect.DISCARD)
         .start();
   }
 

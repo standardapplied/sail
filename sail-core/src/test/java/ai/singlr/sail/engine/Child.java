@@ -96,6 +96,17 @@ public final class Child {
             });
   }
 
+  /**
+   * Ends {@code process} and closes the three pipes the test holds to it, whatever was read of
+   * them: a test that leaves one to the JDK's reaper may end its class before the reaper closes it.
+   */
+  public static void end(Process process) throws IOException, InterruptedException {
+    process.destroyForcibly().waitFor();
+    process.getOutputStream().close();
+    process.getInputStream().close();
+    process.getErrorStream().close();
+  }
+
   /** {@code stream} read to its end and closed, on a virtual thread of its own. */
   private static FutureTask<String> reading(InputStream stream) {
     var read =

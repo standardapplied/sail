@@ -7,21 +7,18 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.channels.ServerSocketChannel;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -72,10 +69,8 @@ class SkillCliHelperTest {
     env.put("PATH", bin + ":" + env.getOrDefault("PATH", "/usr/bin:/bin"));
     env.putAll(extra);
     try (Closeable bound = bind()) {
-      var process = builder.start();
-      var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-      assertTrue(process.waitFor(30, TimeUnit.SECONDS), "the script must finish");
-      return new Ran(process.exitValue(), output);
+      var ran = Child.run(builder);
+      return new Ran(ran.exit(), ran.stdout());
     }
   }
 

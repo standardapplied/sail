@@ -21,7 +21,6 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -61,10 +60,8 @@ class PortalSkillTest {
     var channel = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
     channel.bind(UnixDomainSocketAddress.of(socket));
     try (Closeable bound = channel) {
-      var process = builder.start();
-      var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-      assertTrue(process.waitFor(30, TimeUnit.SECONDS), "the script must finish");
-      return new Ran(process.exitValue(), output);
+      var ran = Child.run(builder);
+      return new Ran(ran.exit(), ran.stdout());
     } finally {
       Files.deleteIfExists(socket);
     }

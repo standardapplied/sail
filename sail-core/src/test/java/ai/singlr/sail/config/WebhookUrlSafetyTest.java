@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.KnownHosts;
 import org.junit.jupiter.api.Test;
 
 class WebhookUrlSafetyTest {
@@ -17,6 +18,19 @@ class WebhookUrlSafetyTest {
   @Test
   void requireSafeAcceptsPublicHttps() {
     assertDoesNotThrow(() -> WebhookUrlSafety.requireSafe("https://ntfy.sh/topic"));
+  }
+
+  /**
+   * A public-looking name is judged by where it resolves: one that resolves to a private address,
+   * as a rebound name would, is refused as the address itself is.
+   */
+  @Test
+  void requireSafeRejectsANameThatResolvesToAPrivateAddress() {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> WebhookUrlSafety.requireSafe("https://" + KnownHosts.REBOUND + "/hook"));
+    assertTrue(ex.getMessage().contains("Private"));
   }
 
   @Test
