@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Says whether this Mac's window server answers a new process: one that asks it the screen's size
+# within SAIL_WINDOW_SERVER_SECONDS (20 by default). Exit 0 it answers, said with how long the ask
+# took, so every lane records what that bound rests on; 1 it does not, so every windowed process
+# started after waits on it too (a runner whose window server stopped answering hung each later
+# suite and then the drive, in their first call to it, until their own timeouts); 2 the asking
+# process failed otherwise, a missing one included, which says nothing either way. With LOGDIR, a
+# silent window server is told: its pid and start time, any report of it since
+# LOGDIR/window-server.since (or the last hour), and its own last five minutes of log, kept in
+# LOGDIR/window-server.log. Every program is found on PATH, where ci/window-server-check puts its
+# stand-ins.
+set -uo pipefail
+
+[[ $# -le 1 ]] || { echo "usage: ci/window-server [LOGDIR]" >&2; exit 2; }
+readonly logs=${1:-} seconds=${SAIL_WINDOW_SERVER_SECONDS:-20}
+[[ $seconds =~ ^[1-9][0-9]*$ ]] || { echo "ci/window-server: SAIL_WINDOW_SERVER_SECONDS is a whole number of seconds, not '$seconds'" >&2; exit 2; }
+
+now() { perl -MTime::HiRes=time -e 'printf "%d", time * 1000'; }
+began=$(now)
+said=$(perl -e 'alarm shift; exec @ARGV or exit 127' "$seconds" osascript -l JavaScript -e 'ObjC.import("AppKit"); $.NSScreen.mainScreen.frame.size.width' 2>&1)
+status=$?
+if (( status == 0 )); then
+  echo "ci/window-server: the window server answers a new process, in $(($(now) - began)) ms"
+  exit 0
+fi
+if (( status != 142 )); then
+  echo "ci/window-server: the process asking the window server failed (exit $status), which says nothing of it: $said" >&2
+  exit 2
+fi
+echo "ci/window-server: the window server does not answer a new process within $seconds s: every windowed process started after would wait on it too" >&2
+[[ -n $logs ]] || exit 1
+mkdir -p "$logs"
+pids=$(pgrep -x WindowServer | paste -sd , -)
+if [[ -n $pids ]]; then
+  ps -o pid=,lstart=,stat=,%cpu= -p "$pids" | sed 's/^/ci\/window-server: WindowServer pid, start, state, cpu: /' >&2
+else
+  echo "ci/window-server: no WindowServer runs" >&2
+fi
+newer=(-mmin -60)
+[[ -e $logs/window-server.since ]] && newer=(-newer "$logs/window-server.since")
+find /Library/Logs/DiagnosticReports "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -name 'WindowServer*' "${newer[@]}" 2> /dev/null \
+  | sed 's/^/ci\/window-server: a report of the window server: /' >&2
+perl -e 'alarm shift; exec @ARGV or exit 127' 60 log show --last 5m --style compact --predicate 'process == "WindowServer"' > "$logs/window-server.log" 2>&1 || true
+echo "ci/window-server: its last five minutes of log are in $logs/window-server.log; the last lines:" >&2
+tail -n 15 "$logs/window-server.log" >&2
+exit 1

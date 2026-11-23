@@ -16,7 +16,7 @@
 # this shell, the app had no application role, every thread was held at the utility priority (20)
 # and its timers were coalesced, so the drive measured an app no person runs. The ticket is handed
 # to the drive in a file only it reads, never in the environment a launch passes on, and printed
-# nowhere.
+# nowhere. Nothing is opened when the window server answers no new process (ci/window-server).
 set -euo pipefail
 
 [[ $# -eq 2 ]] || { echo "usage: ci/drive DRIVE_APP OUT" >&2; exit 2; }
@@ -28,6 +28,8 @@ readonly drive=$app/Contents/MacOS/SailDrive sail=$app/Contents/Helpers/sail
 [[ -x $drive ]] || { echo "ci/drive: $app holds no SailDrive" >&2; exit 1; }
 
 mkdir -p "$out"
+ci/window-server "$out" || [[ $? == 2 ]] \
+  || { echo "ci/drive: no run is opened: the app would wait on the window server until the drive's alarm" >&2; exit 1; }
 readonly out_dir=$(cd "$out" && pwd -P) scripts=$PWD/Tests/Drive
 passkeys=$(mktemp -d) plain=$(mktemp -d) private_dir=$(mktemp -d /tmp/sail-drive.XXXXXX) shooter=
 SAIL_DATA_DIR=$passkeys "$sail" server start --port 7979 --rp-id sail.standardapplied.com --origin https://sail.standardapplied.com \
