@@ -8,7 +8,6 @@ package ai.singlr.sail.config;
 import ai.singlr.sail.common.Strings;
 import java.net.InetAddress;
 import java.net.URI;
-import java.net.UnknownHostException;
 
 /**
  * SSRF policy for outbound webhook URLs. Validation runs at config parse time (via {@link
@@ -18,23 +17,13 @@ import java.net.UnknownHostException;
  */
 public final class WebhookUrlSafety {
 
-  /** How a host's name becomes its addresses; production asks the system's resolver. */
-  @FunctionalInterface
-  public interface Resolver {
-    InetAddress[] addresses(String host) throws UnknownHostException;
-  }
-
-  /** The system's resolver, which every production check uses. */
-  public static final Resolver SYSTEM = InetAddress::getAllByName;
-
   private WebhookUrlSafety() {}
 
   /**
-   * Validates that {@code url} is an http(s) URL whose host, as {@code resolver} resolves it, does
-   * not target a private/internal network. Throws {@link IllegalArgumentException} on any
-   * violation.
+   * Validates that {@code url} is an http(s) URL whose host does not target a private/internal
+   * network. Throws {@link IllegalArgumentException} on any violation.
    */
-  public static void requireSafe(String url, Resolver resolver) {
+  public static void requireSafe(String url) {
     URI uri;
     try {
       uri = URI.create(url);
@@ -57,7 +46,7 @@ public final class WebhookUrlSafety {
           "Invalid notifications.url: '" + url + "'. No hostname found.");
     }
 
-    if (isPrivateHost(host, resolver)) {
+    if (isPrivateHost(host)) {
       throw new IllegalArgumentException(
           "Invalid notifications.url: '"
               + url
@@ -74,11 +63,6 @@ public final class WebhookUrlSafety {
    * send-time recheck remains the defense against DNS rebinding between this check and connect.
    */
   public static boolean isPrivateHost(String host) {
-    return isPrivateHost(host, SYSTEM);
-  }
-
-  /** As {@link #isPrivateHost(String)}, the host resolved by {@code resolver}. */
-  public static boolean isPrivateHost(String host, Resolver resolver) {
     var bare = host.toLowerCase();
     if (bare.startsWith("[") && bare.endsWith("]")) {
       bare = bare.substring(1, bare.length() - 1);
@@ -87,7 +71,7 @@ public final class WebhookUrlSafety {
       return true;
     }
     try {
-      for (var addr : resolver.addresses(bare)) {
+      for (var addr : InetAddress.getAllByName(bare)) {
         if (isPrivateAddress(addr)) {
           return true;
         }

@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.KnownHosts;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -368,6 +369,35 @@ class ProjectDefinitionTest {
     assertNull(config.agent().guardrails());
   }
 
+  /**
+   * A definition whose webhook is not public, by its address, its scheme or where its name
+   * resolves, is refused as it is read: the rule runs on the path every stored definition takes.
+   */
+  @Test
+  void aWebhookThatIsNotPublicIsRefusedWhereADefinitionIsRead() {
+    for (var url :
+        List.of(
+            "http://169.254.169.254/latest/meta-data/",
+            "http://10.0.0.1/hook",
+            "file:///etc/passwd",
+            "https://" + KnownHosts.REBOUND + "/hook")) {
+      var yaml =
+          """
+          name: test
+          agent:
+            type: claude-code
+            notifications:
+              url: "%s"
+          """
+              .formatted(url);
+
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> ProjectDefinition.fromMap(YamlUtil.parseMap(yaml)),
+          url);
+    }
+  }
+
   @Test
   void notificationsParsedFromYaml() throws Exception {
     var yaml =
@@ -376,7 +406,7 @@ class ProjectDefinitionTest {
         agent:
           type: claude-code
           notifications:
-            url: "https://203.0.113.1/singlr-test"
+            url: "https://ntfy.sh/singlr-test"
             events:
               - guardrail_triggered
               - agent_session_stopped
@@ -384,7 +414,7 @@ class ProjectDefinitionTest {
     var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
     assertNotNull(config.agent().notifications());
-    assertEquals("https://203.0.113.1/singlr-test", config.agent().notifications().url());
+    assertEquals("https://ntfy.sh/singlr-test", config.agent().notifications().url());
     assertEquals(2, config.agent().notifications().events().size());
   }
 

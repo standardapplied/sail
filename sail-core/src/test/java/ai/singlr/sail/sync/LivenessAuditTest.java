@@ -36,6 +36,7 @@ import ai.singlr.sail.store.TestRuns;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -469,9 +470,11 @@ class LivenessAuditTest {
   /**
    * An upload that replaces an oversized offer while the round is settling it waits its turn: what
    * the round settles is what it judged, so a replacement under the ceiling is kept and lands. The
-   * settle runs on a platform thread of its own: its wait for the upload's write lock is SQLite's,
-   * inside a native call, which would hold the only carrier a one-CPU JVM has and so keep the
-   * upload's virtual thread from ever committing.
+   * upload holds its replacement uncommitted until the settle has begun its first write
+   * transaction, every read it makes before its turn already made, so every run commits the
+   * replacement during the settlement. The settle runs on a platform thread of its own: its wait
+   * for the upload's write lock is SQLite's, inside a native call, which would hold the only
+   * carrier a one-CPU JVM has and so keep the upload's virtual thread from ever committing.
    */
   @Test
   void aReplacementUnderTheCeilingUploadedDuringSettlementIsKept() throws Exception {
@@ -511,7 +514,7 @@ class LivenessAuditTest {
       assertTrue(replaced.await(PATIENCE, TimeUnit.SECONDS));
       var settlement = new Settlement(node.db, Decidability.onNode(node.db), "node");
       var settling = new FutureTask<>(settlement::settle);
-      Thread.ofPlatform().start(settling);
+      awaitItsTurn(Thread.ofPlatform().start(settling));
       commit.countDown();
       upload.get(PATIENCE, TimeUnit.SECONDS);
 
@@ -521,6 +524,23 @@ class LivenessAuditTest {
       assertConvergedWithin(2, node, new Actor("node", Role.MEMBER, Actor.Lane.SYNC));
       assertEquals(2, new FileStore(main.db).find("acme", "a.txt").orElseThrow().size());
     }
+  }
+
+  /**
+   * Waits until {@code settler} is inside a write transaction, which it can begin but not commit
+   * while the upload holds the database's write lock: past every read it makes before its turn.
+   */
+  private static void awaitItsTurn(Thread settler) {
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(PATIENCE);
+    while (Arrays.stream(settler.getStackTrace()).noneMatch(LivenessAuditTest::aTransaction)) {
+      assertTrue(System.nanoTime() < deadline, "the settle never began its turn");
+      Thread.onSpinWait();
+    }
+  }
+
+  private static boolean aTransaction(StackTraceElement frame) {
+    return frame.getClassName().equals(Sqlite.class.getName())
+        && frame.getMethodName().equals("transaction");
   }
 
   /** A reply to a narrator post main accepted under another FDE's run lands as the replier. */

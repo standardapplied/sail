@@ -88,8 +88,6 @@
                         <!-- a Sail of each fork's own: never the person's, the box's, nor another fork's lock files -->
                         -Duser.home=${project.build.directory}/test-home-${surefire.forkNumber}
                         -Dsail.never-the-system-sail=true
-                        <!-- names resolve from this machine's hosts file alone: no test asks DNS, so none rests on a resolver -->
-                        -Djdk.net.hosts.file=/etc/hosts
                     </argLine>
                 </configuration>
             </plugin>

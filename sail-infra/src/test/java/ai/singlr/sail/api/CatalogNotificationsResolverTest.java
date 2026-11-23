@@ -34,7 +34,7 @@ class CatalogNotificationsResolverTest {
       agent:
         type: claude-code
         notifications:
-          url: https://203.0.113.1/light-grid
+          url: https://ntfy.sh/light-grid
           events:
             - guardrail_triggered
             - spec_dispatched
@@ -67,16 +67,15 @@ class CatalogNotificationsResolverTest {
             resolver, url -> (event, project, title, message) -> sent.add(url + " " + event));
 
     var notifications = resolver.resolve("light-grid");
-    assertEquals("https://203.0.113.1/light-grid", notifications.url());
+    assertEquals("https://ntfy.sh/light-grid", notifications.url());
     assertTrue(notifications.events().contains("guardrail_triggered"));
 
     describe(
-        "light-grid",
-        NOTIFYING.replace("https://203.0.113.1/light-grid", "https://203.0.113.1/moved"));
+        "light-grid", NOTIFYING.replace("https://ntfy.sh/light-grid", "https://ntfy.sh/moved"));
     reactor.onEvent(Event.of("light-grid", null, "spec_dispatched", "sail", "h").withId(1L));
 
     assertEquals(
-        List.of("https://203.0.113.1/moved spec_dispatched"),
+        List.of("https://ntfy.sh/moved spec_dispatched"),
         sent,
         "the revision recorded in the catalog is what the next event is sent under, with nothing else run");
   }

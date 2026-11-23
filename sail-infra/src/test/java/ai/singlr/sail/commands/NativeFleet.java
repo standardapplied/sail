@@ -369,16 +369,26 @@ public final class NativeFleet implements AutoCloseable {
 
   /**
    * Removes the fleet's pod, then ends main's sshd and reads its output to the end: its pipe is
-   * closed before this returns, never left to the JDK's reaper or its reader a moment after.
+   * closed before this returns, never left to the JDK's reaper or its reader a moment after. A
+   * failure to remove the pod is the one thrown; one ending sshd is added to it as suppressed.
    */
   @Override
   public void close() throws Exception {
-    try {
+    try (AutoCloseable ending = this::endSshd) {
       run(COMMAND_DEADLINE, List.of("podman", "pod", "rm", "-f", "-t", "0", pod));
-    } finally {
-      if (sshd != null) {
-        sshd.end();
-      }
+    }
+  }
+
+  /** Ends main's sshd; interrupted meanwhile, it says so and keeps the thread interrupted. */
+  private void endSshd() throws InterruptedException {
+    if (sshd == null) {
+      return;
+    }
+    try {
+      sshd.end();
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw interrupted;
     }
   }
 
