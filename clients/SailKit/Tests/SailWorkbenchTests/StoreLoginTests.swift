@@ -52,11 +52,12 @@ import Testing
         let request = endpoint.request
         #expect(request.method == .put && request.path == "/v1/logins/claude-code/default")
         let body = try #require(request.body)
-        #expect(try JSONSerialization.jsonObject(with: body) as? [String: String] == ["kind": "api-key", "value": Self.pasted])
+        let sent = try JSONSerialization.jsonObject(with: body) as? [String: String] == ["kind": "api-key", "value": Self.pasted]
+        #expect(sent, "the body is not the kind and the value")
         let bytes = Data(Self.pasted.utf8)
         let described = [request.route, request.path, String(describing: request), String(reflecting: request), String(describing: endpoint), String(reflecting: endpoint), String(describing: sheet), String(reflecting: sheet)]
-        let holding = described.filter { Data($0.utf8).range(of: bytes) != nil }
-        #expect(holding.isEmpty, "\(holding.count) of the request's descriptions hold the value")
+        let holding = described.filter { Data($0.utf8).range(of: bytes) != nil }.count
+        #expect(holding == 0, "of the request's descriptions, these many hold the value")
         #expect(request.headers["Content-Type"] == "application/json")
     }
 
@@ -74,8 +75,8 @@ import Testing
             lines.append(String(reflecting: sheet))
         }
         #expect(lines.count == 4 * (Self.refusals.count + 2) + Self.refusals.count + 2)
-        let holding = lines.filter { Data($0.utf8).range(of: bytes) != nil }
-        #expect(holding.isEmpty, "\(holding.count) lines a failure writes hold the value")
+        let holding = lines.filter { Data($0.utf8).range(of: bytes) != nil }.count
+        #expect(holding == 0, "of the lines a failure writes, these many hold the value")
     }
 
     // MARK: The kind

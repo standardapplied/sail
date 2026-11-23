@@ -159,7 +159,7 @@ import Testing
         sheet.field.field.stringValue = Self.pasted
         sheet.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: sheet.field.field))
         #expect(sheet.control(name.field, textView: editor, doCommandBy: #selector(NSResponder.insertNewline(_:))))
-        #expect(sheet.field.field.stringValue.isEmpty && sheet.model.stage == .storing, "Return in the name did not store")
+        #expect(Self.cleared(sheet) && sheet.model.stage == .storing, "Return in the name did not store")
         var ended = 0
         sheet.onEnd = { ended += 1 }
         #expect(sheet.control(sheet.field.field, textView: editor, doCommandBy: #selector(NSResponder.cancelOperation(_:))))
@@ -184,6 +184,11 @@ import Testing
         return (view, window, server, sheet)
     }
 
+    /// The sheet's field holds nothing: said as a fact, so no failure prints what it holds.
+    static func cleared(_ sheet: LoginSheet) -> Bool {
+        sheet.field.field.stringValue.isEmpty
+    }
+
     /// The key pasted into the sheet's field, as a paste changes it.
     static func paste(_ value: String = pasted, into sheet: LoginSheet) {
         sheet.field.field.stringValue = value
@@ -205,12 +210,13 @@ import Testing
         #expect(sheet.store.isEnabled)
         view.client = SailClient(transport: RecordedServer([try Exchange("workspace-agents-dock")]), token: "tok")
         try NewSessionPanelTests.press(sheet.store)
-        #expect(sheet.field.field.stringValue.isEmpty, "the field kept the key while it was sent")
+        #expect(Self.cleared(sheet), "the field kept the key while it was sent")
         try #require(await RunnerTabTests.until { window.attachedSheet == nil && panel.stored != nil && !view.busy }, "the panel never said the store: \(panel.view.words)")
         let puts = await server.requests.filter { $0.method == .put }
         #expect(puts.count == 1 && puts.first?.path == "/v1/logins/claude-code/default")
         let body = try #require(puts.first?.body)
-        #expect(try JSONSerialization.jsonObject(with: body) as? [String: String] == ["kind": "api-key", "value": Self.pasted])
+        let sent = try JSONSerialization.jsonObject(with: body) as? [String: String] == ["kind": "api-key", "value": Self.pasted]
+        #expect(sent, "the request's body is not the kind and the key")
         #expect(panel.isOpen && !panel.popover.stays && panel.loginSheet == nil)
         #expect(panel.view.rows.first?.line.stringValue == "login “default” · API key" && panel.view.rows.first?.chosen == true)
         #expect(panel.view.words.contains("Stored Claude Code login “default”.") && !panel.view.words.contains { $0.hasPrefix("No Claude Code login stored") })
@@ -220,8 +226,9 @@ import Testing
         view.onStart = { start, _, _ in started.append(start) }
         try NewSessionPanelTests.press(try NewSessionPanelTests.returnKey(), in: window)
         #expect(started == [AgentStart(harness: "claude-code", display: "Claude Code", mode: "default")], "Return started \(started)")
-        #expect(!String(describing: UserDefaults.standard.dictionaryRepresentation()).contains(Self.pasted), "the key is in the defaults")
-        #expect(!view.text.contains(Self.pasted) && !Driverless.words(window.contentView).contains(Self.pasted))
+        let inDefaults = String(describing: UserDefaults.standard.dictionaryRepresentation()).contains(Self.pasted)
+        let said = view.text.contains(Self.pasted) || Driverless.words(window.contentView).contains(Self.pasted)
+        #expect(!inDefaults && !said, "the key is in the defaults or in what the app says")
     }
 
     /// The clipboard still holding exactly the key once stored is cleared, and the line says so;
@@ -250,7 +257,8 @@ import Testing
         try #require(await RunnerTabTests.until { view.newSession.stored != nil && !view.busy })
         let line = "Stored Claude Code login “default”." + (unchanged ? " Removed the key from the clipboard." : "")
         #expect(view.newSession.stored == line && view.newSession.view.words.contains(line))
-        #expect(view.pasteboard.string(forType: .string) == (unchanged ? nil : Self.pasted))
+        let left = view.pasteboard.string(forType: .string) == (unchanged ? nil : Self.pasted)
+        #expect(left, unchanged ? "the clipboard still holds the key" : "the clipboard changed meanwhile was cleared")
     }
 }
 
@@ -263,7 +271,7 @@ extension LoginSheetTests {
         Self.paste(Self.pasted + "\n" + Self.pasted, into: sheet)
         try NewSessionPanelTests.press(sheet.store)
         try #require(await RunnerTabTests.until { sheet.field.error != nil }, "no refusal was said")
-        #expect(sheet.field.error == "A login's value is one line: paste only the key or token." && sheet.field.field.stringValue.isEmpty)
+        #expect(sheet.field.error == "A login's value is one line: paste only the key or token." && Self.cleared(sheet))
         #expect(sheet.firstResponder === sheet.field.field || (sheet.firstResponder as? NSText)?.delegate === sheet.field.field, "the keys are not in the field: \(String(describing: sheet.firstResponder))")
         #expect(!sheet.store.isEnabled && window.attachedSheet === sheet && view.newSession.isOpen && view.newSession.stored == nil)
         Self.paste(into: sheet)
@@ -278,7 +286,7 @@ extension LoginSheetTests {
         Self.paste(into: sheet)
         try NewSessionPanelTests.press(sheet.store)
         try #require(await RunnerTabTests.until { sheet.field.error != nil })
-        #expect(sheet.field.error == "Can't reach 127.0.0.1. Nothing was stored." && sheet.field.field.stringValue.isEmpty)
+        #expect(sheet.field.error == "Can't reach 127.0.0.1. Nothing was stored." && Self.cleared(sheet))
         sheet.withdraw()
     }
 
@@ -289,7 +297,7 @@ extension LoginSheetTests {
         defer { window.orderOut(nil) }
         Self.paste(into: sheet)
         if escape { sheet.cancelOperation(nil) } else { try NewSessionPanelTests.press(sheet.cancel) }
-        #expect(window.attachedSheet == nil && sheet.field.field.stringValue.isEmpty)
+        #expect(window.attachedSheet == nil && Self.cleared(sheet))
         #expect(await server.requests.filter { $0.method == .put }.isEmpty, "a cancelled sheet sent the key")
         #expect(view.newSession.isOpen && !view.newSession.popover.stays && view.newSession.view.primary?.title == "Start and Sign In There")
     }
@@ -308,7 +316,7 @@ extension LoginSheetTests {
         Self.paste(into: sheet)
         try NewSessionPanelTests.press(sheet.store)
         try #require(await RunnerTabTests.until { name.error != nil })
-        #expect(name.error == refused.said && sheet.field.error == nil && sheet.field.field.stringValue.isEmpty)
+        #expect(name.error == refused.said && sheet.field.error == nil && Self.cleared(sheet))
         #expect(await server.requests.filter { $0.method == .put }.map(\.path) == ["/v1/logins/claude-code/Work"])
         sheet.withdraw()
     }
@@ -330,7 +338,7 @@ extension LoginSheetTests {
         #expect(started == 0 && panel.isOpen && window.attachedSheet === sheet, "the panel's Start acted under its sheet")
         Self.paste(into: sheet)
         view.isHidden = true
-        #expect(!panel.isOpen && window.attachedSheet == nil && panel.loginSheet == nil && sheet.field.field.stringValue.isEmpty)
+        #expect(!panel.isOpen && window.attachedSheet == nil && panel.loginSheet == nil && Self.cleared(sheet))
     }
 
     /// A change of look while the sheet asks reaches all of it.
