@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.TrackedProcess;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyMessage.PutRefusal;
@@ -28,6 +29,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -86,7 +88,13 @@ class PtyUploadsTest {
 
   private PtySessionHost startHost(Function<PtySession.Origin, PtyUploads.Target> targets)
       throws IOException {
-    uploads = new PtyUploads(c.copies(), targets, timer);
+    return startHost(targets, c.copies());
+  }
+
+  private PtySessionHost startHost(
+      Function<PtySession.Origin, PtyUploads.Target> targets, UploadCopy copies)
+      throws IOException {
+    uploads = new PtyUploads(copies, targets, timer);
     var host =
         new PtySessionHost(
             dir.resolve("host.sock"),
@@ -773,6 +781,43 @@ class PtyUploadsTest {
       }
       release.countDown();
       assertEquals(new PtyMessage.PutRefused(1, PutRefusal.SESSION_ENDED, 0), answer(channel));
+    }
+  }
+
+  /**
+   * An open whose session ended as it started, its process ended under it, closes the pipes of that
+   * process before the refusal is told.
+   */
+  @Test
+  void anOpenWhoseSessionEndedAsItStartedClosesItsPipes() throws Exception {
+    c.patience = Duration.ofMinutes(10);
+    var tracked = new CopyOnWriteArrayList<TrackedProcess>();
+    var copies =
+        new UploadCopy(
+            command -> {
+              var process = TrackedProcess.of(c.processes.start(command));
+              tracked.add(process);
+              return process;
+            },
+            c.place());
+    try (var ignored = startHost(origin -> PtyUploads.Target.own("acme"), copies);
+        var channel = writer("lounge")) {
+      c.openHeld = new CountDownLatch(1);
+      var release = c.openHeld;
+      c.openHangs = true;
+      PtyWire.write(channel, new PtyMessage.PutBegin(1, "a", 1));
+      c.awaitCommand(UploadCopy.OPEN);
+      try (var killer = connect()) {
+        PtyWire.write(killer, new PtyMessage.Kill("lounge"));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(killer));
+      }
+      release.countDown();
+      assertEquals(new PtyMessage.PutRefused(1, PutRefusal.SESSION_ENDED, 0), answer(channel));
+    }
+
+    assertFalse(tracked.isEmpty());
+    for (var process : tracked) {
+      process.awaitClosed(Duration.ofSeconds(10));
     }
   }
 

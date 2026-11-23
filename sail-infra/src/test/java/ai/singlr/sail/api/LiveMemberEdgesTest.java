@@ -619,6 +619,26 @@ class LiveMemberEdgesTest {
     assertEquals(List.of("failed"), statuses(), "the claim is released: the room is free");
   }
 
+  /**
+   * A process started for a member that could not then be made, its run gone meanwhile, is ended at
+   * once: its input closed, asked to stop, and its output read to its end.
+   */
+  @Test
+  void aProcessNoMemberCameToOwnIsEnded() {
+    room.engage(SPEC, "claude-code", "full");
+    posted(SPEC, "first");
+    room.processes.onStart(
+        starting -> room.db.execute("DELETE FROM runs WHERE id = ?", starting.runId));
+
+    assertThrows(RuntimeException.class, () -> room.live.deliver(SPEC, HANDLE));
+
+    var abandoned = room.processes.latest();
+    assertTrue(abandoned.stdinClosed(), "its input is closed");
+    assertEquals(List.of(AgentProcess.Signal.TERM), abandoned.signals);
+    abandoned.breaks(new IOException("its pipe broke"));
+    abandoned.awaitEndSeen();
+  }
+
   @Test
   void aRunThatCannotBeStagedGivesItsClaimBack() {
     room.engage(SPEC, "claude-code", "full");

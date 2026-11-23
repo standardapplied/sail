@@ -59,18 +59,25 @@ final class LockProbe {
     var holder = probe("hold", lock.toString()).start();
     var said = new LinkedBlockingQueue<String>();
     var reader = Child.drain(holder, said);
-    assertEquals(
-        "HOLDING",
-        said.poll(LocalPtyHostTest.STEP.toMillis(), TimeUnit.MILLISECONDS),
-        "the holder took the lock");
-    return () -> {
-      holder.getOutputStream().close();
-      if (!holder.waitFor(LocalPtyHostTest.STEP.toMillis(), TimeUnit.MILLISECONDS)) {
-        holder.destroyForcibly();
-      }
-      holder.waitFor();
-      reader.join();
-    };
+    AutoCloseable release =
+        () -> {
+          holder.getOutputStream().close();
+          if (!holder.waitFor(LocalPtyHostTest.STEP.toMillis(), TimeUnit.MILLISECONDS)) {
+            holder.destroyForcibly();
+          }
+          holder.waitFor();
+          reader.join();
+        };
+    try {
+      assertEquals(
+          "HOLDING",
+          said.poll(LocalPtyHostTest.STEP.toMillis(), TimeUnit.MILLISECONDS),
+          "the holder took the lock");
+    } catch (AssertionError | InterruptedException notHolding) {
+      release.close();
+      throw notHolding;
+    }
+    return release;
   }
 
   /** This class run in another JVM with {@code args}, its output and errors as one. */

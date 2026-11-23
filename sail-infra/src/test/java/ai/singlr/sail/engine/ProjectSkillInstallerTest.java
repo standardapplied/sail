@@ -1062,28 +1062,28 @@ class ProjectSkillInstallerTest {
         builder.environment().compute("PATH", (name, path) -> shims + ":" + path);
       }
       var process = builder.start();
-      var stderr = new StringBuilder();
-      try (var lines = process.errorReader(StandardCharsets.UTF_8)) {
+      try (var input = process.getOutputStream();
+          var output = process.getInputStream();
+          var lines = process.errorReader(StandardCharsets.UTF_8)) {
+        var stderr = new StringBuilder();
         for (var line = lines.readLine(); line != null; line = lines.readLine()) {
           if (line.equals(STOPPED)) {
-            try (var input = process.getOutputStream()) {
+            try {
               stopped.run();
+            } finally {
+              input.close();
             }
           } else {
             stderr.append(line).append('\n');
           }
         }
+        var stdout = new String(output.readAllBytes(), StandardCharsets.UTF_8);
+        var exit = process.waitFor();
+        return new Result(
+            failingReads && inner(command).getFirst().equals("cat") ? 1 : exit,
+            stdout,
+            stderr.toString());
       }
-      String stdout;
-      try (var output = process.getInputStream()) {
-        stdout = new String(output.readAllBytes(), StandardCharsets.UTF_8);
-      }
-      var exit = process.waitFor();
-      process.getOutputStream().close();
-      return new Result(
-          failingReads && inner(command).getFirst().equals("cat") ? 1 : exit,
-          stdout,
-          stderr.toString());
     }
 
     private static Result push(List<String> command) {

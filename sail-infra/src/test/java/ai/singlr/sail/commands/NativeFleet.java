@@ -689,18 +689,29 @@ public final class NativeFleet implements AutoCloseable {
       var reader =
           new BufferedReader(
               new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
-      awaitListening(reader);
+      try {
+        awaitListening(reader);
+      } catch (IOException | AssertionError notListening) {
+        process.destroyForcibly();
+        process.waitFor();
+        reader.close();
+        throw notListening;
+      }
       drain = Thread.ofVirtual().start(() -> drain(reader));
     }
 
     @Override
     public void close() throws Exception {
-      box.shOk("pkill -x " + processName);
-      if (!process.waitFor(COMMAND_DEADLINE.toMillis(), TimeUnit.MILLISECONDS)) {
+      try {
+        box.shOk("pkill -x " + processName);
+        if (!process.waitFor(COMMAND_DEADLINE.toMillis(), TimeUnit.MILLISECONDS)) {
+          fail(box.name + ": " + processName + " did not stop:\n" + log);
+        }
+      } finally {
         process.destroyForcibly();
-        fail(box.name + ": " + processName + " did not stop:\n" + log);
+        process.waitFor();
+        drain.join();
       }
-      drain.join();
     }
 
     /** Keeps what the daemon says until its output ends, then closes it. */

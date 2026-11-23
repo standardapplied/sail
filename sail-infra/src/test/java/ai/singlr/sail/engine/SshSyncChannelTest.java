@@ -226,6 +226,14 @@ class SshSyncChannelTest {
     assertEquals(Optional.empty(), authorisation("mady", pinned()));
   }
 
+  private static void closeQuietly(SshSyncChannel channel) {
+    try {
+      channel.close();
+    } catch (IOException closedAlready) {
+      var unused = closedAlready;
+    }
+  }
+
   /**
    * A close whose input fails, ssh having stopped reading it, still closes ssh's output and waits
    * for it: nothing of the channel is left running or open.
@@ -236,10 +244,15 @@ class SshSyncChannelTest {
     var before = ClosesWhatItOpens.baseline();
     var ssh = new ProcessBuilder("sh", "-c", "exec 0<&-; exec yes").start();
     var channel = new SshSyncChannel(ssh, handle -> Optional.empty());
-    assertEquals('y', channel.reader().read(), "ssh closed its input before it spoke");
-    channel.writer().write('x');
+    try {
+      assertEquals('y', channel.reader().read(), "ssh closed its input before it spoke");
+      channel.writer().write('x');
 
-    assertThrows(IOException.class, channel::close);
+      assertThrows(IOException.class, channel::close);
+    } finally {
+      ssh.destroyForcibly();
+      closeQuietly(channel);
+    }
 
     assertFalse(ssh.isAlive());
     ClosesWhatItOpens.assertClosed("a channel whose close failed", before);

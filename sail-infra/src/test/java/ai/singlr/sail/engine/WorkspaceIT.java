@@ -1429,21 +1429,23 @@ class WorkspaceIT extends AbstractIncusIT {
             .redirectErrorStream(true)
             .start();
     watcher.getOutputStream().close();
-    var watching =
-        exec(
-            fix.instance(),
-            List.of(
-                "bash",
-                "-c",
-                "for _ in $(seq 1 300); do [ -e /home/dev/.sail-it-watching ] && exit 0; sleep 0.1;"
-                    + " done; exit 1"));
-    assertTrue(watching.ok(), "the live run is watching");
-
-    assertEquals(List.of(), workspaces.refresh(udayWith("tok-2"), project -> definition()));
-    assertTrue(exec(fix.instance(), List.of("touch", "/home/dev/.sail-it-stop")).ok());
-    assertTrue(watcher.waitFor(60, TimeUnit.SECONDS), "the watch ends");
     try (var watched = watcher.getInputStream()) {
+      var watching =
+          exec(
+              fix.instance(),
+              List.of(
+                  "bash",
+                  "-c",
+                  "for _ in $(seq 1 300); do [ -e /home/dev/.sail-it-watching ] && exit 0; sleep"
+                      + " 0.1; done; exit 1"));
+      assertTrue(watching.ok(), "the live run is watching");
+
+      assertEquals(List.of(), workspaces.refresh(udayWith("tok-2"), project -> definition()));
+      assertTrue(exec(fix.instance(), List.of("touch", "/home/dev/.sail-it-stop")).ok());
+      assertTrue(watcher.waitFor(60, TimeUnit.SECONDS), "the watch ends");
       assertEquals("watched", new String(watched.readAllBytes(), StandardCharsets.UTF_8).strip());
+    } finally {
+      watcher.destroyForcibly();
     }
     assertEquals("https://oauth2:tok-2@example.invalid\n", pulled(fix.instance(), store));
     workspaces.stop(PROJECT, FIX, NO_RUN);

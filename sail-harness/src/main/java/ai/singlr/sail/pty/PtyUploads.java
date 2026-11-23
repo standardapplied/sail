@@ -314,8 +314,8 @@ final class PtyUploads {
       upload.copy = copy;
       if (ended(upload.record) || !copy.opened()) {
         var kind = ended(upload.record) ? PutRefusal.SESSION_ENDED : copy.refusal();
+        copy.close();
         if (copy.opened()) {
-          copy.close();
           copy.abort();
         }
         refuse(upload, kind, reply);

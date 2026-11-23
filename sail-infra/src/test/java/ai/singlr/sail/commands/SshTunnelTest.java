@@ -235,9 +235,12 @@ class SshTunnelTest {
     var before = ClosesWhatItOpens.baseline();
 
     var ssh = SshTunnel.launch(List.of("cat"));
+    try (var stderr = ssh.getErrorStream()) {
+      assertTrue(ssh.waitFor(10, TimeUnit.SECONDS), "it read an empty input");
+    } finally {
+      ssh.destroyForcibly();
+    }
 
-    assertTrue(ssh.waitFor(10, TimeUnit.SECONDS), "it read an empty input");
-    ssh.getErrorStream().close();
     ClosesWhatItOpens.assertClosed("a tunnel's ssh", before);
   }
 }

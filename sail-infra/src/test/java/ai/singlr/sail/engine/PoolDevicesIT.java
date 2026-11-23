@@ -317,10 +317,11 @@ class PoolDevicesIT extends AbstractIncusIT {
               .redirectErrorStream(true)
               .start();
       List<String> held;
-      try (var said = new BufferedReader(new InputStreamReader(holder.getInputStream()))) {
+      try (var input = holder.getOutputStream();
+          var said = new BufferedReader(new InputStreamReader(holder.getInputStream()))) {
         assertEquals("held", said.readLine());
         held = devices.openBy(loop, Map.of(number, loop));
-        holder.getOutputStream().close();
+        input.close();
         assertTrue(holder.waitFor(60, TimeUnit.SECONDS), "the holder did not let go");
       }
       var released = devices.openBy(loop, Map.of(number, loop));
@@ -375,10 +376,11 @@ class PoolDevicesIT extends AbstractIncusIT {
               .redirectErrorStream(true)
               .start();
       List<String> held;
-      try (var said = new BufferedReader(new InputStreamReader(holder.getInputStream()))) {
+      try (var input = holder.getOutputStream();
+          var said = new BufferedReader(new InputStreamReader(holder.getInputStream()))) {
         assertEquals("held", said.readLine());
         held = devices.openBy(partition, numbers);
-        holder.getOutputStream().close();
+        input.close();
         assertTrue(holder.waitFor(60, TimeUnit.SECONDS), "the holder did not let go");
       }
       var released = devices.openBy(partition, numbers);

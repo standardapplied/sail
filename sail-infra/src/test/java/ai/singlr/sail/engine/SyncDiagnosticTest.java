@@ -282,9 +282,10 @@ class SyncDiagnosticTest {
                       "read -r hello; echo 'sail@10.128.0.29: Permission denied (publickey).' >&2;"
                           + " exit 255"))
               .start();
-      refused =
-          failure(
-              new SshSyncChannel(ssh, handle -> Optional.of(AUTHORISE.replace("mady", handle))));
+      try (var channel =
+          new SshSyncChannel(ssh, handle -> Optional.of(AUTHORISE.replace("mady", handle)))) {
+        refused = failure(channel);
+      }
     } finally {
       System.setErr(err);
     }
