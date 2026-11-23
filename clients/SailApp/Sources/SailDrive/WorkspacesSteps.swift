@@ -5,6 +5,7 @@ import SailControls
 import SailKitTestSupport
 import SailShell
 import SailTerminal
+import SailTerminalWire
 
 /// The control plane of the drive's workspaces run: every route answered as the server answered
 /// it in the goldens its `ClientGoldensTest` writes, a step choosing which golden answers a route
@@ -99,6 +100,13 @@ actor GoldenDesk: Transport {
         guard let answer = answers[route], var body = try JSONSerialization.jsonObject(with: answer.body) as? [String: Any], var rows = body["workspaces"] as? [[String: Any]] else { return }
         if change == "gone" {
             rows.removeAll { $0["name"] as? String == name }
+        } else if change.hasPrefix("owner:") {
+            rows = rows.map { row in
+                guard row["name"] as? String == name else { return row }
+                var changed = row
+                changed["owner"] = String(change.dropFirst("owner:".count))
+                return changed
+            }
         } else {
             rows = rows.map { row in
                 guard row["name"] as? String == name else { return row }
@@ -196,6 +204,7 @@ extension Driver {
 
     func performWorkspaces(_ step: Step) async -> (Bool, String)? {
         if let files = await performFiles(step) { return files }
+        if let started = await performNewSession(step) { return started }
         let pane = shell.workspaces
         if let pair = step.golden {
             guard pair.count == 2 || pair.count == 3, let seconds = Int(pair.count == 3 ? pair[2] : "0") else {
@@ -520,6 +529,243 @@ extension Driver {
             return await inBothLooks(name) { file in await self.capture(.screen, to: file) }
         }
         return nil
+    }
+
+    /// A1's steps: a row's + and ⋯, the New Session panel and what its Start asks of the runner.
+    private func performNewSession(_ step: Step) async -> (Bool, String)? {
+        let pane = shell.workspaces, panel = pane.newSession, list = pane.project.list
+        let said = { panel.isOpen ? "the panel says: " + panel.view.words.joined(separator: " | ") : "the panel is closed" }
+        if let shows = step.rowShows, let name = shows.first {
+            guard await clickRow(name, in: list) else { return (false, "no row \(name) to click") }
+            let titles = { Self.rowButtons(name, in: list).map(\.title) }
+            let found = await waitUntil(step.seconds ?? 5) { titles() == Array(shows.dropFirst()) }
+            return (found, "\(name) shows \(titles())")
+        }
+        if let pick = step.clickRowButton, pick.count == 2 {
+            guard let button = Self.rowButtons(pick[0], in: list).first(where: { $0.title == pick[1] }) else {
+                return (false, "\(pick[0]) shows no \(pick[1]): \(Self.rowButtons(pick[0], in: list).map(\.title))")
+            }
+            guard await click(button, at: NSPoint(x: button.bounds.midX, y: button.bounds.midY)) else { return (false, "\(pick[1]) could not be clicked") }
+            return (true, "clicked \(pick[1]) on \(pick[0])")
+        }
+        if let words = step.newSessionSays {
+            let found = await waitUntil(step.seconds ?? 5) { !pane.busy && panel.isOpen && Self.inOrder(words, in: panel.view.words) }
+            return (found, said())
+        }
+        if let name = step.newSessionChosen {
+            let chosen = { panel.view.rows.first(where: \.chosen)?.name.stringValue }
+            let found = await waitUntil(step.seconds ?? 5) { panel.isOpen && chosen() == name }
+            return (found, "chosen: \(chosen() ?? "none"); " + said())
+        }
+        if let primary = step.newSessionPrimary, primary.count == 2 {
+            let button = { panel.view.primary }
+            let found = await waitUntil(step.seconds ?? 5) { button()?.title == primary[0] && button()?.isEnabled == (primary[1] == "on") }
+            return (found, "the primary: \(button().map { "\($0.title), \($0.isEnabled ? "on" : "off")" } ?? "none")")
+        }
+        if let title = step.newSessionClick {
+            let view = panel.view
+            let controls: [NSView] = view.rows + [view.primary, view.secondary, view.modes, view.storeLogin].compactMap { $0 }
+            let named = { (control: NSView) -> String in (control as? NewSessionRow)?.name.stringValue ?? (control as? NSButton)?.title ?? "" }
+            guard panel.isOpen, let target = controls.first(where: { named($0) == title }) else { return (false, "the panel shows no \(title); " + said()) }
+            guard await click(target, at: NSPoint(x: target.bounds.midX, y: target.bounds.midY)) else { return (false, "\(title) could not be clicked") }
+            return (true, "clicked \(title)")
+        }
+        if let open = step.newSessionOpen {
+            let found = await waitUntil(step.seconds ?? 5) { panel.isOpen == open }
+            let keys = shell.window.firstResponder.map { String(describing: type(of: $0)) } ?? "nothing"
+            return (found, said() + "; the keys are with \(keys)")
+        }
+        if let label = step.newSessionMode {
+            guard panel.isOpen, let menu = panel.view.modes?.menu, let index = menu.items.firstIndex(where: { $0.title == label }), let key = Keys.named("m", modifiers: ["command"]) else {
+                return (false, "no mode \(label) to choose; " + said())
+            }
+            var opened = false
+            let choose = Timer(timeInterval: 0.3, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    opened = NSApp.windows.contains { $0.isVisible && $0.level.rawValue >= NSWindow.Level.popUpMenu.rawValue }
+                    menu.cancelTracking()
+                    menu.performActionForItem(at: index)
+                }
+            }
+            RunLoop.main.add(choose, forMode: .common)
+            send(key)
+            let chosen = await waitUntil(step.seconds ?? 5) { panel.view.modes?.title == label }
+            return (opened && chosen, (opened ? "⌘M opened the modes" : "⌘M opened no menu") + "; " + said())
+        }
+        if let name = step.newSessionModesShot {
+            guard panel.isOpen, panel.view.modes != nil else { return (false, "no mode menu to shoot; " + said()) }
+            return await inBothLooks(name) { file in
+                guard let button = panel.view.modes, let menu = button.menu, let shot = Shot.begin(.menu, to: file) else { return }
+                menu.perform(#selector(NSMenu.cancelTracking), with: nil, afterDelay: 2.5, inModes: [.common])
+                MenuOpener.shared.open(button)
+                await shot.taken()
+            }
+        }
+        if let wanted = step.doorCreated, wanted.count == 3 {
+            guard let door = GoldenDesk.door, let name = workbench.focused?.name else { return (false, "no door or no focused tab") }
+            let found = await waitUntil(step.seconds ?? 10) { door.create(of: name) != nil }
+            guard found, let create = door.create(of: name) else { return (false, "the door was asked no Create for \(name)") }
+            let agent = [create.agent.harness, create.agent.mode, create.agent.inside ? "inside" : "stored"]
+            return (agent == wanted && create.command.isEmpty, "\(name)'s Create named \(agent) and the command \(create.command)")
+        }
+        if let holding = step.doorHoldsCreates {
+            guard let door = GoldenDesk.door else { return (false, "the drive's runner door did not listen") }
+            if holding { door.holdCreates() } else { door.releaseCreates() }
+            return (true, "")
+        }
+        if let refusal = step.doorRefusesCreates {
+            guard let door = GoldenDesk.door, refusal.isEmpty || refusal.count == 2 else { return (false, "no door, or not [code, sentence]") }
+            door.refuseCreates(with: refusal.isEmpty ? nil : HostRefusal(message: refusal[1], remedy: [], code: refusal[0]))
+            return (true, "")
+        }
+        if step.newSessionModesDismissed == true {
+            guard panel.isOpen, let menu = panel.view.modes?.menu, let before = panel.view.modes?.title, let key = Keys.named("m", modifiers: ["command"]) else { return (false, "no mode menu; " + said()) }
+            var opened = false
+            let dismiss = Timer(timeInterval: 0.3, repeats: false) { _ in
+                MainActor.assumeIsolated {
+                    opened = NSApp.windows.contains { $0.isVisible && $0.level.rawValue >= NSWindow.Level.popUpMenu.rawValue }
+                    menu.cancelTracking()
+                }
+            }
+            RunLoop.main.add(dismiss, forMode: .common)
+            send(key)
+            let kept = await waitUntil(step.seconds ?? 2) { panel.isOpen && panel.view.modes?.title == before }
+            return (opened && kept, (opened ? "the mode menu opened and was put away" : "⌘M opened no menu") + "; " + said())
+        }
+        if let title = step.newSessionStartTwice {
+            guard panel.isOpen, let enter = Keys.named("enter", modifiers: []) else { return (false, said()) }
+            send(enter)
+            send(enter)
+            let titles = { self.workbench.model.tabs.map { self.workbench.model.title(of: $0.id) } }
+            let once = await waitUntil(step.seconds ?? 5) { !panel.isOpen && titles() == [title] }
+            return (once, "two Returns sent at once; the tabs are \(titles()); the keys are with \(shell.window.firstResponder.map { String(describing: type(of: $0)) } ?? "nothing")")
+        }
+        if step.newSessionModesEscape == true {
+            return await modesEscape(panel)
+        }
+        if let pick = step.shadowWhole, pick.count == 2 {
+            let popover = pick[1] == "userMenu" ? shell.userMenu.popover : panel.popover
+            guard popover.isOpen else { return (false, "no \(pick[1]) open") }
+            var faults: [String] = [], read: [String] = []
+            for look in ["light", "dark"] {
+                let file = out.deletingLastPathComponent().appending(path: "window").appending(path: "\(pick[0])-\(look).png")
+                guard let data = try? Data(contentsOf: file), let bitmap = NSBitmapImageRep(data: data) else {
+                    faults.append("no \(file.lastPathComponent)")
+                    continue
+                }
+                faults += Self.shadowCut(in: bitmap, of: popover, over: shell.window).map { "\(look): \($0)" }
+                read.append(file.lastPathComponent)
+            }
+            return (faults.isEmpty, faults.isEmpty ? "the shadow is whole in \(read.joined(separator: " and "))" : faults.joined(separator: "; "))
+        }
+        if let rightToLeft = step.workspacesRightToLeft {
+            let direction: NSUserInterfaceLayoutDirection = rightToLeft ? .rightToLeft : .leftToRight
+            for view in [pane] + Self.views(in: pane) {
+                view.userInterfaceLayoutDirection = direction
+                view.needsLayout = true
+                view.needsDisplay = true
+            }
+            list.reloadData()
+            pane.layoutSubtreeIfNeeded()
+            return (true, "the section is laid out \(rightToLeft ? "right to left" : "left to right")")
+        }
+        return nil
+    }
+
+    /// Where a screen shot shows `popover`'s shadow cut: at the middle of each side of its window, a
+    /// pixel just inside that differs from one just outside, the window's edge drawn as a step. A
+    /// side is judged only where both pixels lie on `window`'s content, the same surface under both
+    /// (a floating window may reach past it, over the desktop); a shot judging no side is a fault.
+    private static func shadowCut(in bitmap: NSBitmapImageRep, of popover: Popover, over window: NSWindow) -> [String] {
+        guard let screen = window.screen else { return ["the window is on no screen"] }
+        let scale = Double(bitmap.pixelsWide) / Double(screen.frame.width), content = window.convertToScreen(window.contentLayoutRect).insetBy(dx: 4, dy: 4)
+        func ink(_ point: NSPoint) -> [Double]? {
+            guard content.contains(point) else { return nil }
+            let x = Int((Double(point.x) - Double(screen.frame.minX)) * scale), y = Int((Double(screen.frame.maxY) - Double(point.y)) * scale)
+            guard x >= 0, y >= 0, x < bitmap.pixelsWide, y < bitmap.pixelsHigh, let colour = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return nil }
+            return [colour.redComponent, colour.greenComponent, colour.blueComponent].map { Double($0) * 255 }
+        }
+        let outer = popover.panel.frame
+        let sides = [
+            (NSPoint(x: outer.minX + 1, y: outer.midY), NSPoint(x: outer.minX - 2, y: outer.midY)), (NSPoint(x: outer.maxX - 1, y: outer.midY), NSPoint(x: outer.maxX + 2, y: outer.midY)),
+            (NSPoint(x: outer.midX, y: outer.minY + 1), NSPoint(x: outer.midX, y: outer.minY - 2)), (NSPoint(x: outer.midX, y: outer.maxY - 1), NSPoint(x: outer.midX, y: outer.maxY + 2)),
+        ]
+        var faults: [String] = [], judged = 0
+        for (inside, outside) in sides {
+            guard let one = ink(inside), let other = ink(outside) else { continue }
+            judged += 1
+            if zip(one, other).contains(where: { abs($0 - $1) > 4 }) { faults.append("the window's edge shows at \(inside): \(one.map(Int.init)) inside, \(other.map(Int.init)) outside") }
+        }
+        return judged == 0 ? ["no side of the floating window lies on the window's content"] : faults
+    }
+
+    /// ⌘M, then a real Escape while AppKit tracks the mode menu, then a second Escape. A menu's
+    /// tracking loop reads its own events, so the Escape is posted the two ways one can reach it:
+    /// first to the app's event queue, then, if the menu is still up, to this process through the
+    /// window server. Each way is tried only while the menu is up and none once it has gone, so the
+    /// result names the way that put it away. The step passes only when one of them did: should
+    /// neither reach it, it fails, the menu put away by its `cancelTracking` so no later step is
+    /// left under it; gone before any was posted, it fails too.
+    private func modesEscape(_ panel: NewSessionPanel) async -> (Bool, String) {
+        guard panel.isOpen, let menu = panel.view.modes?.menu, let before = panel.view.modes?.title,
+              let open = Keys.named("m", modifiers: ["command"]), let escape = Keys.named("escape", modifiers: [])
+        else { return (false, "no mode menu to open") }
+        let menuShown = { NSApp.windows.contains { $0.isVisible && $0.level.rawValue >= NSWindow.Level.popUpMenu.rawValue } }
+        var opened = false, way: String?, unreached = false
+        let queued = Timer(timeInterval: 0.3, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                opened = menuShown()
+                for type in [NSEvent.EventType.keyDown, .keyUp] {
+                    guard let event = NSEvent.keyEvent(
+                        with: type, location: .zero, modifierFlags: escape.flags, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: 0, context: nil,
+                        characters: escape.characters, charactersIgnoringModifiers: escape.ignoring, isARepeat: false, keyCode: escape.code
+                    ) else { continue }
+                    NSApp.postEvent(event, atStart: false)
+                }
+                way = "an Escape posted to the app's event queue"
+            }
+        }
+        let windowServer = Timer(timeInterval: 0.9, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                guard menuShown() else { return }
+                for down in [true, false] { CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(escape.code), keyDown: down)?.postToPid(getpid()) }
+                way = "an Escape posted to this process through the window server"
+            }
+        }
+        let last = Timer(timeInterval: 1.6, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                guard menuShown() else { return }
+                unreached = true
+                menu.cancelTracking()
+            }
+        }
+        [queued, windowServer, last].forEach { RunLoop.main.add($0, forMode: .common) }
+        send(open)
+        let kept = await waitUntil(3) { !menuShown() && panel.isOpen && panel.view.modes?.title == before }
+        [queued, windowServer, last].forEach { $0.invalidate() }
+        send(escape)
+        let closed = await waitUntil(3) { !panel.isOpen }
+        let went = unreached
+            ? "no posted Escape (the app's queue, then the window server to this process) put it away; the step put it away by its cancelTracking"
+            : "it went by \(way ?? "nothing: it was gone before any Escape was posted")"
+        return (opened && way != nil && !unreached && kept && closed, "\(opened ? "the mode menu opened" : "⌘M opened no menu"); \(went); the panel \(kept ? "stayed open, its mode \(before)" : "did not stay as it was"); a second Escape \(closed ? "closed it" : "left it open")")
+    }
+
+    /// The buttons row `name` shows now, in order.
+    private static func rowButtons(_ name: String, in list: SailList) -> [SailButton] {
+        guard let index = row(name, in: list), let view = list.rowView(atRow: index, makeIfNecessary: false) else { return [] }
+        view.layoutSubtreeIfNeeded()
+        return found(SailButton.self, in: view).filter { !$0.isHiddenOrHasHiddenAncestor }
+    }
+
+    /// Whether `wanted` are among `words` in that order.
+    private static func inOrder(_ wanted: [String], in words: [String]) -> Bool {
+        var rest = words[...]
+        for word in wanted {
+            guard let at = rest.firstIndex(of: word) else { return false }
+            rest = rest[(at + 1)...]
+        }
+        return true
     }
 
     /// The ticket requests the desk was sent, each as its fields.

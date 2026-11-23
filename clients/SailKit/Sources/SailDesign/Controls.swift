@@ -59,6 +59,8 @@ public struct ButtonSize: Equatable, Sendable {
     public static let icon = 15.0
     /// The shortcut hint's opacity.
     public static let hintOpacity = 0.7
+    /// A pop-up's chevron after its label, in the hint's place.
+    public static let chevron = 11.0
 
     /// The box's width for a label, a leading icon or spinner and a trailing hint of these widths: the
     /// padding inside the 1 pt edge on each side.

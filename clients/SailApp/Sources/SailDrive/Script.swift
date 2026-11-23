@@ -193,8 +193,9 @@ struct Step: Decodable {
     /// marked prompt, as a command it runs moves it), within `seconds` (10 by default): a close sent
     /// before the shell has answered a command's Return finds the cursor still at the prompt.
     var mayEndAProgram: Bool?
-    /// `[name, "stopped" | "gone"]`: harbor's list from now on as it is answered now, that row stopped
-    /// or left out, as the runner lists it after a stop or a delete.
+    /// `[name, "stopped" | "gone" | "owner:<handle>"]`: harbor's list from now on as it is answered
+    /// now, that row stopped, left out, or another's ("owner:removed", an owner no longer active), as
+    /// the runner lists it after a stop, a delete or a change of hands.
     var relistAs: [String]?
     /// A plain delete of that harbor workspace refused as holding work, in the server's sentence
     /// naming it.
@@ -225,6 +226,53 @@ struct Step: Decodable {
     var skeletons: Bool?
     /// The Workspaces row of this name selected and Open pressed: a tab on the runner.
     var open: String?
+    /// `[row, titles…]`: the Workspaces row of this name, clicked, shows exactly these buttons, in
+    /// order ("Open", "New Session", "More"), within `seconds` (5 by default).
+    var rowShows: [String]?
+    /// `[row, title]`: that row's button of this title (its + is "New Session") clicked with a real
+    /// mouse-down and mouse-up through the window.
+    var clickRowButton: [String]?
+    /// The New Session panel is open and says these words among its own, in this order, within
+    /// `seconds` (5 by default).
+    var newSessionSays: [String]?
+    /// The panel's chosen row is the one of this name.
+    var newSessionChosen: String?
+    /// `[title, "on" | "off"]`: the panel's primary is titled so and offered or not.
+    var newSessionPrimary: [String]?
+    /// The panel's row, button or link of this title clicked with real mouse events through the
+    /// panel's own window.
+    var newSessionClick: String?
+    /// The panel is open (true) or closed (false), within `seconds` (5 by default).
+    var newSessionOpen: Bool?
+    /// ⌘M pressed with the panel open, and the mode of this label chosen from the menu it opens,
+    /// while AppKit tracks it.
+    var newSessionMode: String?
+    /// The panel's mode menu shot open over it, the whole screen, in both looks.
+    var newSessionModesShot: String?
+    /// `[harness, mode, "stored" | "inside"]`: the focused tab's session was asked of the runner's
+    /// door naming exactly this agent, and no command.
+    var doorCreated: [String]?
+    /// `[shot, "newSession" | "userMenu"]`: in that shot's two looks, the floating box shown casts
+    /// its shadow whole: its window's edges, where they lie on the window's content, show no step.
+    var shadowWhole: [String]?
+    /// The runner's door holds every `Create` from now on (true), as a workspace still starting, or
+    /// lets those held go on (false).
+    var doorHoldsCreates: Bool?
+    /// `[code, sentence]`: the runner's door refuses every `Create` from now on, in the host's words;
+    /// `[]` makes them again.
+    var doorRefusesCreates: [String]?
+    /// ⌘M pressed with the panel open and its mode menu put away unchosen, as Escape puts it away:
+    /// the panel stays open, its mode as it was.
+    var newSessionModesDismissed: Bool?
+    /// Return pressed twice at once with the panel open: the panel closes and exactly one tab, the
+    /// agent's of this title, opens, the second Return reaching no Open, within `seconds` (5 by default).
+    var newSessionStartTwice: String?
+    /// ⌘M with the panel open, then a real Escape posted while AppKit tracks the mode menu: the menu
+    /// goes, the panel stays open with its mode as it was; a second Escape closes the panel.
+    var newSessionModesEscape: Bool?
+    /// The Workspaces section laid out right to left (true), as a right-to-left Mac lays it out,
+    /// or left to right again (false).
+    var workspacesRightToLeft: Bool?
     /// The Workspaces row of this name clicked: chosen, with the list holding the keys (its Open
     /// says ⏎), within `seconds` (5 by default).
     var chooseRow: String?

@@ -202,8 +202,9 @@ import Testing
         #expect(many.words == many.made && few.words == few.made, "a redraw made the words of \(many.words) rows for \(many.made) rows made of three hundred, \(few.words) for \(few.made) of thirty")
     }
 
-    /// The narrow rows' actions column is the widest actions a row shows, measured and said; the
-    /// reach sweep, with the list holding the keys, checks a chosen row's actions fit it.
+    /// The narrow rows' actions column is the widest actions a row shows (a person's own stopped
+    /// row: Start and Open, + and ⋯), measured and said; the reach sweep, with the list holding the
+    /// keys, checks a chosen row's actions fit it.
     @Test func theNarrowActionsColumnIsTheWidestActions() throws {
         let page = try #require(WorkspacesViewTests.page([WorkspaceRow(name: "pier", instance: "harbor-pier", state: .known(.stopped), owner: "uday")]))
         let (project, window) = try WorkspacesViewTests.project(width: WorkspacesViewTests.narrowestCard)
@@ -218,7 +219,7 @@ import Testing
         let boxes = buttons.map { row.convert($0.alignmentRect(forFrame: $0.frame), from: $0.superview) }
         let shown = (boxes.map(\.maxX).max() ?? 0) - (boxes.map(\.minX).min() ?? 0)
         print("workspaces: the narrow actions column is \(project.narrowActionsColumn) pt; a chosen stopped row's actions take \(shown) pt")
-        #expect(buttons.count == 2 && abs(Double(shown) - project.narrowActionsColumn) < 0.5, "the column is \(project.narrowActionsColumn) pt, the widest actions take \(shown) pt")
+        #expect(buttons.map(\.title) == ["Start and Open", "New Session", "More"] && abs(Double(shown) - project.narrowActionsColumn) < 0.5, "the column is \(project.narrowActionsColumn) pt, the widest actions take \(shown) pt")
     }
 
     /// Twenty projects scroll between the panel's header and its bottom edge: the panel has no foot,

@@ -84,6 +84,11 @@ public final class LinkButton: NSButton {
     override public func resetCursorRects() {
         addCursorRect(bounds, cursor: .pointingHand)
     }
+
+    /// In a panel floating over the window, which never takes the keys, the first click acts.
+    override public func acceptsFirstMouse(for _: NSEvent?) -> Bool {
+        window is NSPanel
+    }
 }
 
 extension LinkButton: Marked {

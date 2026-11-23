@@ -2,6 +2,7 @@ import AppKit
 import SailAPI
 import SailControls
 import SailLook
+import SailWorkbench
 
 /// A project's Workspaces view, as the approved design draws it: its name and the line under it,
 /// List Again and New Workspace at the top right, a banner when something went wrong, then the list
@@ -13,7 +14,7 @@ import SailLook
 @MainActor
 package final class ProjectView: NSView, NSTextFieldDelegate {
     enum Act: Equatable {
-        case open(String), startAndOpen(String), copyName(String), stop(String), delete(String)
+        case open(String), startAndOpen(String), newSession(String), startLast(String), copyName(String), stop(String), delete(String)
         case newWorkspace, listAgain, checkAgain, typed(String), create, cancelCreate, chose(String?), show(String)
     }
 
@@ -55,13 +56,14 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     private let frameView: ListFrame
 
     /// The narrow rows' actions column: the widest actions a narrow row shows (Start and Open with
-    /// no keycap, which narrow rows drop; ⋯ beside it), measured, so every list's pills stand at
+    /// no keycap, which narrow rows drop; + and ⋯ beside it), measured, so every list's pills stand at
     /// one x and a row's name keeps the rest; a note ("Only uday or an admin opens it") is cut within it.
     lazy var narrowActionsColumn: Double = {
         let start = SailButton("Start and Open", kind: .primary, size: .small, look: look, target: nil, action: nil)
+        let plus = SailButton(icon: .plus, label: NewSessionWords.newSession, size: .small, look: look, target: nil, action: nil)
         let more = SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil)
-        let boxes = [start, more].map { Double($0.alignmentRect(forFrame: NSRect(origin: .zero, size: $0.fittingSize)).width) }
-        return (boxes.reduce(0, +) + Self.buttonGap).rounded(.up)
+        let boxes = [start, plus, more].map { Double($0.alignmentRect(forFrame: NSRect(origin: .zero, size: $0.fittingSize)).width) }
+        return (boxes.reduce(0, +) + 2 * Self.buttonGap).rounded(.up)
     }()
     /// The project whose rows the list last held: its rows drawn again keep the person's scroll;
     /// another project's, or anyone's after a change of person, start at the top.
@@ -109,6 +111,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             button.action = #selector(beginCreate(_:))
         }
         list.onChoose = { [weak self] in self?.on(.chose($0)) }
+        list.onKey = { [weak self] event in self?.newSession(event) ?? false }
         field.field.delegate = self
         field.boxWidth = CreateRow.box
         for label in [title, lede] {
@@ -358,12 +361,40 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         frameView.height = height
     }
 
+    /// ⌥⌘T on the chosen row, anyone's: the panel says what starts in it, or why nothing does.
+    private func newSession(_ event: NSEvent) -> Bool {
+        let held = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        guard held == [.command, .option], event.charactersIgnoringModifiers?.lowercased() == "t" else { return false }
+        guard let name = list.chosen, ![Self.createID, Self.creatingID].contains(name) else { return true }
+        on(.newSession(name))
+        return true
+    }
+
+    /// Where row `name` is in the window, nil while it is not listed.
+    func rowFrame(_ name: String) -> NSRect? {
+        guard let row = list.entries.firstIndex(where: { if case let .item(item) = $0 { item.id == name } else { false } }) else { return nil }
+        return list.convert(list.rect(ofRow: row), to: nil)
+    }
+
+    /// Row `name`'s + while it shows: what opened its panel, which a click on toggles.
+    func plus(_ name: String) -> NSView? {
+        guard let index = list.entries.firstIndex(where: { if case let .item(item) = $0 { item.id == name } else { false } }),
+              let row = list.rowView(atRow: index, makeIfNecessary: false)
+        else { return nil }
+        return Self.found(SailButton.self, in: row).first { $0.title == NewSessionWords.newSession && !$0.isHiddenOrHasHiddenAncestor }
+    }
+
     private func item(_ line: WorkspacesModel.Line) -> SailList.Item {
         let narrow = narrow, look = look, mono = mono
         let actions: [SailList.Action] = line.menu.map { entry in
             switch entry {
             case .open: SailList.Action("Open") { [weak self] in self?.on(.open(line.name)) }
             case .startAndOpen: SailList.Action("Start and Open") { [weak self] in self?.on(.startAndOpen(line.name)) }
+            case let .startLast(display): SailList.Action(NewSessionWords.quickStart(display), onRow: false) { [weak self] in self?.on(.startLast(line.name)) }
+            case .newSession:
+                SailList.Action(NewSessionWords.newSession, key: "t", modifiers: [.command, .option], icon: .plus, busy: line.askingAgents ? NewSessionWords.asking : nil) { [weak self] in
+                    self?.on(.newSession(line.name))
+                }
             case .copyName: SailList.Action("Copy Name", key: "c", modifiers: .command, onRow: false) { [weak self] in self?.on(.copyName(line.name)) }
             case .stop: SailList.Action("Stop", onRow: false, startsGroup: true) { [weak self] in self?.on(.stop(line.name)) }
             case .delete:
@@ -429,11 +460,12 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         ])
     }
 
-    /// The count (or when the list was last listed) at the left, the keys at the right.
+    /// The count (or when the list was last listed) at the left, the keys at the right: Open, New
+    /// Session and New, as the approved list's foot says them (⌘R says itself on List Again).
     private func buildFoot() {
         foot.subviews.forEach { $0.removeFromSuperview() }
         var shown: [NSView] = []
-        for (key, words) in [("⏎", "Open"), ("⌘N", "New"), ("⌘R", "List again")] {
+        for (key, words) in [("⏎", "Open"), ("⌥⌘T", NewSessionWords.newSession), ("⌘N", "New")] {
             shown.append(Keycap(key, look: look, mono: mono))
             shown.append(NSTextField(labelWithAttributedString: micro(words)))
         }

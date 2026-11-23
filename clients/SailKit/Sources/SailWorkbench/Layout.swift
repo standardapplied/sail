@@ -59,13 +59,18 @@ public enum Place: Hashable, Codable, Sendable {
 
     /// What a new tab here asks its host to make, the one place the app builds it: a login shell
     /// named `session` at `size`, in this Mac's folder; in a workspace, where the runner starts it in
-    /// the instance's own directory, so it names no folder.
-    public func sessionCreate(session: String, size: TerminalSize) -> SessionCreate {
+    /// the instance's own directory, so it names no folder, the shell or `agent`, whose command the
+    /// host composes. An agent starts only in a workspace.
+    public func sessionCreate(session: String, size: TerminalSize, agent: AgentStart? = nil) -> SessionCreate {
         switch self {
         case let .thisMac(folder):
-            SessionCreate(session: session, command: [], workingDirectory: folder, project: "", room: "", size: size)
+            precondition(agent == nil, "an agent starts in a workspace on the runner, never on this Mac")
+            return SessionCreate(session: session, command: [], workingDirectory: folder, project: "", room: "", size: size)
         case let .workspace(project, name):
-            SessionCreate(session: session, command: [], workingDirectory: "", project: project, room: "", size: size, workspace: name)
+            return SessionCreate(
+                session: session, command: [], workingDirectory: "", project: project, room: "", size: size, workspace: name,
+                agent: agent?.wire ?? .none
+            )
         }
     }
 
@@ -79,15 +84,25 @@ public enum Place: Hashable, Codable, Sendable {
     }
 }
 
-/// One terminal: its session, for the pane's life, and what its program last said.
+/// One terminal: its session, for the pane's life, the harness it runs when it is an agent, and
+/// what its program last said.
 public struct Pane: Hashable, Sendable {
     public let id: PaneID
     public let session: String
     public let place: Place
+    public internal(set) var agent: AgentStart?
     /// The program's title (OSC 0 or 2), empty for none.
     public internal(set) var programTitle = ""
     /// The folder the shell last reported (OSC 7), as it was sent, empty for none.
     public internal(set) var reportedFolder = ""
+
+    /// What its tab is called until the person names it: an agent by its harness and workspace
+    /// ("Claude Code · dock"), else its place's label.
+    public var label: String? {
+        guard let agent, case let .workspace(_, name) = place else { return place.label }
+        return "\(agent.display) · \(name)"
+    }
+
     /// The host the shell's first report named ("" for none), nil before its first report.
     public internal(set) var firstHost: String?
 

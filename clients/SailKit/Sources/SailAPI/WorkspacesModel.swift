@@ -20,6 +20,16 @@ public struct WorkspacesModel: Sendable {
             self.confirmed = confirmed
             self.controlPlane = controlPlane
         }
+
+        /// Who `signedIn` is, as its `whoami` confirmed this time, at the control plane's full
+        /// address (two control planes on one host are two places); no one, signed out.
+        public init(_ signedIn: SignedIn?) {
+            let whoami = signedIn.flatMap { try? $0.whoami.get() }
+            self.init(
+                handle: whoami?.fde ?? signedIn?.fde ?? "", admin: whoami?.role == .known(.admin), confirmed: whoami != nil,
+                controlPlane: signedIn?.controlPlane.description ?? ""
+            )
+        }
     }
 
     public enum Screen: Equatable, Sendable {
@@ -143,7 +153,8 @@ public struct WorkspacesModel: Sendable {
         public let primary: Primary?
         /// Why it offers no Open: whose it is.
         public let why: String?
-        /// Its ⋯ menu.
+        /// Its ⋯ menu: on the person's own row that opens, New Session, after the harness they started
+        /// last.
         public let menu: [Entry]
         /// How many of the person's terminal sessions run in it, on their own running workspace.
         public let sessions: Int
@@ -154,6 +165,8 @@ public struct WorkspacesModel: Sendable {
         }
         /// What is under way on it, its pill said so and its actions waiting.
         public let busy: Action?
+        /// What can start in it is being asked, for its New Session panel.
+        public let askingAgents: Bool
     }
 
     /// What a person does to a workspace that asks first and waits for the runner.
@@ -192,8 +205,10 @@ public struct WorkspacesModel: Sendable {
         case open, startAndOpen
     }
 
+    /// A row's action. New Session opens the panel of what can start in it; starting the harness
+    /// last started (`startLast`, by that harness's name) starts it again without the panel.
     public enum Entry: Equatable, Sendable {
-        case open, startAndOpen, copyName, stop, delete
+        case open, startAndOpen, startLast(String), newSession, copyName, stop, delete
     }
 
     /// The server's rule for a workspace's name, said under the name field.
@@ -219,6 +234,10 @@ public struct WorkspacesModel: Sendable {
 
     /// Who is signed in; a new role or its confirmation keeps what is shown and under way.
     public var person: Person
+    /// The harness the person started last, by its name: their own rows offer to start it again.
+    public var lastStarted: String?
+    /// The workspace whose agents route is being asked, for its New Session panel.
+    public var askingAgentsIn: String?
     public private(set) var chosen: String?
     public private(set) var chosenRow: String?
     private var projects: [ProjectSummary]?
@@ -679,7 +698,7 @@ public struct WorkspacesModel: Sendable {
         guard let create = creates[project], create.underWay else { return nil }
         return Line(
             name: create.name, instance: "\(project)-\(create.name)", state: .known(.notCreated), creating: true, mine: true, owner: nil, chosen: false,
-            primary: nil, why: "about 3 s", menu: [], sessions: 0, busy: nil
+            primary: nil, why: "about 3 s", menu: [], sessions: 0, busy: nil, askingAgents: false
         )
     }
 
@@ -693,6 +712,7 @@ public struct WorkspacesModel: Sendable {
         let underWay = chosen.flatMap { busy[$0]?[row.name] }
         let entry: [Entry] = primary.map { [$0 == .open ? .open : .startAndOpen] } ?? []
         let acts: [Entry] = opens ? (row.state == .known(.running) || row.state == .known(.frozen) ? [.stop, .delete] : [.delete]) : []
+        let agents: [Entry] = mine && primary != nil ? lastStarted.map { [.startLast($0), .newSession] } ?? [.newSession] : []
         let owner: Owner? = switch row.owner {
         case _ where mine: nil
         case nil: .nobody
@@ -702,8 +722,8 @@ public struct WorkspacesModel: Sendable {
         return Line(
             name: row.name, instance: row.instance, state: row.state, creating: false, mine: mine, owner: owner, chosen: row.name == chosenRow,
             primary: underWay == nil ? primary : nil, why: row.whyNotOpened(for: person.handle, admin: person.admin),
-            menu: underWay == nil ? entry + [.copyName] + acts : [.copyName],
-            sessions: mine && row.state == .known(.running) ? sessions[row.name] ?? 0 : 0, busy: underWay
+            menu: underWay == nil ? entry + agents + [.copyName] + acts : [.copyName],
+            sessions: mine && row.state == .known(.running) ? sessions[row.name] ?? 0 : 0, busy: underWay, askingAgents: row.name == askingAgentsIn
         )
     }
 

@@ -48,7 +48,7 @@ let package = Package(
         ),
         .target(name: "SailFiles", dependencies: ["SailAPI", "SailTerminal", "SailTerminalWire"], swiftSettings: strict),
         .target(name: "SailSurface", dependencies: ["SailVT", "SailTerminal"], swiftSettings: strict),
-        .target(name: "SailWorkbench", dependencies: ["SailTerminalWire"], swiftSettings: strict),
+        .target(name: "SailWorkbench", dependencies: ["SailAPI", "SailTerminalWire"], swiftSettings: strict),
         .target(name: "SailMeasures", dependencies: ["SailSurface", "SailTerminal"], swiftSettings: strict),
         .target(name: "SailDesign", dependencies: ["SailVT"], swiftSettings: strict),
         .executableTarget(
@@ -98,7 +98,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SailWorkbenchTests",
-            dependencies: ["SailWorkbench", "SailTerminalWire"],
+            dependencies: ["SailWorkbench", "SailAPI", "SailTerminalWire", "SailKitTestSupport"],
             swiftSettings: strict
         ),
         .testTarget(name: "SailMeasuresTests", dependencies: ["SailMeasures", "SailSurface"], swiftSettings: strict),

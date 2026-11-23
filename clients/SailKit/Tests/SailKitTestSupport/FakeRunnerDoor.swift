@@ -66,6 +66,10 @@ public final class FakeRunnerDoor: Sendable {
         var losing = false
         var received = 0
         var held: [DispatchSemaphore] = []
+        /// What every `Create` is refused with, as the host refuses one before it starts anything.
+        var refusal: HostRefusal?
+        /// Each `Create` received, by its session.
+        var made: [String: SessionCreate] = [:]
     }
 
     /// A files ticket's workspace, played: its folders by path, each with its entries and version, and
@@ -486,6 +490,17 @@ public final class FakeRunnerDoor: Sendable {
         held.forEach { $0.signal() }
     }
 
+    /// From now on every `Create` is refused with `refusal`, its session not made, as the host
+    /// refuses an agent start before it starts the workspace; nil makes them again.
+    public func refuseCreates(with refusal: HostRefusal?) {
+        creates.withLock { $0.refusal = refusal }
+    }
+
+    /// The `Create` that asked for `session`, as it came.
+    public func create(of session: String) -> SessionCreate? {
+        creates.withLock { $0.made[session] }
+    }
+
     /// How many `Create`s the door has received, held or not.
     public var createsReceived: Int {
         creates.withLock { $0.received }
@@ -537,16 +552,21 @@ public final class FakeRunnerDoor: Sendable {
         }
     }
 
+    /// The harnesses' names as the server's sessions listing gives them.
+    static let displays = ["claude-code": "Claude Code", "codex": "Codex CLI"]
+
     /// The sessions the API lists for its person, newest first: every one it holds, and every one it
     /// ended on its own, in that end's words.
     public var listing: RunnerSessions {
         state.withLock { state in
+            let made = creates.withLock { $0.made }
             let sessions = state.made.enumerated().reversed().compactMap { index, name -> RunnerSession? in
                 let live = state.live.contains(name)
                 guard live || state.ended[name] != nil else { return nil }
+                let agent = made[name].flatMap { $0.agent.isNone ? nil : RunnerAgent(harness: $0.agent.harness, display: Self.displays[$0.agent.harness] ?? $0.agent.harness, mode: $0.agent.mode, login: $0.agent.inside ? "inside" : "stored") }
                 return RunnerSession(
                     name: name, live: live, attached: state.attached[name]?.count ?? 0, writer: "", opener: person ?? "",
-                    command: [], createdAt: Date(timeIntervalSince1970: Double(index)), endedReason: state.ended[name]
+                    command: [], agent: agent, createdAt: Date(timeIntervalSince1970: Double(index)), endedReason: state.ended[name]
                 )
             }
             return RunnerSessions(sessions: sessions)
@@ -702,6 +722,11 @@ public final class FakeRunnerDoor: Sendable {
             }
             switch frame {
             case let .create(create):
+                let refusal = creates.withLock { creates in
+                    creates.made[create.session] = create
+                    return creates.refusal
+                }
+                if let refusal { return answer(.refused(refusal), on: connection) }
                 made(create.session)
                 if creates.withLock({ $0.losing }) { return }
                 opened = create.session

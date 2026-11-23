@@ -44,6 +44,7 @@ public final class SailButton: NSButton {
     public private(set) var busyWord: String?
     private let icon: LineIcon?
     private let iconOnly: Bool
+    private let popUp: Bool
     private var showsShortcut = false
     private var mono: LabelFont?
     private(set) var hovered = false
@@ -52,12 +53,14 @@ public final class SailButton: NSButton {
     private var heldWidth = 0.0
     let spinner = SpinnerRing()
 
-    /// A labelled button, with a leading line icon when `icon` names one.
-    public init(_ title: String, kind: ButtonKind, size: ButtonSize = .regular, icon: LineIcon? = nil, look: Look, target: AnyObject?, action: Selector?) {
+    /// A labelled button, with a leading line icon when `icon` names one; a pop-up of choices
+    /// (`popUp`) shows a chevron after its label.
+    public init(_ title: String, kind: ButtonKind, size: ButtonSize = .regular, icon: LineIcon? = nil, popUp: Bool = false, look: Look, target: AnyObject?, action: Selector?) {
         self.look = look
         self.kind = kind
         self.size = size
         self.icon = icon
+        self.popUp = popUp
         iconOnly = false
         super.init(frame: .zero)
         prepare(title, target: target, action: action)
@@ -69,6 +72,7 @@ public final class SailButton: NSButton {
         self.kind = kind
         self.size = size
         self.icon = icon
+        popUp = false
         iconOnly = true
         super.init(frame: .zero)
         prepare(label, target: target, action: action)
@@ -202,7 +206,7 @@ public final class SailButton: NSButton {
 
     override public var intrinsicContentSize: NSSize {
         guard !iconOnly else { return NSSize(width: size.height, height: size.height) }
-        let hint: Double? = hintText.map { Double(ceil($0.size().width)) }
+        let hint: Double? = hintText.map { Double(ceil($0.size().width)) } ?? (popUp ? ButtonSize.chevron : nil)
         let width = size.width(label: Double(ceil(label.size().width)), mark: busyWord != nil || icon != nil, hint: hint)
         return NSSize(width: max(width, busyWord == nil ? 0 : heldWidth), height: size.height)
     }
@@ -213,7 +217,7 @@ public final class SailButton: NSButton {
     func arrangement() -> (mark: NSRect?, label: NSRect, hint: NSRect?) {
         let box = self.box, labelSize = label.size()
         guard !iconOnly else { return (box.insetBy(dx: (box.width - ButtonSize.icon) / 2, dy: (box.height - ButtonSize.icon) / 2), .zero, nil) }
-        let marked = busyWord != nil || icon != nil, hintSize = hintText?.size()
+        let marked = busyWord != nil || icon != nil, hintSize = hintText?.size() ?? (popUp ? NSSize(width: ButtonSize.chevron, height: ButtonSize.chevron) : nil)
         let mark: Double = marked ? ButtonSize.mark + ButtonSize.markGap : 0
         let hinted: Double = hintSize.map { ButtonSize.hintGap + Double($0.width) } ?? 0
         let total = mark + Double(labelSize.width) + hinted
@@ -242,6 +246,7 @@ public final class SailButton: NSButton {
         Draw.box(box, radius: size.radius, fill: paint.fill, edge: paint.edge)
         if busyWord == nil, let mark, let icon { Draw.icon(icon, in: mark, ink: paint.label) }
         if !iconOnly { label.draw(in: labelRect) }
+        if let hintRect, popUp, busyWord == nil { Draw.icon(.down, in: hintRect, ink: paint.label) }
         if let hintRect, let hintText {
             let points = Look.Step.caption.points, top = Double(box.minY) + (Double(box.height) - TextLine.height(points: points)) / 2
             Draw.line(hintText, x: Double(hintRect.minX), baseline: TextLine.baseline(top: top, points: points))
@@ -322,6 +327,12 @@ public final class SailButton: NSButton {
     override public func mouseExited(with _: NSEvent) {
         hovered = false
         needsDisplay = true
+    }
+
+    /// In a panel floating over the window, which never takes the keys (the New Session panel),
+    /// the first click acts, as the user menu's rows do.
+    override public func acceptsFirstMouse(for _: NSEvent?) -> Bool {
+        window is NSPanel
     }
 
     override public var acceptsFirstResponder: Bool {

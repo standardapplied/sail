@@ -40,20 +40,20 @@ public struct Arrangement: Codable, Equatable, Sendable {
     }
 
     public indirect enum Node: Codable, Equatable, Sendable {
-        case pane(session: String, place: Place)
+        case pane(session: String, place: Place, agent: AgentStart? = nil)
         case split(axis: Axis, ratio: Double, first: Node, second: Node)
 
         /// Its panes' sessions, in order.
         public var sessions: [String] {
             switch self {
-            case let .pane(session, _): [session]
+            case let .pane(session, _, _): [session]
             case let .split(_, _, first, second): first.sessions + second.sessions
             }
         }
 
         var onRunner: Bool {
             switch self {
-            case let .pane(_, place): place.onRunner
+            case let .pane(_, place, _): place.onRunner
             case let .split(_, _, first, _): first.onRunner
             }
         }
@@ -97,7 +97,7 @@ extension Workbench {
         switch layout {
         case let .pane(id):
             let pane = panes[id]
-            return .pane(session: pane?.session ?? "", place: pane?.place ?? .thisMac(folder: ""))
+            return .pane(session: pane?.session ?? "", place: pane?.place ?? .thisMac(folder: ""), agent: pane?.agent)
         case let .split(axis, ratio, first, second):
             return .split(axis: axis, ratio: ratio, first: node(first), second: node(second))
         }

@@ -9,6 +9,12 @@ public final class PopShadowView: NSView {
         didSet { if look != oldValue { needsLayout = true } }
     }
 
+    /// The corners of the rectangle that casts it: a rounded card's, so no square corner of shadow
+    /// shows past the card's.
+    public var radius = 0.0 {
+        didSet { if radius != oldValue { needsLayout = true } }
+    }
+
     public init(look: Look) {
         self.look = look
         super.init(frame: .zero)
@@ -36,7 +42,8 @@ public final class PopShadowView: NSView {
         CATransaction.setDisableActions(true)
         for (shadow, cast) in zip(shadows, cast) {
             cast.frame = layer.bounds
-            cast.shadowPath = CGPath(rect: layer.bounds.insetBy(dx: -shadow.spread, dy: -shadow.spread), transform: nil)
+            let box = layer.bounds.insetBy(dx: -shadow.spread, dy: -shadow.spread), corner = min(radius + shadow.spread, Double(min(box.width, box.height)) / 2)
+            cast.shadowPath = radius > 0 ? CGPath(roundedRect: box, cornerWidth: corner, cornerHeight: corner, transform: nil) : CGPath(rect: box, transform: nil)
             cast.shadowColor = NSColor(Tint(shadow.color.rgb)).cgColor
             cast.shadowOpacity = Float(shadow.color.alpha)
             cast.shadowRadius = shadow.blur / 2

@@ -54,8 +54,17 @@ public final class WorkbenchView: NSView {
     static let keepDelay = 0.3
     /// The arrangement is the person's from here on: restored, so worth keeping.
     private(set) var restored = false
-    /// Workspaces asked to open before the first restore, opened once it has replaced the model.
-    private var pendingWorkspaces: [Place] = []
+    /// Workspaces asked to open before the first restore, as a shell or the agent each starts (with
+    /// who asked for it, on which control plane), opened once it has replaced the model; an agent
+    /// only for that same person there.
+    private var pendingWorkspaces: [(place: Place, agent: AgentStart?, asker: [String]?)] = []
+    /// The control plane signed in to, which with the handle says who asked for a queued start.
+    var controlPlane: @MainActor () -> String = { "" }
+
+    /// Who is signed in, on which control plane; nil, no one.
+    private var asker: [String]? {
+        signedIn().map { [controlPlane(), $0.handle] }
+    }
     /// Runner tabs kept aside while no one is signed in, and whose they are: still kept with the
     /// arrangement, and brought back by that person's sign-in alone.
     private var held: [Arrangement.Tab] = []
@@ -141,8 +150,13 @@ public final class WorkbenchView: NSView {
         let waiting = pendingWorkspaces
         pendingWorkspaces = []
         if model.tabs.isEmpty, waiting.isEmpty, held.isEmpty { openTab() } else { apply() }
-        for case let .workspace(project, name) in waiting {
-            openWorkspace(project: project, name: name)
+        for (place, agent, asker) in waiting {
+            guard case let .workspace(project, name) = place else { continue }
+            if let agent {
+                if asker == self.asker { openAgent(agent, project: project, name: name) }
+            } else {
+                openWorkspace(project: project, name: name)
+            }
         }
     }
 
@@ -488,7 +502,7 @@ public final class WorkbenchView: NSView {
     /// there are none (or they cannot be listed); before the first restore, once it is done.
     func openWorkspace(project: String, name: String) {
         let place = Place.workspace(project: project, name: name)
-        guard restored else { return pendingWorkspaces.append(place) }
+        guard restored else { return pendingWorkspaces.append((place, nil, nil)) }
         guard let reached = signedIn() else { return openTab(in: place) }
         Task { [weak self] in
             let listed = try? await reached.tickets.sessions(in: project, workspace: name)
@@ -512,11 +526,20 @@ public final class WorkbenchView: NSView {
         }
         guard !theirs.isEmpty else { return openTab(in: place) }
         let size = points
-        theirs.forEach { open(model.newTab(session: $0.name, place: place), start: .attach, points: size) }
+        theirs.forEach { open(model.newTab(session: $0.name, place: place, agent: $0.agent?.start), start: .attach, points: size) }
     }
 
     private func openTab(in place: Place) {
         open(model.newTab(session: place.newSessionName, place: place), points: points)
+    }
+
+    /// A new runner tab in workspace `name` of `project` whose session is `agent`: the host composes
+    /// its command and signs it in, and the tab is titled by its harness and workspace. Asked before
+    /// the first restore (the section never shown yet), it opens once that is done.
+    func openAgent(_ agent: AgentStart, project: String, name: String) {
+        let place = Place.workspace(project: project, name: name)
+        guard restored else { return pendingWorkspaces.append((place, agent, asker)) }
+        open(model.newTab(session: place.newSessionName, place: place, agent: agent), points: points)
     }
 
     @objc public func newTab(_: Any?) {
