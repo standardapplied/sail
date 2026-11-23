@@ -672,7 +672,10 @@ import Testing
     }
 
     /// M4: the ticket is inside the end's deadline: a control plane that never answers it leaves the
-    /// end unconfirmed at the deadline, not at the transport's own 60 s.
+    /// end unconfirmed at the deadline, saying so, not at the transport's own 60 s. A source silent
+    /// for an hour proves it with no clock: an end that waited on the ticket would hold the test past
+    /// its one-minute limit. (A wall-clock bound of 5 s here read 5.27 s on a loaded macOS runner,
+    /// where this test began 11 s after it was started: the bound measured the runner, not the end.)
     @Test(.timeLimit(.minutes(1))) func aTicketThatNeverComesIsInsideTheEndsDeadline() async {
         struct Silent: TicketSource {
             func ticket(for _: TicketRequest) async throws(SailError) -> TerminalTicket {
@@ -680,9 +683,7 @@ import Testing
                 throw .unreachable("no answer")
             }
         }
-        let asked = ContinuousClock.now
         #expect(await Door.runner(Silent()).end("app-a", within: .seconds(1)) == .unconfirmed(["The runner did not answer within 1 s."]))
-        #expect(ContinuousClock.now - asked < .seconds(5))
     }
 
     @Test func everyPageIsReadInOrder() async throws {
