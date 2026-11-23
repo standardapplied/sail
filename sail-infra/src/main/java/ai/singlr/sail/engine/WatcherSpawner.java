@@ -9,7 +9,6 @@ import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.engine.SystemdServiceInstaller.Mode;
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -142,7 +141,7 @@ public final class WatcherSpawner {
   public static long spawnProcess(List<String> command, Path logPath) throws IOException {
     var process =
         new ProcessBuilder(command)
-            .redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")))
+            .redirectInput(ShellExecutor.NO_INPUT)
             .redirectOutput(ProcessBuilder.Redirect.to(logPath.toFile()))
             .redirectErrorStream(true)
             .start();

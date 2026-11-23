@@ -70,11 +70,13 @@ public final class ClosesWhatItOpens implements BeforeAllCallback, AfterAllCallb
 
   /**
    * What is open before a stretch of work that {@link #assertClosed} then checks, once the JDK has
-   * opened {@link #THE_JDKS what it keeps for the fork's life}.
+   * opened {@link #THE_JDKS what it keeps for the fork's life} where that is checked.
    */
   public static Map<String, Object> baseline() throws IOException, ClassNotFoundException {
-    for (var name : THE_JDKS) {
-      Class.forName(name);
+    if (Files.isDirectory(PROC_FD)) {
+      for (var name : THE_JDKS) {
+        Class.forName(name);
+      }
     }
     return OpenDescriptors.list();
   }

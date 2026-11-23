@@ -9,12 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -297,5 +299,30 @@ class SlackClientTest {
       assertEquals(1, server.connections(), "both posts came on the one client's connection");
     }
     ClosesWhatItOpens.assertClosed("a Slack client", before);
+  }
+
+  /**
+   * Closing a client waits on no Slack answer that never finishes: a post still under way is
+   * dropped, so it never holds the shutdown of the subscription that owns it.
+   */
+  @Test
+  void closingAClientDropsAPostWhoseAnswerNeverEnds() throws Exception {
+    try (var server = CountingHttpServer.trickling()) {
+      var poster = SlackClient.defaultHttp("xoxb-test", server.uri("/api/chat.postMessage"));
+      var posting =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    try {
+                      poster.send("{}");
+                    } catch (Exception dropped) {
+                      var unused = dropped;
+                    }
+                  });
+      assertTrue(server.asked(Duration.ofSeconds(10)), "Slack was asked");
+
+      assertTimeoutPreemptively(Duration.ofSeconds(5), poster::close, "closing waits on it");
+      assertTrue(posting.join(Duration.ofSeconds(10)), "the post under way was dropped");
+    }
   }
 }

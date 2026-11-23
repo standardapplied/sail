@@ -97,7 +97,10 @@ public final class SlackClient implements SlackPoster {
     return null;
   }
 
-  /** Closes the client every post shares, once the posts still under way are answered. */
+  /**
+   * Closes the client every post shares, dropping a post still under way: Slack may trickle its
+   * answer past any timeout, and a post is best effort.
+   */
   @Override
   public void close() {
     http.close();
@@ -179,6 +182,7 @@ public final class SlackClient implements SlackPoster {
 
       @Override
       public void close() {
+        client.shutdownNow();
         client.close();
       }
     };

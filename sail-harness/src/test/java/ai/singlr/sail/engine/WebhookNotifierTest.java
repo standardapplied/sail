@@ -9,12 +9,15 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -212,5 +215,33 @@ class WebhookNotifierTest {
       assertEquals(1, server.connections(), "both posts came on the one client's connection");
     }
     ClosesWhatItOpens.assertClosed("a webhook notifier", before);
+  }
+
+  /**
+   * Closing a notifier waits on no endpoint that answers and then never finishes: a notification
+   * still under way is dropped, so it never holds the shutdown of the subscription that owns it.
+   */
+  @Test
+  void closingANotifierDropsANotificationWhoseAnswerNeverEnds() throws Exception {
+    try (var server = CountingHttpServer.trickling()) {
+      var notifier = new WebhookNotifier(server.uri("/hook").toString());
+      var posting =
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    try {
+                      notifier.post(
+                          HttpRequest.newBuilder(server.uri("/hook"))
+                              .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                              .build());
+                    } catch (IOException | InterruptedException dropped) {
+                      var unused = dropped;
+                    }
+                  });
+      assertTrue(server.asked(Duration.ofSeconds(10)), "the endpoint was asked");
+
+      assertTimeoutPreemptively(Duration.ofSeconds(5), notifier::close, "closing waits on it");
+      assertTrue(posting.join(Duration.ofSeconds(10)), "the notification under way was dropped");
+    }
   }
 }

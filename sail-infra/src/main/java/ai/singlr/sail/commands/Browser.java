@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.commands;
 
-import java.io.File;
+import ai.singlr.sail.engine.ShellExecutor;
 import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
@@ -35,7 +35,7 @@ final class Browser {
    */
   static Process start(List<String> command) throws IOException {
     return new ProcessBuilder(command)
-        .redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")))
+        .redirectInput(ShellExecutor.NO_INPUT)
         .redirectOutput(ProcessBuilder.Redirect.DISCARD)
         .redirectError(ProcessBuilder.Redirect.DISCARD)
         .start();

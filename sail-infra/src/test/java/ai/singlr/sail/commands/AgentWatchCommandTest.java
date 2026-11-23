@@ -17,7 +17,9 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.QuietNarrator;
 import ai.singlr.sail.api.RunWatch;
+import ai.singlr.sail.config.Notifications;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.engine.ClosesWhatItOpens;
 import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -332,6 +334,38 @@ class AgentWatchCommandTest {
     assertEquals(1, stops.size(), "an agent that died at launch is told ended, with how");
     assertEquals(3, stops.getFirst().data().get(Event.WellKnownData.EXIT_CODE));
     assertEquals(RUN_ID, stops.getFirst().data().get(Event.WellKnownData.RUN_ID));
+  }
+
+  /**
+   * A watch closes the notifier and the publisher it holds once it ends, however it ends: one whose
+   * run never ran leaves neither client open.
+   */
+  @Test
+  void aWatchClosesItsNotifierAndPublisherHoweverItEnds() throws Exception {
+    var never =
+        new ScriptedShellExecutor()
+            .onOk("printf gone", "gone")
+            .onOk("--property=ActiveState", "ActiveState=inactive\nExecMainStatus=0\n");
+    var command = watching();
+    System.setProperty("SAIL_SERVER", "http://127.0.0.1:9");
+    System.setProperty("SAIL_TOKEN", "tok-watch");
+    try {
+      var before = ClosesWhatItOpens.baseline();
+
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              command.supervise(
+                  never,
+                  new Notifications("https://ntfy.sh/acme", List.of("guardrail_triggered")),
+                  command.guardrails(),
+                  Instant.parse(STARTED_AT)));
+
+      ClosesWhatItOpens.assertClosed("a watch whose run never ran", before);
+    } finally {
+      System.clearProperty("SAIL_SERVER");
+      System.clearProperty("SAIL_TOKEN");
+    }
   }
 
   @Test

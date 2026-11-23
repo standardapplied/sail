@@ -162,7 +162,7 @@ public final class AgentWatchCommand implements Runnable {
     return Remedy.sail("agent report", RunStore.RunRow.addressed(name, runId, specId));
   }
 
-  private Guardrails guardrails() {
+  Guardrails guardrails() {
     return Guardrails.of(maxDuration, maxIdle, action);
   }
 
@@ -194,8 +194,17 @@ public final class AgentWatchCommand implements Runnable {
     var started = parseStartedAt(startedAt);
     var shell = new ShellExecutor(dryRun);
     requireRunning(shell);
+    supervise(shell, notifications(), guardrails, started);
+  }
 
-    var notifications = notifications();
+  /**
+   * Watches the run on {@code shell} under {@code guardrails} from {@code started}, with a notifier
+   * for {@code notifications} and a publisher to this box's API, both held for the watch's life and
+   * closed with it however it ends.
+   */
+  void supervise(
+      ShellExec shell, Notifications notifications, Guardrails guardrails, Instant started)
+      throws Exception {
     try (var notifier = buildNotifier(notifications);
         var events = localPublisher()) {
       RunWatch.StopPublisher publisher = events == null ? null : events::publish;

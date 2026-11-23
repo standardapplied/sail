@@ -114,6 +114,7 @@ public final class SyncOperations implements AutoCloseable {
   private final Consumer<Remedy> notice;
   private final ShellExec shell;
   private final AuthorizedKeysSync gatewayKeys;
+  private final Object publishing = new Object();
   private SailEventPublisher publisher;
 
   /** A round whose notices print as {@link #PLAIN_NOTICES} prints them. */
@@ -1033,12 +1034,9 @@ public final class SyncOperations implements AutoCloseable {
     }
   }
 
-  private synchronized void publishQuietly(Event event) {
+  private void publishQuietly(Event event) {
     try {
-      if (publisher == null) {
-        publisher = SailEventPublisher.localDefault();
-      }
-      publisher.publish(event);
+      publisher().publish(event);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     } catch (Exception ignored) {
@@ -1049,12 +1047,30 @@ public final class SyncOperations implements AutoCloseable {
     }
   }
 
-  /** Closes the publisher a round opened to the local API, if one did. */
+  /** The one publisher to the local API every round shares, opened by the first to publish. */
+  private SailEventPublisher publisher() throws IOException {
+    synchronized (publishing) {
+      if (publisher == null) {
+        publisher = SailEventPublisher.localDefault();
+      }
+      return publisher;
+    }
+  }
+
+  /**
+   * Closes the publisher a round opened to the local API, if one did. It takes only the publisher's
+   * own lock, never this object's, which a round holds while it runs; a publish still under way is
+   * answered first.
+   */
   @Override
-  public synchronized void close() {
-    if (publisher != null) {
-      publisher.close();
+  public void close() {
+    SailEventPublisher open;
+    synchronized (publishing) {
+      open = publisher;
       publisher = null;
+    }
+    if (open != null) {
+      open.close();
     }
   }
 

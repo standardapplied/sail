@@ -16,6 +16,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.engine.ClosesWhatItOpens;
+import ai.singlr.sail.engine.OpenDescriptors;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -45,6 +46,7 @@ import java.time.Instant;
 import java.time.InstantSource;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -548,6 +550,7 @@ class AgentLogStreamerTest {
     private final java.util.Map<String, Object> attributes = new java.util.HashMap<>();
     private int status = -1;
     private boolean hungUp;
+    private OutputStream body = responseBody;
 
     private CapturingExchange(String path) {
       this.uri = URI.create(path);
@@ -568,6 +571,12 @@ class AgentLogStreamerTest {
     /** An exchange whose client has gone before its headers are sent. */
     private CapturingExchange hungUp() {
       hungUp = true;
+      return this;
+    }
+
+    /** An exchange whose body is written to {@code into}. */
+    private CapturingExchange writingTo(OutputStream into) {
+      body = into;
       return this;
     }
 
@@ -605,7 +614,7 @@ class AgentLogStreamerTest {
 
     @Override
     public OutputStream getResponseBody() {
-      return responseBody;
+      return body;
     }
 
     @Override
@@ -676,6 +685,43 @@ class AgentLogStreamerTest {
 
     assertEquals(200, exchange.status);
     assertTrue(exchange.body().contains("event: error"), exchange.body());
+  }
+
+  /**
+   * A tail being streamed holds one pipe of ours, the output that is read: its input and its merged
+   * error output, which the JDK still opens a pipe for, are closed before the stream begins.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aTailBeingStreamedHoldsOnlyTheOutputThatIsRead() throws Exception {
+    var streamer = streamer(id -> Optional.empty(), "node-a");
+    var running = ProcessHandle.current().children().toList();
+    var before = ClosesWhatItOpens.baseline();
+    var held = new AtomicReference<Map<String, Object>>();
+    var exchange =
+        new CapturingExchange("/v1/runs/r1/stream")
+            .writingTo(
+                new OutputStream() {
+                  @Override
+                  public void write(int b) throws IOException {
+                    write(new byte[] {(byte) b}, 0, 1);
+                  }
+
+                  @Override
+                  public void write(byte[] bytes, int offset, int length) throws IOException {
+                    held.compareAndSet(
+                        null, OpenDescriptors.opened(before, OpenDescriptors.list()));
+                    throw new IOException("the client hung up");
+                  }
+                });
+
+    streamer.streamLog(
+        exchange, "acme", new String[] {"tail", "-f", "/dev/null"}, 0, NEVER_ENDS, ENDED);
+    for (var tail : ProcessHandle.current().children().filter(c -> !running.contains(c)).toList()) {
+      tail.onExit().get(10, TimeUnit.SECONDS);
+    }
+
+    assertEquals(1, held.get().size(), "only the tail's output is held: " + held.get());
   }
 
   /** A client gone before the stream's headers are sent leaves the tail with no pipe of ours. */

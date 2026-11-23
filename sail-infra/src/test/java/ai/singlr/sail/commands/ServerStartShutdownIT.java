@@ -58,7 +58,7 @@ class ServerStartShutdownIT {
 
     var transcript = new StringBuilder();
     try {
-      var listening = awaitLine(lines, transcript, "Sail server listening", 60);
+      var listening = awaitLine(lines, reader, transcript, "Sail server listening", 60);
       assertTrue(listening, "server should start and announce it is listening:\n" + transcript);
 
       new ProcessBuilder("kill", "-TERM", String.valueOf(process.pid()))
@@ -66,7 +66,7 @@ class ServerStartShutdownIT {
           .start()
           .waitFor();
 
-      var cleaned = awaitLine(lines, transcript, "[shutdown] closed", 30);
+      var cleaned = awaitLine(lines, reader, transcript, "[shutdown] closed", 30);
       var exited = process.waitFor(30, TimeUnit.SECONDS);
       assertTrue(exited, "server must exit after SIGTERM:\n" + transcript);
       assertTrue(
@@ -105,15 +105,23 @@ class ServerStartShutdownIT {
     return process;
   }
 
+  /**
+   * Whether the server says {@code needle} within {@code timeoutSeconds}; false at once when its
+   * output has ended ({@code reader}, its drain, has ended and left no line unread).
+   */
   private static boolean awaitLine(
       LinkedBlockingQueue<String> lines,
+      Thread reader,
       StringBuilder transcript,
       String needle,
       int timeoutSeconds)
       throws InterruptedException {
-    for (var line = lines.poll(timeoutSeconds, TimeUnit.SECONDS);
-        line != null;
-        line = lines.poll(timeoutSeconds, TimeUnit.SECONDS)) {
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+    while (System.nanoTime() < deadline && (reader.isAlive() || !lines.isEmpty())) {
+      var line = lines.poll(100, TimeUnit.MILLISECONDS);
+      if (line == null) {
+        continue;
+      }
       transcript.append(line).append('\n');
       if (line.contains(needle)) {
         return true;

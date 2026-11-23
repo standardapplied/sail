@@ -106,8 +106,8 @@ public final class WebhookReactor implements EventSubscriber {
   }
 
   /**
-   * Closes every sender cached, so no client outlives the subscription; a notification already
-   * under way is answered first, within its own timeout.
+   * Closes every sender cached, so no client outlives the subscription; a notification still under
+   * way is dropped, since this must not block.
    */
   @Override
   public void closed() {

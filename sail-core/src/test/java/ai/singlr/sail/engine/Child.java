@@ -6,7 +6,6 @@
 package ai.singlr.sail.engine;
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -28,8 +27,7 @@ public final class Child {
   public static final Duration PATIENCE = Duration.ofSeconds(60);
 
   /** A child's stdin with nothing to read: no pipe for anyone to close. */
-  public static final ProcessBuilder.Redirect NO_INPUT =
-      ProcessBuilder.Redirect.from(new File("/dev/null"));
+  public static final ProcessBuilder.Redirect NO_INPUT = ShellExecutor.NO_INPUT;
 
   /** How a child ended: its exit status and what it wrote, stderr empty when merged. */
   public record Ended(int exit, String stdout, String stderr) {}

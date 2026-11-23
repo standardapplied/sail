@@ -78,9 +78,13 @@ public final class WebhookNotifier implements AutoCloseable {
     return client.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
   }
 
-  /** Closes the shared client, once the notifications still under way are answered. */
+  /**
+   * Closes the shared client, dropping a notification still under way: an endpoint may trickle its
+   * answer past any timeout, and a notification is best effort.
+   */
   @Override
   public void close() {
+    client.shutdownNow();
     client.close();
   }
 

@@ -7,8 +7,8 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ShellExecutor;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
@@ -100,7 +100,7 @@ public final class SshTunnel implements AutoCloseable {
    */
   static Process launch(List<String> command) throws IOException {
     return new ProcessBuilder(command)
-        .redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")))
+        .redirectInput(ShellExecutor.NO_INPUT)
         .redirectOutput(ProcessBuilder.Redirect.DISCARD)
         .start();
   }
