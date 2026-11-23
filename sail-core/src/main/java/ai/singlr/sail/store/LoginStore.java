@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.PrivateDirectory;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.NameValidator;
@@ -18,6 +19,7 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
@@ -474,6 +476,7 @@ public final class LoginStore {
           Files.createTempFile(dir, TEMP_PREFIX, "", PosixFilePermissions.asFileAttribute(FILE));
       try {
         Files.writeString(temp, content, StandardCharsets.UTF_8);
+        Files.setLastModifiedTime(temp, FileTime.from(DateTimeUtils.now()));
         Files.move(
             temp,
             dir.resolve(name),

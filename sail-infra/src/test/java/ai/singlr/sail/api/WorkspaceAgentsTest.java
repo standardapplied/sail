@@ -246,16 +246,20 @@ class WorkspaceAgentsTest {
                 "label",
                 "API key",
                 "how",
-                "Create an API key in the Claude Console"),
+                List.of(Map.of("text", "Create an API key in the Claude Console"))),
             Map.of(
                 "kind",
                 "token",
                 "label",
                 "long-lived token",
                 "how",
-                "Run claude setup-token on a machine where Claude Code is signed in")),
+                List.of(
+                    Map.of("text", "Run "),
+                    Map.of("run", "elsewhere", "verb", "claude", "args", List.of("setup-token")),
+                    Map.of("text", " on a machine where Claude Code is signed in")))),
         claude.get("kinds"),
-        "the kinds in the order a person is shown them, an API key first");
+        "the kinds in the order a person is shown them, an API key first, each how as words and"
+            + " the commands among them");
     var codex = answer.offer("codex");
     assertEquals(
         refusal(

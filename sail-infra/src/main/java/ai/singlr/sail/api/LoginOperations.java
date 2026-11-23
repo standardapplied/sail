@@ -10,6 +10,7 @@ import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.harness.Harness;
@@ -86,7 +87,7 @@ public final class LoginOperations {
       announce(STORED, person, row);
       return new LoginResponse(view(person, row), unreached(person));
     }
-    var named = LoginStore.requireName(name);
+    var named = named(name);
     var known = Harnesses.of(harness);
     var still = liveOn(person, known, named);
     var replacing =
@@ -226,6 +227,24 @@ public final class LoginOperations {
   private static void refuseUnless(Decision decision) {
     if (decision instanceof Decision.Refused(var refusal)) {
       throw Refusals.exception(refusal);
+    }
+  }
+
+  /**
+   * {@code name} once it is a login's name; refused naming the field, so a client says the rule
+   * under the name and not under the value.
+   */
+  private static String named(String name) {
+    try {
+      return LoginStore.requireName(name);
+    } catch (IllegalArgumentException refused) {
+      throw ApiException.of(
+          new Result.Failure<>(
+              ErrorCode.INVALID_REQUEST,
+              refused.getMessage(),
+              Remedy.NONE,
+              List.of(FieldError.of("name", refused.getMessage())),
+              refused));
     }
   }
 

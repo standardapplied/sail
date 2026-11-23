@@ -205,6 +205,7 @@ extension Driver {
     func performWorkspaces(_ step: Step) async -> (Bool, String)? {
         if let files = await performFiles(step) { return files }
         if let started = await performNewSession(step) { return started }
+        if let stored = await performLoginSheet(step) { return stored }
         let pane = shell.workspaces
         if let pair = step.golden {
             guard pair.count == 2 || pair.count == 3, let seconds = Int(pair.count == 3 ? pair[2] : "0") else {
@@ -557,10 +558,11 @@ extension Driver {
             let found = await waitUntil(step.seconds ?? 5) { panel.isOpen && chosen() == name }
             return (found, "chosen: \(chosen() ?? "none"); " + said())
         }
-        if let primary = step.newSessionPrimary, primary.count == 2 {
+        if let primary = step.newSessionPrimary, primary.count == 2 || primary.count == 3 {
             let button = { panel.view.primary }
-            let found = await waitUntil(step.seconds ?? 5) { button()?.title == primary[0] && button()?.isEnabled == (primary[1] == "on") }
-            return (found, "the primary: \(button().map { "\($0.title), \($0.isEnabled ? "on" : "off")" } ?? "none")")
+            let keys = primary.count == 3
+            let found = await waitUntil(step.seconds ?? 5) { button()?.title == primary[0] && button()?.isEnabled == (primary[1] == "on") && button()?.holdsKeys == keys }
+            return (found, "the primary: \(button().map { "\($0.title), \($0.isEnabled ? "on" : "off")\($0.holdsKeys ? ", holding the keys" : "")" } ?? "none")")
         }
         if let title = step.newSessionClick {
             let view = panel.view
@@ -670,6 +672,54 @@ extension Driver {
             return (true, "the section is laid out \(rightToLeft ? "right to left" : "left to right")")
         }
         return nil
+    }
+
+    /// Store a Login's steps: a key pasted as a person pastes it, the sheet read, and the clipboard.
+    /// A step that acts on the fake door waits for the app to have heard by the sheet's own state.
+    private func performLoginSheet(_ step: Step) async -> (Bool, String)? {
+        let panel = shell.workspaces.newSession
+        let sheet = { self.shell.window.attachedSheet as? LoginSheet }
+        if let value = step.pasteLogin {
+            guard let up = sheet(), let paste = Keys.named("v", modifiers: ["command"]) else { return (false, "no Store a Login sheet to paste into") }
+            pastedLogins.insert(value)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(value, forType: .string)
+            send(paste)
+            let pasted = await waitUntil(step.seconds ?? 5) { up.store.isEnabled }
+            return (pasted, "pasted \(value.count) characters; the sheet: " + Self.facts(of: up, over: panel).joined(separator: ", "))
+        }
+        if let words = step.loginSheetSays {
+            let found = await waitUntil(step.seconds ?? 5) { sheet().map { Self.inOrder(words, in: Self.words(in: $0.contentView)) } == true }
+            return (found, sheet().map { "the sheet says: " + Self.words(in: $0.contentView).joined(separator: " | ") } ?? "no sheet is up")
+        }
+        if let wanted = step.loginSheetIs {
+            let facts = { sheet().map { Self.facts(of: $0, over: panel) } ?? ["closed", panel.isOpen ? "the panel open" : "the panel closed"] }
+            let found = await waitUntil(step.seconds ?? 5) { Set(wanted).isSubset(of: facts()) }
+            return (found, "the sheet: " + facts().joined(separator: ", "))
+        }
+        if let held = step.pasteboardHolds {
+            let now = { NSPasteboard.general.string(forType: .string) ?? "" }
+            let found = await waitUntil(step.seconds ?? 5) { now() == held }
+            let said = now().isEmpty ? "nothing" : pastedLogins.contains(now()) ? "a key the drive pasted" : "'\(now())'"
+            return (found, "the pasteboard holds \(said)")
+        }
+        if let text = step.setPasteboard {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            return (true, "")
+        }
+        return nil
+    }
+
+    /// The sheet as the drive reads it, a fact each; never the field's text.
+    private static func facts(of sheet: LoginSheet, over panel: NewSessionPanel) -> [String] {
+        let keys = sheet.firstResponder
+        let inField = keys === sheet.field.field || (keys as? NSText)?.delegate === sheet.field.field
+        return [
+            sheet.store.isEnabled ? "Store on" : "Store off", sheet.field.field.stringValue.isEmpty ? "the field empty" : "the field filled",
+            panel.isOpen ? "the panel open behind" : "the panel closed", sheet.name.map { "the name \($0.field.stringValue)" } ?? "no name asked",
+        ] + (sheet.model.stage == .storing ? ["Storing"] : []) + (sheet.field.field is NSSecureTextField ? ["dots only"] : [])
+            + (inField ? ["the keys in the field"] : []) + (sheet.field.error.map { ["refused: \($0)"] } ?? []) + (sheet.name?.error.map { ["the name refused: \($0)"] } ?? [])
     }
 
     /// Where a screen shot shows `popover`'s shadow cut: at the middle of each side of its window, a

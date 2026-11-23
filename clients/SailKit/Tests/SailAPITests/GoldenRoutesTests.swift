@@ -56,12 +56,24 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "workspace-agents-dock-not-installed": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
     "workspace-agents-pier-owner-gone": { _ = try await $0.send(.agents(workspace: "pier", project: "harbor")) },
     "refusal-forbidden-not-assignee-agents": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
+    "workspace-agents-dock-no-default": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
+    "logins": { _ = try await $0.send(.logins) },
+    "logins-no-default": { _ = try await $0.send(.logins) },
+    "login-stored": { _ = try await $0.send(.storeLogin(goldenKey, kind: "api-key", harness: "claude-code", name: "default")) },
+    "refusal-invalid-request-login-empty": { _ = try await $0.send(.storeLogin("   ", kind: "api-key", harness: "claude-code", name: "default")) },
+    "refusal-invalid-request-login-lines": { _ = try await $0.send(.storeLogin(goldenKey + "\n" + goldenKey, kind: "api-key", harness: "claude-code", name: "default")) },
+    "refusal-invalid-request-login-long": { _ = try await $0.send(.storeLogin(String(repeating: "k", count: 16 * 1024 + 1), kind: "api-key", harness: "claude-code", name: "default")) },
+    "refusal-invalid-request-login-characters": { _ = try await $0.send(.storeLogin("sk-ant-api03 golden fake key", kind: "api-key", harness: "claude-code", name: "default")) },
+    "refusal-invalid-request-login-name": { _ = try await $0.send(.storeLogin(goldenKey, kind: "api-key", harness: "claude-code", name: "Work")) },
     "attention": { _ = try await $0.send(.attention(conversation: "harbor-docks")) },
     "changes": { _ = try await $0.send(.changes(since: "golden.0.0")) },
     "board-specs": { _ = try await $0.send(.specs(SpecFilter(project: "harbor"))) },
     "board-rooms": { _ = try await $0.send(.rooms(project: "harbor")) },
     "refusal-resync-required": { _ = try await $0.send(.changes(since: "999999999")) },
 ]
+
+/// The obvious fake the server's goldens store as a login's value.
+let goldenKey = "sk-ant-api03-golden-fake-key"
 
 let question = MessagePost(body: "Which berth takes the ferry — north or south? ⚓", asksQuestion: true)
 let reply = MessagePost(body: "South: it has the deeper draft. 🚢", replyTo: "00000000-0000-7000-8000-000000000001")

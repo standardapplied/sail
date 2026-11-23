@@ -284,7 +284,17 @@ class LoginRoutesTest {
         "A login's value is printable ASCII with no space, quote, backslash, $ or backtick.",
         ((Map<?, ?>) spaced.map().get("error")).get("message"));
     assertFalse(spaced.body().contains("TOKEN_value"));
+    assertEquals(List.of(), ((Map<?, ?>) spaced.map().get("error")).get("field_errors"));
     assertEquals(422, badName.status());
+    var nameRule =
+        "A login's name is 1 to 32 lowercase letters, digits and hyphens, starting with a letter or"
+            + " digit, such as work or personal.";
+    var refusedName = (Map<?, ?>) badName.map().get("error");
+    assertEquals(nameRule, refusedName.get("message"));
+    assertEquals(
+        List.of(Map.of("field", "name", "message", nameRule)),
+        refusedName.get("field_errors"),
+        "a name breaking its rule is refused naming the field, so a client says it under the name");
     assertEquals(422, badKind.status());
     assertEquals(
         "Claude Code takes no login of kind 'session'; it takes token, api-key.",

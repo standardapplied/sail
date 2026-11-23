@@ -163,9 +163,11 @@ class HarnessContractTest {
       assertTrue(kind.variable().matches("[A-Z][A-Z0-9_]*"), kind.variable());
       assertFalse(kind.howToMake().isEmpty(), kind.kind());
       assertTrue(
-          kind.howToMake().parts().stream().allMatch(Remedy.Words.class::isInstance),
-          "a login is made where the person's harness is signed in, not on the box, so no door"
-              + " renders its making as a command of the box's account (sudo): "
+          kind.howToMake().commands().stream()
+              .allMatch(command -> command.runs() == Remedy.Runs.ELSEWHERE),
+          "a login is made where the person's harness is signed in, not on the box, so a command"
+              + " of its making runs elsewhere and no door renders it as a command of the box's"
+              + " account (sudo): "
               + kind.howToMake());
       assertEquals(kind, harness.loginKind(kind.kind()));
     }
