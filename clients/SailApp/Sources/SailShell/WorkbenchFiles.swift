@@ -213,8 +213,11 @@ extension WorkbenchView {
         model.selectedTab.flatMap { tabViews[$0.id]?.files }.flatMap { $0.isHidden ? nil : $0 }
     }
 
+    /// The row whose path under the root is `name`, else the first row named so: a name moved out
+    /// of a folder is found where it is now, not where its folder's listing still has it.
     private func filesPath(named name: String) -> FileName? {
-        shownFiles?.tree.rows.first { $0.name == name && $0.kind != .note }?.path
+        let rows = shownFiles?.tree.rows.filter { $0.kind != .note } ?? [], exact = FileName(FileTree.root.shown + "/" + name)
+        return rows.first { $0.path == exact }?.path ?? rows.first { $0.name == name }?.path
     }
 
     /// Row `name`'s action `title`, run as its menu item runs it; false with no such row or action,
