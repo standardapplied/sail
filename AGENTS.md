@@ -135,6 +135,8 @@ tests bite, and the deletion count in the body.
   size, `preferredMaxLayoutWidth`, a label's text or font, a constraint's `constant` or `isActive`.
   AppKit then asks for another pass from inside one and ends the app (#502). A view whose height
   follows its width alone may invalidate its size when its width changes.
+- A precondition a test then relies on (an index, a force, a returned view) is `try #require`,
+  never `#expect`, which goes on; `TestRulesTests` holds the app's and SailKit's tests to it.
 - A Mac app suite whose tests wait on the main actor beside long sweeps runs one at a time
   (`.serialized`, its reason beside it); the proof is a parallel repeat on the efficiency cores.
 - Coverage: `ai.singlr.sail.api.*` is held to 100% line and method coverage; new classes
