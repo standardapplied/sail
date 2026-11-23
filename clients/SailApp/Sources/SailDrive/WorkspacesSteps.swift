@@ -718,6 +718,20 @@ extension Driver {
         return front < back
     }
 
+    /// Every window the window server shows in front of `sheet` and over it, by its owner and name: a
+    /// suggestion such as Passwords' AutoFill, whoever draws it. None of the app's own is in front.
+    private static func inFrontOf(_ sheet: NSWindow) -> [String] {
+        let listed = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        guard let at = listed.firstIndex(where: { $0[kCGWindowNumber as String] as? Int == sheet.windowNumber }), let screen = sheet.screen else { return [] }
+        let frame = sheet.frame, top = Double(screen.frame.maxY)
+        let shown = CGRect(x: Double(frame.minX), y: top - Double(frame.maxY), width: Double(frame.width), height: Double(frame.height))
+        return listed[..<at].compactMap { window in
+            guard let bounds = (window[kCGWindowBounds as String] as? NSDictionary).flatMap({ CGRect(dictionaryRepresentation: $0 as CFDictionary) }),
+                  bounds.intersects(shown), (window[kCGWindowAlpha as String] as? Double ?? 1) > 0 else { return nil }
+            return "\(window[kCGWindowOwnerName as String] as? String ?? "?") \(window[kCGWindowName as String] as? String ?? "")"
+        }
+    }
+
     /// The sheet as the drive reads it, a fact each; never the field's text.
     private static func facts(of sheet: LoginSheet, over panel: NewSessionPanel) -> [String] {
         let keys = sheet.firstResponder, field = sheet.field.field
@@ -730,6 +744,7 @@ extension Driver {
         if let error = sheet.field.error { facts.append("refused: \(error)") } else if let help = sheet.field.help { facts.append("help: \(help)") }
         if let error = sheet.name?.error { facts.append("the name refused: \(error)") }
         if panel.isOpen, Self.inFront(sheet.windowNumber, of: panel.popover.panel.windowNumber) { facts.append("over the panel") }
+        if Self.inFrontOf(sheet).isEmpty { facts.append("no suggestion window is showing") }
         return facts
     }
 

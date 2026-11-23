@@ -19,6 +19,9 @@ package final class LoginSheet: NSPanel, NSTextFieldDelegate {
     static let width = 420.0, inset = 12.0
     static let padding = (top: 20.0, sides: 22.0, bottom: 14.0), gap = 12.0, helpGap = 8.0, footer = (vertical: 14.0, sides: 16.0), buttonGap = 8.0
     static let nameWidth = 180.0
+    /// The content type that offers no suggestion: neither field is a login form's, so neither the
+    /// key nor the name is offered Passwords' AutoFill.
+    static let noSuggestion = NSTextContentType(rawValue: "")
 
     var look: Look {
         didSet {
@@ -85,6 +88,10 @@ package final class LoginSheet: NSPanel, NSTextFieldDelegate {
         store.setAccessibilityLabel(model.storeName)
         field.field.delegate = self
         field.field.setAccessibilityLabel(model.fieldName)
+        for each in [field.field] + (name.map { [$0.field] } ?? []) {
+            each.contentType = Self.noSuggestion
+            each.isAutomaticTextCompletionEnabled = false
+        }
         if let name {
             name.field.stringValue = model.name
             name.field.font = mono.font(Look.Step.callout.points) as NSFont

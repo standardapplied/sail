@@ -125,7 +125,9 @@ package final class NewSessionPanel: NSObject {
             guard let self, loginSheet === sheet else { return }
             loginSheet = nil
             popover.stays = false
+            redraw()
         }
+        redraw()
         window.beginSheet(sheet)
     }
 
@@ -159,7 +161,7 @@ package final class NewSessionPanel: NSObject {
 
     private func draw(width: Double) {
         guard let content else { return }
-        view.show(content, workspace: workspace, stored: stored, width: width)
+        view.show(content, workspace: workspace, stored: stored, veiled: loginSheet != nil, width: width)
     }
 
     /// Drawn again where it is, its top kept under its row (its foot over it) as its height changes.
@@ -290,7 +292,7 @@ final class NewSessionKeys: NSView {
 /// The panel's box, on the popover's surface with a strong hairline edge and 8 pt corners: its
 /// title, the stopped workspace's line, the rows with the chosen one's detail under it, a login
 /// just stored said in one line, and the foot with the keys and Start; or, where nothing starts for
-/// the person, why, and one button. Built whole by ``show(_:workspace:stored:width:)``, every frame
+/// the person, why, and one button. Built whole by ``show(_:workspace:stored:veiled:width:)``, every frame
 /// set there, so no layout pass changes what it shows; mirrored right to left.
 @MainActor
 package final class NewSessionView: NSView {
@@ -327,6 +329,10 @@ package final class NewSessionView: NSView {
     /// The chosen harness's mode pop-up, nil for a harness of one mode or none chosen.
     package private(set) var modes: SailButton?
     package private(set) var storeLogin: LinkButton?
+    /// Under its sheet's veil, its primary elsewhere: the sheet's.
+    package private(set) var veiled = false
+    /// The veil drawn over it while its sheet asks.
+    private var veil: NSView?
     /// The hairlines across it, the chosen row's bar, the stopped line's square and the stored
     /// line's, as last laid out.
     private var hairlines: [Double] = []
@@ -363,8 +369,10 @@ package final class NewSessionView: NSView {
     }
 
     /// Builds it for `content` in workspace `workspace`, `width` wide, saying `stored` over the foot
-    /// once a login was stored.
-    func show(_ content: Content, workspace: String, stored: String?, width: Double) {
+    /// once a login was stored; `veiled` while its sheet asks: its Start outlined, as a row's Open is
+    /// under the panel, the sheet's Store the one primary on screen, and the sheet's veil over it.
+    func show(_ content: Content, workspace: String, stored: String?, veiled: Bool, width: Double) {
+        self.veiled = veiled
         subviews.forEach { $0.removeFromSuperview() }
         rows = []
         primary = nil
@@ -396,7 +404,7 @@ package final class NewSessionView: NSView {
             if let stored { storedSquare = quietLine(stored, y: &y, width: width) }
             hairlines.append(y)
             let (title, enabled) = NewSessionWords.primary(panel.readiness)
-            let start = SailButton(title, kind: .primary, size: .small, look: look, target: self, action: #selector(pressedStart(_:)))
+            let start = SailButton(title, kind: veiled ? .secondary : .primary, size: .small, look: look, target: self, action: #selector(pressedStart(_:)))
             start.hint("\r", mono: mono)
             start.isEnabled = enabled
             start.holdsKeys = stored != nil && enabled
@@ -419,7 +427,25 @@ package final class NewSessionView: NSView {
             y = foot(button, hint: nil, y: y, width: width)
         }
         height = y + edge
+        veil = veiled ? addVeil() : nil
         needsDisplay = true
+    }
+
+    /// The sheet's veil laid over the whole box, above its controls. AppKit dims the window under a
+    /// sheet inside the window itself, which a child panel floats over, so the panel lays the
+    /// page's veil over itself; it takes no click.
+    private func addVeil() -> NSView {
+        let veil = Veil(frame: NSRect(x: 0, y: 0, width: boxWidth, height: height))
+        veil.wantsLayer = true
+        veil.layer?.backgroundColor = NSColor(Self.veil(look)).cgColor
+        veil.layer?.cornerRadius = Self.radius
+        addSubview(veil)
+        return veil
+    }
+
+    /// The page's veil (`login-store-mockup.html`): ink at 18 % over paper, black at 40 % in the dark.
+    static func veil(_ look: Look) -> Tint {
+        look.palette.isDark ? Tint(0x000000, alpha: 0.4) : Tint(0x0A0E11, alpha: 0.18)
     }
 
     /// The row of `choice` at `y` and, chosen, its detail under it; where the next row starts.
@@ -732,5 +758,13 @@ extension ModeMemory {
     func store(in defaults: UserDefaults, for person: WorkspacesModel.Person) {
         guard let data = try? JSONEncoder().encode(self) else { return }
         defaults.set(data, forKey: Self.key(for: person))
+    }
+}
+
+/// A veil over the panel: drawn, never clicked.
+@MainActor
+final class Veil: NSView {
+    override func hitTest(_: NSPoint) -> NSView? {
+        nil
     }
 }

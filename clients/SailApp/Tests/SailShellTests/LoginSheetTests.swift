@@ -207,6 +207,11 @@ import Testing
         #expect(panel.isOpen && panel.popover.stays && sheet.name == nil && !sheet.store.isEnabled)
         #expect(window.childWindows?.contains(panel.popover.panel) == true)
         Self.paste(into: sheet)
+        let underSheet = CalmTests.Count(marks(in: window))
+        #expect(underSheet.fill == 1 && underSheet.tint == 0 && underSheet.neutral == 0, "the window with the sheet up draws \(underSheet): one primary on screen, the sheet's Store")
+        #expect(panel.view.primary?.kind == .secondary && panel.view.veiled, "the panel behind the sheet keeps its primary or is not under the sheet's veil")
+        #expect(sheet.field.field.contentType == LoginSheet.noSuggestion && sheet.field.field.isAutomaticTextCompletionEnabled == false, "the key's field offers suggestions")
+        Self.paste(into: sheet)
         #expect(sheet.store.isEnabled)
         view.client = SailClient(transport: RecordedServer([try Exchange("workspace-agents-dock")]), token: "tok")
         try NewSessionPanelTests.press(sheet.store)
@@ -217,7 +222,7 @@ import Testing
         let body = try #require(puts.first?.body)
         let sent = try JSONSerialization.jsonObject(with: body) as? [String: String] == ["kind": "api-key", "value": Self.pasted]
         #expect(sent, "the request's body is not the kind and the key")
-        #expect(panel.isOpen && !panel.popover.stays && panel.loginSheet == nil)
+        #expect(panel.isOpen && !panel.popover.stays && panel.loginSheet == nil && !panel.view.veiled)
         #expect(panel.view.rows.first?.line.stringValue == "login “default” · API key" && panel.view.rows.first?.chosen == true)
         #expect(panel.view.words.contains("Stored Claude Code login “default”.") && !panel.view.words.contains { $0.hasPrefix("No Claude Code login stored") })
         let start = try #require(panel.view.primary)
@@ -299,6 +304,7 @@ extension LoginSheetTests {
         if escape { sheet.cancelOperation(nil) } else { try NewSessionPanelTests.press(sheet.cancel) }
         #expect(window.attachedSheet == nil && Self.cleared(sheet))
         #expect(await server.requests.filter { $0.method == .put }.isEmpty, "a cancelled sheet sent the key")
+        #expect(view.newSession.view.primary?.kind == .primary && !view.newSession.view.veiled, "the panel's primary did not come back with the sheet gone")
         #expect(view.newSession.isOpen && !view.newSession.popover.stays && view.newSession.view.primary?.title == "Start and Sign In There")
     }
 
@@ -310,6 +316,7 @@ extension LoginSheetTests {
         let (_, window, server, sheet) = try await Self.asked(agents: "workspace-agents-dock-no-default", logins: "logins-no-default", stored: [refused])
         defer { window.orderOut(nil) }
         let name = try #require(sheet.name, "no name was asked of a person with a Claude Code login")
+        #expect(name.field.contentType == LoginSheet.noSuggestion && !name.field.isAutomaticTextCompletionEnabled, "the name offers suggestions, or reads as a login form's user name")
         #expect(name.field.stringValue == "work" && Driverless.words(sheet.contentView).contains("you already have “home”"))
         name.field.stringValue = "Work"
         sheet.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: name.field))
