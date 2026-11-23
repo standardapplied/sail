@@ -73,6 +73,7 @@ import Testing
         let panel = played.panel
         panel.newFile(nil)
         #expect(panel.list.numberOfRows == 3 && panel.nameRow?.holdsKeys == true, "the name field did not open with the keys")
+        #expect(panel.nameRow?.field.field.accessibilityLabel() == "New file name", "VoiceOver names the field holding the keys nothing")
         try played.type("notes.md")
         let made = try #require(played.changes.first)
         #expect(played.changes.count == 1 && made.frame == .filesCreate(id: made.id, path: FileName(Self.root + "/notes.md"), folder: false))
@@ -101,6 +102,7 @@ import Testing
         panel.list.choose(Self.root + "/src/tide.ts")
         panel.newFolder(nil)
         #expect(panel.naming?.folder == FileName(Self.root + "/src") && panel.list.entries.count == 3, "the field is not in src")
+        #expect(panel.nameRow?.field.field.accessibilityLabel() == "New folder name")
         try played.type("lib")
         let made = try #require(played.changes.first?.id)
         #expect(played.changes.map(\.frame) == [.filesCreate(id: made, path: FileName(Self.root + "/src/lib"), folder: true)])
@@ -118,11 +120,11 @@ import Testing
         let panel = played.panel
         panel.list.choose(Self.root + "/README.md")
         panel.renameFile(nil)
-        #expect(panel.nameRow?.text == "README.md")
+        #expect(panel.nameRow?.text == "README.md" && panel.nameRow?.field.field.accessibilityLabel() == "New name")
         try played.type("notes.md")
         let move = try #require(played.changes.first)
         #expect(played.changes.map(\.frame) == [.filesMove(id: move.id, from: FileName(Self.root + "/README.md"), to: FileName(Self.root + "/notes.md"))])
-        panel.heard(.frame(.filesRefused(id: move.id, kind: .known(.exists), message: "/home/dev/workspace/notes.md exists already, so nothing was replaced.")))
+        panel.heard(.frame(.filesRefused(id: move.id, kind: .known(.exists), message: "notes.md is already there.")))
         let field = try #require(panel.nameRow)
         #expect(field.refusal == "notes.md is already there." && field.holdsKeys, "the refusal is not under the field holding the keys: \(field.refusal ?? "none")")
         #expect(field.field.field.currentEditor()?.selectedRange == NSRange(location: 0, length: 8), "the refused name is not chosen")
@@ -194,7 +196,7 @@ import Testing
         try #require(await RunnerTabTests.until(5) { played.changes.count == 2 })
         let first = played.changes[0].id, second = played.changes[1].id
         #expect(played.changes.map(\.frame) == [.filesRemove(id: first, path: FileName(Self.root + "/a.ts")), .filesRemove(id: second, path: FileName(Self.root + "/b.ts"))])
-        panel.heard(.frame(.filesRefused(id: first, kind: .known(.partlyRemoved), message: "Some of /home/dev/workspace/a.ts could not be removed; what is left is still there.")))
+        panel.heard(.frame(.filesRefused(id: first, kind: .known(.partlyRemoved), message: "Some of a.ts could not be deleted.")))
         #expect(panel.shownLine?.words == "Some of a.ts could not be deleted.")
     }
 
@@ -220,15 +222,116 @@ import Testing
         panel.list.choose(Self.root + "/my notes.md")
         let reveal = NSMenuItem(title: "Reveal in Terminal", action: #selector(FilesPanel.revealInTerminal(_:)), keyEquivalent: "")
         let action = try #require(panel.rowActions(FileName(Self.root + "/my notes.md")).first { $0.title == "Reveal in Terminal" })
+        let offered = { panel.list.rowView(atRow: 0, makeIfNecessary: true)?.accessibilityCustomActions()?.map(\.name) ?? [] }
         #expect(!panel.validateMenuItem(reveal) && !action.enabled(), "Reveal is on with no terminal in the tab")
+        #expect(offered() == ["New File", "New Folder", "Rename", "Delete"], "VoiceOver offers Reveal with no terminal in the tab: \(offered())")
         panel.pasteInTerminal = { { pasted.append($0) } }
-        #expect(panel.validateMenuItem(reveal) && action.enabled())
+        #expect(panel.validateMenuItem(reveal) && action.enabled() && offered().contains("Reveal in Terminal"))
         panel.revealInTerminal(nil)
         #expect(pasted == ["'/home/dev/workspace/my notes.md'"], "pasted \(pasted)")
         panel.list.selectRowIndexes(IndexSet([0, 1]), byExtendingSelection: false)
         action.run()
         #expect(pasted.last == "'/home/dev/workspace/my notes.md' /home/dev/workspace/tide.ts" && !pasted.joined().contains("\n"), "pasted \(pasted)")
         #expect(played.sent.isEmpty, "Reveal sent something to the workspace")
+    }
+
+    /// A folder dragged with a row inside it moves once, the row going with it.
+    @Test func aFolderDraggedWithItsChildMovesOnce() throws {
+        let played = try Played([Self.folder("lib"), Self.folder("src")])
+        let panel = played.panel
+        let src = Self.root + "/src"
+        panel.toggle(FileName(src))
+        panel.heard(.frame(.filesListing(FileListing(id: 2, version: "s1", entries: [Self.file("a.ts")], more: false, truncated: false))))
+        panel.drop([src, src + "/a.ts"], into: Self.root + "/lib")
+        let move = try #require(played.changes.first?.id)
+        #expect(played.changes.map(\.frame) == [.filesMove(id: move, from: FileName(src), to: FileName(Self.root + "/lib/src"))], "\(played.changes.map(\.frame))")
+    }
+
+    /// Delete and Reveal of a folder and a row inside it, both chosen, act on the folder once.
+    @Test func aFolderChosenWithItsChildIsDeletedAndRevealedOnce() async throws {
+        let played = try Played([Self.folder("src")])
+        let panel = played.panel
+        let src = Self.root + "/src"
+        panel.toggle(FileName(src))
+        panel.heard(.frame(.filesListing(FileListing(id: 2, version: "s1", entries: [Self.file("a.ts")], more: false, truncated: false))))
+        panel.list.selectRowIndexes(IndexSet([0, 1]), byExtendingSelection: false)
+        var pasted: [String] = []
+        panel.pasteInTerminal = { { pasted.append($0) } }
+        panel.revealInTerminal(nil)
+        #expect(pasted == [src], "pasted \(pasted)")
+        panel.deleteFiles(nil)
+        let sheet = try #require(panel.question)
+        #expect(sheet.title.stringValue == "Delete src and everything in it?")
+        sheet.confirm.performClick(nil)
+        try #require(await RunnerTabTests.until(5) { !played.changes.isEmpty })
+        #expect(played.changes.map(\.frame) == [.filesRemove(id: played.changes[0].id, path: FileName(src))], "\(played.changes.map(\.frame))")
+    }
+
+    /// A move answered while its folder is shut never takes the person's later choice.
+    @Test func aDropIntoAShutFolderDoesNotTakeTheChoiceLater() throws {
+        let played = try Played([Self.folder("src"), Self.file("a.ts"), Self.file("README.md")])
+        let panel = played.panel
+        let src = Self.root + "/src"
+        panel.drop([Self.root + "/a.ts"], into: src)
+        let move = try #require(played.changes.first?.id)
+        panel.heard(.frame(.filesDone(id: move)))
+        try played.listed(Self.root, [Self.folder("src"), Self.file("README.md")])
+        panel.list.choose(Self.root + "/README.md")
+        panel.toggle(FileName(src))
+        let id = try #require(played.sent.reversed().lazy.compactMap { if case let .filesList(id, path) = $0, path == FileName(src) { id } else { nil } }.first)
+        panel.heard(.frame(.filesListing(FileListing(id: id, version: "s1", entries: [Self.file("a.ts")], more: false, truncated: false))))
+        #expect(panel.list.chosen == Self.root + "/README.md", "the move took the choice: \(panel.list.chosen ?? "nothing")")
+    }
+
+    /// An action's refusal is said ahead of the tree's own standing line, behind only what the
+    /// connection says while it is down.
+    @Test func aRefusalIsSaidWhileAFolderKeepsChanging() throws {
+        let played = try Played([Self.folder("src"), Self.file("a.ts")])
+        let panel = played.panel
+        let src = FileName(Self.root + "/src")
+        panel.toggle(src)
+        for _ in 0 ..< 3 {
+            let id = try #require(played.sent.reversed().lazy.compactMap { if case let .filesList(id, path) = $0, path == src { id } else { nil } }.first)
+            panel.heard(.frame(.filesRefused(id: id, kind: .known(.changed), message: "src changed while it was read; read it again.")))
+            panel.heard(.frame(.filesTick))
+        }
+        #expect(panel.shownLine?.words == "src keeps changing.")
+        panel.drop([src.key], into: src.key)
+        #expect(played.changes.isEmpty)
+        #expect(panel.shownLine?.words == FileActions.intoItself, "line: \(panel.shownLine?.words ?? "none")")
+        panel.heard(.phase(.stopped("dock is stopped.")))
+        #expect(panel.shownLine?.words == "dock is stopped." && panel.shownLine?.action == .start, "the refusal hid the stopped workspace's Start")
+    }
+
+    /// An answer is matched to the field by its request: a rename closed with Esc and typed again
+    /// is not refused by the first one's answer.
+    @Test func anAnswerFindsItsOwnField() throws {
+        let played = try Played([Self.file("notes.md"), Self.file("README.md")])
+        let panel = played.panel
+        panel.list.choose(Self.root + "/README.md")
+        panel.renameFile(nil)
+        try played.type("notes.md")
+        panel.nameRow?.onCancel()
+        panel.renameFile(nil)
+        try played.type("notes.md")
+        let first = try #require(played.changes.first?.id), second = try #require(played.changes.last?.id)
+        #expect(first != second)
+        panel.heard(.frame(.filesRefused(id: first, kind: .known(.exists), message: "notes.md is already there.")))
+        #expect(panel.nameRow?.refusal == nil && panel.naming?.asked != nil, "the first rename's answer refused the second's field")
+        panel.heard(.frame(.filesDone(id: second)))
+        #expect(panel.naming == nil, "the second rename's answer did not close its field")
+    }
+
+    /// A delete question still asking when the panel closes is withdrawn, deleting nothing.
+    @Test func theDeleteQuestionGoesWithThePanel() async throws {
+        let played = try Played([Self.file("README.md")])
+        let panel = played.panel
+        panel.list.choose(Self.root + "/README.md")
+        panel.deleteFiles(nil)
+        _ = try #require(panel.question)
+        panel.close()
+        #expect(panel.question == nil && played.changes.isEmpty, "the question outlived its panel, or deleted")
+        #expect(await RunnerTabTests.until(5) { panel.window?.attachedSheet == nil }, "the sheet stayed on the window")
     }
 
     /// The File menu's tree items act only while the tree holds the keys, so ⌘⌫, F2 and the rest
@@ -279,6 +382,17 @@ import Testing
         #expect(await RunnerTabTests.until(10) { panel.tree.rows.count == 2 })
         panel.toggle(FileName(Self.root + "/locked"))
         #expect(await RunnerTabTests.until(10) { panel.tree.refusals[FileName(Self.root + "/locked")] != nil }, "with a file open, a folder's refusal never reached the tree")
+    }
+
+    /// M59 through a folder: renaming the folder holding the open file takes the pane with it.
+    @Test func aRenamedFolderTakesItsOpenFileWithIt() async throws {
+        let (_, _, _, panel, pane) = try await FilePaneTests.opened(Array("one\n".utf8), in: "src")
+        #expect(await RunnerTabTests.until(10) { pane.editor.isEditable })
+        panel.list.choose(Self.root + "/src")
+        panel.renameFile(nil)
+        panel.nameRow?.field.field.stringValue = "lib"
+        panel.nameRow?.onCommit()
+        #expect(await RunnerTabTests.until(10) { pane.path == FileName(Self.root + "/lib/tide.ts") }, "the pane did not follow its folder: \(pane.path)")
     }
 }
 

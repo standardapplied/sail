@@ -1,5 +1,4 @@
 import Foundation
-import SailAPI
 import SailTerminalWire
 
 /// What a person changes of a workspace's names: a file or a folder made, one moved (a rename is a
@@ -17,15 +16,16 @@ public struct FileActions: Sendable {
         case remove(FileName)
     }
 
-    /// What an ask comes to: the frame to send, or its refusal before any frame.
+    /// What an ask comes to: the frame to send and its request's id, or its refusal before any frame.
     public enum Asked: Equatable, Sendable {
-        case send(Frame)
+        case send(Frame, id: Int32)
         case refused(String)
     }
 
+    /// The workspace's answer to request `id`.
     public enum Answer: Equatable, Sendable {
-        case done(Action)
-        case refused(Action, String)
+        case done(Action, id: Int32)
+        case refused(Action, String, id: Int32)
     }
 
     public static let intoItself = "A folder cannot be moved into itself."
@@ -52,20 +52,21 @@ public struct FileActions: Sendable {
         let id = nextID
         nextID += 1
         asked[id] = action
-        return switch action {
-        case let .create(path, folder): .send(.filesCreate(id: id, path: path, folder: folder))
-        case let .move(from, to): .send(.filesMove(id: id, from: from, to: to))
-        case let .remove(path): .send(.filesRemove(id: id, path: path))
+        let frame: Frame = switch action {
+        case let .create(path, folder): .filesCreate(id: id, path: path, folder: folder)
+        case let .move(from, to): .filesMove(id: id, from: from, to: to)
+        case let .remove(path): .filesRemove(id: id, path: path)
         }
+        return .send(frame, id: id)
     }
 
     /// The answer `frame` gives to an action of these, nil for any other frame.
     public mutating func receive(_ frame: Frame) -> Answer? {
         switch frame {
         case let .filesDone(id):
-            return asked.removeValue(forKey: id).map { .done($0) }
-        case let .filesRefused(id, kind, message):
-            return asked.removeValue(forKey: id).map { .refused($0, Self.sentence(kind, message, $0)) }
+            return asked.removeValue(forKey: id).map { .done($0, id: id) }
+        case let .filesRefused(id, _, message):
+            return asked.removeValue(forKey: id).map { .refused($0, message, id: id) }
         default:
             return nil
         }
@@ -75,23 +76,13 @@ public struct FileActions: Sendable {
     public mutating func disconnected() -> [Answer] {
         defer { asked = [:] }
         return asked.sorted { $0.key < $1.key }.map {
-            .refused($0.value, "The connection to \(workspace) dropped before it answered; the tree shows what is there.")
+            .refused($0.value, "The connection to \(workspace) dropped before it answered; the tree shows what is there.", id: $0.key)
         }
     }
 
     /// A name typed for a new entry or a rename is one entry's name: no slash, and not `.` or `..`.
     public static func isName(_ typed: String) -> Bool {
         !typed.isEmpty && typed != "." && typed != ".." && !typed.contains("/")
-    }
-
-    /// A taken name and a folder partly removed in the contract's words, naming what the person
-    /// typed or chose; every other refusal in the host's own.
-    private static func sentence(_ kind: Open<FileRefusal>, _ message: String, _ action: Action) -> String {
-        switch (kind, action) {
-        case let (.known(.exists), .create(path, _)), let (.known(.exists), .move(_, path)): "\(path.leaf.shown) is already there."
-        case let (.known(.partlyRemoved), .remove(path)): "Some of \(path.leaf.shown) could not be deleted."
-        default: message
-        }
     }
 }
 
@@ -103,11 +94,13 @@ extension FileName {
 
     /// The path as a shell reads it back, pasted at a prompt: as it is when every byte is plain,
     /// else in single quotes, a quote in it closed, escaped and opened again; a path that is not
-    /// UTF-8 in ANSI-C quotes, each byte that is not plain written `\xHH`.
+    /// UTF-8 or holds a control character in ANSI-C quotes, each byte that is not printable ASCII
+    /// written `\xHH`, since a terminal's paste turns a control character into a space and a newline
+    /// would end the line.
     public var shellQuoted: String {
         let plain = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/._-+,:@%".utf8)
         if !bytes.isEmpty, bytes.allSatisfy(plain.contains) { return shown }
-        guard let text = String(validating: bytes, as: UTF8.self) else {
+        guard let text = String(validating: bytes, as: UTF8.self), !bytes.contains(where: { $0 < 0x20 || $0 == 0x7F }) else {
             return "$'" + bytes.map { (0x20 ..< 0x7F).contains($0) && $0 != 0x27 && $0 != 0x5C ? String(UnicodeScalar($0)) : String(format: "\\x%02x", $0) }.joined() + "'"
         }
         return "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"

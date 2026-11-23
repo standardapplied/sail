@@ -2154,7 +2154,9 @@ class FileWritesTest {
 
   /**
    * Every way a save ends unwritten is its own answer: a conflict found before the bytes, a full
-   * disk with the bytes free, a taken name; a move onto a taken name names that name.
+   * disk with the bytes free, a taken name; a move onto a taken name names that name; a folder
+   * partly removed says so. A taken name and a folder partly removed are said in the contract's
+   * words (M20, M24), naming the last name of the path.
    */
   @Test
   void aSaveEndedUnwrittenSaysWhyAndAMoveNamesTheTakenName() throws Exception {
@@ -2184,13 +2186,13 @@ class FileWritesTest {
     save(connection, 3, file.toString(), PtyMessage.ABSENT, "", "mine");
     assertEquals(
         new PtyMessage.FilesRefused(
-            3, PtyMessage.FilesRefusal.EXISTS, file + " exists already, so nothing was replaced."),
+            3, PtyMessage.FilesRefusal.EXISTS, "notes.md is already there."),
         answer());
     var other = Files.writeString(home.resolve("other.md"), "other");
     connection.move(new PtyMessage.FilesMove(4, other.toString(), file.toString()));
     assertEquals(
         new PtyMessage.FilesRefused(
-            4, PtyMessage.FilesRefusal.EXISTS, file + " exists already, so nothing was replaced."),
+            4, PtyMessage.FilesRefusal.EXISTS, "notes.md is already there."),
         answer());
     var locked = Files.writeString(home.resolve("locked.md"), "kept");
     Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("r--r--r--"));
@@ -2212,6 +2214,15 @@ class FileWritesTest {
         new PtyMessage.FilesCreate(8, home + "/" + FileScripts.SAVING + "notes", false));
     assertEquals(
         new PtyMessage.FilesDone(8), answer(), "m3: a person's name of Sail's prefix is made");
+    var kept = Files.createDirectories(home.resolve("kept/inner"));
+    Files.writeString(kept.resolve("stays"), "x");
+    Files.setPosixFilePermissions(kept, PosixFilePermissions.fromString("r-x------"));
+    connection.remove(new PtyMessage.FilesRemove(10, home + "/kept"));
+    assertEquals(
+        new PtyMessage.FilesRefused(
+            10, PtyMessage.FilesRefusal.PARTLY_REMOVED, "Some of kept could not be deleted."),
+        answer(),
+        "M24: a folder partly removed is named by its last name");
     assertEquals("theirs", Files.readString(file));
     everyScriptEnds();
     assertEquals(List.of(), temporaries(home));

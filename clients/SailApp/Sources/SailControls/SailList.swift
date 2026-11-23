@@ -142,17 +142,44 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         let hovered = (0 ..< numberOfRows).first { (rowView(atRow: $0, makeIfNecessary: false) as? SailRowView)?.hovered == true }.flatMap { item(at: $0)?.id }
         Tooltip.putAway()
         reloadData()
-        let row: Int?
-        if let point = pointerNow {
-            let inList = convert(point, from: nil), content = window?.contentView
-            let hit = content.flatMap { $0.hitTest($0.superview?.convert(point, from: nil) ?? point) }
-            let under = visibleRect.contains(inList) && hit?.isDescendant(of: self) == true ? self.row(at: inList) : -1
-            row = under >= 0 ? under : nil
-        } else {
-            row = hovered.flatMap { id in entries.indices.first { item(at: $0)?.id == id } }
-        }
+        let row = pointerNow == nil ? hovered.flatMap(rowIndex(of:)) : rowUnderPointer()
         guard let row, item(at: row) != nil else { return }
         (rowView(atRow: row, makeIfNecessary: true) as? SailRowView)?.hovered = true
+    }
+
+    /// The row shown under the pointer, nil when it is over none or not known.
+    private func rowUnderPointer() -> Int? {
+        guard let point = pointerNow else { return nil }
+        let inList = convert(point, from: nil), content = window?.contentView
+        let hit = content.flatMap { $0.hitTest($0.superview?.convert(point, from: nil) ?? point) }
+        let under = visibleRect.contains(inList) && hit?.isDescendant(of: self) == true ? row(at: inList) : -1
+        return under >= 0 ? under : nil
+    }
+
+    /// The pointer held over the middle of row `id`, wherever the row is laid out, as the drive puts
+    /// it there: the row drawn hovered, and found so again by every reload (a change of look or
+    /// direction); nil gives the pointer back.
+    package func point(at id: String?) {
+        pointer = id.map { id -> @MainActor () -> NSPoint? in { [weak self] in self?.middle(of: id) } }
+        let under = rowUnderPointer()
+        enumerateAvailableRowViews { view, row in (view as? SailRowView)?.hovered = row == under }
+    }
+
+    /// Where row `id`'s middle is in its window, nil while it is not a row.
+    private func middle(of id: String) -> NSPoint? {
+        guard let row = rowIndex(of: id) else { return nil }
+        let box = rect(ofRow: row)
+        return convert(NSPoint(x: box.midX, y: box.midY), to: nil)
+    }
+
+    private func rowIndex(of id: String) -> Int? {
+        entries.indices.first { item(at: $0)?.id == id }
+    }
+
+    /// Whether row `id`'s actions are shown whole: what a hover or a choice brings up.
+    package func actionsShown(_ id: String) -> Bool {
+        guard let row = rowIndex(of: id), let cell = rowView(atRow: row, makeIfNecessary: false)?.view(atColumn: 0) as? RowCell else { return false }
+        return !cell.actions.isHidden && cell.actions.alphaValue == 1 && !cell.actions.views.isEmpty
     }
 
     public let rowStyle: RowStyle
@@ -375,11 +402,6 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     public func choose(_ id: String?) {
         guard let row = select(id) else { return }
         scrollRowToVisible(row)
-    }
-
-    /// The row of `id` drawn as under the pointer, and no other: what the drive shows of a hover.
-    package func hover(_ id: String) {
-        enumerateAvailableRowViews { view, row in (view as? SailRowView)?.hovered = item(at: row)?.id == id }
     }
 
     /// Chooses `id` where it stands without scrolling to it: new rows keep the person's scroll.
@@ -673,10 +695,10 @@ final class SailRowView: NSTableRowView {
         nil
     }
 
-    /// Its actions as VoiceOver offers them, made when VoiceOver asks: a row scrolled into a long
-    /// tree makes none.
+    /// Its actions that can be done now as VoiceOver offers them, made when VoiceOver asks: a row
+    /// scrolled into a long tree makes none.
     override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
-        item?.actions.map { action in
+        item?.actions.filter { $0.enabled() }.map { action in
             let run = Run(action)
             return NSAccessibilityCustomAction(name: action.title) {
                 MainActor.assumeIsolated { run.go(nil) }

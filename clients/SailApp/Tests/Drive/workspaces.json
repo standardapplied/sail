@@ -652,6 +652,7 @@
   {"name": "a-rows-at-rest-shown", "filesShot": "49-files-rows-at-rest"},
   {"name": "a-under-the-pointer", "filesHover": "Package.swift"},
   {"name": "a-under-the-pointer-shown", "filesShot": "50-files-row-under-the-pointer"},
+  {"name": "a-the-pointer-given-back", "filesHover": ""},
   {"name": "a-the-context-menu", "filesMenu": ["README.md", "51-files-context-menu"]},
   {"name": "a-m19-new-folder", "filesAct": ["README.md", "New Folder"]},
   {"name": "a-m19-name-it", "filesName": "pier"},

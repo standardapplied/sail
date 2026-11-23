@@ -92,10 +92,11 @@ final class FilesPanel: NSView {
     var naming: Naming?
     var nameRow: NameRow?
     private var shownNaming: Naming?
-    /// A path made or moved to, chosen once the watch lists it: rows come only from the workspace.
+    /// A path made or moved to, chosen once the watch lists it (rows come only from the workspace),
+    /// unless the person chooses or acts first.
     var choosing: FileName?
     /// An action's refusal with no field to say it under (a drag's move, a delete), said in the line
-    /// until the next act.
+    /// until the next act or choice.
     var refused: String?
     /// The delete question while it asks.
     var question: Sheet?
@@ -131,10 +132,9 @@ final class FilesPanel: NSView {
         list.onChoose = { [weak self] key in
             guard let self, !rebuilding else { return }
             chosenPath = key.flatMap { key in shownRows.first { $0.path.key == key }?.path }
-            if refused != nil {
-                refused = nil
-                refresh()
-            }
+            let said = refused != nil
+            acts()
+            if said { refresh() }
         }
         list.allowsMultipleSelection = true
         list.moves = SailList.Moves(lands: { [weak self] over in self?.landing(over) }, drop: { [weak self] ids, into in self?.drop(ids, into: into) })
@@ -189,6 +189,7 @@ final class FilesPanel: NSView {
     func close() {
         lookup = nil
         admitted = false
+        question?.withdraw()
         guard session != nil else { return }
         wake?.invalidate()
         wake = nil
@@ -322,12 +323,14 @@ final class FilesPanel: NSView {
     // MARK: What it shows
 
     /// The line and the rows as the tree and the connection say now, each drawn again only when it
-    /// changed: a tick that changes nothing touches no view.
+    /// changed: a tick that changes nothing touches no view. An action's refusal is the person's own
+    /// and goes ahead of the tree's standing line, behind only what the connection says while down.
     package func refresh() {
         let now = clock()
+        let standing = FilesLine(tree: tree, phase: phase, workspace: workspace, at: now) { [clock] at in Self.timeOfDay(at, now: clock()) }
+        let refusal = refused.map { FilesLine(words: $0, mark: .bad) }
         let said = startRefusal.map { FilesLine(words: $0.joined(separator: " "), mark: .bad, action: .start) }
-            ?? FilesLine(tree: tree, phase: phase, workspace: workspace, at: now) { [clock] at in Self.timeOfDay(at, now: clock()) }
-            ?? refused.map { FilesLine(words: $0, mark: .bad) }
+            ?? (FilesLine.state(of: phase, workspace: workspace) == nil ? refusal ?? standing : standing ?? refusal)
         if said != shownLine {
             shownLine = said
             line.show(said, starting: starting)
@@ -923,31 +926,6 @@ final class FilesLineView: NSView {
 
 // MARK: Making, renaming, moving and deleting
 
-/// The inline name field open in the tree: a new file or folder in `folder`, or a rename of the
-/// entry at `renaming` in its folder; `asked` the action sent for its name while unanswered, and
-/// `refusal` the sentence under the field.
-struct Naming: Equatable {
-    enum Kind: Equatable {
-        case file, folder
-        case rename(FileName)
-    }
-
-    let kind: Kind
-    let folder: FileName
-    var asked: FileActions.Action?
-    var refusal: String?
-
-    /// The entry a rename renames; nil for a new one.
-    var renaming: FileName? {
-        if case let .rename(path) = kind { path } else { nil }
-    }
-
-    /// Its row's id: a rename's is its entry's own, a new one's a key no path has.
-    var id: String {
-        renaming?.key ?? "\u{0}new\u{0}" + folder.key
-    }
-}
-
 extension FilesPanel {
     static let renameKey = String(Character(UnicodeScalar(UInt16(NSF2FunctionKey)) ?? " "))
     static let deleteKey = "\u{8}"
@@ -1010,10 +988,10 @@ extension FilesPanel {
 
     private func begin(_ new: Naming, name: String) {
         guard naming?.asked == nil, question == nil else { return }
-        refused = nil
+        acts()
         let depth = new.folder == FileTree.root ? 0 : (row(new.folder)?.depth ?? -1) + 1
         let room = Self.width - RowStyle.tree.margin * 2 - RowStyle.tree.leading - RowStyle.tree.trailing
-        let field = NameRow(name: name, depth: depth, room: room, direction: userInterfaceLayoutDirection, look: look, mono: mono)
+        let field = NameRow(name: name, voice: new.voice, depth: depth, room: room, direction: userInterfaceLayoutDirection, look: look, mono: mono)
         field.onCommit = { [weak self] in self?.commit() }
         field.onCancel = { [weak self] in self?.endNaming() }
         field.onEdit = { [weak self] in
@@ -1046,15 +1024,10 @@ extension FilesPanel {
     }
 
     private func nameItem() -> SailList.Item {
-        let field = nameRow, refusal = naming?.refusal
-        field?.refusal = refusal
-        let words = switch naming?.kind {
-        case .folder: "New folder name"
-        case .rename: "New name"
-        default: "New file name"
-        }
+        let field = nameRow
+        field?.refusal = naming?.refusal
         return SailList.Item(
-            id: naming?.id ?? "", name: "", voice: words, content: field ?? NSView(), height: field?.height, paint: RowPaint(RowState()), inert: true
+            id: naming?.id ?? "", name: "", voice: naming?.voice ?? "", content: field ?? NSView(), height: field?.height, paint: RowPaint(RowState()), inert: true
         )
     }
 
@@ -1086,8 +1059,8 @@ extension FilesPanel {
         case let .rename(from): .move(from: from, to: path)
         }
         switch actions.ask(action) {
-        case let .send(frame):
-            naming.asked = action
+        case let .send(frame, id):
+            naming.asked = id
             self.naming = naming
             send([frame])
             refresh()
@@ -1115,8 +1088,8 @@ extension FilesPanel {
     /// under its field, or in the line when it has none.
     func answered(_ answer: FileActions.Answer) {
         switch answer {
-        case let .done(action):
-            if naming?.asked == action { endNaming() }
+        case let .done(action, id):
+            if naming?.asked == id { endNaming() }
             switch action {
             case let .create(path, _): choosing = path
             case let .move(from, to):
@@ -1125,8 +1098,8 @@ extension FilesPanel {
             case .remove: break
             }
             refresh()
-        case let .refused(action, words):
-            if naming?.asked == action {
+        case let .refused(_, words, id):
+            if naming?.asked == id {
                 naming?.asked = nil
                 refuse(words)
             } else {
@@ -1173,14 +1146,14 @@ extension FilesPanel {
         let byKey = Dictionary(shownRows.map { ($0.path.key, $0.path) }, uniquingKeysWith: { first, _ in first })
         guard let folder = into.isEmpty ? FileTree.root : byKey[into] else { return }
         let dragged = ids.compactMap { byKey[$0] }
-        refused = nil
+        acts()
         for path in dragged where !dragged.contains(where: { path.isUnder($0) }) && FileTree.parent(of: path) != folder {
             guard admitted else {
                 refused = notConnected
                 break
             }
             switch actions.ask(.move(from: path, to: folder.appending(path.leaf))) {
-            case let .send(frame): send([frame])
+            case let .send(frame, _): send([frame])
             case let .refused(words): refused = words
             }
         }
@@ -1204,7 +1177,7 @@ extension FilesPanel {
         let body = "This cannot be undone." + (open.map { " \($0.leaf.shown) has unsaved changes; they stay in its pane." } ?? "")
         let sheet = Sheet(title: title, body: body, confirm: "Delete", kind: .destructive, look: look, titleFont: titleFont)
         question = sheet
-        refused = nil
+        acts()
         refresh()
         sheet.ask(on: window) { [weak self] confirmed in
             self?.question = nil
@@ -1218,7 +1191,7 @@ extension FilesPanel {
             return refresh()
         }
         for path in paths {
-            if case let .send(frame) = actions.ask(.remove(path)) { send([frame]) }
+            if case let .send(frame, _) = actions.ask(.remove(path)) { send([frame]) }
         }
     }
 
@@ -1226,7 +1199,16 @@ extension FilesPanel {
     /// terminal through its own paste, no newline after; nothing runs (M45).
     func reveal(from path: FileName) {
         guard let paste = pasteInTerminal() else { return }
+        acts()
+        refresh()
         paste(targets(from: path).map(\.shellQuoted).joined(separator: " "))
+    }
+
+    /// The person acts: a refusal said in the line goes, and what was made or moved to is no longer
+    /// chosen for them once the watch lists it.
+    private func acts() {
+        refused = nil
+        choosing = nil
     }
 
     // MARK: The File menu
@@ -1262,98 +1244,6 @@ extension FilesPanel: NSMenuItemValidation {
         case #selector(revealInTerminal(_:)): return chosenPath != nil && pasteInTerminal() != nil
         default: return chosenPath != nil
         }
-    }
-}
-
-/// The inline name field of New File, New Folder and Rename in its row's own place, as the mockup's
-/// `.renf`: the box where the name starts, 22 pt in the 24 pt row, the name's 13 pt, and a refusal
-/// as its sentence under it. ⏎ commits and Esc cancels; every other key is the field's.
-@MainActor
-final class NameRow: NSView, NSTextFieldDelegate {
-    let field: SailTextField
-    private let depth: Int
-    /// The row's width for its content, which its sentence wraps in.
-    private let room: Double
-    var onCommit: @MainActor () -> Void = {}
-    var onCancel: @MainActor () -> Void = {}
-    var onEdit: @MainActor () -> Void = {}
-
-    init(name: String, depth: Int, room: Double, direction: NSUserInterfaceLayoutDirection, look: Look, mono: LabelFont) {
-        field = SailTextField(label: nil, placeholder: "", size: .row, look: look, mono: mono)
-        self.depth = depth
-        self.room = room
-        super.init(frame: .zero)
-        userInterfaceLayoutDirection = direction
-        field.userInterfaceLayoutDirection = direction
-        field.field.stringValue = name
-        field.field.delegate = self
-        addSubview(field)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    override var isFlipped: Bool {
-        true
-    }
-
-    var text: String {
-        field.field.stringValue
-    }
-
-    var refusal: String? {
-        get { field.error }
-        set { if field.error != newValue { field.error = newValue; needsLayout = true } }
-    }
-
-    /// Where the box starts: where the row's name does.
-    private var start: Double {
-        Double(depth) * RowStyle.indent + TreeRowCell.slot + TreeRowCell.gap
-    }
-
-    /// Its height: the row's, or the field with its sentence wrapped in the row's width, 1 pt above
-    /// it and 3 below.
-    var height: Double {
-        let width = max(room - start, 0) + 2 * Look.haloRoom
-        if Double(field.frame.width) != width { field.setFrameSize(NSSize(width: width, height: Double(field.frame.height))) }
-        return max(RowStyle.tree.height, Double(field.intrinsicContentSize.height) + (refusal == nil ? 2 : 4))
-    }
-
-    override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: height)
-    }
-
-    var holdsKeys: Bool {
-        (window?.firstResponder as? NSTextView)?.delegate === field.field
-    }
-
-    /// The keys in the field, its name chosen: up to its extension when it opens on a file's name,
-    /// all of it when refused, so the next keys replace it.
-    func focus(stem: Bool) {
-        guard let window, window.makeFirstResponder(field.field), let editor = field.field.currentEditor() else { return }
-        let name = text as NSString, dot = name.range(of: ".", options: .backwards)
-        editor.selectedRange = NSRange(location: 0, length: stem && dot.location != NSNotFound && dot.location > 0 ? dot.location : name.length)
-    }
-
-    override func layout() {
-        super.layout()
-        let width = max(Double(bounds.width) - start, 0), x = userInterfaceLayoutDirection == .rightToLeft ? 0 : start
-        field.frame = NSRect(x: x - Look.haloRoom, y: 1 - Look.haloRoom, width: width + 2 * Look.haloRoom, height: Double(field.intrinsicContentSize.height) + 2 * Look.haloRoom)
-    }
-
-    func control(_: NSControl, textView _: NSTextView, doCommandBy selector: Selector) -> Bool {
-        switch selector {
-        case #selector(NSResponder.insertNewline(_:)): onCommit()
-        case #selector(NSResponder.cancelOperation(_:)): onCancel()
-        default: return false
-        }
-        return true
-    }
-
-    func controlTextDidChange(_: Notification) {
-        onEdit()
     }
 }
 

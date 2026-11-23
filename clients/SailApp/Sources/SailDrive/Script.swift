@@ -396,7 +396,8 @@ struct Step: Decodable {
     var filesNameSays: String?
     /// `[row, folder]`: the row dropped into the folder's row ("" the root), as a drag drops it.
     var filesDropInto: [String]?
-    /// The files panel's row of this name drawn as under the pointer.
+    /// The pointer held over the files panel's row of this name, through changes of look and
+    /// direction, until its ⋯ shows within `seconds`; "" gives the pointer back.
     var filesHover: String?
     /// `[row, shot]`: the row's context menu popped up as a right-click shows it, the whole screen
     /// taken in both looks as `window/<shot>`, then the menu closed.

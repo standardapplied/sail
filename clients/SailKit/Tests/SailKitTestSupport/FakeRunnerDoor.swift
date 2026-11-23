@@ -256,20 +256,26 @@ public final class FakeRunnerDoor: Sendable {
         files.withLock { $0.refuseChange = (kind, message) }
     }
 
-    /// Create, move or remove `id` as the host does: never over a name there (`exists`, in the
-    /// host's words), never of a name not there (`not_found`); a folder with all it holds; each
-    /// folder's listing kept in step and its watchers told.
+    /// Create, move or remove `id` as the host does, refusing in the host's words: never over a name
+    /// there (`exists`), never of a name not there or into a folder not there (`not_found`); a
+    /// folder with all it holds; each folder's listing kept in step and its watchers told.
     private func change(_ frame: Frame, _ id: Int32, in files: inout Files) -> Frame {
-        func entry(_ path: FileName) -> FileEntry? {
+        func split(_ path: FileName) -> (folder: FileName, name: FileName)? {
             guard let slash = path.bytes.lastIndex(of: 0x2F) else { return nil }
-            let parent = FileName(Array(path.bytes[..<slash])), name = path.bytes[path.bytes.index(after: slash)...]
-            return files.folders[parent]?.entries.first { $0.name.bytes[...] == name }
+            return (FileName(Array(path.bytes[..<slash])), FileName(Array(path.bytes[path.bytes.index(after: slash)...])))
+        }
+        func entry(_ path: FileName) -> FileEntry? {
+            split(path).flatMap { folder, name in files.folders[folder]?.entries.first { $0.name == name } }
         }
         func holds(_ path: FileName) -> Bool {
             files.contents[path] != nil || files.folders[path] != nil || entry(path) != nil
         }
         func refused(_ kind: FileRefusal, _ path: FileName) -> Frame {
-            .filesRefused(id: id, kind: .known(kind), message: kind == .exists ? "\(path.shown) exists already, so nothing was replaced." : "No file at \(path.shown) in dock.")
+            .filesRefused(id: id, kind: .known(kind), message: kind == .exists ? "\((split(path)?.name ?? path).shown) is already there." : "No file at \(path.shown) in dock.")
+        }
+        func folderGone(_ path: FileName) -> Frame? {
+            guard let folder = split(path)?.folder, files.folders[folder] == nil else { return nil }
+            return .filesRefused(id: id, kind: .known(.notFound), message: "The folder \(folder.shown) is gone from dock, so \(path.shown) was not made.")
         }
         func under(_ path: FileName, _ key: FileName) -> Bool {
             key == path || key.bytes.starts(with: path.bytes + [0x2F])
@@ -285,11 +291,13 @@ public final class FakeRunnerDoor: Sendable {
         let version = "v\(files.versions)"
         switch frame {
         case let .filesCreate(_, path, folder):
+            if let gone = folderGone(path) { return gone }
             guard !holds(path) else { return refused(.exists, path) }
             if folder { files.folders[path] = Folder(entries: [], version: version, truncated: false) } else { files.contents[path] = ([], version) }
             listed(path, size: 0, folder: folder, in: &files)
         case let .filesMove(_, from, to):
             guard holds(from) else { return refused(.notFound, from) }
+            if let gone = folderGone(to) { return gone }
             guard !holds(to) else { return refused(.exists, to) }
             let folder = isFolder(from)
             for key in files.folders.keys where under(from, key) {
@@ -669,13 +677,13 @@ public final class FakeRunnerDoor: Sendable {
         announce(session, writer: fde, holder: nil)
     }
 
-    /// Whether a key typed on a free keyboard takes it, as the session's opener's does; false for
-    /// someone else (an admin), whose keys stay refused until they take it.
     /// The bytes typed into session `session` so far, by whoever held its keyboard.
     public func typed(into session: String) -> [UInt8] {
         state.withLock { $0.typed[session] ?? [] }
     }
 
+    /// Whether a key typed on a free keyboard takes it, as the session's opener's does; false for
+    /// someone else (an admin), whose keys stay refused until they take it.
     public var typingTakesAFreeKeyboard: Bool {
         get { state.withLock { $0.typingTakes } }
         set { state.withLock { $0.typingTakes = newValue } }

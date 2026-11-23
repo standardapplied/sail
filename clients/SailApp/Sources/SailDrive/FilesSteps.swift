@@ -556,8 +556,6 @@ extension Driver {
         mainStacks.told(gap).forEach { print("files, \(phase), the main thread's longest hold: \($0)") }
     }
 
-    /// The window in both looks, then with the workbench and the panel laid out right to left, as a
-    /// right-to-left Mac lays them out, in both again.
     /// The steps of making, renaming, moving, deleting and revealing in the tree.
     private func performChange(_ step: Step) async -> (Bool, String)? {
         if let act = step.filesAct, act.count == 2 {
@@ -574,7 +572,10 @@ extension Driver {
             return (workbench.filesDrop([drop[0]], into: drop[1]), "\(drop[0]) dropped into \(drop[1].isEmpty ? "the root" : drop[1])")
         }
         if let name = step.filesHover {
-            return (workbench.filesHover(name), "\(name) under the pointer")
+            guard workbench.filesHover(name) else { return (false, "no row \(name) to hold the pointer over") }
+            guard !name.isEmpty else { return (true, "the pointer given back") }
+            let shown = await waitForState(step.seconds ?? 5) { self.workbench.filesActionsShown(name) }
+            return (shown, "\(name) under the pointer, its ⋯ \(shown ? "shown" : "not shown")")
         }
         if let shown = step.filesMenu, shown.count == 2 {
             guard workbench.filesMenu(shown[0]) != nil else { return (false, "\(shown[0]) offers no menu") }
@@ -607,6 +608,8 @@ extension Driver {
         await shot.taken()
     }
 
+    /// The window in both looks, then with the workbench and the panel laid out right to left, as a
+    /// right-to-left Mac lays them out, in both again.
     private func filesShot(_ name: String) async -> (Bool, String) {
         let window = shell.window.windowNumber
         let (ok, said) = await inBothLooks(name) { file in await self.capture(.window(window), to: file) }

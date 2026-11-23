@@ -252,11 +252,19 @@ extension WorkbenchView {
         return true
     }
 
-    /// Row `name` drawn as under the pointer.
+    /// The pointer held over row `name`, the row drawn as under it; "" gives the pointer back.
     package func filesHover(_ name: String) -> Bool {
-        guard let panel = shownFiles, let path = filesPath(named: name) else { return false }
-        panel.list.hover(path.key)
+        guard let panel = shownFiles else { return false }
+        let path = filesPath(named: name)
+        guard name.isEmpty || path != nil else { return false }
+        panel.list.point(at: path?.key)
         return true
+    }
+
+    /// Whether row `name`'s ⋯ is shown whole.
+    package func filesActionsShown(_ name: String) -> Bool {
+        guard let panel = shownFiles, let path = filesPath(named: name) else { return false }
+        return panel.list.actionsShown(path.key)
     }
 
     /// Row `name`'s context menu, as a right-click asks it, and where it pops up.
