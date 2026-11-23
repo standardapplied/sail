@@ -84,7 +84,10 @@ end_hosts() {
   gone_within 30 "${pids[@]}" || { echo "ci/drive: the terminal hosts this run started (pid ${pids[*]}) did not end within 30 s" >&2; return 1; }
 }
 
-passkeys=$(mktemp -d) plain=$(mktemp -d) private_dir=$(mktemp -d /tmp/sail-drive.XXXXXX) shooter='' feeder=''
+passkeys=$(mktemp -d) plain=$(mktemp -d) private_dir=$(mktemp -d /tmp/sail-drive.XXXXXX) shooter=''
+# The third run's attach client reads a `tail -f /dev/null` that never ends, which records its own
+# pid here (macOS's script gets nothing through a FIFO), to be ended by that pid.
+readonly feeder=$private_dir/attach-feeder
 SAIL_DATA_DIR=$passkeys "$sail" server start --port 7979 --rp-id sail.standardapplied.com --origin https://sail.standardapplied.com \
   > "$out/server-7979.log" 2>&1 &
 servers=($!)
@@ -116,7 +119,7 @@ stop_drive() {
     { kill -0 "$pid" 2> /dev/null && kill -KILL "$pid" 2> /dev/null; } || true
   done
 }
-trap 'stop_drive; end_hosts || true; [[ -z $feeder ]] || kill "$feeder" 2> /dev/null || true; declare -F stop_shots > /dev/null && stop_shots; kill "${servers[@]}" 2>/dev/null || true; restore_settings; rm -rf "$passkeys" "$plain" "$private_dir"; restore_keyboard' EXIT
+trap 'stop_drive; end_hosts || true; [[ ! -s $feeder ]] || kill "$(< "$feeder")" 2> /dev/null || true; declare -F stop_shots > /dev/null && stop_shots; kill "${servers[@]}" 2>/dev/null || true; restore_settings; rm -rf "$passkeys" "$plain" "$private_dir"; restore_keyboard' EXIT
 for port in 7979 7980; do
   for _ in $(seq 1 60); do
     curl -fsS "http://127.0.0.1:$port/v1/health" > /dev/null 2>&1 && break
@@ -306,10 +309,8 @@ for run in first second third shots workspaces kit kit-rtl; do
     ("$other/sail" _pty-host --local > "$out/other-host.log" 2>&1 &)
     perl -e 'alarm shift; exec @ARGV' 30 bash -c 'until "$1" session ls --socket "$2" > /dev/null 2>&1; do :; done' _ "$other/sail" "$socket"
     "$other/sail" session new held --socket "$socket" --command cat > /dev/null
-    mkfifo -m 600 "$private_dir/attach-input"
-    tail -f /dev/null > "$private_dir/attach-input" &
-    feeder=$!
-    (script -q /dev/null "$other/sail" session attach held --socket "$socket" < "$private_dir/attach-input" > /dev/null 2>&1 &)
+    (sh -c 'echo $$ > "$1" && exec tail -f /dev/null' _ "$feeder" \
+      | script -q /dev/null "$other/sail" session attach held --socket "$socket" > /dev/null 2>&1 &)
     perl -e 'alarm shift; exec @ARGV' 30 bash -c 'until "$1" session ls --socket "$2" --json | grep -Eq "\"attached\" *: *1"; do :; done' _ "$other/sail" "$socket"
   fi
   if [[ $run == shots || $run == workspaces ]]; then
