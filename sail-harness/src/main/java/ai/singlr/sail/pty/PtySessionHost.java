@@ -157,10 +157,10 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   /**
-   * Where the host listens beside its unix socket, if anywhere, the clock its tickets and its
-   * deadline for connections that present none run on, who resolves a ticket's credential, and what
-   * a ticket request hears when it listens nowhere else ({@code closed}). {@link #NONE} is a box
-   * that listens nowhere else.
+   * Where the host listens beside its unix socket, if anywhere, the clock its tickets, its deadline
+   * for connections that present none and its stop run on, who resolves a ticket's credential, and
+   * what a ticket request hears when it listens nowhere else ({@code closed}). {@link #NONE} is a
+   * box that listens nowhere else.
    */
   public record Network(
       Optional<InetSocketAddress> tcp,
@@ -267,6 +267,12 @@ public final class PtySessionHost implements AutoCloseable {
   /** Whether a pass asking each files connection's workspace again is under way. */
   private final java.util.concurrent.atomic.AtomicBoolean rechecking =
       new java.util.concurrent.atomic.AtomicBoolean();
+
+  /**
+   * How long a {@link #stop} waits at most, every wait in it drawing from one deadline taken as it
+   * begins, so the host exits inside its unit's {@code TimeoutStopSec} of 15 s with 3 s to spare.
+   */
+  static final Duration STOPPING = Duration.ofSeconds(12);
 
   /** How long a files connection being ended may take to hear why before it is closed anyway. */
   static final Duration TOLD = Duration.ofSeconds(5);
@@ -2272,25 +2278,39 @@ public final class PtySessionHost implements AutoCloseable {
    * Stops for good: every live session ends with {@code reason} in its stream and on its ending,
    * all of them at once, so the last one is told within the same seconds as the first. This is the
    * loud path a {@code systemctl stop} takes; a restart takes {@link #handoff()}.
+   *
+   * <p>Every wait draws from one deadline, {@link #STOPPING} (12 s) after the stop begins: files
+   * connections are told within its first second; sessions' endings get what is left (a child
+   * ignoring its hangup and {@code SIGTERM} is killed 6 s into its ending, whose record may then
+   * wait 5 s on a busy database, and its senders 1 s); the upload removals get what is left after
+   * them, never more than {@link UploadCleanup#CLOSING}. An ending or a removal still running at
+   * the deadline is said in the log and left.
    */
   public void stop(String reason) {
-    endSessions(reason);
-    uploads.close();
+    var deadline = network.clock().getAsLong() + STOPPING.toNanos();
+    endSessions(reason, deadline);
+    uploads.close(Duration.ofNanos(deadline - network.clock().getAsLong()));
   }
 
-  private synchronized void endSessions(String reason) {
+  private synchronized void endSessions(String reason, long deadline) {
     endEveryFiles();
     closeServer();
     var endings =
         sessions.values().stream()
             .map(session -> Thread.ofVirtual().start(() -> session.end(reason)))
             .toList();
+    var left = 0;
     for (var ending : endings) {
       try {
-        ending.join();
+        if (!ending.join(Duration.ofNanos(deadline - network.clock().getAsLong()))) {
+          left++;
+        }
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
       }
+    }
+    if (left > 0) {
+      log("stop-left", "-", "-", left + " session ending(s) still running at the stop's deadline");
     }
     sessions.clear();
   }
@@ -2303,7 +2323,7 @@ public final class PtySessionHost implements AutoCloseable {
   public void close() {
     closeSessions();
     endConnections();
-    uploads.close();
+    uploads.close(UploadCleanup.CLOSING);
   }
 
   private synchronized void closeSessions() {

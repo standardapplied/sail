@@ -42,6 +42,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -49,8 +50,10 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -67,6 +70,7 @@ class PtySessionHostTest {
   private final LinkedBlockingQueue<String> typed = new LinkedBlockingQueue<>();
 
   private volatile CountDownLatch startGate;
+  private volatile Runnable whenEnded = () -> {};
   private final CountDownLatch startGated = new CountDownLatch(1);
 
   private final Set<String> revoked = ConcurrentHashMap.newKeySet();
@@ -231,6 +235,7 @@ class PtySessionHostTest {
               @Override
               public void sessionEnded(PtySession.Origin origin, String reason) {
                 events.add("ended:" + origin.name());
+                whenEnded.run();
               }
 
               @Override
@@ -297,27 +302,95 @@ class PtySessionHostTest {
    */
   @Test
   void aStopLeavesAnUploadRemovalThatNeverReturnsOnceItsDeadlinePasses() throws Exception {
-    endingLeavesAnUploadRemovalThatNeverReturns(ending -> ending.stop("stopping"));
+    endingLeavesUploadRemovalsThatNeverReturn(
+        1,
+        UploadCleanup.CLOSING.plusSeconds(5),
+        ending -> ending.stop("stopping"),
+        "1 removal(s) or sweep(s) still running after 5000 ms");
   }
 
   /** So does a close. */
   @Test
   void aCloseLeavesAnUploadRemovalThatNeverReturnsOnceItsDeadlinePasses() throws Exception {
-    endingLeavesAnUploadRemovalThatNeverReturns(PtySessionHost::close);
+    endingLeavesUploadRemovalsThatNeverReturn(
+        1,
+        UploadCleanup.CLOSING.plusSeconds(5),
+        PtySessionHost::close,
+        "1 removal(s) or sweep(s) still running after 5000 ms");
   }
 
-  private void endingLeavesAnUploadRemovalThatNeverReturns(Consumer<PtySessionHost> ending)
+  /**
+   * Every wait of a stop draws from one deadline, 12 s after it begins: its sessions' endings took
+   * 11 s of it (a session ignoring its hangup and {@code SIGTERM}, 6 s, then its record waiting 5 s
+   * on a busy database), so the upload removals, two of them hung, get the second left between
+   * them, not {@link UploadCleanup#CLOSING} each.
+   */
+  @Test
+  void aStopDrawsEveryWaitFromOneDeadline() throws Exception {
+    var ended = new AtomicInteger();
+    whenEnded =
+        () -> {
+          if (ended.incrementAndGet() == 2) {
+            now.addAndGet(Duration.ofSeconds(11).toNanos());
+          }
+        };
+    network = clocked(now::get);
+
+    endingLeavesUploadRemovalsThatNeverReturn(
+        2,
+        UploadCleanup.CLOSING,
+        ending -> ending.stop("stopping"),
+        "2 removal(s) or sweep(s) still running after 1000 ms");
+  }
+
+  /**
+   * A stop waits for no session's ending past its deadline: one whose record never lands, its
+   * database never answering, is said in the log and left. Each read of this host's clock comes a
+   * whole budget after the one before it once the stop begins.
+   */
+  @Test
+  void aStopLeavesASessionEndingThatNeverReturnsOnceItsDeadlinePasses() throws Exception {
+    var never = new CountDownLatch(1);
+    whenEnded = () -> awaitQuietly(never);
+    var late = new AtomicLong();
+    network = clocked(() -> now.addAndGet(late.get()));
+    try (var log = new LogCapture()) {
+      startHost();
+      try (var channel = connect()) {
+        create(channel, "mine", "");
+      }
+      late.set(PtySessionHost.STOPPING.toNanos());
+
+      assertTimeoutPreemptively(
+          Duration.ofSeconds(5), () -> host.stop("stopping"), "it ends in time");
+      assertTrue(log.awaitLine("stop-left").contains("1 session ending(s) still running"));
+    } finally {
+      never.countDown();
+    }
+  }
+
+  private static PtySessionHost.Network clocked(LongSupplier clock) {
+    return new PtySessionHost.Network(
+        Optional.empty(), clock, PtyIdentity.Holders.NONE, PtySessionHost.Network.NONE.closed());
+  }
+
+  private static void awaitQuietly(CountDownLatch latch) {
+    try {
+      latch.await();
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
+  private void endingLeavesUploadRemovalsThatNeverReturn(
+      int sessions, Duration within, Consumer<PtySessionHost> ending, String left)
       throws Exception {
     var never = new CountDownLatch(1);
     var copies =
         new UploadCopy(
             command -> {
               if (command.contains(UploadCleanup.REMOVE)) {
-                try {
-                  never.await();
-                } catch (InterruptedException e) {
-                  Thread.currentThread().interrupt();
-                }
+                awaitQuietly(never);
               }
               throw new IOException("no container here");
             },
@@ -328,15 +401,13 @@ class PtySessionHostTest {
           PtySessionHost.Handoff.NONE,
           new PtyUploads(copies, origin -> PtyUploads.Target.own("box"), PtyUploads.SYSTEM_TIMER));
       try (var channel = connect()) {
-        PtyWire.write(
-            channel,
-            new PtyMessage.Create("mine", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
-        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(channel));
+        for (var i = 1; i <= sessions; i++) {
+          create(channel, "mine-" + i, "");
+        }
       }
 
-      assertTimeoutPreemptively(
-          UploadCleanup.CLOSING.plusSeconds(5), () -> ending.accept(host), "it ends in time");
-      assertTrue(log.awaitLine("upload-cleanup-left").contains("1 removal(s) or sweep(s)"));
+      assertTimeoutPreemptively(within, () -> ending.accept(host), "it ends in time");
+      assertTrue(log.awaitLine("upload-cleanup-left").contains(left));
     } finally {
       never.countDown();
     }

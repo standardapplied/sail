@@ -61,9 +61,9 @@ final class UploadCleanup {
       """;
 
   /**
-   * How long closing waits for the removals and sweeps still running, all of them together: each
-   * may take an {@code incus exec} up to its place's patience, and a host stopping has 15 s in all
-   * ({@code TimeoutStopSec}) for its sessions to end first.
+   * The most closing waits for the removals and sweeps still running, all of them together: each
+   * may take an {@code incus exec} up to its place's patience, and a host stopping gives them only
+   * what is left of its own deadline ({@link PtySessionHost#STOPPING}).
    */
   static final Duration CLOSING = Duration.ofSeconds(5);
 
@@ -160,12 +160,14 @@ final class UploadCleanup {
   }
 
   /**
-   * Waits for every removal and sweep still running, until {@link #CLOSING} has passed, so none
-   * outlives the host that started it; one still running then is said and left, its directory swept
-   * at the container's next session. An interrupt stops the waiting and is kept.
+   * Waits for every removal and sweep still running, all of them together, for {@code within} but
+   * never more than {@link #CLOSING}, so none outlives the host that started it; one still running
+   * then is said and left, its directory swept at the container's next session. An interrupt stops
+   * the waiting and is kept.
    */
-  void close() {
-    var deadline = System.nanoTime() + CLOSING.toNanos();
+  void close(Duration within) {
+    var wait = within.compareTo(CLOSING) < 0 ? within : CLOSING;
+    var deadline = System.nanoTime() + wait.toNanos();
     for (var thread : List.copyOf(running)) {
       try {
         thread.join(Duration.ofNanos(Math.max(0, deadline - System.nanoTime())));
@@ -181,8 +183,8 @@ final class UploadCleanup {
           "-",
           running.size()
               + " removal(s) or sweep(s) still running after "
-              + CLOSING.toSeconds()
-              + " s; swept at the next session");
+              + Math.max(0, wait.toMillis())
+              + " ms; swept at the next session");
     }
   }
 }

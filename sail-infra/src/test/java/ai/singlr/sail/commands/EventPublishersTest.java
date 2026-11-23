@@ -56,7 +56,10 @@ import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncRpcServer;
 import ai.singlr.sail.sync.SyncTransitionSink;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -223,23 +226,7 @@ class EventPublishersTest {
       var message =
           Acting.as(
               "uday", () -> new MessageStore(main.db).append("shared", "uday", "hello", null));
-      var sync =
-          new SyncOperations(
-              box.db,
-              "node-host",
-              tempDir,
-              () -> NODE,
-              target ->
-                  PipedSyncChannel.to(
-                      SyncRpcServer.over(
-                          main.db,
-                          "main",
-                          null,
-                          new Actor(ME, Role.MEMBER, Actor.Lane.SYNC),
-                          () -> SyncServerCommand.roster(main.db, Actor.main()),
-                          SyncTransitionSink.NONE,
-                          "1.0.0")),
-              SyncOperations.PLAIN_NOTICES);
+      var sync = nodeSyncWith(main);
       try (var owner = new SailOperations().useControlPlane(box.db, tempDir, sync)) {
         Acting.by(
             new Actor(ME, Role.MEMBER, Actor.Lane.CLI), () -> owner.sync(new SyncRequest(null)));
@@ -256,6 +243,60 @@ class EventPublishersTest {
       assertEquals("hello", announced.data().get("preview"));
       assertTrue(landed.stream().allMatch(event -> MEMBER_ME.equals(event.publisher())));
     }
+  }
+
+  /**
+   * A sync closed with its server announces nothing more: a round after the close neither publishes
+   * on the publisher it closed nor opens another, and says nothing of what it no longer announces.
+   */
+  @Test
+  void aClosedSyncAnnouncesNothingMore() throws Exception {
+    serve(NODE, "member");
+    try (var main = new SyncBox("main")) {
+      new FdeStore(main.db).add(ME, null, null, "member");
+      new FdeStore(main.db).add("uday", null, null, "admin");
+      seedSpec(main, "shared", ME);
+      Acting.as("uday", () -> new MessageStore(main.db).append("shared", "uday", "hello", null));
+      var sync = nodeSyncWith(main);
+      var cli = new Actor(ME, Role.MEMBER, Actor.Lane.CLI);
+      Acting.by(cli, () -> sync.sync(new SyncRequest(null)));
+      assertEquals(2, landedSoFar().size(), "the round before the close announced");
+      sync.close();
+      Acting.as("uday", () -> new MessageStore(main.db).append("shared", "uday", "again", null));
+      var announced = bus.publishedCount();
+
+      var original = System.err;
+      var said = new ByteArrayOutputStream();
+      System.setErr(new PrintStream(said, true, StandardCharsets.UTF_8));
+      try {
+        Acting.by(cli, () -> sync.sync(new SyncRequest(null)));
+      } finally {
+        System.setErr(original);
+      }
+
+      assertEquals(announced, bus.publishedCount(), "nothing more was announced");
+      assertEquals("", said.toString(StandardCharsets.UTF_8));
+    }
+  }
+
+  /** A node's sync with {@code main}, announcing what it pulls to this box's API. */
+  private SyncOperations nodeSyncWith(SyncBox main) {
+    return new SyncOperations(
+        box.db,
+        "node-host",
+        tempDir,
+        () -> NODE,
+        target ->
+            PipedSyncChannel.to(
+                SyncRpcServer.over(
+                    main.db,
+                    "main",
+                    null,
+                    new Actor(ME, Role.MEMBER, Actor.Lane.SYNC),
+                    () -> SyncServerCommand.roster(main.db, Actor.main()),
+                    SyncTransitionSink.NONE,
+                    "1.0.0")),
+        SyncOperations.PLAIN_NOTICES);
   }
 
   @Test

@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -106,6 +107,30 @@ class SlackClientTest {
 
     assertEquals(1, calls.size());
     assertTrue(err.contains("channel_not_found"));
+  }
+
+  /**
+   * A post on a closed client is dropped at its first failure, without a retry or a word: the
+   * reactor's drain thread may still hand its last event to a client its subscription has closed.
+   */
+  @Test
+  void aPostOnAClosedClientIsDroppedWithoutARetryOrAWord() {
+    var calls = new ArrayList<String>();
+    var sleeps = new ArrayList<Long>();
+    var client =
+        new SlackClient(
+            body -> {
+              calls.add(body);
+              throw new IOException("closed");
+            },
+            sleeps::add);
+    client.close();
+
+    var err = captureStderr(() -> assertNull(client.post(post())));
+
+    assertEquals(1, calls.size());
+    assertEquals(List.of(), sleeps);
+    assertEquals("", err);
   }
 
   @Test

@@ -47,6 +47,7 @@ public final class SlackClient implements SlackPoster {
 
   private final HttpPoster http;
   private final LongConsumer sleeper;
+  private volatile boolean closed;
 
   public SlackClient(String token) {
     this(
@@ -79,6 +80,9 @@ public final class SlackClient implements SlackPoster {
                 + MAX_ATTEMPTS
                 + ")");
       } catch (Exception e) {
+        if (closed) {
+          return null;
+        }
         warn(
             "could not reach Slack posting to "
                 + post.channel()
@@ -98,11 +102,13 @@ public final class SlackClient implements SlackPoster {
   }
 
   /**
-   * Closes the client every post shares, dropping a post still under way: Slack may trickle its
-   * answer past any timeout, and a post is best effort.
+   * Closes the client every post shares, dropping a post still under way, or one begun after, at
+   * its first failure, without a retry or a word: Slack may trickle its answer past any timeout,
+   * and a post is best effort.
    */
   @Override
   public void close() {
+    closed = true;
     http.close();
   }
 

@@ -162,7 +162,7 @@ public final class AgentWatchCommand implements Runnable {
     return Remedy.sail("agent report", RunStore.RunRow.addressed(name, runId, specId));
   }
 
-  Guardrails guardrails() {
+  private Guardrails guardrails() {
     return Guardrails.of(maxDuration, maxIdle, action);
   }
 

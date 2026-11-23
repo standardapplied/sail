@@ -17,6 +17,7 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.QuietNarrator;
 import ai.singlr.sail.api.RunWatch;
+import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.Notifications;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ClosesWhatItOpens;
@@ -358,7 +359,7 @@ class AgentWatchCommandTest {
               command.supervise(
                   never,
                   new Notifications("https://ntfy.sh/acme", List.of("guardrail_triggered")),
-                  command.guardrails(),
+                  Guardrails.of(null, null, "stop"),
                   Instant.parse(STARTED_AT)));
 
       ClosesWhatItOpens.assertClosed("a watch whose run never ran", before);

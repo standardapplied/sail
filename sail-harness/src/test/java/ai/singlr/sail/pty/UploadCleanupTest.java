@@ -71,7 +71,7 @@ class UploadCleanupTest {
     var session = directory(ID);
 
     cleanup.remove("acme", ID, null);
-    cleanup.close();
+    cleanup.close(UploadCleanup.CLOSING);
 
     assertEquals(List.of(UploadCleanup.REMOVE), List.copyOf(c.finished));
     assertFalse(Files.exists(session, LinkOption.NOFOLLOW_LINKS));

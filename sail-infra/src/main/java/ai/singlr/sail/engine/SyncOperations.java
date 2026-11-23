@@ -116,6 +116,7 @@ public final class SyncOperations implements AutoCloseable {
   private final AuthorizedKeysSync gatewayKeys;
   private final Object publishing = new Object();
   private SailEventPublisher publisher;
+  private boolean closed;
 
   /** A round whose notices print as {@link #PLAIN_NOTICES} prints them. */
   public SyncOperations(
@@ -1034,9 +1035,22 @@ public final class SyncOperations implements AutoCloseable {
     }
   }
 
+  /**
+   * Publishes {@code event} on the one publisher to the local API every round shares, opened by the
+   * first to publish, under its lock, so no publish runs on a publisher {@link #close} closed and
+   * none opens another after it: a round's events after the close are dropped.
+   */
   private void publishQuietly(Event event) {
     try {
-      publisher().publish(event);
+      synchronized (publishing) {
+        if (publisher == null) {
+          if (closed) {
+            return;
+          }
+          publisher = SailEventPublisher.localDefault();
+        }
+        publisher.publish(event);
+      }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     } catch (Exception ignored) {
@@ -1047,25 +1061,16 @@ public final class SyncOperations implements AutoCloseable {
     }
   }
 
-  /** The one publisher to the local API every round shares, opened by the first to publish. */
-  private SailEventPublisher publisher() throws IOException {
-    synchronized (publishing) {
-      if (publisher == null) {
-        publisher = SailEventPublisher.localDefault();
-      }
-      return publisher;
-    }
-  }
-
   /**
-   * Closes the publisher a round opened to the local API, if one did. It takes only the publisher's
-   * own lock, never this object's, which a round holds while it runs; a publish still under way is
-   * answered first.
+   * Closes the publisher a round opened to the local API, if one did, for good. It takes only the
+   * publisher's own lock, never this object's, which a round holds while it runs, so it waits for a
+   * publish under way (its request's timeout at most), never for a whole round.
    */
   @Override
   public void close() {
     SailEventPublisher open;
     synchronized (publishing) {
+      closed = true;
       open = publisher;
       publisher = null;
     }

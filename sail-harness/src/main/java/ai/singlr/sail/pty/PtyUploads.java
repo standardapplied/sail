@@ -128,10 +128,11 @@ final class PtyUploads {
   }
 
   /**
-   * Waits for the removals and sweeps of sessions' uploads still running ({@link UploadCleanup}).
+   * Waits for the removals and sweeps of sessions' uploads still running ({@link UploadCleanup}),
+   * {@code within} at most.
    */
-  void close() {
-    cleanup.close();
+  void close(Duration within) {
+    cleanup.close(within);
   }
 
   /** Where a file pasted into {@code origin}'s session goes. */
