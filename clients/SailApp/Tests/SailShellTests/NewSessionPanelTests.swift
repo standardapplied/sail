@@ -26,6 +26,7 @@ import Testing
     }
 
     static let claude = AgentStart(harness: "claude-code", display: "Claude Code", mode: "default")
+    static let storedLine = "Stored Claude Code login “default”. Removed the key from the clipboard."
 
     /// harbor listed for uday (dock and pier his, quay ana's), what starts in each answered as
     /// `agents` recorded, `width` wide in `look`.
@@ -428,9 +429,9 @@ import Testing
     }
 
     /// No login stored, the harness signing in inside: the server's sentence, Store a Claude Code
-    /// Login with the kinds beside it, the sign-in-inside line, and Start and Sign In There, which
-    /// starts it with `inside`. Store a Login says how to make the kind the server names first, in
-    /// place. No command shows, ever.
+    /// Login with how to make the kind it stores under it (the API key: the long-lived token's how
+    /// runs a command, and is never said), the sign-in-inside line, and Start and Sign In There,
+    /// which starts it with `inside`. No command shows, ever.
     @Test func noLoginStoredOffersBothActions() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-dock-no-login"])
         defer { window.orderOut(nil) }
@@ -438,14 +439,13 @@ import Testing
         let words = panel.view.words
         #expect(panel.view.rows.first?.line.stringValue == "no login stored")
         #expect(words.contains("No Claude Code login stored for uday, so a Claude Code session cannot start in dock."))
-        #expect(words.contains("Store a Claude Code Login") && words.contains("API key or long-lived token"))
-        #expect(words.contains("Or start it and sign in inside Claude Code: that login stays in dock only."))
-        #expect(panel.view.primary?.title == "Start and Sign In There" && panel.view.primary?.isEnabled == true && panel.view.modes == nil)
-        try Self.press(panel.view.storeLogin)
-        #expect(panel.view.words.contains("Create an API key in the Claude Console.") && !panel.view.words.contains("API key or long-lived token"))
-        for said in [words, panel.view.words] {
-            #expect(!said.contains { $0.contains("agent login") || $0.contains("setup-token") || $0.contains("sail ") }, "a command shows: \(said)")
+        let order = try ["Store a Claude Code Login", "Create an API key in the Claude Console.", "Or start it and sign in inside Claude Code: that login stays in dock only."].map { said in
+            try #require(words.firstIndex(of: said), "\(said) is not said: \(words)")
         }
+        #expect(order == order.sorted(), "\(words)")
+        #expect(!words.contains { $0.contains("long-lived token") }, "the kind the app does not store is offered")
+        #expect(panel.view.primary?.title == "Start and Sign In There" && panel.view.primary?.isEnabled == true && panel.view.modes == nil)
+        #expect(!words.contains { $0.contains("agent login") || $0.contains("setup-token") || $0.contains("sail ") }, "a command shows: \(words)")
         var started: [AgentStart] = []
         view.onStart = { start, _, _ in started.append(start) }
         try Self.press(try Self.returnKey(), in: window)
@@ -652,8 +652,8 @@ import Testing
 
     // MARK: Look, reach and calm
 
-    /// Every scene the panel draws: each harness of dock chosen, no login, not installed, stopped,
-    /// someone else's and an owner gone.
+    /// Every scene the panel draws: each harness of dock chosen, a login just stored, no login, not
+    /// installed, stopped, someone else's and an owner gone.
     static let scenes: [(golden: String, row: String, choices: Int)] = [
         ("workspace-agents-dock", "dock", 3), ("workspace-agents-dock-no-login", "dock", 1), ("workspace-agents-dock-not-installed", "dock", 2),
         ("workspace-agents-pier", "pier", 1), ("workspace-agents-quay", "quay", 0), ("workspace-agents-pier-owner-gone", "pier", 0),
@@ -674,9 +674,10 @@ import Testing
                 if at > 0 { try press(try down(), in: window) }
                 try check("\(scene.golden), row \(at + 1) chosen", panel, window)
             }
-            if scene.golden == "workspace-agents-dock-no-login" {
-                try Self.press(panel.view.storeLogin)
-                try check("\(scene.golden), how to store one", panel, window)
+            if scene.golden == "workspace-agents-dock" {
+                let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: try Exchange(scene.golden).body))
+                panel.show(.agents(agents), memory: ModeMemory(), stored: Self.storedLine, harness: "claude-code")
+                try check("\(scene.golden), a login just stored", panel, window)
             }
         }
     }
@@ -732,14 +733,16 @@ import Testing
     }
 
     /// Calm, in both looks: the panel's one accent fill is its primary (Start, on or off), none
-    /// where nothing starts; its accent lines the chosen row's bar and Store a Login's underline;
+    /// where nothing starts; its accent lines the chosen row's bar, Store a Login's underline and,
+    /// once a login is stored, Start's halo;
     /// no tint, no grey; and the page under it draws no more than before it opened.
     @Test(arguments: [Look.light, .dark])
     func thePanelIsCalm(_ look: Look) async throws {
         var faults: [String] = []
         try await Self.eachScene(width: 1000, look: look) { scene, panel, _ in
             let count = CalmTests.Count(marks(in: panel.view))
-            let primary = panel.view.primary == nil ? 0 : 1, lines = (panel.view.rows.contains(where: \.chosen) ? 1 : 0) + (panel.view.storeLogin == nil ? 0 : 1)
+            let primary = panel.view.primary == nil ? 0 : 1, halo = panel.view.primary?.holdsKeys == true ? 1 : 0
+            let lines = (panel.view.rows.contains(where: \.chosen) ? 1 : 0) + (panel.view.storeLogin == nil ? 0 : 1) + halo
             if count.fill != primary || count.line != lines || count.tint != 0 || count.neutral != 0 || count.error != 0 {
                 faults.append("\(scene): \(count), wanted \(primary) fills and \(lines) lines")
             }

@@ -466,7 +466,10 @@ final class ClaudeCode implements Harness {
             "token",
             "CLAUDE_CODE_OAUTH_TOKEN",
             "long-lived token",
-            Remedy.of("Run claude setup-token on a machine where Claude Code is signed in"),
+            Remedy.of(
+                "Run ",
+                Remedy.elsewhere("claude", "setup-token"),
+                " on a machine where Claude Code is signed in"),
             TOKEN_LIFETIME),
         new LoginKind(
             "api-key",

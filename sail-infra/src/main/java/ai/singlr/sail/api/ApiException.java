@@ -33,8 +33,12 @@ public final class ApiException extends RuntimeException implements Remedied {
   }
 
   public ApiException(ErrorCode errorCode, String message, Remedy remedy, Throwable cause) {
-    super(message, cause);
-    failure = new Result.Failure<>(errorCode, message, remedy, null, cause);
+    this(new Result.Failure<>(errorCode, message, remedy, null, cause));
+  }
+
+  private ApiException(Result.Failure<?> failure) {
+    super(failure.errorMessage(), failure.cause());
+    this.failure = failure;
   }
 
   /**
@@ -47,10 +51,12 @@ public final class ApiException extends RuntimeException implements Remedied {
         : new ApiException(errorCode, failure.getMessage(), Remedy.NONE, failure);
   }
 
-  /** The refusal {@code failure} answers with: its code, its reason and its remedy as they are. */
+  /**
+   * The refusal {@code failure} answers with: its code, its reason, its remedy and the fields it
+   * names, as they are.
+   */
   public static ApiException of(Result.Failure<?> failure) {
-    return new ApiException(
-        failure.errorCode(), failure.errorMessage(), failure.remedy(), failure.cause());
+    return new ApiException(failure);
   }
 
   public int status() {
