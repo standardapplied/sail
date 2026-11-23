@@ -307,11 +307,11 @@ public interface Harness {
   RunUsage usage(String report);
 
   /**
-   * What came of the login of kind {@code given} a run gave this harness, as {@code report} (as
-   * {@link #usage} takes it) says: refused, limited or overridden, each read from the harness's own
-   * last word on it; empty for anything else, which is an ordinary end, nothing guessed.
+   * What came of the stored login a run gave this harness, as {@code report} (as {@link #usage}
+   * takes it) says: refused, limited or never seen, each read from the harness's own last word on
+   * it; empty for anything else, which is an ordinary end, nothing guessed.
    */
-  Optional<LoginOutcome> loginOutcome(String report, LoginKind given);
+  Optional<LoginOutcome> loginOutcome(String report);
 
   /**
    * The keys this harness reads from its environment, in the order a person is shown them, the

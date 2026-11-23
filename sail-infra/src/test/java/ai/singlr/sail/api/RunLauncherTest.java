@@ -409,7 +409,8 @@ class RunLauncherTest {
         List.of(
             "spec: Claude Code refused node's login 'default' (GLM Coding Plan key),"
                 + " so its run stopped. Create a GLM Coding Plan API key at"
-                + " z.ai/manage-apikey/apikey-list, then sail agent login claude-code"
+                + " z.ai/manage-apikey/apikey-list, or a Team Plan's at"
+                + " z.ai/manage-apikey/coding-plan/team/my-plan, then sail agent login claude-code"
                 + " --kind glm. Then build it again: sail spec dispatch -p proj --spec spec"
                 + " --restart."),
         told);

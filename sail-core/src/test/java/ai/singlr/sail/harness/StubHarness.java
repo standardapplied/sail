@@ -104,7 +104,7 @@ public record StubHarness(String yamlName, HookFile hooks, OptionalInt loginTunn
   }
 
   @Override
-  public Optional<LoginOutcome> loginOutcome(String report, LoginKind given) {
+  public Optional<LoginOutcome> loginOutcome(String report) {
     return Optional.empty();
   }
 
@@ -116,7 +116,8 @@ public record StubHarness(String yamlName, HookFile hooks, OptionalInt loginTunn
             yamlName.toUpperCase().replace('-', '_') + "_KEY",
             "key",
             Remedy.NONE,
-            new LinkedHashMap<>()));
+            new LinkedHashMap<>(),
+            true));
   }
 
   @Override

@@ -24,19 +24,16 @@ final class ClaudeCode implements Harness {
 
   private static final String BINARY = "claude";
   private static final String RESULT = "\"type\":\"result\"";
-  private static final String INIT = "\"subtype\":\"init\"";
-
-  /**
-   * The {@code apiKeySource} values Claude Code declares ({@code ANTHROPIC_API_KEY}, the configured
-   * {@code apiKeyHelper}, a {@code /login managed key}; 2.1.322's own schema): each but the one a
-   * kind's own variable is names another credential than the one Sail gave. Any other value, {@code
-   * none} and names never seen among them, says nothing.
-   */
-  private static final List<String> SOURCES =
-      List.of("ANTHROPIC_API_KEY", "apiKeyHelper", "/login managed key");
 
   /** Where Claude Code sends its requests, which every stored kind fixes to its own service. */
   private static final String BASE_URL = "ANTHROPIC_BASE_URL";
+
+  /**
+   * A unix socket Claude Code sends every request through instead of its address, whatever host
+   * that names (2.1.327, measured: undocumented, and read from the environment alone, never from a
+   * settings file): every stored kind sets it empty, which Claude Code takes as unset.
+   */
+  private static final String UNIX_SOCKET = "ANTHROPIC_UNIX_SOCKET";
 
   /**
    * Set, Claude Code takes its address, provider and credential from its environment alone and
@@ -356,7 +353,7 @@ final class ClaudeCode implements Harness {
 
   @Override
   public List<String> reportMarkers() {
-    return List.of(RESULT, INIT);
+    return List.of(RESULT);
   }
 
   /**
@@ -377,53 +374,32 @@ final class ClaudeCode implements Harness {
   }
 
   /**
-   * The last {@code result}, when it is an error, decides first: a 401 is a refusal, of the login
-   * or, when the last {@code init} line names another credential's source ({@link #OTHER_SOURCES}),
-   * of that credential, which the login never was; "Not logged in" is no login delivered at all
-   * (only a harness given no credential, or an empty one, prints it: 2.1.322, recorded); "You've
-   * hit your … limit" is a limit, with the time it resets. Otherwise the last {@code init} line
-   * naming a source that is another credential for the kind it was given ({@link #OTHER_SOURCES})
-   * is an override.
+   * The last {@code result}, when it is an error: a 401 is a refusal of the login; "Not logged in"
+   * is no login delivered at all (only a harness given no credential, or an empty one, prints it:
+   * 2.1.322, recorded); "You've hit your … limit" is a limit, with the time it resets. No other
+   * credential is ever used in the login's place: under {@link #HOST_MANAGED} no settings file's
+   * {@code apiKeyHelper} or key, a user's, a project's or a managed one, no key kept by {@code
+   * /login} and no signed-in subscription outranks the kind's own variable, and its {@code init}
+   * line names that variable, or {@code none} for a GLM key (2.1.327, measured).
    */
   @Override
-  public Optional<LoginOutcome> loginOutcome(String report, LoginKind given) {
-    var other = otherSource(report, given);
+  public Optional<LoginOutcome> loginOutcome(String report) {
     var result = RunUsage.last(report, RESULT, line -> "result".equals(line.get("type"))).line();
-    if (result != null && Boolean.TRUE.equals(result.get("is_error"))) {
-      var said = result.get("result") instanceof String text ? text.strip() : "";
-      var limit = LIMIT.matcher(said);
-      if (Long.valueOf(401).equals(RunUsage.count(result, "api_error_status"))) {
-        return Optional.of(
-            other
-                .<LoginOutcome>map(LoginOutcome.RefusedOther::new)
-                .orElseGet(LoginOutcome.Refused::new));
-      }
-      if (said.startsWith("Not logged in")) {
-        return Optional.of(new LoginOutcome.Undelivered());
-      }
-      if (limit.matches()) {
-        return Optional.of(new LoginOutcome.Limited(LoginOutcome.resetTime(limit.group(1))));
-      }
+    if (result == null || !Boolean.TRUE.equals(result.get("is_error"))) {
+      return Optional.empty();
     }
-    return other.map(LoginOutcome.Overridden::new);
-  }
-
-  /**
-   * The source the last {@code init} line names, when it is another credential for {@code given}.
-   */
-  private static Optional<String> otherSource(String report, LoginKind given) {
-    var init =
-        RunUsage.last(
-                report,
-                INIT,
-                line -> "system".equals(line.get("type")) && "init".equals(line.get("subtype")))
-            .line();
-    return init != null
-            && init.get("apiKeySource") instanceof String source
-            && SOURCES.contains(source)
-            && !source.equals(given.variable())
-        ? Optional.of(source)
-        : Optional.empty();
+    var said = result.get("result") instanceof String text ? text.strip() : "";
+    var limit = LIMIT.matcher(said);
+    if (Long.valueOf(401).equals(RunUsage.count(result, "api_error_status"))) {
+      return Optional.of(new LoginOutcome.Refused());
+    }
+    if (said.startsWith("Not logged in")) {
+      return Optional.of(new LoginOutcome.Undelivered());
+    }
+    if (limit.matches()) {
+      return Optional.of(new LoginOutcome.Limited(LoginOutcome.resetTime(limit.group(1))));
+    }
+    return Optional.empty();
   }
 
   private static boolean reports(Map<String, Object> line) {
@@ -479,7 +455,12 @@ final class ClaudeCode implements Harness {
    * A Console API key, read from {@code ANTHROPIC_API_KEY} and sent to the Anthropic API; or a GLM
    * Coding Plan key, read from {@code ANTHROPIC_AUTH_TOKEN} and sent to Z.AI's Anthropic endpoint,
    * which maps Claude Code's models to its own unless told otherwise (docs.z.ai, Claude Code). Each
-   * outranks a sign-in made with {@code /login}, the subscription's, which Sail never holds.
+   * outranks a sign-in made with {@code /login}, the subscription's, which Sail never holds. A GLM
+   * run's dollars are not Z.AI's: Claude Code prices every run at Anthropic's rates. {@code
+   * API_TIMEOUT_MS}, which Z.AI's own setup script sets to 3000000, is not fixed: that page names
+   * only the token and the address as what to set, and the timeout bounds only the wait for a
+   * response's headers, never a streaming answer, 10 minutes unless the container sets its own
+   * (code.claude.com/docs/en/env-vars).
    */
   @Override
   public List<LoginKind> loginKinds() {
@@ -489,41 +470,62 @@ final class ClaudeCode implements Harness {
             "ANTHROPIC_API_KEY",
             "API key",
             "Create an API key in the Claude Console",
-            "https://api.anthropic.com"),
+            "https://api.anthropic.com",
+            true),
         key(
             "glm",
             "ANTHROPIC_AUTH_TOKEN",
             "GLM Coding Plan key",
-            "Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list",
-            "https://api.z.ai/api/anthropic"));
+            "Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, or a Team"
+                + " Plan's at z.ai/manage-apikey/coding-plan/team/my-plan",
+            "https://api.z.ai/api/anthropic",
+            false));
   }
 
   /** A kind whose key Claude Code sends to {@code address} alone ({@link #HOST_MANAGED}). */
   private static LoginKind key(
-      String kind, String variable, String noun, String howToMake, String address) {
+      String kind, String variable, String noun, String howToMake, String address, boolean priced) {
     var fixed = new LinkedHashMap<String, String>();
     fixed.put(BASE_URL, address);
+    fixed.put(UNIX_SOCKET, "");
     fixed.put(HOST_MANAGED, "1");
-    return new LoginKind(kind, variable, noun, Remedy.of(howToMake), fixed);
+    return new LoginKind(kind, variable, noun, Remedy.of(howToMake), fixed, priced);
   }
 
   /**
-   * Its kinds' variables, the gateway token outranking the API key, and {@code
-   * CLAUDE_CODE_OAUTH_TOKEN}, a subscription's token a container may export. Claude Code takes an
-   * empty variable as unset.
+   * Its kinds' variables, the gateway token outranking the API key, {@code
+   * CLAUDE_CODE_OAUTH_TOKEN}, a subscription's token a container may export, the credentials a host
+   * hands it by file descriptor, and {@code ANTHROPIC_CUSTOM_HEADERS}, whose header replaces the
+   * key's own (2.1.327, measured: a key by descriptor is sent beside a GLM key, and an {@code
+   * x-api-key} header in place of the stored one). Claude Code takes an empty variable as unset.
    */
   @Override
   public List<String> loginVariables() {
-    return List.of("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN");
+    return List.of(
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
+        "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+        "CLAUDE_CODE_GATEWAY_TOKEN_FILE_DESCRIPTOR",
+        "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR",
+        "ANTHROPIC_CUSTOM_HEADERS");
   }
 
   /**
-   * The Bedrock, Vertex and Foundry switches: set, Claude Code sends its requests to that cloud on
-   * the container's own account, whatever login it holds; empty, it is off.
+   * The switches of every cloud it reaches Claude through: set, Claude Code sends its requests to
+   * that cloud on the container's own account, whatever login it holds (Mantle and Claude on Google
+   * Cloud to whatever address the container names, measured); empty, it is off.
    */
   @Override
   public List<String> credentialSwitches() {
-    return List.of("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY");
+    return List.of(
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_FOUNDRY",
+        "CLAUDE_CODE_USE_MANTLE",
+        "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+        "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD");
   }
 
   @Override

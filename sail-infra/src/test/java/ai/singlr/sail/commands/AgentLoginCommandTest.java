@@ -279,6 +279,51 @@ class AgentLoginCommandTest {
         new FdeStore(db).logins().list(new FdeStore(db).byHandle("uday").orElseThrow().id()));
   }
 
+  /**
+   * L1 at the CLI's door: the deleted kind is refused naming the kinds that exist, and nothing is
+   * stored, read from stdin or not.
+   */
+  @Test
+  void theDeletedTokenKindIsRefusedNamingTheKindsThatExistAndNothingIsStored() {
+    var refused = sail("fake-token-value", "login", "claude-code", "--kind", "token");
+
+    assertEquals(1, refused.exit());
+    assertTrue(
+        refused
+            .err()
+            .contains("Claude Code takes no login of kind 'token'; it takes api-key, glm."),
+        refused.err());
+    assertEquals(
+        List.of(),
+        new FdeStore(db).logins().list(new FdeStore(db).byHandle("uday").orElseThrow().id()));
+  }
+
+  /**
+   * Under {@code --json} a refusal of {@code login}, {@code use} and {@code remove} is JSON in the
+   * API's error envelope, its code in it, and nothing but that is printed.
+   */
+  @Test
+  void aRefusalOfEachChangeUnderJsonIsTheApisErrorEnvelopeWithItsCode() {
+    var kind = sail("fake-token-value", "login", "claude-code", "--kind", "token", "--json");
+    var use = sail("", "login", "use", "claude-code", "missing", "--json");
+    var remove = sail("", "login", "remove", "claude-code", "default", "--fde", "ana", "--json");
+
+    assertEquals("invalid_request", error(kind).get("code"), kind.out());
+    assertEquals(
+        "Claude Code takes no login of kind 'token'; it takes api-key, glm.",
+        error(kind).get("message"));
+    assertEquals("not_found", error(use).get("code"), use.out());
+    assertEquals("forbidden_admin_only", error(remove).get("code"), remove.out());
+    for (var ran : List.of(kind, use, remove)) {
+      assertEquals(1, ran.exit(), ran.out());
+      assertEquals("", ran.err(), "nothing but the JSON");
+    }
+  }
+
+  private static Map<?, ?> error(SailCli.Ran ran) {
+    return (Map<?, ?>) YamlUtil.parseMap(ran.out()).get("error");
+  }
+
   @Test
   void stdinIsReadWholeItsOneTrailingNewlineDroppedAndMoreThanALoginHoldsRefused()
       throws Exception {

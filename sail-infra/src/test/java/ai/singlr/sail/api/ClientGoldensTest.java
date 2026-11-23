@@ -1311,11 +1311,7 @@ class ClientGoldensTest {
                   new RunStore.Launched(
                       null, null, null, new RunStore.RunLogin("default", "api-key"), null)));
       var launched = runs.findById(run.id()).orElseThrow();
-      Stream.of(
-              new LoginOutcome.Refused(),
-              new LoginOutcome.RefusedOther("apiKeyHelper"),
-              new LoginOutcome.Limited("15:00 UTC"),
-              new LoginOutcome.Overridden("ANTHROPIC_API_KEY"))
+      Stream.of(new LoginOutcome.Refused(), new LoginOutcome.Limited("15:00 UTC"))
           .map(outcome -> new RunReport(RunUsage.NONE, outcome))
           .forEach(
               report ->

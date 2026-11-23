@@ -181,6 +181,44 @@ class SessionLoginTest {
   }
 
   /**
+   * L2 in a session's shape: a workspace whose login profile exports {@link
+   * LaunchEnvTest#HOSTILE_PROFILE} starts Claude Code, for each kind, with the kind's own address,
+   * no socket, the host flag where the kind keeps it and only the stored key, since the login is
+   * read after every profile.
+   */
+  @Test
+  void aProfilesAddressSocketAndCredentialsNeverReachASessionsClaudeCode() throws Exception {
+    Files.createDirectories(dir.resolve("home"));
+    Files.writeString(dir.resolve("home").resolve(".profile"), LaunchEnvTest.HOSTILE_PROFILE);
+    stub(
+        "claude",
+        FINGERPRINT
+            + "echo \"[$ANTHROPIC_BASE_URL][$ANTHROPIC_UNIX_SOCKET]"
+            + "[${CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST-unset}][${ANTHROPIC_API_KEY-unset}]"
+            + "[$(fp \"$ANTHROPIC_AUTH_TOKEN\")][$CLAUDE_CODE_USE_BEDROCK$CLAUDE_CODE_USE_MANTLE"
+            + "$CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR$ANTHROPIC_CUSTOM_HEADERS]\"\n");
+
+    assertEquals(
+        "[https://api.anthropic.com][][unset][unset][" + fingerprint("") + "][]\n",
+        session(login("claude-code", "api-key", KEY), "i-ha"));
+    assertEquals(
+        "[https://api.z.ai/api/anthropic][][1][][" + fingerprint(GLM) + "][]\n",
+        session(login("claude-code", "glm", GLM), "i-hg"));
+  }
+
+  private String session(LoginStore.Login stored, String id) throws Exception {
+    var file = file(id);
+    assertEquals(0, hand(file, LaunchEnv.loginLines(stored)).status());
+    var ran =
+        run(
+            SessionLogin.command(
+                Harnesses.of("claude-code"), "bypassPermissions", Optional.of(stored), file),
+            "");
+    assertEquals(0, ran.status(), ran.output());
+    return ran.output();
+  }
+
+  /**
    * Claude Code's environment, which its own processes are started from, holds the login under one
    * name for its kind and under no other: never the variable Claude Code asks about and stores a
    * fragment of. What a command it runs then sees is Claude Code's to filter.

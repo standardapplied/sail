@@ -86,7 +86,7 @@ public final class RunReports {
               if (!write.test(report)) {
                 return false;
               }
-              said.set(say(runs, run, report, true, done));
+              said.set(say(run, report, true, done));
               return true;
             });
     published(run, report, said.get());
@@ -97,16 +97,15 @@ public final class RunReports {
    * Says what a live member's turn, {@code report}, said of its login: as a finish would, except
    * that the member's run goes on, so the sentence says nothing of it stopping.
    */
-  public void heardLive(RunStore runs, RunStore.RunRow run, RunReport report) {
-    published(run, report, say(runs, run, report, false, false));
+  public void heardLive(RunStore.RunRow run, RunReport report) {
+    published(run, report, say(run, report, false, false));
   }
 
   /** Says it in the room, best-effort; the sentence, or null when there is nothing to say. */
-  private String say(
-      RunStore runs, RunStore.RunRow run, RunReport report, boolean ended, boolean done) {
+  private String say(RunStore.RunRow run, RunReport report, boolean ended, boolean done) {
     var outcome = report == null ? Optional.<LoginOutcome>empty() : report.outcome();
     var kind = outcome.isEmpty() ? Optional.<LoginKind>empty() : kindOf(run);
-    if (kind.isEmpty() || saidBefore(runs, run, outcome.get())) {
+    if (kind.isEmpty()) {
       return null;
     }
     var said = sentence(run, kind.get(), outcome.get(), ended, done);
@@ -120,16 +119,6 @@ public final class RunReports {
       System.err.println("  [api] Warning: could not tell run " + run.id() + "'s room: " + e);
     }
     return said;
-  }
-
-  /** Whether an earlier run of the spec recorded this same override: it was said then. */
-  private static boolean saidBefore(RunStore runs, RunStore.RunRow run, LoginOutcome outcome) {
-    return outcome instanceof LoginOutcome.Overridden overridden
-        && runs.listForSpec(run.specId()).stream()
-            .anyMatch(
-                other ->
-                    !other.id().equals(run.id())
-                        && overridden.source().equals(other.loginOverridden()));
   }
 
   private void published(RunStore.RunRow run, RunReport report, String said) {
@@ -179,21 +168,6 @@ public final class RunReports {
               + (ended && commits(run) && Strings.isNotBlank(run.branch())
                   ? "; what it committed stays on branch " + run.branch() + "."
                   : ".");
-      case LoginOutcome.RefusedOther other ->
-          harness.displayName()
-              + " refused the credential from "
-              + other.source()
-              + stopped
-              + "; it never used "
-              + login
-              + ", which its container's own settings outrank.";
-      case LoginOutcome.Overridden overridden ->
-          harness.displayName()
-              + " ran on a credential from "
-              + overridden.source()
-              + ", not on "
-              + login
-              + ": its container's own settings outrank the login Sail gave it.";
       case LoginOutcome.Undelivered undelivered ->
           harness.displayName()
               + " saw no login, though Sail gave it "
@@ -206,9 +180,7 @@ public final class RunReports {
   static String outcome(LoginOutcome outcome) {
     return switch (outcome) {
       case LoginOutcome.Refused refused -> "refused";
-      case LoginOutcome.RefusedOther other -> "refused_other";
       case LoginOutcome.Limited limited -> "limited";
-      case LoginOutcome.Overridden overridden -> "overridden";
       case LoginOutcome.Undelivered undelivered -> "undelivered";
     };
   }

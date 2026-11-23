@@ -464,9 +464,16 @@ Every spec has a room. Agents post progress there, read it before deciding, and 
 
 A run of your spec starts its harness with a key you stored, never one made by hand in the
 container. A stored login is a key its service issues for programs: a Claude Console API key, a
-GLM Coding Plan key (Claude Code sends it to Z.AI), or an OpenAI API key. Store one once; it is
-read from stdin and never shown again, and it is sent only to its own service, whatever the
-container's environment or the harness's settings say:
+GLM Coding Plan key (Claude Code sends it to Z.AI; a run on it reports its tokens, not dollars), or
+an OpenAI API key. Store one once; it is read from stdin and never shown again, and it is sent to
+its own service whatever the container's environment and the harness's user and project settings
+say. Some ways remain for the container to send it elsewhere, and the draft spec
+`sail-a-stored-login-never-enters-the-container` owns them: in either harness, a proxy with a CA
+file that the container's profile exports reads the key; Claude Code's managed settings, or a
+settings file naming a proxy and a CA, redirect an interactive API-key session; Codex's
+`/etc/codex/managed_config.toml` or `/etc/codex/requirements.toml`, or a `model_catalog_url` under
+`[model_providers.sail]` in its `config.toml`, sends the key elsewhere; and anything running in the
+container can read it from the harness's environment.
 
 ```bash
 sudo sail agent login claude-code                   # paste a Console API key: stored as 'default', the default
@@ -481,8 +488,8 @@ sudo sail agent login remove claude-code default
 On the host it is `sudo`, as you; from a thin client run the same `sail agent login` without
 `sudo`. A spec run whose person stored no login for its harness is refused before anything
 starts, saying how to make one. A run whose harness refused your login (expired, revoked,
-wrong), ran out of its account's quota, or used another credential is said so in the spec's
-room, with the command that replaces it. An admin lists or removes another person's logins
+wrong) or ran out of its account's quota is said so in the spec's room, with the command that
+replaces it. An admin lists or removes another person's logins
 with `--fde <handle>`; nobody, an admin included, can read a value back. A subscription (Claude
 Pro or Max, a ChatGPT plan) is never stored: sign in inside the harness's own session in your
 workspace (Claude Code's `/login`; Codex's "Sign in with Device Code", once device code login is

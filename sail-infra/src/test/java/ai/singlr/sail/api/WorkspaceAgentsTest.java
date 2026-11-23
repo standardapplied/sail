@@ -263,7 +263,9 @@ class WorkspaceAgentsTest {
                 List.of(
                     Map.of(
                         "text",
-                        "Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list")))),
+                        "Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, or a"
+                            + " Team Plan's at"
+                            + " z.ai/manage-apikey/coding-plan/team/my-plan")))),
         claude.get("kinds"),
         "the kinds in the order a person is shown them, an API key first, each a key whose how is"
             + " words");

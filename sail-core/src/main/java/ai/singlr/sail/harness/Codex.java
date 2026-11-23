@@ -263,7 +263,7 @@ final class Codex implements Harness {
    * turn.failed}; this is where its end is recorded (codex-cli 0.163.0).
    */
   @Override
-  public Optional<LoginOutcome> loginOutcome(String report, LoginKind given) {
+  public Optional<LoginOutcome> loginOutcome(String report) {
     var context = RunUsage.last(report, TURN_CONTEXT, Codex::isTurnContext).line();
     var turn = context == null ? null : RunUsage.map(context, "payload").get("turn_id");
     var done =
@@ -320,7 +320,8 @@ final class Codex implements Harness {
             "CODEX_API_KEY",
             "API key",
             Remedy.of("Create an API key at platform.openai.com/api-keys"),
-            new LinkedHashMap<>()));
+            new LinkedHashMap<>(),
+            true));
   }
 
   /**

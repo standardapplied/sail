@@ -17,10 +17,9 @@ import java.util.regex.Pattern;
 
 /**
  * What came of the login a run gave its harness, as the harness's own report says ({@link
- * Harness#loginOutcome}): refused, limited by its account's quota, passed over for another
- * credential, or never seen at all. A report that says none of these has no outcome, and nothing is
- * guessed from it. Nothing a harness printed is carried: a reset time is Sail's own rendering of
- * the time it parsed, and a source is one of the names its harness declares.
+ * Harness#loginOutcome}): refused, limited by its account's quota, or never seen at all. A report
+ * that says none of these has no outcome, and nothing is guessed from it. Nothing a harness printed
+ * is carried: a reset time is Sail's own rendering of the time it parsed.
  */
 public sealed interface LoginOutcome {
 
@@ -28,19 +27,10 @@ public sealed interface LoginOutcome {
   record Refused() implements LoginOutcome {}
 
   /**
-   * The harness refused the credential it took from {@code source}, one of the sources it declares,
-   * not the login it was given, which it never used.
-   */
-  record RefusedOther(String source) implements LoginOutcome {}
-
-  /**
    * The login's account ran out of quota; {@code resets} is when, as Sail renders the time its
    * harness gave ({@link #resetTime}), or null when it gave none Sail could parse.
    */
   record Limited(String resets) implements LoginOutcome {}
-
-  /** The harness took its credential from {@code source}, not from the login it was given. */
-  record Overridden(String source) implements LoginOutcome {}
 
   /**
    * The harness saw no login at all, though Sail gave it one: Sail's delivery failed, and the login

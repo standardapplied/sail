@@ -166,43 +166,16 @@ class RunReportsTest {
   }
 
   /**
-   * Round 4, item 8: a 401 on a credential its harness took from another source it declares names
-   * that credential, says the stored login was never used, gives no command to replace that login,
-   * and holds nothing, since storing a login would not mend it.
-   */
-  @Test
-  void aRefusedCredentialOfAnotherSourceIsNamedAndTheStoredLoginIsNotToldToBeReplaced() {
-    var run = run("auth", "feat/auth", new RunStore.RunLogin("default", "glm"), "review");
-
-    assertTrue(finished(reporting(new LoginOutcome.RefusedOther("apiKeyHelper")), run));
-
-    assertEquals(
-        List.of(
-            "auth: Claude Code refused the credential from apiKeyHelper, so its run"
-                + " stopped; it never used eng's login 'default' (GLM Coding Plan key),"
-                + " which its container's own settings outrank."),
-        told);
-    assertFalse(told.getFirst().contains("sail agent login"), "no replace command");
-    assertEquals(
-        List.of("refused_other"), published.stream().map(e -> e.data().get("outcome")).toList());
-    var recorded = runs.findById(run.id()).orElseThrow();
-    assertFalse(recorded.stoppedForLogin(), "not the stored login's refusal: nothing held");
-    assertEquals("apiKeyHelper", recorded.loginOverridden());
-  }
-
-  /**
    * Round 4, item 4: the event names each outcome by a constant written out, never by its class;
    * one its harness never saw has a name too, though it is never published.
    */
   @Test
   void eachOutcomeHasTheNameItsEventCarries() {
     assertEquals(
-        List.of("refused", "refused_other", "limited", "overridden", "undelivered"),
+        List.of("refused", "limited", "undelivered"),
         List.of(
             RunReports.outcome(new LoginOutcome.Refused()),
-            RunReports.outcome(new LoginOutcome.RefusedOther("apiKeyHelper")),
             RunReports.outcome(new LoginOutcome.Limited(null)),
-            RunReports.outcome(new LoginOutcome.Overridden("apiKeyHelper")),
             RunReports.outcome(new LoginOutcome.Undelivered())));
   }
 
@@ -287,14 +260,13 @@ class RunReportsTest {
 
     var throwing =
         new RunReports(
-            read -> new RunReport(RunUsage.NONE, new LoginOutcome.Overridden("apiKeyHelper")),
+            read -> new RunReport(RunUsage.NONE, new LoginOutcome.Limited(null)),
             (spec, body) -> {
               throw new IllegalStateException("database is locked");
             },
             published::add);
     assertTrue(finished(throwing, run("auth", "b", new RunStore.RunLogin("default", "glm"))));
-    assertEquals(
-        List.of("overridden"), published.stream().map(e -> e.data().get("outcome")).toList());
+    assertEquals(List.of("limited"), published.stream().map(e -> e.data().get("outcome")).toList());
   }
 
   /** M3: a login its harness never saw is the operator's to hear: no room line, no event. */
@@ -321,26 +293,5 @@ class RunReportsTest {
             + " itself was never tried.\n",
         log.toString(StandardCharsets.UTF_8));
     assertFalse(runs.findById(run.id()).orElseThrow().stoppedForLogin(), "an ordinary failure");
-  }
-
-  /** m6: an override is said once a spec; another source is said again. */
-  @Test
-  void anOverrideIsSaidOnceASpecUntilItsSourceChanges() {
-    var token = new RunStore.RunLogin("default", "glm");
-    var helper = reporting(new LoginOutcome.Overridden("apiKeyHelper"));
-
-    finished(helper, run("auth", "b", token));
-    finished(helper, run("auth", "b", token));
-    finished(reporting(new LoginOutcome.Overridden("ANTHROPIC_API_KEY")), run("auth", "b", token));
-
-    assertEquals(
-        List.of(
-            "auth: Claude Code ran on a credential from apiKeyHelper, not on eng's"
-                + " login 'default' (GLM Coding Plan key): its container's own settings"
-                + " outrank the login Sail gave it.",
-            "auth: Claude Code ran on a credential from ANTHROPIC_API_KEY, not on"
-                + " eng's login 'default' (GLM Coding Plan key): its container's own"
-                + " settings outrank the login Sail gave it."),
-        told);
   }
 }

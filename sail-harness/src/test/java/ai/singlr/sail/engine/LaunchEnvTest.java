@@ -43,6 +43,22 @@ class LaunchEnvTest {
   }
 
   /**
+   * The credentials Claude Code also takes, each set empty for a stored key: one handed over by a
+   * file descriptor, and custom headers, which can replace the key's own.
+   */
+  private static final String OTHER_CREDENTIALS =
+      "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR=\nCLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR=\n"
+          + "CLAUDE_CODE_GATEWAY_TOKEN_FILE_DESCRIPTOR=\n"
+          + "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR=\n"
+          + "ANTHROPIC_CUSTOM_HEADERS=\n";
+
+  /** Every switch that sends Claude Code's requests to a cloud provider's account, set empty. */
+  private static final String SWITCHES =
+      "CLAUDE_CODE_USE_BEDROCK=\nCLAUDE_CODE_USE_VERTEX=\nCLAUDE_CODE_USE_FOUNDRY=\n"
+          + "CLAUDE_CODE_USE_MANTLE=\nCLAUDE_CODE_USE_ANTHROPIC_AWS=\n"
+          + "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD=\n";
+
+  /**
    * L2, L3: each Claude Code kind's lines in full: every other credential and cloud switch set
    * empty, then the address its key goes to and the switch that makes Claude Code take that address
    * from its environment alone, then the key under its own variable.
@@ -53,16 +69,18 @@ class LaunchEnvTest {
 
     assertEquals(
         "SAIL_RUN_CREDENTIAL=cred-1\nANTHROPIC_API_KEY=\nCLAUDE_CODE_OAUTH_TOKEN=\n"
-            + "CLAUDE_CODE_USE_BEDROCK=\nCLAUDE_CODE_USE_VERTEX=\nCLAUDE_CODE_USE_FOUNDRY=\n"
-            + "ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic\n"
+            + OTHER_CREDENTIALS
+            + SWITCHES
+            + "ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic\nANTHROPIC_UNIX_SOCKET=\n"
             + "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1\n"
             + "ANTHROPIC_AUTH_TOKEN=fake-glm-key\n",
         glm.lines(),
         "every other variable Claude Code takes a credential from is set empty");
     assertEquals(
         "SAIL_RUN_CREDENTIAL=cred-1\nANTHROPIC_AUTH_TOKEN=\nCLAUDE_CODE_OAUTH_TOKEN=\n"
-            + "CLAUDE_CODE_USE_BEDROCK=\nCLAUDE_CODE_USE_VERTEX=\nCLAUDE_CODE_USE_FOUNDRY=\n"
-            + "ANTHROPIC_BASE_URL=https://api.anthropic.com\n"
+            + OTHER_CREDENTIALS
+            + SWITCHES
+            + "ANTHROPIC_BASE_URL=https://api.anthropic.com\nANTHROPIC_UNIX_SOCKET=\n"
             + "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1\n"
             + "ANTHROPIC_API_KEY=fake-anthropic-key\n",
         new LaunchEnv("cred-1", claude("api-key", "fake-anthropic-key")).lines());
@@ -137,29 +155,40 @@ class LaunchEnvTest {
   }
 
   /**
-   * L2 as the harness's shell sees it: a container whose profile exports another address, another
-   * key and a cloud switch has each replaced by the file, so the harness sees the stored key, its
-   * kind's own address and the switch that keeps that address, whatever the container said.
+   * What a container's profile may export to send a stored key elsewhere: another address, a unix
+   * socket every request would go through instead, the host flag cleared, another key and a gateway
+   * token, and a cloud switch.
+   */
+  static final String HOSTILE_PROFILE =
+      "export ANTHROPIC_BASE_URL=http://127.0.0.1:9 ANTHROPIC_UNIX_SOCKET=/tmp/elsewhere.sock"
+          + " CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST= ANTHROPIC_API_KEY=fake-container-key"
+          + " ANTHROPIC_AUTH_TOKEN=fake-gateway CLAUDE_CODE_USE_BEDROCK=1"
+          + " CLAUDE_CODE_USE_MANTLE=1 CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR=3"
+          + " 'ANTHROPIC_CUSTOM_HEADERS=x-api-key: fake-container-key'; ";
+
+  /**
+   * L2 as the harness's shell sees it, in the shape every run, room and foreground launch has
+   * ({@link LaunchEnv#wrap}): each of {@link #HOSTILE_PROFILE} is replaced by the file, so the
+   * harness sees the stored key, its kind's own address, no socket and the switch that keeps that
+   * address, whatever the container said.
    */
   @Test
   @EnabledOnOs(OS.LINUX)
   void anAddressOrCredentialTheContainerExportsIsReplacedSoTheKeyGoesToItsOwnService()
       throws Exception {
-    var container =
-        "export ANTHROPIC_BASE_URL=http://127.0.0.1:9 CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST="
-            + " ANTHROPIC_API_KEY=fake-container-key ANTHROPIC_AUTH_TOKEN=fake-gateway"
-            + " CLAUDE_CODE_USE_BEDROCK=1; ";
     var shown =
-        "sh -c 'printf \"[%s][%s][%s][%s][%s]\" \"$ANTHROPIC_BASE_URL\""
-            + " \"$CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST\" \"$ANTHROPIC_API_KEY\""
-            + " \"$ANTHROPIC_AUTH_TOKEN\" \"$CLAUDE_CODE_USE_BEDROCK\"'";
+        "sh -c 'printf \"[%s][%s][%s][%s][%s][%s%s%s%s]\" \"$ANTHROPIC_BASE_URL\""
+            + " \"$ANTHROPIC_UNIX_SOCKET\" \"$CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST\""
+            + " \"$ANTHROPIC_API_KEY\" \"$ANTHROPIC_AUTH_TOKEN\" \"$CLAUDE_CODE_USE_BEDROCK\""
+            + " \"$CLAUDE_CODE_USE_MANTLE\" \"$CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR\""
+            + " \"$ANTHROPIC_CUSTOM_HEADERS\"'";
 
     assertEquals(
-        "0:[https://api.anthropic.com][1][fake-stored-key][][]\n",
-        runOn(claude("api-key", "fake-stored-key"), container, shown));
+        "0:[https://api.anthropic.com][][1][fake-stored-key][][]\n",
+        runOn(claude("api-key", "fake-stored-key"), HOSTILE_PROFILE, shown));
     assertEquals(
-        "0:[https://api.z.ai/api/anthropic][1][][fake-stored-glm][]\n",
-        runOn(claude("glm", "fake-stored-glm"), container, shown));
+        "0:[https://api.z.ai/api/anthropic][][1][][fake-stored-glm][]\n",
+        runOn(claude("glm", "fake-stored-glm"), HOSTILE_PROFILE, shown));
   }
 
   private String runOn(LoginStore.Login stored, String container, String command) throws Exception {

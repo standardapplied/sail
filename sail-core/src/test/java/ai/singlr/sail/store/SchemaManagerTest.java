@@ -13,12 +13,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.LoginKind;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -466,6 +469,39 @@ class SchemaManagerTest {
     assertTrue(indexes.contains("idx_runs_project"));
     assertTrue(indexes.contains("idx_runs_spec"));
     assertTrue(indexes.contains("idx_room_messages_page"));
+  }
+
+  /**
+   * The kinds {@code runs.login_kind} takes are a literal of this schema version, and they are the
+   * kinds the harnesses declare: a kind added, renamed or removed fails here until the version is
+   * bumped with the literal, so no box made by an earlier build of this version refuses the runs a
+   * newer build records.
+   */
+  @Test
+  void theRunsLoginKindsAreTheKindsTheHarnessesDeclareSoANewKindBumpsTheVersion() {
+    new SchemaManager(db).migrate();
+    var runs =
+        db.queryOne(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'runs'",
+                row -> row.text(0))
+            .orElseThrow();
+    var check = Pattern.compile("login_kind TEXT CHECK \\(login_kind IN \\(([^)]*)\\)\\)");
+    var found = check.matcher(runs);
+    assertTrue(found.find(), runs);
+
+    assertEquals(
+        Harnesses.all().stream()
+            .flatMap(harness -> harness.loginKinds().stream())
+            .map(LoginKind::kind)
+            .distinct()
+            .sorted()
+            .toList(),
+        Arrays.stream(found.group(1).split(","))
+            .map(kind -> kind.strip().replace("'", ""))
+            .sorted()
+            .toList(),
+        "a kind added, renamed or removed changes runs.login_kind: bump"
+            + " SchemaManager.CURRENT_VERSION with the literal and say so in the change's entry");
   }
 
   @Test

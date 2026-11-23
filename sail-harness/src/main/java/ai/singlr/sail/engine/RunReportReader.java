@@ -80,12 +80,11 @@ public final class RunReportReader {
         return null;
       }
       var report = inFileOrder(marked);
+      var kind = harness.declaredKind(run.loginKind());
+      var usage = parsed(run, harness.usage(report));
       return new RunReport(
-          parsed(run, harness.usage(report)),
-          harness
-              .declaredKind(run.loginKind())
-              .flatMap(kind -> harness.loginOutcome(report, kind))
-              .orElse(null));
+          kind.map(given -> given.charged(usage)).orElse(usage),
+          kind.isEmpty() ? null : harness.loginOutcome(report).orElse(null));
     } catch (IOException | TimeoutException unanswered) {
       return null;
     } catch (InterruptedException interrupted) {

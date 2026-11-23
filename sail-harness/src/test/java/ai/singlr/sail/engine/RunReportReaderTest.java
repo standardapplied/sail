@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.LoginOutcome;
@@ -126,7 +127,6 @@ class RunReportReaderTest {
         null,
         null,
         login,
-        null,
         null);
   }
 
@@ -171,8 +171,7 @@ class RunReportReaderTest {
             "sh",
             LOG,
             "16",
-            "\"type\":\"result\"",
-            "\"subtype\":\"init\""),
+            "\"type\":\"result\""),
         asked.subList(asked.indexOf("LC_ALL=C") - 1, asked.size()));
     assertEquals(List.of(Duration.ofSeconds(10)), container.waited);
   }
@@ -290,6 +289,32 @@ class RunReportReaderTest {
         new RunReport(RunUsage.NONE, new LoginOutcome.Refused()),
         new RunReportReader(holding(resource("codex-refused-key.jsonl")))
             .read(run("codex", TRANSCRIPT, new RunStore.RunLogin("work", "api-key"))));
+  }
+
+  /**
+   * A GLM key's run keeps the tokens Claude Code reported and no dollars: Claude Code prices a run
+   * at Anthropic's rates, which are not what Z.AI charges. An API key's run keeps its dollars.
+   */
+  @Test
+  void aGlmRunsUsageHoldsItsTokensAndNoDollars() {
+    var reported = Harnesses.of("claude-code").usage(CLAUDE_LOG);
+    var reader = new RunReportReader(holding(CLAUDE_LOG));
+
+    var glm = reader.read(run("claude-code", null, new RunStore.RunLogin("default", "glm")));
+    var key = reader.read(run("claude-code", null, new RunStore.RunLogin("work", "api-key")));
+
+    assertTrue(reported.costUsd() > 0, reported.toString());
+    assertEquals(reported, key.usage());
+    assertEquals(
+        new RunUsage(
+            reported.model(),
+            reported.tokensIn(),
+            reported.tokensOut(),
+            reported.tokensCacheRead(),
+            reported.tokensCacheWrite(),
+            null,
+            reported.source()),
+        glm.usage());
   }
 
   /**

@@ -482,10 +482,12 @@ class HarnessGoldenTest {
         List.of(
             "api-key ANTHROPIC_API_KEY Create an API key in the Claude Console"
                 + " {ANTHROPIC_BASE_URL=https://api.anthropic.com,"
-                + " CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1}",
+                + " ANTHROPIC_UNIX_SOCKET=, CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1}",
             "glm ANTHROPIC_AUTH_TOKEN Create a GLM Coding Plan API key at"
-                + " z.ai/manage-apikey/apikey-list {ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic,"
-                + " CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1}"),
+                + " z.ai/manage-apikey/apikey-list, or a Team Plan's at"
+                + " z.ai/manage-apikey/coding-plan/team/my-plan"
+                + " {ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic,"
+                + " ANTHROPIC_UNIX_SOCKET=, CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1}"),
         described(CLAUDE_CODE),
         "each key fixes the address it is sent to, and makes Claude Code take it from its"
             + " environment alone");
@@ -494,7 +496,15 @@ class HarnessGoldenTest {
         described(CODEX),
         "Codex reads no address from its environment: its provider on the command line fixes it");
     assertEquals(
-        List.of("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"),
+        List.of(
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR",
+            "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+            "CLAUDE_CODE_GATEWAY_TOKEN_FILE_DESCRIPTOR",
+            "CLAUDE_CODE_WEBSOCKET_AUTH_FILE_DESCRIPTOR",
+            "ANTHROPIC_CUSTOM_HEADERS"),
         CLAUDE_CODE.loginVariables(),
         "every variable Claude Code takes a credential from, the gateway token outranking both");
     assertEquals(
@@ -502,7 +512,13 @@ class HarnessGoldenTest {
         CODEX.loginVariables(),
         "a container's own access token never outranks the stored key");
     assertEquals(
-        List.of("CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"),
+        List.of(
+            "CLAUDE_CODE_USE_BEDROCK",
+            "CLAUDE_CODE_USE_VERTEX",
+            "CLAUDE_CODE_USE_FOUNDRY",
+            "CLAUDE_CODE_USE_MANTLE",
+            "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+            "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD"),
         CLAUDE_CODE.credentialSwitches(),
         "each sends Claude Code to a cloud account, outranking any login");
     assertEquals(List.of(), CODEX.credentialSwitches());

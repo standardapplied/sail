@@ -8,7 +8,6 @@ package ai.singlr.sail.store;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
-import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.sync.SyncTransportException;
 import java.util.List;
 import java.util.Map;
@@ -488,17 +487,9 @@ public final class SchemaManager {
               usage_source TEXT
                   CHECK (usage_source IN ('result', 'transcript', 'none', 'unattributable')),
               login TEXT,
-              login_kind TEXT CHECK (login_kind IN (%s)),
-              dispatched_by TEXT,
-              login_overridden TEXT CHECK (login_overridden IN
-                  ('ANTHROPIC_API_KEY', 'apiKeyHelper', '/login managed key'))
-          )"""
-              .formatted(
-                  Harnesses.all().stream()
-                      .flatMap(harness -> harness.loginKinds().stream())
-                      .map(kind -> "'" + kind.kind() + "'")
-                      .distinct()
-                      .collect(Collectors.joining(", "))),
+              login_kind TEXT CHECK (login_kind IN ('api-key', 'glm')),
+              dispatched_by TEXT
+          )""",
           RUN_COUNTED,
           RUN_RECOUNTED_FROM,
           RUN_RECOUNTED_INTO,

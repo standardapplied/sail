@@ -213,13 +213,12 @@ public record Event(
 
     /**
      * What came of the stored login a run was given, in {@code data.outcome}, one of: {@code
-     * refused} (its harness refused the login), {@code refused_other} (its harness refused the
-     * credential of another source, which it ran on instead), {@code limited} (the login's account
-     * is out of quota) or {@code overridden} (its harness ran on another source's credential), each
-     * published once, by the write that recorded the run's report ({@link RunReports}). {@code
-     * data.login} and {@code data.login_kind} name the login, and {@code data.detail} is the
-     * sentence its spec's room was told. The values are {@code RunReports.outcome}; a login its
-     * harness never saw is said to the operator only, never published.
+     * refused} (its harness refused the login) or {@code limited} (the login's account is out of
+     * quota), each published once, by the write that recorded the run's report ({@link
+     * RunReports}). {@code data.login} and {@code data.login_kind} name the login, and {@code
+     * data.detail} is the sentence its spec's room was told. The values are {@code
+     * RunReports.outcome}; a login its harness never saw is said to the operator only, never
+     * published.
      */
     public static final String AGENT_LOGIN_OUTCOME = "agent_login_outcome";
 

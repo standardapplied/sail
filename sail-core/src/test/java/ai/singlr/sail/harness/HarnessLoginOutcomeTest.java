@@ -30,9 +30,6 @@ class HarnessLoginOutcomeTest {
 
   private static final Harness CLAUDE_CODE = Harnesses.of("claude-code");
   private static final Harness CODEX = Harnesses.of("codex");
-  private static final LoginKind GLM_KEY = CLAUDE_CODE.loginKind("glm");
-  private static final LoginKind ANTHROPIC_KEY = CLAUDE_CODE.loginKind("api-key");
-  private static final LoginKind CODEX_KEY = CODEX.loginKind("api-key");
 
   static final String CLAUDE_TOKEN_REFUSED = fixture("claude-code-refused-token.jsonl");
   static final String CLAUDE_KEY_REFUSED = fixture("claude-code-refused-key.jsonl");
@@ -79,129 +76,97 @@ class HarnessLoginOutcomeTest {
 
   static Stream<Object[]> outcomes() {
     return Stream.of(
-        new Object[] {CLAUDE_CODE, GLM_KEY, CLAUDE_TOKEN_REFUSED, new LoginOutcome.Refused()},
-        new Object[] {CLAUDE_CODE, ANTHROPIC_KEY, CLAUDE_KEY_REFUSED, new LoginOutcome.Refused()},
-        new Object[] {CLAUDE_CODE, GLM_KEY, CLAUDE_NOT_LOGGED_IN, new LoginOutcome.Undelivered()},
+        new Object[] {CLAUDE_CODE, CLAUDE_TOKEN_REFUSED, new LoginOutcome.Refused()},
+        new Object[] {CLAUDE_CODE, CLAUDE_KEY_REFUSED, new LoginOutcome.Refused()},
+        new Object[] {CLAUDE_CODE, CLAUDE_NOT_LOGGED_IN, new LoginOutcome.Undelivered()},
         new Object[] {
           CLAUDE_CODE,
-          GLM_KEY,
-          CLAUDE_HELPER_INIT + afterInit(CLAUDE_LOG),
-          new LoginOutcome.Overridden("apiKeyHelper")
-        },
-        new Object[] {
-          CLAUDE_CODE,
-          GLM_KEY,
           CLAUDE_HELPER_INIT + afterInit(CLAUDE_TOKEN_REFUSED),
-          new LoginOutcome.RefusedOther("apiKeyHelper")
+          new LoginOutcome.Refused()
         },
         new Object[] {
           CLAUDE_CODE,
-          GLM_KEY,
           withSource(CLAUDE_TOKEN_REFUSED, "/login managed key"),
-          new LoginOutcome.RefusedOther("/login managed key")
+          new LoginOutcome.Refused()
         },
         new Object[] {
           CLAUDE_CODE,
-          GLM_KEY,
-          withSource(CLAUDE_LOG, "/login managed key"),
-          new LoginOutcome.Overridden("/login managed key")
-        },
-        new Object[] {
-          CLAUDE_CODE,
-          ANTHROPIC_KEY,
-          withSource(CLAUDE_LOG, "apiKeyHelper"),
-          new LoginOutcome.Overridden("apiKeyHelper")
-        },
-        new Object[] {
-          CLAUDE_CODE,
-          GLM_KEY,
           CLAUDE_TOKEN_REFUSED.lines().findFirst().orElseThrow()
               + "\n"
               + claudeLimited("3pm (UTC)"),
           new LoginOutcome.Limited("15:00 UTC")
         },
         new Object[] {
-          CLAUDE_CODE,
-          GLM_KEY,
-          claudeLimited("Nov 16 at 9:30am"),
-          new LoginOutcome.Limited("11-16 09:30")
+          CLAUDE_CODE, claudeLimited("Nov 16 at 9:30am"), new LoginOutcome.Limited("11-16 09:30")
         },
-        new Object[] {CODEX, CODEX_KEY, CODEX_KEY_REFUSED, new LoginOutcome.Refused()},
+        new Object[] {CODEX, CODEX_KEY_REFUSED, new LoginOutcome.Refused()},
         new Object[] {
           CODEX,
-          CODEX_KEY,
           codexLimited("Nov 16th, 2026 3:04 PM"),
           new LoginOutcome.Limited("2026-11-16 15:04")
         },
-        new Object[] {
-          CODEX, CODEX_KEY, codexLimited("3:04 PM"), new LoginOutcome.Limited("15:04")
-        });
+        new Object[] {CODEX, codexLimited("3:04 PM"), new LoginOutcome.Limited("15:04")});
   }
 
   /** Each harness says it in its own report, and the lines holding a marker are all it needs. */
   @ParameterizedTest
   @MethodSource("outcomes")
   void eachHarnessSaysWhatCameOfTheLoginInItsOwnReport(
-      Harness harness, LoginKind given, String report, LoginOutcome expected) {
-    assertEquals(Optional.of(expected), harness.loginOutcome(report, given));
+      Harness harness, String report, LoginOutcome expected) {
+    assertEquals(Optional.of(expected), harness.loginOutcome(report));
     assertEquals(
         Optional.of(expected),
-        harness.loginOutcome(HarnessUsageTest.marked(harness, report), given),
+        harness.loginOutcome(HarnessUsageTest.marked(harness, report)),
         "the reader asks a container only for the lines holding a marker");
   }
 
   static Stream<Object[]> ordinary() {
     return Stream.of(
-        new Object[] {CLAUDE_CODE, GLM_KEY, CLAUDE_LOG},
-        new Object[] {CLAUDE_CODE, GLM_KEY, CLAUDE_TOKEN_REFUSED + CLAUDE_LOG},
-        new Object[] {CLAUDE_CODE, GLM_KEY, null},
-        new Object[] {CLAUDE_CODE, GLM_KEY, ""},
+        new Object[] {CLAUDE_CODE, CLAUDE_LOG},
+        new Object[] {CLAUDE_CODE, CLAUDE_TOKEN_REFUSED + CLAUDE_LOG},
+        new Object[] {CLAUDE_CODE, null},
+        new Object[] {CLAUDE_CODE, ""},
         new Object[] {
           CLAUDE_CODE,
-          GLM_KEY,
           "{\"type\":\"result\",\"is_error\":true,\"api_error_status\":500,"
               + "\"result\":\"API Error: 500 Internal server error\"}"
         },
         new Object[] {
           CLAUDE_CODE,
-          GLM_KEY,
           "{\"type\":\"result\",\"is_error\":false,\"result\":\"Not logged in yet, so it asked\"}"
         },
-        new Object[] {CLAUDE_CODE, ANTHROPIC_KEY, CLAUDE_LOG},
-        new Object[] {CLAUDE_CODE, GLM_KEY, withSource(CLAUDE_LOG, "CLAUDE_CODE_OAUTH_TOKEN")},
-        new Object[] {CLAUDE_CODE, GLM_KEY, withSource(CLAUDE_LOG, "oauth_token")},
+        new Object[] {CLAUDE_CODE, CLAUDE_LOG},
+        new Object[] {CLAUDE_CODE, CLAUDE_HELPER_INIT + afterInit(CLAUDE_LOG)},
+        new Object[] {CLAUDE_CODE, withSource(CLAUDE_LOG, "/login managed key")},
+        new Object[] {CLAUDE_CODE, withSource(CLAUDE_LOG, "apiKeyHelper")},
+        new Object[] {CLAUDE_CODE, withSource(CLAUDE_LOG, "CLAUDE_CODE_OAUTH_TOKEN")},
+        new Object[] {CLAUDE_CODE, withSource(CLAUDE_LOG, "oauth_token")},
+        new Object[] {CLAUDE_CODE, withSource(CLAUDE_LOG, "sk-ant-api03-AbCdEf0123456789xyz")},
+        new Object[] {CODEX, CODEX_ROLLOUT},
+        new Object[] {CODEX, null},
+        new Object[] {CODEX, CODEX_KEY_REFUSED + RESUMED_UNENDED},
+        new Object[] {CODEX, codexLimited("3:04 PM") + RESUMED_UNENDED},
         new Object[] {
-          CLAUDE_CODE, GLM_KEY, withSource(CLAUDE_LOG, "sk-ant-api03-AbCdEf0123456789xyz")
-        },
-        new Object[] {CODEX, CODEX_KEY, CODEX_ROLLOUT},
-        new Object[] {CODEX, CODEX_KEY, null},
-        new Object[] {CODEX, CODEX_KEY, CODEX_KEY_REFUSED + RESUMED_UNENDED},
-        new Object[] {CODEX, CODEX_KEY, codexLimited("3:04 PM") + RESUMED_UNENDED},
-        new Object[] {
-          CODEX,
-          CODEX_KEY,
-          CODEX_KEY_REFUSED.replace("\"http_status_code\":401", "\"http_status_code\":500")
-        },
-        new Object[] {
-          CODEX,
-          CODEX_KEY,
-          CODEX_KEY_REFUSED.replace("\"http_status_code\":401", "\"http_status_code\":403")
+          CODEX, CODEX_KEY_REFUSED.replace("\"http_status_code\":401", "\"http_status_code\":500")
         },
         new Object[] {
-          CODEX,
-          CODEX_KEY,
-          codexLimited("3:04 PM").replace("usage_limit_exceeded", "rate_limit_exceeded")
+          CODEX, CODEX_KEY_REFUSED.replace("\"http_status_code\":401", "\"http_status_code\":403")
+        },
+        new Object[] {
+          CODEX, codexLimited("3:04 PM").replace("usage_limit_exceeded", "rate_limit_exceeded")
         });
   }
 
   /**
    * RL7 and B1: what a harness did not say of this run's login is an ordinary end; nothing is
    * guessed, and an end an earlier run of a resumed Codex session wrote speaks for that run only.
+   * The source an {@code init} line names says nothing either: on a stored key Claude Code uses no
+   * credential but the kind's own (2.1.327, measured), so a refusal is the login's own.
    */
   @ParameterizedTest
   @MethodSource("ordinary")
-  void anythingElseIsAnOrdinaryEnd(Harness harness, LoginKind given, String report) {
-    assertEquals(Optional.empty(), harness.loginOutcome(report, given));
+  void anythingElseIsAnOrdinaryEnd(Harness harness, String report) {
+    assertEquals(Optional.empty(), harness.loginOutcome(report));
   }
 
   /**
@@ -214,28 +179,27 @@ class HarnessLoginOutcomeTest {
     assertEquals(
         Optional.of(new LoginOutcome.Refused()),
         CLAUDE_CODE.loginOutcome(
-            refusedResult.replace("\"is_error\":true", "\"is_error\":true,\"retryable\":{\"x\":1}"),
-            GLM_KEY));
+            refusedResult.replace(
+                "\"is_error\":true", "\"is_error\":true,\"retryable\":{\"x\":1}")));
     assertEquals(
         Optional.empty(),
         CLAUDE_CODE.loginOutcome(
-            refusedResult.replace("\"api_error_status\"", "\"apiErrorStatus\""), GLM_KEY));
+            refusedResult.replace("\"api_error_status\"", "\"apiErrorStatus\"")));
     assertEquals(
         Optional.empty(),
-        CLAUDE_CODE.loginOutcome(refusedResult.replace("\"is_error\":true,", ""), GLM_KEY));
+        CLAUDE_CODE.loginOutcome(refusedResult.replace("\"is_error\":true,", "")));
     assertEquals(
         Optional.of(new LoginOutcome.Refused()),
         CODEX.loginOutcome(
             CODEX_KEY_REFUSED.replace(
-                "\"http_status_code\":401", "\"http_status_code\":401,\"retry_after\":3"),
-            CODEX_KEY));
+                "\"http_status_code\":401", "\"http_status_code\":401,\"retry_after\":3")));
     assertEquals(
         Optional.empty(),
         CODEX.loginOutcome(
-            CODEX_KEY_REFUSED.replace("http_connection_failed", "http_request_failed"), CODEX_KEY));
+            CODEX_KEY_REFUSED.replace("http_connection_failed", "http_request_failed")));
     assertEquals(
         Optional.empty(),
-        CODEX.loginOutcome(CODEX_KEY_REFUSED.replace("\"turn_id\":", "\"turnId\":"), CODEX_KEY));
+        CODEX.loginOutcome(CODEX_KEY_REFUSED.replace("\"turn_id\":", "\"turnId\":")));
   }
 
   /**
@@ -259,11 +223,11 @@ class HarnessLoginOutcomeTest {
         }) {
       assertEquals(
           Optional.of(new LoginOutcome.Limited(null)),
-          CLAUDE_CODE.loginOutcome(claudeLimited(hostile), GLM_KEY),
+          CLAUDE_CODE.loginOutcome(claudeLimited(hostile)),
           hostile);
       assertEquals(
           Optional.of(new LoginOutcome.Limited(null)),
-          CODEX.loginOutcome(codexLimited(hostile), CODEX_KEY),
+          CODEX.loginOutcome(codexLimited(hostile)),
           hostile);
     }
     assertNull(LoginOutcome.resetTime(null));

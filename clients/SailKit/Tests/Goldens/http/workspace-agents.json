@@ -23,7 +23,7 @@
             {
               "how": [
                 {
-                  "text": "Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list"
+                  "text": "Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, or a Team Plan's at z.ai/manage-apikey/coding-plan/team/my-plan"
                 }
               ],
               "kind": "glm",
