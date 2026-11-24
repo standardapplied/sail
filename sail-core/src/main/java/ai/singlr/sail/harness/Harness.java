@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.harness;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -27,9 +28,10 @@ public interface Harness {
   /**
    * One headless launch: the task file the prompt is read from, whether every action is
    * auto-approved, an optional model and reasoning effort, the recorded conversation to resume
-   * ({@code null} for a fresh session) and whether the harness should stream its output as it runs.
-   * A background dispatch streams; the foreground paths parse the harness's final output and do
-   * not. A launch with no task file to read is refused.
+   * ({@code null} for a fresh session), whether the harness should stream its output as it runs,
+   * and the kind of the stored login its run starts with ({@code null} for its container's own). A
+   * background dispatch streams; the foreground paths parse the harness's final output and do not.
+   * A launch with no task file to read is refused.
    */
   record Launch(
       String taskFile,
@@ -37,7 +39,8 @@ public interface Harness {
       String model,
       String reasoningEffort,
       String resumeSessionId,
-      boolean stream) {
+      boolean stream,
+      LoginKind login) {
 
     private static final Pattern SAFE_SESSION_ID =
         Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
@@ -223,6 +226,13 @@ public interface Harness {
   }
 
   /**
+   * How a person signs in to this harness with their own subscription, in a session of it in their
+   * workspace: the harness's own flow, whose sign-in stays in that workspace and which Sail never
+   * holds.
+   */
+  Remedy signIn();
+
+  /**
    * Where, under the dev user's home, this harness keeps a login, or a part of one, that a person
    * made in its session: the files a workspace loses when it leaves its person.
    */
@@ -297,25 +307,18 @@ public interface Harness {
   RunUsage usage(String report);
 
   /**
-   * What came of the login of kind {@code given} a run gave this harness, as {@code report} (as
-   * {@link #usage} takes it) says: refused, limited or overridden, each read from the harness's own
-   * last word on it; empty for anything else, which is an ordinary end, nothing guessed.
+   * What came of the stored login a run gave this harness, as {@code report} (as {@link #usage}
+   * takes it) says: refused, limited or never seen, each read from the harness's own last word on
+   * it; empty for anything else, which is an ordinary end, nothing guessed.
    */
-  Optional<LoginOutcome> loginOutcome(String report, LoginKind given);
+  Optional<LoginOutcome> loginOutcome(String report);
 
   /**
-   * The static credentials this harness reads from its environment, the first its default kind. A
-   * spec run starts with one its person stored; a login the harness refreshes is never one.
+   * The keys this harness reads from its environment, in the order a person is shown them, the
+   * first its default kind. A spec run starts with one its person stored; a subscription's sign-in
+   * is never one ({@link #signIn}).
    */
   List<LoginKind> loginKinds();
-
-  /**
-   * Its {@link #loginKinds()} in the order a person is shown them: what an app lists and a remedy
-   * names first. The default kind stays the first of {@link #loginKinds()}.
-   */
-  default List<LoginKind> offeredKinds() {
-    return loginKinds();
-  }
 
   /**
    * Every variable this harness takes a credential from, its kinds' and any that outranks them: a
@@ -333,6 +336,24 @@ public interface Harness {
    */
   default List<String> credentialSwitches() {
     return List.of();
+  }
+
+  /**
+   * What a stored login of {@code kind} sets beside its own key, in order: every other variable
+   * this harness takes a credential from and every credential switch, empty, then the kind's fixed
+   * values, such as its address. Every launch shape sets them after every profile ({@code
+   * LaunchEnv.loginLines}); a session that cannot keep the kind's fixed values out of reach of the
+   * harness's settings files also sets them where those files cannot outrank them ({@link
+   * #interactiveLogin}).
+   */
+  default SequencedMap<String, String> pinned(LoginKind kind) {
+    var pinned = new LinkedHashMap<String, String>();
+    loginVariables().stream()
+        .filter(variable -> !variable.equals(kind.variable()))
+        .forEach(variable -> pinned.put(variable, ""));
+    credentialSwitches().forEach(variable -> pinned.put(variable, ""));
+    pinned.putAll(kind.fixed());
+    return Collections.unmodifiableSequencedMap(pinned);
   }
 
   /** The kind of login this harness declares as {@code kind}; empty for none, or a null kind. */

@@ -167,8 +167,7 @@ class RunReservationTest {
         sessionYield,
         RunReservation.Displaceable.NONE,
         new FdeStore(db),
-        RunLauncher.Room.NONE,
-        event -> {});
+        RunLauncher.Room.NONE);
   }
 
   private LaunchEnv reserve(RunReservation r) {
@@ -251,8 +250,7 @@ class RunReservationTest {
             sessionYield,
             RunReservation.Displaceable.NONE,
             fdes,
-            (spec, body) -> said.add(spec + ": " + body),
-            event -> {});
+            (spec, body) -> said.add(spec + ": " + body));
 
     assertThrows(ApiException.class, () -> reserve(r));
     assertThrows(ApiException.class, () -> reserve(r));
@@ -639,8 +637,7 @@ class RunReservationTest {
                     SessionYield.NONE,
                     RunReservation.Displaceable.NONE,
                     null,
-                    RunLauncher.Room.NONE,
-                    event -> {})
+                    RunLauncher.Room.NONE)
                 .releaseIfAbsent(RUN_ID, RunPlace.of("acme", null), AgentUnit.forRun(RUN_ID)));
   }
 
@@ -685,8 +682,7 @@ class RunReservationTest {
         sessionYield,
         displaceable,
         new FdeStore(db),
-        RunLauncher.Room.NONE,
-        event -> {});
+        RunLauncher.Room.NONE);
   }
 
   private LaunchEnv claim(RunReservation reservation, String role) {

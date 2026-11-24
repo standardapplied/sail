@@ -332,7 +332,6 @@ public final class DispatchCommand implements Runnable {
    */
   private DispatchOperations.Listener renderer(SyncScheduler sync, OperatorCommand operator) {
     var entered = new AtomicReference<DispatchOperations.WorkspaceUse>();
-    var ending = new AtomicReference<String>();
     return new DispatchOperations.Listener() {
       @Override
       public void workspaceEntered(DispatchOperations.WorkspaceUse workspace) {
@@ -352,14 +351,6 @@ public final class DispatchCommand implements Runnable {
       }
 
       @Override
-      public void loginEnding(String said) {
-        ending.set(said);
-        if (!json) {
-          System.out.println(Ansi.AUTO.string("  @|yellow !|@ " + said));
-        }
-      }
-
-      @Override
       public void claimed(Spec taskSpec, String task) {
         if (dryRun) {
           return;
@@ -375,8 +366,7 @@ public final class DispatchCommand implements Runnable {
                       taskSpec.title(),
                       background ? "background" : "foreground",
                       task,
-                      entered.get(),
-                      ending.get())));
+                      entered.get())));
           return;
         }
         System.out.println(Ansi.AUTO.string("  @|bold Dispatching spec:|@ " + taskSpec.id()));
@@ -476,10 +466,7 @@ public final class DispatchCommand implements Runnable {
     }
   }
 
-  /**
-   * What a dispatch says when it claims its spec, with the workspace its run went into and, when
-   * its login ends soon, the warning its spec's room was told ({@code loginEnding}, else null).
-   */
+  /** What a dispatch says when it claims its spec, with the workspace its run went into. */
   record DispatchPreview(
       boolean dryRun,
       String name,
@@ -487,8 +474,7 @@ public final class DispatchCommand implements Runnable {
       String specTitle,
       String mode,
       String task,
-      DispatchOperations.WorkspaceUse workspace,
-      String loginEnding) {}
+      DispatchOperations.WorkspaceUse workspace) {}
 
   /** What a dry run says, in JSON: what a real dispatch would do. */
   record DryDispatch(

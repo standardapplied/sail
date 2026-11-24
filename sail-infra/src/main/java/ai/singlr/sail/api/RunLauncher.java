@@ -317,7 +317,8 @@ public final class RunLauncher {
             s.unit().logPath(),
             s.runId(),
             s.role(),
-            s.resumeSessionId())
+            s.resumeSessionId(),
+            s.env().kind())
         : AgentSession.buildForegroundTaskCommand(
             s.place().instance(),
             ProjectDefinition.USER,
@@ -330,7 +331,8 @@ public final class RunLauncher {
             s.agentType(),
             s.unit().logPath(),
             s.runId(),
-            s.role());
+            s.role(),
+            s.env().kind());
   }
 
   /**

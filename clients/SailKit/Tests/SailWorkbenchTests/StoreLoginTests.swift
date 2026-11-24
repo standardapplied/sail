@@ -83,9 +83,9 @@ import Testing
 
     // MARK: The kind
 
-    /// Claude Code offers an API key and a long-lived token; the token's how runs a command, so the
-    /// sheet stores the API key, in the server's words. Codex CLI stores its API key. A harness whose
-    /// every kind runs a command offers no sheet.
+    /// Claude Code offers an API key and a GLM Coding Plan key; the sheet stores the first, the API
+    /// key, in the server's words. Codex CLI stores its API key. A harness whose every kind runs a
+    /// command (here the recorded kind given the harness's own sign-in as its how) offers no sheet.
     @Test func theKindIsTheFirstWhoseHowNamesNoCommand() throws {
         let sheet = try #require(StoreLogin(try Self.offer(), logins: [], address: Self.address))
         #expect(sheet.kind.kind == "api-key" && sheet.label == "API key" && sheet.placeholder == "Paste your API key")
@@ -94,17 +94,24 @@ import Testing
         #expect(sheet.kept == "Kept on 127.0.0.1:7979 for your sessions only. Sail never shows it again.")
         let codex = try #require(StoreLogin(try Self.offer(at: 1), logins: [], address: "https://sail.example.com"))
         #expect(codex.kind.kind == "api-key" && codex.help == "Create an API key at platform.openai.com/api-keys." && codex.place == "sail.example.com")
-        let tokenOnly = try Exchange("workspace-agents-dock-no-login").altered(at: ["offered", 0, "kinds"], to: [try Self.kinds()[1]])
-        let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: tokenOnly.body))
+        let signIn = try #require(try Self.offered()["sign_in"])
+        let commandOnly = try Exchange("workspace-agents-dock-no-login")
+            .altered(at: ["offered", 0, "kinds"], to: [try Self.kinds()[0]])
+            .altered(at: ["offered", 0, "kinds", 0, "how"], to: signIn)
+        let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: commandOnly.body))
         #expect(StoreLogin(agents.offered[0], logins: [], address: Self.address) == nil, "a kind made by running a command was offered")
     }
 
     /// The recorded kinds of Claude Code, as the server wrote them.
     static func kinds() throws -> [Any] {
+        try #require(try offered()["kinds"] as? [Any])
+    }
+
+    /// Claude Code as the server offered it where no login is stored.
+    static func offered() throws -> [String: Any] {
         let golden = try Goldens.object("http/workspace-agents-dock-no-login.json")
         let body = (golden["response"] as? [String: Any])?["body"] as? [String: Any]
-        let offered = try #require((body?["offered"] as? [[String: Any]])?.first)
-        return try #require(offered["kinds"] as? [Any])
+        return try #require((body?["offered"] as? [[String: Any]])?.first)
     }
 
     /// A label is the kind's as a label starts, whatever case the server gives it.

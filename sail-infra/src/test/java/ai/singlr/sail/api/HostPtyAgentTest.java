@@ -99,8 +99,8 @@ class HostPtyAgentTest {
     var bobId = Acting.system(() -> fdes.add("bob", "Bob", null, "member")).id();
     Acting.system(() -> fdes.add("root", "Root", null, "admin"));
     var claude = Harnesses.of("claude-code");
-    fdes.logins().store(adaId, claude, "work", "token", "sk-ant-oat01-ada-work");
-    fdes.logins().store(bobId, claude, "work", "token", "sk-ant-oat01-bob-work");
+    fdes.logins().store(adaId, claude, "work", "glm", "fake-glm-ada-work");
+    fdes.logins().store(bobId, claude, "work", "glm", "fake-glm-bob-work");
     var codex = Harnesses.of("codex");
     fdes.logins().store(adaId, codex, "work", "api-key", "sk-proj-ada-work");
     fdes.logins().store(adaId, codex, "home", "api-key", "sk-proj-ada-home");
@@ -293,7 +293,7 @@ class HostPtyAgentTest {
   @Test
   void aLoginIsHandedToTheWorkspacesDevUserOnItsInputAndWithdrawnTheSameWay() throws IOException {
     var file = SessionLogin.file("i-1");
-    var lines = "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-ada-work\n";
+    var lines = "ANTHROPIC_AUTH_TOKEN=fake-glm-ada-work\n";
 
     lane.handOver("acme", "dock", file, lines, ada);
     lane.withdraw("acme-dock", file);

@@ -381,7 +381,7 @@ class RunLauncherTest {
           runStore.recordLaunch(
               RUN_ID,
               new RunStore.Launched(
-                  null, null, null, new RunStore.RunLogin("default", "token"), "uday"));
+                  null, null, null, new RunStore.RunLogin("default", "glm"), "uday"));
         });
     var told = new ArrayList<String>();
     var shell =
@@ -407,10 +407,12 @@ class RunLauncherTest {
     assertEquals("failed", runStore.findById(RUN_ID).orElseThrow().status());
     assertEquals(
         List.of(
-            "spec: Claude Code refused node's login 'default' (long-lived token), so its run"
-                + " stopped. Run claude setup-token on a machine where Claude Code is signed in,"
-                + " then sail agent login claude-code. Then build it again: sail spec dispatch -p"
-                + " proj --spec spec --restart."),
+            "spec: Claude Code refused node's login 'default' (GLM Coding Plan key),"
+                + " so its run stopped. Create a GLM Coding Plan API key at"
+                + " z.ai/manage-apikey/apikey-list, or a Team Plan's at"
+                + " z.ai/manage-apikey/coding-plan/team/my-plan, then sail agent login claude-code"
+                + " --kind glm. Then build it again: sail spec dispatch -p proj --spec spec"
+                + " --restart."),
         told);
   }
 

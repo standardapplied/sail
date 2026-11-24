@@ -25,6 +25,7 @@ import ai.singlr.sail.store.SqliteException;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.SocketException;
 import java.net.StandardProtocolFamily;
 import java.net.StandardSocketOptions;
 import java.net.UnixDomainSocketAddress;
@@ -282,11 +283,28 @@ class PtySessionHostTest {
 
       assertEquals(
           -1,
-          assertTimeoutPreemptively(
-              Duration.ofSeconds(5), () -> client.read(ByteBuffer.allocate(1))),
+          assertTimeoutPreemptively(Duration.ofSeconds(5), () -> endOf(client)),
           "the host ended the connection");
     }
     ClosesWhatItOpens.assertClosed("a host and the connection it served", before);
+  }
+
+  /**
+   * What reading {@code client} says once its host is closed: -1 for an end. Each side of the
+   * handshake writes its magic before it reads the other's, so the client's handshake can finish
+   * before the host's thread has read the client's magic; a unix socket closed with bytes unread
+   * resets its peer instead of ending it, and that reset, and no other failure, is the host's end
+   * closed too.
+   */
+  private static int endOf(SocketChannel client) throws IOException {
+    try {
+      return client.read(ByteBuffer.allocate(1));
+    } catch (SocketException failed) {
+      if (!"Connection reset".equals(failed.getMessage())) {
+        throw failed;
+      }
+      return -1;
+    }
   }
 
   /**

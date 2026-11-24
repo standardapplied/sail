@@ -89,7 +89,6 @@ class MissedStopsTest {
         null,
         null,
         null,
-        null,
         null);
   }
 

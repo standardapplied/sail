@@ -13,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.harness.Harness.Launch;
 import java.util.List;
-import java.util.Set;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -65,7 +64,7 @@ class HarnessContractTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> harness.headless(new Launch(TASK, true, null, null, "a; rm -rf /", true)));
+            () -> harness.headless(new Launch(TASK, true, null, null, "a; rm -rf /", true, null)));
 
     assertEquals(MALFORMED_ID, ex.getMessage());
   }
@@ -73,7 +72,7 @@ class HarnessContractTest {
   @ParameterizedTest
   @MethodSource("harnesses")
   void readOnlyWithAMalformedSessionIdThrowsItOrTheRefusal(Harness harness) {
-    var launch = new Launch(TASK, false, null, null, "a; rm -rf /", true);
+    var launch = new Launch(TASK, false, null, null, "a; rm -rf /", true, null);
 
     if (harness.readOnlyRefusal().isPresent()) {
       var ex = assertThrows(IllegalStateException.class, () -> harness.readOnly(launch));
@@ -148,12 +147,13 @@ class HarnessContractTest {
   @ValueSource(strings = {"", "  "})
   void aLaunchNamesTheTaskFileItReads(String taskFile) {
     assertThrows(
-        IllegalArgumentException.class, () -> new Launch(taskFile, true, null, null, null, true));
+        IllegalArgumentException.class,
+        () -> new Launch(taskFile, true, null, null, null, true, null));
   }
 
   @ParameterizedTest
   @MethodSource("harnesses")
-  void everyHarnessDeclaresAStaticLoginOfDistinctKindsAndVariables(Harness harness) {
+  void everyHarnessDeclaresKeysOfDistinctKindsAndVariables(Harness harness) {
     var kinds = harness.loginKinds();
 
     assertFalse(kinds.isEmpty(), harness.yamlName());
@@ -162,13 +162,19 @@ class HarnessContractTest {
     for (var kind : kinds) {
       assertTrue(kind.variable().matches("[A-Z][A-Z0-9_]*"), kind.variable());
       assertFalse(kind.howToMake().isEmpty(), kind.kind());
-      assertTrue(
-          kind.howToMake().commands().stream()
-              .allMatch(command -> command.runs() == Remedy.Runs.ELSEWHERE),
-          "a login is made where the person's harness is signed in, not on the box, so a command"
-              + " of its making runs elsewhere and no door renders it as a command of the box's"
-              + " account (sudo): "
+      assertEquals(
+          List.of(),
+          kind.howToMake().commands(),
+          "a kind is a key its service issues for programs, made where the service says, never by"
+              + " running a harness that is signed in: "
               + kind.howToMake());
+      assertTrue(
+          kind.fixed().keySet().stream()
+              .noneMatch(
+                  fixed ->
+                      harness.loginVariables().contains(fixed)
+                          || harness.credentialSwitches().contains(fixed)),
+          "a fixed value is never a credential the run's lines set empty: " + kind.fixed());
       assertEquals(kind, harness.loginKind(kind.kind()));
     }
     assertEquals(kinds.getFirst(), harness.loginKind(null));
@@ -176,11 +182,19 @@ class HarnessContractTest {
         harness.loginVariables().containsAll(kinds.stream().map(LoginKind::variable).toList()),
         "a run on a stored login sets empty every other variable its harness reads");
     assertEquals(kinds.getFirst(), harness.loginKind(" "));
-    assertEquals(
-        Set.copyOf(kinds),
-        Set.copyOf(harness.offeredKinds()),
-        "a person is offered every kind the harness takes, and only those");
-    assertEquals(kinds.size(), harness.offeredKinds().size());
+  }
+
+  @ParameterizedTest
+  @MethodSource("harnesses")
+  void everyHarnessSaysHowASubscriptionSignsInInsideItsOwnSession(Harness harness) {
+    var signIn = harness.signIn();
+
+    assertFalse(signIn.isEmpty(), harness.yamlName());
+    assertTrue(
+        signIn.commands().stream().allMatch(command -> command.runs() == Remedy.Runs.ELSEWHERE),
+        "the sign-in is the harness's own, typed in its session, never a command of the box's"
+            + " account (sudo): "
+            + signIn);
   }
 
   @ParameterizedTest

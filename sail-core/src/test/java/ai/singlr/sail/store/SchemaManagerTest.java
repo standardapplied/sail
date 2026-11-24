@@ -13,18 +13,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.LoginKind;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 
 class SchemaManagerTest {
 
@@ -126,7 +127,7 @@ class SchemaManagerTest {
     var refusal = assertThrows(Remedied.State.class, schema::migrate);
 
     assertEquals(
-        "Database schema v244 was made by an earlier Sail release; this release opens only v1004"
+        "Database schema v244 was made by an earlier Sail release; this release opens only v1005"
             + " and converts none: the box is reinstalled.",
         refusal.reason());
     assertEquals(List.of(Remedy.sail("init")), refusal.remedy().commands());
@@ -141,25 +142,25 @@ class SchemaManagerTest {
   }
 
   /**
-   * The database 0.68.0 made, before a run recorded its login: refused whole, the reinstall named,
-   * nothing created or changed beside it.
+   * The database 0.75.0 made, before a run's login could be a GLM key and while it could be a
+   * subscription's token: refused whole, the reinstall named, nothing created or changed beside it.
    */
   @Test
   void aDatabaseTheReleaseBeforeMadeIsRefusedNamingAReinstallAndLeftAsItWas() {
-    stageAtVersion(1003);
+    stageAtVersion(1004);
     db.execute("CREATE TABLE runs (id TEXT PRIMARY KEY)");
     var schema = new SchemaManager(db);
 
     var refusal = assertThrows(Remedied.State.class, schema::migrate);
 
     assertEquals(
-        "Database schema v1003 was made by an earlier Sail release; this release opens only v1004"
+        "Database schema v1004 was made by an earlier Sail release; this release opens only v1005"
             + " and converts none: the box is reinstalled.",
         refusal.reason());
     assertEquals(
         "Move " + tempDir.resolve("test.db") + " aside and run 'sail init' to make a fresh one.",
         refusal.remedy().plain());
-    assertEquals(1003, schema.currentVersion());
+    assertEquals(1004, schema.currentVersion());
     assertEquals(
         List.of("id"),
         db.query("SELECT name FROM pragma_table_info('runs')", row -> row.text(0)),
@@ -183,56 +184,6 @@ class SchemaManagerTest {
     assertEquals(List.of(Remedy.sail("migrate")), refusal.remedy().commands());
     assertEquals("Run 'sail migrate' to convert it to this release.", refusal.remedy().plain());
     assertEquals(LegacyConversion.VERSION, schema.currentVersion());
-  }
-
-  /**
-   * A v1004 database a build made before {@code runs.login_overridden}, {@code fdes.main_id} or
-   * {@code run_delivered_messages.state} is refused at the start, naming the reinstall, not at the
-   * first read.
-   */
-  @ParameterizedTest
-  @CsvSource({"runs,login_overridden", "fdes,main_id", "run_delivered_messages,state"})
-  void aV1004DatabaseWithoutAColumnThisReleaseAddedIsRefusedAtTheStart(
-      String table, String column) {
-    new SchemaManager(db).migrate();
-    db.execute("ALTER TABLE " + table + " DROP COLUMN " + column);
-
-    var refusal = assertThrows(Remedied.State.class, new SchemaManager(db)::migrate);
-
-    assertEquals(
-        "Database "
-            + tempDir.resolve("test.db")
-            + " was made by a build of schema v1004 before "
-            + table
-            + "."
-            + column
-            + ", and none is converted: the box is reinstalled.",
-        refusal.reason());
-    assertEquals(
-        "Move " + tempDir.resolve("test.db") + " aside and run 'sail init' to make a fresh one.",
-        refusal.remedy().plain());
-  }
-
-  /**
-   * The closing look's n8: a v1004 database a build made before sync_health's check took the kind
-   * {@code removed} is refused at the start, naming the reinstall, not at the first refused round.
-   */
-  @Test
-  void aV1004DatabaseWhoseSyncHealthCheckLacksAKindIsRefusedAtTheStart() {
-    new SchemaManager(db).migrate();
-    db.execute("DROP TABLE sync_health");
-    db.execute(
-        "CREATE TABLE sync_health (peer TEXT PRIMARY KEY, last_error_kind TEXT CHECK"
-            + " (last_error_kind IN ('unreachable', 'refused', 'protocol', 'store')))");
-
-    var refusal = assertThrows(Remedied.State.class, new SchemaManager(db)::migrate);
-
-    assertEquals(
-        "Database "
-            + tempDir.resolve("test.db")
-            + " was made by a build of schema v1004 before sync_health.last_error_kind took"
-            + " removed, and none is converted: the box is reinstalled.",
-        refusal.reason());
   }
 
   @Test
@@ -518,6 +469,39 @@ class SchemaManagerTest {
     assertTrue(indexes.contains("idx_runs_project"));
     assertTrue(indexes.contains("idx_runs_spec"));
     assertTrue(indexes.contains("idx_room_messages_page"));
+  }
+
+  /**
+   * The kinds {@code runs.login_kind} takes are a literal of this schema version, and they are the
+   * kinds the harnesses declare: a kind added, renamed or removed fails here until the version is
+   * bumped with the literal, so no box made by an earlier build of this version refuses the runs a
+   * newer build records.
+   */
+  @Test
+  void theRunsLoginKindsAreTheKindsTheHarnessesDeclareSoANewKindBumpsTheVersion() {
+    new SchemaManager(db).migrate();
+    var runs =
+        db.queryOne(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'runs'",
+                row -> row.text(0))
+            .orElseThrow();
+    var check = Pattern.compile("login_kind TEXT CHECK \\(login_kind IN \\(([^)]*)\\)\\)");
+    var found = check.matcher(runs);
+    assertTrue(found.find(), runs);
+
+    assertEquals(
+        Harnesses.all().stream()
+            .flatMap(harness -> harness.loginKinds().stream())
+            .map(LoginKind::kind)
+            .distinct()
+            .sorted()
+            .toList(),
+        Arrays.stream(found.group(1).split(","))
+            .map(kind -> kind.strip().replace("'", ""))
+            .sorted()
+            .toList(),
+        "a kind added, renamed or removed changes runs.login_kind: bump"
+            + " SchemaManager.CURRENT_VERSION with the literal and say so in the change's entry");
   }
 
   @Test
