@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# The PMD exclusions only shrink. ci/exclusions [BASE] refuses a config/quality/pmd-exclusions.properties
+# whose class=rule pairs are not all in BASE's (default: where the change left origin/main), and
+# one that names a class twice, since the later line would replace the earlier one. A base
+# without the file is the change that adds it. Run in the repository's root.
+
+readonly FILE=config/quality/pmd-exclusions.properties
+
+entries() {
+  grep -vE '^[[:space:]]*(#|$)' | tr -d '[:blank:]\r' || true
+}
+
+pairs() {
+  entries | awk -F= '{ n = split($2, rules, ","); for (i = 1; i <= n; i++) print $1 "=" rules[i] }' | sort -u
+}
+
+base=${1:-}
+[[ -n $base ]] || base=$(git merge-base origin/main HEAD)
+if ! git rev-parse -q --verify "$base^{commit}" > /dev/null; then
+  echo "ci/exclusions: '$base' is not a commit of this repository; name the base branch's commit." >&2
+  exit 2
+fi
+if [[ ! -f $FILE ]]; then
+  echo "ci/exclusions: no $FILE, so nothing is excluded."
+  exit 0
+fi
+
+twice=$(entries < "$FILE" | cut -d= -f1 | sort | uniq -d)
+if [[ -n $twice ]]; then
+  echo "ci/exclusions: $FILE names a class on more than one line, and the last line replaces the others:" >&2
+  sed 's/^/  /' <<< "$twice" >&2
+  echo "Keep one line per class, listing only the rules the base branch lists for it." >&2
+  exit 1
+fi
+
+if ! git cat-file -e "$base:$FILE" 2> /dev/null; then
+  echo "ci/exclusions: $base holds no $FILE; this change adds it."
+  exit 0
+fi
+
+added=$(comm -13 <(git show "$base:$FILE" | pairs) <(pairs < "$FILE"))
+if [[ -n $added ]]; then
+  echo "ci/exclusions: $FILE only shrinks, and these class=rule pairs are not in $base's:" >&2
+  sed 's/^/  /' <<< "$added" >&2
+  echo "Fix the class instead: no class is added to the list and no rule to an entry." >&2
+  exit 1
+fi
+echo "ci/exclusions: every class=rule pair of $FILE is in $base's."

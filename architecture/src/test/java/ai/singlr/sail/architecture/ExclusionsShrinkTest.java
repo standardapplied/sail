@@ -31,7 +31,9 @@ import org.w3c.dom.Element;
  */
 class ExclusionsShrinkTest {
 
-  private static final Path ROOT = Path.of(System.getProperty("sail.root", ".."));
+  private static final Path ROOT = Path.of(System.getProperty("sail.root"));
+  private static final Path EXCLUSIONS =
+      Path.of(System.getProperty("sail.quality.config"), "pmd-exclusions.properties");
   private static final List<String> MODULES = List.of("sail-core", "sail-harness", "sail-infra");
   private static final List<String> REPORTS = List.of("target/pmd.xml", "target/pmd-test/pmd.xml");
 
@@ -47,13 +49,13 @@ class ExclusionsShrinkTest {
         List.of(),
         obsolete,
         "these classes no longer break the rule their entry lists: delete the rule from the"
-            + " entry, and the entry once it lists none, in config/quality/pmd-exclusions.properties");
+            + " entry, and the entry once it lists none, in "
+            + EXCLUSIONS);
   }
 
   private static List<String> listed() throws IOException {
     var entries = new Properties();
-    try (Reader reader =
-        Files.newBufferedReader(ROOT.resolve("config/quality/pmd-exclusions.properties"))) {
+    try (Reader reader = Files.newBufferedReader(EXCLUSIONS)) {
       entries.load(reader);
     }
     return entries.stringPropertyNames().stream()
@@ -74,9 +76,10 @@ class ExclusionsShrinkTest {
             Files.isRegularFile(file),
             "no PMD report at "
                 + file
-                + ": build "
+                + ": "
                 + module
-                + " in this reactor, or install it, without -Dpmd.skip");
+                + " writes it in its verify phase, so run verify (or install) with it in the"
+                + " reactor, without -Dpmd.skip");
         broken.addAll(violations(file));
       }
     }

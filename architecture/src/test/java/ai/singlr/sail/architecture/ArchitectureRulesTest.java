@@ -130,8 +130,8 @@ class ArchitectureRulesTest {
                 .and(not(origin(A_CONSTRUCTOR_OR_STATIC_INITIALISER))))
         .because(
             "the time is DateTimeUtils.now(), whose clock a test pins; a class with a clock of"
-                + " its own takes it as a field whose initial value is Clock.system*, never a"
-                + " Clock.system* read inside a method")
+                + " its own reads Clock.system* only where it is built, in a constructor or a"
+                + " static initialiser (a field's initial value), never inside a method")
         .check(MAIN);
   }
 

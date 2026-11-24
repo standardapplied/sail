@@ -5277,7 +5277,7 @@ to end, which wait only for the one native build:
 
 | Check | What it runs | What it needs |
 |---|---|---|
-| `Unit tests (<module>, <os>)` | `ci/check unit <module>`: the module's unit tests, its JaCoCo gates, its PMD gate and spotless, on Linux, where `sail-infra`'s job also runs the `architecture` module's rules and the reactor's duplication report; the same tests without gates on macOS (`--tests-only`) | its upstream modules, installed first |
+| `Unit tests (<module>, <os>)` | `ci/check unit <module>`: the module's unit tests, its JaCoCo gates, its PMD gate and spotless, on Linux, where `sail-infra`'s job also runs `ci/exclusions` (the PMD exclusions only shrink, against the merge base), the `architecture` module's rules and the reactor's duplication report; the same tests without gates on macOS (`--tests-only`) | its upstream modules, installed first |
 | `Dependency scan` | OWASP dependency-check, offline against a cached NVD database refreshed best-effort | the NVD cache |
 | `Native binaries` | the candidate (`-Ob` quick build) and the release `.github/released-tag` pins, each smoke-tested, uploaded as `native-binaries` | nothing else |
 | `Native fleet sync tests (part i of 3)` | `ci/check methods NativeFleetIT i 3`: every third test of `NativeFleetIT`, sync end to end on native binaries in Podman boxes | `native-binaries` |
@@ -5297,7 +5297,10 @@ to end, which wait only for the one native build:
   -Dspotless.check.skip=true -Dpmd.skip=true -Dcpd.skip=true`, and every other build that is not
   a unit job (the native builds, which build `-pl sail-infra -am` and so never the `architecture`
   module, the dependency scan, a unit job's install of its upstream modules) skips the gates too:
-  the unit suite, the coverage and quality gates and the format check are the unit jobs'.
+  the unit suite, the coverage and quality gates and the format check are the unit jobs'. The one
+  install that analyses is `sail-infra`'s on Linux, whose `ExclusionsShrinkTest` reads sail-core's
+  and sail-harness's PMD reports: it writes them with `-Dpmd.failOnViolation=false`, and each
+  module's own job judges them.
 - **macOS runs the unit suite on every pull request.** A release ships a macOS binary, and only
   its own tests see Apple's libraries; a test of Linux-only behaviour says so with
   `@EnabledOnOs(OS.LINUX)`.

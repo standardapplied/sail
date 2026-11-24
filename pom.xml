@@ -41,6 +41,7 @@
         <sail.it.requireIncus>false</sail.it.requireIncus>
         <sail.native.optimization>-O2</sail.native.optimization>
         <sail.quality.config>${maven.multiModuleProjectDirectory}/config/quality</sail.quality.config>
+        <pmd.skip>false</pmd.skip>
     </properties>
 
     <dependencyManagement>

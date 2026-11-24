@@ -14,8 +14,8 @@ Usage:
   ci/check full                 every module's tests and gates, as CI's unit jobs run them together
   ci/check unit MODULE [--tests-only]
                                 one module's tests and gates, its upstream installed first; sail-infra's
-                                adds the architecture rules and the duplication report; --tests-only
-                                runs the tests alone, without coverage or quality gates
+                                adds the architecture rules, the duplication report and ci/exclusions;
+                                --tests-only runs the tests alone, without coverage or quality gates
   ci/check shard INDEX COUNT [EXCLUDED_IT...]
                                 print the IT classes of shard INDEX (1-based) of COUNT
   ci/check its INDEX COUNT [EXCLUDED_IT...] -- [MAVEN_ARG...]
@@ -27,6 +27,8 @@ Usage:
                                 naming it, and SIGTERM stops it leaving only its lock
   ci/check min-macos BINARY     fail unless the darwin BINARY's minimum macOS (its Mach-O
                                 LC_BUILD_VERSION) is no newer than the app's LSMinimumSystemVersion
+  ci/check exclusions [BASE]    fail if the PMD exclusions name a class=rule pair BASE's do not
+                                (default: where it left origin/main), or a class twice (ci/exclusions)
   ci/check changelog [BASE]     fail if the change from BASE (default: where it left origin/main)
                                 edits CHANGELOG.md or leaves an entry the release could not fold
                                 (ci/changelog check)
@@ -61,15 +63,19 @@ unit() {
     --tests-only) gates=false ;;
     *) usage ;;
   esac
-  local upstream
+  local upstream upstream_pmd=-Dpmd.skip=true
   upstream=$(upstream_of "$module")
+  if $gates && [[ $module == sail-infra ]]; then
+    upstream_pmd=-Dpmd.failOnViolation=false
+  fi
   if [[ -n $upstream ]]; then
     mvn -B -q install -pl "$upstream" -am -DskipTests -Djacoco.skip=true -Dspotless.check.skip=true \
-      -Dcpd.skip=true
+      -Dcpd.skip=true "$upstream_pmd"
   fi
   if ! $gates; then
     mvn -B verify -pl "$module" -Djacoco.skip=true -Dpmd.skip=true -Dcpd.skip=true
   elif [[ $module == sail-infra ]]; then
+    ci/exclusions
     mvn -B verify -pl sail-infra,architecture
     mvn -B pmd:aggregate-cpd@cpd pmd:aggregate-cpd-check@cpd-check
   else
@@ -299,6 +305,11 @@ changed_tests() {
     | paste -sd, -
 }
 
+# The PMD exclusions only shrink (ci/exclusions).
+exclusions() {
+  ci/exclusions "$@"
+}
+
 # A pull request's entry is a file of changes/, never an edit of CHANGELOG.md (ci/changelog).
 changelog() {
   ci/changelog check "$@"
@@ -327,6 +338,7 @@ case ${1:-} in
   methods) shift; methods "$@" ;;
   local-host) shift; local_host "$@" ;;
   min-macos) shift; min_macos "$@" ;;
+  exclusions) shift; exclusions "$@" ;;
   changelog) shift; changelog "$@" ;;
   *) usage ;;
 esac

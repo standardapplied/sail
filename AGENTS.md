@@ -14,8 +14,8 @@ and contracts: `ARCHITECTURE.md`. Build, gates, migrations, releases: `CONTRIBUT
   does not `clean`: a deleted or renamed class leaves its compiled `.class` in `target`, so after
   one, run the gate.
 - `mvn clean verify` is the gate CI runs: every unit test, JaCoCo coverage gates, spotless and
-  the quality gate (see "Quality gate"; two and a half to three minutes). `mvn spotless:apply` formats. Build offline with `-o` when the
-  repository is warm.
+  the quality gate (see "Quality gate"; two and a half to three minutes). `mvn spotless:apply`
+  formats. Build offline with `-o` when the repository is warm.
 - Before pushing: `mvn -o -Pintegration -Dsail.it.requireIncus=false clean verify`. It adds
   the multi-node integration tests (`*IT`); the incus-backed ones skip here and run in CI.
 - One module and class: `mvn -o -pl sail-infra -am -Dtest=StageSkillsTest test`
@@ -182,8 +182,10 @@ Gated today, failing at the first measured value shown:
 
 Still to burn down, each family its own pull request in this order, with what it broke on
 1b2ff7fa5. Their rules wait in `config/quality/pmd-main-pending.xml` and `pmd-test-pending.xml`,
-which the build does not read; a family's pull request moves its rules, unchanged, into the gated
-file, and the pending files only shrink.
+which no build analyses; a family's pull request moves its rules, unchanged, into the gated file,
+and the pending files only shrink. `RuleSetsTest` (architecture) holds the gated and pending sets
+of each kind together to Helios's rules and limits, so a rule deleted from pending, or moved with a
+new limit, fails.
 
 1. The wall clock read statically (8 reads in 5 classes), an `HttpClient` built outside one
    factory (11 classes), `Thread.sleep` outside one sleeper (17 sites): ArchUnit rules.
@@ -200,9 +202,11 @@ file, and the pending files only shrink.
    `ExcessiveParameterList` 10 (51, 2).
 7. Test size: `NcssCount` in test code, 60 a method and 600 a class (36).
 
-The classes that broke the class-level rules when the gate went on (118 classes, 186 rule
-breaks) are listed once in `config/quality/pmd-exclusions.properties`, each with only the rules it
-broke.
+The classes that broke the class-level rules when the gate went on (__CLASSES__ classes,
+__PAIRS__ rule breaks) are listed once in `config/quality/pmd-exclusions.properties`, each with
+only the rules it broke. Test classes that break a class-level rule (coupling, too many fields)
+are listed in the same file on the same terms; test-class size is not a listed rule and is burned
+down in its own pull request.
 
 ### Rules of the gate
 
@@ -210,9 +214,11 @@ broke.
 - **No suppression in source.** Neither PMD's suppression comment nor a `@SuppressWarnings`
   naming a PMD rule; `git grep` for both stays empty.
 - **The exclusions file only shrinks.** No class is ever added to it and no rule to an entry. A
-  spec that works in a listed class splits it and deletes its entry. `ExclusionsShrinkTest`
-  (architecture) reads every module's PMD reports, which the exclusions do not filter, and fails
-  on an entry whose class no longer breaks a rule it lists; the change that cleared it deletes it.
+  spec that works in a listed class splits it and deletes its entry. `ci/exclusions` (run by
+  `sail-infra`'s Linux unit job) fails a change whose file names a `class=rule` pair its merge
+  base's does not, or names a class on two lines. `ExclusionsShrinkTest` (architecture) reads
+  every module's PMD reports, which the exclusions do not filter, and fails on an entry whose
+  class no longer breaks a rule it lists; the change that cleared it deletes it.
 - **Adding an ArchUnit rule.** A spec that establishes or consolidates a pattern adds one `@Test`
   to `ArchitectureRulesTest`, named for the rule, whose `because` names the one allowed way. A new
   module is added to `architecture/pom.xml` and to `ExclusionsShrinkTest`'s modules.
@@ -223,6 +229,7 @@ broke.
 mvn -o clean verify                                       # everything, as CI's Linux unit jobs run it together
 mvn -o verify -DskipTests                                 # enforcer, PMD and CPD only
 mvn -o pmd:aggregate-cpd@cpd pmd:aggregate-cpd-check@cpd-check   # duplication alone, in seconds
+ci/check exclusions                                       # the exclusions against where they left origin/main
 mvn -o -Pmutation test-compile org.pitest:pitest-maven:mutationCoverage -DtargetClasses=<classes> -DtargetTests=<tests> -DfailWhenNoMutations=false -Dpmd.skip=true -Dcpd.skip=true -Dspotless.check.skip=true   # mutation score, by hand
 ```
 
@@ -230,9 +237,12 @@ Never add `-q`: what to fix is logged as warnings (`PMD Failure: <class>:<line> 
 <message>`), only the summary as an error. Reports: `target/pmd.xml` (main),
 `target/pmd-test/pmd.xml` (tests) and, at the root, `target/cpd/cpd.xml`. CPD reads the
 reactor's sources, so a `-pl` build checks no duplication. The rule sets resolve through
-`${maven.multiModuleProjectDirectory}`, the root that holds `.mvn/`. CI runs the gate in the
-Linux unit jobs (`ci/check unit`; `sail-infra`'s adds `architecture` and CPD); the macOS jobs run
-the tests alone.
+`${maven.multiModuleProjectDirectory}`, the root that holds `.mvn/`. The `architecture` module's
+tests run in `verify`, after every module has written this build's reports, so `mvn test` and
+`mvn package` do not reach them. CI runs the gate in the Linux unit jobs (`ci/check unit`;
+`sail-infra`'s adds `ci/exclusions`, `architecture` and CPD); the macOS jobs run the tests alone.
+A job's install of its upstream modules skips PMD, except `sail-infra`'s Linux job, which needs
+their reports and writes them without judging; each module's own job judges it.
 
 ## Gotchas
 

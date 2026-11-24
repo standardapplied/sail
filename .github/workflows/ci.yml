@@ -56,10 +56,12 @@ jobs:
 
   # The unit verdict, one module per job so the slowest module bounds it, not their sum. `ci/check
   # unit` runs the module's tests and spotless with its coverage and quality gates on Linux, where
-  # sail-infra's job also runs the architecture rules and the duplication report. macOS runs the
-  # same tests without the gates, since a release ships a macOS binary and only its own tests see
-  # Apple's libraries, while the gates read the same sources on either system. No other job runs a
-  # unit test or the quality gate.
+  # sail-infra's job also runs the architecture rules, the duplication report and ci/exclusions.
+  # macOS runs the same tests without the gates, since a release ships a macOS binary and only its
+  # own tests see Apple's libraries, while the gates read the same sources on either system. A
+  # job's install of its upstream modules skips PMD, but for sail-infra's Linux job, whose
+  # ExclusionsShrinkTest reads their reports, so it writes them without judging; each module's own
+  # job judges it. No other job runs a unit test or the quality gate.
   unit:
     name: Unit tests (${{ matrix.module }}, ${{ matrix.os }})
     needs: changes
@@ -74,7 +76,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
+      # sail-infra's Linux job compares the PMD exclusions with the merge base (ci/exclusions),
+      # which needs main's history; every other job needs only this commit.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: ${{ matrix.module == 'sail-infra' && matrix.os == 'ubuntu-24.04' && '0' || '1' }}
 
       - uses: graalvm/setup-graalvm@bef4b0e916c7dd079bf60fb95d49139f67e32c5f # v1
         with:
