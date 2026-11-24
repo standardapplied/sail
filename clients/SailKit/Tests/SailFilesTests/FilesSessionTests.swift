@@ -188,6 +188,40 @@ import Testing
         #expect(desk.requests.count == 1, "a capped connection was asked for again on its own: \(desk.requests.count)")
     }
 
+    /// The played door changes a name only where the host would: a create or a move into a folder
+    /// that is not there is refused `not_found`, and onto a taken name `exists`, each in the host's
+    /// words; a name free in a folder there is made.
+    @Test func thePlayedDoorChangesANameOnlyWhereTheHostWould() async throws {
+        let door = try FakeRunnerDoor()
+        door.setFolder(FileTree.root.shown, [FileTreeTests.file("README.md")])
+        let session = Self.session(Desk(door))
+        let heard = Heard(session)
+        session.start()
+        defer { session.close() }
+        #expect(await heard.until { heard.admissions == 1 })
+        let root = FileTree.root.shown
+        session.send([
+            .filesCreate(id: 1, path: FileName(root + "/gone/notes.md"), folder: false),
+            .filesMove(id: 2, from: FileName(root + "/README.md"), to: FileName(root + "/gone/README.md")),
+            .filesCreate(id: 3, path: FileName(root + "/README.md"), folder: false),
+            .filesCreate(id: 4, path: FileName(root + "/notes.md"), folder: false),
+        ])
+        #expect(await heard.until { heard.frames.count(where: Self.answersAChange) == 4 })
+        #expect(heard.frames.filter(Self.answersAChange) == [
+            .filesRefused(id: 1, kind: .known(.notFound), message: "The folder \(root)/gone is gone from dock, so \(root)/gone/notes.md was not made."),
+            .filesRefused(id: 2, kind: .known(.notFound), message: "The folder \(root)/gone is gone from dock, so \(root)/gone/README.md was not made."),
+            .filesRefused(id: 3, kind: .known(.exists), message: "README.md is already there."),
+            .filesDone(id: 4),
+        ])
+    }
+
+    static func answersAChange(_ frame: Frame) -> Bool {
+        switch frame {
+        case .filesDone, .filesRefused: true
+        default: false
+        }
+    }
+
     @Test func aStopEndsItInTheHostsWordsAndNothingTriesAgain() async throws {
         let door = try FakeRunnerDoor()
         let desk = Desk(door)

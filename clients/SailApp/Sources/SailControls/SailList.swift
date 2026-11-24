@@ -25,11 +25,14 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         public let icon: LineIcon?
         /// It is under way: its button on the row in flight under this word, taking no press.
         public let busy: String?
+        /// Whether it can be done now, asked each time its menu opens or its key comes: off, its item
+        /// is dimmed and its key does nothing (Reveal in Terminal with no terminal in the tab).
+        public let enabled: @MainActor () -> Bool
         public let run: @MainActor () -> Void
 
         public init(
             _ title: String, key: String = "", modifiers: NSEvent.ModifierFlags = [], onRow: Bool = true, startsGroup: Bool = false, destructive: Bool = false,
-            icon: LineIcon? = nil, busy: String? = nil, run: @escaping @MainActor () -> Void
+            icon: LineIcon? = nil, busy: String? = nil, enabled: @escaping @MainActor () -> Bool = { true }, run: @escaping @MainActor () -> Void
         ) {
             self.title = title
             self.key = key
@@ -39,6 +42,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             self.destructive = destructive
             self.icon = icon
             self.busy = busy
+            self.enabled = enabled
             self.run = run
         }
     }
@@ -138,17 +142,44 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         let hovered = (0 ..< numberOfRows).first { (rowView(atRow: $0, makeIfNecessary: false) as? SailRowView)?.hovered == true }.flatMap { item(at: $0)?.id }
         Tooltip.putAway()
         reloadData()
-        let row: Int?
-        if let point = pointerNow {
-            let inList = convert(point, from: nil), content = window?.contentView
-            let hit = content.flatMap { $0.hitTest($0.superview?.convert(point, from: nil) ?? point) }
-            let under = visibleRect.contains(inList) && hit?.isDescendant(of: self) == true ? self.row(at: inList) : -1
-            row = under >= 0 ? under : nil
-        } else {
-            row = hovered.flatMap { id in entries.indices.first { item(at: $0)?.id == id } }
-        }
+        let row = pointerNow == nil ? hovered.flatMap(rowIndex(of:)) : rowUnderPointer()
         guard let row, item(at: row) != nil else { return }
         (rowView(atRow: row, makeIfNecessary: true) as? SailRowView)?.hovered = true
+    }
+
+    /// The row shown under the pointer, nil when it is over none or not known.
+    private func rowUnderPointer() -> Int? {
+        guard let point = pointerNow else { return nil }
+        let inList = convert(point, from: nil), content = window?.contentView
+        let hit = content.flatMap { $0.hitTest($0.superview?.convert(point, from: nil) ?? point) }
+        let under = visibleRect.contains(inList) && hit?.isDescendant(of: self) == true ? row(at: inList) : -1
+        return under >= 0 ? under : nil
+    }
+
+    /// The pointer held over the middle of row `id`, wherever the row is laid out, as the drive puts
+    /// it there: the row drawn hovered, and found so again by every reload (a change of look or
+    /// direction); nil gives the pointer back.
+    package func point(at id: String?) {
+        pointer = id.map { id -> @MainActor () -> NSPoint? in { [weak self] in self?.middle(of: id) } }
+        let under = rowUnderPointer()
+        enumerateAvailableRowViews { view, row in (view as? SailRowView)?.hovered = row == under }
+    }
+
+    /// Where row `id`'s middle is in its window, nil while it is not a row.
+    private func middle(of id: String) -> NSPoint? {
+        guard let row = rowIndex(of: id) else { return nil }
+        let box = rect(ofRow: row)
+        return convert(NSPoint(x: box.midX, y: box.midY), to: nil)
+    }
+
+    private func rowIndex(of id: String) -> Int? {
+        entries.indices.first { item(at: $0)?.id == id }
+    }
+
+    /// Whether row `id`'s actions are shown whole: what a hover or a choice brings up.
+    package func actionsShown(_ id: String) -> Bool {
+        guard let row = rowIndex(of: id), let cell = rowView(atRow: row, makeIfNecessary: false)?.view(atColumn: 0) as? RowCell else { return false }
+        return !cell.actions.isHidden && cell.actions.alphaValue == 1 && !cell.actions.views.isEmpty
     }
 
     public let rowStyle: RowStyle
@@ -362,6 +393,11 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         item(at: selectedRow)?.id
     }
 
+    /// Every chosen item's id, in the list's order: a tree's rows are chosen several at once.
+    public var chosenIDs: [String] {
+        selectedRowIndexes.compactMap { item(at: $0)?.id }
+    }
+
     /// Chooses the item of `id`, as a pane restoring its last choice does; nil chooses nothing.
     public func choose(_ id: String?) {
         guard let row = select(id) else { return }
@@ -370,7 +406,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
 
     /// Chooses `id` where it stands without scrolling to it: new rows keep the person's scroll.
     @discardableResult
-    private func select(_ id: String?) -> Int? {
+    package func select(_ id: String?) -> Int? {
         guard let row = entries.indices.first(where: { item(at: $0)?.id == id }) else {
             deselectAll(nil)
             return nil
@@ -412,7 +448,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             let pressed = typed == "\u{7f}" ? "\u{8}" : typed
             let held = event.modifierFlags.intersection([.command, .option, .control, .shift])
             guard !pressed.isEmpty, let action = item(at: selectedRow)?.actions.first(where: { $0.key == pressed && $0.modifiers == held }) else { return false }
-            action.run()
+            if action.enabled() { action.run() }
             return true
         }
     }
@@ -537,6 +573,64 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     public func tableViewSelectionDidChange(_: Notification) {
         if !reloading { onChoose(chosen) }
     }
+
+    // MARK: Moving rows by a drag
+
+    /// A tree's rows moved by a drag within it: where a drop over row `over` (nil past the last row)
+    /// lands, the id of the folder row it goes into, "" for the tree's root, nil for nowhere; and the
+    /// dragged rows' ids dropped there.
+    public struct Moves {
+        public let lands: @MainActor (_ over: String?) -> String?
+        public let drop: @MainActor (_ ids: [String], _ into: String) -> Void
+
+        public init(lands: @escaping @MainActor (_ over: String?) -> String?, drop: @escaping @MainActor (_ ids: [String], _ into: String) -> Void) {
+            self.lands = lands
+            self.drop = drop
+        }
+    }
+
+    /// Rows dragged within the list move; nil, nothing is dragged.
+    public var moves: Moves? {
+        didSet {
+            registerForDraggedTypes(moves == nil ? [] : [Self.rowType])
+            setDraggingSourceOperationMask(moves == nil ? [] : .move, forLocal: true)
+        }
+    }
+
+    static let rowType = NSPasteboard.PasteboardType("sh.standardapplied.sail.row")
+    /// A dragged row's opacity while it is dragged, as the mockup's `.drag`.
+    static let dragged = 0.45
+
+    public func tableView(_: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
+        guard moves != nil, let item = item(at: row), !item.inert else { return nil }
+        let writer = NSPasteboardItem()
+        writer.setString(item.id, forType: Self.rowType)
+        return writer
+    }
+
+    public func tableView(_: NSTableView, draggingSession _: NSDraggingSession, willBeginAt _: NSPoint, forRowIndexes rows: IndexSet) {
+        rows.forEach { rowView(atRow: $0, makeIfNecessary: false)?.alphaValue = Self.dragged }
+    }
+
+    public func tableView(_: NSTableView, draggingSession _: NSDraggingSession, endedAt _: NSPoint, operation _: NSDragOperation) {
+        enumerateAvailableRowViews { row, _ in row.alphaValue = 1 }
+    }
+
+    /// A drop over a row lands on the folder `moves` says, the whole list for its root; a drag from
+    /// anywhere else lands nowhere.
+    public func tableView(_: NSTableView, validateDrop info: any NSDraggingInfo, proposedRow row: Int, proposedDropOperation _: NSTableView.DropOperation) -> NSDragOperation {
+        guard let moves, info.draggingSource as? SailList === self, let into = moves.lands(item(at: row)?.id) else { return [] }
+        setDropRow(into.isEmpty ? -1 : entries.firstIndex { Self.id($0) == into } ?? -1, dropOperation: .on)
+        return .move
+    }
+
+    public func tableView(_: NSTableView, acceptDrop info: any NSDraggingInfo, row: Int, dropOperation _: NSTableView.DropOperation) -> Bool {
+        guard let moves, info.draggingSource as? SailList === self else { return false }
+        let ids = info.draggingPasteboard.pasteboardItems?.compactMap { $0.string(forType: Self.rowType) } ?? []
+        guard !ids.isEmpty else { return false }
+        moves.drop(ids, item(at: row)?.id ?? "")
+        return true
+    }
 }
 
 /// A row as the look draws it (`RowPaint`): the fill, the accent bar
@@ -581,6 +675,7 @@ final class SailRowView: NSTableRowView {
         self.item = item
         self.first = first
         hovered = false
+        alphaValue = 1
         line?.removeFromSuperview()
         line = nil
         if item?.paint?.progress == true {
@@ -591,13 +686,6 @@ final class SailRowView: NSTableRowView {
         setAccessibilityLabel(item?.voice)
         setAccessibilitySubrole(item?.outline == nil ? nil : .outlineRow)
         setAccessibilityDisclosureLevel(item?.outline?.level ?? 0)
-        setAccessibilityCustomActions(item?.actions.map { action in
-            let run = Run(action)
-            return NSAccessibilityCustomAction(name: action.title) {
-                MainActor.assumeIsolated { run.go(nil) }
-                return true
-            }
-        })
         refresh()
         needsLayout = true
     }
@@ -605,6 +693,18 @@ final class SailRowView: NSTableRowView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
+    }
+
+    /// Its actions that can be done now as VoiceOver offers them, made when VoiceOver asks: a row
+    /// scrolled into a long tree makes none.
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
+        item?.actions.filter { $0.enabled() }.map { action in
+            let run = Run(action)
+            return NSAccessibilityCustomAction(name: action.title) {
+                MainActor.assumeIsolated { run.go(nil) }
+                return true
+            }
+        }
     }
 
     /// A tree row is open or shut as its item says: a table's row answers false on its own, so the
@@ -700,6 +800,15 @@ final class SailRowView: NSTableRowView {
 
     override func drawSelection(in _: NSRect) {}
 
+    /// The row a drag drops into: a 1 pt ink edge inside its rounded box, as the mockup's `.drop`.
+    override func drawDraggingDestinationFeedback(in _: NSRect) {
+        let box = NSRect(x: rowStyle.margin, y: top, width: Double(bounds.width) - 2 * rowStyle.margin, height: Double(bounds.height) - top).insetBy(dx: 0.5, dy: 0.5)
+        let edge = NSBezierPath(roundedRect: box, xRadius: rowStyle.radius, yRadius: rowStyle.radius)
+        edge.lineWidth = 1
+        NSColor(look.text).setStroke()
+        edge.stroke()
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let hoverArea { removeTrackingArea(hoverArea) }
@@ -793,7 +902,9 @@ final class RowCell: NSView {
     private var first: SailButton?
     private var runs: [Run] = []
     private var shown = false
-    private var moreMenu: NSMenu?
+    /// A tree row's menu-only actions, its ⋯ made the first time its actions show: a row scrolled
+    /// into a long tree makes no button and no menu (the drive's scroll and burst budgets).
+    private var moreOwed: (actions: [SailList.Action], look: Look)?
     /// What it keeps clear at its trailing end for every row's actions, nil none; 0 for a full row.
     private var column: Double?
     /// The gap between the content and the actions: 8 pt with buttons or a note, else none.
@@ -852,14 +963,9 @@ final class RowCell: NSView {
             if let busy = other.action.busy { button.fly(busy) }
             buttons.append(button)
         }
-        moreMenu = nil
+        moreOwed = nil
         if rowStyle != .sidebar, runs.contains(where: { !$0.action.onRow }) {
-            let more = SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil)
-            buttons.append(more)
-            moreMenu = RowMenu(item.actions, look: look)
-            more.target = MenuOpener.shared
-            more.action = #selector(MenuOpener.open(_:))
-            more.menu = moreMenu
+            if rowStyle == .tree { moreOwed = (item.actions, look) } else { buttons.append(Self.more(item.actions, rowStyle: rowStyle, look: look)) }
         }
         let note = item.note.map { words -> NSTextField in
             let label = NSTextField(labelWithAttributedString: Draw.text(words, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary).cut(.byTruncatingTail))
@@ -937,6 +1043,12 @@ final class RowCell: NSView {
             if first.kind != kind { first.kind = kind }
             if first.keyEquivalent != key { first.keyEquivalent = key }
         }
+        if shown, let owed = moreOwed {
+            moreOwed = nil
+            actions.append(Self.more(owed.actions, rowStyle: rowStyle, look: owed.look))
+            gap = 8
+            needsLayout = true
+        }
         guard shown != self.shown else { return }
         self.shown = shown
         if shown, actions.isHidden { actions.isHidden = false }
@@ -955,6 +1067,15 @@ final class RowCell: NSView {
                 self.actions.isHidden = true
             }
         }
+    }
+}
+
+extension RowCell {
+    /// ⋯, opening the menu of `actions` under it.
+    static func more(_ actions: [SailList.Action], rowStyle: RowStyle, look: Look) -> SailButton {
+        let more = SailButton(icon: .more, label: "More", size: rowStyle == .tree ? .row : .small, look: look, target: MenuOpener.shared, action: #selector(MenuOpener.open(_:)))
+        more.menu = RowMenu(actions, look: look)
+        return more
     }
 }
 
@@ -979,6 +1100,13 @@ final class RowActions: NSView {
         self.views = views
         self.note = note
         views.forEach { addSubview($0) }
+        needsLayout = true
+    }
+
+    /// `view` added at the trailing end.
+    func append(_ view: NSView) {
+        views.append(view)
+        addSubview(view)
         needsLayout = true
     }
 
@@ -1057,17 +1185,22 @@ final class RowMenu: NSMenu, NSMenuDelegate {
     }
 }
 
-/// An action as a target: buttons and menu items send `go(_:)`.
+/// An action as a target: buttons and menu items send `go(_:)`, and a menu item is on only while
+/// its action can be done.
 @MainActor
-final class Run: NSObject {
+final class Run: NSObject, NSMenuItemValidation {
     let action: SailList.Action
 
     init(_ action: SailList.Action) {
         self.action = action
     }
 
+    func validateMenuItem(_: NSMenuItem) -> Bool {
+        action.enabled()
+    }
+
     @objc func go(_: Any?) {
-        action.run()
+        if action.enabled() { action.run() }
     }
 }
 

@@ -851,6 +851,123 @@ import Testing
         #expect(abs(ink.0 - under.0) <= slack && abs(ink.1 - under.1) <= slack, "\(side): the words' ink spans pixels \(ink.0)–\(ink.1), the underline \(under.0)–\(under.1)")
     }
 
+    /// A tree of `ids`, each row's actions all in its menu, as the files panel's are; `ran` hears
+    /// which ran, and Reveal is on only while `revealing`.
+    @MainActor final class Tree {
+        let list: SailList
+        var ran: [String] = []
+        var revealing = false
+        var dropped: [([String], String)] = []
+
+        init(_ ids: [String]) throws {
+            list = SailList(rowStyle: .tree, look: .light, mono: try ControlsTests.mono())
+            list.entries = ids.map { id in
+                .item(SailList.Item(id: id, name: id, voice: id, content: NSTextField(labelWithString: id), actions: [
+                    SailList.Action("Rename", key: "\u{F705}", onRow: false) { [unowned self] in ran.append("Rename \(id)") },
+                    SailList.Action("Reveal in Terminal", onRow: false, enabled: { [unowned self] in revealing }) { [unowned self] in ran.append("Reveal \(id)") },
+                    SailList.Action("Delete", key: "\u{8}", modifiers: .command, onRow: false, startsGroup: true, destructive: true) { [unowned self] in ran.append("Delete \(id)") },
+                ]))
+            }
+            list.frame = NSRect(x: 0, y: 0, width: 224, height: 96)
+            list.moves = SailList.Moves(lands: { over in over == "notes" ? nil : over == "src" ? "src" : "" }, drop: { [unowned self] ids, into in dropped.append((ids, into)) })
+        }
+    }
+
+    /// A tree row's actions are its ⋯ alone, 20 pt in the 24 pt row: gone at rest, there on the row
+    /// under the pointer and on the chosen one.
+    @Test func aTreeRowsActionsAreItsMoreButtonOnHoverOrChoice() throws {
+        let motion = Motion.shared, was = motion.reduced
+        defer { motion.reduced = was }
+        motion.reduced = true
+        let tree = try Tree(["src", "README.md"])
+        let (window, _) = Self.shown(tree.list)
+        defer { window.orderOut(nil) }
+        let row = try Self.row(tree.list, 1), cell = try #require(row.view(atColumn: 0) as? RowCell)
+        #expect(cell.actions.isHidden, "a button stands on a row neither chosen nor under the pointer")
+        row.hovered = true
+        let buttons = cell.actions.views.compactMap { $0 as? SailButton }
+        #expect(!cell.actions.isHidden && buttons.map(\.title) == ["More"] && buttons.allSatisfy { $0.size == .row }, "\(buttons.map(\.title))")
+        row.hovered = false
+        #expect(cell.actions.isHidden)
+        tree.list.choose("README.md")
+        #expect(!cell.actions.isHidden, "the chosen row has no ⋯")
+    }
+
+    /// An action that cannot be done now is dimmed in its menu and its key does nothing; the menu
+    /// holds the same items, Delete under its own separator.
+    @Test func anActionThatCannotBeDoneIsDimmedAndItsKeyDoesNothing() throws {
+        let tree = try Tree(["src"])
+        tree.list.choose("src")
+        let menu = try #require(try Self.row(tree.list, 0).menu(for: try Self.key(0, "")))
+        #expect(menu.items.map { $0.isSeparatorItem ? "-" : $0.title } == ["Rename", "Reveal in Terminal", "-", "Delete"])
+        let reveal = try #require(menu.items.first { $0.title == "Reveal in Terminal" })
+        #expect((reveal.target as? NSMenuItemValidation)?.validateMenuItem(reveal) == false, "Reveal is on with nothing to paste into")
+        tree.revealing = true
+        #expect((reveal.target as? NSMenuItemValidation)?.validateMenuItem(reveal) == true)
+        #expect(tree.list.act(on: try Self.key(120, "\u{F705}", [.function])) && tree.ran == ["Rename src"], "F2 did not rename: \(tree.ran)")
+        tree.revealing = false
+        _ = (reveal.target as? NSObject)?.perform(reveal.action, with: reveal)
+        #expect(tree.ran == ["Rename src"], "a dimmed action ran")
+    }
+
+    /// Rows dragged within a tree land where `moves` says, the whole list for its root, a note
+    /// nowhere; a drag from elsewhere lands nowhere; a drop hands over the dragged rows' ids.
+    @Test func aTreesRowsMoveByADragWithinIt() throws {
+        let tree = try Tree(["src", "notes", "README.md"])
+        let list = tree.list
+        let writer = try #require(list.tableView(list, pasteboardWriterForRow: 2) as? NSPasteboardItem)
+        #expect(writer.string(forType: SailList.rowType) == "README.md")
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("rows-\(UUID())"))
+        pasteboard.clearContents()
+        pasteboard.writeObjects([writer])
+        let within = Dragging(source: list, pasteboard: pasteboard), outside = Dragging(source: NSView(), pasteboard: pasteboard)
+        #expect(list.tableView(list, validateDrop: within, proposedRow: 0, proposedDropOperation: .on) == .move)
+        #expect(list.tableView(list, validateDrop: within, proposedRow: 1, proposedDropOperation: .on) == [], "a drop over a note landed")
+        #expect(list.tableView(list, validateDrop: outside, proposedRow: 0, proposedDropOperation: .on) == [], "a drag from outside landed")
+        #expect(list.tableView(list, validateDrop: within, proposedRow: 2, proposedDropOperation: .above) == .move)
+        #expect(list.tableView(list, acceptDrop: within, row: 0, dropOperation: .on) && list.tableView(list, acceptDrop: within, row: -1, dropOperation: .on))
+        #expect(tree.dropped.map(\.0) == [["README.md"], ["README.md"]] && tree.dropped.map(\.1) == ["src", ""], "\(tree.dropped)")
+        list.moves = nil
+        #expect(list.tableView(list, pasteboardWriterForRow: 2) == nil, "a list that moves nothing began a drag")
+    }
+
+    /// What a drag says to a list: its source and its pasteboard; nothing else is asked.
+    @MainActor final class Dragging: NSObject, @preconcurrency NSDraggingInfo {
+        let draggingSource: Any?
+        let draggingPasteboard: NSPasteboard
+
+        init(source: Any, pasteboard: NSPasteboard) {
+            draggingSource = source
+            draggingPasteboard = pasteboard
+        }
+
+        var draggingDestinationWindow: NSWindow? { nil }
+        var draggingSourceOperationMask: NSDragOperation { .move }
+        var draggingLocation: NSPoint { .zero }
+        var draggedImageLocation: NSPoint { .zero }
+        var draggedImage: NSImage? { nil }
+        var draggingSequenceNumber: Int { 1 }
+        var draggingFormation: NSDraggingFormation {
+            get { .default }
+            set {}
+        }
+        var animatesToDestination: Bool {
+            get { false }
+            set {}
+        }
+        var numberOfValidItemsForDrop: Int {
+            get { 1 }
+            set {}
+        }
+        var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+        func slideDraggedImage(to _: NSPoint) {}
+        func enumerateDraggingItems(
+            options _: NSDraggingItemEnumerationOptions, for _: NSView?, classes _: [AnyClass], searchOptions _: [NSPasteboard.ReadingOptionKey: Any],
+            using _: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void
+        ) {}
+        func resetSpringLoading() {}
+    }
+
     static func key(_ code: UInt16, _ characters: String, _ flags: NSEvent.ModifierFlags = []) throws -> NSEvent {
         try #require(NSEvent.keyEvent(
             with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, characters: characters,

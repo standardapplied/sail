@@ -49,7 +49,7 @@ extension WorkbenchView {
         pane.wantsLayer = true
         pane.send = { [weak panel] frames in panel?.send(frames) }
         pane.onWatched = { [weak panel] watched in panel?.watchFile(watched) }
-        pane.onUnsaved = { [weak panel] unsaved in panel?.unsaved = unsaved ? path : nil }
+        pane.onUnsaved = { [weak panel, weak pane] unsaved in panel?.unsaved = unsaved ? pane?.path : nil }
         pane.onClose = { [weak self, weak view, weak panel, weak pane] in
             panel?.unsaved = nil
             panel?.watchFile(nil)

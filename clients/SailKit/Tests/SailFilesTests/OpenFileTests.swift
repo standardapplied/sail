@@ -413,6 +413,67 @@ import Testing
         #expect(pane.file.theirs?.text == "one\ntheirs\n")
     }
 
+    /// M59: a file renamed or moved in the app takes its pane with it: read at the new name, equal
+    /// bytes keep it as it was, clean or unsaved, its text never dropped nor marked saved; different
+    /// bytes are a clean pane's reload (M15a) and an unsaved one's line (M15b).
+    @Test func aMovedFileTakesItsPaneWithIt() throws {
+        let moved: FileName = "/home/dev/workspace/docs/tides.ts"
+        var unsaved = Self.opened("one\n")
+        unsaved.type("one\nmine\n")
+        unsaved.take(unsaved.file.moved(to: moved))
+        #expect(unsaved.file.path == moved && unsaved.file.name == "tides.ts")
+        let reread = try #require(unsaved.lastRead)
+        #expect(unsaved.asked.last == .read(id: reread, path: moved), "not read at the new name")
+        unsaved.answer(Array("one\n".utf8), version: "v2")
+        #expect(!unsaved.file.clean && unsaved.text == "one\nmine\n" && unsaved.file.note == .none, "the move dropped the text or marked it saved")
+        unsaved.take(unsaved.file.moved(to: Self.path))
+        unsaved.answer(Array("one\ntheirs\n".utf8), version: "v3")
+        #expect(unsaved.file.note == .changed && unsaved.text == "one\nmine\n", "different bytes at the new name replaced typed text")
+        var clean = Self.opened("one\n")
+        clean.take(clean.file.moved(to: moved))
+        clean.answer(Array("one\n".utf8), version: "v2")
+        #expect(clean.file.clean && !clean.said.contains { if case .replaced = $0 { true } else { false } }, "equal bytes reloaded a clean pane")
+        clean.take(clean.file.moved(to: Self.path))
+        clean.answer(Array("two\n".utf8), version: "v3")
+        #expect(clean.text == "two\n" && clean.file.clean, "a clean pane did not follow different bytes at the new name")
+    }
+
+    /// M59: a read under way at the old name is given up for one at the new: a first read starts
+    /// again there, a follow read is asked there; a pane still taking its first read reads once whole.
+    @Test func aMoveGivesUpTheReadAtTheOldName() throws {
+        let moved: FileName = "/home/dev/workspace/tides.ts"
+        var first = Pane(size: 4)
+        let opening = try #require(first.lastRead)
+        first.take(first.file.moved(to: moved))
+        let reopened = try #require(first.lastRead)
+        #expect(Array(first.asked.suffix(2)) == [.cancel(id: opening), .read(id: reopened, path: moved)] && !first.file.asked(opening))
+        var following = Self.opened("one\n")
+        following.take(following.file.changed())
+        let follow = try #require(following.lastRead)
+        following.take(following.file.moved(to: moved))
+        let followed = try #require(following.lastRead)
+        #expect(Array(following.asked.suffix(2)) == [.cancel(id: follow), .read(id: followed, path: moved)])
+        var taking = Pane(size: 4, placesAtOnce: false)
+        taking.answer(Array("one\n".utf8))
+        let asked = taking.asked.count
+        taking.take(taking.file.moved(to: moved))
+        #expect(taking.asked.count == asked, "read before the view held the file")
+        taking.place()
+        let whole = try #require(taking.lastRead)
+        #expect(taking.asked.last == .read(id: whole, path: moved), "never read at the new name once whole")
+    }
+
+    /// A pane answers for its own requests alone: a read and a save while they wait, nothing else.
+    @Test func aPaneOwnsOnlyItsOwnRequests() throws {
+        var pane = Self.opened("one\n")
+        let answered = try #require(pane.lastRead)
+        #expect(!pane.file.asked(1) && !pane.file.asked(answered), "an answered read, or the tree's id, is the pane's")
+        pane.type("two\n")
+        pane.save()
+        let saving = try #require(pane.lastWrite?.id)
+        #expect(pane.file.asked(saving))
+    }
+
     /// M4: a change named while a follow read runs is read once that read ends.
     @Test func aChangeDuringAReadIsReadAfterIt() throws {
         var pane = Self.opened("one\n")

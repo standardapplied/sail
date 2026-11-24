@@ -516,6 +516,7 @@ import Testing
             ("Move Divider Down", arrow(NSDownArrowFunctionKey), [.command, .control]), ("Move Divider Left", arrow(NSLeftArrowFunctionKey), [.command, .control]),
             ("Move Divider Right", arrow(NSRightArrowFunctionKey), [.command, .control]), ("Show Previous Tab", "{", [.command, .shift]),
             ("Show Next Tab", "}", [.command, .shift]), ("Select Last Tab", "9", command), ("Account", ",", command),
+            ("New File", "n", [.option, .command]), ("New Folder", "N", [.command, .shift]), ("Rename", FilesPanel.renameKey, []), ("Delete", "\u{8}", command),
         ]
         for number in 1 ... 8 {
             table.append(("Select Tab \(number)", "\(number)", command))

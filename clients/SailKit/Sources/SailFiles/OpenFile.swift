@@ -43,6 +43,13 @@ public struct OpenFile: Sendable {
         case written(id: Int32, digest: String, version: String)
         /// Write `id` wrote nothing: the file is at `digest`, ``absent`` when gone.
         case conflict(id: Int32, digest: String)
+
+        /// The request it answers.
+        public var id: Int32 {
+            switch self {
+            case let .data(id, _, _, _, _, _), let .refused(id, _, _), let .written(id, _, _), let .conflict(id, _): id
+            }
+        }
     }
 
     /// What the pane shows.
@@ -127,8 +134,8 @@ public struct OpenFile: Sendable {
         case save, keepMine, saveAnyway
     }
 
-    public let path: FileName
-    public let name: String
+    public private(set) var path: FileName
+    public private(set) var name: String
     private let size: Int64
     public private(set) var state: State
     /// The view holds every byte of the first read: keys and saves are taken.
@@ -171,7 +178,7 @@ public struct OpenFile: Sendable {
     /// `path` as the tree listed it; requests numbered from `firstID`, apart from the tree's.
     public init(path: FileName, entry: FileEntry, firstID: Int32 = 1 << 30) {
         self.path = path
-        name = FileName(Array(path.bytes.split(separator: 0x2F).last ?? [])).shown
+        name = path.leaf.shown
         size = entry.size
         nextID = firstID
         let kind = entry.kind == .known(.link) ? entry.target : entry.kind
@@ -265,6 +272,26 @@ public struct OpenFile: Sendable {
         guard dueAtTick, reading == nil else { return Step() }
         dueAtTick = false
         return whole ? Step(asks: [read(.follow)]) : reopen()
+    }
+
+    /// The person moved or renamed the file in the app (M59): the pane follows it to `path` and reads
+    /// it there, a read under way given up for one at the new name. Read whole, equal bytes keep the
+    /// pane as it was, clean or unsaved, and different bytes are a change (M15a, M15b).
+    public mutating func moved(to path: FileName) -> Step {
+        self.path = path
+        name = path.leaf.shown
+        guard let held = reading else {
+            if whole { return Step(asks: [read(.follow)]) }
+            if arrived { readAgain = true }
+            return Step()
+        }
+        reading = nil
+        return merge(Step(asks: [.cancel(id: held.id)]), held.why == .open ? reopen() : Step(asks: [read(held.why)]))
+    }
+
+    /// Whether request `id` is this pane's, and still waits for its answer.
+    public func asked(_ id: Int32) -> Bool {
+        reading?.id == id || saving?.id == id
     }
 
     /// The connection ended: what is held stays; a save under way is decided by the next read, and

@@ -51,6 +51,8 @@ public final class FakeRunnerDoor: Sendable {
         var holders: [String: String] = [:]
         /// A key typed on a free keyboard takes it, as the opener's does; false models someone else.
         var typingTakes = true
+        /// The bytes typed into each session, in order.
+        var typed: [String: [UInt8]] = [:]
         var connections = 0
         var kills: [String] = []
         /// Every session it made, oldest first, and the reasons of those it ended on its own.
@@ -84,6 +86,8 @@ public final class FakeRunnerDoor: Sendable {
         var saves: [Int32: (path: FileName, base: String, bytes: [UInt8])] = [:]
         /// The next save is refused so.
         var refuseSave: (kind: FileRefusal, message: String)?
+        /// The next create, move or remove is refused so.
+        var refuseChange: (kind: FileRefusal, message: String)?
         var refusals: [FileName: (kind: FileRefusal, message: String)] = [:]
         var versions = 0
         var watched: [Int32: [WatchedPath]] = [:]
@@ -231,20 +235,90 @@ public final class FakeRunnerDoor: Sendable {
     /// File `path`'s folder's listing kept in step with it, as the host's listing and watch are:
     /// its entry put, replaced (`size`) or taken away (nil), at a new version, and the folder's
     /// watchers told. A folder the door does not list is left unlisted.
-    private func listed(_ path: FileName, size: Int?, in files: inout Files) {
+    private func listed(_ path: FileName, size: Int?, folder: Bool = false, in files: inout Files) {
         guard let slash = path.bytes.lastIndex(of: 0x2F) else { return }
-        let parent = FileName(Array(path.bytes[..<slash])), name = FileName(Array(path.bytes[path.bytes.index(after: slash)...]))
+        let parent = FileName(Array(path.bytes[..<slash])), name = FileName(Array(path.bytes[path.bytes.index(after: slash)...])), isFolder = folder
         guard var folder = files.folders[parent] else { return }
         let had = folder.entries.first { $0.name == name }
         guard size != nil || had != nil else { return }
         folder.entries.removeAll { $0.name == name }
         if let size {
-            folder.entries.append(FileEntry(name: name, kind: .known(.file), target: .known(.none), size: Int64(size), mtimeNanos: 0, mode: had?.mode ?? 0o100644))
+            folder.entries.append(FileEntry(name: name, kind: .known(isFolder ? .folder : .file), target: .known(.none), size: Int64(size), mtimeNanos: 0, mode: had?.mode ?? (isFolder ? 0o040755 : 0o100644)))
         }
         files.versions += 1
         folder.version = "v\(files.versions)"
         files.folders[parent] = folder
         tellWatchers(of: parent, in: files)
+    }
+
+    /// The next create, move or remove is refused as `kind`, in `message`, nothing changed.
+    public func refuseNextChange(_ kind: FileRefusal, saying message: String) {
+        files.withLock { $0.refuseChange = (kind, message) }
+    }
+
+    /// Create, move or remove `id` as the host does, refusing in the host's words: never over a name
+    /// there (`exists`), never of a name not there or into a folder not there (`not_found`); a
+    /// folder with all it holds; each folder's listing kept in step and its watchers told.
+    private func change(_ frame: Frame, _ id: Int32, in files: inout Files) -> Frame {
+        func split(_ path: FileName) -> (folder: FileName, name: FileName)? {
+            guard let slash = path.bytes.lastIndex(of: 0x2F) else { return nil }
+            return (FileName(Array(path.bytes[..<slash])), FileName(Array(path.bytes[path.bytes.index(after: slash)...])))
+        }
+        func entry(_ path: FileName) -> FileEntry? {
+            split(path).flatMap { folder, name in files.folders[folder]?.entries.first { $0.name == name } }
+        }
+        func holds(_ path: FileName) -> Bool {
+            files.contents[path] != nil || files.folders[path] != nil || entry(path) != nil
+        }
+        func refused(_ kind: FileRefusal, _ path: FileName) -> Frame {
+            .filesRefused(id: id, kind: .known(kind), message: kind == .exists ? "\((split(path)?.name ?? path).shown) is already there." : "No file at \(path.shown) in dock.")
+        }
+        func folderGone(_ path: FileName) -> Frame? {
+            guard let folder = split(path)?.folder, files.folders[folder] == nil else { return nil }
+            return .filesRefused(id: id, kind: .known(.notFound), message: "The folder \(folder.shown) is gone from dock, so \(path.shown) was not made.")
+        }
+        func under(_ path: FileName, _ key: FileName) -> Bool {
+            key == path || key.bytes.starts(with: path.bytes + [0x2F])
+        }
+        func isFolder(_ path: FileName) -> Bool {
+            files.folders[path] != nil || entry(path)?.kind == .known(.folder)
+        }
+        if let refusal = files.refuseChange {
+            files.refuseChange = nil
+            return .filesRefused(id: id, kind: .known(refusal.kind), message: refusal.message)
+        }
+        files.versions += 1
+        let version = "v\(files.versions)"
+        switch frame {
+        case let .filesCreate(_, path, folder):
+            if let gone = folderGone(path) { return gone }
+            guard !holds(path) else { return refused(.exists, path) }
+            if folder { files.folders[path] = Folder(entries: [], version: version, truncated: false) } else { files.contents[path] = ([], version) }
+            listed(path, size: 0, folder: folder, in: &files)
+        case let .filesMove(_, from, to):
+            guard holds(from) else { return refused(.notFound, from) }
+            if let gone = folderGone(to) { return gone }
+            guard !holds(to) else { return refused(.exists, to) }
+            let folder = isFolder(from)
+            for key in files.folders.keys where under(from, key) {
+                files.folders[FileName(to.bytes + key.bytes.dropFirst(from.bytes.count))] = files.folders.removeValue(forKey: key)
+            }
+            for key in files.contents.keys where under(from, key) {
+                files.contents[FileName(to.bytes + key.bytes.dropFirst(from.bytes.count))] = files.contents.removeValue(forKey: key)
+            }
+            listed(from, size: nil, in: &files)
+            listed(to, size: 0, folder: folder, in: &files)
+            tellWatchers(of: from, in: files)
+        case let .filesRemove(_, path):
+            guard holds(path) else { return refused(.notFound, path) }
+            files.folders = files.folders.filter { !under(path, $0.key) }
+            files.contents = files.contents.filter { !under(path, $0.key) }
+            listed(path, size: nil, in: &files)
+            tellWatchers(of: path, in: files)
+        default:
+            break
+        }
+        return .filesDone(id: id)
     }
 
     /// The next save is refused as `kind`, in `message`, nothing written.
@@ -456,6 +530,8 @@ public final class FakeRunnerDoor: Sendable {
                 } else {
                     answer(.filesRefused(id: id, kind: .known(.notFound), message: "No folder at \(path)."), on: connection)
                 }
+            case let .filesCreate(id, _, _), let .filesMove(id, _, _), let .filesRemove(id, _):
+                answer(files.withLock { change(frame, id, in: &$0) }, on: connection)
             case let .filesWatch(paths):
                 let stale = files.withLock { files -> [FileName] in
                     files.watched[connection] = paths
@@ -599,6 +675,11 @@ public final class FakeRunnerDoor: Sendable {
             state.holders[session] = fde
         }
         announce(session, writer: fde, holder: nil)
+    }
+
+    /// The bytes typed into session `session` so far, by whoever held its keyboard.
+    public func typed(into session: String) -> [UInt8] {
+        state.withLock { $0.typed[session] ?? [] }
     }
 
     /// Whether a key typed on a free keyboard takes it, as the session's opener's does; false for
@@ -761,9 +842,10 @@ public final class FakeRunnerDoor: Sendable {
                 }
                 answer(.sessionEnded(reason: "ended"), on: connection)
                 answer(.accepted, on: connection)
-            case .input:
+            case let .input(_, bytes):
                 guard let session = opened ?? Self.session(of: ticket) else { continue }
                 let took = state.withLock { state -> Bool? in
+                    if state.writers[session] == number || state.writers[session] == nil && state.typingTakes { state.typed[session, default: []] += bytes }
                     if state.writers[session] == number { return false }
                     guard state.writers[session] == nil, state.typingTakes else { return nil }
                     state.writers[session] = number

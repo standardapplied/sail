@@ -3,6 +3,7 @@ import SailControls
 import SailFiles
 import SailLook
 import SailTerminal
+import SailTerminalWire
 import SailWorkbench
 
 /// A workspace tab's files panel (``FilesPanel``): 236 pt at the tab's leading edge, beside its
@@ -136,8 +137,17 @@ extension WorkbenchView {
     func makeFiles(project: String, name: String, in view: TabView) -> FilesPanel {
         let reached = signedIn()
         let tickets = reached.map { SignedInTickets(for: $0.handle, current: signedIn) }
-        let panel = FilesPanel(project: project, workspace: name, tickets: tickets, look: look, mono: labels)
+        let panel = FilesPanel(project: project, workspace: name, tickets: tickets, look: look, mono: labels, titleFont: titles)
         panel.onStart = { [weak self] project, name in await self?.startWorkspace(project, name) }
+        panel.pasteInTerminal = { [weak self, weak view] in
+            guard let self, let view, let tab = model.tabs.first(where: { self.tabViews[$0.id] === view }), let terminal = panes[tab.focused]?.terminal,
+                  terminal.link != nil else { return nil }
+            return { [weak self, weak terminal] text in
+                guard let terminal else { return }
+                terminal.paste(text: text)
+                self?.window?.makeFirstResponder(terminal)
+            }
+        }
         panel.onDismiss = { [weak self] in self?.dismissFloatingFiles() }
         panel.onOpenFile = { [weak self, weak view] path, entry in
             if let view { self?.openFile(path, entry, in: view) }
@@ -192,5 +202,90 @@ extension WorkbenchView {
             listingHeard: panel.listingHeard, changeHeard: panel.changeHeard, openedAt: panel.openedAt, admittedAt: panel.admittedAt, lastDrawn: TreeRowCell.lastDrawn, newDrawn: TreeRowCell.newDrawn,
             draws: TreeRowCell.draws, namesBuilt: TreeRowCell.namesBuilt, drawCPU: TreeRowCell.drawCPU
         )
+    }
+}
+
+/// What the drive does in the selected tab's files panel as a person would: a row's action as its
+/// menu item runs it, a name typed and ⏎, rows dropped as a drag drops them, the delete question
+/// answered; and what it reads back.
+extension WorkbenchView {
+    private var shownFiles: FilesPanel? {
+        model.selectedTab.flatMap { tabViews[$0.id]?.files }.flatMap { $0.isHidden ? nil : $0 }
+    }
+
+    /// The row whose path under the root is `name`, else the first row named so: a name moved out
+    /// of a folder is found where it is now, not where its folder's listing still has it.
+    private func filesPath(named name: String) -> FileName? {
+        let rows = shownFiles?.tree.rows.filter { $0.kind != .note } ?? [], exact = FileName(FileTree.root.shown + "/" + name)
+        return rows.first { $0.path == exact }?.path ?? rows.first { $0.name == name }?.path
+    }
+
+    /// Row `name`'s action `title`, run as its menu item runs it; false with no such row or action,
+    /// or one that cannot be done now.
+    package func filesAct(_ title: String, on name: String) -> Bool {
+        guard let panel = shownFiles, let path = filesPath(named: name), let action = panel.rowActions(path).first(where: { $0.title == title }), action.enabled() else {
+            return false
+        }
+        action.run()
+        return true
+    }
+
+    /// `name` typed into the open name field, and ⏎; false with no field open.
+    package func filesName(_ name: String) -> Bool {
+        guard let field = shownFiles?.nameRow else { return false }
+        field.field.field.stringValue = name
+        field.onCommit()
+        return true
+    }
+
+    /// The open name field's sentence ("" with none said), nil with no field open.
+    package var filesNameSays: String? {
+        shownFiles?.naming.map { $0.refusal ?? "" }
+    }
+
+    /// Rows `names` dropped into folder `into` ("" the root), as a drag within the tree drops them.
+    package func filesDrop(_ names: [String], into: String) -> Bool {
+        guard let panel = shownFiles else { return false }
+        let paths = names.compactMap(filesPath(named:))
+        guard paths.count == names.count, into.isEmpty || filesPath(named: into) != nil else { return false }
+        panel.drop(paths.map(\.key), into: into.isEmpty ? "" : filesPath(named: into)?.key ?? "")
+        return true
+    }
+
+    /// The pointer held over row `name`, the row drawn as under it; "" gives the pointer back.
+    package func filesHover(_ name: String) -> Bool {
+        guard let panel = shownFiles else { return false }
+        let path = filesPath(named: name)
+        guard name.isEmpty || path != nil else { return false }
+        panel.list.point(at: path?.key)
+        return true
+    }
+
+    /// Whether row `name`'s ⋯ is shown whole.
+    package func filesActionsShown(_ name: String) -> Bool {
+        guard let panel = shownFiles, let path = filesPath(named: name) else { return false }
+        return panel.list.actionsShown(path.key)
+    }
+
+    /// Row `name`'s context menu, as a right-click asks it, and where it pops up.
+    package func filesMenu(_ name: String) -> (menu: NSMenu, row: NSView)? {
+        guard let panel = shownFiles, let path = filesPath(named: name), let index = panel.tree.rows.firstIndex(where: { $0.path == path }),
+              let row = panel.list.rowView(atRow: index, makeIfNecessary: true), let event = NSEvent.mouseEvent(
+                  with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window?.windowNumber ?? 0, context: nil, eventNumber: 0,
+                  clickCount: 1, pressure: 1
+              ), let menu = row.menu(for: event) else { return nil }
+        return (menu, row)
+    }
+
+    /// The delete question's title while it asks.
+    package var filesQuestion: String? {
+        shownFiles?.question?.title.stringValue
+    }
+
+    /// The delete question answered: Delete, or Cancel.
+    package func filesAnswer(_ delete: Bool) -> Bool {
+        guard let question = shownFiles?.question else { return false }
+        (delete ? question.confirm : question.cancel).performClick(nil)
+        return true
     }
 }
