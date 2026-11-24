@@ -1,7 +1,7 @@
 import Foundation
 import SailAPI
 
-/// The Store a Login sheet's model for one harness (`login-store-mockup.html`): the kind it stores,
+/// The Store a Key sheet's model for one harness (`login-store-mockup.html`): the kind it stores,
 /// the name a store takes, and where it stands. The kind is the first the server names that a
 /// person makes without running anything (``SailAPI/AgentOffer/storable``). The name is `default`
 /// and not asked while the person has no login of the harness; with one, a free name is suggested
@@ -172,7 +172,7 @@ public struct StoreLogin: Equatable, Sendable {
     // MARK: Words
 
     public var title: String {
-        "Store a \(display) login"
+        "Store a \(display) key"
     }
 
     /// The field's label: the kind's, as a label starts.
@@ -217,7 +217,7 @@ public struct StoreLogin: Equatable, Sendable {
 
     /// Store as VoiceOver names it.
     public var storeName: String {
-        "Store \(display) login"
+        "Store \(display) key"
     }
 
     /// The panel's one quiet line once stored: the clipboard's sentence when it was cleared, and
@@ -225,6 +225,6 @@ public struct StoreLogin: Equatable, Sendable {
     public var stored: String? {
         guard case let .stored(answer, cleared) = stage else { return nil }
         let clipboard = cleared ? " Removed the key from the clipboard." : ""
-        return "Stored \(display) login “\(answer.login.name)”." + clipboard + (answer.note.map { " " + $0 } ?? "")
+        return "Stored \(display) key “\(answer.login.name)”." + clipboard + (answer.note.map { " " + $0 } ?? "")
     }
 }

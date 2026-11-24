@@ -21,28 +21,6 @@
               "label": "API key"
             }
           ],
-          "login_refusal": {
-            "action": "Choose one: agent login use claude-code home.",
-            "code": "login_not_stored",
-            "field_errors": [],
-            "message": "uday has no default Claude Code login, so a Claude Code session cannot start in dock; stored: home.",
-            "remedy": [
-              {
-                "text": "Choose one: "
-              },
-              {
-                "args": [
-                  "claude-code",
-                  "home"
-                ],
-                "run": "sail",
-                "verb": "agent login use"
-              },
-              {
-                "text": "."
-              }
-            ]
-          },
           "mode_default": "default",
           "modes": [
             {

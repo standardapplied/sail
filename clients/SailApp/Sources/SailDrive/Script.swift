@@ -272,6 +272,17 @@ struct Step: Decodable {
     var newSessionMode: String?
     /// The panel's mode menu shot open over it, the whole screen, in both looks.
     var newSessionModesShot: String?
+    /// ⇥ then Space pressed with the panel open, Sign in's ring drawn between them, and the item of
+    /// this title chosen from the menu Space opens, while AppKit tracks it.
+    var newSessionSignIn: String?
+    /// The panel's Sign in menu shot open over it, the whole screen, in both looks.
+    var newSessionSignInShot: String?
+    /// From now on dock's agents are the golden's with a third harness no Claude Code or Codex
+    /// word names, made up here: the app draws its sign-in and its key from the server alone.
+    var agentsMadeUp: Bool?
+    /// `[text, address]`: ⌘-click on this text where the workspace terminal focused shows it opens
+    /// this web address in the browser, and nothing else.
+    var urlCommandClick: [String]?
     /// `[harness, mode, "stored" | "inside"]`: the focused tab's session was asked of the runner's
     /// door naming exactly this agent, and no command.
     var doorCreated: [String]?

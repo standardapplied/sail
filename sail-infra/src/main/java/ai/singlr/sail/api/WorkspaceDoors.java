@@ -289,10 +289,10 @@ public final class WorkspaceDoors {
   /**
    * What can start in workspace {@code name} of {@code config}'s project for the bound actor, who
    * may enter it: nothing, said why, when it is not theirs or its person is gone; else each harness
-   * Sail knows, with the login it starts signed in with from {@code fdes}, or why none, and why one
-   * the project does not install does not start. The same decisions a terminal Create of an agent
-   * makes ({@link AgentStarts}). Whether a running workspace holds each installed harness's own
-   * sign-in is read in it ({@link WorkspaceSignIns}); a stopped one is not started to read it.
+   * Sail knows, with its person's default key from {@code fdes}, if any, and why one the project
+   * does not install does not start. The same decisions a terminal Create of an agent makes ({@link
+   * AgentStarts}). Whether a running workspace holds each installed harness's own sign-in is read
+   * in it ({@link WorkspaceSignIns}); a stopped one is not started to read it.
    */
   public AgentOffersResponse agents(ProjectDefinition config, String name, FdeStore fdes)
       throws Exception {
@@ -318,20 +318,21 @@ public final class WorkspaceDoors {
             ? signIns.held(
                 found.name(), installed.stream().map(harness -> harness.signIn().file()).toList())
             : Optional.<Set<String>>empty();
+    var keys = fdes.logins().list(fdeId);
     var offered = new ArrayList<AgentOffer>();
     for (var harness : Harnesses.all()) {
       if (!installed.contains(harness)) {
         var notInstalled = AgentStarts.notInstalled(config, harness).orElseThrow().error();
-        offered.add(new AgentOffer(harness, null, null, false, null, notInstalled));
+        offered.add(new AgentOffer(harness, null, false, null, notInstalled));
         continue;
       }
       var signedIn = held.map(files -> files.contains(harness.signIn().file())).orElse(null);
-      try {
-        var login = AgentStarts.login(fdes, fdeId, person, harness, name);
-        offered.add(new AgentOffer(harness, login.row(), null, true, signedIn, null));
-      } catch (ApiException noLogin) {
-        offered.add(new AgentOffer(harness, null, noLogin.error(), true, signedIn, null));
-      }
+      var key =
+          keys.stream()
+              .filter(row -> row.harness().equals(harness.yamlName()) && row.isDefault())
+              .findFirst()
+              .orElse(null);
+      offered.add(new AgentOffer(harness, key, true, signedIn, null));
     }
     return new AgentOffersResponse(project, name, person, running, null, offered);
   }

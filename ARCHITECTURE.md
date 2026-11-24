@@ -4332,9 +4332,9 @@ someone it does not know): a workspace whose person is gone (`owner_gone`) or th
 asker's (`not_your_workspace`, which is what an admin sees in another person's, with
 nothing offered and nothing of that person's logins) is refused whole; otherwise every harness Sail
 knows is offered with its modes (`Harness.modes()`, `mode_default` the first) and `note`, the kinds
-of login it takes and how to make one, and either the login it starts signed in with (`{name,
-kind}`, never a value) or why none (`login_refusal`: `login_not_stored`, with the remedy that
-stores one or makes one the default), with `inside` true and `sign_in`, the harness's own sign-in
+of login it takes and how to make one, the person's default key (`login`, `{name, kind}`, read
+from the keys' rows, never a value; none when they have no default, which is no refusal: the
+harness's own sign-in is the other way in), with `inside` true and `sign_in`, the harness's own sign-in
 (`Harness.signIn`, a `SignIn`): its `name` ("Your Claude account", "Your ChatGPT account"), `how`
 it goes (words the New Session panel says) and `signed_in`, whether the workspace holds it: its
 `SignIn.file` (`~/.claude/.credentials.json`, never `~/.claude.json`, Claude Code's own state;

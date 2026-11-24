@@ -31,39 +31,51 @@ extension RunnerAgent {
     }
 }
 
-/// What a person last started, per harness the mode, and the last start whole (signing in there
-/// included), which the row's menu names and starts again. Kept by the app between launches.
+/// How a person starts a harness: with its own sign-in inside the session, or with the key they
+/// stored for it.
+public enum Way: String, Codable, Hashable, Sendable {
+    case signIn, key
+}
+
+/// What a person last started, per harness the mode and the way in, and the last start whole,
+/// which the row's menu names and starts again. Kept by the app between launches.
 public struct ModeMemory: Codable, Equatable, Sendable {
     public private(set) var modes: [String: String]
+    public private(set) var ways: [String: Way]
     public private(set) var last: AgentStart?
 
-    public init(modes: [String: String] = [:], last: AgentStart? = nil) {
+    public init(modes: [String: String] = [:], ways: [String: Way] = [:], last: AgentStart? = nil) {
         self.modes = modes
+        self.ways = ways
         self.last = last
     }
 
     public mutating func remember(_ start: AgentStart) {
         modes[start.harness] = start.mode
+        ways[start.harness] = start.inside ? .signIn : .key
         last = start
+    }
+
+    /// `way` chosen for `harness` without a start: storing a key chooses it.
+    public mutating func choose(_ way: Way, for harness: String) {
+        ways[harness] = way
     }
 }
 
 /// The New Session panel's model for one workspace, from what its agents route answered: the
-/// harnesses it offers in its order and a Shell after them, the one chosen, its mode (the person's
-/// last for that harness while it is offered, else the harness's own default), and what a start
-/// would do. Every sentence is the server's; no harness's, mode's or kind's name is branched on.
+/// harnesses it offers in its order and a Shell after them, the one chosen, its mode and its way in
+/// (each the person's last for that harness while it is offered, else the harness's own default
+/// mode and its own sign-in), and what a start would do. Every sentence is the server's; no
+/// harness's, mode's or kind's name is branched on.
 public struct NewSession: Equatable, Sendable {
     public enum Choice: Hashable, Sendable {
         case harness(String)
         case shell
     }
 
-    /// What Start does for the choice: start it signed in; start it to sign in inside, its login
-    /// refused (`Start and Sign In There`); nothing, said why; or open a shell.
+    /// What Start does for the choice: start it, in its way in; nothing, said why; or open a shell.
     public enum Readiness: Equatable, Sendable {
         case start(AgentStart)
-        case signInThere(AgentStart, Refusal)
-        case needsLogin(Refusal)
         case refused(Refusal)
         case shell
     }
@@ -72,16 +84,29 @@ public struct NewSession: Equatable, Sendable {
     public private(set) var chosen: Choice
     public private(set) var memory: ModeMemory
     private var modes: [String: String]
+    private var ways: [String: Way]
 
     public init(_ agents: WorkspaceAgents, memory: ModeMemory) {
         self.agents = agents
         self.memory = memory
         modes = [:]
+        ways = [:]
         let lastOffered = memory.last.flatMap { last in agents.offered.first { $0.harness == last.harness } }
         chosen = (lastOffered ?? agents.offered.first).map { .harness($0.harness) } ?? .shell
         for offer in agents.offered {
             let remembered = memory.modes[offer.harness]
             modes[offer.harness] = offer.modes.contains { $0.mode == remembered } ? remembered : offer.modeDefault
+            let way = memory.ways[offer.harness] ?? .signIn
+            ways[offer.harness] = Self.offered(way, by: offer) ? way : .signIn
+        }
+    }
+
+    /// Whether `offer` starts in `way`: its sign-in where it signs in inside, a key where one is
+    /// its default.
+    private static func offered(_ way: Way, by offer: AgentOffer) -> Bool {
+        switch way {
+        case .signIn: offer.inside
+        case .key: offer.login != nil
         }
     }
 
@@ -104,6 +129,11 @@ public struct NewSession: Equatable, Sendable {
         modes[harness]
     }
 
+    /// How `harness` starts: its own sign-in, or the key.
+    public func way(of harness: String) -> Way? {
+        ways[harness]
+    }
+
     public mutating func choose(_ choice: Choice) {
         guard choices.contains(choice) else { return }
         chosen = choice
@@ -122,35 +152,41 @@ public struct NewSession: Equatable, Sendable {
         modes[harness] = mode
     }
 
-    /// Whether the row's quick item starts the last start again at once: its harness chosen, its
-    /// mode still offered, and the start going ahead as it did, with a stored login, or signing in
-    /// there when that is how it last started. Otherwise the panel opens at that harness, saying why.
+    /// Chooses `way` for the chosen harness when it starts so; anything else is ignored.
+    public mutating func choose(way: Way) {
+        guard case let .harness(harness) = chosen, let offer = offer(harness), Self.offered(way, by: offer) else { return }
+        ways[harness] = way
+    }
+
+    /// Whether Start makes the person sign in: the chosen harness starts with its own sign-in in a
+    /// workspace not known to hold it.
+    public var signsIn: Bool {
+        guard case let .start(start) = readiness, start.inside, let offer = offer(start.harness) else { return false }
+        return offer.signIn?.signedIn != true
+    }
+
+    /// Whether the row's quick item starts the last start's harness again at once, in the way in
+    /// and mode the person chose for it: it is chosen, its mode and way still offered (a key
+    /// chosen is still stored), and it starts. Otherwise the panel opens at that harness.
     public var startsAgain: Bool {
-        guard let last = memory.last, chosen == .harness(last.harness), offer(last.harness)?.modes.contains(where: { $0.mode == last.mode }) == true else { return false }
-        switch readiness {
-        case .start: return true
-        case .signInThere: return last.inside
-        case .needsLogin, .refused, .shell: return false
-        }
+        guard let last = memory.last, chosen == .harness(last.harness), offer(last.harness)?.modes.contains(where: { $0.mode == last.mode }) == true,
+              ways[last.harness] == memory.ways[last.harness] ?? .signIn
+        else { return false }
+        if case .start = readiness { return true }
+        return false
     }
 
     public var readiness: Readiness {
         guard case let .harness(harness) = chosen, let offer = offer(harness), let mode = modes[harness] else { return .shell }
         if let refusal = offer.refusal { return .refused(refusal) }
-        guard offer.login == nil, let refused = offer.loginRefusal else {
-            return .start(AgentStart(harness: harness, display: offer.display, mode: mode))
-        }
-        return offer.inside ? .signInThere(AgentStart(harness: harness, display: offer.display, mode: mode, inside: true), refused) : .needsLogin(refused)
+        return .start(AgentStart(harness: harness, display: offer.display, mode: mode, inside: ways[harness] != .key))
     }
 
     /// The start Start makes now, nil when it makes none or opens a shell; the memory then holds
-    /// its mode for its harness and it as the last start.
+    /// its mode and way for its harness and it as the last start.
     public mutating func start() -> AgentStart? {
-        let start: AgentStart? = switch readiness {
-        case let .start(start), let .signInThere(start, _): start
-        case .needsLogin, .refused, .shell: nil
-        }
-        if let start { memory.remember(start) }
+        guard case let .start(start) = readiness else { return nil }
+        memory.remember(start)
         return start
     }
 }
@@ -169,19 +205,26 @@ public enum NewSessionWords {
     public static let shell = (name: "Shell", line: "a terminal, no agent")
     public static let hint = "↑↓ choose · ⌘M mode"
     public static let mode = "Mode"
+    public static let signIn = "Sign in"
+    public static let storeKey = "Store a Key"
 
-    /// A harness row's trailing line: its login and the kind's label, or what stops it.
-    public static func line(_ offer: AgentOffer) -> String {
+    /// A harness row's trailing line: how it starts, its sign-in's name or its key, or what stops
+    /// it.
+    public static func line(_ offer: AgentOffer, way: Way?) -> String {
         if offer.refusal?.code == .known(.harnessNotInstalled) { return "not installed here" }
         if let refusal = offer.refusal { return refusal.message }
-        guard let login = offer.login else { return offer.loginRefusal == nil ? "" : "no login stored" }
-        return "login “\(login.name)” · \(label(of: login, in: offer))"
+        return way == .key ? key(offer) ?? "" : offer.signIn?.name ?? ""
     }
 
-    /// What VoiceOver hears of a harness ready to start signed in: its login and the kind's label;
-    /// nil with none.
+    /// The person's default key of `offer`: the kind's label and its name, nil with none.
+    public static func key(_ offer: AgentOffer) -> String? {
+        offer.login.map { "\(label(of: $0, in: offer)) “\($0.name)”" }
+    }
+
+    /// What VoiceOver hears of a harness ready to start on a key just stored: its kind's label and
+    /// name; nil with none.
     public static func ready(_ offer: AgentOffer) -> String? {
-        offer.login.map { "\(offer.display) ready, signed in as \($0.name), \(label(of: $0, in: offer))." }
+        offer.login.map { "\(offer.display) ready, \(label(of: $0, in: offer)) \($0.name)." }
     }
 
     /// The server's label of `login`'s kind, its kind's name where the server labels it not.
@@ -209,10 +252,6 @@ public enum NewSessionWords {
         return said.isEmpty ? nil : said
     }
 
-    public static func storeLogin(_ offer: AgentOffer) -> String {
-        "Store a \(offer.display) Login"
-    }
-
     /// What the chosen harness's mode says under it: a harness of one mode the server's note on
     /// why it has no other, else the mode's own words.
     public static func about(_ offer: AgentOffer, mode: String) -> String {
@@ -220,15 +259,12 @@ public enum NewSessionWords {
         return offer.modes.count == 1 ? offer.note ?? about : about
     }
 
-    public static func signInThere(_ offer: AgentOffer, workspace: String) -> String {
-        "Or start it and sign in inside \(offer.display): that login stays in \(workspace) only."
-    }
-
-    public static func primary(_ readiness: NewSession.Readiness) -> (title: String, enabled: Bool) {
+    /// Start, its title and whether it is on: Start and Sign In where starting makes the person
+    /// sign in (``NewSession/signsIn``).
+    public static func primary(_ readiness: NewSession.Readiness, signsIn: Bool) -> (title: String, enabled: Bool) {
         switch readiness {
-        case .start: ("Start", true)
-        case .signInThere: ("Start and Sign In There", true)
-        case .needsLogin, .refused: ("Start", false)
+        case .start: (signsIn ? "Start and Sign In" : "Start", true)
+        case .refused: ("Start", false)
         case .shell: ("Start", true)
         }
     }
@@ -243,8 +279,8 @@ public enum NewSessionWords {
     public static let asking = "Asking"
     public static let openAShell = "Open a Shell"
 
-    /// What an agent tab says while its host composes it and hands its login over.
+    /// What an agent tab says while its host composes it and hands its key over.
     public static func starting(_ start: AgentStart, in place: String) -> String {
-        start.inside ? "Starting \(start.display) in \(place); you sign in inside it" : "Starting \(start.display) in \(place), signed in with your login"
+        start.inside ? "Starting \(start.display) in \(place)" : "Starting \(start.display) in \(place), with your key"
     }
 }

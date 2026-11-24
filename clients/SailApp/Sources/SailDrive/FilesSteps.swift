@@ -325,6 +325,16 @@ extension Driver {
             guard let terminal = self.pane, let cell = terminal.terminal.cell(of: text) else { return (false, "the workspace terminal shows no \(text.debugDescription)") }
             return (await click(terminal.terminal, at: terminal.terminal.point(of: cell), modifiers: .command), "⌘-clicked \(text.debugDescription) at column \(cell.x + 1), row \(cell.y + 1)")
         }
+        if let pair = step.urlCommandClick, pair.count == 2 {
+            guard let view = self.pane?.terminal, let cell = view.cell(of: pair[0]) else { return (false, "the workspace terminal shows no \(pair[0].debugDescription)") }
+            var opened: [String] = []
+            let browser = view.openURL
+            view.openURL = { opened.append($0.absoluteString) }
+            defer { view.openURL = browser }
+            let clicked = await click(view, at: view.point(of: cell), modifiers: .command)
+            let done = await waitForState(step.seconds ?? 5) { !opened.isEmpty }
+            return (clicked && done && opened == [pair[1]], "⌘-clicked \(pair[0].debugDescription) at column \(cell.x + 1), row \(cell.y + 1): opened \(opened)")
+        }
         if let line = step.fileAtLine {
             let lines = { self.workbench.fileLines }
             let there = await waitForState(step.seconds ?? 10) { pane()?.editable == true && lines()?.at == line && lines()?.caret == line }

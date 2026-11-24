@@ -207,7 +207,8 @@ func answer<Response>(
         let claude = try #require(owned.offered.first)
         #expect(claude.login?.name == "work" && claude.login?.kind == "api-key")
         #expect(claude.modeDefault == claude.modes.first?.mode)
-        #expect(claude.modes.count == 7 && claude.refusal == nil && claude.loginRefusal == nil && claude.inside)
+        #expect(claude.modes.count == 7 && claude.refusal == nil && claude.inside)
+        #expect(claude.signIn?.name == "Your Claude account" && claude.signIn?.signedIn == false && claude.signIn?.said?.hasPrefix("Claude Code asks you to sign in") == true)
         #expect(claude.kinds.map(\.label) == ["API key"], "its one key")
         let codex = try #require(owned.offered.last)
         #expect(codex.refusal?.code == .known(.harnessNotInstalled) && !codex.inside && codex.login == nil)
@@ -216,11 +217,10 @@ func answer<Response>(
         let stopped = try agents("workspace-agents-stopped-no-login", "quay")
         #expect(!stopped.running && stopped.refusal == nil)
         let none = try #require(stopped.offered.first)
-        #expect(none.login == nil && none.inside && none.loginRefusal?.code == .known(.loginNotStored))
-        #expect(none.loginRefusal?.remedy.isEmpty == false)
+        #expect(none.login == nil && none.inside && none.signIn?.signedIn == nil, "a stopped workspace is not read for its sign-in")
 
         let noDefault = try #require(try agents("workspace-agents-no-default", "quay").offered.first)
-        #expect(noDefault.loginRefusal?.message.hasSuffix("stored: home.") == true)
+        #expect(noDefault.login == nil && noDefault.inside)
 
         let theirs = try agents("workspace-agents-not-yours", "dock")
         #expect(theirs.refusal?.code == .known(.notYourWorkspace) && theirs.offered.isEmpty && theirs.owner == "uday")

@@ -247,7 +247,7 @@ public final class Tooltip: NSResponder {
     }
 
     /// Placed by `TooltipPlacement` against the anchor's frame on its screen; also shown by a view
-    /// that knows when its anchor is pointed at by the keys (the user menu's Logins).
+    /// that knows when its anchor is pointed at by the keys (the user menu's Keys).
     package func show() {
         guard let anchor, let window = anchor.window, let screen = window.screen else { return }
         let size = chip.chip

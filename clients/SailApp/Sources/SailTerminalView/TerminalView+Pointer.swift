@@ -10,7 +10,7 @@ extension TerminalView {
     override public func mouseDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command), let place = place(of: event), let found = linkUnder(place.cell) {
             linkClicked = true
-            onLink(found.text, found.column)
+            if let url = found.url { openURL(url) } else { onLink(found.text, found.column) }
             return
         }
         if window?.firstResponder !== self { window?.makeFirstResponder(self) }

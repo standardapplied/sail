@@ -281,6 +281,46 @@ import Testing
                 "\(String(describing: harness.view.shownLink))")
     }
 
+    /// A web address is a link of its own, ahead of any the app finds: ⌘ over any row of one
+    /// soft-wrapped across rows underlines it on each, and a ⌘-click there opens it whole in the
+    /// browser, never the app's own link.
+    @Test func aWebAddressWrappedAcrossRowsOpensWhole() async throws {
+        let harness = try Harness(columns: 20, rows: 8, size: NSSize(width: 200, height: 320))
+        let grid = try #require(harness.view.grid)
+        let address = "https://claude.ai/oauth/authorize?code=true&client_id=5c2e7a90&state=f3Kp9xR2mT7v"
+        let rows = (address.count + grid.columns - 1) / grid.columns
+        try #require(rows > 2 && rows + 2 <= grid.rows, "a grid of \(grid.columns) by \(grid.rows) holds the address on \(rows) rows")
+        var opened: [URL] = [], hosts: [String] = []
+        harness.view.openURL = { opened.append($0) }
+        harness.view.linkIn = { _, _ in 0 ..< 3 }
+        harness.view.onLink = { text, _ in hosts.append(text) }
+        harness.link.output("Open:\r\n" + address + "\r\n> ")
+        await harness.tick()
+        harness.mouse(.mouseMoved, column: 0, row: rows, flags: .command)
+        let spans = (0 ..< rows).map { row in OverlayLink.Span(row: 1 + row, columns: 0 ..< (row == rows - 1 ? address.count - row * grid.columns : grid.columns)) }
+        #expect(harness.view.shownLink == OverlayLink(spans: spans), "\(String(describing: harness.view.shownLink))")
+        harness.mouse(.leftMouseDown, column: 0, row: rows, flags: .command)
+        harness.mouse(.leftMouseUp, column: 0, row: rows, flags: .command)
+        #expect(opened == [try #require(URL(string: address))] && hosts.isEmpty, "opened \(opened), the app's own link \(hosts)")
+    }
+
+    /// A program's own link (OSC 8) is its words, opening the address it names: ⌘ over them
+    /// underlines exactly them, a ⌘-click opens that address, and the words beside it are none.
+    @Test func aProgramsOwnLinkOpensTheAddressItNames() async throws {
+        let harness = try Harness()
+        var opened: [URL] = []
+        harness.view.openURL = { opened.append($0) }
+        harness.link.output("\u{1b}]8;;https://chatgpt.com/#settings/Security\u{1b}\\ChatGPT security settings\u{1b}]8;;\u{1b}\\ here")
+        await harness.tick()
+        harness.mouse(.mouseMoved, column: 9, row: 0, flags: .command)
+        #expect(harness.view.shownLink == OverlayLink(row: 0, columns: 0 ..< 25), "\(String(describing: harness.view.shownLink))")
+        harness.mouse(.leftMouseDown, column: 9, row: 0, flags: .command)
+        harness.mouse(.leftMouseUp, column: 9, row: 0, flags: .command)
+        #expect(opened == [try #require(URL(string: "https://chatgpt.com/#settings/Security"))])
+        harness.mouse(.mouseMoved, column: 27, row: 0, flags: .command)
+        #expect(harness.view.shownLink == nil, "the words after the link were underlined")
+    }
+
     /// R2-5: a line whose start has scrolled above the screen is never read from its tail, nor one
     /// going on below the screen from its head: no link lies in a word the edge cuts, even one
     /// ending short of the edge (a path's closing `.` left out), so ⌘ over it underlines nothing

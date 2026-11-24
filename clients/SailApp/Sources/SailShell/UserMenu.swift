@@ -4,7 +4,7 @@ import SailControls
 import SailLook
 
 /// The menu behind the rail's user button (`calm-accent-mockup.html`, in Paper and ink): who is
-/// signed in and the control plane with its state; Account (⌘,), Logins (not yet usable, saying
+/// signed in and the control plane with its state; Account (⌘,), Keys (not yet usable, saying
 /// why), Appearance Light / Dark / Auto, and Sign Out apart; signed out, Not signed in, Sign In and
 /// Appearance. It is drawn by us, not an `NSMenu`, whose highlight is the system's accent: 260 pt,
 /// its leading edge on the button's, its foot 8 pt above it, on the popover's surface and shadow.
@@ -210,7 +210,7 @@ package final class UserMenuView: NSView {
         self.look = look
         self.mono = mono
         segments = MenuSegments(look: look)
-        tip = Tooltip(UserMenuContent.Item.logins.why ?? "", look: look, mono: nil)
+        tip = Tooltip(UserMenuContent.Item.keys.why ?? "", look: look, mono: nil)
         planeRow = ControlPlaneRow(look: look, mono: mono, points: Look.Step.micro.points)
         super.init(frame: .zero)
         for label in [name, detail] {
@@ -292,7 +292,7 @@ package final class UserMenuView: NSView {
             addSubview(row)
             return row
         }
-        if let logins = items.first(where: { $0.item == .logins }) { tip.attach(to: logins, saying: logins.item.why ?? "") }
+        if let logins = items.first(where: { $0.item == .keys }) { tip.attach(to: logins, saying: logins.item.why ?? "") }
         segments.chosen = appearance
         if fresh {
             highlight(highlightingFirst ? stops.first : nil)
@@ -312,7 +312,7 @@ package final class UserMenuView: NSView {
         }
         segments.highlighted = index == items.count
         segments.setAccessibilitySelected(index == items.count)
-        if let index, items.indices.contains(index), items[index].item == .logins { tip.show() } else { tip.hide() }
+        if let index, items.indices.contains(index), items[index].item == .keys { tip.show() } else { tip.hide() }
         onHighlight(highlightedElement)
     }
 

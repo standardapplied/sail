@@ -42,11 +42,14 @@ public final class WorkspacesView: NSView {
     var onStart: @MainActor (_ start: AgentStart, _ project: String, _ name: String) -> Void = { _, _, _ in }
     /// Reads the starts kept for a person on a control plane: asked again whenever someone else signs in.
     var remembered: @MainActor (WorkspacesModel.Person) -> ModeMemory = { _ in ModeMemory() }
-    /// The person's starts: the mode chosen for each harness and the last start, which their own
-    /// rows offer to start again.
+    /// Keeps the person's starts between launches, told each time they change.
+    var keep: @MainActor (ModeMemory, WorkspacesModel.Person) -> Void = { _, _ in }
+    /// The person's starts: the mode and the way in chosen for each harness and the last start,
+    /// which their own rows offer to start again.
     var memory = ModeMemory() {
         didSet {
             guard memory != oldValue else { return }
+            keep(memory, person)
             model.lastStarted = memory.last?.display
             render()
         }
@@ -137,7 +140,7 @@ public final class WorkspacesView: NSView {
         panel.onChoose = { [weak self] name in self?.choose(name) }
         project.on = { [weak self] act in self?.act(act) }
         newSession.onStart = { [weak self] start, memory in self?.started(start, memory) }
-        newSession.onStoreLogin = { [weak self] offer in self?.storeLogin(offer) }
+        newSession.onStoreKey = { [weak self] offer in self?.storeKey(offer) }
         newSession.onClose = { [weak self] in
             self?.panelRow = nil
             self?.project.list.primaryElsewhere = false
@@ -446,11 +449,11 @@ public final class WorkspacesView: NSView {
         }
     }
 
-    /// Store a Login on `offer`: the person's logins asked, so the sheet asks a name only where they
+    /// Store a Key on `offer`: the person's keys asked, so the sheet asks a name only where they
     /// have one of the harness; not read, the panel says why and no sheet opens (a name not asked
     /// could replace one they have). Then the sheet over the panel, 420 pt or the window less 12 pt
     /// each side on a narrow page. Asked for a workspace the panel no longer shows, nothing opens.
-    private func storeLogin(_ offer: AgentOffer) {
+    private func storeKey(_ offer: AgentOffer) {
         guard let client, let place = startingIn else { return }
         let era = self.era
         byAPerson { [weak self] in
@@ -473,13 +476,15 @@ public final class WorkspacesView: NSView {
         }
     }
 
-    /// A login stored: where the panel is still open on its workspace, it says so at once, the
-    /// clipboard cleared there and then when it still held the key, so the line that says so shows;
-    /// then it shows what the route answers now, the harness chosen. With the panel gone, nothing
-    /// says it, so the clipboard is left as it is.
+    /// A key stored: where the panel is still open on its workspace, it says so at once, the
+    /// clipboard cleared there and then when it still held the key, so the line that says so shows,
+    /// and the person's starts take the key as the harness's way in; then it shows what the route
+    /// answers now, the harness chosen. With the panel gone, nothing says it, so the clipboard is
+    /// left as it is.
     private func loginStored(_ stored: StoreLogin, in place: (project: String, name: String), era: Int) {
         guard let client, let line = stored.stored, era == self.era, newSession.isOpen, startingIn.map({ $0 == place }) == true else { return }
         if case .stored(_, clearsClipboard: true) = stored.stage { pasteboard.clearContents() }
+        memory.choose(.key, for: stored.harness)
         newSession.say(.stored(line))
         byAPerson { [weak self] in
             guard let self else { return }

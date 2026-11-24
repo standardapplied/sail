@@ -6,6 +6,7 @@ import SailKitTestSupport
 import SailShell
 import SailTerminal
 import SailTerminalWire
+import SailWorkbench
 
 /// The control plane of the drive's workspaces run: every route answered as the server answered
 /// it in the goldens its `ClientGoldensTest` writes, a step choosing which golden answers a route
@@ -92,6 +93,25 @@ actor GoldenDesk: Transport {
         body["workspaces"] = rows + [["name": name, "instance": "harbor-\(name)", "state": "running", "owner": "uday"]]
         answers["GET /v1/projects/harbor/workspaces"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: try JSONSerialization.data(withJSONObject: body))
         held["GET /v1/projects/harbor/workspaces"] = .zero
+    }
+
+    /// From now on dock's agents are the golden `workspace-agents-dock-no-login`'s with a third
+    /// harness after them that no word of the app names: its own sign-in, words and key, as a
+    /// server declaring it would.
+    func answerMadeUp() throws {
+        let exchange = try Exchange("workspace-agents-dock-no-login")
+        guard var body = try JSONSerialization.jsonObject(with: exchange.body) as? [String: Any], let offered = body["offered"] as? [[String: Any]] else { return }
+        let madeUp: [String: Any] = [
+            "harness": "tide", "display": "Tide", "mode_default": "default", "inside": true,
+            "modes": [["mode": "default", "label": "Tide's own", "about": "Starts as Tide starts by itself."]],
+            "kinds": [["kind": "token", "label": "Tide token", "how": [["text": "Create a token on the Tide dashboard"]]]],
+            "login": ["name": "default", "kind": "token"],
+            "sign_in": ["name": "Your Tide crew", "signed_in": false,
+                        "how": [["text": "Tide asks you to sign in with your Tide crew when it starts, once in each workspace. Pick “Join by code” there."]]],
+        ]
+        body["offered"] = offered + [madeUp]
+        answers["GET /v1/projects/harbor/workspaces/dock/agents"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: try JSONSerialization.data(withJSONObject: body))
+        held["GET /v1/projects/harbor/workspaces/dock/agents"] = .zero
     }
 
     /// From now on harbor's list is the one answered now with `name` stopped, or left out ("gone").
@@ -207,6 +227,14 @@ extension Driver {
         if let started = await performNewSession(step) { return started }
         if let stored = await performLoginSheet(step) { return stored }
         let pane = shell.workspaces
+        if step.agentsMadeUp == true {
+            do {
+                try await GoldenDesk.shared.answerMadeUp()
+                return (true, "")
+            } catch {
+                return (false, "workspace-agents-dock-no-login: \(error)")
+            }
+        }
         if let pair = step.golden {
             guard pair.count == 2 || pair.count == 3, let seconds = Int(pair.count == 3 ? pair[2] : "0") else {
                 return (false, "golden takes a route, a golden's name and, to hold the answer, its seconds")
@@ -566,7 +594,7 @@ extension Driver {
         }
         if let title = step.newSessionClick {
             let view = panel.view
-            let controls: [NSView] = view.rows + [view.primary, view.secondary, view.modes, view.storeLogin].compactMap { $0 }
+            let controls: [NSView] = view.rows + [view.primary, view.secondary, view.modes, view.signIn].compactMap { $0 }
             let named = { (control: NSView) -> String in (control as? NewSessionRow)?.name.stringValue ?? (control as? NSButton)?.title ?? "" }
             guard panel.isOpen, let target = controls.first(where: { named($0) == title }) else { return (false, "the panel shows no \(title); " + said()) }
             guard await click(target, at: NSPoint(x: target.bounds.midX, y: target.bounds.midY)) else { return (false, "\(title) could not be clicked") }
@@ -593,6 +621,18 @@ extension Driver {
             send(key)
             let chosen = await waitUntil(step.seconds ?? 5) { panel.view.modes?.title == label }
             return (opened && chosen, (opened ? "⌘M opened the modes" : "⌘M opened no menu") + "; " + said())
+        }
+        if let title = step.newSessionSignIn {
+            return await signInByKeys(panel, choosing: title, said: said)
+        }
+        if let name = step.newSessionSignInShot {
+            guard panel.isOpen, panel.view.signIn != nil else { return (false, "no Sign in menu to shoot; " + said()) }
+            return await inBothLooks(name) { file in
+                guard let button = panel.view.signIn, let menu = button.menu, let shot = Shot.begin(.menu, to: file) else { return }
+                menu.perform(#selector(NSMenu.cancelTracking), with: nil, afterDelay: 2.5, inModes: [.common])
+                MenuOpener.shared.open(button)
+                await shot.taken()
+            }
         }
         if let name = step.newSessionModesShot {
             guard panel.isOpen, panel.view.modes != nil else { return (false, "no mode menu to shoot; " + said()) }
@@ -672,6 +712,29 @@ extension Driver {
             return (true, "the section is laid out \(rightToLeft ? "right to left" : "left to right")")
         }
         return nil
+    }
+
+    /// ⇥ to Sign in, its ring checked, then Space to open its menu, and the item titled `title`
+    /// chosen while AppKit tracks it: Sign in then reads it, or for Store a Key, the sheet is asked.
+    private func signInByKeys(_ panel: NewSessionPanel, choosing title: String, said: () -> String) async -> (Bool, String) {
+        guard panel.isOpen, let tab = Keys.named("tab", modifiers: []), let space = Keys.named(" ", modifiers: []) else { return (false, "no panel, or no ⇥ or Space; " + said()) }
+        send(tab)
+        let ringed = await waitUntil(2) { panel.signInFocused && panel.view.signIn?.holdsKeys == true }
+        guard ringed, let menu = panel.view.signIn?.menu, let index = menu.items.firstIndex(where: { $0.title == title }) else {
+            return (false, (ringed ? "Sign in offers no \(title)" : "⇥ did not reach Sign in") + "; " + said())
+        }
+        var opened = false
+        let choose = Timer(timeInterval: 0.3, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                opened = NSApp.windows.contains { $0.isVisible && $0.level.rawValue >= NSWindow.Level.popUpMenu.rawValue }
+                menu.cancelTracking()
+                menu.performActionForItem(at: index)
+            }
+        }
+        RunLoop.main.add(choose, forMode: .common)
+        send(space)
+        let chosen = await waitUntil(5) { title == NewSessionWords.storeKey ? panel.loginSheet != nil : panel.view.signIn?.title == title }
+        return (opened && chosen, (opened ? "Space opened Sign in" : "Space opened no menu") + "; " + said())
     }
 
     /// Store a Login's steps: a key pasted as a person pastes it, the sheet read, and the clipboard.

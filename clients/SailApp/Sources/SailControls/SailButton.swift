@@ -175,7 +175,7 @@ public final class SailButton: NSButton {
     }
 
     /// Drawn focused, its halo on, while Return reaches it through a view that holds the window's
-    /// keys for it: the New Session panel's Start once a login is stored, in a box floating over the
+    /// keys for it: the New Session panel's Start once a key is stored, in a box floating over the
     /// window, which never takes the keys itself.
     public var holdsKeys = false {
         didSet { needsDisplay = true }
