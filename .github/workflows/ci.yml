@@ -30,8 +30,7 @@ jobs:
   # dispatch and a change it cannot compute run every lane.
   changes:
     name: What the change touches
-    # Every Linux lane but the dependency scan, which holds the NVD key, runs on this label.
-    runs-on: &linux blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       ci: ${{ steps.diff.outputs.ci }}
@@ -87,12 +86,12 @@ jobs:
 
       - name: Unit tests and quality gates
         run: >
-          ci/check unit ${{ matrix.module }} ${{ runner.os != 'Linux' && '--no-coverage' || '' }}
+          ci/check unit ${{ matrix.module }} ${{ matrix.os != 'ubuntu-24.04' && '--no-coverage' || '' }}
           2>&1 | tee "$RUNNER_TEMP/maven.log"
 
       - name: Upload coverage reports
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always() && runner.os == 'Linux'
+        if: always() && matrix.os == 'ubuntu-24.04'
         with:
           name: jacoco-reports-${{ matrix.module }}
           path: |
@@ -179,7 +178,7 @@ jobs:
     name: Native binaries
     needs: changes
     if: needs.changes.outputs.terminal == 'true'
-    runs-on: *linux
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -368,7 +367,7 @@ jobs:
       fail-fast: false
       matrix:
         part: [1, 2, 3]
-    runs-on: *linux
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -424,7 +423,7 @@ jobs:
     name: Multi-node control-plane integration tests
     needs: changes
     if: needs.changes.outputs.ci == 'true'
-    runs-on: *linux
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -534,7 +533,7 @@ jobs:
     name: Native upgrade tests
     needs: [changes, native]
     if: needs.changes.outputs.ci == 'true'
-    runs-on: *linux
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -591,7 +590,7 @@ jobs:
     if: always()
     needs:
       [changes, unit, dependency-scan, native, native-fleet, native-upgrade, fleet-integration, incus-integration, terminal-e2e]
-    runs-on: *linux
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Every job succeeded
