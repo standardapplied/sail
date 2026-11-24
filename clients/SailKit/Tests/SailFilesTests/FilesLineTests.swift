@@ -125,7 +125,7 @@ import Testing
     }
 
     @Test func anEmptyWorkspaceSaysSo() throws {
-        #expect(Self.line(try Self.listed([]), .connected, at: 0) == FilesLine(words: "~/workspace is empty.", mark: .none))
+        #expect(Self.line(try Self.listed([]), .connected, at: 0) == FilesLine(words: "~/workspace is empty. ⌥⌘N makes a file.", mark: .none))
     }
 
     /// A folder that never settles says so, with when what is shown of it was listed, rather than

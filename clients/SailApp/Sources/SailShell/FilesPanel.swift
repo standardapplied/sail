@@ -86,13 +86,36 @@ final class FilesPanel: NSView {
     /// Whether it floats over the tab's terminals (a narrow tab), with its shadow.
     var floating = false
 
-    init(project: String, workspace: String, tickets: (any TicketSource)?, look: Look, mono: LabelFont, clock: @escaping @MainActor () -> Double = FilesPanel.monotonic) {
+    /// What the person changes of the workspace's names, each under way until answered.
+    var actions: FileActions
+    /// The inline name field open now, a new entry's or a rename's, and the view it is.
+    var naming: Naming?
+    var nameRow: NameRow?
+    private var shownNaming: Naming?
+    /// A path made or moved to, chosen once the watch lists it (rows come only from the workspace),
+    /// unless the person chooses or acts first.
+    var choosing: FileName?
+    /// An action's refusal with no field to say it under (a drag's move, a delete), said in the line
+    /// until the next act or choice.
+    var refused: String?
+    /// The delete question while it asks.
+    var question: Sheet?
+    /// Pastes text at the cursor of the tab's terminal; nil while the tab has none to paste into.
+    var pasteInTerminal: @MainActor () -> (@MainActor (String) -> Void)? = { nil }
+    let titleFont: TitleFont
+
+    init(
+        project: String, workspace: String, tickets: (any TicketSource)?, look: Look, mono: LabelFont, titleFont: TitleFont,
+        clock: @escaping @MainActor () -> Double = FilesPanel.monotonic
+    ) {
         self.project = project
         self.workspace = workspace
         self.tickets = tickets
         self.look = look
         self.mono = mono
+        self.titleFont = titleFont
         self.clock = clock
+        actions = FileActions(workspace: workspace)
         tree = FileTree(openedAt: clock())
         list = SailList(rowStyle: .tree, look: look, mono: mono)
         scroll = QuietScrollView(look: look)
@@ -109,7 +132,12 @@ final class FilesPanel: NSView {
         list.onChoose = { [weak self] key in
             guard let self, !rebuilding else { return }
             chosenPath = key.flatMap { key in shownRows.first { $0.path.key == key }?.path }
+            let said = refused != nil
+            acts()
+            if said { refresh() }
         }
+        list.allowsMultipleSelection = true
+        list.moves = SailList.Moves(lands: { [weak self] over in self?.landing(over) }, drop: { [weak self] ids, into in self?.drop(ids, into: into) })
         list.target = self
         list.doubleAction = #selector(doubleClicked(_:))
         line.onAction = { [weak self] action in self?.act(action) }
@@ -161,6 +189,7 @@ final class FilesPanel: NSView {
     func close() {
         lookup = nil
         admitted = false
+        question?.withdraw()
         guard session != nil else { return }
         wake?.invalidate()
         wake = nil
@@ -172,6 +201,7 @@ final class FilesPanel: NSView {
         shownRevision = nil
         phase = .connecting
         startRefusal = nil
+        actions.disconnected().forEach(answered)
         refresh()
     }
 
@@ -198,6 +228,7 @@ final class FilesPanel: NSView {
             if phase != .connected {
                 tree.disconnected()
                 filePane?.disconnected()
+                actions.disconnected().forEach(answered)
             }
             if phase == .connected { startRefusal = nil }
         case .admitted:
@@ -212,6 +243,10 @@ final class FilesPanel: NSView {
             filePane?.admitted()
         case let .frame(frame):
             if lookedUp(frame) { break }
+            if let answer = actions.receive(frame) {
+                answered(answer)
+                break
+            }
             if filePane?.takes(frame) == true { break }
             send(tree.receive(frame, at: now))
             if TreeRowCell.measuring, frame.isWholeListing, let path = tree.lastListed { listingHeard = (path.key, CACurrentMediaTime()) }
@@ -288,11 +323,14 @@ final class FilesPanel: NSView {
     // MARK: What it shows
 
     /// The line and the rows as the tree and the connection say now, each drawn again only when it
-    /// changed: a tick that changes nothing touches no view.
+    /// changed: a tick that changes nothing touches no view. An action's refusal is the person's own
+    /// and goes ahead of the tree's standing line, behind only what the connection says while down.
     package func refresh() {
         let now = clock()
+        let standing = FilesLine(tree: tree, phase: phase, workspace: workspace, at: now) { [clock] at in Self.timeOfDay(at, now: clock()) }
+        let refusal = refused.map { FilesLine(words: $0, mark: .bad) }
         let said = startRefusal.map { FilesLine(words: $0.joined(separator: " "), mark: .bad, action: .start) }
-            ?? FilesLine(tree: tree, phase: phase, workspace: workspace, at: now) { [clock] at in Self.timeOfDay(at, now: clock()) }
+            ?? (FilesLine.state(of: phase, workspace: workspace) == nil ? refusal ?? standing : standing ?? refusal)
         if said != shownLine {
             shownLine = said
             line.show(said, starting: starting)
@@ -300,25 +338,31 @@ final class FilesPanel: NSView {
             needsLayout = true
         }
         schedule(after: now)
-        let new = tree.newPaths(at: now), marked = new != shownNew || unsaved != shownUnsaved
-        guard tree.revision != shownRevision || marked else { return }
+        let new = tree.newPaths(at: now), marked = new != shownNew || unsaved != shownUnsaved || naming != shownNaming
+        guard tree.revision != shownRevision || marked else { return chooseMade() }
         let rows = tree.rows, wasNew = shownNew
+        if let naming, !shows(naming, in: rows) { return endNaming() }
         shownRevision = tree.revision
         shownNew = new
-        guard rows != shownRows || marked else { return }
+        guard rows != shownRows || marked else { return chooseMade() }
         let place = chosenPath.flatMap { path in shownRows.firstIndex { $0.path == path } }
         let before = Dictionary(shownRows.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
         let dotted = Set([unsaved, shownUnsaved].compactMap { $0 })
         shownUnsaved = unsaved
-        let changed = Set(rows.filter { row in before[row.path].map { $0 != row } ?? false || wasNew.contains(row.path) != new.contains(row.path) || dotted.contains(row.path) }.map(\.path))
-        let fresh = shownRows.isEmpty
+        var changed = Set(rows.filter { row in before[row.path].map { $0 != row } ?? false || wasNew.contains(row.path) != new.contains(row.path) || dotted.contains(row.path) }.map(\.path.key))
+        if naming != shownNaming { changed.formUnion([naming?.id, shownNaming?.id].compactMap { $0 }) }
+        let fresh = shownRows.isEmpty && (!rows.isEmpty || list.entries.isEmpty)
+        let focus = naming.map { $0.id != shownNaming?.id || $0.refusal != nil && $0.refusal != shownNaming?.refusal } ?? false
         shownRows = rows
+        shownNaming = naming
         rowSets += 1
         rebuilding = true
-        let entries = rows.map { SailList.Entry.item(item($0, new: new.contains($0.path))) }
-        scroll.keepingScroll { if fresh { list.entries = entries } else { list.apply(entries, changed: Set(changed.map(\.key))) } }
+        let entries = shownEntries(rows, new: new)
+        scroll.keepingScroll { if fresh { list.entries = entries } else { list.apply(entries, changed: changed) } }
         rebuilding = false
+        named(focus: focus)
         keepChoice(in: rows, place: place)
+        chooseMade()
         needsLayout = true
     }
 
@@ -340,7 +384,7 @@ final class FilesPanel: NSView {
         chosenPath = target
         guard list.chosen != target?.key else { return }
         rebuilding = true
-        if let target { list.selectRowIndexes(IndexSet(integer: rows.firstIndex { $0.path == target } ?? 0), byExtendingSelection: false) } else { list.deselectAll(nil) }
+        list.select(target?.key)
         rebuilding = false
     }
 
@@ -378,6 +422,7 @@ final class FilesPanel: NSView {
         return SailList.Item(
             id: row.path.key, name: row.name, voice: "\(row.name), \(kind)\(new ? ", new" : "")\(dotted ? ", unsaved" : "")",
             content: TreeRowCell(row, new: new, unsaved: dotted, height: RowStyle.tree.height, direction: direction, look: look) { [weak self] in self?.toggle(row.path) },
+            actions: rowActions(row.path),
             outline: SailList.Outline(level: row.depth, expanded: row.kind == .folder ? row.expanded : nil)
         )
     }
@@ -462,6 +507,7 @@ final class FilesPanel: NSView {
     override var userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection {
         didSet {
             guard userInterfaceLayoutDirection != oldValue else { return }
+            let held = nameRow?.holdsKeys == true
             for view in [list, scroll, line] as [NSView] {
                 view.userInterfaceLayoutDirection = userInterfaceLayoutDirection
             }
@@ -469,6 +515,7 @@ final class FilesPanel: NSView {
             shownRevision = nil
             shownRows = []
             refresh()
+            if held { named(focus: true) }
         }
     }
 
@@ -480,10 +527,14 @@ final class FilesPanel: NSView {
     // MARK: Drawing
 
     private func relook() {
+        let held = nameRow?.holdsKeys == true
+        defer { if held { named(focus: true) } }
         list.look = look
         scroll.look = look
         line.look = look
         castShadow.look = look
+        nameRow?.field.look = look
+        question?.look = look
         shownRevision = nil
         shownRows = []
         shownLine = nil
@@ -872,6 +923,329 @@ final class FilesLineView: NSView {
     @objc private func pressed(_: Any?) {
         guard let action = shown?.action, !starting else { return }
         onAction(action)
+    }
+}
+
+// MARK: Making, renaming, moving and deleting
+
+extension FilesPanel {
+    static let renameKey = String(Character(UnicodeScalar(UInt16(NSF2FunctionKey)) ?? " "))
+    static let deleteKey = "\u{8}"
+
+    /// What a row offers on its ⋯ and in its context menu, each the File menu's own with its key.
+    func rowActions(_ path: FileName) -> [SailList.Action] {
+        [
+            SailList.Action("New File", key: "n", modifiers: [.option, .command], onRow: false) { [weak self] in self?.beginNew(folder: false, at: path) },
+            SailList.Action("New Folder", key: "n", modifiers: [.shift, .command], onRow: false) { [weak self] in self?.beginNew(folder: true, at: path) },
+            SailList.Action("Rename", key: Self.renameKey, onRow: false, startsGroup: true) { [weak self] in self?.beginRename(path) },
+            SailList.Action("Reveal in Terminal", onRow: false, enabled: { [weak self] in self?.pasteInTerminal() != nil }) { [weak self] in self?.reveal(from: path) },
+            SailList.Action("Delete", key: Self.deleteKey, modifiers: .command, onRow: false, startsGroup: true, destructive: true) { [weak self] in
+                self?.askToDelete(from: path)
+            },
+        ]
+    }
+
+    /// The entries chosen now, by path, in the tree's order.
+    var chosenPaths: [FileName] {
+        let byKey = Dictionary(shownRows.map { ($0.path.key, $0.path) }, uniquingKeysWith: { first, _ in first })
+        return list.chosenIDs.compactMap { byKey[$0] }
+    }
+
+    /// What an action from row `path` acts on: every chosen entry when it is one of them, else it
+    /// alone; an entry inside another acted on goes with that one.
+    func targets(from path: FileName) -> [FileName] {
+        let chosen = chosenPaths, acted = chosen.contains(path) ? chosen : [path]
+        return acted.filter { target in !acted.contains { target.isUnder($0) } }
+    }
+
+    private func row(_ path: FileName) -> FileTree.Row? {
+        shownRows.first { $0.path == path }
+    }
+
+    /// The folder a new entry goes into from row `path`: the folder itself, else the one holding it.
+    private func folder(of path: FileName?) -> FileName {
+        guard let path, let row = row(path) else { return FileTree.root }
+        return row.kind == .folder ? path : FileTree.parent(of: path) ?? FileTree.root
+    }
+
+    private var notConnected: String {
+        "Not connected to \(workspace); nothing was changed."
+    }
+
+    // MARK: The name field
+
+    /// New File or New Folder from row `path` (none: the root): the name field opens at the top of
+    /// its folder, the folder opened first.
+    func beginNew(folder isFolder: Bool, at path: FileName?) {
+        let into = folder(of: path)
+        if into != FileTree.root, !tree.expanded.contains(into) { send(tree.expand(into)) }
+        begin(Naming(kind: isFolder ? .folder : .file, folder: into), name: "")
+    }
+
+    /// Rename: the name field in the entry's own place, holding its name.
+    func beginRename(_ path: FileName) {
+        guard let row = row(path), row.kind != .note else { return }
+        begin(Naming(kind: .rename(path), folder: FileTree.parent(of: path) ?? FileTree.root), name: row.name)
+    }
+
+    private func begin(_ new: Naming, name: String) {
+        guard naming?.asked == nil, question == nil else { return }
+        acts()
+        let depth = new.folder == FileTree.root ? 0 : (row(new.folder)?.depth ?? -1) + 1
+        let room = Self.width - RowStyle.tree.margin * 2 - RowStyle.tree.leading - RowStyle.tree.trailing
+        let field = NameRow(name: name, voice: new.voice, depth: depth, room: room, direction: userInterfaceLayoutDirection, look: look, mono: mono)
+        field.onCommit = { [weak self] in self?.commit() }
+        field.onCancel = { [weak self] in self?.endNaming() }
+        field.onEdit = { [weak self] in
+            guard let self, naming?.refusal != nil else { return }
+            naming?.refusal = nil
+            refresh()
+        }
+        nameRow = field
+        naming = new
+        refresh()
+    }
+
+    /// Whether `naming`'s place is shown in `rows`: a rename's entry, a new entry's folder open.
+    private func shows(_ naming: Naming, in rows: [FileTree.Row]) -> Bool {
+        switch naming.kind {
+        case let .rename(path): rows.contains { $0.path == path }
+        case .file, .folder: naming.folder == FileTree.root || rows.contains { $0.path == naming.folder && $0.expanded }
+        }
+    }
+
+    /// The rows as the list shows them: the tree's, a rename's entry as its field, a new entry's
+    /// field at the top of its folder.
+    private func shownEntries(_ rows: [FileTree.Row], new: Set<FileName>) -> [SailList.Entry] {
+        var entries = rows.map { row in SailList.Entry.item(naming?.id == row.path.key ? nameItem() : item(row, new: new.contains(row.path))) }
+        if let naming, naming.renaming == nil {
+            let at = naming.folder == FileTree.root ? 0 : (rows.firstIndex { $0.path == naming.folder }).map { $0 + 1 } ?? 0
+            entries.insert(.item(nameItem()), at: at)
+        }
+        return entries
+    }
+
+    private func nameItem() -> SailList.Item {
+        let field = nameRow
+        field?.refusal = naming?.refusal
+        return SailList.Item(
+            id: naming?.id ?? "", name: "", voice: naming?.voice ?? "", content: field ?? NSView(), height: field?.height, paint: RowPaint(RowState()), inert: true
+        )
+    }
+
+    /// After the rows are set: the field held as the list's edit, as tall as its words, and given
+    /// the keys when it has just opened or was just refused (`focus`).
+    private func named(focus: Bool) {
+        if list.editing != naming?.id { list.editing = naming?.id }
+        guard let naming, let field = nameRow, let at = list.entries.firstIndex(where: { if case let .item(item) = $0 { item.id == naming.id } else { false } }) else { return }
+        list.noteHeightOfRows(withIndexesChanged: IndexSet(integer: at))
+        guard focus else { return }
+        list.scrollRowToVisible(at)
+        list.layoutSubtreeIfNeeded()
+        _ = list.view(atColumn: 0, row: at, makeIfNecessary: true)
+        field.focus(stem: naming.refusal == nil)
+    }
+
+    /// ⏎ in the field: its name made, or the rename sent; nothing while one is unanswered, nothing
+    /// for an empty name or a rename to its own; a name Sail does not make refused in place.
+    func commit() {
+        guard var naming, naming.asked == nil, let typed = nameRow?.text else { return }
+        if case let .rename(path) = naming.kind, FileName(typed) == path.leaf { return endNaming() }
+        guard !typed.isEmpty else { return }
+        guard FileActions.isName(typed) else { return refuse(FileActions.notAName) }
+        guard admitted else { return refuse(notConnected) }
+        let path = naming.folder.appending(FileName(typed))
+        let action: FileActions.Action = switch naming.kind {
+        case .file: .create(path, folder: false)
+        case .folder: .create(path, folder: true)
+        case let .rename(from): .move(from: from, to: path)
+        }
+        switch actions.ask(action) {
+        case let .send(frame, id):
+            naming.asked = id
+            self.naming = naming
+            send([frame])
+            refresh()
+        case let .refused(words):
+            refuse(words)
+        }
+    }
+
+    private func refuse(_ words: String) {
+        naming?.refusal = words
+        refresh()
+    }
+
+    /// The field closed (Esc, or its action done): the keys back to the tree.
+    func endNaming() {
+        let held = nameRow?.holdsKeys == true
+        naming = nil
+        nameRow = nil
+        refresh()
+        if held { window?.makeFirstResponder(list) }
+    }
+
+    /// The workspace answered an action: done, the field closes, an open file follows its move
+    /// (M59), and what was made or moved to is chosen once the watch lists it; refused, the sentence
+    /// under its field, or in the line when it has none.
+    func answered(_ answer: FileActions.Answer) {
+        switch answer {
+        case let .done(action, id):
+            if naming?.asked == id { endNaming() }
+            switch action {
+            case let .create(path, _): choosing = path
+            case let .move(from, to):
+                follow(from, to)
+                choosing = to
+            case .remove: break
+            }
+            refresh()
+        case let .refused(_, words, id):
+            if naming?.asked == id {
+                naming?.asked = nil
+                refuse(words)
+            } else {
+                refused = words
+                refresh()
+            }
+        }
+    }
+
+    /// The path the watch has now listed, chosen and given the keys' attention.
+    private func chooseMade() {
+        guard let path = choosing, shownRows.contains(where: { $0.path == path }) else { return }
+        choosing = nil
+        chosenPath = path
+        rebuilding = true
+        list.choose(path.key)
+        rebuilding = false
+    }
+
+    /// The open file, or a folder holding it, moved from `from` to `to`: the pane goes with it, its
+    /// dot with it.
+    private func follow(_ from: FileName, _ to: FileName) {
+        guard let pane = filePane, pane.path == from || pane.path.isUnder(from) else { return }
+        let moved = FileName(to.bytes + pane.path.bytes.dropFirst(from.bytes.count)), dotted = unsaved == pane.path
+        pane.moved(to: moved)
+        if dotted { unsaved = moved }
+    }
+
+    // MARK: Moving by a drag
+
+    /// Where a drop over row `over` goes: a folder row itself, any other row's folder, the root past
+    /// the rows; nowhere over a note or while a name is being typed.
+    func landing(_ over: String?) -> String? {
+        guard naming == nil else { return nil }
+        guard let over else { return "" }
+        guard let row = shownRows.first(where: { $0.path.key == over }), row.kind != .note else { return nil }
+        let into = row.kind == .folder ? row.path : FileTree.parent(of: row.path) ?? FileTree.root
+        return into == FileTree.root ? "" : into.key
+    }
+
+    /// The dragged rows `ids` moved into folder `into` ("" the root), each by one move; one already
+    /// there stays; a folder into itself is refused before any frame (M22).
+    func drop(_ ids: [String], into: String) {
+        let byKey = Dictionary(shownRows.map { ($0.path.key, $0.path) }, uniquingKeysWith: { first, _ in first })
+        guard let folder = into.isEmpty ? FileTree.root : byKey[into] else { return }
+        let dragged = ids.compactMap { byKey[$0] }
+        acts()
+        for path in dragged where !dragged.contains(where: { path.isUnder($0) }) && FileTree.parent(of: path) != folder {
+            guard admitted else {
+                refused = notConnected
+                break
+            }
+            switch actions.ask(.move(from: path, to: folder.appending(path.leaf))) {
+            case let .send(frame, _): send([frame])
+            case let .refused(words): refused = words
+            }
+        }
+        refresh()
+    }
+
+    // MARK: Delete and Reveal
+
+    /// Delete from row `path`: asked once, the button in `error` and Cancel the default, naming one
+    /// entry or counting several, saying so when an open file's unsaved text is among them (M23,
+    /// M25); Cancel changes nothing.
+    func askToDelete(from path: FileName) {
+        guard naming?.asked == nil, question == nil, let window else { return }
+        let deleted = targets(from: path)
+        guard !deleted.isEmpty else { return }
+        let folders = deleted.contains { row($0)?.kind == .folder }
+        let title = deleted.count == 1
+            ? (folders ? "Delete \(deleted[0].leaf.shown) and everything in it?" : "Delete \(deleted[0].leaf.shown)?")
+            : (folders ? "Delete \(deleted.count) items and everything in them?" : "Delete \(deleted.count) items?")
+        let open = unsaved.flatMap { open in deleted.contains { open == $0 || open.isUnder($0) } ? open : nil }
+        let body = "This cannot be undone." + (open.map { " \($0.leaf.shown) has unsaved changes; they stay in its pane." } ?? "")
+        let sheet = Sheet(title: title, body: body, confirm: "Delete", kind: .destructive, look: look, titleFont: titleFont)
+        question = sheet
+        acts()
+        refresh()
+        sheet.ask(on: window) { [weak self] confirmed in
+            self?.question = nil
+            if confirmed { self?.remove(deleted) }
+        }
+    }
+
+    private func remove(_ paths: [FileName]) {
+        guard admitted else {
+            refused = notConnected
+            return refresh()
+        }
+        for path in paths {
+            if case let .send(frame, _) = actions.ask(.remove(path)) { send([frame]) }
+        }
+    }
+
+    /// Reveal in Terminal: the shell-quoted path of each entry acted on, at the cursor of the tab's
+    /// terminal through its own paste, no newline after; nothing runs (M45).
+    func reveal(from path: FileName) {
+        guard let paste = pasteInTerminal() else { return }
+        acts()
+        refresh()
+        paste(targets(from: path).map(\.shellQuoted).joined(separator: " "))
+    }
+
+    /// The person acts: a refusal said in the line goes, and what was made or moved to is no longer
+    /// chosen for them once the watch lists it.
+    private func acts() {
+        refused = nil
+        choosing = nil
+    }
+
+    // MARK: The File menu
+
+    @objc func newFile(_: Any?) {
+        beginNew(folder: false, at: chosenPath)
+    }
+
+    @objc func newFolder(_: Any?) {
+        beginNew(folder: true, at: chosenPath)
+    }
+
+    @objc func renameFile(_: Any?) {
+        chosenPath.map(beginRename)
+    }
+
+    @objc func revealInTerminal(_: Any?) {
+        chosenPath.map(reveal)
+    }
+
+    @objc func deleteFiles(_: Any?) {
+        chosenPath.map(askToDelete)
+    }
+}
+
+extension FilesPanel: NSMenuItemValidation {
+    /// The File menu's tree items act only while the tree itself holds the keys, so their keys pass
+    /// to a name field, the file pane and a terminal; New with no row chosen makes at the root.
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        guard window?.firstResponder === list, naming == nil, question == nil else { return false }
+        switch item.action {
+        case #selector(newFile(_:)), #selector(newFolder(_:)): return true
+        case #selector(revealInTerminal(_:)): return chosenPath != nil && pasteInTerminal() != nil
+        default: return chosenPath != nil
+        }
     }
 }
 

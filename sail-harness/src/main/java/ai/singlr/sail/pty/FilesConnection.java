@@ -433,7 +433,7 @@ final class FilesConnection {
    * save's temporary, which no listing shows and a later write would remove.
    */
   static boolean makes(String path) {
-    var name = path.substring(path.lastIndexOf('/') + 1);
+    var name = lastName(path);
     return FileNames.shown(name).equals(name)
         && name.chars().noneMatch(Character::isISOControl)
         && !TEMPORARY.matcher(name).matches();
@@ -1658,7 +1658,9 @@ final class FilesConnection {
 
   /**
    * The sentence {@code kind} is said in, naming the path, each byte of it that is no UTF-8 shown
-   * as {@code U+FFFD}, and the workspace; a failure says what Sail could not {@code verb}.
+   * as {@code U+FFFD}, and the workspace; a failure says what Sail could not {@code verb}. A taken
+   * name and a folder partly removed are said in the contract's words (M20, M24), naming the last
+   * name of the path, as the person typed or chose it.
    */
   String sentence(FilesRefusal kind, String named, String verb) {
     var path = FileNames.shown(named);
@@ -1682,7 +1684,7 @@ final class FilesConnection {
           path + " is not a file (a pipe, a socket or a device), so Sail does not read it.";
       case LOOP -> path + " leads back to itself.";
       case CHANGED -> path + " changed while it was read; read it again.";
-      case EXISTS -> path + " exists already, so nothing was replaced.";
+      case EXISTS -> leaf(named) + " is already there.";
       case NO_SPACE -> workspace + "'s disk is full, so " + path + " was not saved.";
       case TOO_LARGE ->
           "diff".equals(verb)
@@ -1702,8 +1704,7 @@ final class FilesConnection {
           path
               + " passes through a filter (Git LFS and its like), so its change is not shown as"
               + " text; it is still listed as changed.";
-      case PARTLY_REMOVED ->
-          "Some of " + path + " could not be removed; what is left is still there.";
+      case PARTLY_REMOVED -> "Some of " + leaf(named) + " could not be deleted.";
       case UNSAFE ->
           "Sail does not make "
               + path
@@ -1712,6 +1713,15 @@ final class FilesConnection {
       case FAILED ->
           "Sail could not " + verb + " " + path + " in " + workspace + "; nothing was changed.";
     };
+  }
+
+  private static String leaf(String path) {
+    return FileNames.shown(lastName(path));
+  }
+
+  /** The last name of {@code path}: what a refusal names and what {@link #makes} judges. */
+  private static String lastName(String path) {
+    return path.substring(path.lastIndexOf('/') + 1);
   }
 
   /**

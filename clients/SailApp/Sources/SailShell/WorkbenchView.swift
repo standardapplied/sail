@@ -43,6 +43,8 @@ public final class WorkbenchView: NSView {
     private let fonts: TerminalFonts
     /// The files panels' words in mono, as every list's.
     let labels: LabelFont
+    /// The files panels' questions' titles, as every sheet's.
+    let titles: TitleFont
     private(set) var tabViews: [TabID: TabView] = [:]
     private var shownSelected: TabID?
     private let banner: Card
@@ -91,6 +93,7 @@ public final class WorkbenchView: NSView {
         do {
             fonts = try TerminalFonts(directory: directory)
             labels = try LabelFont(directory: directory)
+            titles = try TitleFont(directory: directory)
         } catch {
             throw .resources("the terminal's fonts cannot be read: \(error)")
         }

@@ -53,6 +53,7 @@ extension Driver {
     func performFiles(_ step: Step) async -> (Bool, String)? {
         WorkbenchView.filesMeasuring = true
         if let done = await performFile(step) { return done }
+        if let done = await performChange(step) { return done }
         let asks = [step.filesFolder, step.filesRefuse, step.filesNew, step.filesClick, step.filesDoubleClick, step.filesChosen, step.filesButton, step.filesShot].contains { $0 != nil }
             || step.filesRows != nil || step.filesSays != nil || step.filesHold != nil || step.filesTicks != nil || step.filesEnd != nil
             || step.filesDrop != nil || step.filesBudgets != nil || step.filesReconnects != nil || step.filesFlood != nil
@@ -331,7 +332,8 @@ extension Driver {
         }
         if let name = step.filesRowShown ?? step.filesRowGone {
             let shown = step.filesRowShown != nil
-            let there = await waitForState(step.seconds ?? 10) { (self.filesShown?.rows.contains { $0.name == name } == true) == shown }
+            let path = FileName(Self.filesPath(name)), named = { (row: FileTree.Row) in name.contains("/") ? row.path == path : row.name == name }
+            let there = await waitForState(step.seconds ?? 10) { (self.filesShown?.rows.contains(where: named) == true) == shown }
             return (there, "the tree's rows: \(filesShown?.rows.prefix(12).map(\.name) ?? [])")
         }
         if let words = step.terminalSays {
@@ -552,6 +554,58 @@ extension Driver {
     private func tellLongestHold(_ phase: String) {
         guard let gap = mainThread.stalls.longest() else { return }
         mainStacks.told(gap).forEach { print("files, \(phase), the main thread's longest hold: \($0)") }
+    }
+
+    /// The steps of making, renaming, moving, deleting and revealing in the tree.
+    private func performChange(_ step: Step) async -> (Bool, String)? {
+        if let act = step.filesAct, act.count == 2 {
+            return (workbench.filesAct(act[1], on: act[0]), "\(act[1]) on \(act[0])")
+        }
+        if let name = step.filesName {
+            return (workbench.filesName(name), "typed \(name) and ⏎")
+        }
+        if let words = step.filesNameSays {
+            let said = await waitForState(step.seconds ?? 10) { self.workbench.filesNameSays == words }
+            return (said, "the name field says \(workbench.filesNameSays ?? "nothing: none is open")")
+        }
+        if let drop = step.filesDropInto, drop.count == 2 {
+            return (workbench.filesDrop([drop[0]], into: drop[1]), "\(drop[0]) dropped into \(drop[1].isEmpty ? "the root" : drop[1])")
+        }
+        if let name = step.filesHover {
+            guard workbench.filesHover(name) else { return (false, "no row \(name) to hold the pointer over") }
+            guard !name.isEmpty else { return (true, "the pointer given back") }
+            let shown = await waitForState(step.seconds ?? 5) { self.workbench.filesActionsShown(name) }
+            return (shown, "\(name) under the pointer, its ⋯ \(shown ? "shown" : "not shown")")
+        }
+        if let shown = step.filesMenu, shown.count == 2 {
+            guard workbench.filesMenu(shown[0]) != nil else { return (false, "\(shown[0]) offers no menu") }
+            return await inBothLooks(shown[1]) { file in await self.captureFilesMenu(shown[0], to: file) }
+        }
+        if let title = step.filesAsks {
+            let asked = await waitForState(step.seconds ?? 5) { self.workbench.filesQuestion == title }
+            return (asked, "the question asks \(workbench.filesQuestion ?? "nothing")")
+        }
+        if let answer = step.filesAnswer {
+            return (workbench.filesAnswer(answer == "Delete"), "answered \(answer)")
+        }
+        if let text = step.terminalTyped, let door = GoldenDesk.door {
+            guard let terminal = pane else { return (false, "no workspace terminal focused") }
+            let wanted = Array(text.utf8)
+            let typed = await waitForState(step.seconds ?? 10) { door.typed(into: terminal.name).suffix(wanted.count).elementsEqual(wanted) }
+            let all = door.typed(into: terminal.name), broken = all.contains(0x0A) || all.contains(0x0D)
+            if typed { door.print(terminal.name, text) }
+            return (typed && !broken, "the terminal was typed \(String(decoding: all.suffix(120), as: UTF8.self).debugDescription)")
+        }
+        return nil
+    }
+
+    /// Row `name`'s context menu popped up at its row as a right-click shows it, the whole screen
+    /// taken a moment later (the menu is a window of its own), then the menu closed.
+    private func captureFilesMenu(_ name: String, to file: URL) async {
+        guard let (menu, row) = workbench.filesMenu(name), let shot = Shot.begin(.menu, to: file) else { return }
+        menu.perform(#selector(NSMenu.cancelTracking), with: nil, afterDelay: 2.5, inModes: [.common])
+        menu.popUp(positioning: nil, at: NSPoint(x: 40, y: Double(row.bounds.maxY)), in: row)
+        await shot.taken()
     }
 
     /// The window in both looks, then with the workbench and the panel laid out right to left, as a
