@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="helios-test"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+    <description>
+        Complexity, size and coupling limits for Helios test code: pmd-main.xml minus the three
+        class-level rules that do not fit test classes (cyclomatic complexity per class, God
+        class, too many methods). Keep the two in step. The four rules at the end apply to test
+        code only: they keep every test's outcome independent of real time.
+    </description>
+
+    <rule ref="category/java/design.xml/CognitiveComplexity">
+        <properties>
+            <property name="reportLevel" value="15"/>
+        </properties>
+    </rule>
+    <rule ref="category/java/design.xml/CyclomaticComplexity">
+        <properties>
+            <property name="methodReportLevel" value="15"/>
+            <!-- The rule has no switch for its class-level report; this puts it out of reach. -->
+            <property name="classReportLevel" value="2147483647"/>
+        </properties>
+    </rule>
+    <rule ref="category/java/design.xml/NPathComplexity"/>
+    <rule ref="category/java/design.xml/AvoidDeeplyNestedIfStmts"
+          message="if statements are nested 3 or more deep (limit: a depth of 2)"/>
+    <rule ref="category/java/design.xml/NcssCount">
+        <properties>
+            <property name="methodReportLevel" value="60"/>
+            <property name="classReportLevel" value="600"/>
+        </properties>
+    </rule>
+    <rule ref="category/java/design.xml/ExcessiveParameterList"/>
+    <rule ref="category/java/design.xml/TooManyFields"
+          message="The class has more than 15 non-static, non-final fields"/>
+    <rule ref="category/java/design.xml/CouplingBetweenObjects"/>
+    <rule ref="category/java/design.xml/SwitchDensity"
+          message="The switch averages 10 or more statements per label (limit: fewer than 10)"/>
+
+    <rule name="OnDemandImport"
+          language="java"
+          class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
+          message="On-demand (wildcard) imports are not allowed; import each type or static member by name.">
+        <description>Every import names exactly one type or static member.</description>
+        <priority>3</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+<![CDATA[
+//ImportDeclaration[@ImportOnDemand = true()]
+]]>
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule name="SleepInTest"
+          language="java"
+          class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
+          message="A test does not sleep: wait for the event through com.standardapplied.helios.core.test.Await">
+        <description>A test waits for an event, never for time.</description>
+        <priority>3</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+<![CDATA[
+//MethodCall[pmd-java:matchesSig('java.lang.Thread#sleep(_*)')
+    or pmd-java:matchesSig('java.util.concurrent.TimeUnit#sleep(long)')
+    or pmd-java:matchesSig('java.util.concurrent.locks.LockSupport#parkNanos(_*)')
+    or pmd-java:matchesSig('java.util.concurrent.locks.LockSupport#parkUntil(_*)')]
+[not(ancestor::ClassDeclaration[@SimpleName = 'Await']
+    and /CompilationUnit/PackageDeclaration[@Name = 'com.standardapplied.helios.core.test'])]
+]]>
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule name="PipedStreamInTest"
+          language="java"
+          class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
+          message="A piped stream fails when its writer thread exits: use LineSink and FeedableInputStream from com.standardapplied.helios.core.test">
+        <description>What the code under test writes goes to a LineSink; what it reads comes from a FeedableInputStream.</description>
+        <priority>3</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+<![CDATA[
+//ConstructorCall[pmd-java:typeIs('java.io.PipedInputStream')
+    or pmd-java:typeIs('java.io.PipedOutputStream')
+    or pmd-java:typeIs('java.io.PipedReader')
+    or pmd-java:typeIs('java.io.PipedWriter')]
+]]>
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule name="ClockReadInTest"
+          language="java"
+          class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
+          message="A test does not measure elapsed time: assert the outcome">
+        <description>A test never asserts how long something took.</description>
+        <priority>3</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+<![CDATA[
+//MethodCall[pmd-java:matchesSig('java.lang.System#nanoTime()')
+    or pmd-java:matchesSig('java.lang.System#currentTimeMillis()')]
+[not(ancestor::ClassDeclaration[@SimpleName = 'Await']
+    and /CompilationUnit/PackageDeclaration[@Name = 'com.standardapplied.helios.core.test'])]
+]]>
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule name="TimedWaitInTest"
+          language="java"
+          class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
+          message="A test does not choose its own timeout: wait through com.standardapplied.helios.core.test.Await, which applies the one hang guard">
+        <description>A wait ends with the event or with the hang guard shared by every test.</description>
+        <priority>3</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+<![CDATA[
+//MethodCall[ArgumentList/*[pmd-java:typeIs('java.util.concurrent.TimeUnit')]
+    or (pmd-java:matchesSig('java.lang.Thread#join(_*)') and ArgumentList/*)
+    or (pmd-java:matchesSig('java.lang.Object#wait(_*)') and ArgumentList/*)
+    or @MethodName = ('assertTimeout', 'assertTimeoutPreemptively')]
+[not(ancestor::ClassDeclaration[@SimpleName = 'Await']
+    and /CompilationUnit/PackageDeclaration[@Name = 'com.standardapplied.helios.core.test'])]
+]]>
+                </value>
+            </property>
+        </properties>
+    </rule>
+</ruleset>

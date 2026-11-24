@@ -99,7 +99,7 @@ jobs:
           kind: native
 
       - name: Build native image
-        run: mvn package -Pnative -DskipTests -Djacoco.skip=true -Dspotless.check.skip=true
+        run: mvn package -Pnative -pl sail-infra -am -DskipTests -Djacoco.skip=true -Dspotless.check.skip=true
 
       # The pty, TCP door and local host probes run on both systems, and so does the binary's own
       # `_pty-host --local`: a release whose binary skips one, or fails it, stops here.
