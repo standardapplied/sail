@@ -12,7 +12,7 @@
       "error": {
         "code": "invalid_request",
         "field_errors": [],
-        "message": "A login's value is one line: paste only the key or token."
+        "message": "A key is one line: paste only the key."
       },
       "schema_version": 1
     },

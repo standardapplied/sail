@@ -19,15 +19,6 @@
               ],
               "kind": "api-key",
               "label": "API key"
-            },
-            {
-              "how": [
-                {
-                  "text": "Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, or a Team Plan's at z.ai/manage-apikey/coding-plan/team/my-plan"
-                }
-              ],
-              "kind": "glm",
-              "label": "GLM Coding Plan key"
             }
           ],
           "login": {
@@ -72,19 +63,15 @@
               "mode": "bypassPermissions"
             }
           ],
-          "sign_in": [
-            {
-              "text": "Start Claude Code here and run "
-            },
-            {
-              "args": [],
-              "run": "elsewhere",
-              "verb": "/login"
-            },
-            {
-              "text": " in it to sign in with your Claude subscription"
-            }
-          ]
+          "sign_in": {
+            "how": [
+              {
+                "text": "Claude Code asks you to sign in with your Claude account when it starts, once in each workspace."
+              }
+            ],
+            "name": "Your Claude account",
+            "signed_in": false
+          }
         },
         {
           "display": "Codex CLI",

@@ -12,7 +12,7 @@
       "error": {
         "code": "invalid_request",
         "field_errors": [],
-        "message": "A login's value is printable ASCII with no space, quote, backslash, $ or backtick."
+        "message": "A key is printable ASCII with no space, quote, backslash, $ or backtick."
       },
       "schema_version": 1
     },

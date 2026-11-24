@@ -25,8 +25,6 @@ class RemedyTest {
           Remedy.program("ssh-keygen", "-R", "main"),
           "' from '",
           Remedy.client("login"),
-          "', after '",
-          Remedy.elsewhere("claude", "setup-token"),
           "'.");
 
   @Test
@@ -35,8 +33,7 @@ class RemedyTest {
         List.of(
             Remedy.sail("fde update", "ada", "--scoped"),
             Remedy.program("ssh-keygen", "-R", "main"),
-            Remedy.client("login"),
-            Remedy.elsewhere("claude", "setup-token")),
+            Remedy.client("login")),
         SCOPE.commands());
     assertEquals("fde update ada --scoped", SCOPE.commands().getFirst().line());
     assertEquals("login", Remedy.client("login").line());
@@ -46,15 +43,14 @@ class RemedyTest {
   void aReaderWhoTypesPlainSailReadsThePlainForm() {
     assertEquals(
         "Scope it first with 'sail fde update ada --scoped', or 'ssh-keygen -R main' from 'sail"
-            + " login', after 'claude setup-token'.",
+            + " login'.",
         SCOPE.plain());
   }
 
   @Test
   void aReaderWhoTypesNothingReadsEachCommandAsItsVerb() {
     assertEquals(
-        "Scope it first with 'fde update ada --scoped', or 'ssh-keygen -R main' from 'login', after"
-            + " 'claude setup-token'.",
+        "Scope it first with 'fde update ada --scoped', or 'ssh-keygen -R main' from 'login'.",
         SCOPE.described());
   }
 
@@ -80,8 +76,6 @@ class RemedyTest {
             Map.of("run", "program", "verb", "ssh-keygen", "args", List.of("-R", "main")),
             Map.of("text", "' from '"),
             Map.of("run", "client", "verb", "login", "args", List.of()),
-            Map.of("text", "', after '"),
-            Map.of("run", "elsewhere", "verb", "claude", "args", List.of("setup-token")),
             Map.of("text", "'.")),
         SCOPE.toMaps());
     assertEquals(SCOPE, Remedy.fromMaps(SCOPE.toMaps()));

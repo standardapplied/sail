@@ -3702,7 +3702,7 @@ fde ada pins a terminal to s-ada on a node as cli admin root all	ok admitted
 fde ada pins a terminal to s-ada on main as cli admin root all	ok admitted
 fde ada starts Claude Code on a stored login in workspace loose of acme	denied Io loose is no one's workspace, so no agent starts in it. | Open a shell in it, or start the agent in a workspace of your own.
 fde ada starts Claude Code on a stored login in workspace spare of acme	denied Io spare is bob's workspace, so an agent starts in it only as bob, with bob's login. | Open a shell in it, or start the agent in a workspace of your own.
-fde ada starts Claude Code on a stored login in workspace try of acme	denied Io No Claude Code login stored for ada, so a Claude Code session cannot start in try. | Create an API key in the Claude Console, then sail agent login claude-code. Or: Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, or a Team Plan's at z.ai/manage-apikey/coding-plan/team/my-plan, then sail agent login claude-code --kind glm.
+fde ada starts Claude Code on a stored login in workspace try of acme	denied Io No Claude Code login stored for ada, so a Claude Code session cannot start in try. | Create an API key in the Claude Console, then sail agent login claude-code.
 fde ada starts Claude Code signed in inside in workspace loose of acme	denied Io loose is no one's workspace, so no agent starts in it. | Open a shell in it, or start the agent in a workspace of your own.
 fde ada starts Claude Code signed in inside in workspace spare of acme	denied Io spare is bob's workspace, so an agent starts in it only as bob, with bob's login. | Open a shell in it, or start the agent in a workspace of your own.
 fde ada starts Claude Code signed in inside in workspace try of acme	ok started
@@ -3735,7 +3735,7 @@ fde bob pins a terminal to lobby on main as cli admin root all	ok admitted
 fde bob pins a terminal to s-ada on a node as cli admin root all	denied Io Your credential is read-only and cannot post in rooms. | Ask an admin for a member or admin credential.
 fde bob pins a terminal to s-ada on main as cli admin root all	ok admitted
 fde bob starts Claude Code on a stored login in workspace loose of acme	denied FORBIDDEN 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
-fde bob starts Claude Code on a stored login in workspace spare of acme	denied Io No Claude Code login stored for bob, so a Claude Code session cannot start in spare. | Create an API key in the Claude Console, then sail agent login claude-code. Or: Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, or a Team Plan's at z.ai/manage-apikey/coding-plan/team/my-plan, then sail agent login claude-code --kind glm.
+fde bob starts Claude Code on a stored login in workspace spare of acme	denied Io No Claude Code login stored for bob, so a Claude Code session cannot start in spare. | Create an API key in the Claude Console, then sail agent login claude-code.
 fde bob starts Claude Code on a stored login in workspace try of acme	denied FORBIDDEN 403 Workspace 'try' belongs to 'ada', not you. | Ask ada to enter it, or have an admin do it.
 fde bob starts Claude Code signed in inside in workspace loose of acme	denied FORBIDDEN 403 Workspace 'loose' has no owner, so only an admin may enter it. | Have an admin enter it.
 fde bob starts Claude Code signed in inside in workspace spare of acme	ok started

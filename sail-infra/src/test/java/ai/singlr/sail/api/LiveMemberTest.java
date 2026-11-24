@@ -21,7 +21,6 @@ import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
-import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.TestLogins;
@@ -287,34 +286,6 @@ class LiveMemberTest {
     var ended = room.runs.findById(process.runId).orElseThrow();
     assertEquals("stopped", ended.status());
     assertEquals(expected, ended.usage());
-  }
-
-  /**
-   * A live member on a GLM key holds the tokens its turns reported and no dollars: Claude Code
-   * prices them at Anthropic's rates, which are not what Z.AI charges.
-   */
-  @Test
-  void aLiveMemberOnAGlmKeyHoldsItsTokensAndNoDollars() {
-    var fdes = new FdeStore(room.db);
-    fdes.logins()
-        .store(
-            fdes.byHandle(LiveRoom.HANDLE).orElseThrow().id(),
-            Harnesses.of("claude-code"),
-            null,
-            "glm",
-            "fake-glm-live-member");
-    var process = room.prompted(SPEC, "full", "first");
-    room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.spent("One", 10, 1.0));
-
-    var run = room.runs.findById(process.runId).orElseThrow();
-    assertEquals(new RunStore.RunLogin("default", "glm"), run.login());
-    assertEquals(
-        new RunUsage("claude-opus-5-5", 10L, 20L, 100L, 30L, null, RunUsage.Source.RESULT),
-        run.usage());
-    process.onClose(() -> process.exits(0));
-    room.later(Duration.ofMinutes(20));
-    room.live.sweep();
-    room.awaitStopped(process);
   }
 
   /**

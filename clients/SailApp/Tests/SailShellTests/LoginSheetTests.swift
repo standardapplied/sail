@@ -140,7 +140,7 @@ import Testing
         #expect(storing.store.accessibilityLabel() == "Storing" && !storing.store.isEnabled && !storing.field.isEnabled)
         let refused = try Self.sheet(try #require(stages.first { $0.name == "refusal-invalid-request-login-lines" }).model)
         defer { refused.orderOut(nil) }
-        #expect(refused.field.field.accessibilityHelp() == "A login's value is one line: paste only the key or token.")
+        #expect(refused.field.field.accessibilityHelp() == "A key is one line: paste only the key.")
     }
 
     /// What the sheet shows takes a click in the turn it is made, before any display pass.
@@ -243,7 +243,7 @@ import Testing
         #expect(sent, "the request's body is not the kind and the key")
         #expect(panel.isOpen && !panel.popover.stays && panel.loginSheet == nil && !panel.view.veiled)
         #expect(panel.view.rows.first?.line.stringValue == "login “default” · API key" && panel.view.rows.first?.chosen == true)
-        #expect(panel.view.words.contains("Stored Claude Code login “default”. An agent session already running keeps the login it started with until it ends; no workspace keeps any of it.") && !panel.view.words.contains { $0.hasPrefix("No Claude Code login stored") }, "the store, and the server's note on the login it replaced, are not said: \(panel.view.words)")
+        #expect(panel.view.words.contains("Stored Claude Code login “default”. An agent session already running keeps the key it started with until it ends; no workspace keeps any of it.") && !panel.view.words.contains { $0.hasPrefix("No Claude Code login stored") }, "the store, and the server's note on the login it replaced, are not said: \(panel.view.words)")
         let start = try #require(panel.view.primary)
         #expect(start.title == "Start" && start.isEnabled && start.holdsKeys)
         var started: [AgentStart] = []
@@ -295,7 +295,7 @@ extension LoginSheetTests {
         Self.paste(Self.pasted + "\n" + Self.pasted, into: sheet)
         try NewSessionPanelTests.press(sheet.store)
         try #require(await RunnerTabTests.until { sheet.field.error != nil }, "no refusal was said")
-        #expect(sheet.field.error == "A login's value is one line: paste only the key or token." && Self.cleared(sheet))
+        #expect(sheet.field.error == "A key is one line: paste only the key." && Self.cleared(sheet))
         #expect(sheet.firstResponder === sheet.field.field || (sheet.firstResponder as? NSText)?.delegate === sheet.field.field, "the keys are not in the field: \(String(describing: sheet.firstResponder))")
         #expect(!sheet.store.isEnabled && window.attachedSheet === sheet && view.newSession.isOpen && view.newSession.stored == nil)
         Self.paste(into: sheet)

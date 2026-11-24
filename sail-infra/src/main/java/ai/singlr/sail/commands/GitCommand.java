@@ -57,7 +57,7 @@ public final class GitCommand implements Runnable {
 
     private void execute() throws Exception {
       var named = LoginStore.requireHost(host);
-      var value = AgentLoginCommand.read(named + " token", null);
+      var value = AgentLoginCommand.read(named + " token", "git token", null);
       AgentLoginCommand.change(
           connection,
           json,

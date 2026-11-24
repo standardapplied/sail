@@ -99,8 +99,8 @@ class HostPtyAgentTest {
     var bobId = Acting.system(() -> fdes.add("bob", "Bob", null, "member")).id();
     Acting.system(() -> fdes.add("root", "Root", null, "admin"));
     var claude = Harnesses.of("claude-code");
-    fdes.logins().store(adaId, claude, "work", "glm", "fake-glm-ada-work");
-    fdes.logins().store(bobId, claude, "work", "glm", "fake-glm-bob-work");
+    fdes.logins().store(adaId, claude, "work", "api-key", "fake-key-ada-work");
+    fdes.logins().store(bobId, claude, "work", "api-key", "fake-key-bob-work");
     var codex = Harnesses.of("codex");
     fdes.logins().store(adaId, codex, "work", "api-key", "sk-proj-ada-work");
     fdes.logins().store(adaId, codex, "home", "api-key", "sk-proj-ada-home");
@@ -274,12 +274,23 @@ class HostPtyAgentTest {
         noDefault.remedy().commands());
   }
 
-  /** Q1: an agent that signs in inside needs no stored login, and is handed none. */
+  /**
+   * Q1: an agent that signs in inside needs no stored login, and is handed none, even where its
+   * person has a default key of that harness: choosing the sign-in never bills a key.
+   */
   @Test
   void anAgentThatSignsInInsideNeedsNoStoredLogin() throws IOException {
     assertEquals(
         Optional.empty(),
         lane.admitAgent("acme", "spare", new PtyMessage.Agent("codex", "full-access", true), bob));
+    assertTrue(
+        lane.admitAgent("acme", "spare", new PtyMessage.Agent("claude-code", "default", false), bob)
+            .isPresent(),
+        "bob has a default Claude Code key");
+    assertEquals(
+        Optional.empty(),
+        lane.admitAgent(
+            "acme", "spare", new PtyMessage.Agent("claude-code", "default", true), bob));
     var foreign =
         assertThrows(
             Remedied.Io.class,
@@ -293,7 +304,7 @@ class HostPtyAgentTest {
   @Test
   void aLoginIsHandedToTheWorkspacesDevUserOnItsInputAndWithdrawnTheSameWay() throws IOException {
     var file = SessionLogin.file("i-1");
-    var lines = "ANTHROPIC_AUTH_TOKEN=fake-glm-ada-work\n";
+    var lines = "ANTHROPIC_API_KEY=fake-key-ada-work\n";
 
     lane.handOver("acme", "dock", file, lines, ada);
     lane.withdraw("acme-dock", file);

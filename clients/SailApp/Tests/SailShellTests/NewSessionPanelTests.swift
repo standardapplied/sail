@@ -429,8 +429,7 @@ import Testing
     }
 
     /// No login stored, the harness signing in inside: the server's sentence, Store a Claude Code
-    /// Login with how to make the kind it stores under it (the API key, its first; the GLM key is
-    /// not said, since the panel stores only the first), the sign-in-inside line, and Start and
+    /// Login with how to make the kind it stores under it, the sign-in-inside line, and Start and
     /// Sign In There, which starts it with `inside`. No command shows, ever.
     @Test func noLoginStoredOffersBothActions() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-dock-no-login"])
@@ -443,7 +442,6 @@ import Testing
             try #require(words.firstIndex(of: said), "\(said) is not said: \(words)")
         }
         #expect(order == order.sorted(), "\(words)")
-        #expect(!words.contains { $0.contains("GLM") }, "a kind the panel does not store is offered")
         #expect(panel.view.primary?.title == "Start and Sign In There" && panel.view.primary?.isEnabled == true && panel.view.modes == nil)
         #expect(!words.contains { $0.contains("agent login") || $0.contains("/login") || $0.contains("sail ") }, "a command shows: \(words)")
         var started: [AgentStart] = []

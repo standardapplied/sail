@@ -44,7 +44,7 @@ public final class LoginOperations {
    * login into its harness when it started, and nothing of it rests in a workspace.
    */
   static final String SESSIONS_KEEP =
-      "An agent session already running keeps the login it started with until it ends; no"
+      "An agent session already running keeps the key it started with until it ends; no"
           + " workspace keeps any of it.";
 
   private final FdeStore fdes;

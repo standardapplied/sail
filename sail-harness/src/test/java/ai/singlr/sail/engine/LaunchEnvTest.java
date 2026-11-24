@@ -58,23 +58,14 @@ class LaunchEnvTest {
           + "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD=\n";
 
   /**
-   * L2, L3: each Claude Code kind's lines in full: every other credential and cloud switch set
-   * empty, then the address its key goes to and the switch that makes Claude Code take that address
-   * from its environment alone, then the key under its own variable.
+   * L2, L3: Claude Code's key's lines in full: every other credential and cloud switch set empty,
+   * then the address its key goes to and the switch that makes Claude Code take that address from
+   * its environment alone, then the key under its own variable.
    */
   @Test
   void theFileHoldsTheCredentialTheKindsFixedAddressAndTheVariableTheKindNames() {
-    var glm = new LaunchEnv("cred-1", claude("glm", "fake-glm-key"));
+    var key = new LaunchEnv("cred-1", claude("api-key", "fake-anthropic-key"));
 
-    assertEquals(
-        "SAIL_RUN_CREDENTIAL=cred-1\nANTHROPIC_API_KEY=\nCLAUDE_CODE_OAUTH_TOKEN=\n"
-            + OTHER_CREDENTIALS
-            + SWITCHES
-            + "ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic\nANTHROPIC_UNIX_SOCKET=\n"
-            + "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1\n"
-            + "ANTHROPIC_AUTH_TOKEN=fake-glm-key\n",
-        glm.lines(),
-        "every other variable Claude Code takes a credential from is set empty");
     assertEquals(
         "SAIL_RUN_CREDENTIAL=cred-1\nANTHROPIC_AUTH_TOKEN=\nCLAUDE_CODE_OAUTH_TOKEN=\n"
             + OTHER_CREDENTIALS
@@ -82,11 +73,12 @@ class LaunchEnvTest {
             + "ANTHROPIC_BASE_URL=https://api.anthropic.com\nANTHROPIC_UNIX_SOCKET=\n"
             + "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1\n"
             + "ANTHROPIC_API_KEY=fake-anthropic-key\n",
-        new LaunchEnv("cred-1", claude("api-key", "fake-anthropic-key")).lines());
-    assertEquals(new RunStore.RunLogin("work", "glm"), glm.login());
-    assertEquals(Harnesses.of("claude-code").loginKind("glm"), glm.kind());
-    assertEquals("LaunchEnv[login=RunLogin[name=work, kind=glm]]", glm.toString());
-    assertFalse(glm.toString().contains("cred-1"));
+        key.lines(),
+        "every other variable Claude Code takes a credential from is set empty");
+    assertEquals(new RunStore.RunLogin("work", "api-key"), key.login());
+    assertEquals(Harnesses.of("claude-code").loginKind("api-key"), key.kind());
+    assertEquals("LaunchEnv[login=RunLogin[name=work, kind=api-key]]", key.toString());
+    assertFalse(key.toString().contains("cred-1"));
     assertEquals("SAIL_RUN_CREDENTIAL=\n", new LaunchEnv(null, null).lines());
     assertEquals(RunStore.RunLogin.CONTAINER, new LaunchEnv(null, null).login());
     assertEquals(null, new LaunchEnv(null, null).kind());
@@ -185,9 +177,6 @@ class LaunchEnvTest {
     assertEquals(
         "0:[https://api.anthropic.com][][1][fake-stored-key][][]\n",
         runOn(claude("api-key", "fake-stored-key"), HOSTILE_PROFILE, shown));
-    assertEquals(
-        "0:[https://api.z.ai/api/anthropic][][1][][fake-stored-glm][]\n",
-        runOn(claude("glm", "fake-stored-glm"), HOSTILE_PROFILE, shown));
   }
 
   private String runOn(LoginStore.Login stored, String container, String command) throws Exception {

@@ -26,20 +26,20 @@ final class ClaudeCode implements Harness {
   private static final String BINARY = "claude";
   private static final String RESULT = "\"type\":\"result\"";
 
-  /** Where Claude Code sends its requests, which every stored kind fixes to its own service. */
+  /** Where Claude Code sends its requests, which its stored key fixes to the Anthropic API. */
   private static final String BASE_URL = "ANTHROPIC_BASE_URL";
 
   /**
    * A unix socket Claude Code sends every request through instead of its address, whatever host
    * that names (2.1.327, measured: undocumented, and read from the environment alone, never from a
-   * settings file): every stored kind sets it empty, which Claude Code takes as unset.
+   * settings file): its stored key sets it empty, which Claude Code takes as unset.
    */
   private static final String UNIX_SOCKET = "ANTHROPIC_UNIX_SOCKET";
 
   /**
    * Set, Claude Code takes its address, provider and credential from its environment alone and
    * ignores those any settings file names, a managed one included (2.1.327, measured): what makes a
-   * kind's address hold whatever the container's settings say. It also ignores an {@code
+   * key's address hold whatever the container's settings say. It also ignores an {@code
    * apiKeyHelper}.
    */
   private static final String HOST_MANAGED = "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST";
@@ -49,6 +49,9 @@ final class ClaudeCode implements Harness {
       Pattern.compile("You['\u2019]ve hit your .*?limit(?:\\s*\u00b7\\s*resets\\s+(.+))?");
 
   private static final List<String> EFFORTS = List.of("low", "medium", "high", "xhigh");
+
+  /** Where, under the dev user's home, Claude Code keeps its own sign-in. */
+  private static final String CREDENTIALS = ".claude/.credentials.json";
 
   /**
    * The sail-owned settings file, passed to {@code claude} via {@code --settings} only when sail
@@ -250,14 +253,10 @@ final class ClaudeCode implements Harness {
    * settings file's {@code env} then outranks the session's environment: a cloud switch there with
    * its skip-auth sent the helper's key to that cloud's address (measured). So the same {@code
    * --settings}, which outranks the user's and the project's settings but not managed ones, sets
-   * everything the session's lines pin ({@link #pinned}) and its key's variable empty. A GLM key is
-   * read from {@code ANTHROPIC_AUTH_TOKEN}, which asks nothing and keeps nothing.
+   * everything the session's lines pin ({@link #pinned}) and its key's variable empty.
    */
   @Override
   public InteractiveLogin interactiveLogin(LoginKind kind) {
-    if (!"ANTHROPIC_API_KEY".equals(kind.variable())) {
-      return InteractiveLogin.READS_ITS_VARIABLE;
-    }
     var env = new LinkedHashMap<String, Object>(pinned(kind));
     env.remove(HOST_MANAGED);
     env.put(kind.variable(), "");
@@ -270,22 +269,29 @@ final class ClaudeCode implements Harness {
         " --settings '" + YamlUtil.dumpJsonValue(settings) + "'");
   }
 
-  /** Claude Code's own {@code /login}, which a subscription signs in with. */
+  /**
+   * Claude Code's own sign-in, which it asks for when it starts signed out, with a Claude
+   * subscription or an Anthropic Console account. It keeps it in {@code .credentials.json}; {@code
+   * .claude.json} is its own state, which also holds an approved key's last 20 characters, so that
+   * file says nothing of a sign-in.
+   */
   @Override
-  public Remedy signIn() {
-    return Remedy.of(
-        "Start Claude Code here and run ",
-        Remedy.elsewhere("/login"),
-        " in it to sign in with your Claude subscription");
+  public SignIn signIn() {
+    return new SignIn(
+        "Your Claude account",
+        Remedy.of(
+            "Claude Code asks you to sign in with your Claude account when it starts, once in each"
+                + " workspace."),
+        CREDENTIALS);
   }
 
   /**
-   * Its sign-in ({@code /login}) and its own state, which holds an approved key's last 20
+   * Its sign-in ({@link #signIn}) and its own state, which holds an approved key's last 20
    * characters and the signed-in account.
    */
   @Override
   public List<String> storedLogins() {
-    return List.of(".claude/.credentials.json", ".claude.json");
+    return List.of(CREDENTIALS, ".claude.json");
   }
 
   @Override
@@ -384,8 +390,8 @@ final class ClaudeCode implements Harness {
    * 2.1.322, recorded); "You've hit your … limit" is a limit, with the time it resets. No other
    * credential is ever used in the login's place: under {@link #HOST_MANAGED} no settings file's
    * {@code apiKeyHelper} or key, a user's, a project's or a managed one, no key kept by {@code
-   * /login} and no signed-in subscription outranks the kind's own variable, and its {@code init}
-   * line names that variable, or {@code none} for a GLM key (2.1.327, measured).
+   * /login} and no signed-in subscription outranks the key's own variable, and its {@code init}
+   * line names that variable (2.1.327, measured).
    */
   @Override
   public Optional<LoginOutcome> loginOutcome(String report) {
@@ -457,52 +463,31 @@ final class ClaudeCode implements Harness {
   }
 
   /**
-   * A Console API key, read from {@code ANTHROPIC_API_KEY} and sent to the Anthropic API; or a GLM
-   * Coding Plan key, read from {@code ANTHROPIC_AUTH_TOKEN} and sent to Z.AI's Anthropic endpoint,
-   * which maps Claude Code's models to its own unless told otherwise (docs.z.ai, Claude Code). Each
-   * outranks a sign-in made with {@code /login}, the subscription's, which Sail never holds. A GLM
-   * run's dollars are not Z.AI's: Claude Code prices every run at Anthropic's rates. {@code
-   * API_TIMEOUT_MS}, which Z.AI's own setup script sets to 3000000, is not fixed: that page names
-   * only the token and the address as what to set, and the timeout bounds only the wait for a
-   * response's headers, never a streaming answer, 10 minutes unless the container sets its own
-   * (code.claude.com/docs/en/env-vars).
+   * A Console API key, read from {@code ANTHROPIC_API_KEY} and sent to the Anthropic API alone
+   * ({@link #HOST_MANAGED}). It outranks a sign-in made inside the session ({@link #signIn}), which
+   * Sail never holds.
    */
   @Override
   public List<LoginKind> loginKinds() {
+    var fixed = new LinkedHashMap<String, String>();
+    fixed.put(BASE_URL, "https://api.anthropic.com");
+    fixed.put(UNIX_SOCKET, "");
+    fixed.put(HOST_MANAGED, "1");
     return List.of(
-        key(
+        new LoginKind(
             "api-key",
             "ANTHROPIC_API_KEY",
             "API key",
-            "Create an API key in the Claude Console",
-            "https://api.anthropic.com",
-            true),
-        key(
-            "glm",
-            "ANTHROPIC_AUTH_TOKEN",
-            "GLM Coding Plan key",
-            "Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, or a Team"
-                + " Plan's at z.ai/manage-apikey/coding-plan/team/my-plan",
-            "https://api.z.ai/api/anthropic",
-            false));
-  }
-
-  /** A kind whose key Claude Code sends to {@code address} alone ({@link #HOST_MANAGED}). */
-  private static LoginKind key(
-      String kind, String variable, String noun, String howToMake, String address, boolean priced) {
-    var fixed = new LinkedHashMap<String, String>();
-    fixed.put(BASE_URL, address);
-    fixed.put(UNIX_SOCKET, "");
-    fixed.put(HOST_MANAGED, "1");
-    return new LoginKind(kind, variable, noun, Remedy.of(howToMake), fixed, priced);
+            Remedy.of("Create an API key in the Claude Console"),
+            fixed));
   }
 
   /**
-   * Its kinds' variables, the gateway token outranking the API key, {@code
-   * CLAUDE_CODE_OAUTH_TOKEN}, a subscription's token a container may export, the credentials a host
-   * hands it by file descriptor, and {@code ANTHROPIC_CUSTOM_HEADERS}, whose header replaces the
-   * key's own (2.1.327, measured: a key by descriptor is sent beside a GLM key, and an {@code
-   * x-api-key} header in place of the stored one). Claude Code takes an empty variable as unset.
+   * Its key's variable, the gateway token outranking it, {@code CLAUDE_CODE_OAUTH_TOKEN}, a
+   * subscription's token a container may export, the credentials a host hands it by file
+   * descriptor, and {@code ANTHROPIC_CUSTOM_HEADERS}, whose header replaces the key's own (2.1.327,
+   * measured: a key by descriptor is sent beside an {@code ANTHROPIC_AUTH_TOKEN}, and an {@code
+   * x-api-key} header in place of the stored key). Claude Code takes an empty variable as unset.
    */
   @Override
   public List<String> loginVariables() {

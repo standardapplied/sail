@@ -81,9 +81,8 @@ public final class RunReportReader {
       }
       var report = inFileOrder(marked);
       var kind = harness.declaredKind(run.loginKind());
-      var usage = parsed(run, harness.usage(report));
       return new RunReport(
-          kind.map(given -> given.charged(usage)).orElse(usage),
+          parsed(run, harness.usage(report)),
           kind.isEmpty() ? null : harness.loginOutcome(report).orElse(null));
     } catch (IOException | TimeoutException unanswered) {
       return null;

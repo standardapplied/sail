@@ -54,9 +54,7 @@ public final class AgentLoginCommand implements Runnable {
   @Option(names = "--name", description = "The login's name (default: default).")
   private String name;
 
-  @Option(
-      names = "--kind",
-      description = "The login's kind: api-key or glm for claude-code, api-key for codex.")
+  @Option(names = "--kind", description = "The login's kind: api-key.")
   private String kind;
 
   @Option(names = "--json", description = "Output in JSON format.")
@@ -86,7 +84,8 @@ public final class AgentLoginCommand implements Runnable {
       rehearse(known.yamlName(), named, declared.kind());
       return;
     }
-    var value = read(known.displayName() + " " + declared.kind(), declared.howToMake().plain());
+    var value =
+        read(known.displayName() + " " + declared.kind(), "key", declared.howToMake().plain());
     change(
         connection,
         json,
@@ -163,10 +162,11 @@ public final class AgentLoginCommand implements Runnable {
   }
 
   /**
-   * The login's value: typed at a terminal with echo off, after saying how to make one, or the
-   * whole of stdin, its one trailing newline dropped. More than a login may hold is refused unread.
+   * The login's value, a {@code noun} (a key, a git token): typed at a terminal with echo off,
+   * after saying how to make one, or the whole of stdin, its one trailing newline dropped. More
+   * than a login may hold is refused unread.
    */
-  static String read(String what, String howToMake) throws IOException {
+  static String read(String what, String noun, String howToMake) throws IOException {
     if (ConsoleHelper.hasConsole()) {
       if (howToMake != null) {
         System.out.println("  " + howToMake + ", then paste it here.");
@@ -174,13 +174,13 @@ public final class AgentLoginCommand implements Runnable {
       return ConsoleHelper.readPassword("  " + what + " (input hidden): ");
     }
     System.err.println("  Reading the " + what + " from stdin.");
-    return trimmed(System.in);
+    return trimmed(System.in, noun);
   }
 
-  static String trimmed(InputStream in) throws IOException {
+  static String trimmed(InputStream in, String noun) throws IOException {
     var bytes = in.readNBytes(MAX_READ);
     if (bytes.length == MAX_READ) {
-      throw new CliCommand.Refused("A login's value is at most 16 KiB.");
+      throw new CliCommand.Refused("A " + noun + " is at most 16 KiB.");
     }
     var text = new String(bytes, StandardCharsets.UTF_8);
     if (text.endsWith("\r\n")) {

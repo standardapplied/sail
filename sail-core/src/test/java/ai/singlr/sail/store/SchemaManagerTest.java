@@ -142,8 +142,8 @@ class SchemaManagerTest {
   }
 
   /**
-   * The database 0.75.0 made, before a run's login could be a GLM key and while it could be a
-   * subscription's token: refused whole, the reinstall named, nothing created or changed beside it.
+   * The database 0.75.0 made, while a run's login could be a subscription's token: refused whole,
+   * the reinstall named, nothing created or changed beside it.
    */
   @Test
   void aDatabaseTheReleaseBeforeMadeIsRefusedNamingAReinstallAndLeftAsItWas() {

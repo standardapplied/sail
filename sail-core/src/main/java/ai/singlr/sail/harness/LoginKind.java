@@ -13,23 +13,22 @@ import java.util.Objects;
 import java.util.SequencedMap;
 
 /**
- * One kind of key a harness reads from its environment: {@code kind} as a stored login names it,
+ * The kind of key a harness reads from its environment: {@code kind} as a stored login names it,
  * the {@code variable} the harness reads it from, what a person calls it ({@code noun}), how a
- * person makes one, the variables set beside it to values of the kind's own, or empty ({@code
+ * person makes one, and the variables set beside it to values of the kind's own, or empty ({@code
  * fixed}), such as the address the key is sent to and a socket that would carry it elsewhere, so
- * nothing the container says sends it elsewhere, and whether the dollars its harness reports are
- * what the key's service charges ({@code priced}). Only a key a service issues for programs is a
- * kind: one stored value serves any number of runs at once, and nothing is ever written back. A
- * subscription's sign-in is never one: the person makes it inside the harness's own session ({@link
- * Harness#signIn}), and Sail never holds it.
+ * nothing the container says sends it elsewhere. Only a key its harness's own vendor issues for
+ * programs is a kind: one stored value serves any number of runs at once, nothing is ever written
+ * back, and the dollars the harness reports are what that vendor charges. A subscription's sign-in
+ * is never one: the person makes it inside the harness's own session ({@link Harness#signIn}), and
+ * Sail never holds it.
  */
 public record LoginKind(
     String kind,
     String variable,
     String noun,
     Remedy howToMake,
-    SequencedMap<String, String> fixed,
-    boolean priced) {
+    SequencedMap<String, String> fixed) {
 
   public LoginKind {
     Strings.requireNonBlank(kind, "kind");
@@ -41,22 +40,5 @@ public record LoginKind(
           "A kind's own variable " + variable + " is its key, never a fixed value.");
     }
     fixed = Collections.unmodifiableSequencedMap(new LinkedHashMap<>(fixed));
-  }
-
-  /**
-   * {@code usage} as the key's service charges it: without its harness's dollars when the harness
-   * prices a run at another service's rates ({@link #priced}).
-   */
-  public RunUsage charged(RunUsage usage) {
-    return priced || usage == null
-        ? usage
-        : new RunUsage(
-            usage.model(),
-            usage.tokensIn(),
-            usage.tokensOut(),
-            usage.tokensCacheRead(),
-            usage.tokensCacheWrite(),
-            null,
-            usage.source());
   }
 }

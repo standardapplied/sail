@@ -83,7 +83,7 @@ import Testing
         #expect(NewSessionWords.primary(panel.readiness) == ("Start and Sign In There", true))
         #expect(NewSessionWords.storeLogin(claude) == "Store a Claude Code Login")
         #expect(claude.storable?.kind == "api-key" && claude.storable?.said == "Create an API key in the Claude Console.", "Store a Login offers the API key and says how to make it")
-        #expect(claude.kinds.map(\.said) == ["Create an API key in the Claude Console.", "Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, or a Team Plan's at z.ai/manage-apikey/coding-plan/team/my-plan."], "every kind is a key whose how is words alone")
+        #expect(claude.kinds.map(\.said) == ["Create an API key in the Claude Console."], "its one kind is a key whose how is words alone")
         let made = panel.start()
         #expect(made?.wire == SessionAgent(harness: claude.harness, mode: claude.modeDefault, inside: true))
     }

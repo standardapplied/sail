@@ -126,7 +126,7 @@ public final class LoginStore {
   public Row store(String fdeId, Harness harness, String name, String kind, String value) {
     var named = requireName(name);
     var declared = harness.loginKind(kind);
-    requireValue(value);
+    requireValue(value, "key");
     synchronized (WRITES) {
       var dir = directory(fdeId, harness.yamlName());
       write(dir, named, declared.kind() + "\n" + value + "\n");
@@ -243,7 +243,7 @@ public final class LoginStore {
 
   public Row storeGit(String fdeId, String host, String value) {
     var named = requireHost(host);
-    requireValue(value);
+    requireValue(value, "git token");
     if (value.length() < MIN_TOKEN) {
       throw new IllegalArgumentException(
           "A git token is at least "
@@ -333,7 +333,7 @@ public final class LoginStore {
     var named = Strings.isBlank(name) ? DEFAULT_NAME : name;
     if (!NAME.matcher(named).matches()) {
       throw new IllegalArgumentException(
-          "A login's name is 1 to 32 lowercase letters, digits and hyphens, starting with a letter"
+          "A key's name is 1 to 32 lowercase letters, digits and hyphens, starting with a letter"
               + " or digit, such as work or personal.");
     }
     return named;
@@ -342,22 +342,23 @@ public final class LoginStore {
   /**
    * Refuses a value no launch could hand its harness as it is: it is one line, not blank, at most
    * 16 KiB, of printable ASCII with no space, quote, backslash, {@code $} or backtick, so nothing
-   * that reads it ever quotes or evaluates it. The refusal names the rule, never the value.
+   * that reads it ever quotes or evaluates it. The refusal names the rule, said of {@code noun} (a
+   * key, a git token), never the value.
    */
-  static void requireValue(String value) {
+  static void requireValue(String value, String noun) {
     if (Strings.isBlank(value)) {
-      throw new IllegalArgumentException("A login's value is empty: paste the key or token.");
+      throw new IllegalArgumentException("A " + noun + " is empty: paste the " + noun + ".");
     }
     if (value.contains("\n") || value.contains("\r")) {
       throw new IllegalArgumentException(
-          "A login's value is one line: paste only the key or token.");
+          "A " + noun + " is one line: paste only the " + noun + ".");
     }
     if (value.getBytes(StandardCharsets.UTF_8).length > MAX_VALUE_BYTES) {
-      throw new IllegalArgumentException("A login's value is at most 16 KiB.");
+      throw new IllegalArgumentException("A " + noun + " is at most 16 KiB.");
     }
     if (!VALUE.matcher(value).matches()) {
       throw new IllegalArgumentException(
-          "A login's value is printable ASCII with no space, quote, backslash, $ or backtick.");
+          "A " + noun + " is printable ASCII with no space, quote, backslash, $ or backtick.");
     }
   }
 
