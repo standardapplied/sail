@@ -1,0 +1,1 @@
+- **CI trial on Blacksmith runners.** The lanes that hold no secret run on Blacksmith labels for a measured trial; signing, notarization and release stay on GitHub.
