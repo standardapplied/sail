@@ -69,7 +69,7 @@ jobs:
         module: [sail-core, sail-harness, sail-infra]
         # macOS 15, never macos-latest: the oldest macOS the app supports (its
         # LSMinimumSystemVersion), the image the Clients lanes and the release's darwin build use.
-        os: [*linux, blacksmith-6vcpu-macos-15]
+        os: [ubuntu-24.04, blacksmith-6vcpu-macos-15]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -221,7 +221,7 @@ jobs:
   terminal-e2e:
     name: Terminal end to end
     needs: native
-    runs-on: *linux
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     defaults:
       run:
@@ -470,7 +470,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
-    runs-on: *linux
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
