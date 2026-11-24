@@ -51,7 +51,7 @@ jobs:
           kind: native
 
       - name: Build native image
-        run: mvn -B package -Pnative -DskipTests -Djacoco.skip=true -Dspotless.check.skip=true
+        run: mvn -B package -Pnative -pl sail-infra -am -DskipTests -Djacoco.skip=true -Dspotless.check.skip=true
 
       - name: Smoke test
         run: |

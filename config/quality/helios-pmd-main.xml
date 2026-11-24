@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="helios-main"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+    <description>
+        Complexity, size and coupling limits for Helios main code. The limits and their rationale
+        are documented in the "Quality gate" section of AGENTS.md. pmd-test.xml is this rule set
+        minus the class-level rules that do not fit test classes; keep the two in step.
+    </description>
+
+    <rule ref="category/java/design.xml/CognitiveComplexity">
+        <properties>
+            <property name="reportLevel" value="15"/>
+        </properties>
+    </rule>
+    <rule ref="category/java/design.xml/CyclomaticComplexity">
+        <properties>
+            <property name="methodReportLevel" value="15"/>
+            <property name="classReportLevel" value="80"/>
+        </properties>
+    </rule>
+    <rule ref="category/java/design.xml/NPathComplexity"/>
+    <rule ref="category/java/design.xml/AvoidDeeplyNestedIfStmts"
+          message="if statements are nested 3 or more deep (limit: a depth of 2)"/>
+    <rule ref="category/java/design.xml/NcssCount">
+        <properties>
+            <property name="methodReportLevel" value="60"/>
+            <property name="classReportLevel" value="600"/>
+        </properties>
+    </rule>
+    <rule ref="category/java/design.xml/ExcessiveParameterList"/>
+    <rule ref="category/java/design.xml/TooManyFields"
+          message="The class has more than 15 non-static, non-final fields"/>
+    <rule ref="category/java/design.xml/CouplingBetweenObjects"/>
+    <rule ref="category/java/design.xml/SwitchDensity"
+          message="The switch averages 10 or more statements per label (limit: fewer than 10)"/>
+    <rule ref="category/java/design.xml/GodClass"/>
+    <rule ref="category/java/design.xml/TooManyMethods"
+          message="The class has more than 25 methods, not counting get*, set*, is* and with*">
+        <properties>
+            <property name="maxmethods" value="25"/>
+            <property name="xpath">
+                <value>
+<![CDATA[
+//ClassDeclaration
+    [count(ClassBody/MethodDeclaration
+        [not(starts-with(@Name, 'get') or starts-with(@Name, 'set')
+            or starts-with(@Name, 'is') or starts-with(@Name, 'with'))]
+    ) > $maxmethods]
+]]>
+                </value>
+            </property>
+        </properties>
+    </rule>
+
+    <rule name="OnDemandImport"
+          language="java"
+          class="net.sourceforge.pmd.lang.rule.xpath.XPathRule"
+          message="On-demand (wildcard) imports are not allowed; import each type or static member by name.">
+        <description>Every import names exactly one type or static member.</description>
+        <priority>3</priority>
+        <properties>
+            <property name="xpath">
+                <value>
+<![CDATA[
+//ImportDeclaration[@ImportOnDemand = true()]
+]]>
+                </value>
+            </property>
+        </properties>
+    </rule>
+</ruleset>
