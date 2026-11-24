@@ -54,7 +54,7 @@ import Testing
     }
 
     /// Keys is offered and not yet usable: it says so, the server's spec not built.
-    @Test func loginsIsShownButNotYetUsable() {
+    @Test func keysIsShownButNotYetUsable() {
         #expect(!UserMenuContent.Item.keys.enabled && UserMenuContent.Item.keys.why == "Keys come in a later version of Sail.")
         #expect(UserMenuContent.Item.account.enabled && UserMenuContent.Item.account.key == "," && UserMenuContent.Item.signOut.key == nil)
     }

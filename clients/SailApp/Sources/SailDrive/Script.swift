@@ -241,13 +241,13 @@ struct Step: Decodable {
     /// `[title, "on" | "off"]`: the panel's primary is titled so and offered or not; with a third,
     /// "holds the keys", it is drawn holding them.
     var newSessionPrimary: [String]?
-    /// A login's value put on the pasteboard, then ⌘V into the Store a Login sheet's field. The drive
+    /// A key put on the pasteboard, then ⌘V into the Store a Key sheet's field. The drive
     /// keeps it for the sweep to search for (a blank one is no key, and is found in any file), and
     /// says only its length.
     var pasteLogin: String?
-    /// The Store a Login sheet is up saying these words, in this order, within `seconds`.
+    /// The Store a Key sheet is up saying these words, in this order, within `seconds`.
     var loginSheetSays: [String]?
-    /// The Store a Login sheet is as these facts say, within `seconds`: "closed", "Store on", "Store
+    /// The Store a Key sheet is as these facts say, within `seconds`: "closed", "Store on", "Store
     /// off", "Storing", "the field empty", "the field filled", "dots only", "the keys in the field",
     /// "no name asked", "the name <name>", "naming", "no key field", "the keys in the name", "the panel open behind", "refused: <sentence>", "the
     /// name refused: <sentence>", "help: <the help line>", "over the panel" (the window server orders
@@ -255,7 +255,7 @@ struct Step: Decodable {
     /// front of the sheet and over it; claimed by the steps after a shot, once a suggestion has had
     /// the time to show, and never for a sheet the window server does not list).
     var loginSheetIs: [String]?
-    /// The button or link of this title in the Store a Login sheet, clicked with real mouse events;
+    /// The button or link of this title in the Store a Key sheet, clicked with real mouse events;
     /// the sheet stays.
     var loginSheetClick: String?
     /// The pasteboard holds exactly this ("" for nothing), within `seconds`.
@@ -283,6 +283,10 @@ struct Step: Decodable {
     /// `[text, address]`: ⌘-click on this text where the workspace terminal focused shows it opens
     /// this web address in the browser, and nothing else.
     var urlCommandClick: [String]?
+    /// `[text, shot]`: ⌘ held over this text where the workspace terminal focused shows it
+    /// underlines the web address there on every row it wraps over, shot in both looks under this
+    /// name; then the pointer moves on without ⌘ and the underline goes.
+    var urlCommandHover: [String]?
     /// `[harness, mode, "stored" | "inside"]`: the focused tab's session was asked of the runner's
     /// door naming exactly this agent, and no command.
     var doorCreated: [String]?

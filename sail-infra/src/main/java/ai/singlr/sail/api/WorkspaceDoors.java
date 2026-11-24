@@ -25,6 +25,7 @@ import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.LoginStore;
 import ai.singlr.sail.store.ProjectStore;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -322,7 +323,6 @@ public final class WorkspaceDoors {
             .map(harness -> harness.signIn().file())
             .toList();
     var held = running ? signIns.held(found.name(), signInFiles) : Optional.<Set<String>>empty();
-    var keys = fdes.logins().list(fdeId);
     var offered = new ArrayList<AgentOffer>();
     for (var harness : Harnesses.all()) {
       if (notInstalled.containsKey(harness)) {
@@ -330,11 +330,7 @@ public final class WorkspaceDoors {
         continue;
       }
       var signedIn = held.map(files -> files.contains(harness.signIn().file())).orElse(null);
-      var key =
-          keys.stream()
-              .filter(row -> row.harness().equals(harness.yamlName()) && row.isDefault())
-              .findFirst()
-              .orElse(null);
+      var key = fdes.logins().defaultFor(fdeId, harness).map(LoginStore.Login::row).orElse(null);
       offered.add(new AgentOffer(harness, key, true, signedIn, null));
     }
     return new AgentOffersResponse(project, name, person, running, null, offered);

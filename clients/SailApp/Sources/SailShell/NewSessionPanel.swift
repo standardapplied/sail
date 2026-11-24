@@ -61,6 +61,8 @@ package final class NewSessionPanel: NSObject {
     package private(set) var line: NewSessionView.Line?
     /// Sign in holds the keys (⇥), so Space and ↑ ↓ open its menu.
     package private(set) var signInFocused = false
+    /// What VoiceOver was last told of a key just stored becoming the way in; nil when it was not.
+    package private(set) var announced: String?
 
     /// The line saying a key was stored.
     package var stored: String? {
@@ -144,7 +146,7 @@ package final class NewSessionPanel: NSObject {
 
     /// What the route answers once a key of `harness` was stored, `harness` chosen with `memory`'s
     /// way in for it, `line` said over the foot until the panel closes, Start holding the keys;
-    /// VoiceOver hears it ready.
+    /// VoiceOver hears it ready on the key where the key is its way in.
     func show(_ answer: Answer, memory: ModeMemory, stored line: String, harness: String) {
         guard isOpen else { return }
         var shown = Self.content(answer, memory: memory)
@@ -155,9 +157,11 @@ package final class NewSessionPanel: NSObject {
         content = shown
         self.line = .stored(line)
         signInFocused = false
+        announced = nil
         redraw()
         guard case let .offered(panel) = shown, let offer = panel.offer(harness), let start = view.primary else { return }
-        if let ready = NewSessionWords.ready(offer) {
+        if panel.way(of: harness) == .key, let ready = NewSessionWords.ready(offer) {
+            announced = ready
             NSAccessibility.post(element: view, notification: .announcementRequested, userInfo: [.announcement: ready, .priority: NSAccessibilityPriorityLevel.high.rawValue])
         }
         NSAccessibility.post(element: start, notification: .layoutChanged, userInfo: [.uiElements: [start]])
@@ -458,7 +462,7 @@ package final class NewSessionView: NSView {
             let start = SailButton(title, kind: veiled ? .secondary : .primary, size: .small, look: look, target: self, action: #selector(pressedStart(_:)))
             start.hint("\r", mono: mono)
             start.isEnabled = enabled
-            start.holdsKeys = line.map { if case .stored = $0 { true } else { false } } == true && enabled
+            start.holdsKeys = line.map { if case .stored = $0 { true } else { false } } == true && enabled && !focused
             start.why = enabled ? nil : Self.refusal(panel.readiness)?.message
             primary = start
             let hint = Self.label(Self.text(NewSessionWords.hint, mono.font(Look.Step.micro.points, .regular) as NSFont, look.textTertiary, direction: direction).cut(.byTruncatingTail))

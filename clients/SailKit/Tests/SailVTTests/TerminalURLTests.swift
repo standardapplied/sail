@@ -20,6 +20,23 @@ import Testing
         #expect(TerminalURL.find(in: "<https://example.com/c>", at: 2)?.range == 1 ..< 22)
     }
 
+    /// An address's scheme is read in any case, as a browser reads it.
+    @Test func anAddressInCapitalsIsFound() {
+        #expect(TerminalURL.find(in: "see HTTPS://Example.com/x now", at: 6)?.url.absoluteString == "HTTPS://Example.com/x")
+        #expect(TerminalURL.find(in: "Http://example.com", at: 1)?.range == 0 ..< 18)
+    }
+
+    /// Only the web opens: `http` and `https` in any case; never a file, a share, an app's own scheme
+    /// or any of them in capitals.
+    @Test func onlyTheWebOpens() throws {
+        for address in ["https://example.com/a", "http://example.com", "HtTpS://example.com/b"] {
+            #expect(TerminalURL.opens(try #require(URL(string: address))), "\(address)")
+        }
+        for address in ["file:///tmp/x", "smb://host/share", "x-sail-test://a", "FiLe:///Applications/Calculator.app", "javascript:alert(1)", "mailto:a@example.com"] {
+            #expect(!TerminalURL.opens(try #require(URL(string: address))), "\(address)")
+        }
+    }
+
     @Test func nothingElseIsAnAddress() {
         #expect(TerminalURL.find(in: "src/a.ts:4 ftp://example.com example.com", at: 15) == nil)
         #expect(TerminalURL.find(in: "src/a.ts:4 ftp://example.com example.com", at: 32) == nil)

@@ -324,6 +324,28 @@ import Testing
         #expect(harness.view.shownLink == nil, "the words after the link were underlined")
     }
 
+    /// A program's own link opens only the web: one to a file, a share, another app's scheme, or a
+    /// file in capitals, is no link, underlined or opened, nor handed to the app's own links; one
+    /// to an `https` address in capitals opens it.
+    @Test(arguments: [
+        ("file:///tmp/x", false), ("smb://host/share", false), ("x-sail-test://a", false), ("FiLe:///Applications/Calculator.app", false),
+        ("HtTpS://example.com/a", true),
+    ])
+    func aProgramsOwnLinkOpensOnlyTheWeb(_ address: String, _ opens: Bool) async throws {
+        let harness = try Harness()
+        var opened: [URL] = [], found: [String] = []
+        harness.view.openURL = { opened.append($0) }
+        harness.view.linkIn = { _, _ in nil }
+        harness.view.onLink = { text, _ in found.append(text) }
+        harness.link.output("\u{1b}]8;;\(address)\u{1b}\\read the notes\u{1b}]8;;\u{1b}\\ here")
+        await harness.tick()
+        harness.mouse(.mouseMoved, column: 3, row: 0, flags: .command)
+        #expect(harness.view.shownLink == (opens ? OverlayLink(row: 0, columns: 0 ..< 14) : nil), "\(String(describing: harness.view.shownLink))")
+        harness.mouse(.leftMouseDown, column: 3, row: 0, flags: .command)
+        harness.mouse(.leftMouseUp, column: 3, row: 0, flags: .command)
+        #expect(opened == (opens ? [try #require(URL(string: address))] : []) && found.isEmpty, "opened \(opened), the app's own \(found)")
+    }
+
     /// R2-5: a line whose start has scrolled above the screen is never read from its tail, nor one
     /// going on below the screen from its head: no link lies in a word the edge cuts, even one
     /// ending short of the edge (a path's closing `.` left out), so ⌘ over it underlines nothing

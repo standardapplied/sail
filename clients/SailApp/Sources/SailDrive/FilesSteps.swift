@@ -50,6 +50,16 @@ extension Driver {
         return true
     }
 
+    /// The pointer moved to `point` in `view` with `modifiers` held, as AppKit hands the view a
+    /// move over its tracking area.
+    private static func hover(_ view: NSView, at point: NSPoint, modifiers: NSEvent.ModifierFlags) {
+        guard let window = view.window, let moved = NSEvent.mouseEvent(
+            with: .mouseMoved, location: view.convert(point, to: nil), modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0
+        ) else { return }
+        view.mouseMoved(with: moved)
+    }
+
     func performFiles(_ step: Step) async -> (Bool, String)? {
         WorkbenchView.filesMeasuring = true
         if let done = await performFile(step) { return done }
@@ -334,6 +344,21 @@ extension Driver {
             let clicked = await click(view, at: view.point(of: cell), modifiers: .command)
             let done = await waitForState(step.seconds ?? 5) { !opened.isEmpty }
             return (clicked && done && opened == [pair[1]], "⌘-clicked \(pair[0].debugDescription) at column \(cell.x + 1), row \(cell.y + 1): opened \(opened)")
+        }
+        if let shown = step.urlCommandHover, shown.count == 2 {
+            guard let view = self.pane?.terminal, let cell = view.cell(of: shown[0]) else { return (false, "the workspace terminal shows no \(shown[0].debugDescription)") }
+            let window = shell.window.windowNumber
+            var rows: [Int] = []
+            let (shot, said) = await inBothLooks(shown[1]) { file in
+                Self.hover(view, at: view.point(of: cell), modifiers: .command)
+                guard await self.waitForState(step.seconds ?? 5, { (view.shownLink?.spans.count ?? 0) > 1 }) else { return }
+                rows.append(view.shownLink?.spans.count ?? 0)
+                await self.drawnAndCommitted()
+                await self.capture(.window(window), to: file)
+            }
+            Self.hover(view, at: view.point(of: cell), modifiers: [])
+            let gone = await waitForState(step.seconds ?? 5) { view.shownLink == nil }
+            return (shot && rows.count == 2 && gone, "⌘ over \(shown[0].debugDescription) underlined the address on \(rows) rows; the underline \(gone ? "gone" : "kept") without ⌘; \(said)")
         }
         if let line = step.fileAtLine {
             let lines = { self.workbench.fileLines }

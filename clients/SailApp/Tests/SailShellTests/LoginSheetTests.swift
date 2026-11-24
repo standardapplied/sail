@@ -42,7 +42,7 @@ import Testing
         filled.typed(holdsSomething: true)
         var storing = filled
         _ = storing.store(pasted, clipboard: clipboard)
-        var named = try model(logins: "logins-no-default", agents: "workspace-agents-dock-no-default")
+        var named = try model(logins: "logins-no-default", agents: "workspace-agents-dock-no-login")
         named.typed(holdsSomething: true)
         var naming = named
         naming.changeName()
@@ -160,7 +160,7 @@ import Testing
     /// and the key comes back holding the keys; Return in the key stores, Store's key is Return,
     /// Escape cancels.
     @Test func theKeysGoAsThePageSays() throws {
-        let sheet = try Self.sheet(try Self.model(logins: "logins-no-default", agents: "workspace-agents-dock-no-default"))
+        let sheet = try Self.sheet(try Self.model(logins: "logins-no-default", agents: "workspace-agents-dock-no-login"))
         defer { sheet.orderOut(nil) }
         let name = try #require(sheet.name), change = try #require(sheet.change)
         #expect(sheet.initialFirstResponder === sheet.field.field && name.superview == nil)
@@ -248,6 +248,10 @@ import Testing
         #expect(panel.view.words.contains("Stored Claude Code key “default”. An agent session already running keeps the key it started with until it ends; no workspace keeps any of it.") && !panel.view.words.contains { $0.contains("asks you to sign in") }, "the store, and the server's note on the key it replaced, are not said: \(panel.view.words)")
         let start = try #require(panel.view.primary)
         #expect(start.title == "Start" && start.isEnabled && start.holdsKeys)
+        try NewSessionPanelTests.press(try NewSessionPanelTests.key(48, "\t"), in: window)
+        #expect(panel.view.signIn?.holdsKeys == true && panel.view.primary?.holdsKeys == false, "⇥ to Sign in left Start's ring on too")
+        try NewSessionPanelTests.press(try NewSessionPanelTests.key(48, "\t", .shift), in: window)
+        #expect(panel.view.primary?.holdsKeys == true && panel.view.signIn?.holdsKeys == false, "⇧⇥ back did not give Start its ring again")
         var started: [AgentStart] = []
         view.onStart = { start, _, _ in started.append(start) }
         try NewSessionPanelTests.press(try NewSessionPanelTests.returnKey(), in: window)
@@ -255,6 +259,34 @@ import Testing
         let inDefaults = String(describing: UserDefaults.standard.dictionaryRepresentation()).contains(Self.pasted)
         let said = view.text.contains(Self.pasted) || Driverless.words(window.contentView).contains(Self.pasted)
         #expect(!inDefaults && !said, "the key is in the defaults or in what the app says")
+    }
+
+    /// A key stored beside the default the person already has is made the one in use (`:use`): the
+    /// panel's Sign in, its row and VoiceOver say that key, never the old default, and Start takes
+    /// it. Where that is not done, the key is not chosen and the line says why.
+    @Test(arguments: [true, false])
+    func aKeyStoredBesideADefaultBecomesTheOneInUse(_ answered: Bool) async throws {
+        let (view, window, _, sheet) = try await Self.asked(
+            agents: "workspace-agents-dock", logins: "logins-with-a-default", stored: [try Exchange("login-stored-beside-the-default")]
+        )
+        defer { window.orderOut(nil) }
+        let panel = view.newSession
+        #expect(sheet.model.name == "work", "the second key is named \(sheet.model.name)")
+        Self.paste(into: sheet)
+        let onWork = try Exchange("workspace-agents-dock").altered(at: ["offered", 0, "login", "name"], to: "work")
+        let after = RecordedServer(answered ? [try Exchange("login-used"), onWork] : [try Exchange("workspace-agents-dock")])
+        view.client = SailClient(transport: after, token: "tok")
+        try NewSessionPanelTests.press(sheet.store)
+        try #require(await RunnerTabTests.until { window.attachedSheet == nil && panel.stored != nil && !view.busy && panel.view.signIn != nil }, "the panel never came back: \(panel.view.words)")
+        let asked = await after.requests.map(\.route)
+        #expect(asked == ["POST /v1/logins/claude-code/work%3Ause", "GET /v1/projects/harbor/workspaces/dock/agents"], "asked \(asked)")
+        if answered {
+            #expect(panel.view.signIn?.title == "API key “work”" && panel.view.rows.first?.line.stringValue == "API key “work”" && view.memory.ways == ["claude-code": .key])
+            #expect(panel.announced == "Claude Code ready, API key work." && panel.stored == "Stored Claude Code key “work”.")
+        } else {
+            #expect(panel.view.signIn?.title == "Your Claude account" && view.memory.ways["claude-code"] == nil, "a key not in use was chosen: \(panel.view.words)")
+            #expect(panel.announced == nil && panel.stored == "Stored Claude Code key “work”. Can't reach 127.0.0.1, so “work” is not the key Start takes.", "\(String(describing: panel.stored))")
+        }
     }
 
     /// The clipboard still holding exactly the key once stored is cleared, and the line says so;
@@ -335,7 +367,7 @@ extension LoginSheetTests {
     /// the key's field put away and empty.
     @Test func theNameIsAskedWhereThePersonHasALoginOfTheHarness() async throws {
         let refused = try Exchange("refusal-invalid-request-login-name")
-        let (_, window, server, sheet) = try await Self.asked(agents: "workspace-agents-dock-no-default", logins: "logins-no-default", stored: [refused])
+        let (_, window, server, sheet) = try await Self.asked(agents: "workspace-agents-dock-no-login", logins: "logins-no-default", stored: [refused])
         defer { window.orderOut(nil) }
         let name = try #require(sheet.name, "no name was asked of a person with a Claude Code login")
         let said = Driverless.words(sheet.contentView)

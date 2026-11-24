@@ -46,22 +46,24 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "refusal-project-not-in-catalog-sessions": { _ = try await $0.send(.sessions(workspace: "dock", project: "harbor")) },
     "workspace-agents": { _ = try await $0.send(.agents(workspace: "berth", project: "harbor")) },
     "workspace-agents-stopped-no-login": { _ = try await $0.send(.agents(workspace: "quay", project: "harbor")) },
-    "workspace-agents-no-default": { _ = try await $0.send(.agents(workspace: "quay", project: "harbor")) },
     "workspace-agents-not-yours": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
     "workspace-agents-owner-gone": { _ = try await $0.send(.agents(workspace: "wreck", project: "harbor")) },
     "workspace-agents-dock": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
     "workspace-agents-dock-signed-in": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
+    "workspace-agents-dock-signed-out": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
     "workspace-agents-pier": { _ = try await $0.send(.agents(workspace: "pier", project: "harbor")) },
     "workspace-agents-quay": { _ = try await $0.send(.agents(workspace: "quay", project: "harbor")) },
     "workspace-agents-dock-no-login": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
     "workspace-agents-dock-not-installed": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
     "workspace-agents-pier-owner-gone": { _ = try await $0.send(.agents(workspace: "pier", project: "harbor")) },
     "refusal-forbidden-not-assignee-agents": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
-    "workspace-agents-dock-no-default": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
     "logins": { _ = try await $0.send(.logins) },
     "logins-no-default": { _ = try await $0.send(.logins) },
+    "logins-with-a-default": { _ = try await $0.send(.logins) },
     "login-stored": { _ = try await $0.send(.storeLogin(goldenKey, kind: "api-key", harness: "claude-code", name: "default")) },
     "login-replaced": { _ = try await $0.send(.storeLogin(goldenKey, kind: "api-key", harness: "claude-code", name: "default")) },
+    "login-stored-beside-the-default": { _ = try await $0.send(.storeLogin(goldenKey, kind: "api-key", harness: "claude-code", name: "work")) },
+    "login-used": { _ = try await $0.send(.useLogin(harness: "claude-code", name: "work")) },
     "refusal-invalid-request-login-empty": { _ = try await $0.send(.storeLogin("   ", kind: "api-key", harness: "claude-code", name: "default")) },
     "refusal-invalid-request-login-lines": { _ = try await $0.send(.storeLogin(goldenKey + "\n" + goldenKey, kind: "api-key", harness: "claude-code", name: "default")) },
     "refusal-invalid-request-login-long": { _ = try await $0.send(.storeLogin(String(repeating: "k", count: 16 * 1024 + 1), kind: "api-key", harness: "claude-code", name: "default")) },
@@ -218,9 +220,6 @@ func answer<Response>(
         #expect(!stopped.running && stopped.refusal == nil)
         let none = try #require(stopped.offered.first)
         #expect(none.login == nil && none.inside && none.signIn?.signedIn == nil, "a stopped workspace is not read for its sign-in")
-
-        let noDefault = try #require(try agents("workspace-agents-no-default", "quay").offered.first)
-        #expect(noDefault.login == nil && noDefault.inside)
 
         let theirs = try agents("workspace-agents-not-yours", "dock")
         #expect(theirs.refusal?.code == .known(.notYourWorkspace) && theirs.offered.isEmpty && theirs.owner == "uday")

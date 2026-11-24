@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/logins/claude-code/work%3Ause"
+  },
+  "response": {
+    "body": {
+      "login": {
+        "default": true,
+        "fde": "uday",
+        "fingerprint": "584e1bc1",
+        "harness": "claude-code",
+        "kind": "api-key",
+        "name": "work",
+        "stored_at": "2026-11-11T09:00:00.656Z"
+      },
+      "note": "An agent session already running keeps the key it started with until it ends; no workspace keeps any of it.",
+      "schema_version": 1
+    },
+    "status": 200
+  }
+}

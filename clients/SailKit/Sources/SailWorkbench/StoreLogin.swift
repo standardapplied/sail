@@ -169,6 +169,24 @@ public struct StoreLogin: Equatable, Sendable {
         }
     }
 
+    /// What makes the key just stored the one Start takes, where the server did not make it the
+    /// default itself (the person had one already): nil before it is stored, and for the default.
+    public var use: Endpoint<LoginStored>? {
+        guard case let .stored(answer, _) = stage, !answer.login.isDefault else { return nil }
+        return .useLogin(harness: harness, name: answer.login.name)
+    }
+
+    /// Why the key just stored is not the one Start takes: the server's sentence, or that it did not
+    /// answer.
+    public func notUsed(_ error: SailError) -> String {
+        guard case let .stored(answer, _) = stage else { return "" }
+        return switch error {
+        case let .refused(refusal): refusal.message
+        case .unreachable: "Can't reach \(place), so “\(answer.login.name)” is not the key Start takes."
+        default: error.said(at: place)
+        }
+    }
+
     // MARK: Words
 
     public var title: String {

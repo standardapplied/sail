@@ -1533,10 +1533,9 @@ class ClientGoldensTest {
 
     /**
      * Records what can start in a workspace, each case the app draws: its owner signed in, with a
-     * harness the project does not install; a stopped one whose person stored no login, then logins
-     * but no default; an admin in another person's; one whose person is gone; and a member refused
-     * another person's. Harbor is defined with its agent installation only meanwhile, so no other
-     * answer changes.
+     * harness the project does not install; a stopped one whose person stored no login; an admin in
+     * another person's; one whose person is gone; and a member refused another person's. Harbor is
+     * defined with its agent installation only meanwhile, so no other answer changes.
      */
     void recordAgents(Map<String, String> goldens, String ana, String dana) throws Exception {
       Acting.system(
@@ -1563,10 +1562,6 @@ class ClientGoldensTest {
       record(goldens, "workspace-agents", "GET", agents.formatted("berth"), dana, null);
       record(
           goldens, "workspace-agents-stopped-no-login", "GET", agents.formatted("quay"), ana, null);
-      logins.store(idOf("ana"), claude, "work", "api-key", "fake-key-golden-ana-work");
-      logins.store(idOf("ana"), claude, "home", "api-key", "sk-ant-api03-golden-ana-home");
-      logins.remove(idOf("ana"), claude, "work");
-      record(goldens, "workspace-agents-no-default", "GET", agents.formatted("quay"), ana, null);
       record(goldens, "workspace-agents-not-yours", "GET", agents.formatted("dock"), dana, null);
       record(goldens, "workspace-agents-owner-gone", "GET", agents.formatted("wreck"), dana, null);
       record(
@@ -1583,8 +1578,9 @@ class ClientGoldensTest {
      * Records what can start in the drive's own workspaces of harbor, as uday asks, so the app's
      * New Session frames name the rows they open from: dock, uday's and running, with a Claude Code
      * login and a Codex login, holding Codex's own sign-in and not Claude Code's; dock once it
-     * holds both; pier, uday's and stopped; quay, ana's; dock with no Claude Code login stored,
-     * then with harbor installing Claude Code alone; and pier once its person is gone.
+     * holds both, and while it holds neither; pier, uday's and stopped; quay, ana's; dock with no
+     * Claude Code login stored, then with harbor installing Claude Code alone; and pier once its
+     * person is gone.
      */
     void recordDriveAgents(Map<String, String> goldens) throws Exception {
       var uday = new AuthSessionStore(db).create(idOf("uday"), Duration.ofMinutes(30)).token();
@@ -1608,6 +1604,9 @@ class ClientGoldensTest {
       var agents = "/v1/projects/" + PROJECT + "/workspaces/%s/agents";
       record(
           goldens, "workspace-agents-dock-signed-in", "GET", agents.formatted("dock"), uday, null);
+      incus.onOk("incus exec harbor-dock ", "");
+      record(
+          goldens, "workspace-agents-dock-signed-out", "GET", agents.formatted("dock"), uday, null);
       incus.onOk("incus exec harbor-dock ", ".codex/auth.json\n");
       record(goldens, "workspace-agents-dock", "GET", agents.formatted("dock"), uday, null);
       record(goldens, "workspace-agents-pier", "GET", agents.formatted("pier"), uday, null);
@@ -1637,9 +1636,10 @@ class ClientGoldensTest {
      * Records a person storing a login from the app, as uday with a Codex login and none of Claude
      * Code's, the run he started earlier ended: his logins listed; an API key stored as "default",
      * his first (`login-stored`, no note); the same name stored again (`login-replaced`, its note
-     * on the sessions already running); each refusal of a value, and of a name; then his logins and
-     * dock's agents while he has a Claude Code login that is not the default, where the app asks a
-     * name. Every value sent is an obvious fake.
+     * on the sessions already running); his logins with it the default, a second key stored beside
+     * it (`work`, not the default) and made the one in use; each refusal of a value, and of a name;
+     * then his logins while he has a Claude Code login that is not the default, where the app asks
+     * a name. Every value sent is an obvious fake.
      */
     void recordLogins(Map<String, String> goldens) throws Exception {
       var uday = new AuthSessionStore(db).create(idOf("uday"), Duration.ofMinutes(30)).token();
@@ -1668,6 +1668,16 @@ class ClientGoldensTest {
           claudeLogin.formatted("default"),
           uday,
           Map.of("kind", "api-key", "value", fake));
+      record(goldens, "logins-with-a-default", "GET", "/v1/logins", uday, null);
+      record(
+          goldens,
+          "login-stored-beside-the-default",
+          "PUT",
+          claudeLogin.formatted("work"),
+          uday,
+          Map.of("kind", "api-key", "value", fake));
+      record(goldens, "login-used", "POST", claudeLogin.formatted("work%3Ause"), uday, null);
+      logins.remove(udayId, claude, "work");
       logins.remove(udayId, claude, "default");
       var refused =
           Map.of(
@@ -1699,13 +1709,6 @@ class ClientGoldensTest {
       logins.store(udayId, claude, "home", "api-key", "sk-ant-api03-golden-uday-home");
       logins.remove(udayId, claude, "work");
       record(goldens, "logins-no-default", "GET", "/v1/logins", uday, null);
-      record(
-          goldens,
-          "workspace-agents-dock-no-default",
-          "GET",
-          "/v1/projects/" + PROJECT + "/workspaces/dock/agents",
-          uday,
-          null);
       logins.remove(udayId, claude, "home");
       logins.remove(udayId, codex, "work");
       Acting.system(() -> new ProjectStore(db).upsert(HARBOR));

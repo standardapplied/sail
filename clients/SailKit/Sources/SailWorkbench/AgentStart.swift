@@ -101,13 +101,10 @@ public struct NewSession: Equatable, Sendable {
         }
     }
 
-    /// Whether `offer` starts in `way`: its sign-in where it signs in inside, a key where one is
-    /// its default.
+    /// Whether `offer` starts in `way`: its own sign-in always, a key where one is its default.
+    /// An offer the server says does not start inside does not start at all (its `refusal`).
     private static func offered(_ way: Way, by offer: AgentOffer) -> Bool {
-        switch way {
-        case .signIn: offer.inside
-        case .key: offer.login != nil
-        }
+        way == .signIn || offer.login != nil
     }
 
     /// Why nothing starts in the workspace at all, its person's or gone; nil when its harnesses list.

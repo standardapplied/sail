@@ -2,8 +2,8 @@ import AppKit
 import SailSurface
 import SailVT
 
-/// A link in the terminal: a program's own (OSC 8), a web address in its text (``TerminalURL``),
-/// each opened in the browser (``TerminalView/openURL``), or one the app finds
+/// A link in the terminal: a program's own (OSC 8) to a web address, a web address in its text
+/// (``TerminalURL``), each opened in the browser (``TerminalView/openURL``), or one the app finds
 /// (``TerminalView/linkIn``, opened by ``TerminalView/onLink``). Underlined, with the pointing hand,
 /// while ⌘ is held over it, across every row its line is soft-wrapped over, and opened whole by a
 /// ⌘-click. A ⌘-click on a link goes to the link alone: neither the selection nor a program that
@@ -59,10 +59,10 @@ extension TerminalView {
     }
 
     /// What character `index` of a line's `text`, drawn in `cells`, is part of: a program's own
-    /// link, the run of cells around it naming one address; a web address in the text; or a link
-    /// of the app's own.
+    /// link to a web address, the run of cells around it naming that address; a web address in the
+    /// text; or a link of the app's own. A program's link to anything else is no link of its own.
     private func target(in text: String, at index: Int, of cells: [CellPoint]) -> (Range<Int>, URL?)? {
-        if let screen = link?.screen, case let address?? = screen.hyperlinks(at: [cells[index]]).first, let url = URL(string: address) {
+        if let screen = link?.screen, case let address?? = screen.hyperlinks(at: [cells[index]]).first, let url = URL(string: address), TerminalURL.opens(url) {
             let addresses = screen.hyperlinks(at: cells)
             let start = addresses[..<index].lastIndex { $0 != address }.map { $0 + 1 } ?? 0
             let end = addresses[index...].firstIndex { $0 != address } ?? addresses.count

@@ -4,7 +4,7 @@ import SailKitTestSupport
 @testable import SailWorkbench
 import Testing
 
-/// The Store a Login sheet's model and its request, read from the goldens the server recorded: the
+/// The Store a Key sheet's model and its request, read from the goldens the server recorded: the
 /// kind is the first whose how names no command, the name is `default` unless the person has a login
 /// of the harness, the store is one request holding the value in its body alone, each refusal is
 /// the server's sentence under the key or, for a name, the name named again, and the clipboard is cleared only while it

@@ -122,7 +122,7 @@ import Testing
         }
         let stored = try Endpoint.storeLogin("sk-ant-api03-model-tests-fake", kind: "api-key", harness: "claude-code", name: "default").decode(response(try Exchange("login-stored")))
         #expect(try roundTrip(stored) == stored)
-        for name in ["workspace-agents", "workspace-agents-no-default", "workspace-agents-not-yours"] {
+        for name in ["workspace-agents", "workspace-agents-stopped-no-login", "workspace-agents-not-yours"] {
             let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(response(try Exchange(name)))
             #expect(try roundTrip(agents) == agents, "\(name)")
         }

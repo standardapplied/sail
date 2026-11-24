@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
@@ -28,7 +29,9 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -330,6 +333,49 @@ class WorkspaceAgentsTest {
         incus.invocations().stream()
             .noneMatch(command -> command.startsWith("incus exec beta-dock")),
         "nothing runs in a stopped workspace: " + incus.invocations());
+  }
+
+  /**
+   * A running workspace whose read of the sign-ins fails is still offered each harness, with its
+   * sign-in's name and words and nothing said of whether it holds it.
+   */
+  @Test
+  void aWorkspaceThatCannotBeReadIsOfferedEachSignInWithNothingSaidOfWhetherItIsHeld()
+      throws Exception {
+    var answer = ask(sam, "beta-mute");
+
+    assertEquals(200, answer.status(), answer.toString());
+    for (var harness : List.of("claude-code", "codex")) {
+      var signIn = (Map<?, ?>) answer.offer(harness).get("sign_in");
+      assertEquals(
+          List.of(Harnesses.of(harness).signIn().name(), false),
+          List.of(signIn.get("name"), signIn.containsKey("signed_in")),
+          harness);
+    }
+  }
+
+  /**
+   * The route reads only the default key of each harness the project installs: a key that is not
+   * the default, or of a harness the project does not install, is never read, so one that cannot be
+   * read leaves the offer answered.
+   */
+  @Test
+  void theRouteReadsOnlyTheDefaultKeyOfEachHarnessItOffers() throws Exception {
+    assumeFalse("root".equals(System.getProperty("user.name")), "root opens a file of mode 000");
+    var logins = new FdeStore(db).logins();
+    logins.store(samId, Harnesses.of("claude-code"), "spare", "api-key", "sk-ant-api03-sam-spare");
+    logins.store(samId, Harnesses.of("codex"), "spare", "api-key", "sk-proj-sam-spare");
+    var unreadable = PosixFilePermissions.fromString("---------");
+    for (var harness : List.of("claude-code", "codex")) {
+      Files.setPosixFilePermissions(
+          tempDir.resolve("logins").resolve(samId).resolve(harness).resolve("spare"), unreadable);
+    }
+
+    var answer = ask(sam, "acme-try");
+
+    assertEquals(200, answer.status(), answer.toString());
+    assertEquals(
+        Map.of("name", "work", "kind", "api-key"), answer.offer("claude-code").get("login"));
   }
 
   /**
