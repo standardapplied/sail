@@ -68,7 +68,7 @@ jobs:
         module: [sail-core, sail-harness, sail-infra]
         # macOS 15, never macos-latest: the oldest macOS the app supports (its
         # LSMinimumSystemVersion), the image the Clients lanes and the release's darwin build use.
-        os: [ubuntu-24.04, blacksmith-6vcpu-macos-15]
+        os: [ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
