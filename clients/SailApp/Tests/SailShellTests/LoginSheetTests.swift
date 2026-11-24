@@ -245,7 +245,7 @@ import Testing
         #expect(panel.isOpen && !panel.popover.stays && panel.loginSheet == nil && !panel.view.veiled)
         #expect(panel.view.rows.first?.line.stringValue == "API key “default”" && panel.view.rows.first?.chosen == true)
         #expect(panel.view.signIn?.title == "API key “default”" && view.memory.ways == ["claude-code": .key], "storing a key did not choose it")
-        #expect(panel.view.words.contains("Stored Claude Code key “default”. An agent session already running keeps the login it started with until it ends; no workspace keeps any of it.") && !panel.view.words.contains { $0.contains("asks you to sign in") }, "the store, and the server's note on the key it replaced, are not said: \(panel.view.words)")
+        #expect(panel.view.words.contains("Stored Claude Code key “default”. An agent session already running keeps the key it started with until it ends; no workspace keeps any of it.") && !panel.view.words.contains { $0.contains("asks you to sign in") }, "the store, and the server's note on the key it replaced, are not said: \(panel.view.words)")
         let start = try #require(panel.view.primary)
         #expect(start.title == "Start" && start.isEnabled && start.holdsKeys)
         var started: [AgentStart] = []

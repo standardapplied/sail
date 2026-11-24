@@ -41,7 +41,7 @@ import Testing
 
     static let elsewhere = Clipboard(count: 7, text: "something else")
     /// What the recorded store of a name stored again says once of the sessions already running.
-    static let note = " An agent session already running keeps the login it started with until it ends; no workspace keeps any of it."
+    static let note = " An agent session already running keeps the key it started with until it ends; no workspace keeps any of it."
 
     typealias Clipboard = StoreLogin.Clipboard
 
@@ -94,7 +94,7 @@ import Testing
         #expect(sheet.kept == "Kept on 127.0.0.1:7979 for your sessions only. Sail never shows it again.")
         let codex = try #require(StoreLogin(try Self.offer(at: 1), logins: [], address: "https://sail.example.com"))
         #expect(codex.kind.kind == "api-key" && codex.help == "Create an API key at platform.openai.com/api-keys." && codex.place == "sail.example.com")
-        let command: [Any] = [["text": "Run "], ["run": "program", "verb": "claude", "args": ["setup-token"]]]
+        let command: [Any] = [["text": "Run "], ["run": "program", "verb": "make-key", "args": []]]
         let commandOnly = try Exchange("workspace-agents-dock-no-login")
             .altered(at: ["offered", 0, "kinds", 0, "how"], to: command)
         let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: commandOnly.body))

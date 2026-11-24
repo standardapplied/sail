@@ -440,13 +440,21 @@ class LoginStoreTest {
     assertEquals(Map.of(), store.gitTokens(ANA));
   }
 
+  /** A git token takes a key's rule for its value, said of a git token, never of a key. */
   @Test
   void aGitTokenTakesTheLoginValueRuleAndAHostOutsideTheHostRuleIsRefused() {
     var store = store();
     var value =
         assertThrows(
             IllegalArgumentException.class, () -> store.storeGit(UDAY, "github.com", "a b"));
-    assertEquals(VALUE_RULE, value.getMessage());
+    var lines =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> store.storeGit(UDAY, "github.com", "ghp_x_0123456789ab\nx"));
+    assertEquals(
+        "A git token is printable ASCII with no space, quote, backslash, $ or backtick.",
+        value.getMessage());
+    assertEquals("A git token is one line: paste only the git token.", lines.getMessage());
     assertEquals("git.example.com:8443", LoginStore.requireHost("Git.Example.com:8443"));
     for (var host : List.of("../x", "-github.com", "git hub", "", "h:0", "h:65536", "h:x")) {
       assertThrows(

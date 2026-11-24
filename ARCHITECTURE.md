@@ -4338,34 +4338,35 @@ harness's own sign-in is the other way in), with `inside` true and `sign_in`, th
 (`Harness.signIn`, a `SignIn`): its `name` ("Your Claude account", "Your ChatGPT account"), `how`
 it goes (words the New Session panel says) and `signed_in`, whether the workspace holds it: its
 `SignIn.file` (`~/.claude/.credentials.json`, never `~/.claude.json`, Claude Code's own state;
-`~/.codex/auth.json`) is there and not empty, as `test -s` stats it, never opened
-(`WorkspaceSignIns`, one `incus exec` as the dev user for every installed harness, bounded by five
-seconds). `signed_in` is said only when it was read: a stopped workspace is not started to read it,
-and a read that fails or does not answer says nothing. A harness the project does not install
-carries `harness_not_installed` and `inside` false. Every harness has exactly two ways in, its own
-sign-in or one stored key (`HarnessContractTest`), so a later harness is one adapter and no client
-change. Each refusal is
-the API's error shape (`code`, `message`, `action`, `remedy`).
+`~/.codex/auth.json`) is a regular file and not empty, as `test -f` and `test -s` stat it through
+a link as the harness would read it, never opened (`WorkspaceSignIns`, one `incus exec` as the dev
+user for every installed harness, bounded by five seconds, none when none is installed). `signed_in`
+is said only when it was read: a stopped workspace is not started to read it, and a read that fails
+or does not answer says nothing. A harness the project does not install carries
+`harness_not_installed` and `inside` false. Every harness has exactly two ways in, its own sign-in
+or one stored key (`HarnessContractTest`), so a later harness is one adapter and no client change.
+Each refusal is the API's error shape (`code`, `message`, `action`, `remedy`).
 
 What a command the agent runs can read, measured with fake keys on Claude Code 2.1.327 (its Bash
 tool's `env`, against a stand-in API) and Codex 0.170: a run's key, in `ANTHROPIC_API_KEY`, or an
-`ANTHROPIC_AUTH_TOKEN`, is in none of Claude Code's commands' environments, but the interactive API-key session's `SAIL_ANTHROPIC_API_KEY` is in every one
-(2.1.329 had `ANTHROPIC_API_KEY` there too, so the scrub is Claude Code's to keep or drop);
-Codex's shell commands get `CODEX_API_KEY` empty, and its policy governs only that shell. Every
-process in a workspace is the dev user, so any command, any session there and an admin's shell in
-it can read a running harness's own `/proc/<pid>/environ`, the login included, as they can the
-owner's git token. Claude Code's `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` is no remedy in a workspace:
-it runs every command in its bubblewrap sandbox and forces the default permission mode, and in an
-Incus container on an Ubuntu 24.04 host bubblewrap is refused a namespace (`bwrap: Creating new
-namespace failed: Permission denied`), so every command fails; without bubblewrap and `socat`
-Claude Code does not start. On a host where the sandbox runs, the scrub does remove
-`SAIL_ANTHROPIC_API_KEY` from a command and hides Claude Code's `environ`; the session's
-`apiKeyHelper` still reads the key. A file the helper reads instead of the variable would keep the
-key out of what a command inherits but not out of what it reads (the same user `cat`s it), and
-would have to live for the session, since the helper runs again every five minutes and on a 401,
-so the variable stays. Sail adds no permission rule to an interactive session: what the agent may
-do is the project's to set in its own `.claude/settings.json` or `config.toml` (deny rules,
-Codex's `shell_environment_policy`), with the mode the person chooses.
+`ANTHROPIC_AUTH_TOKEN`, is in none of Claude Code's commands' environments, but the interactive
+API-key session's `SAIL_ANTHROPIC_API_KEY` is in every one (2.1.329 had `ANTHROPIC_API_KEY` there
+too, so the scrub is Claude Code's to keep or drop); Codex's shell commands get `CODEX_API_KEY`
+empty, and its policy governs only that shell. Every process in a workspace is the dev user, so any
+command, any session there and an admin's shell in it can read a running harness's own
+`/proc/<pid>/environ`, the login included, as they can the owner's git token. Claude Code's
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` is no remedy in a workspace: it runs every command in its
+bubblewrap sandbox and forces the default permission mode, and in an Incus container on an Ubuntu
+24.04 host bubblewrap is refused a namespace (`bwrap: Creating new namespace failed: Permission
+denied`), so every command fails; without bubblewrap and `socat` Claude Code does not start. On a
+host where the sandbox runs, the scrub does remove `SAIL_ANTHROPIC_API_KEY` from a command and hides
+Claude Code's `environ`; the session's `apiKeyHelper` still reads the key. A file the helper reads
+instead of the variable would keep the key out of what a command inherits but not out of what it
+reads (the same user `cat`s it), and would have to live for the session, since the helper runs again
+every five minutes and on a 401, so the variable stays. Sail adds no permission rule to an
+interactive session: what the agent may do is the project's to set in its own
+`.claude/settings.json` or `config.toml` (deny rules, Codex's `shell_environment_policy`), with the
+mode the person chooses.
 
 **The terminal host on a person's own machine.** `sail _pty-host --local` (`LocalPtyHost`) is the
 same host wired for the account it runs as, with no server: the native app's launchd agent runs
@@ -4729,15 +4730,15 @@ no pairing is removed through the gateway as before, and no key file is touched.
   - *What is stored.* Only a key the harness's own vendor issues for programs, one kind per
     harness (`Harness.loginKinds`), with the address it is sent to (`LoginKind.fixed`): Claude
     Code's `api-key` (`ANTHROPIC_API_KEY`, `https://api.anthropic.com`); Codex's `api-key`
-    (`CODEX_API_KEY`, which `codex exec`, every Sail launch of Codex, reads first): a `CODEX_ACCESS_TOKEN` is read by Codex as an
-    agent identity, so a run is never started on one, but it is in Codex's
-    `Harness.loginVariables`, so a container's own value is set empty; so is Claude Code's
-    `ANTHROPIC_AUTH_TOKEN`, which outranks its API key. A subscription's sign-in
+    (`CODEX_API_KEY`, which `codex exec`, every Sail launch of Codex, reads first): a
+    `CODEX_ACCESS_TOKEN` is read by Codex as an agent identity, so a run is never started on one,
+    but it is in Codex's `Harness.loginVariables`, so a container's own value is set empty; so is
+    Claude Code's `ANTHROPIC_AUTH_TOKEN`, which outranks its API key. A subscription's sign-in
     (Claude Code's `/login`, Codex's "Sign in with ChatGPT") is never stored, copied, mounted or
     adopted: Anthropic's terms forbid a developer to "collect, store, or intermediate Claude.ai
     credentials or session tokens", so the person signs in inside the harness's own session
-    (`Harness.signIn`) and the sign-in stays in that workspace. A login is (person, harness,
-    name); the first stored is the default, and a switch applies to launches after it.
+    (`Harness.signIn`) and the sign-in stays in that workspace. A login is (person, harness, name);
+    the first stored is the default, and a switch applies to launches after it.
   - *Where it is sent.* A stored key goes to its own service whatever the container's environment
     and the harness's user and project files say; what a container can still do is listed below
     and owned by the draft spec `sail-a-stored-login-never-enters-the-container`. Claude Code: its
@@ -4749,35 +4750,34 @@ no pairing is removed through the gateway as before, and no key file is touched.
     user's or a project's `env.ANTHROPIC_BASE_URL` overwrites the shell's). They set empty every
     other credential it reads (`Harness.loginVariables`: `ANTHROPIC_AUTH_TOKEN`,
     `CLAUDE_CODE_OAUTH_TOKEN`, the four credentials a host hands it by file descriptor, of which a
-    key is sent beside an `ANTHROPIC_AUTH_TOKEN`, and `ANTHROPIC_CUSTOM_HEADERS`, whose `x-api-key` replaces the
-    key's) and every cloud switch, Mantle's and Claude on Google Cloud's measured sending requests
-    to whatever address the container names. An interactive API-key session, whose `apiKeyHelper`
-    the flag would ignore, sets the same list (`Harness.pinned`, the one list both use) and its
-    key's variable empty in its own `--settings` `env` as well, which the user's and the project's
-    settings cannot outrank and managed settings can (measured): without the flag a settings file's
-    `env` outranks the session's environment, and a user's or a repository's cloud switch with its
-    skip-auth sent the helper's key to that cloud's address. Codex reads no
-    address from its environment (`OPENAI_BASE_URL` is not read, 0.163), but its user config's
+    key is sent beside an `ANTHROPIC_AUTH_TOKEN`, and `ANTHROPIC_CUSTOM_HEADERS`, whose `x-api-key`
+    replaces the key's) and every cloud switch, Mantle's and Claude on Google Cloud's measured
+    sending requests to whatever address the container names. An interactive API-key session, whose
+    `apiKeyHelper` the flag would ignore, sets the same list (`Harness.pinned`, the one list both
+    use) and its key's variable empty in its own `--settings` `env` as well, which the user's and
+    the project's settings cannot outrank and managed settings can (measured): without the flag a
+    settings file's `env` outranks the session's environment, and a user's or a repository's cloud
+    switch with its skip-auth sent the helper's key to that cloud's address. Codex reads no address
+    from its environment (`OPENAI_BASE_URL` is not read, 0.163), but its user config's
     `openai_base_url` or a `model_provider` naming `CODEX_API_KEY` would send the key elsewhere, so
     every launch on a stored key, headless (`Launch.login`) or interactive, declares Sail's provider
     on the command line with the OpenAI API as its address, which outranks every config file but
     `/etc/codex/managed_config.toml` and `/etc/codex/requirements.toml`, under an id each launch
-    draws (`sail_` and twelve random hex digits), since a config's table under the id a launch
-    names merges into it, and a user's `[model_providers.sail]` `model_catalog_url` received the
-    key under the fixed id (0.163, measured); a session resumed by its id under a new provider id
-    resumes with its earlier turns (measured), which is how Sail resumes one. A person's own `codex
-    resume --last` in that workspace does not find a session Sail started on a stored key, since
-    Codex looks up the last session by the current provider id (measured: under a new id it starts
-    a new session). What still sends a key elsewhere, each measured with a fake one: in either
-    harness, a proxy (`HTTPS_PROXY`) with a CA
-    file (`NODE_EXTRA_CA_CERTS`; `CODEX_CA_CERTIFICATE` or `SSL_CERT_FILE`) that the container's
-    profile exports, which a TLS-intercepting proxy reads the key through, and which are not set
-    empty since a container behind a corporate proxy needs them; in the interactive API-key
-    session, managed settings' `env` (its address) and a settings file's `env` naming a proxy and a
-    CA (the user's, measured); in Codex, `/etc/codex/managed_config.toml` and
-    `/etc/codex/requirements.toml` (the container's root writes them: the dev user has `sudo`);
-    and replacing either binary or reading a running harness's environment. Only a key
-    that never enters the container is beyond them.
+    draws (`sail_` and twelve random hex digits), since a config's table under the id a launch names
+    merges into it, and a user's `[model_providers.sail]` `model_catalog_url` received the key under
+    the fixed id (0.163, measured); a session resumed by its id under a new provider id resumes with
+    its earlier turns (measured), which is how Sail resumes one. A person's own `codex resume
+    --last` in that workspace does not find a session Sail started on a stored key, since Codex
+    looks up the last session by the current provider id (measured: under a new id it starts a new
+    session). What still sends a key elsewhere, each measured with a fake one: in either harness, a
+    proxy (`HTTPS_PROXY`) with a CA file (`NODE_EXTRA_CA_CERTS`; `CODEX_CA_CERTIFICATE` or
+    `SSL_CERT_FILE`) that the container's profile exports, which a TLS-intercepting proxy reads the
+    key through, and which are not set empty since a container behind a corporate proxy needs them;
+    in the interactive API-key session, managed settings' `env` (its address) and a settings file's
+    `env` naming a proxy and a CA (the user's, measured); in Codex, `/etc/codex/managed_config.toml`
+    and `/etc/codex/requirements.toml` (the container's root writes them: the dev user has `sudo`);
+    and replacing either binary or reading a running harness's environment. Only a key that never
+    enters the container is beyond them.
   - *Where.* `LoginStore`, beside the database (`/var/lib/sail/logins/<fde-id>/<harness>/<name>`
     on a box): `0700` directories, `0600` files, each written whole as a temporary file and renamed,
     the kind on the first line and the value on the second; `<harness>/.default` names the default

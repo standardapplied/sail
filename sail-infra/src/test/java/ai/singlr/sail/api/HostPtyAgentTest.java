@@ -274,12 +274,23 @@ class HostPtyAgentTest {
         noDefault.remedy().commands());
   }
 
-  /** Q1: an agent that signs in inside needs no stored login, and is handed none. */
+  /**
+   * Q1: an agent that signs in inside needs no stored login, and is handed none, even where its
+   * person has a default key of that harness: choosing the sign-in never bills a key.
+   */
   @Test
   void anAgentThatSignsInInsideNeedsNoStoredLogin() throws IOException {
     assertEquals(
         Optional.empty(),
         lane.admitAgent("acme", "spare", new PtyMessage.Agent("codex", "full-access", true), bob));
+    assertTrue(
+        lane.admitAgent("acme", "spare", new PtyMessage.Agent("claude-code", "default", false), bob)
+            .isPresent(),
+        "bob has a default Claude Code key");
+    assertEquals(
+        Optional.empty(),
+        lane.admitAgent(
+            "acme", "spare", new PtyMessage.Agent("claude-code", "default", true), bob));
     var foreign =
         assertThrows(
             Remedied.Io.class,
