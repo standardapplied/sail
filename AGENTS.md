@@ -35,6 +35,33 @@ and contracts: `ARCHITECTURE.md`. Build, gates, migrations, releases: `CONTRIBUT
 - No AI attribution anywhere: no `Co-Authored-By` trailers, no "Generated with" lines.
 - The pull request body names what the change deleted, with the `git diff --shortstat` count. A
   change that only adds is read twice.
+- The spec on the board (`spec show <id>`) is the contract; read it in full first. Design before
+  code: the classes that change, what is deleted, the one seam, the risks, and the main-source lines
+  you expect to add and remove. Past about 1500 main-source lines, stop and propose the split.
+- A ruling in the spec that is wrong, or a scenario that cannot hold, is asked in the room
+  (`spec comment <id> --question`) with your recommendation; never built around. Go on with the
+  rest meanwhile.
+- A change's entry is exactly one file, `changes/<spec-id>.md` (`changes/README.md`); no pull
+  request edits `CHANGELOG.md`. A schema or wire change is bumped once and said in that entry.
+- A change to what a working install does changes its `ci/fleet` rows in the same pull request;
+  a task given to a fleet agent is one no repository already meets and asks no question.
+- Stage the files you mean by name: never `git add -A`, never `git stash`. Push only on a green
+  local gate, one push a round; a pull request that conflicts with main starts no CI, so merge
+  main first. After a push read every lane (the Incus ITs run only in CI) and root-cause any red
+  from its log; a lane is never re-run to green.
+- Done is a draft pull request green on every lane whose body maps each invariant and scenario to
+  its test, names the mutants that prove the tests bite, the deletions and net lines, and every
+  deviation from the spec with its reason.
+
+## Review
+
+A reviewer owes the change nothing. A finding is shown from the code or from a run (the command
+and its output), never asserted. The bar: functionally correct, reliable, covered, readable, one
+abstraction a job, SRP, DRY, KISS, this file's conventions and nothing unnecessary. Each finding
+has a severity, `file:line`, what is wrong, the evidence and the fix: BLOCKER for wrong behaviour,
+a widened permission, a broken invariant or a test that cannot fail; MAJOR for a structural defect
+by this file's bar, changed behaviour without coverage or a misleading document; MINOR for naming,
+wording and small duplication. A review ends with what was checked and found sound.
 
 ## Shape of a change
 
@@ -80,6 +107,10 @@ tests bite, and the deletion count in the body.
   happened and what to do.
 - Untrusted input (names, paths, spec text, agent output) is validated once, at the edge,
   and reaches a shell only as an argument, never interpolated into script text.
+- Every sentence Sail prints that names a command works when that command is pasted as printed,
+  and a test proves it. A `--json` refusal carries the API's error code.
+- No secret in any command line, log, event, test output or pull request body.
+- Fresh installs only: no migration, upgrade or reinstall polish.
 - One rule, one place: every permission is `Access.decide` over the `Policy` table
   (`ai.singlr.sail.access`), every read of a row `ReadFilter`, every resource and its owners
   built by `Resources` from the facts its caller selects of the row, every door's credential
@@ -111,7 +142,11 @@ tests bite, and the deletion count in the body.
 
 - Test behaviour through the production seam, with exact assertions (`assertEquals` on the
   whole message, never `contains` where equality is possible). No `Thread.sleep`: latches,
-  callbacks, fake clocks with a horizon that throws.
+  callbacks, fake clocks with a horizon that throws. Every wait is bounded.
+- Failing tests first, for every behaviour, and each test proven to bite: a mutant that reverts
+  the fix turns it red (PIT, the `mutation` profile, for Java; by hand for Swift and the scripts).
+- A fake answers only for what exists: a fake container that answered to any instance name once
+  hid a bug.
 - No network and no external service in a unit test. A test that fails once is a bug to
   root-cause with evidence; "flaky" is not a diagnosis and a rerun is not a fix.
 - A unit test of the Mac app never runs AppKit's own mouse tracking (a control's `mouseDown`) or
@@ -158,7 +193,8 @@ tests bite, and the deletion count in the body.
 
 `mvn verify` fails on a size, coupling, import or architecture violation in main or test code
 and prints the class, line, rule and its limit. Duplication is reported until its burn-down turns
-it on. The gate is Helios's (`standardapplied/helios`), with its versions and limits.
+it on. The gate is Helios's (`standardapplied/helios`), with its versions and limits. The rules a
+script decides over the Swift and the Java's text, with no build, are `ci/rules`' (below).
 
 | Tool | Enforces | Where |
 |---|---|---|
@@ -210,6 +246,47 @@ each with only the rules it broke. Test classes that break a class-level rule (c
 many fields) are listed in the same file on the same terms; test-class size is not a listed rule
 and is burned down in its own pull request.
 
+### The rules a script decides (`ci/rules`)
+
+`ci/check rules [BASE]` (`ci/rules check`) decides these in under a second, with no build. CI runs
+it in the first job of both workflows (`What the change touches`), which every other job needs, so
+no lane, and no macOS lane, starts on a change that breaks one; with a pull request's base it also
+holds the pull request to its entry. A finding is one line, `file:line: rule: what it found: the
+rule's sentence`. One lexer reads the Swift under `clients/` and the Java under `*/src/`, so nothing
+in a string literal or a comment is taken for code (Swift's nested block comments, raw and
+multi-line strings and their interpolations, whose code is code; Java's text blocks and character
+literals). `CiRulesTest` holds each rule to an offending and a clean fixture.
+
+On:
+
+| Rule | Holds | Decided by | Exempt by role |
+|---|---|---|---|
+| `ellipsis` | A menu item's or a button's label names its action, with no "…" or "..."; progress text keeps its ellipsis | a literal holding one, given as `title:`, `withTitle:`, `button:`, `label:`, `confirm:`, set as `.title` or a SwiftUI `Button(`, in `clients/*/Sources/` | the drive, `SailTestPasskey` |
+| `lists` | A list is a `SailList` and its rows are its: no view outside `clients/SailApp/Sources/SailControls/` makes or subclasses an AppKit table, outline, collection, row or cell view | the type's name called or inherited | `SailControls`, the design system, the drive |
+| `changes` (a pull request) | Exactly one entry, `changes/<spec-id>.md`, the id read from the branch `agent/<spec-id>` (any one name on another branch), and no edit of `CHANGELOG.md` | `ci/changelog check BASE` | the release's fold, on main |
+
+Not yet on, each switched on by the pull request that clears it, with what it finds on 8acfd25b4:
+
+| Rule | Holds | Findings |
+|---|---|---|
+| `comments` | No inline comments: a documentation comment (`///`, `/** */`) says a non-obvious why, otherwise rename or extract; a `// MARK:` is a comment. Swift under `clients/` and Java under `*/src/`; a `Package.swift`'s tools-version line and the Java licence header are exempt | 231 (Swift 110, 47 of them `MARK`; Java 121) |
+| `sleeps` | A Swift test waits for the event it needs, never for time: no `Task.sleep`, `Thread.sleep`, `usleep`, `nanosleep`, `sleep(` or a real clock's `sleep`; the one `Await` helper is exempt | 8 |
+| `tokens` | A view takes its colours, fonts, spacing, radii and edge widths from the design system (`clients/SailKit/Sources/SailDesign/`, `SailVT/Palette.swift`, `clients/SailApp/Sources/SailLook/`), never a literal: no colour or font constructor, no literal but 0 for `spacing`, `NSEdgeInsets`, `cornerRadius`, `x`/`yRadius`, `lineWidth` or `borderWidth` | 34 |
+| `components` | No view outside `SailControls` makes or subclasses an AppKit button, editable field, alert, panel or sheet, or begins a sheet: it uses `SailButton`, `SailTextField` or `Sheet` | 12 |
+| `function-lines` | A function is at most 80 code lines (not blank, not only a comment) | 21 |
+| `parameters` | A `func` or `subscript` takes at most 6 parameters; an `init` takes its type's stored properties | 5 |
+| `nesting` | A function's body nests at most 4 blocks deep | 6 |
+| `file-lines` | A Swift file is at most 800 code lines | 8 |
+
+What a script cannot decide, a reviewer holds to the same sentences: a bare number used as a
+size or a spacing in frame arithmetic or an anchor; a view that styles a primitive it did not
+make; a label with an ellipsis passed in a variable. Every record a `--json` verb prints has its
+`reflect-config.json` entry: `CliJsonReflectionTest` (sail-infra) reads them from the JSON probe and
+its components' declared types.
+
+A lesson from a red lane ends as a sentence here and, where a script can decide it, as a rule of
+`ci/rules` with its two fixtures, in the pull request that fixes the lane.
+
 ### Rules of the gate
 
 - **Fix the code, never the gate.** No limit is raised, and no rule moves back to a pending file.
@@ -231,6 +308,12 @@ and is burned down in its own pull request.
   column: what it accepts, Properties reads as it does. `ExclusionsShrinkTest` (architecture) reads
   every module's PMD reports, which the exclusions do not filter, and fails on an entry whose
   class no longer breaks a rule it lists; the change that cleared it deletes it.
+- **A rule of `ci/rules` is on or not yet, never in part.** It has no list of tolerated sites; a
+  file it must not judge is named once, in the script, by its role. The pull request that clears a
+  rule moves its name from `NOT_YET` to `ON` in `ci/rules` and its row above into the table of
+  rules on. `CiRulesTest` holds both lists to this repository: every rule on holds in it, and every
+  rule not yet on still finds something, so the change that clears one fails until it switches it
+  on.
 - **Adding an ArchUnit rule.** A spec that establishes or consolidates a pattern adds one `@Test`
   to `ArchitectureRulesTest`, named for the rule, whose `because` names the one allowed way. A new
   module is added to `architecture/pom.xml` and to `ExclusionsShrinkTest`'s modules.
@@ -242,6 +325,8 @@ ci/check full                                             # everything, as CI's 
 mvn -o verify -DskipTests                                 # enforcer, PMD and CPD only
 mvn -o pmd:aggregate-cpd@cpd pmd:aggregate-cpd-check@cpd-check   # duplication alone, in seconds
 ci/check exclusions                                       # no suppression in source; the exclusions against where they left origin/main
+ci/check rules origin/main                                # the rules ci/rules has on, and this change's one entry
+ci/rules run tokens                                       # one rule, on or not yet (ci/rules list names them)
 mvn -o -Pmutation test-compile org.pitest:pitest-maven:mutationCoverage -DtargetClasses=<classes> -DtargetTests=<tests> -DfailWhenNoMutations=false -Dpmd.skip=true -Dcpd.skip=true -Dspotless.check.skip=true   # mutation score, by hand
 ```
 
@@ -270,4 +355,4 @@ their reports and writes them without judging; each module's own job judges it.
 - Hook scripts drain stdin before anything else, or the hook writer gets `EPIPE`.
 - `gh run view --log` truncates a job's log at about 5,000 lines. The whole log is
   `gh api repos/standardapplied/sail/actions/jobs/<jobId>/logs`.
-- A change's entry is one file, `changes/<short-slug>.md` (`changes/README.md`), never an edit of `CHANGELOG.md`, which only the release writes (`ci/changelog`).
+- A change's entry is one file, `changes/<spec-id>.md` (`changes/README.md`), never an edit of `CHANGELOG.md`, which only the release writes (`ci/changelog`).

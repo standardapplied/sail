@@ -194,6 +194,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The rules a script decides (ci/rules), as CI's first job runs them: every job here needs
+      # this one, so no macOS lane starts on a change that breaks a rule.
+      - name: The rules a script decides
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: ci/check rules ${BASE:+"$BASE"}
+
       - id: diff
         env:
           EVENT: ${{ github.event_name }}

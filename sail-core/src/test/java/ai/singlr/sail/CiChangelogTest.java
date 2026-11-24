@@ -22,8 +22,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * {@code ci/changelog}, the release's fold of {@code changes/} into {@code CHANGELOG.md}, and
- * {@code ci/check changelog}, which keeps a pull request's entry out of {@code CHANGELOG.md}, over
- * a real repository holding both scripts.
+ * {@code ci/changelog check}, which holds a pull request to one entry of its own and keeps it out
+ * of {@code CHANGELOG.md}, over a real repository holding the script.
  */
 class CiChangelogTest {
 
@@ -43,12 +43,10 @@ class CiChangelogTest {
   @BeforeEach
   void aRepositoryWithAReleasedChangelog() throws Exception {
     git(Map.of(), "init", "-q");
-    for (var script : List.of("changelog", "check")) {
-      var copy = repo.resolve("ci").resolve(script);
-      Files.createDirectories(copy.getParent());
-      Files.copy(CI.resolve(script), copy);
-      copy.toFile().setExecutable(true);
-    }
+    var copy = repo.resolve("ci").resolve("changelog");
+    Files.createDirectories(copy.getParent());
+    Files.copy(CI.resolve("changelog"), copy);
+    copy.toFile().setExecutable(true);
     write("CHANGELOG.md", RELEASED);
     write("changes/README.md", README);
     base = commit("2026-11-01T00:00:00Z");
@@ -143,7 +141,7 @@ class CiChangelogTest {
         RELEASED.replace("## 0.74.0", "## 0.75.0\n\n- **Mine.** New.\n\n## 0.74.0"));
     commit("2026-11-02T00:00:00Z");
 
-    var ran = sh("ci/check", "changelog", base);
+    var ran = sh("ci/changelog", "check", base);
 
     assertEquals(1, ran.exit());
     assertEquals(EDITS_CHANGELOG, ran.err());
@@ -154,7 +152,7 @@ class CiChangelogTest {
     write("changes/mine.md", "- **Mine.** New.\n");
     commit("2026-11-02T00:00:00Z");
 
-    var ran = sh("ci/check", "changelog", base);
+    var ran = sh("ci/changelog", "check", base);
 
     assertEquals(0, ran.exit(), ran.err());
     assertEquals("", ran.err());
@@ -166,7 +164,7 @@ class CiChangelogTest {
     write("changes/the-spec.md", "- **Mine.** New.\n");
     commit("2026-11-02T00:00:00Z");
 
-    var ran = sh("ci/check", "changelog", base);
+    var ran = sh("ci/changelog", "check", base);
 
     assertEquals(0, ran.exit(), ran.err());
   }
@@ -177,7 +175,7 @@ class CiChangelogTest {
     write("changes/mine.md", "- **Mine.** New.\n");
     commit("2026-11-02T00:00:00Z");
 
-    var ran = sh("ci/check", "changelog", base);
+    var ran = sh("ci/changelog", "check", base);
 
     assertEquals(1, ran.exit());
     assertEquals(
@@ -192,7 +190,7 @@ class CiChangelogTest {
     commit("2026-11-02T00:00:00Z");
 
     var ran =
-        run(List.of("bash", "ci/check", "changelog", base), Map.of("GITHUB_HEAD_REF", "agent/x"));
+        run(List.of("bash", "ci/changelog", "check", base), Map.of("GITHUB_HEAD_REF", "agent/x"));
 
     assertEquals(1, ran.exit());
     assertEquals(
@@ -207,7 +205,7 @@ class CiChangelogTest {
     write("README.md", "Changed.\n");
     commit("2026-11-02T00:00:00Z");
 
-    var ran = sh("ci/check", "changelog", base);
+    var ran = sh("ci/changelog", "check", base);
 
     assertEquals(1, ran.exit());
     assertEquals(
@@ -222,7 +220,7 @@ class CiChangelogTest {
     write("changes/two.md", "- **Two.** New.\n");
     commit("2026-11-02T00:00:00Z");
 
-    var ran = sh("ci/check", "changelog", base);
+    var ran = sh("ci/changelog", "check", base);
 
     assertEquals(1, ran.exit());
     assertEquals(
@@ -235,7 +233,7 @@ class CiChangelogTest {
   void anEntryNotYetCommittedCountsAsAdded() throws Exception {
     write("changes/mine.md", "- **Mine.** New.\n");
 
-    var ran = sh("ci/check", "changelog", base);
+    var ran = sh("ci/changelog", "check", base);
 
     assertEquals(0, ran.exit(), ran.err());
   }
@@ -245,7 +243,7 @@ class CiChangelogTest {
     write("CHANGELOG.md", RELEASED.replace("- **Old.** Released.\n", ""));
     commit("2026-11-02T00:00:00Z");
 
-    var ran = sh("ci/check", "changelog", base);
+    var ran = sh("ci/changelog", "check", base);
 
     assertEquals(1, ran.exit());
     assertEquals(EDITS_CHANGELOG, ran.err());
@@ -256,14 +254,14 @@ class CiChangelogTest {
     write("CHANGELOG.md", RELEASED.replace("Released.", "Released, reworded."));
     commit("2026-11-02T00:00:00Z");
 
-    assertEquals(1, sh("ci/check", "changelog", base).exit());
+    assertEquals(1, sh("ci/changelog", "check", base).exit());
   }
 
   @Test
   void anUncommittedEditOfTheChangelogIsRefusedToo() throws Exception {
     write("CHANGELOG.md", RELEASED + "- **Mine.** Tucked in.\n");
 
-    assertEquals(1, sh("ci/check", "changelog", base).exit());
+    assertEquals(1, sh("ci/changelog", "check", base).exit());
   }
 
   @Test
@@ -276,7 +274,7 @@ class CiChangelogTest {
     write("CHANGELOG.md", RELEASED.replace("- **Old.** Released.\n", ""));
     commit("2026-11-03T00:00:00Z");
 
-    var ran = sh("ci/check", "changelog", before);
+    var ran = sh("ci/changelog", "check", before);
 
     assertEquals(0, ran.exit(), ran.err());
   }
@@ -286,7 +284,7 @@ class CiChangelogTest {
     write("changes/prose.md", "Some notes, not a bullet.\n");
     commit("2026-11-02T00:00:00Z");
 
-    var ran = sh("ci/check", "changelog", base);
+    var ran = sh("ci/changelog", "check", base);
 
     assertEquals(1, ran.exit());
     assertEquals(
@@ -302,7 +300,7 @@ class CiChangelogTest {
     var refusal =
         "ci/changelog: changes/crlf.md has Windows line ends (CRLF): save it with LF only.\n";
 
-    var checked = sh("ci/check", "changelog", base);
+    var checked = sh("ci/changelog", "check", base);
     var folded = sh("ci/changelog", "0.75.0");
 
     assertEquals(1, checked.exit());
@@ -321,7 +319,7 @@ class CiChangelogTest {
         "ci/changelog: changes/sub is not an entry file: changes/ holds only <spec-id>.md"
             + " files, directly in it.\n";
 
-    var checked = sh("ci/check", "changelog", base);
+    var checked = sh("ci/changelog", "check", base);
     var folded = sh("ci/changelog", "0.75.0");
 
     assertEquals(1, checked.exit());

@@ -40,13 +40,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      # A pull request's entry is a file of changes/, never an edit of CHANGELOG.md. The release's
-      # fold into CHANGELOG.md (ci/changelog) is pushed to main, outside any pull request.
-      - name: A change's entry is a file of its own
-        if: github.event_name == 'pull_request'
+      # The rules a script decides (ci/rules), before any lane starts; a pull request's own rule, its
+      # one entry in changes/ and no edit of CHANGELOG.md, with its base. The release's fold into
+      # CHANGELOG.md (ci/changelog) is pushed to main, outside any pull request. Clients runs the
+      # same step, so neither workflow's macOS lanes start on a change that breaks a rule.
+      - name: The rules a script decides
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
-        run: ci/check changelog "$BASE"
+        run: ci/check rules ${BASE:+"$BASE"}
 
       - id: diff
         env:
