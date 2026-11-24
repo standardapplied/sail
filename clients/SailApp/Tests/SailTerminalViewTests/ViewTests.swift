@@ -282,8 +282,8 @@ import Testing
     }
 
     /// A web address is a link of its own, ahead of any the app finds: ⌘ over any row of one
-    /// soft-wrapped across rows underlines it on each, and a ⌘-click there opens it whole in the
-    /// browser, never the app's own link.
+    /// soft-wrapped across rows underlines it on each, and a ⌘-click on its last row or its first
+    /// opens it whole in the browser, never the app's own link.
     @Test func aWebAddressWrappedAcrossRowsOpensWhole() async throws {
         let harness = try Harness(columns: 20, rows: 8, size: NSSize(width: 200, height: 320))
         let grid = try #require(harness.view.grid)
@@ -299,9 +299,12 @@ import Testing
         harness.mouse(.mouseMoved, column: 0, row: rows, flags: .command)
         let spans = (0 ..< rows).map { row in OverlayLink.Span(row: 1 + row, columns: 0 ..< (row == rows - 1 ? address.count - row * grid.columns : grid.columns)) }
         #expect(harness.view.shownLink == OverlayLink(spans: spans), "\(String(describing: harness.view.shownLink))")
-        harness.mouse(.leftMouseDown, column: 0, row: rows, flags: .command)
-        harness.mouse(.leftMouseUp, column: 0, row: rows, flags: .command)
-        #expect(opened == [try #require(URL(string: address))] && hosts.isEmpty, "opened \(opened), the app's own link \(hosts)")
+        for row in [rows, 1] {
+            harness.mouse(.leftMouseDown, column: 0, row: row, flags: .command)
+            harness.mouse(.leftMouseUp, column: 0, row: row, flags: .command)
+        }
+        let whole = try #require(URL(string: address))
+        #expect(opened == [whole, whole] && hosts.isEmpty, "opened \(opened), the app's own link \(hosts)")
     }
 
     /// A program's own link (OSC 8) is its words, opening the address it names: ⌘ over them
