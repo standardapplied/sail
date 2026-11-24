@@ -35,7 +35,7 @@ jobs:
     name: The darwin sail of this commit
     needs: changes
     if: needs.changes.outputs.clients == 'true' && !inputs.release
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -51,7 +51,7 @@ jobs:
           kind: native
 
       - name: Build native image
-        run: mvn -B package -Pnative -DskipTests -Djacoco.skip=true -Dspotless.check.skip=true
+        run: mvn -B package -Pnative -pl sail-infra -am -DskipTests -Djacoco.skip=true -Dspotless.check.skip=true
 
       - name: Smoke test
         run: |

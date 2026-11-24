@@ -13,9 +13,9 @@ and contracts: `ARCHITECTURE.md`. Build, gates, migrations, releases: `CONTRIBUT
   does not run the coverage gates, the `*IT` suites, the macOS suite or the native build, and it
   does not `clean`: a deleted or renamed class leaves its compiled `.class` in `target`, so after
   one, run the gate.
-- `mvn clean verify` is the gate CI runs: every unit test, JaCoCo coverage gates, spotless (two
-  to two and a half minutes). `mvn spotless:apply` formats. Build offline with `-o` when the
-  repository is warm.
+- `mvn clean verify` is the gate CI runs: every unit test, JaCoCo coverage gates, spotless and
+  the quality gate (see "Quality gate"; two and a half to three minutes). `mvn spotless:apply`
+  formats. Build offline with `-o` when the repository is warm.
 - Before pushing: `mvn -o -Pintegration -Dsail.it.requireIncus=false clean verify`. It adds
   the multi-node integration tests (`*IT`); the incus-backed ones skip here and run in CI.
 - One module and class: `mvn -o -pl sail-infra -am -Dtest=StageSkillsTest test`
@@ -72,7 +72,7 @@ tests bite, and the deletion count in the body.
   comment to be understood, rename or extract instead.
 - Modern Java: `var` for locals, records for values, sealed interfaces for alternatives,
   text blocks for multi-line strings, `List.of`/`Map.of` for constants, pattern matching,
-  try-with-resources, `java.time`, `ProcessBuilder`. No wildcard imports (CI fails them), no
+  try-with-resources, `java.time`, `ProcessBuilder`. No wildcard imports (PMD fails them), no
   inline fully qualified names.
 - Shared seams are in `ai.singlr.sail.common` (`Ids`, `Strings`, `DateTimeUtils`); use them.
 - Two runtime libraries, picocli and SnakeYAML Engine, and no more. Do not add a dependency.
@@ -153,6 +153,108 @@ tests bite, and the deletion count in the body.
   real.
 - A change to a contract in `ARCHITECTURE.md` (the sync, loop and skill rows) changes the
   row and the tests it names in the same pull request.
+
+## Quality gate
+
+`mvn verify` fails on a size, coupling, import or architecture violation in main or test code
+and prints the class, line, rule and its limit. Duplication is reported until its burn-down turns
+it on. The gate is Helios's (`standardapplied/helios`), with its versions and limits.
+
+| Tool | Enforces | Where |
+|---|---|---|
+| Enforcer | Java 25 or later, Maven 3.9.14 or later, a version on every plugin | root `pom.xml` |
+| PMD (`maven-pmd-plugin`, every module) | the limits below, main and test code | `config/quality/pmd-main.xml`, `pmd-test.xml` |
+| CPD (same plugin, at the reactor root) | no block of 100 tokens or more repeated, main and test, within or across modules; reports only, until its burn-down | root `pom.xml` |
+| ArchUnit (`architecture` module, build-only, never shipped) | one way to do each thing: module directions, the two runtime libraries, picocli in `sail-infra` only, `Clock.system*` only as a field's initial value, a UUID minted only by `Ids`, nothing `@Deprecated` | `architecture/src/test/java/.../ArchitectureRulesTest.java` |
+| PIT (`mutation` profile, by hand) | which mutants a change's tests kill; it replaces hand-made mutants in a report | root `pom.xml` |
+
+Gated today, failing at the first measured value shown:
+
+| PMD rule | Measures | Fails at |
+|---|---|---|
+| `TooManyFields` | non-static, non-final fields of a class | 16 |
+| `CouplingBetweenObjects` | distinct types a class uses in fields, locals and return types | 21 |
+| `GodClass` | weighted methods (WMC ≥ 47), foreign data access (ATFD > 5) and low cohesion (TCC < 1/3) together; main code only | all three |
+| `TooManyMethods` | methods of a class, not counting `get*`, `set*`, `is*`, `with*`; main code only | 26 |
+| `SwitchDensity` | statements per `switch` label | 10 |
+| `OnDemandImport` | `import a.b.*`, `import static a.B.*` | 1 |
+| `AvoidDeeplyNestedIfStmts` | depth of nested `if`; test code (main code is pending) | 3 |
+
+Still to burn down, each family its own pull request in this order, with what it broke on
+1b2ff7fa5. Their rules wait in `config/quality/pmd-main-pending.xml` and `pmd-test-pending.xml`,
+which no build analyses; a family's pull request moves its rules, unchanged, into the gated file,
+and the pending files only shrink. `config/quality/helios-pmd-main.xml` and `helios-pmd-test.xml`
+are Helios's two rule files verbatim, which no build reads. `RuleSetsTest` (architecture) holds the
+gated and pending sets of each kind together to them: every rule is in exactly one of the two and
+equals Helios's in every attribute, property and XPath, only its message aside (and Helios's
+test-helper package read as `ai.singlr.sail.test`), so a rule deleted, weakened or in both fails.
+
+1. The wall clock read statically (8 reads in 5 classes), an `HttpClient` built outside one
+   factory (11 classes), `Thread.sleep` outside one sleeper (17 sites): ArchUnit rules.
+2. Top-level types named `*Util`, `*Utils`, `*Helper`, `*Helpers` or `*Manager` (10, `DateTimeUtils`
+   among them).
+3. `ProcessBuilder` outside `engine.ShellExecutor` and `pty.Pty` (102 uses in 23 classes).
+4. Time in tests, through one `ai.singlr.sail.test.Await` with `LineSink` and
+   `FeedableInputStream`: `TimedWaitInTest` (314), `ClockReadInTest` (251), `PipedStreamInTest`
+   (46), `SleepInTest` (14).
+5. Duplication: 104 blocks, 12 of them in main code.
+6. Method-level complexity, per module: `CognitiveComplexity` 15 (80 main, 31 test),
+   `CyclomaticComplexity` 15 a method and 80 a class (110, 10), `NPathComplexity` 200 (49, 5),
+   `AvoidDeeplyNestedIfStmts` 3 (13 main), `NcssCount` 60 a method and 600 a class (18 main),
+   `ExcessiveParameterList` 10 (51, 2).
+7. Test size: `NcssCount` in test code, 60 a method and 600 a class (36).
+
+The classes that broke the class-level rules when the gate went on (118 classes and 186 rule
+breaks, measured on main d5ffc5e9a) are listed once in `config/quality/pmd-exclusions.properties`,
+each with only the rules it broke. Test classes that break a class-level rule (coupling, too
+many fields) are listed in the same file on the same terms; test-class size is not a listed rule
+and is burned down in its own pull request.
+
+### Rules of the gate
+
+- **Fix the code, never the gate.** No limit is raised, and no rule moves back to a pending file.
+- **No suppression in source.** Neither PMD's suppression comment, CPD's `CPD-OFF`/`CPD-ON`
+  comments, nor a `@SuppressWarnings` naming a PMD rule, `PMD` or `all`. PMD honours these however
+  they are spelled (concatenated, in a constant, through a unicode escape) and has no switch to
+  turn them off, so `ci/exclusions` fails, naming file and line, any Java line holding `NOPMD`,
+  `CPD-OFF` or `CPD-ON`, a `@SuppressWarnings` that is not one line of lowercase literals such as
+  `@SuppressWarnings("unchecked")`, `"all"` in one, or a printable ASCII character written as a
+  unicode escape (a control character such as `\u001b` stays allowed). That check needs no history
+  and runs first, in `sail-infra`'s Linux unit job and in `ci/check full`.
+- **The exclusions file only shrinks.** No class is ever added to it and no rule to an entry. A
+  spec that works in a listed class splits it and deletes its entry. `ci/exclusions` (run by
+  `sail-infra`'s Linux unit job and `ci/check full`) fails a change whose file names a
+  `class=rule` pair its merge base's does not, or names a class on two lines. PMD reads the file
+  as Java properties, which also take `:` or a blank as the separator, join a line ending in `\`,
+  read escapes and end a line at a lone carriage return, so `ci/exclusions` also fails any line
+  that is not a `#` comment, blank, or exactly `fully.qualified.Class=Rule1,Rule2` from the first
+  column: what it accepts, Properties reads as it does. `ExclusionsShrinkTest` (architecture) reads
+  every module's PMD reports, which the exclusions do not filter, and fails on an entry whose
+  class no longer breaks a rule it lists; the change that cleared it deletes it.
+- **Adding an ArchUnit rule.** A spec that establishes or consolidates a pattern adds one `@Test`
+  to `ArchitectureRulesTest`, named for the rule, whose `because` names the one allowed way. A new
+  module is added to `architecture/pom.xml` and to `ExclusionsShrinkTest`'s modules.
+
+### Running it
+
+```bash
+ci/check full                                             # everything, as CI's Linux unit jobs run it together
+mvn -o verify -DskipTests                                 # enforcer, PMD and CPD only
+mvn -o pmd:aggregate-cpd@cpd pmd:aggregate-cpd-check@cpd-check   # duplication alone, in seconds
+ci/check exclusions                                       # no suppression in source; the exclusions against where they left origin/main
+mvn -o -Pmutation test-compile org.pitest:pitest-maven:mutationCoverage -DtargetClasses=<classes> -DtargetTests=<tests> -DfailWhenNoMutations=false -Dpmd.skip=true -Dcpd.skip=true -Dspotless.check.skip=true   # mutation score, by hand
+```
+
+Never add `-q`: what to fix is logged as warnings (`PMD Failure: <class>:<line> Rule:<rule>
+<message>`), only the summary as an error. Reports: `target/pmd.xml` (main),
+`target/pmd-test/pmd.xml` (tests) and, at the root, `target/cpd/cpd.xml`. CPD reads the
+reactor's sources, so a `-pl` build checks no duplication. The rule sets resolve through
+`${maven.multiModuleProjectDirectory}`, the root that holds `.mvn/`. The `architecture` module's
+tests run in `verify`, after every module has written this build's reports, so `mvn test` and
+`mvn package` do not reach them. CI runs the gate in the Linux unit jobs (`ci/check unit`;
+`sail-infra`'s adds `ci/exclusions`, `architecture` and CPD); the macOS jobs run the tests alone.
+A job's install of its upstream modules skips PMD, except `sail-infra`'s Linux job, which needs
+their reports and writes them without judging; each module's own job judges it.
 
 ## Gotchas
 
