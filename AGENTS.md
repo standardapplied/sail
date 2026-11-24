@@ -214,7 +214,12 @@ and is burned down in its own pull request.
 
 - **Fix the code, never the gate.** No limit is raised, and no rule moves back to a pending file.
 - **No suppression in source.** Neither PMD's suppression comment nor a `@SuppressWarnings`
-  naming a PMD rule; `git grep` for both stays empty.
+  naming a PMD rule, `PMD` or `all`. PMD honours both however they are spelled (concatenated, in a
+  constant, through a unicode escape) and has no switch to turn them off, so `ci/exclusions`
+  fails, naming file and line, any Java line holding `NOPMD`, a `@SuppressWarnings` that is not
+  one line of lowercase literals such as `@SuppressWarnings("unchecked")`, `"all"` in one, or a
+  letter written as a unicode escape. That check needs no history and runs first, in
+  `sail-infra`'s Linux unit job and in `ci/check full`.
 - **The exclusions file only shrinks.** No class is ever added to it and no rule to an entry. A
   spec that works in a listed class splits it and deletes its entry. `ci/exclusions` (run by
   `sail-infra`'s Linux unit job and `ci/check full`) fails a change whose file names a
@@ -235,7 +240,7 @@ and is burned down in its own pull request.
 ci/check full                                             # everything, as CI's Linux unit jobs run it together
 mvn -o verify -DskipTests                                 # enforcer, PMD and CPD only
 mvn -o pmd:aggregate-cpd@cpd pmd:aggregate-cpd-check@cpd-check   # duplication alone, in seconds
-ci/check exclusions                                       # the exclusions against where they left origin/main
+ci/check exclusions                                       # no suppression in source; the exclusions against where they left origin/main
 mvn -o -Pmutation test-compile org.pitest:pitest-maven:mutationCoverage -DtargetClasses=<classes> -DtargetTests=<tests> -DfailWhenNoMutations=false -Dpmd.skip=true -Dcpd.skip=true -Dspotless.check.skip=true   # mutation score, by hand
 ```
 

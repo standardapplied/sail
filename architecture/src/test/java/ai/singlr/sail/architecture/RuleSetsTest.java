@@ -9,7 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.StringReader;
 import java.nio.file.Files;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -36,6 +38,7 @@ class RuleSetsTest {
 
   private static final String HELIOS_TEST_PACKAGE = "com.standardapplied.helios.core.test";
   private static final String SAIL_TEST_PACKAGE = "ai.singlr.sail.test";
+  private static final String ABSENT = "absent";
 
   @ParameterizedTest(name = "pmd-{0}.xml and pmd-{0}-pending.xml are helios-pmd-{0}.xml")
   @ValueSource(strings = {"main", "test"})
@@ -45,9 +48,25 @@ class RuleSetsTest {
     var gated = Files.readString(config.resolve("pmd-" + kind + ".xml"));
     var pending = Files.readString(config.resolve("pmd-" + kind + "-pending.xml"));
 
+    var expected = rules(helios.replace(HELIOS_TEST_PACKAGE, SAIL_TEST_PACKAGE));
+    var actual = rules(gated, pending);
+
+    var differing =
+        Stream.concat(expected.keySet().stream(), actual.keySet().stream())
+            .distinct()
+            .sorted()
+            .filter(name -> !Objects.equals(expected.get(name), actual.get(name)))
+            .map(
+                name ->
+                    name
+                        + "\n  Helios: "
+                        + expected.getOrDefault(name, ABSENT)
+                        + "\n  Sail:   "
+                        + actual.getOrDefault(name, ABSENT))
+            .toList();
     assertEquals(
-        rules(helios.replace(HELIOS_TEST_PACKAGE, SAIL_TEST_PACKAGE)),
-        rules(gated, pending),
+        List.of(),
+        differing,
         "pmd-" + kind + ".xml and pmd-" + kind + "-pending.xml hold each Helios rule once, as is");
   }
 

@@ -20,8 +20,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * {@code ci/exclusions}, which keeps the PMD exclusions file a subset of its base's, over a real
- * repository: a base commit listing two classes and a change on top of it.
+ * {@code ci/exclusions}, which keeps the PMD exclusions file a subset of its base's and lets no
+ * source silence PMD, over a real repository: a base commit listing two classes and a change on top
+ * of it. Its Java fixtures spell the annotation and the marker through placeholders, so this file
+ * is not itself a line the check refuses.
  */
 class CiExclusionsTest {
 
@@ -36,6 +38,8 @@ class CiExclusionsTest {
 
   @TempDir Path repo;
   private String base;
+
+  private static final String JAVA = "src/main/java/a/Quiet.java";
 
   private record Ran(int exit, String out, String err) {}
 
@@ -122,6 +126,65 @@ class CiExclusionsTest {
         check(base));
   }
 
+  @ParameterizedTest(name = "{index}: {0}")
+  @ValueSource(
+      strings = {
+        "int quiet; // NO_PMD",
+        "@SW(\"PMD.TooManyMethods\")",
+        "@SW(\"PMD\")",
+        "@SW({\"unchecked\", \"PMD.GodClass\"})",
+        "@SW(\"all\")",
+        "@SW(\"P\" + \"MD\")",
+        "@SW(Names.QUIET)",
+        "@SW(value = \"unchecked\")",
+        "@java.lang.SW(\"unchecked\")",
+        "@SW({",
+        "@SW(\"\\U0050MD\")",
+        "/* NO\\U0050MD */",
+      })
+  void aLineThatCouldSilencePmdFailsNamingIt(String quiet) throws Exception {
+    var line = java(quiet);
+    commitJava("package a;\n\n" + line + "\nclass Quiet {}\n");
+
+    assertEquals(
+        new Ran(
+            1,
+            "",
+            "ci/exclusions: these Java lines could silence PMD, which honours NO"
+                + "PMD in a comment and a Suppress"
+                + "Warnings naming PMD, PMD.<rule> or all, however"
+                + " spelled:\n  "
+                + JAVA
+                + ":3:"
+                + line
+                + "\nFix the code instead: name only javac's warnings, in one-line literal form such"
+                + " as @Suppress"
+                + "Warnings(\"unchecked\"), and spell no letter as a unicode escape.\n"),
+        check(base));
+  }
+
+  @Test
+  void javacWarningsNamedOnOneLinePass() throws Exception {
+    commitJava(
+        java(
+            """
+            package a;
+
+            @SW("unchecked")
+            class Quiet {
+              @SW({"unchecked", "rawtypes"})
+              Object raw() {
+                return "\\\\u0041 is no escape, \\U001b is not a letter";
+              }
+            }
+            """));
+
+    assertEquals(
+        new Ran(
+            0, "ci/exclusions: every class=rule pair of " + FILE + " is in " + base + "'s.\n", ""),
+        check(base));
+  }
+
   @Test
   void aBaseWithoutTheFileIsTheChangeThatAddsIt() throws Exception {
     sh(
@@ -159,6 +222,19 @@ class CiExclusionsTest {
             + "'s:\n  "
             + pair
             + "\nFix the class instead: no class is added to the list and no rule to an entry.\n");
+  }
+
+  private static String java(String text) {
+    return text.replace("SW(", "Suppress" + "Warnings(")
+        .replace("NO_PMD", "NO" + "PMD")
+        .replace("\\U", "\\" + "u");
+  }
+
+  private void commitJava(String source) throws Exception {
+    var file = repo.resolve(JAVA);
+    Files.createDirectories(file.getParent());
+    Files.writeString(file, source);
+    sh("git add -A && git -c user.name=CI -c user.email=ci@example.com commit -q -m java");
   }
 
   private String commitList(String list) throws Exception {
