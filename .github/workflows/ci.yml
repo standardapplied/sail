@@ -30,7 +30,7 @@ jobs:
   # dispatch and a change it cannot compute run every lane.
   changes:
     name: What the change touches
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     outputs:
       ci: ${{ steps.diff.outputs.ci }}
