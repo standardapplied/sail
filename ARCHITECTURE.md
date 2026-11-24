@@ -4759,9 +4759,12 @@ no pairing is removed through the gateway as before, and no key file is touched.
     `/etc/codex/managed_config.toml` and `/etc/codex/requirements.toml`, under an id each launch
     draws (`sail_` and twelve random hex digits), since a config's table under the id a launch
     names merges into it, and a user's `[model_providers.sail]` `model_catalog_url` received the
-    key under the fixed id (0.163, measured); a session resumed under a new id resumes with its
-    earlier turns (measured). What still sends a key
-    elsewhere, each measured with a fake one: in either harness, a proxy (`HTTPS_PROXY`) with a CA
+    key under the fixed id (0.163, measured); a session resumed by its id under a new provider id
+    resumes with its earlier turns (measured), which is how Sail resumes one. A person's own `codex
+    resume --last` in that workspace does not find a session Sail started on a stored key, since
+    Codex looks up the last session by the current provider id (measured: under a new id it starts
+    a new session). What still sends a key elsewhere, each measured with a fake one: in either
+    harness, a proxy (`HTTPS_PROXY`) with a CA
     file (`NODE_EXTRA_CA_CERTS`; `CODEX_CA_CERTIFICATE` or `SSL_CERT_FILE`) that the container's
     profile exports, which a TLS-intercepting proxy reads the key through, and which are not set
     empty since a container behind a corporate proxy needs them; in the interactive API-key
