@@ -95,41 +95,35 @@ class RunUsageStoreTest {
   void aLaunchRecordsItsLoginAndWhoAskedAndTheFinishCarriesThemToEveryBox() {
     var id = run(null);
     store.recordLaunch(
-        id,
-        new RunStore.Launched("opus", null, null, new RunStore.RunLogin("work", "token"), "ana"));
+        id, new RunStore.Launched("opus", null, null, new RunStore.RunLogin("work", "glm"), "ana"));
 
     assertTrue(store.finish(id, "running", "completed", 0, read(REPORTED)));
 
     var row = store.findById(id).orElseThrow();
-    assertEquals(new RunStore.RunLogin("work", "token"), row.login());
+    assertEquals(new RunStore.RunLogin("work", "glm"), row.login());
     assertEquals("ana", row.dispatchedBy());
     var finished = journaled(id);
     assertEquals("work", finished.get("login"));
-    assertEquals("token", finished.get("login_kind"));
+    assertEquals("glm", finished.get("login_kind"));
     assertEquals("ana", finished.get("dispatched_by"));
     var adopted = DateTimeUtils.newId().toString();
     store.applyRevision(adopted, store.comparableSnapshot(id), "1-remote");
     var copy = store.findById(adopted).orElseThrow();
-    assertEquals(new RunStore.RunLogin("work", "token"), copy.login());
+    assertEquals(new RunStore.RunLogin("work", "glm"), copy.login());
     assertEquals("ana", copy.dispatchedBy());
   }
 
   /**
-   * RL3: the credential source a harness reported using instead of its login is recorded in the
-   * write that records its report, journaled, adopted whole by another box, and never cleared by a
-   * later report that says nothing of it; a report that says the login was used records none.
+   * RL3: a report refusing its login ends its run for that login, in the write that records it,
+   * journaled; one that says nothing of the login ends nothing, and an operator's stop stays.
    */
   @Test
-  void theSourceAHarnessUsedInsteadOfItsLoginIsRecordedWithItsReportAndCarried() {
-    var overridden = new RunReport(REPORTED, new LoginOutcome.Overridden("apiKeyHelper"));
+  void aRefusalOfItsLoginEndsTheRunForItAndAnOrdinaryReportEndsNothing() {
     var finished = run(null);
-    var live = run(null);
     var refused = run(null);
     var stopped = run(null);
 
-    assertTrue(store.finish(finished, "running", "completed", 0, overridden));
-    store.recordUsage(live, overridden);
-    store.recordUsage(live, read(REPORTED));
+    assertTrue(store.finish(finished, "running", "completed", 0, read(REPORTED)));
     assertTrue(
         store.finish(
             refused,
@@ -138,22 +132,13 @@ class RunUsageStoreTest {
             1,
             new RunReport(RunUsage.NONE, new LoginOutcome.Refused())));
     assertTrue(store.claimStop(stopped, "stopped", () -> {}));
-    assertTrue(store.recordRead(stopped, overridden));
+    assertTrue(store.recordRead(stopped, read(REPORTED)));
 
-    assertEquals("apiKeyHelper", store.findById(finished).orElseThrow().loginOverridden());
-    assertEquals("apiKeyHelper", journaled(finished).get("login_overridden"));
-    assertEquals("apiKeyHelper", store.findById(live).orElseThrow().loginOverridden());
-    assertNull(store.findById(refused).orElseThrow().loginOverridden());
     assertTrue(store.findById(refused).orElseThrow().stoppedForLogin(), "ended for its login");
     assertEquals(RunStore.STOPPED_FOR_LOGIN, journaled(refused).get("stop_source"));
-    assertFalse(
-        store.findById(finished).orElseThrow().stoppedForLogin(), "an override ends nothing");
+    assertFalse(store.findById(finished).orElseThrow().stoppedForLogin());
     assertTrue(
         store.findById(stopped).orElseThrow().stoppedByOperator(), "an operator's stop stays");
-    assertEquals("apiKeyHelper", journaled(stopped).get("login_overridden"));
-    var adopted = DateTimeUtils.newId().toString();
-    store.applyRevision(adopted, store.comparableSnapshot(finished), "1-remote");
-    assertEquals("apiKeyHelper", store.findById(adopted).orElseThrow().loginOverridden());
   }
 
   /** A run that names no spec records the container's login, of no kind, and machinery no one. */
@@ -167,10 +152,13 @@ class RunUsageStoreTest {
     assertEquals(RunStore.RunLogin.CONTAINER, store.findById(id).orElseThrow().login());
     assertEquals(null, store.findById(id).orElseThrow().dispatchedBy());
     assertEquals(null, store.findById(unlaunched).orElseThrow().login());
-    assertThrows(IllegalArgumentException.class, () -> new RunStore.RunLogin(" ", "token"));
+    assertThrows(IllegalArgumentException.class, () -> new RunStore.RunLogin(" ", "glm"));
   }
 
-  /** A run records only a kind of login a harness takes, whether launched here or synced. */
+  /**
+   * A run records only a kind of login a harness takes, whether launched here or synced: the
+   * subscription token no harness takes any more included.
+   */
   @Test
   void aLoginOfAKindNoHarnessTakesIsRefusedAndNothingIsRecorded() {
     var id = run(null);
@@ -181,37 +169,14 @@ class RunUsageStoreTest {
             store.recordLaunch(
                 id,
                 new RunStore.Launched(
-                    null, null, null, new RunStore.RunLogin("work", "bogus"), null)));
+                    null, null, null, new RunStore.RunLogin("work", "token"), null)));
     assertNull(store.findById(id).orElseThrow().login());
     var snapshot = new LinkedHashMap<>(store.comparableSnapshot(id));
     snapshot.put("login", "work");
-    snapshot.put("login_kind", "bogus");
+    snapshot.put("login_kind", "token");
     var adopted = DateTimeUtils.newId().toString();
     assertThrows(SqliteException.class, () -> store.applyRevision(adopted, snapshot, "1-remote"));
     assertTrue(store.findById(adopted).isEmpty());
-  }
-
-  /**
-   * Round 4, item 7: a run records as its override only a source a harness declares, so a node's
-   * row naming any other text is refused at the door it enters by, and nothing is adopted.
-   */
-  @Test
-  void anOverrideOfASourceNoHarnessDeclaresIsRefusedAtTheDoorANodesRowEntersBy() {
-    var id = run(null);
-    var base = new LinkedHashMap<>(store.comparableSnapshot(id));
-    for (var declared : List.of("ANTHROPIC_API_KEY", "apiKeyHelper", "/login managed key")) {
-      var snapshot = new LinkedHashMap<>(base);
-      snapshot.put("login_overridden", declared);
-      var adopted = DateTimeUtils.newId().toString();
-      store.applyRevision(adopted, snapshot, "1-remote");
-      assertEquals(declared, store.findById(adopted).orElseThrow().loginOverridden());
-    }
-    var hostile = new LinkedHashMap<>(base);
-    hostile.put("login_overridden", "sk-ant-api03-AbCdEf0123456789xyz");
-    var refused = DateTimeUtils.newId().toString();
-
-    assertThrows(SqliteException.class, () -> store.applyRevision(refused, hostile, "1-remote"));
-    assertTrue(store.findById(refused).isEmpty());
   }
 
   /** M1: the finish and its usage are one write, so main hears them as one revision. */

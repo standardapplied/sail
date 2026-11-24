@@ -54,10 +54,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -569,9 +567,10 @@ class RoomWakeLaunchTest {
         List.of(
             "No Claude Code login stored for uday, so a run of a spec cannot start: a login made by"
                 + " hand in the project's container is not used by runs. Create an API key in the"
-                + " Claude Console, then sail agent login claude-code --kind api-key. Or: Run claude"
-                + " setup-token on a machine where Claude Code is signed in, then sail agent login"
-                + " claude-code."),
+                + " Claude Console, then sail agent login claude-code. Or: Create a GLM Coding Plan"
+                + " API key at z.ai/manage-apikey/apikey-list, or a Team Plan's at"
+                + " z.ai/manage-apikey/coding-plan/team/my-plan, then sail agent login claude-code"
+                + " --kind glm."),
         messageStore.list("auth", null, 20).stream().map(MessageStore.MessageRow::body).toList());
     assertEquals(List.of(), runStore.listForSpec("auth"));
   }
@@ -763,52 +762,6 @@ class RoomWakeLaunchTest {
     assertNotNull(first);
   }
 
-  /**
-   * Medium 1 of the GCP proof: on a node, a spec's first dispatch on a token in its last 14 days is
-   * warned like any other. The warning is said once the run is reserved, so the run supports the
-   * room's line there and the node's next round keeps it; the dispatch's own output and the bus
-   * carry the same words.
-   */
-  @Test
-  void onANodeASpecsFirstDispatchOnAnEndingTokenIsWarnedAndTheLineStays() throws Exception {
-    assertNotNull(operations(liveAgentShell()));
-    createSpec(HANDLE, "auth", HANDLE);
-    var aged = Instant.now().minus(Duration.ofDays(360));
-    try (var files = Files.walk(db.path().getParent().resolve("logins"))) {
-      for (var file : files.filter(Files::isRegularFile).toList()) {
-        Files.setLastModifiedTime(file, FileTime.from(aged));
-      }
-    }
-    var node = new SyncConfig(SyncConfig.ROLE_NODE, "main.example", HANDLE);
-    var printed = new ArrayList<String>();
-    var listener =
-        new DispatchOperations.Listener() {
-          @Override
-          public void loginEnding(String said) {
-            printed.add(said);
-          }
-        };
-    assertTrue(runStore.listForSpec("auth").isEmpty(), "the spec never ran on this box");
-
-    dispatchAsThePerson(anotherProcess(liveAgentShell(), listener).useBox(() -> node));
-
-    var warned =
-        messageStore.list("auth", null, 50).stream()
-            .filter(row -> MessageStore.SAIL_AUTHOR.equals(row.author()))
-            .map(MessageStore.MessageRow::body)
-            .filter(body -> body.contains("will refuse"))
-            .toList();
-    assertEquals(1, warned.size(), warned.toString());
-    assertEquals(List.of(warned.getFirst()), printed);
-    assertEquals(
-        List.of(warned.getFirst()),
-        events.stream()
-            .filter(e -> Event.WellKnownTypes.AGENT_LOGIN_OUTCOME.equals(e.type()))
-            .map(e -> e.data().get("detail"))
-            .toList());
-    assertEquals(List.of(), withdrawnMessages(), "the node's next round keeps it");
-  }
-
   /** The messages the node's next settlement round withdraws. */
   private List<String> withdrawnMessages() {
     return new Settlement(db, Decidability.onNode(db), HANDLE)
@@ -820,11 +773,6 @@ class RoomWakeLaunchTest {
 
   /** Operations over this test's database as a second process, or a restarted one, opens them. */
   private DispatchOperations anotherProcess(ShellExec shell) throws IOException {
-    return anotherProcess(shell, DispatchOperations.Listener.NONE);
-  }
-
-  private DispatchOperations anotherProcess(ShellExec shell, DispatchOperations.Listener listener)
-      throws IOException {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, YAML);
     return new DispatchOperations(
@@ -838,7 +786,7 @@ class RoomWakeLaunchTest {
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
             TestWorkspaces.ready(TestProjects.reading(yaml), "acme"),
             command -> 0,
-            listener,
+            DispatchOperations.Listener.NONE,
             SessionYield.NONE)
         .useMessages(new MessageStore(db))
         .useRooms(new RoomStore(db));

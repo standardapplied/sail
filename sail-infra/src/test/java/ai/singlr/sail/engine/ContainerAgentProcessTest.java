@@ -10,16 +10,20 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.store.LoginStore;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
 import java.util.function.UnaryOperator;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -172,6 +176,57 @@ class ContainerAgentProcessTest {
 
     assertEquals("c1 t-1", handle.stdout().read());
     assertEquals("gone", handle.stdout().read());
+    assertEquals(OptionalInt.of(0), handle.waitFor(PATIENCE));
+  }
+
+  /**
+   * L2 in the live member's shape: a container whose login profile exports another address, a
+   * socket, other credentials and cloud switches starts the member with its stored key, its kind's
+   * own address and no socket, since the launch file is read after every profile.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aProfilesAddressSocketAndCredentialsNeverReachALiveMember() throws Exception {
+    var home = Files.createDirectories(dir.resolve("home"));
+    Files.writeString(
+        home.resolve(".profile"),
+        "export ANTHROPIC_BASE_URL=http://127.0.0.1:9 ANTHROPIC_UNIX_SOCKET=/tmp/elsewhere.sock"
+            + " CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST= ANTHROPIC_API_KEY=fake-container-key"
+            + " ANTHROPIC_AUTH_TOKEN=fake-gateway CLAUDE_CODE_USE_BEDROCK=1"
+            + " CLAUDE_CODE_USE_MANTLE=1"
+            + " CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR=3"
+            + " 'ANTHROPIC_CUSTOM_HEADERS=x-api-key: fake-container-key'\n");
+    var stored =
+        new LoginStore.Login(
+            new LoginStore.Row("claude-code", "work", "api-key", true, Instant.EPOCH, "0123abcd"),
+            Harnesses.of("claude-code").loginKind("api-key"),
+            "fake-stored-key");
+    var file = dir.resolve("launch.env");
+    Files.writeString(file, new LaunchEnv("c1", stored).lines());
+    UnaryOperator<List<String>> profiled =
+        argv ->
+            Stream.concat(Stream.of("env", "HOME=" + home), LOCALLY.apply(argv).stream()).toList();
+
+    var handle =
+        held(
+            new ContainerAgentProcess(new ScriptedShellExecutor(), profiled)
+                .start(
+                    "acme",
+                    dir.toString(),
+                    Map.of(),
+                    List.of(
+                        "bash",
+                        "-c",
+                        "echo \"[$ANTHROPIC_BASE_URL][$ANTHROPIC_UNIX_SOCKET]"
+                            + "[$CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST][$ANTHROPIC_API_KEY]"
+                            + "[$ANTHROPIC_AUTH_TOKEN][$CLAUDE_CODE_USE_BEDROCK"
+                            + "$CLAUDE_CODE_USE_MANTLE"
+                            + "$CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR$ANTHROPIC_CUSTOM_HEADERS]\""),
+                    dir.resolve("agent.pid").toString(),
+                    dir.resolve("agent.log").toString(),
+                    file.toString()));
+
+    assertEquals("[https://api.anthropic.com][][1][fake-stored-key][][]", handle.stdout().read());
     assertEquals(OptionalInt.of(0), handle.waitFor(PATIENCE));
   }
 

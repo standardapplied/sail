@@ -7,6 +7,8 @@ package ai.singlr.sail.harness;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.ContainerExec;
+import java.security.SecureRandom;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +23,11 @@ final class Codex implements Harness {
   private static final String TOKEN_COUNT = "\"type\":\"token_count\"";
   private static final String TURN_CONTEXT = "\"type\":\"turn_context\"";
   private static final String TASK_COMPLETE = "\"type\":\"task_complete\"";
+
+  private static final SecureRandom RANDOM = new SecureRandom();
+
+  /** The OpenAI API, the one address a stored key is sent to. */
+  private static final String OPENAI_API = "https://api.openai.com/v1";
 
   /** When a usage limit resets, as its message says it. */
   private static final Pattern TRY_AGAIN = Pattern.compile("(?i)try again at ([^.]+)");
@@ -73,15 +80,15 @@ final class Codex implements Harness {
   }
 
   /**
-   * {@code codex exec}, or {@code codex exec resume <id>} for a recorded conversation. Codex
-   * already streams a readable transcript, so a streaming launch is the same command. A
-   * full-permission session additionally passes {@code --dangerously-bypass-hook-trust}: Codex
-   * silently skips untrusted hooks even in headless {@code exec}, and sail cannot pre-seed trust
-   * hashes for the hooks file it owns and rewrites, so without the flag the sail hooks layer would
-   * never fire. It is tied to full permissions because hooks run outside the Codex sandbox: in a
-   * sandboxed session auto-trusting hooks would grant an escape hatch, while an unsandboxed session
-   * gains nothing it did not already have. Every sail dispatch path runs with full permissions, and
-   * interactive engineer sessions never get the flag.
+   * {@code codex exec}, or {@code codex exec resume <id>} for a recorded conversation, given a
+   * stored login's key through {@link #provider}. Codex already streams a readable transcript, so a
+   * streaming launch is the same command. A full-permission session additionally passes {@code
+   * --dangerously-bypass-hook-trust}: Codex silently skips untrusted hooks even in headless {@code
+   * exec}, and sail cannot pre-seed trust hashes for the hooks file it owns and rewrites, so
+   * without the flag the sail hooks layer would never fire. It is tied to full permissions because
+   * hooks run outside the Codex sandbox: in a sandboxed session auto-trusting hooks would grant an
+   * escape hatch, while an unsandboxed session gains nothing it did not already have. Every sail
+   * dispatch path runs with full permissions, and interactive engineer sessions never get the flag.
    */
   @Override
   public String headless(Launch launch) {
@@ -94,6 +101,7 @@ final class Codex implements Harness {
         + " exec"
         + resume.map(id -> " resume").orElse("")
         + perm
+        + Optional.ofNullable(launch.login()).map(Codex::provider).orElse("")
         + modelOptions(launch.model(), launch.reasoningEffort())
         + resume.map(id -> " " + id).orElse("")
         + " "
@@ -143,24 +151,63 @@ final class Codex implements Harness {
 
   /**
    * Codex's built-in provider takes an API key in an interactive session only from its own store
-   * ({@code auth.json}), where it would rest after the session. A provider of its own config,
-   * declared on the command line ({@code model_providers}), reads the key from the environment
-   * instead ({@code env_key}), so nothing of it is stored: the OpenAI API under the id {@code
-   * sail}, which Codex does not reserve. The variable is set empty in the shell Codex starts for
+   * ({@code auth.json}), where it would rest after the session, so the session takes it through
+   * {@link #provider}, which stores nothing of it.
+   */
+  @Override
+  public InteractiveLogin interactiveLogin(LoginKind kind) {
+    return new InteractiveLogin("", provider(kind));
+  }
+
+  /**
+   * The key of {@code kind} given to Codex by a provider declared on the command line ({@code
+   * model_providers}), the OpenAI API under an id of this launch's own ({@link #providerId}): it
+   * reads the key from the environment ({@code env_key}), so nothing of it is stored, and it fixes
+   * the address. Codex reads no address from its environment ({@code OPENAI_BASE_URL} is not read),
+   * but its user config's {@code openai_base_url}, or a {@code model_provider} of its own naming
+   * the key's variable, would send the key elsewhere; the command line outranks every config file
+   * but a managed one (0.163, measured). The variable is set empty in the shell Codex starts for
    * its commands ({@code shell_environment_policy.set}, one key by its dotted path, so a project's
    * own policy stands), whose snapshot Codex writes to {@code ~/.codex/shell_snapshots}, {@code
    * 0644}, every exported variable in it (codex-cli 0.163 and 0.170).
    */
+  private static String provider(LoginKind kind) {
+    var id = providerId();
+    return " -c model_provider="
+        + id
+        + " -c 'model_providers."
+        + id
+        + "={name=\"OpenAI\", base_url=\""
+        + OPENAI_API
+        + "\", env_key=\""
+        + kind.variable()
+        + "\", wire_api=\"responses\"}' -c 'shell_environment_policy.set."
+        + kind.variable()
+        + "=\"\"'";
+  }
+
+  /**
+   * A provider id no config file can name ahead: a config's table under the id a launch names
+   * merges into the command line's ({@code [model_providers.sail]}'s {@code model_catalog_url}
+   * received the key, 0.163, measured), so each launch draws its own. A session resumed under
+   * another id than it started with resumes, its earlier turns sent with the next (measured).
+   */
+  private static String providerId() {
+    var drawn = new byte[6];
+    RANDOM.nextBytes(drawn);
+    return "sail_" + HexFormat.of().formatHex(drawn);
+  }
+
+  /**
+   * Codex's own "Sign in with Device Code", the way a ChatGPT plan signs in from a terminal with no
+   * browser, which ChatGPT allows only once it is turned on (developers.openai.com/codex/auth).
+   */
   @Override
-  public InteractiveLogin interactiveLogin(LoginKind kind) {
-    return new InteractiveLogin(
-        "",
-        " -c model_provider=sail -c 'model_providers.sail={name=\"OpenAI\","
-            + " base_url=\"https://api.openai.com/v1\", env_key=\""
-            + kind.variable()
-            + "\", wire_api=\"responses\"}' -c 'shell_environment_policy.set."
-            + kind.variable()
-            + "=\"\"'");
+  public Remedy signIn() {
+    return Remedy.of(
+        "Turn on device code login in your ChatGPT security settings (in a ChatGPT workspace, its"
+            + " admin turns it on in the workspace's permissions), then start Codex CLI here and"
+            + " choose Sign in with Device Code");
   }
 
   /** Its own store, where {@code codex login} keeps a ChatGPT sign-in or a key. */
@@ -237,7 +284,7 @@ final class Codex implements Harness {
    * turn.failed}; this is where its end is recorded (codex-cli 0.163.0).
    */
   @Override
-  public Optional<LoginOutcome> loginOutcome(String report, LoginKind given) {
+  public Optional<LoginOutcome> loginOutcome(String report) {
     var context = RunUsage.last(report, TURN_CONTEXT, Codex::isTurnContext).line();
     var turn = context == null ? null : RunUsage.map(context, "payload").get("turn_id");
     var done =
@@ -282,8 +329,9 @@ final class Codex implements Harness {
 
   /**
    * An API key, read from {@code CODEX_API_KEY}, which {@code codex exec} (every Sail launch of
-   * Codex) reads before any other login. Codex does not read {@code OPENAI_API_KEY} for its own
-   * login, and its "Sign in with ChatGPT" refreshes, so it is never stored.
+   * Codex) reads before any other login, and sent to the OpenAI API alone ({@link #provider}).
+   * Codex does not read {@code OPENAI_API_KEY} for its own login, and a ChatGPT plan signs in
+   * inside its session ({@link #signIn}), which Sail never holds.
    */
   @Override
   public List<LoginKind> loginKinds() {
@@ -293,7 +341,8 @@ final class Codex implements Harness {
             "CODEX_API_KEY",
             "API key",
             Remedy.of("Create an API key at platform.openai.com/api-keys"),
-            null));
+            new LinkedHashMap<>(),
+            true));
   }
 
   /**

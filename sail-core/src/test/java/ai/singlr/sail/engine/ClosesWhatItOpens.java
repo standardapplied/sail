@@ -22,10 +22,10 @@ import org.junit.jupiter.api.extension.ExtensionContext;
  * Fails a test class that leaves open a descriptor it opened: an HTTP client's selector, a server's
  * socket, a store's database files. What a class leaves open is closed when it is collected, at a
  * moment no one chooses and inside whichever class runs then, or not before the fork ends.
- * Registered for every sail-infra class through JUnit's extension auto-detection (sail-infra's test
- * resources name it; it lives here so every module's tests can assert with it), it checks once the
- * class's own {@code @AfterAll} has run. Linux only, where {@code /proc/self/fd} names what each
- * descriptor is open on; elsewhere it does nothing.
+ * Registered for every class of every module through JUnit's extension auto-detection, as {@link
+ * OwnSailGuard} is (this module's test resources name it, and its test-jar carries them to the
+ * others), it checks once the class's own {@code @AfterAll} has run. Linux only, where {@code
+ * /proc/self/fd} names what each descriptor is open on; elsewhere it does nothing.
  */
 public final class ClosesWhatItOpens implements BeforeAllCallback, AfterAllCallback {
 

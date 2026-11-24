@@ -39,7 +39,7 @@ class LoginStoreTest {
 
   private static final String UDAY = "fde_uday0000000000000000";
   private static final String ANA = "fde_ana00000000000000000";
-  private static final String TOKEN = "sk-ant-oat01-AAAA_bbbb-1234";
+  private static final String GLM_KEY = "fake-glm-key-AAAA_bbbb-1234";
   private static final String KEY = "sk-ant-api03-ZZZZ";
   private static final String VALUE_RULE =
       "A login's value is printable ASCII with no space, quote, backslash, $ or backtick.";
@@ -60,20 +60,20 @@ class LoginStoreTest {
     DateTimeUtils.clock = Clock.fixed(at, ZoneOffset.UTC);
     LoginStore.Row stored;
     try {
-      stored = store().store(UDAY, CLAUDE, null, null, TOKEN);
+      stored = store().store(UDAY, CLAUDE, null, "glm", GLM_KEY);
     } finally {
       DateTimeUtils.clock = clock;
     }
 
     assertEquals(
         new LoginStore.Row(
-            "claude-code", "default", "token", true, at, LoginStore.fingerprint(TOKEN)),
+            "claude-code", "default", "glm", true, at, LoginStore.fingerprint(GLM_KEY)),
         stored,
         "stored when the box's clock says, as every other time it answers");
     assertEquals(List.of(stored), store().list(UDAY));
     assertEquals(8, stored.fingerprint().length());
     assertTrue(stored.fingerprint().matches("[0-9a-f]{8}"));
-    assertFalse(stored.toString().contains(TOKEN));
+    assertFalse(stored.toString().contains(GLM_KEY));
   }
 
   @Test
@@ -86,7 +86,7 @@ class LoginStoreTest {
     var codex = Files.createDirectories(person.resolve("codex"));
     Files.setAttribute(codex, "unix:mode", 02755);
 
-    store().store(UDAY, CLAUDE, null, null, TOKEN);
+    store().store(UDAY, CLAUDE, null, "glm", GLM_KEY);
     store().store(UDAY, CODEX, null, null, KEY);
 
     var self = PrivateDirectory.ProcessOwner.current().orElseThrow();
@@ -102,14 +102,15 @@ class LoginStoreTest {
     Files.createSymbolicLink(
         dir.resolve("logins"), Files.createDirectory(dir.resolve("elsewhere")));
 
-    assertThrows(UncheckedIOException.class, () -> store().store(UDAY, CLAUDE, null, null, TOKEN));
+    assertThrows(
+        UncheckedIOException.class, () -> store().store(UDAY, CLAUDE, null, "glm", GLM_KEY));
   }
 
   @Test
   @EnabledOnOs({OS.LINUX, OS.MAC})
   void everyDirectoryIsOwnerOnlyAndEveryFileOwnerReadWriteWithNoTemporaryFileLeft()
       throws Exception {
-    store().store(UDAY, CLAUDE, "work", null, TOKEN);
+    store().store(UDAY, CLAUDE, "work", "glm", GLM_KEY);
 
     var person = dir.resolve("logins").resolve(UDAY);
     for (var each : List.of(dir.resolve("logins"), person, person.resolve("claude-code"))) {
@@ -127,26 +128,26 @@ class LoginStoreTest {
           Set.copyOf(files.map(file -> file.getFileName().toString()).toList()));
     }
     assertEquals(
-        List.of("token", TOKEN), Files.readAllLines(person.resolve("claude-code").resolve("work")));
+        List.of("glm", GLM_KEY), Files.readAllLines(person.resolve("claude-code").resolve("work")));
     assertEquals(List.of("work"), Files.readAllLines(person.resolve("claude-code/.default")));
   }
 
   @Test
   void aSecondLoginLeavesTheDefaultAndUseSwitchesIt() {
     var store = store();
-    store.store(UDAY, CLAUDE, null, null, TOKEN);
+    store.store(UDAY, CLAUDE, null, "glm", GLM_KEY);
     store.store(UDAY, CLAUDE, "personal", "api-key", KEY);
 
     assertEquals(
-        List.of("claude-code/default token default", "claude-code/personal api-key"),
+        List.of("claude-code/default glm default", "claude-code/personal api-key"),
         described(store.list(UDAY)));
-    assertEquals(TOKEN, store.defaultFor(UDAY, CLAUDE).orElseThrow().value());
+    assertEquals(GLM_KEY, store.defaultFor(UDAY, CLAUDE).orElseThrow().value());
 
     var used = store.use(UDAY, CLAUDE, "personal");
 
     assertTrue(used.isDefault());
     assertEquals(
-        List.of("claude-code/default token", "claude-code/personal api-key default"),
+        List.of("claude-code/default glm", "claude-code/personal api-key default"),
         described(store.list(UDAY)));
     var login = store.defaultFor(UDAY, CLAUDE).orElseThrow();
     assertEquals(KEY, login.value());
@@ -157,7 +158,7 @@ class LoginStoreTest {
   @Test
   void storingANameAgainReplacesItsValueAndKind() {
     var store = store();
-    store.store(UDAY, CLAUDE, "work", null, TOKEN);
+    store.store(UDAY, CLAUDE, "work", "glm", GLM_KEY);
 
     var replaced = store.store(UDAY, CLAUDE, "work", "api-key", KEY);
 
@@ -188,16 +189,16 @@ class LoginStoreTest {
   @Test
   void removingTheDefaultLeavesNoDefaultAndTheNextStoredBecomesIt() {
     var store = store();
-    store.store(UDAY, CLAUDE, null, null, TOKEN);
+    store.store(UDAY, CLAUDE, null, "glm", GLM_KEY);
     store.store(UDAY, CLAUDE, "personal", null, KEY);
 
     var removed = store.remove(UDAY, CLAUDE, "default").orElseThrow();
 
     assertTrue(removed.isDefault());
-    assertEquals(List.of("claude-code/personal token"), described(store.list(UDAY)));
+    assertEquals(List.of("claude-code/personal api-key"), described(store.list(UDAY)));
     assertEquals(Optional.empty(), store.defaultFor(UDAY, CLAUDE));
 
-    store.store(UDAY, CLAUDE, "work", null, TOKEN);
+    store.store(UDAY, CLAUDE, "work", "glm", GLM_KEY);
 
     assertEquals("work", store.defaultFor(UDAY, CLAUDE).orElseThrow().row().name());
   }
@@ -205,7 +206,7 @@ class LoginStoreTest {
   @Test
   void usingALoginNotStoredIsRefusedNamingItAndRemovingOneIsNothingToDo() {
     var store = store();
-    store.store(UDAY, CLAUDE, null, null, TOKEN);
+    store.store(UDAY, CLAUDE, null, "glm", GLM_KEY);
 
     assertEquals(Optional.empty(), store.remove(UDAY, CLAUDE, "work"));
     assertEquals(Optional.empty(), new LoginStore(null).remove(UDAY, CLAUDE, "work"));
@@ -269,7 +270,8 @@ class LoginStoreTest {
   void aNameOutsideTheRuleIsRefused(String name) {
     var refused =
         assertThrows(
-            IllegalArgumentException.class, () -> store().store(UDAY, CLAUDE, name, null, TOKEN));
+            IllegalArgumentException.class,
+            () -> store().store(UDAY, CLAUDE, name, "glm", GLM_KEY));
 
     assertEquals(
         "A login's name is 1 to 32 lowercase letters, digits and hyphens, starting with a letter"
@@ -279,34 +281,34 @@ class LoginStoreTest {
 
   @Test
   void aNameOfThirtyTwoIsTakenAndThirtyThreeIsNot() {
-    store().store(UDAY, CLAUDE, "a".repeat(32), null, TOKEN);
+    store().store(UDAY, CLAUDE, "a".repeat(32), "glm", GLM_KEY);
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> store().store(UDAY, CLAUDE, "a".repeat(33), null, TOKEN));
+        () -> store().store(UDAY, CLAUDE, "a".repeat(33), "glm", GLM_KEY));
   }
 
   @ParameterizedTest
   @ValueSource(strings = {"..", "a/b", "", "-x"})
   void anFdeIdThatIsNotOneNeverNamesAPath(String fdeId) {
     assertThrows(
-        IllegalArgumentException.class, () -> store().store(fdeId, CLAUDE, null, null, TOKEN));
+        IllegalArgumentException.class, () -> store().store(fdeId, CLAUDE, null, "glm", GLM_KEY));
   }
 
   @Test
   void eachPersonKeepsOnlyTheirOwn() {
     var store = store();
-    store.store(UDAY, CLAUDE, null, null, TOKEN);
+    store.store(UDAY, CLAUDE, null, "glm", GLM_KEY);
     store.store(ANA, CLAUDE, null, null, KEY);
 
-    assertEquals(TOKEN, store.defaultFor(UDAY, CLAUDE).orElseThrow().value());
+    assertEquals(GLM_KEY, store.defaultFor(UDAY, CLAUDE).orElseThrow().value());
     assertEquals(KEY, store.defaultFor(ANA, CLAUDE).orElseThrow().value());
   }
 
   @Test
   void forgetDeletesAPersonsLoginsAndTheSweepDeletesThoseOfPeopleNoLongerHeld() {
     var store = store();
-    store.store(UDAY, CLAUDE, null, null, TOKEN);
+    store.store(UDAY, CLAUDE, null, "glm", GLM_KEY);
     store.store(UDAY, CODEX, null, null, KEY);
     store.store(ANA, CLAUDE, null, null, KEY);
 
@@ -314,7 +316,7 @@ class LoginStoreTest {
 
     assertEquals(List.of(), store.list(UDAY));
     assertFalse(Files.exists(dir.resolve("logins").resolve(UDAY)));
-    store.store(UDAY, CLAUDE, null, null, TOKEN);
+    store.store(UDAY, CLAUDE, null, "glm", GLM_KEY);
 
     assertEquals(1, store.sweep(Set.of(ANA)::contains));
     assertEquals(0, store.sweep(Set.of(ANA)::contains));
@@ -329,7 +331,7 @@ class LoginStoreTest {
   @Test
   void theSweepAsksOfEachPersonAsItReachesThemSoOneAddedSinceIsKept() {
     var store = store();
-    store.store(UDAY, CLAUDE, null, null, TOKEN);
+    store.store(UDAY, CLAUDE, null, "glm", GLM_KEY);
     store.store(ANA, CLAUDE, null, null, KEY);
     var asked = new ArrayList<String>();
 
@@ -356,7 +358,7 @@ class LoginStoreTest {
       store.forget(UDAY);
       var refused =
           assertThrows(
-              IllegalStateException.class, () -> store.store(UDAY, CLAUDE, null, null, TOKEN));
+              IllegalStateException.class, () -> store.store(UDAY, CLAUDE, null, "glm", GLM_KEY));
       assertEquals(
           "This box keeps its database in memory, so it keeps no logins.", refused.getMessage());
     }
@@ -365,7 +367,7 @@ class LoginStoreTest {
   @Test
   void aStoreBesideADatabaseFileKeepsItsLoginsBesideIt() {
     try (var db = Sqlite.open(dir.resolve("sail.db"))) {
-      LoginStore.beside(db).store(UDAY, CLAUDE, null, null, TOKEN);
+      LoginStore.beside(db).store(UDAY, CLAUDE, null, "glm", GLM_KEY);
     }
 
     assertEquals(1, store().list(UDAY).size());
@@ -374,11 +376,11 @@ class LoginStoreTest {
   @Test
   void aFileThatIsNotALoginIsNotListedOrUsed() throws Exception {
     var store = store();
-    store.store(UDAY, CLAUDE, null, null, TOKEN);
+    store.store(UDAY, CLAUDE, null, "glm", GLM_KEY);
     var harness = dir.resolve("logins").resolve(UDAY).resolve("claude-code");
-    Files.writeString(harness.resolve("default"), "token\n");
+    Files.writeString(harness.resolve("default"), "glm\n");
     Files.createDirectories(dir.resolve("logins").resolve(UDAY).resolve("unknown-harness"));
-    Files.writeString(harness.resolve("Not.A.Name"), "token\nx\n");
+    Files.writeString(harness.resolve("Not.A.Name"), "glm\nx\n");
 
     assertEquals(List.of(), store.list(UDAY));
     assertEquals(Optional.empty(), store.defaultFor(UDAY, CLAUDE));
@@ -388,7 +390,7 @@ class LoginStoreTest {
   void aGitTokenIsKeptByHostBesideTheLoginsAndOnlyItsHostDateAndFingerprintAreShown()
       throws Exception {
     var store = store();
-    store.store(UDAY, CLAUDE, null, null, TOKEN);
+    store.store(UDAY, CLAUDE, null, "glm", GLM_KEY);
     var stored = store.storeGit(UDAY, "GitHub.com", "ghp_uday_0123456789ab");
     store.storeGit(UDAY, "gitlab.example", "glpat-uday_0123456789ab");
 
@@ -406,9 +408,7 @@ class LoginStoreTest {
         store.gitTokens(UDAY));
     assertEquals(
         List.of(
-            "claude-code/default token default",
-            "git/github.com token",
-            "git/gitlab.example token"),
+            "claude-code/default glm default", "git/github.com token", "git/gitlab.example token"),
         described(store.list(UDAY)));
     assertFalse(store.list(UDAY).toString().contains("ghp_uday_0123456789ab"));
     var git = dir.resolve("logins").resolve(UDAY).resolve("git");

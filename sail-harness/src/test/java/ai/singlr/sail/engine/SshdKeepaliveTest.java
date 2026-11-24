@@ -13,7 +13,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -87,9 +86,6 @@ class SshdKeepaliveTest {
   private int run(List<String> command) throws Exception {
     var builder = new ProcessBuilder(command).redirectErrorStream(true);
     builder.environment().put("PATH", dir.resolve("bin") + ":" + System.getenv("PATH"));
-    var process = builder.start();
-    var output = new String(process.getInputStream().readAllBytes());
-    assertTrue(process.waitFor(10, TimeUnit.SECONDS), "the install script hung: " + output);
-    return process.exitValue();
+    return Child.run(builder).exit();
   }
 }

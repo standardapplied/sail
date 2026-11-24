@@ -367,9 +367,29 @@ public final class NativeFleet implements AutoCloseable {
         .orElseGet(() -> fail("no JSON line opening with " + opening + " in:\n" + output));
   }
 
+  /**
+   * Removes the fleet's pod, then ends main's sshd and reads its output to the end: its pipe is
+   * closed before this returns, never left to the JDK's reaper or its reader a moment after. A
+   * failure to remove the pod is the one thrown; one ending sshd is added to it as suppressed.
+   */
   @Override
   public void close() throws Exception {
-    run(COMMAND_DEADLINE, List.of("podman", "pod", "rm", "-f", "-t", "0", pod));
+    try (AutoCloseable ending = this::endSshd) {
+      run(COMMAND_DEADLINE, List.of("podman", "pod", "rm", "-f", "-t", "0", pod));
+    }
+  }
+
+  /** Ends main's sshd; interrupted meanwhile, it says so and keeps the thread interrupted. */
+  private void endSshd() throws InterruptedException {
+    if (sshd == null) {
+      return;
+    }
+    try {
+      sshd.end();
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw interrupted;
+    }
   }
 
   private Box launch(String name, boolean isMain, String db) throws Exception {
@@ -709,10 +729,15 @@ public final class NativeFleet implements AutoCloseable {
           fail(box.name + ": " + processName + " did not stop:\n" + log);
         }
       } finally {
-        process.destroyForcibly();
-        process.waitFor();
-        drain.join();
+        end();
       }
+    }
+
+    /** Ends the process however it stands and waits until what it said is read and closed. */
+    private void end() throws InterruptedException {
+      process.destroyForcibly();
+      process.waitFor();
+      drain.join();
     }
 
     /** Keeps what the daemon says until its output ends, then closes it. */

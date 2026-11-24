@@ -25,6 +25,7 @@ import ai.singlr.sail.store.SqliteException;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.SocketException;
 import java.net.StandardProtocolFamily;
 import java.net.StandardSocketOptions;
 import java.net.UnixDomainSocketAddress;
@@ -32,6 +33,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystemException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -56,6 +58,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -66,6 +69,10 @@ class PtySessionHostTest {
   @TempDir Path dir;
 
   private PtySessionHost host;
+
+  /** Every host a test started, each closed once it has run, whether or not the test closed it. */
+  private final List<PtySessionHost> hosts = new ArrayList<>();
+
   private final ConcurrentLinkedQueue<String> events = new ConcurrentLinkedQueue<>();
 
   /** Each minute of typing the host told, as {@code session:person}, in the order told. */
@@ -251,8 +258,14 @@ class PtySessionHostTest {
             network,
             uploads,
             FileScripts.ofContainers());
+    hosts.add(host);
     host.start();
     return host;
+  }
+
+  @AfterEach
+  void closeHosts() {
+    hosts.forEach(PtySessionHost::close);
   }
 
   /**
@@ -270,11 +283,28 @@ class PtySessionHostTest {
 
       assertEquals(
           -1,
-          assertTimeoutPreemptively(
-              Duration.ofSeconds(5), () -> client.read(ByteBuffer.allocate(1))),
+          assertTimeoutPreemptively(Duration.ofSeconds(5), () -> endOf(client)),
           "the host ended the connection");
     }
     ClosesWhatItOpens.assertClosed("a host and the connection it served", before);
+  }
+
+  /**
+   * What reading {@code client} says once its host is closed: -1 for an end. Each side of the
+   * handshake writes its magic before it reads the other's, so the client's handshake can finish
+   * before the host's thread has read the client's magic; a unix socket closed with bytes unread
+   * resets its peer instead of ending it, and that reset, and no other failure, is the host's end
+   * closed too.
+   */
+  private static int endOf(SocketChannel client) throws IOException {
+    try {
+      return client.read(ByteBuffer.allocate(1));
+    } catch (SocketException failed) {
+      if (!"Connection reset".equals(failed.getMessage())) {
+        throw failed;
+      }
+      return -1;
+    }
   }
 
   /**
@@ -369,6 +399,39 @@ class PtySessionHostTest {
     } finally {
       never.countDown();
     }
+    awaitClosed(SessionFiles.in(dir.resolve("sessions"), "mine").ring());
+  }
+
+  /**
+   * Waits until no descriptor of this process is open on {@code file}, as once an ending a stop
+   * left has run to its end: the last thing an ending does is close its ring. Linux only, where
+   * {@code /proc/self/fd} names what each descriptor is open on, as the descriptor check is.
+   */
+  private static void awaitClosed(Path file) throws IOException {
+    var fds = Path.of("/proc/self/fd");
+    if (!Files.isDirectory(fds)) {
+      return;
+    }
+    var deadline = System.nanoTime() + Duration.ofMinutes(1).toNanos();
+    while (openOn(fds, file)) {
+      assertTrue(System.nanoTime() < deadline, file + " is still open a minute on");
+      Thread.yield();
+    }
+  }
+
+  private static boolean openOn(Path fds, Path file) throws IOException {
+    try (var open = Files.list(fds)) {
+      for (var fd : open.toList()) {
+        try {
+          if (Files.readSymbolicLink(fd).toString().startsWith(file.toString())) {
+            return true;
+          }
+        } catch (FileSystemException closedMeanwhile) {
+          var unused = closedMeanwhile;
+        }
+      }
+    }
+    return false;
   }
 
   /**
@@ -404,11 +467,7 @@ class PtySessionHostTest {
       create(channel, "stubborn", "");
     }
     var shim =
-        ProcessHandle.current()
-            .children()
-            .filter(child -> child.info().commandLine().orElse("").contains(dir.toString()))
-            .findFirst()
-            .orElseThrow();
+        ProcessHandle.current().children().filter(this::ofThisTest).findFirst().orElseThrow();
 
     var written =
         assertTimeoutPreemptively(
@@ -421,6 +480,11 @@ class PtySessionHostTest {
             "it ends in time");
 
     assertTrue(written, "the shim was gone and the record written before the stop returned");
+  }
+
+  /** Whether {@code child} is one of this test's, its command naming this test's directory. */
+  private boolean ofThisTest(ProcessHandle child) {
+    return child.info().commandLine().orElse("").contains(dir.toString());
   }
 
   /** Waits until {@code stopper} waits with a timeout, as a stop waiting for an ending does. */
@@ -495,14 +559,19 @@ class PtySessionHostTest {
     }
   }
 
+  /** A connection welcomed for {@code token}; one turned away is closed, and says why. */
   private SocketChannel connect(String token) throws IOException {
     var channel = SocketChannel.open(StandardProtocolFamily.UNIX);
-    channel.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
-    var reply = hello(channel, token);
-    if (reply instanceof PtyMessage.Err err) {
-      throw new IOException(err.message());
+    try {
+      channel.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
+      if (hello(channel, token) instanceof PtyMessage.Err err) {
+        throw new IOException(err.message());
+      }
+      return channel;
+    } catch (IOException | RuntimeException refused) {
+      channel.close();
+      throw refused;
     }
-    return channel;
   }
 
   private static PtyMessage hello(SocketChannel channel, String token) throws IOException {
@@ -1882,23 +1951,26 @@ class PtySessionHostTest {
         var first = connect();
         var second = connect()) {
       startGate = new CountDownLatch(1);
-      PtyWire.write(
-          first,
-          new PtyMessage.Create("s0", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
-      assertTrue(startGated.await(10, TimeUnit.SECONDS), "the first create is mid-admission");
-      PtyWire.write(second, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
-      PtyWire.write(
-          second,
-          new PtyMessage.Create("s1", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
-      assertInstanceOf(PtyMessage.Sessions.class, PtyWire.read(second));
-      try (var fence = connect()) {
-        PtyWire.write(fence, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
-        assertInstanceOf(
-            PtyMessage.Sessions.class,
-            PtyWire.read(fence),
-            "the second create has had a whole round trip to reach admission before the gate opens");
+      try {
+        PtyWire.write(
+            first,
+            new PtyMessage.Create("s0", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
+        assertTrue(startGated.await(10, TimeUnit.SECONDS), "the first create is mid-admission");
+        PtyWire.write(second, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+        PtyWire.write(
+            second,
+            new PtyMessage.Create("s1", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Sessions.class, PtyWire.read(second));
+        try (var fence = connect()) {
+          PtyWire.write(fence, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+          assertInstanceOf(
+              PtyMessage.Sessions.class,
+              PtyWire.read(fence),
+              "the second create has had a whole round trip to reach admission before the gate opens");
+        }
+      } finally {
+        startGate.countDown();
       }
-      startGate.countDown();
 
       assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(first));
       var refused = assertInstanceOf(PtyMessage.Err.class, PtyWire.read(second));
@@ -2105,12 +2177,22 @@ class PtySessionHostTest {
       assertEquals(List.of("here live", "in-acme live"), listedFor("tok-uday"));
 
       try (var box = connect("")) {
-        host.handoff();
-        PtyWire.write(box, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
-        assertEquals(
-            "The pty host is shutting down; reconnect and try again.",
-            assertInstanceOf(PtyMessage.Err.class, PtyWire.read(box)).message(),
-            "a listing during a handoff is refused, not a short page");
+        var masters = host.handoff();
+        try {
+          PtyWire.write(box, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+          assertEquals(
+              "The pty host is shutting down; reconnect and try again.",
+              assertInstanceOf(PtyMessage.Err.class, PtyWire.read(box)).message(),
+              "a listing during a handoff is refused, not a short page");
+        } finally {
+          var shims = ProcessHandle.current().children().filter(this::ofThisTest).toList();
+          for (var master : masters.values()) {
+            Pty.closeFd(master);
+          }
+          for (var child : shims) {
+            child.onExit().get(1, TimeUnit.MINUTES);
+          }
+        }
       }
     }
   }

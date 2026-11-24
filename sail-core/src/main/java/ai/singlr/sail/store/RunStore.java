@@ -125,9 +125,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * RunLogin#CONTAINER} for one that names none, which uses whatever login its container has. Null
    * until the launch records it. {@code dispatchedBy} is the handle of the person whose request
    * launched the run, null when Sail's own machinery launched it (the review loop, a room wake, a
-   * resumed build). {@code loginOverridden} is the credential source its harness reported using
-   * instead of that login, read with its usage ({@link RunReport#overriddenBy}); null when it used
-   * the login, or said nothing of it.
+   * resumed build).
    */
   public record RunRow(
       String id,
@@ -161,8 +159,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String effort,
       RunUsage usage,
       RunLogin login,
-      String dispatchedBy,
-      String loginOverridden) {
+      String dispatchedBy) {
 
     /** The kind of the stored login the run started with; null for a container's own, or none. */
     public String loginKind() {
@@ -246,7 +243,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           sessionId,
           sessionSource,
           transcriptPath,
-          null,
           null,
           null,
           null,
@@ -424,7 +420,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           + " principal, owner, session_id, session_source, transcript_path, last_activity_at,"
           + " room_id, review_id, stop_source, model, effort, tokens_in, tokens_out,"
           + " tokens_cache_read, tokens_cache_write, cost_usd, usage_source, login, login_kind,"
-          + " dispatched_by, login_overridden";
+          + " dispatched_by";
 
   /**
    * Records a new run in the {@code running} state, journaling a baseline revision so it
@@ -1689,8 +1685,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
 
   /**
    * Records {@code reported}, a live run's report after a turn: its running total as its share of
-   * its session's ({@link #attributed}), and the credential it used instead of its login. Only
-   * while it runs, and with no revision: the finish that ends it journals the row whole.
+   * its session's ({@link #attributed}). Only while it runs, and with no revision: the finish that
+   * ends it journals the row whole.
    */
   public void recordUsage(String id, RunReport reported) {
     db.transaction(
@@ -1702,7 +1698,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           var attributed = attributed(run.get(), reported.usage());
           db.execute(
               "UPDATE runs SET " + USAGE_SET + " WHERE id = ? AND status = 'running'",
-              usageParameters(attributed.own(), reported, id));
+              usageParameters(attributed.own(), id));
           keep(run.get(), attributed.session());
           return null;
         });
@@ -1730,10 +1726,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
                   + ", stop_source = COALESCE(stop_source, ?)"
                   + " WHERE id = ? AND usage_source IS NULL",
               usageParameters(
-                  attributed.own(),
-                  report,
-                  report.refusedItsLogin() ? STOPPED_FOR_LOGIN : null,
-                  id));
+                  attributed.own(), report.refusedItsLogin() ? STOPPED_FOR_LOGIN : null, id));
           keep(run.get(), attributed.session());
           recordRevision(id, ChangeLog.Entry.LOCAL, false);
           return true;
@@ -1917,10 +1910,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
 
   private static final String USAGE_SET =
       "model = COALESCE(?, model), tokens_in = ?, tokens_out = ?, tokens_cache_read = ?,"
-          + " tokens_cache_write = ?, cost_usd = ?, usage_source = ?,"
-          + " login_overridden = COALESCE(?, login_overridden)";
+          + " tokens_cache_write = ?, cost_usd = ?, usage_source = ?";
 
-  private static Object[] usageParameters(RunUsage usage, RunReport report, Object... after) {
+  private static Object[] usageParameters(RunUsage usage, Object... after) {
     var parameters =
         new ArrayList<Object>(
             Arrays.asList(
@@ -1930,8 +1922,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
                 usage.tokensCacheRead(),
                 usage.tokensCacheWrite(),
                 usage.costUsd(),
-                usage.source().wire(),
-                report.overriddenBy()));
+                usage.source().wire()));
     parameters.addAll(Arrays.asList(after));
     return parameters.toArray();
   }
@@ -2024,11 +2015,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
                   own == null
                       ? new Object[] {id, expected}
                       : usageParameters(
-                          own,
-                          report,
-                          report.refusedItsLogin() ? STOPPED_FOR_LOGIN : null,
-                          id,
-                          expected)));
+                          own, report.refusedItsLogin() ? STOPPED_FOR_LOGIN : null, id, expected)));
           db.execute(
               "UPDATE runs SET status = ?, completed_at = ?, exit_code = COALESCE(?, exit_code)"
                   + (own == null
@@ -2244,9 +2231,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             principal, owner, session_id, session_source, transcript_path, last_activity_at,
             room_id, review_id, stop_source, model, effort, tokens_in, tokens_out,
             tokens_cache_read, tokens_cache_write, cost_usd, usage_source, login, login_kind,
-            dispatched_by, login_overridden)
+            dispatched_by)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET project = excluded.project, spec_id = excluded.spec_id,
             node = excluded.node, role = excluded.role, agent = excluded.agent,
             branch = excluded.branch, task = excluded.task, pid = excluded.pid,
@@ -2263,8 +2250,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             tokens_out = excluded.tokens_out, tokens_cache_read = excluded.tokens_cache_read,
             tokens_cache_write = excluded.tokens_cache_write, cost_usd = excluded.cost_usd,
             usage_source = excluded.usage_source, login = excluded.login,
-            login_kind = excluded.login_kind, dispatched_by = excluded.dispatched_by,
-            login_overridden = excluded.login_overridden""",
+            login_kind = excluded.login_kind, dispatched_by = excluded.dispatched_by""",
         row.id(),
         row.project(),
         row.specId(),
@@ -2302,8 +2288,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         row.usage() == null ? null : row.usage().source().wire(),
         row.login() == null ? null : row.login().name(),
         row.login() == null ? null : row.login().kind(),
-        row.dispatchedBy(),
-        row.loginOverridden());
+        row.dispatchedBy());
   }
 
   private static Map<String, Object> snapshotMap(RunRow run) {
@@ -2347,7 +2332,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     map.put("login", run.login() == null ? null : run.login().name());
     map.put("login_kind", run.login() == null ? null : run.login().kind());
     map.put("dispatched_by", run.dispatchedBy());
-    map.put("login_overridden", run.loginOverridden());
     return map;
   }
 
@@ -2405,8 +2389,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           "usage_source",
           "login",
           "login_kind",
-          "dispatched_by",
-          "login_overridden");
+          "dispatched_by");
 
   /**
    * The subset of a snapshot that carries the run's meaning across boxes. The surrogate id is out
@@ -2469,8 +2452,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             ? null
             : new RunLogin(
                 Snapshots.text(snapshot, "login"), Snapshots.text(snapshot, "login_kind")),
-        Snapshots.text(snapshot, "dispatched_by"),
-        Snapshots.text(snapshot, "login_overridden"));
+        Snapshots.text(snapshot, "dispatched_by"));
   }
 
   /** The run's store-specific half of the shared {@link RevisionJournal} sync protocol. */
@@ -2574,8 +2556,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             row.real(33),
             row.text(27)),
         row.isNull(35) ? null : new RunLogin(row.text(35), row.text(36)),
-        row.text(37),
-        row.text(38));
+        row.text(37));
   }
 
   /** The usage a row records, null when it names no source: not finished, or not read. */

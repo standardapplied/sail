@@ -6,11 +6,9 @@
 package ai.singlr.sail.pty;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.nio.charset.StandardCharsets;
+import ai.singlr.sail.engine.Child;
 import java.nio.file.Path;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 class AccountTest {
@@ -22,13 +20,11 @@ class AccountTest {
   @Test
   void thisProcessesAccountIsItsEntryInTheAccountDatabase() throws Exception {
     var perl =
-        new ProcessBuilder(
-                "perl", "-e", "my @p = getpwuid($<); print join(\"\\n\", $p[0], $p[7], $p[8])")
-            .redirectErrorStream(true)
-            .start();
-    assertTrue(perl.waitFor(30, TimeUnit.SECONDS), "perl answered");
-    var entry =
-        new String(perl.getInputStream().readAllBytes(), StandardCharsets.UTF_8).split("\n");
+        Child.run(
+            new ProcessBuilder(
+                "perl", "-e", "my @p = getpwuid($<); print join(\"\\n\", $p[0], $p[7], $p[8])"));
+    assertEquals(0, perl.exit(), perl.stderr());
+    var entry = perl.stdout().split("\n");
 
     assertEquals(new Account(entry[0], Path.of(entry[1]), Path.of(entry[2])), Account.current());
   }

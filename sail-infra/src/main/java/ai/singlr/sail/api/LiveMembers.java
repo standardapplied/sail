@@ -978,7 +978,6 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     private Instant lastDelta = Instant.MIN;
     private Instant lastStamp = Instant.MIN;
     private String sessionId;
-    private String initLine;
     private boolean loginSaid;
     private int turn;
     private boolean turnOpen;
@@ -1159,7 +1158,6 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       }
       switch (LiveStream.read(line)) {
         case LiveStream.Step.Init init -> {
-          initLine = line;
           session(init.sessionId());
           startTurn();
         }
@@ -1331,26 +1329,21 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     /**
      * What the run has spent once a turn ends: its harness's running total on the turn's result
      * line, set on the run as it runs, so its finish records the last of them, once (M1). The
-     * turn's report, its process's {@code init} line and this result, also says what came of the
-     * login the member was given: recorded with it, and said once for the member's run (RL4).
+     * result also says what came of the login the member was given: said once for the member's run
+     * (RL4).
      */
     private void spent(String line) {
       var harness = Harnesses.of(run.agent());
-      var usage = harness.usage(line);
-      var outcome =
-          harness
-              .declaredKind(run.loginKind())
-              .flatMap(
-                  kind ->
-                      harness.loginOutcome(initLine == null ? line : initLine + "\n" + line, kind))
-              .orElse(null);
-      var report = new RunReport(usage == null ? RunUsage.NONE : usage, outcome);
-      if (report.usage().reported() || report.overriddenBy() != null) {
+      var kind = harness.declaredKind(run.loginKind());
+      var usage = Objects.requireNonNullElse(harness.usage(line), RunUsage.NONE);
+      var outcome = kind.isEmpty() ? null : harness.loginOutcome(line).orElse(null);
+      var report = new RunReport(kind.map(given -> given.charged(usage)).orElse(usage), outcome);
+      if (report.usage().reported()) {
         runStore.recordUsage(runId, report);
       }
       if (outcome != null && !loginSaid) {
         loginSaid = true;
-        reports.heardLive(runStore, run, report);
+        reports.heardLive(run, report);
       }
     }
 

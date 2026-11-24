@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.identity.ActingAs;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -182,10 +183,7 @@ class BlobStoreTest {
         assertEquals(0, child.exitValue());
         assertEquals(5, collecting.get(5, TimeUnit.SECONDS));
       } finally {
-        if (child != null) {
-          child.destroyForcibly();
-          child.waitFor();
-        }
+        end(child);
       }
     }
   }
@@ -218,11 +216,15 @@ class BlobStoreTest {
         assertEquals(0, child.exitValue());
         assertFalse(blobs.has(orphan));
       } finally {
-        if (child != null) {
-          child.destroyForcibly();
-          child.waitFor();
-        }
+        end(child);
       }
+    }
+  }
+
+  /** Ends {@code child}, if it started, and closes the pipes this test spoke to it through. */
+  private static void end(Process child) throws Exception {
+    if (child != null) {
+      Child.end(child);
     }
   }
 

@@ -1953,8 +1953,7 @@ record RunView(
     String presence,
     String reviewId,
     RunStore.RunLogin login,
-    String dispatchedBy,
-    String loginOverridden)
+    String dispatchedBy)
     implements Mappable {
   static RunView from(RunStore.RunRow row) {
     return new RunView(
@@ -1979,8 +1978,7 @@ record RunView(
         RunPresence.of(row.status(), row.lastActivityAt(), DateTimeUtils.now()),
         row.reviewId(),
         row.login(),
-        row.dispatchedBy(),
-        row.loginOverridden());
+        row.dispatchedBy());
   }
 
   @Override
@@ -2012,7 +2010,6 @@ record RunView(
       if (login.kind() != null) m.put("login_kind", login.kind());
     }
     if (dispatchedBy != null) m.put("dispatched_by", dispatchedBy);
-    if (loginOverridden != null) m.put("login_overridden", loginOverridden);
     return m;
   }
 }
@@ -2143,8 +2140,8 @@ record AgentOffersResponse(
  * One harness as a workspace offers it: its modes, the first the one it starts in until a person
  * chooses, and why there are no others ({@code note}); the login it starts signed in with, or why
  * there is none ({@code loginRefusal}), and the kinds a person stores one of; whether it starts
- * with the person signing in inside it ({@code inside}); and why it does not start at all ({@code
- * refusal}).
+ * with the person signing in inside it ({@code inside}), and then how they sign in with their
+ * subscription ({@code sign_in}); and why it does not start at all ({@code refusal}).
  */
 record AgentOffer(
     Harness harness, LoginStore.Row login, ApiError loginRefusal, boolean inside, ApiError refusal)
@@ -2176,7 +2173,7 @@ record AgentOffer(
     }
     m.put(
         "kinds",
-        harness.offeredKinds().stream()
+        harness.loginKinds().stream()
             .map(
                 kind -> {
                   var shown = new LinkedHashMap<String, Object>();
@@ -2187,6 +2184,9 @@ record AgentOffer(
                 })
             .toList());
     m.put("inside", inside);
+    if (inside) {
+      m.put("sign_in", harness.signIn().toMaps());
+    }
     if (refusal != null) {
       m.put("refusal", refusal.toMap());
     }

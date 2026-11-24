@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import java.net.InetAddress;
 import org.junit.jupiter.api.Test;
 
 class HostInfoTest {
@@ -18,6 +19,11 @@ class HostInfoTest {
     var name = HostInfo.hostname();
     assertNotNull(name);
     assertFalse(name.isBlank());
+  }
+
+  @Test
+  void hostnameIsTheMachinesOwnName() throws Exception {
+    assertEquals(InetAddress.getLocalHost().getHostName(), HostInfo.hostname());
   }
 
   @Test

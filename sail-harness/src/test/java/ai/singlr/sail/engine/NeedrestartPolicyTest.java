@@ -6,14 +6,14 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -72,21 +72,23 @@ class NeedrestartPolicyTest {
   void concurrentInstallsAllSucceedAndAReaderOnlyEverSeesTheWholePolicy() throws Exception {
     var snippet = dir.resolve("50-sail.conf");
     var command = NeedrestartPolicy.DROP_IN.installCommand(snippet.toString());
-    var installs = new ArrayList<Process>();
-    for (var i = 0; i < 16; i++) {
-      installs.add(new ProcessBuilder(command).redirectErrorStream(true).start());
-    }
-
-    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-    while (installs.stream().anyMatch(Process::isAlive)) {
-      assertTrue(System.nanoTime() < deadline, "an install script hung");
-      if (Files.exists(snippet)) {
-        assertEquals(NeedrestartPolicy.DROP_IN.content(), Files.readString(snippet));
+    var installs = new ArrayList<Future<Child.Ended>>();
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      for (var i = 0; i < 16; i++) {
+        installs.add(
+            executor.submit(
+                () -> Child.run(new ProcessBuilder(command).redirectErrorStream(true))));
+      }
+      while (installs.stream().anyMatch(install -> !install.isDone())) {
+        if (Files.exists(snippet)) {
+          assertEquals(NeedrestartPolicy.DROP_IN.content(), Files.readString(snippet));
+        }
       }
     }
 
     for (var install : installs) {
-      assertEquals(0, install.waitFor(), new String(install.getInputStream().readAllBytes()));
+      var ended = install.get();
+      assertEquals(0, ended.exit(), ended.stdout());
     }
     assertEquals(NeedrestartPolicy.DROP_IN.content(), Files.readString(snippet));
     try (var files = Files.list(dir)) {
@@ -110,9 +112,6 @@ class NeedrestartPolicyTest {
   }
 
   private int run(List<String> command) throws Exception {
-    var process = new ProcessBuilder(command).redirectErrorStream(true).start();
-    var output = new String(process.getInputStream().readAllBytes());
-    assertTrue(process.waitFor(10, TimeUnit.SECONDS), "the install script hung: " + output);
-    return process.exitValue();
+    return Child.run(new ProcessBuilder(command).redirectErrorStream(true)).exit();
   }
 }

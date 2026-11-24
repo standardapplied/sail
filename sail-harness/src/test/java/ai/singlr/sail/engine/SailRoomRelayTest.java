@@ -16,14 +16,12 @@ import java.io.IOException;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
 import java.nio.channels.ServerSocketChannel;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -374,12 +372,8 @@ class SailRoomRelayTest {
     }
     env.put("PATH", pathPrefix + ":" + env.getOrDefault("PATH", "/usr/bin:/bin"));
     env.putAll(extraEnv);
-    var process = pb.start();
-    process.getOutputStream().close();
-    var stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    var stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertTrue(process.waitFor(30, TimeUnit.SECONDS), "the relay must finish well inside its 15s");
-    return new RelayResult(process.exitValue(), stdout, stderr);
+    var ran = Child.run(pb);
+    return new RelayResult(ran.exit(), ran.stdout(), ran.stderr());
   }
 
   private static void writeExecutable(Path path, String content) throws IOException {

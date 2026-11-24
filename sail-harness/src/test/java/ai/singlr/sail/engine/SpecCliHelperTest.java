@@ -20,7 +20,6 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 class SpecCliHelperTest {
@@ -360,10 +359,8 @@ class SpecCliHelperTest {
     env.put("PATH", bin + ":" + env.getOrDefault("PATH", "/usr/bin:/bin"));
     env.putAll(extra);
     pb.redirectErrorStream(true);
-    var process = pb.start();
-    var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertTrue(process.waitFor(30, TimeUnit.SECONDS), "the shim must finish");
-    return new Shim(process.exitValue(), output);
+    var ran = Child.run(pb);
+    return new Shim(ran.exit(), ran.stdout());
   }
 
   private static java.io.Closeable bind(Path socket) throws IOException {

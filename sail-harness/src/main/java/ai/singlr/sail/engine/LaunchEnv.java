@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.LoginKind;
 import ai.singlr.sail.store.LoginStore;
 import ai.singlr.sail.store.RunStore;
 import java.util.Objects;
@@ -40,6 +41,11 @@ public record LaunchEnv(String runCredential, LoginStore.Login stored) {
     }
   }
 
+  /** The kind of the stored login the run starts with, {@code null} for its container's own. */
+  public LoginKind kind() {
+    return stored == null ? null : stored.kind();
+  }
+
   /** The login the run starts with, as its row records it: never the value. */
   public RunStore.RunLogin login() {
     return stored == null
@@ -60,22 +66,18 @@ public record LaunchEnv(String runCredential, LoginStore.Login stored) {
   }
 
   /**
-   * The lines of {@code stored} alone: every other variable its harness takes a credential from and
-   * every switch that sends it to a cloud provider's account set empty, then its own kind's.
+   * The lines of {@code stored} alone: what its harness pins beside its key ({@link
+   * ai.singlr.sail.harness.Harness#pinned}: every other credential and cloud switch empty, then the
+   * kind's fixed values, such as the address its key is sent to), then its own kind's.
    */
   public static String loginLines(LoginStore.Login stored) {
     var lines = new StringBuilder();
-    var own = stored.kind().variable();
-    var harness = Harnesses.of(stored.row().harness());
-    for (var variable : harness.loginVariables()) {
-      if (!variable.equals(own)) {
-        lines.append(variable).append("=\n");
-      }
-    }
-    for (var variable : harness.credentialSwitches()) {
-      lines.append(variable).append("=\n");
-    }
-    return lines.append(own).append('=').append(stored.value()).append('\n').toString();
+    var kind = stored.kind();
+    Harnesses.of(stored.row().harness())
+        .pinned(kind)
+        .forEach(
+            (variable, value) -> lines.append(variable).append('=').append(value).append('\n'));
+    return lines.append(kind.variable()).append('=').append(stored.value()).append('\n').toString();
   }
 
   /**

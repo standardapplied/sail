@@ -207,7 +207,7 @@ func answer<Response>(
         #expect(claude.login?.name == "work" && claude.login?.kind == "api-key")
         #expect(claude.modeDefault == claude.modes.first?.mode)
         #expect(claude.modes.count == 7 && claude.refusal == nil && claude.loginRefusal == nil && claude.inside)
-        #expect(claude.kinds.map(\.label) == ["API key", "long-lived token"], "in the order a person is shown them")
+        #expect(claude.kinds.map(\.label) == ["API key", "GLM Coding Plan key"], "in the order a person is shown them")
         let codex = try #require(owned.offered.last)
         #expect(codex.refusal?.code == .known(.harnessNotInstalled) && !codex.inside && codex.login == nil)
         #expect(codex.note?.hasPrefix("Sail starts Codex CLI in a workspace with full access") == true && codex.modes.count == 1)

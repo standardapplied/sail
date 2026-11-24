@@ -57,7 +57,7 @@ class LoginRoutesTest {
     CLIENT.close();
   }
 
-  private static final String TOKEN = "sk-ant-oat01-TOKEN_value-0001";
+  private static final String GLM = "fake-glm-GLM_value-0001";
   private static final String KEY = "sk-ant-api03-KEY_value-0002";
 
   @TempDir Path tempDir;
@@ -169,7 +169,7 @@ class LoginRoutesTest {
                     : HttpRequest.BodyPublishers.ofString(json));
     var response = CLIENT.send(request.build(), HttpResponse.BodyHandlers.ofString());
     var answer = new Answer(response.statusCode(), response.body());
-    assertFalse(answer.body().contains(TOKEN), "no answer holds a value: " + answer.body());
+    assertFalse(answer.body().contains(GLM), "no answer holds a value: " + answer.body());
     assertFalse(answer.body().contains(KEY), "no answer holds a value: " + answer.body());
     return answer;
   }
@@ -198,7 +198,7 @@ class LoginRoutesTest {
   @SuppressWarnings("unchecked")
   @Test
   void aMemberStoresListsSwitchesAndRemovesTheirOwnLoginsSeeingNoValue() throws Exception {
-    var stored = store(sam, "default", "token", TOKEN);
+    var stored = store(sam, "default", "glm", GLM);
 
     assertEquals(200, stored.status(), stored.body());
     var login = (Map<String, Object>) stored.map().get("login");
@@ -208,14 +208,14 @@ class LoginRoutesTest {
     assertEquals(8, login.get("fingerprint").toString().length());
     assertEquals(200, store(sam, "personal", "api-key", KEY).status());
     assertEquals(
-        List.of("default token default", "personal api-key"),
+        List.of("default glm default", "personal api-key"),
         named(ask(sam, "GET", "/v1/logins", null)));
 
     var used = ask(sam, "POST", "/v1/logins/claude-code/personal:use", null);
 
     assertEquals(200, used.status(), used.body());
     assertEquals(
-        List.of("default token", "personal api-key default"),
+        List.of("default glm", "personal api-key default"),
         named(ask(sam, "GET", "/v1/logins", null)));
     var fdes = new FdeStore(db);
     var samId = fdes.byHandle("sam").orElseThrow().id();
@@ -238,18 +238,18 @@ class LoginRoutesTest {
             "person", "sam",
             "harness", "claude-code",
             "name", "default",
-            "kind", "token",
+            "kind", "glm",
             "fingerprint", login.get("fingerprint")),
         first.data());
     assertEquals("sam", first.agent());
-    assertFalse(events.toString().contains(TOKEN));
+    assertFalse(events.toString().contains(GLM));
     assertFalse(events.toString().contains(KEY));
   }
 
   @Test
   void aViewerKeepsTheirOwnAndAnotherPersonsAreAnAdminsToListOrRemove() throws Exception {
-    assertEquals(200, store(obs, "default", "token", TOKEN).status());
-    assertEquals(200, store(sam, "default", "token", TOKEN).status());
+    assertEquals(200, store(obs, "default", "glm", GLM).status());
+    assertEquals(200, store(sam, "default", "glm", GLM).status());
 
     var refused = ask(sam, "GET", "/v1/logins?fde=obs", null);
     var refusedRemove = ask(sam, "DELETE", "/v1/logins/claude-code/default?fde=obs", null);
@@ -258,10 +258,10 @@ class LoginRoutesTest {
     assertEquals("forbidden_admin_only", ((Map<?, ?>) refused.map().get("error")).get("code"));
     assertEquals(403, refusedRemove.status());
     assertEquals(
-        List.of("default token default"), named(ask(ada, "GET", "/v1/logins?fde=sam", null)));
+        List.of("default glm default"), named(ask(ada, "GET", "/v1/logins?fde=sam", null)));
     assertEquals(200, ask(ada, "DELETE", "/v1/logins/claude-code/default?fde=sam", null).status());
     assertEquals(List.of(), named(ask(sam, "GET", "/v1/logins", null)));
-    assertEquals(List.of("default token default"), named(ask(obs, "GET", "/v1/logins", null)));
+    assertEquals(List.of("default glm default"), named(ask(obs, "GET", "/v1/logins", null)));
     assertEquals("ada", events.getLast().agent(), "the removal is announced as the admin's");
     assertEquals("sam", events.getLast().data().get("person"));
     assertEquals(404, ask(ada, "GET", "/v1/logins?fde=nobody", null).status());
@@ -269,7 +269,7 @@ class LoginRoutesTest {
 
   @Test
   void aCredentialForNoPersonKeepsNoLogins() throws Exception {
-    var refused = store(machine, "default", "token", TOKEN);
+    var refused = store(machine, "default", "glm", GLM);
 
     assertEquals(403, refused.status());
     assertEquals(
@@ -280,15 +280,15 @@ class LoginRoutesTest {
   @Test
   void aValueOrNameBreakingItsRuleAndALoginNotStoredAreRefusedSayingSoAndNeverTheValue()
       throws Exception {
-    var spaced = store(sam, "default", "token", "sk-ant-oat01 TOKEN_value-0001");
-    var badName = store(sam, "Work", "token", TOKEN);
-    var badKind = store(sam, "default", "session", TOKEN);
+    var spaced = store(sam, "default", "glm", "fake-glm GLM_value-0001");
+    var badName = store(sam, "Work", "glm", GLM);
+    var deletedKind = store(sam, "default", "token", GLM);
     var badHarness =
         ask(
             sam,
             "PUT",
             "/v1/logins/gem%0Aini" + "x".repeat(4000) + "/default",
-            YamlUtil.dumpJson(Map.of("kind", "api-key", "value", TOKEN)));
+            YamlUtil.dumpJson(Map.of("kind", "api-key", "value", GLM)));
     var useBadHarness = ask(sam, "POST", "/v1/logins/gemini/default:use", null);
     var removeBadHarness = ask(sam, "DELETE", "/v1/logins/gemini/default", null);
     var missing = ask(sam, "POST", "/v1/logins/claude-code/work:use", null);
@@ -298,7 +298,7 @@ class LoginRoutesTest {
     assertEquals(
         "A login's value is printable ASCII with no space, quote, backslash, $ or backtick.",
         ((Map<?, ?>) spaced.map().get("error")).get("message"));
-    assertFalse(spaced.body().contains("TOKEN_value"));
+    assertFalse(spaced.body().contains("GLM_value"));
     assertEquals(List.of(), ((Map<?, ?>) spaced.map().get("error")).get("field_errors"));
     assertEquals(422, badName.status());
     var nameRule =
@@ -310,10 +310,11 @@ class LoginRoutesTest {
         List.of(Map.of("field", "name", "message", nameRule)),
         refusedName.get("field_errors"),
         "a name breaking its rule is refused naming the field, so a client says it under the name");
-    assertEquals(422, badKind.status());
+    assertEquals(422, deletedKind.status());
     assertEquals(
-        "Claude Code takes no login of kind 'session'; it takes token, api-key.",
-        ((Map<?, ?>) badKind.map().get("error")).get("message"));
+        "Claude Code takes no login of kind 'token'; it takes api-key, glm.",
+        ((Map<?, ?>) deletedKind.map().get("error")).get("message"),
+        "the subscription token Claude Code no longer takes is refused naming the kinds there are");
     var noSuchHarness = "A login is stored for claude-code, codex or as a git token.";
     assertEquals(422, badHarness.status());
     assertEquals(
@@ -340,7 +341,7 @@ class LoginRoutesTest {
   /** A login live runs started with goes on serving them; removing it says so, once. */
   @Test
   void removingALoginLiveRunsStartedWithSaysTheyFinishOnIt() throws Exception {
-    assertEquals(200, store(sam, "work", "token", TOKEN).status());
+    assertEquals(200, store(sam, "work", "glm", GLM).status());
     var runs = new RunStore(db);
     for (var i = 0; i < 2; i++) {
       var id = DateTimeUtils.newId().toString();
@@ -351,7 +352,7 @@ class LoginRoutesTest {
             runs.recordLaunch(
                 id,
                 new RunStore.Launched(
-                    null, null, null, new RunStore.RunLogin("work", "token"), null));
+                    null, null, null, new RunStore.RunLogin("work", "glm"), null));
           });
     }
 
@@ -389,7 +390,7 @@ class LoginRoutesTest {
   @Test
   void aPersonKeepsTheirOwnGitTokensByHostAndOnlyAnAdminReachesAnothersSeeingNoValue()
       throws Exception {
-    var stored = storeToken(sam, "GitHub.com", TOKEN);
+    var stored = storeToken(sam, "GitHub.com", GLM);
 
     assertEquals(200, stored.status(), stored.body());
     var login = (Map<String, Object>) stored.map().get("login");
@@ -422,7 +423,7 @@ class LoginRoutesTest {
         List.of("login_stored", "login_stored", "login_removed"),
         events.stream().map(Event::type).toList());
     assertEquals("git", events.getFirst().data().get("harness"));
-    assertFalse(events.toString().contains(TOKEN));
+    assertFalse(events.toString().contains(GLM));
     assertFalse(events.toString().contains(KEY));
   }
 
@@ -433,7 +434,7 @@ class LoginRoutesTest {
    */
   @Test
   void aStoreNamingAnotherPersonIsRefusedForAnAdminTooAndChangesNothing() throws Exception {
-    assertEquals(200, storeToken(ada, "github.com", TOKEN).status());
+    assertEquals(200, storeToken(ada, "github.com", GLM).status());
 
     var git =
         ask(
@@ -446,13 +447,13 @@ class LoginRoutesTest {
             ada,
             "PUT",
             "/v1/logins/claude-code/default?fde=sam",
-            YamlUtil.dumpJson(Map.of("kind", "token", "value", KEY)));
+            YamlUtil.dumpJson(Map.of("kind", "api-key", "value", KEY)));
     var own =
         ask(
             ada,
             "PUT",
             "/v1/logins/git/github.com?fde=ada",
-            YamlUtil.dumpJson(Map.of("kind", "token", "value", TOKEN)));
+            YamlUtil.dumpJson(Map.of("kind", "token", "value", GLM)));
 
     var sentence = "Nobody stores a login for another person: sam stores their own.";
     assertEquals(403, git.status(), git.body());
@@ -462,7 +463,7 @@ class LoginRoutesTest {
     assertEquals(200, own.status(), own.body());
     var fdes = new FdeStore(db);
     assertEquals(
-        Map.of("github.com", TOKEN),
+        Map.of("github.com", GLM),
         fdes.logins().gitTokens(fdes.byHandle("ada").orElseThrow().id()));
     assertEquals(Map.of(), fdes.logins().gitTokens(fdes.byHandle("sam").orElseThrow().id()));
     assertEquals(List.of(), fdes.logins().list(fdes.byHandle("sam").orElseThrow().id()));
@@ -474,7 +475,7 @@ class LoginRoutesTest {
   @Test
   void aGitTokenForABadHostOrWithABadValueIsRefusedNamingTheRule() throws Exception {
     var spaced = storeToken(sam, "github.com", "a b");
-    var badHost = storeToken(sam, "git_hub.com", TOKEN);
+    var badHost = storeToken(sam, "git_hub.com", GLM);
 
     assertEquals(422, spaced.status());
     assertTrue(spaced.body().contains("printable ASCII with no space"), spaced.body());

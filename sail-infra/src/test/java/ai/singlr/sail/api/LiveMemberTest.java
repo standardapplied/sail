@@ -21,6 +21,7 @@ import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.harness.RunUsage;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.TestLogins;
@@ -90,9 +91,9 @@ class LiveMemberTest {
         "the process holds its run's own credential, so the spec CLI speaks for it");
     assertEquals(
         TestLogins.VALUE,
-        started.secrets().get("CLAUDE_CODE_OAUTH_TOKEN"),
+        started.secrets().get("ANTHROPIC_API_KEY"),
         "a member of a spec's room starts with its person's stored login");
-    assertEquals(new RunStore.RunLogin("default", "token"), run.login());
+    assertEquals(new RunStore.RunLogin("default", "api-key"), run.login());
     assertEquals(LiveRoom.HANDLE, run.dispatchedBy(), "the person whose message woke it");
     assertEquals(null, room.container.file(unit.launchEnvPath()), "read and removed");
     assertEquals(unit.pidPath(), started.pidFile());
@@ -289,13 +290,40 @@ class LiveMemberTest {
   }
 
   /**
-   * RL4 for a live member: each turn's report is its process's {@code init} line and the turn's
-   * result, real lines of Claude Code refusing a fake token; the refusal is said once for the
-   * member's run however many turns meet it, and a credential its harness took instead of the login
-   * is recorded on the run.
+   * A live member on a GLM key holds the tokens its turns reported and no dollars: Claude Code
+   * prices them at Anthropic's rates, which are not what Z.AI charges.
    */
   @Test
-  void aMemberWhoseLoginWasRefusedSaysSoOnceAndOneThatRanOnAnotherIsRecorded() {
+  void aLiveMemberOnAGlmKeyHoldsItsTokensAndNoDollars() {
+    var fdes = new FdeStore(room.db);
+    fdes.logins()
+        .store(
+            fdes.byHandle(LiveRoom.HANDLE).orElseThrow().id(),
+            Harnesses.of("claude-code"),
+            null,
+            "glm",
+            "fake-glm-live-member");
+    var process = room.prompted(SPEC, "full", "first");
+    room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.spent("One", 10, 1.0));
+
+    var run = room.runs.findById(process.runId).orElseThrow();
+    assertEquals(new RunStore.RunLogin("default", "glm"), run.login());
+    assertEquals(
+        new RunUsage("claude-opus-5-5", 10L, 20L, 100L, 30L, null, RunUsage.Source.RESULT),
+        run.usage());
+    process.onClose(() -> process.exits(0));
+    room.later(Duration.ofMinutes(20));
+    room.live.sweep();
+    room.awaitStopped(process);
+  }
+
+  /**
+   * RL4 for a live member: each turn's report is the turn's result, real lines of Claude Code
+   * refusing a fake token; the refusal is said once for the member's run however many turns meet
+   * it.
+   */
+  @Test
+  void aMemberWhoseLoginWasRefusedSaysSoOnce() {
     var refused =
         RunLoginOutcomeTest.fixture("claude-code-refused-token.jsonl")
             .lines()
@@ -309,17 +337,9 @@ class LiveMemberTest {
         List.of(
             "sail: Claude Code refused "
                 + LiveRoom.HANDLE
-                + "'s login 'default' (long-lived token). Run claude"
-                + " setup-token on a machine where Claude Code is signed in, then sail agent login"
-                + " claude-code."),
+                + "'s login 'default' (API key). Create an API key in the Claude Console, then"
+                + " sail agent login claude-code."),
         room.conversation(SPEC).stream().filter(line -> line.startsWith("sail: ")).toList());
-    assertEquals(1, room.events(Event.WellKnownTypes.AGENT_LOGIN_OUTCOME).size());
-
-    var helper = RunLoginOutcomeTest.fixture("claude-code-helper-init.jsonl").strip();
-    room.says(SPEC, "third");
-    room.says(process, helper, Lines.result("Three"));
-
-    assertEquals("apiKeyHelper", room.runs.findById(process.runId).orElseThrow().loginOverridden());
     assertEquals(1, room.events(Event.WellKnownTypes.AGENT_LOGIN_OUTCOME).size(), "once a run");
   }
 

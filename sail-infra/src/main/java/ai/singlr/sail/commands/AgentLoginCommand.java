@@ -56,7 +56,7 @@ public final class AgentLoginCommand implements Runnable {
 
   @Option(
       names = "--kind",
-      description = "The login's kind: token or api-key for claude-code, api-key for codex.")
+      description = "The login's kind: api-key or glm for claude-code, api-key for codex.")
   private String kind;
 
   @Option(names = "--json", description = "Output in JSON format.")
@@ -75,7 +75,7 @@ public final class AgentLoginCommand implements Runnable {
       CommandLine.usage(this, System.out);
       return;
     }
-    CliCommand.run(this::execute);
+    CliCommand.run(json, this::execute);
   }
 
   private void execute() throws Exception {
@@ -312,7 +312,7 @@ public final class AgentLoginCommand implements Runnable {
 
     @Override
     public void run() {
-      CliCommand.run(this::execute);
+      CliCommand.run(json, this::execute);
     }
 
     private void execute() throws Exception {
@@ -357,7 +357,7 @@ public final class AgentLoginCommand implements Runnable {
 
     @Override
     public void run() {
-      CliCommand.run(this::execute);
+      CliCommand.run(json, this::execute);
     }
 
     private void execute() throws Exception {

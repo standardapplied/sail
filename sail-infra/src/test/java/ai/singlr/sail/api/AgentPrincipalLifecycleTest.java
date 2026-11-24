@@ -263,7 +263,7 @@ class AgentPrincipalLifecycleTest {
     fdes.add(HANDLE, null, HANDLE + "@sail.invalid", "member");
     fdes.add("alice", null, null, "admin");
     var claude = Harnesses.of("claude-code");
-    fdes.logins().store(fdes.byHandle(HANDLE).orElseThrow().id(), claude, null, null, "uday-token");
+    fdes.logins().store(fdes.byHandle(HANDLE).orElseThrow().id(), claude, null, null, "uday-key");
     fdes.logins()
         .store(fdes.byHandle("alice").orElseThrow().id(), claude, null, null, "alice-token");
     Acting.as(
@@ -324,8 +324,8 @@ class AgentPrincipalLifecycleTest {
         HANDLE,
         run.owner(),
         "the agent acts for the assignee whose spec it builds, never for the initiating admin");
-    assertEquals("uday-token", shell.pushed("CLAUDE_CODE_OAUTH_TOKEN"), "it spends uday's login");
-    assertEquals(new RunStore.RunLogin("default", "token"), run.login());
+    assertEquals("uday-key", shell.pushed("ANTHROPIC_API_KEY"), "it spends uday's login");
+    assertEquals(new RunStore.RunLogin("default", "api-key"), run.login());
     assertEquals("alice", run.dispatchedBy(), "and records who asked");
     var credential = shell.pushed("SAIL_RUN_CREDENTIAL");
 

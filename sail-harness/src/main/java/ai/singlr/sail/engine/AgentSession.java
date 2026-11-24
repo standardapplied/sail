@@ -11,6 +11,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harness.Launch;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.LoginKind;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -590,14 +591,16 @@ public final class AgentSession {
         logPath,
         runId,
         "",
+        null,
         null);
   }
 
   /**
    * As the eleven-argument overload, additionally exporting {@code role} as {@code SAIL_RUN_ROLE}
-   * (the lane marker hooks and synthesized stops carry) and, when {@code resumeSessionId} is
-   * non-null, launching the agent as a headless resume of that recorded conversation instead of a
-   * fresh one.
+   * (the lane marker hooks and synthesized stops carry), launching the agent as a headless resume
+   * of the recorded conversation {@code resumeSessionId} when it is non-null instead of a fresh
+   * one, and giving the harness the stored login of kind {@code login} its {@code launch.env}
+   * holds, as the harness takes one ({@link Launch#login}); {@code null} for its container's own.
    */
   public static List<String> buildBackgroundLaunchCommand(
       String containerName,
@@ -612,11 +615,13 @@ public final class AgentSession {
       String logPath,
       String runId,
       String role,
-      String resumeSessionId) {
+      String resumeSessionId,
+      LoginKind login) {
     var launching = Objects.requireNonNullElse(harness, Harnesses.DEFAULT);
     var effort = launching.requireEffort(reasoningEffort);
     var unit = AgentUnit.forRun(runId);
-    var launch = new Launch(unit.taskPath(), fullPermissions, model, effort, resumeSessionId, true);
+    var launch =
+        new Launch(unit.taskPath(), fullPermissions, model, effort, resumeSessionId, true, login);
     var agentCmd = LaunchEnv.wrap(unit.launchEnvPath(), agentCommand(launching, role, launch));
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
     var effectiveAgent =
@@ -694,10 +699,14 @@ public final class AgentSession {
         agentType,
         logPath,
         runId,
-        "");
+        "",
+        null);
   }
 
-  /** As the eleven-argument overload, additionally exporting {@code role} as SAIL_RUN_ROLE. */
+  /**
+   * As the eleven-argument overload, additionally exporting {@code role} as SAIL_RUN_ROLE and
+   * giving the harness the stored login of kind {@code login} ({@link Launch#login}).
+   */
   public static List<String> buildForegroundTaskCommand(
       String containerName,
       String sshUser,
@@ -710,7 +719,8 @@ public final class AgentSession {
       String agentType,
       String logPath,
       String runId,
-      String role) {
+      String role,
+      LoginKind login) {
     var launching = Objects.requireNonNullElse(harness, Harnesses.DEFAULT);
     var effort = launching.requireEffort(reasoningEffort);
     var unit = AgentUnit.forRun(runId);
@@ -718,7 +728,7 @@ public final class AgentSession {
         LaunchEnv.wrap(
             unit.launchEnvPath(),
             launching.headless(
-                new Launch(unit.taskPath(), fullPermissions, model, effort, null, false)));
+                new Launch(unit.taskPath(), fullPermissions, model, effort, null, false, login)));
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
     var effectiveAgent =
         agentType == null || agentType.isBlank() ? launching.yamlName() : agentType;

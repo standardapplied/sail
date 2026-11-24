@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.Child;
 import ai.singlr.sail.pty.PtyMessage.FileEntry;
 import ai.singlr.sail.pty.PtyMessage.FileKind;
 import java.io.IOException;
@@ -52,6 +53,8 @@ class FileScriptsTest {
   Path outside;
   final List<List<String>> commands = new CopyOnWriteArrayList<>();
   final List<FileScripts.Script> started = new CopyOnWriteArrayList<>();
+
+  private final List<Process> processes = new CopyOnWriteArrayList<>();
   FileScripts files;
 
   /**
@@ -157,13 +160,32 @@ class FileScriptsTest {
   void setUp() throws IOException {
     home = Files.createDirectory(dir.toRealPath().resolve("home"));
     outside = Files.createDirectory(dir.toRealPath().resolve("outside"));
-    files = over(home, commands);
+    files = ours(Map.of());
   }
 
   @AfterEach
-  void tearDown() throws IOException {
+  void tearDown() throws Exception {
     started.forEach(FileScripts.Script::end);
+    for (var process : processes) {
+      Child.end(process);
+    }
     open(dir);
+  }
+
+  /**
+   * Scripts in this test's home with {@code env} added, every process they start ended and its
+   * pipes closed once the test has run, whether or not the test read its script to the end.
+   */
+  private FileScripts ours(Map<String, String> env) {
+    return over(
+        home,
+        commands,
+        env,
+        java.util.function.UnaryOperator.identity(),
+        process -> {
+          processes.add(process);
+          return process;
+        });
   }
 
   /** Makes {@code folder} and every folder under it its owner's again, so it can be removed. */
@@ -304,7 +326,7 @@ class FileScriptsTest {
     var unreadable = Files.writeString(home.resolve("key"), "k");
     Files.setPosixFilePermissions(unreadable, PosixFilePermissions.fromString("-w-------"));
     var pipe = home.resolve("pipe");
-    assertEquals(0, new ProcessBuilder("mkfifo", pipe.toString()).start().waitFor());
+    assertEquals(0, Child.run(new ProcessBuilder("mkfifo", pipe.toString())).exit());
 
     assertEquals(FileScripts.NOT_PERMITTED, list(locked).status(), "an unreadable folder");
     assertEquals(FileScripts.NOT_PERMITTED, list(shut).status(), "a folder it may not enter");
@@ -412,20 +434,20 @@ class FileScriptsTest {
   }
 
   /** {@code name} under {@code folder}, made by the shell, since Java names files as UTF-8. */
-  private static String shellMade(Path folder, byte[] name) throws Exception {
+  static String shellMade(Path folder, byte[] name) throws Exception {
     var octal = new StringBuilder();
     for (var b : name) {
       octal.append(String.format("\\%03o", b & 0xff));
     }
     var made =
-        new ProcessBuilder(
+        Child.run(
+            new ProcessBuilder(
                 "sh",
                 "-c",
                 "printf 'body' > \"$1/$(printf '" + octal + "')\"",
                 "sh",
-                folder.toString())
-            .start();
-    assertEquals(0, made.waitFor());
+                folder.toString()));
+    assertEquals(0, made.exit(), made.stderr());
     return folder + "/" + FileNames.decode(name);
   }
 
@@ -459,14 +481,14 @@ class FileScriptsTest {
     watch.onlyBeats(1);
     assertEquals(
         0,
-        new ProcessBuilder(
-                "sh",
-                "-c",
-                "for f in \"$1\"/bad?n; do printf more >> \"$f\"; done",
-                "sh",
-                src.toString())
-            .start()
-            .waitFor());
+        Child.run(
+                new ProcessBuilder(
+                    "sh",
+                    "-c",
+                    "for f in \"$1\"/bad?n; do printf more >> \"$f\"; done",
+                    "sh",
+                    src.toString()))
+            .exit());
     assertEquals(List.of(path), watch.changed(), "the changed name, as its bytes");
   }
 
@@ -494,9 +516,7 @@ class FileScriptsTest {
         """);
     Files.setPosixFilePermissions(fake, PosixFilePermissions.fromString("rwx------"));
     var german =
-        over(
-            home,
-            commands,
+        ours(
             Map.of(
                 STAND_IN,
                 bin + ":" + System.getenv("PATH"),
@@ -570,7 +590,7 @@ class FileScriptsTest {
     for (var fake : cases.entrySet()) {
       var bin = binWith(fake.getKey());
       var read =
-          over(home, commands, Map.of(STAND_IN, bin.toString()))
+          ours(Map.of(STAND_IN, bin.toString()))
               .start(CONTAINER, FileScripts.READ, file.toString(), "0", "5");
       while (read.field() != null) {
         continue;
@@ -755,7 +775,7 @@ class FileScriptsTest {
 
   @Test
   void aScriptForAnInstanceThatIsNotThereFailsToStart() {
-    var other = over(home, commands);
+    var other = ours(Map.of());
     var refused =
         org.junit.jupiter.api.Assertions.assertThrows(
             IOException.class, () -> other.start("acme-gone", FileScripts.LIST, "/x"));

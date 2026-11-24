@@ -23,25 +23,15 @@
             {
               "how": [
                 {
-                  "text": "Run "
-                },
-                {
-                  "args": [
-                    "setup-token"
-                  ],
-                  "run": "elsewhere",
-                  "verb": "claude"
-                },
-                {
-                  "text": " on a machine where Claude Code is signed in"
+                  "text": "Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, or a Team Plan's at z.ai/manage-apikey/coding-plan/team/my-plan"
                 }
               ],
-              "kind": "token",
-              "label": "long-lived token"
+              "kind": "glm",
+              "label": "GLM Coding Plan key"
             }
           ],
           "login_refusal": {
-            "action": "Create an API key in the Claude Console, then agent login claude-code --kind api-key. Or: Run claude setup-token on a machine where Claude Code is signed in, then agent login claude-code.",
+            "action": "Create an API key in the Claude Console, then agent login claude-code. Or: Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, or a Team Plan's at z.ai/manage-apikey/coding-plan/team/my-plan, then agent login claude-code --kind glm.",
             "code": "login_not_stored",
             "field_errors": [],
             "message": "No Claude Code login stored for ana, so a Claude Code session cannot start in quay.",
@@ -51,29 +41,19 @@
               },
               {
                 "args": [
-                  "claude-code",
-                  "--kind",
-                  "api-key"
+                  "claude-code"
                 ],
                 "run": "sail",
                 "verb": "agent login"
               },
               {
-                "text": ". Or: Run "
+                "text": ". Or: Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, or a Team Plan's at z.ai/manage-apikey/coding-plan/team/my-plan, then "
               },
               {
                 "args": [
-                  "setup-token"
-                ],
-                "run": "elsewhere",
-                "verb": "claude"
-              },
-              {
-                "text": " on a machine where Claude Code is signed in, then "
-              },
-              {
-                "args": [
-                  "claude-code"
+                  "claude-code",
+                  "--kind",
+                  "glm"
                 ],
                 "run": "sail",
                 "verb": "agent login"
@@ -119,6 +99,19 @@
               "about": "Skips every permission prompt and safety check.",
               "label": "Bypass permissions",
               "mode": "bypassPermissions"
+            }
+          ],
+          "sign_in": [
+            {
+              "text": "Start Claude Code here and run "
+            },
+            {
+              "args": [],
+              "run": "elsewhere",
+              "verb": "/login"
+            },
+            {
+              "text": " in it to sign in with your Claude subscription"
             }
           ]
         },

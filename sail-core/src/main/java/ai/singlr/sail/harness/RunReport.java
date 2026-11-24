@@ -28,18 +28,9 @@ public record RunReport(RunUsage usage, LoginOutcome login) {
 
   /**
    * Whether its harness refused the run's own login: what only a stored login mends. A limit resets
-   * by itself, and a refused credential of another source was never the login.
+   * by itself.
    */
   public boolean refusedItsLogin() {
     return login instanceof LoginOutcome.Refused;
-  }
-
-  /** The credential source the harness used instead of the run's login, or null when it did not. */
-  public String overriddenBy() {
-    return switch (login) {
-      case LoginOutcome.Overridden overridden -> overridden.source();
-      case LoginOutcome.RefusedOther other -> other.source();
-      case null, default -> null;
-    };
   }
 }

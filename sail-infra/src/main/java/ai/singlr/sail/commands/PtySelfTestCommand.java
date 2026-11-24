@@ -482,7 +482,7 @@ public final class PtySelfTestCommand implements Callable<Integer> {
             "Pool tank is DEGRADED");
     var preview =
         new DispatchCommand.DispatchPreview(
-            false, "box", "spec", "title", "foreground", "task", made, "login ends");
+            false, "box", "spec", "title", "foreground", "task", made);
     var dry =
         new DispatchCommand.DryDispatch(
             true,

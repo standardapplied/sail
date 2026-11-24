@@ -13,7 +13,7 @@ readonly MAX_RUN=6h
 readonly SECRETS="fleet-anthropic-key fleet-openai-key fleet-github-token"
 readonly LOOP_REPO=standardapplied/nocaptcha
 readonly LOOP_AGENTS=${FLEET_LOOP_AGENTS:-claude-code}
-readonly SCHEMA_CHANGED_IN=0.70.0
+readonly SCHEMA_CHANGED_IN=0.76.0
 
 usage() {
   cat >&2 <<'EOF'

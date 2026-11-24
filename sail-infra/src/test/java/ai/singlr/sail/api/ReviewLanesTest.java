@@ -474,9 +474,8 @@ class ReviewLanesTest {
     var said = sailLines("auth").subList(before, sailLines("auth").size());
     assertEquals(
         List.of(
-            "Claude Code refused node-a's login 'default' (long-lived token), so its run stopped."
-                + " Run claude setup-token on a machine where Claude Code is signed in, then sail"
-                + " agent login claude-code."),
+            "Claude Code refused node-a's login 'default' (API key), so its run stopped. Create"
+                + " an API key in the Claude Console, then sail agent login claude-code."),
         said);
     assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus("auth"), "not handed to a person");
     assertEquals("failed", loop.statusOf(fix.reviewId()), "owed its fix, never escalated");
