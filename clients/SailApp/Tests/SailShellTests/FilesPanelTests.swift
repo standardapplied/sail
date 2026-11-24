@@ -268,7 +268,7 @@ import Testing
     /// listed as `entries`.
     static func played(_ entries: [FileEntry], look: Look = .light, now: @escaping @MainActor () -> Double = { 0 }) throws -> FilesPanel {
         let mono = try LabelFont(directory: LookTests.fonts)
-        let panel = FilesPanel(project: "harbor", workspace: "dock", tickets: nil, look: look, mono: mono, clock: now)
+        let panel = FilesPanel(project: "harbor", workspace: "dock", tickets: nil, look: look, mono: mono, titleFont: try TitleFont(directory: LookTests.fonts), clock: now)
         panel.frame = NSRect(x: 0, y: 0, width: FilesPanel.width, height: 600)
         panel.heard(.phase(.connected))
         panel.heard(.admitted)
@@ -298,7 +298,7 @@ import Testing
     ] as [(String, FilesSession.Phase, String)])
     func aLookupEndsWithTheConnectionInItsOwnWords(_ name: String, _ phase: FilesSession.Phase, _ words: String) throws {
         for parkedFirst in [false, true] {
-            let panel = FilesPanel(project: "harbor", workspace: "dock", tickets: nil, look: .light, mono: try LabelFont(directory: LookTests.fonts))
+            let panel = FilesPanel(project: "harbor", workspace: "dock", tickets: nil, look: .light, mono: try LabelFont(directory: LookTests.fonts), titleFont: try TitleFont(directory: LookTests.fonts))
             var sent: [Frame] = [], said: [TerminalPath.Lookup.Next] = []
             panel.onSent = { sent += $0 }
             if parkedFirst { panel.heard(.phase(phase)) }
@@ -409,7 +409,7 @@ import Testing
         panel.layoutSubtreeIfNeeded()
         #expect(panel.line.frame.minY >= FilesLineView.top && panel.scroll.frame.minY >= panel.line.frame.maxY, "\(name): the tree is under the line")
         let empty = try Self.played([], look: look)
-        #expect(empty.shownLine?.words == "~/workspace is empty.")
+        #expect(empty.shownLine?.words == "~/workspace is empty. ⌥⌘N makes a file.")
     }
 
     /// The rows as the third pass draws them: 24 pt, 12 pt further in each level, the disclosure on

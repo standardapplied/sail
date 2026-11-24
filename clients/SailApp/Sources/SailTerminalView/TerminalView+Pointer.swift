@@ -133,7 +133,14 @@ extension TerminalView {
     /// back at the bottom first and drawn there; text that could run commands in a program that did
     /// not ask for pastes is sent only once the person confirms.
     @objc public func paste(_: Any?) {
-        guard let link, let text = pasteboard.string(forType: .string), !text.isEmpty else { return }
+        guard let text = pasteboard.string(forType: .string) else { return }
+        paste(text: text)
+    }
+
+    /// `text` pasted at the cursor as ⌘V pastes the pasteboard's: bracketed when the program asked,
+    /// and asked first where it could run commands in one that did not.
+    public func paste(text: String) {
+        guard let link, !text.isEmpty else { return }
         input.async { [weak self] in
             link.screen.scrollToBottom()
             let outcome = link.paste(text, confirmed: false)

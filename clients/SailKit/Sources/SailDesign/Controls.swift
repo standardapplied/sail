@@ -51,6 +51,8 @@ public struct ButtonSize: Equatable, Sendable {
     public static let small = ButtonSize(height: 26, padding: 10, label: 12, radius: Look.smallRadius)
     public static let regular = ButtonSize(height: 32, padding: 14, label: 13, radius: Look.contentRadius)
     public static let large = ButtonSize(height: 36, padding: 18, label: 14, radius: Look.contentRadius)
+    /// A tree row's ⋯: 20 pt inside its 24 pt row, as the mockup's `.act`.
+    public static let row = ButtonSize(height: 20, padding: 4, label: 12, radius: 4)
 
     /// A leading icon or the spinner, and the gaps after them and before a shortcut hint.
     public static let mark = 14.0, markGap = 6.0, hintGap = 8.0
@@ -134,6 +136,8 @@ public struct FieldSize: Equatable, Sendable {
 
     public static let regular = FieldSize(height: 32, inset: 10, text: 13)
     public static let small = FieldSize(height: 28, inset: 8, text: 12)
+    /// A tree row's name field, in the row's own place: 22 pt in its 24 pt row, the name's 13 pt.
+    public static let row = FieldSize(height: 22, inset: 6, text: 13)
 
     /// The gap between the eyebrow, the box and the line under it.
     public static let gap = 6.0

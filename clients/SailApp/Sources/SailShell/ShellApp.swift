@@ -559,7 +559,10 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let file: [NSMenuItem] = [
             Command.newTab.item(target: terminals), .separator(),
             Command.splitRight.item(target: terminals), Command.splitDown.item(target: terminals), .separator(),
-            Command.close.item(target: terminals), Command.closeTab.item(target: terminals), Command.closeOtherTabs.item(target: terminals),
+            Command.close.item(target: terminals), Command.closeTab.item(target: terminals), Command.closeOtherTabs.item(target: terminals), .separator(),
+            item("New File", #selector(FilesPanel.newFile(_:)), "n", [.option, .command]), item("New Folder", #selector(FilesPanel.newFolder(_:)), "N", [.command, .shift]),
+            item("Rename", #selector(FilesPanel.renameFile(_:)), FilesPanel.renameKey, []), item("Reveal in Terminal", #selector(FilesPanel.revealInTerminal(_:)), ""),
+            item("Delete", #selector(FilesPanel.deleteFiles(_:)), FilesPanel.deleteKey), .separator(),
             item("Save", #selector(FilePane.saveDocument(_:)), "s"),
             item("Close Window", #selector(NSWindow.performClose(_:)), "W", [.command, .shift]),
         ]

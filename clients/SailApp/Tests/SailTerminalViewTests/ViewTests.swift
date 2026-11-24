@@ -229,12 +229,15 @@ import Testing
     }
 
     /// ⌘ held over a link underlines exactly its cells, at every font size, in both palettes and
-    /// right to left; without ⌘, or over text that is no link, nothing is underlined.
+    /// right to left; without ⌘, or over text that is no link, nothing is underlined. The palette
+    /// is set before the first frame: one landing later changes the rows under the link, and the
+    /// link is looked for again with the keys really held, which in a test are none.
     @Test(arguments: [("light", false), ("dark", false), ("light", true)])
     func commandOverALinkUnderlinesExactlyItsCells(_ palette: String, _ rightToLeft: Bool) async throws {
         for points in FontLadder.sizes {
             let harness = try Harness()
             harness.view.recolour(palette == "dark" ? .dark : .light)
+            harness.flush()
             harness.view.userInterfaceLayoutDirection = rightToLeft ? .rightToLeft : .leftToRight
             harness.view.setFontSize(points)
             harness.link.output("see src/a.ts:4 here")

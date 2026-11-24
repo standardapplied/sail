@@ -19,12 +19,20 @@ import Testing
     /// The windows the tests' workbenches are in, kept while the suite runs.
     static var windows: [NSWindow] = []
 
-    /// A shell with the files panel shown over a door holding `tide.ts` as `text`, the file opened;
-    /// the workbench in a window of its own, so the keys have somewhere to be.
-    static func opened(_ text: [UInt8], width: Double = 1180) async throws -> (FakeRunnerDoor, ShellApp, WorkbenchView, FilesPanel, FilePane) {
+    /// A shell with the files panel shown over a door holding `tide.ts` as `text`, at the root or in
+    /// `folder` (opened in the tree), the file opened; the workbench in a window of its own, so the
+    /// keys have somewhere to be.
+    static func opened(_ text: [UInt8], in folder: String? = nil, width: Double = 1180) async throws -> (FakeRunnerDoor, ShellApp, WorkbenchView, FilesPanel, FilePane) {
         let door = try FakeRunnerDoor(person: "uday")
-        door.setFolder(FilesPanelTests.root, [FileEntry(name: "tide.ts", kind: .known(.file), target: .known(.none), size: Int64(text.count), mtimeNanos: 0, mode: 0o100644)])
-        door.setFile(path, text)
+        let tide = FileEntry(name: "tide.ts", kind: .known(.file), target: .known(.none), size: Int64(text.count), mtimeNanos: 0, mode: 0o100644)
+        let holder = folder.map { FilesPanelTests.root + "/" + $0 }, file = (holder ?? FilesPanelTests.root) + "/tide.ts"
+        if let folder, let holder {
+            door.setFolder(FilesPanelTests.root, [FilesPanelTests.folder(folder)])
+            door.setFolder(holder, [tide])
+        } else {
+            door.setFolder(FilesPanelTests.root, [tide])
+        }
+        door.setFile(file, text)
         let (shell, bench) = try FilesPanelTests.shell(door, width: width)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
         bench.removeFromSuperview()
@@ -33,8 +41,12 @@ import Testing
         bench.setFrameSize(NSSize(width: width, height: 600))
         bench.toggleFiles(nil)
         let panel = try #require(FilesPanelTests.panel(bench))
-        #expect(await RunnerTabTests.until(10) { panel.list.numberOfRows == 1 }, "the tree never listed tide.ts")
-        #expect(panel.openFile(FileName(path)))
+        #expect(await RunnerTabTests.until(10) { panel.list.numberOfRows == 1 }, "the tree never listed its root")
+        if let holder {
+            panel.toggle(FileName(holder))
+            #expect(await RunnerTabTests.until(10) { panel.list.numberOfRows == 2 }, "the tree never listed \(holder)")
+        }
+        #expect(panel.openFile(FileName(file)))
         let pane = try #require(bench.model.selectedTab.flatMap { bench.tabViews[$0.id]?.filePane })
         return (door, shell, bench, panel, pane)
     }
