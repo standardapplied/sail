@@ -213,7 +213,7 @@ jobs:
     # In a release the host job does not run (the release built its darwin sail), so the app runs
     # on its own condition rather than on the host's success.
     if: ${{ !cancelled() && (inputs.release || (needs.changes.outputs.clients == 'true' && needs.host.result == 'success')) }}
-    runs-on: *macos
+    runs-on: macos-15
     timeout-minutes: 45
     # actions: read, to download the app's zip from the artifact service by its id.
     permissions:
@@ -236,16 +236,15 @@ jobs:
       - name: Xcode
         run: sudo xcode-select --switch /Applications/Xcode_26.3.app
 
-      # GitHub's macOS image gives the runner's account bash 3.2 as its login shell, and the drive's
-      # This Mac session runs that shell: its paste step needs one that does not ask for bracketed
-      # paste, which zsh, the login shell of Blacksmith's image, does.
-      - name: The account's login shell is bash, as on GitHub's image
-        run: |
-          sudo dscl . -create "/Users/$USER" UserShell /bin/bash
-          dscacheutil -flushcache
-          dscl . -read "/Users/$USER" UserShell
-
       - name: Signing on or off (all seven secrets, or none)
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
         run: |
           mode=$(ci/signing)
           echo "SIGNING=$mode" | tee -a "$GITHUB_ENV"
@@ -341,6 +340,14 @@ jobs:
 
       - name: Sign the drive build as the shipped app is signed
         if: ${{ !cancelled() }}
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
         run: ci/sign "$RUNNER_TEMP/drive/Sail.app"
 
       - name: The bundled sail runs under the hardened runtime from inside the bundle
@@ -384,6 +391,14 @@ jobs:
 
       - name: Sign the shipped app with Developer ID
         if: env.SIGNING == 'on'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
         run: ci/sign "$RUNNER_TEMP/app/Sail.app"
 
       - name: Sign the unsigned build ad hoc (no signing secrets)
@@ -392,6 +407,14 @@ jobs:
 
       - name: Notarize and staple
         if: env.SIGNING == 'on'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
         run: |
           mkdir -p "$RUNNER_TEMP/shipped"
           ci/notarize "$RUNNER_TEMP/app/Sail.app" "$RUNNER_TEMP/shipped/$SHIPPED.zip"
