@@ -213,12 +213,12 @@ and is burned down in its own pull request.
 ### Rules of the gate
 
 - **Fix the code, never the gate.** No limit is raised, and no rule moves back to a pending file.
-- **No suppression in source.** Neither PMD's suppression comment nor a `@SuppressWarnings`
-  naming a PMD rule, `PMD` or `all`. PMD honours both however they are spelled (concatenated, in a
-  constant, through a unicode escape) and has no switch to turn them off, so `ci/exclusions`
-  fails, naming file and line, any Java line holding `NOPMD`, a `@SuppressWarnings` that is not
-  one line of lowercase literals such as `@SuppressWarnings("unchecked")`, `"all"` in one, or a
-  letter written as a unicode escape. That check needs no history and runs first, in
+- **No suppression in source.** Neither PMD's suppression comment, CPD's `CPD-OFF`/`CPD-ON`
+  comments, nor a `@SuppressWarnings` naming a PMD rule, `PMD` or `all`. PMD honours these however
+  they are spelled (concatenated, in a constant, through a unicode escape) and has no switch to
+  turn them off, so `ci/exclusions` fails, naming file and line, any Java line holding `NOPMD`,
+  `CPD-OFF` or `CPD-ON`, a `@SuppressWarnings` that is not one line of lowercase literals such as
+  `@SuppressWarnings("unchecked")`, `"all"` in one, or a letter written as a unicode escape. That check needs no history and runs first, in
   `sail-infra`'s Linux unit job and in `ci/check full`.
 - **The exclusions file only shrinks.** No class is ever added to it and no rule to an entry. A
   spec that works in a listed class splits it and deletes its entry. `ci/exclusions` (run by

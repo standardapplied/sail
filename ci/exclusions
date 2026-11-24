@@ -8,10 +8,11 @@ set -euo pipefail
 # PMD reads the file as java.util.Properties, which also splits a key at ':' or a blank, joins a
 # line ending in '\', reads escapes, takes '!' for a comment and ends a line at a lone CR; so every
 # line must be a comment, blank, or exactly one entry, which Properties reads as this check does.
-# Nor may the source silence PMD, first and without history: PMD honours NOPMD in a comment and a
-# SuppressWarnings naming PMD, PMD.<rule> or all, also when concatenated, held in a constant or
-# spelled with a unicode escape, and offers no switch to turn either off. So a line naming the
-# annotation must name only javac's warnings, as one-line literals, and no letter may be escaped.
+# Nor may the source silence PMD or CPD, first and without history: they honour NOPMD and a
+# CPD-OFF..CPD-ON pair in a comment and a SuppressWarnings naming PMD, PMD.<rule> or all, also when
+# concatenated, held in a constant or spelled with a unicode escape, and offer no switch to turn
+# them off. So a line naming the annotation must name only javac's warnings, as one-line literals,
+# and no letter may be escaped.
 
 readonly FILE=config/quality/pmd-exclusions.properties
 readonly ENTRY='[A-Za-z][A-Za-z0-9_.]*=[A-Za-z]+(,[A-Za-z]+)*'
@@ -28,11 +29,11 @@ pairs() {
   entries | awk -F= '{ n = split($2, rules, ","); for (i = 1; i <= n; i++) print $1 "=" rules[i] }' | sort -u
 }
 
-silencing=$(git grep -nE --untracked -e NOPMD --or -e "$ESCAPED_LETTER" \
+silencing=$(git grep -nE --untracked -e NOPMD --or -e CPD-OFF --or -e CPD-ON --or -e "$ESCAPED_LETTER" \
   --or \( -e SuppressWarnings --and --not -e "$JAVAC_WARNINGS" \) \
   --or \( -e SuppressWarnings --and -e '"all"' \) -- '*.java') || [[ $? -eq 1 ]]
 if [[ -n $silencing ]]; then
-  echo "ci/exclusions: these Java lines could silence PMD, which honours NOPMD in a comment and a SuppressWarnings naming PMD, PMD.<rule> or all, however spelled:" >&2
+  echo "ci/exclusions: these Java lines could silence PMD or CPD, which honour NOPMD, CPD-OFF and CPD-ON in a comment and a SuppressWarnings naming PMD, PMD.<rule> or all, however spelled:" >&2
   sed 's/^/  /' <<< "$silencing" >&2
   echo "Fix the code instead: name only javac's warnings, in one-line literal form such as @SuppressWarnings(\"unchecked\"), and spell no letter as a unicode escape." >&2
   exit 1

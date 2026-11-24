@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.StringReader;
 import java.nio.file.Files;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
@@ -65,8 +64,8 @@ class RuleSetsTest {
                         + actual.getOrDefault(name, ABSENT))
             .toList();
     assertEquals(
-        List.of(),
-        differing,
+        "",
+        String.join("\n", differing),
         "pmd-" + kind + ".xml and pmd-" + kind + "-pending.xml hold each Helios rule once, as is");
   }
 

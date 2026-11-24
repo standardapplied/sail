@@ -141,6 +141,8 @@ class CiExclusionsTest {
         "@SW({",
         "@SW(\"\\U0050MD\")",
         "/* NO\\U0050MD */",
+        "// CPD_OFF",
+        "// CPD_ON",
       })
   void aLineThatCouldSilencePmdFailsNamingIt(String quiet) throws Exception {
     var line = java(quiet);
@@ -150,8 +152,10 @@ class CiExclusionsTest {
         new Ran(
             1,
             "",
-            "ci/exclusions: these Java lines could silence PMD, which honours NO"
-                + "PMD in a comment and a Suppress"
+            "ci/exclusions: these Java lines could silence PMD or CPD, which honour NO"
+                + "PMD, CPD-"
+                + "OFF and CPD-"
+                + "ON in a comment and a Suppress"
                 + "Warnings naming PMD, PMD.<rule> or all, however"
                 + " spelled:\n  "
                 + JAVA
@@ -227,6 +231,7 @@ class CiExclusionsTest {
   private static String java(String text) {
     return text.replace("SW(", "Suppress" + "Warnings(")
         .replace("NO_PMD", "NO" + "PMD")
+        .replace("CPD_O", "CPD-" + "O")
         .replace("\\U", "\\" + "u");
   }
 

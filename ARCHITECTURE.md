@@ -5280,7 +5280,7 @@ to end, which wait only for the one native build:
 
 | Check | What it runs | What it needs |
 |---|---|---|
-| `Unit tests (<module>, <os>)` | `ci/check unit <module>`: the module's unit tests, its JaCoCo gates, its PMD gate and spotless, on Linux, where `sail-infra`'s job also runs `ci/exclusions` (no Java line silences PMD, and the PMD exclusions only shrink, against the merge base), the `architecture` module's rules and the reactor's duplication report; the same tests without gates on macOS (`--tests-only`) | its upstream modules, installed first |
+| `Unit tests (<module>, <os>)` | `ci/check unit <module>`: the module's unit tests, its JaCoCo gates, its PMD gate and spotless, on Linux, where `sail-infra`'s job also runs `ci/exclusions` (no Java line silences PMD or CPD, and the PMD exclusions only shrink, against the merge base), the `architecture` module's rules and the reactor's duplication report; the same tests without gates on macOS (`--tests-only`) | its upstream modules, installed first |
 | `Dependency scan` | OWASP dependency-check, offline against a cached NVD database refreshed best-effort | the NVD cache |
 | `Native binaries` | the candidate (`-Ob` quick build) and the release `.github/released-tag` pins, each smoke-tested, uploaded as `native-binaries` | nothing else |
 | `Native fleet sync tests (part i of 3)` | `ci/check methods NativeFleetIT i 3`: every third test of `NativeFleetIT`, sync end to end on native binaries in Podman boxes | `native-binaries` |
