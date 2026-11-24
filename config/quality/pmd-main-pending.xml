@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="sail-main-pending"
+         xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.sourceforge.io/ruleset_2_0_0.xsd">
+    <description>
+        The families not yet burned down, as AGENTS.md "Quality gate" lists them with their
+        counts: method-level complexity (CognitiveComplexity, CyclomaticComplexity,
+        NPathComplexity, AvoidDeeplyNestedIfStmts, NcssCount, ExcessiveParameterList), whose
+        CyclomaticComplexity and NcssCount also hold the class-level sums.
+        A family's rules move to pmd-main.xml, unchanged, in the pull request that makes it
+        clean in every module.
+    </description>
+
+    <rule ref="category/java/design.xml/CognitiveComplexity">
+        <properties>
+            <property name="reportLevel" value="15"/>
+        </properties>
+    </rule>
+
+    <rule ref="category/java/design.xml/CyclomaticComplexity"
+          message="The {0} ''{1}'' has a{2} cyclomatic complexity of {3} (limit: 15 per method, 80 per class)">
+        <properties>
+            <property name="methodReportLevel" value="15"/>
+            <property name="classReportLevel" value="80"/>
+        </properties>
+    </rule>
+
+    <rule ref="category/java/design.xml/NPathComplexity"/>
+
+    <rule ref="category/java/design.xml/AvoidDeeplyNestedIfStmts"
+          message="if statements are nested 3 or more deep (limit: a depth of 2)"/>
+
+    <rule ref="category/java/design.xml/NcssCount"
+          message="The {0} ''{1}'' has a NCSS line count of {2} (limit: 60 per method, 600 per class)">
+        <properties>
+            <property name="methodReportLevel" value="60"/>
+            <property name="classReportLevel" value="600"/>
+        </properties>
+    </rule>
+
+    <rule ref="category/java/design.xml/ExcessiveParameterList"/>
+</ruleset>
