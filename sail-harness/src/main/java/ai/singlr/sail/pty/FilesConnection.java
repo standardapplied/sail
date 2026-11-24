@@ -433,7 +433,7 @@ final class FilesConnection {
    * save's temporary, which no listing shows and a later write would remove.
    */
   static boolean makes(String path) {
-    var name = path.substring(path.lastIndexOf('/') + 1);
+    var name = lastName(path);
     return FileNames.shown(name).equals(name)
         && name.chars().noneMatch(Character::isISOControl)
         && !TEMPORARY.matcher(name).matches();
@@ -1716,7 +1716,12 @@ final class FilesConnection {
   }
 
   private static String leaf(String path) {
-    return FileNames.shown(path.substring(path.lastIndexOf('/') + 1));
+    return FileNames.shown(lastName(path));
+  }
+
+  /** The last name of {@code path}: what a refusal names and what {@link #makes} judges. */
+  private static String lastName(String path) {
+    return path.substring(path.lastIndexOf('/') + 1);
   }
 
   /**

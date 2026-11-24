@@ -334,6 +334,23 @@ import Testing
         #expect(await RunnerTabTests.until(5) { panel.window?.attachedSheet == nil }, "the sheet stayed on the window")
     }
 
+    /// The delete question and the name field take a new look while open, as the rows do.
+    @Test func theDeleteQuestionAndTheNameFieldTakeANewLook() throws {
+        let played = try Played([Self.file("README.md")])
+        let panel = played.panel
+        panel.list.choose(Self.root + "/README.md")
+        panel.deleteFiles(nil)
+        let sheet = try #require(panel.question)
+        panel.look = .dark
+        #expect(sheet.look == .dark, "the delete question kept the look it opened in")
+        sheet.cancel.performClick(nil)
+        let second = try Played([Self.file("README.md")])
+        second.panel.newFile(nil)
+        let field = try #require(second.panel.nameRow)
+        second.panel.look = .dark
+        #expect(field.field.look == .dark && second.panel.nameRow === field, "the name field kept the look it opened in")
+    }
+
     /// The File menu's tree items act only while the tree holds the keys, so ⌘⌫, F2 and the rest
     /// reach a name field, the file pane or a terminal; New works with no row chosen.
     @Test func theFileMenusItemsActOnlyWhileTheTreeHoldsTheKeys() throws {

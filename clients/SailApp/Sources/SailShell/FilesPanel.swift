@@ -533,6 +533,8 @@ final class FilesPanel: NSView {
         scroll.look = look
         line.look = look
         castShadow.look = look
+        nameRow?.field.look = look
+        question?.look = look
         shownRevision = nil
         shownRows = []
         shownLine = nil
