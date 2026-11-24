@@ -5178,8 +5178,11 @@ asserts the binary's version is the tag's and its minimum macOS no newer than th
 builds this commit's darwin `sail` (`host`), the SailKit jobs and the drive do not run in a release:
 the same commit's Clients run on main drives it (a release does not wait for that run), and the drive's timing judgements must not cost a release its
 app; the bundled `sail`'s own check under the hardened runtime still runs. Every macOS job runs on
-`macos-15`, never `macos-latest`: a binary takes its build image's macOS as its minimum, and 15 is
-the oldest the app supports. A release dispatched from a branch, not a tag, ships no app: the check
+macOS 15, never `macos-latest`: a binary takes its build image's macOS as its minimum, and 15 is
+the oldest the app supports. Every one runs on GitHub's `macos-15` runner but `host`, which runs on
+Blacksmith's `blacksmith-6vcpu-macos-15` (an M4 whose macOS 15 image follows GitHub's), where the native
+image builds in about 70 s instead of 5 to 6.5 minutes; it holds no secret and never runs in a
+release. A release dispatched from a branch, not a tag, ships no app: the check
 refuses a version that is no tag's, and says so. The app's zip, and its artifact, is named for its
 attempt after the first (`Sail-<sha>-attemptN.zip`): a run's artifacts outlive their attempt, and
 `download-artifact` keeps one per name, the one with the highest id, which need not be the newest,
