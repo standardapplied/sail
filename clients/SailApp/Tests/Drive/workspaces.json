@@ -242,6 +242,7 @@
   {"name": "a1-signed-out", "golden": ["GET /v1/projects/harbor/workspaces/dock/agents", "workspace-agents-dock-signed-out"]},
   {"name": "a1-signed-out-dock-chosen", "chooseRow": "dock"},
   {"name": "a1-signed-out-option-command-t", "press": "t", "modifiers": ["option", "command"]},
+  {"name": "a1-signed-out-each-harness", "newSessionSays": ["New session in dock", "Claude Code", "Codex CLI", "Your ChatGPT account", "Shell"]},
   {"name": "a1-signed-out-down-to-codex", "press": "arrowDown"},
   {"name": "a1-signed-out-codex-chosen", "newSessionChosen": "Codex CLI"},
   {"name": "a1-codex-device-code-said", "newSessionSays": ["Codex CLI", "Your ChatGPT account", "Mode", "Full access", "Sign in", "Your ChatGPT account", "Codex CLI asks you to sign in with your ChatGPT account when it starts, once in each workspace. Choose “Sign in with Device Code” there, after turning it on in your ChatGPT security settings."]},
