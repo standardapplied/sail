@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.harness;
 
-import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -226,11 +225,12 @@ public interface Harness {
   }
 
   /**
-   * How a person signs in to this harness with their own subscription, in a session of it in their
-   * workspace: the harness's own flow, whose sign-in stays in that workspace and which Sail never
-   * holds.
+   * This harness's own sign-in, which a person makes in a session of it in their workspace with a
+   * subscription or the vendor's account: one of the two ways in, beside one stored key ({@link
+   * #loginKinds}). It stays in that workspace, in a file of its {@link #storedLogins}, and Sail
+   * never holds it.
    */
-  Remedy signIn();
+  SignIn signIn();
 
   /**
    * Where, under the dev user's home, this harness keeps a login, or a part of one, that a person
@@ -314,9 +314,9 @@ public interface Harness {
   Optional<LoginOutcome> loginOutcome(String report);
 
   /**
-   * The keys this harness reads from its environment, in the order a person is shown them, the
-   * first its default kind. A spec run starts with one its person stored; a subscription's sign-in
-   * is never one ({@link #signIn}).
+   * The one key this harness reads from its environment, the other way in beside its own sign-in
+   * ({@link #signIn}), which is never one; a list so a kind is named as a stored login names it. A
+   * spec run starts with one its person stored.
    */
   List<LoginKind> loginKinds();
 

@@ -96,14 +96,11 @@ final class RunLogins {
   }
 
   /**
-   * How to make a login of {@code kind} anew and store it as {@code name}, where the one it
-   * replaces was: the command names only what differs from the defaults.
+   * How to make a login of {@code kind}, its harness's one, anew and store it as {@code name},
+   * where the one it replaces was: the command names its name only when it is not the default.
    */
   static Remedy howToReplace(Harness harness, LoginKind kind, String name) {
     var args = new ArrayList<String>(List.of(harness.yamlName()));
-    if (!kind.equals(harness.loginKinds().getFirst())) {
-      args.addAll(List.of("--kind", kind.kind()));
-    }
     if (!LoginStore.DEFAULT_NAME.equals(name)) {
       args.addAll(List.of("--name", name));
     }
@@ -188,13 +185,8 @@ final class RunLogins {
             "."));
   }
 
-  /** Each kind its harness takes, how to make one, and the command that stores it. */
+  /** How to make the key its harness takes, and the command that stores it. */
   static Remedy howToStore(Harness harness) {
-    var parts = new ArrayList<Object>();
-    for (var kind : harness.loginKinds()) {
-      parts.add(parts.isEmpty() ? "" : " Or: ");
-      parts.add(howToReplace(harness, kind, LoginStore.DEFAULT_NAME));
-    }
-    return Remedy.of(parts.toArray());
+    return howToReplace(harness, harness.loginKinds().getFirst(), LoginStore.DEFAULT_NAME);
   }
 }

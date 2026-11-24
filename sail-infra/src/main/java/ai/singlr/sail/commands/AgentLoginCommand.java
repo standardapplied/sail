@@ -54,9 +54,7 @@ public final class AgentLoginCommand implements Runnable {
   @Option(names = "--name", description = "The login's name (default: default).")
   private String name;
 
-  @Option(
-      names = "--kind",
-      description = "The login's kind: api-key or glm for claude-code, api-key for codex.")
+  @Option(names = "--kind", description = "The login's kind: api-key.")
   private String kind;
 
   @Option(names = "--json", description = "Output in JSON format.")
@@ -180,7 +178,7 @@ public final class AgentLoginCommand implements Runnable {
   static String trimmed(InputStream in) throws IOException {
     var bytes = in.readNBytes(MAX_READ);
     if (bytes.length == MAX_READ) {
-      throw new CliCommand.Refused("A login's value is at most 16 KiB.");
+      throw new CliCommand.Refused("A key is at most 16 KiB.");
     }
     var text = new String(bytes, StandardCharsets.UTF_8);
     if (text.endsWith("\r\n")) {

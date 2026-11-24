@@ -95,21 +95,22 @@ class RunUsageStoreTest {
   void aLaunchRecordsItsLoginAndWhoAskedAndTheFinishCarriesThemToEveryBox() {
     var id = run(null);
     store.recordLaunch(
-        id, new RunStore.Launched("opus", null, null, new RunStore.RunLogin("work", "glm"), "ana"));
+        id,
+        new RunStore.Launched("opus", null, null, new RunStore.RunLogin("work", "api-key"), "ana"));
 
     assertTrue(store.finish(id, "running", "completed", 0, read(REPORTED)));
 
     var row = store.findById(id).orElseThrow();
-    assertEquals(new RunStore.RunLogin("work", "glm"), row.login());
+    assertEquals(new RunStore.RunLogin("work", "api-key"), row.login());
     assertEquals("ana", row.dispatchedBy());
     var finished = journaled(id);
     assertEquals("work", finished.get("login"));
-    assertEquals("glm", finished.get("login_kind"));
+    assertEquals("api-key", finished.get("login_kind"));
     assertEquals("ana", finished.get("dispatched_by"));
     var adopted = DateTimeUtils.newId().toString();
     store.applyRevision(adopted, store.comparableSnapshot(id), "1-remote");
     var copy = store.findById(adopted).orElseThrow();
-    assertEquals(new RunStore.RunLogin("work", "glm"), copy.login());
+    assertEquals(new RunStore.RunLogin("work", "api-key"), copy.login());
     assertEquals("ana", copy.dispatchedBy());
   }
 
@@ -152,7 +153,7 @@ class RunUsageStoreTest {
     assertEquals(RunStore.RunLogin.CONTAINER, store.findById(id).orElseThrow().login());
     assertEquals(null, store.findById(id).orElseThrow().dispatchedBy());
     assertEquals(null, store.findById(unlaunched).orElseThrow().login());
-    assertThrows(IllegalArgumentException.class, () -> new RunStore.RunLogin(" ", "glm"));
+    assertThrows(IllegalArgumentException.class, () -> new RunStore.RunLogin(" ", "api-key"));
   }
 
   /**

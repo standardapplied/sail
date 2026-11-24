@@ -2140,11 +2140,18 @@ record AgentOffersResponse(
  * One harness as a workspace offers it: its modes, the first the one it starts in until a person
  * chooses, and why there are no others ({@code note}); the login it starts signed in with, or why
  * there is none ({@code loginRefusal}), and the kinds a person stores one of; whether it starts
- * with the person signing in inside it ({@code inside}), and then how they sign in with their
- * subscription ({@code sign_in}); and why it does not start at all ({@code refusal}).
+ * with the person signing in inside it ({@code inside}), and then its own sign-in ({@code
+ * sign_in}): its name, how it goes, and whether the workspace holds it ({@code signed_in}), said
+ * only when that was read ({@code signedIn} null when not); and why it does not start at all
+ * ({@code refusal}).
  */
 record AgentOffer(
-    Harness harness, LoginStore.Row login, ApiError loginRefusal, boolean inside, ApiError refusal)
+    Harness harness,
+    LoginStore.Row login,
+    ApiError loginRefusal,
+    boolean inside,
+    Boolean signedIn,
+    ApiError refusal)
     implements Mappable {
   @Override
   public Map<String, Object> toMap() {
@@ -2185,7 +2192,14 @@ record AgentOffer(
             .toList());
     m.put("inside", inside);
     if (inside) {
-      m.put("sign_in", harness.signIn().toMaps());
+      var signIn = harness.signIn();
+      var said = new LinkedHashMap<String, Object>();
+      said.put("name", signIn.name());
+      said.put("how", signIn.how().toMaps());
+      if (signedIn != null) {
+        said.put("signed_in", signedIn);
+      }
+      m.put("sign_in", said);
     }
     if (refusal != null) {
       m.put("refusal", refusal.toMap());

@@ -50,6 +50,7 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "workspace-agents-not-yours": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
     "workspace-agents-owner-gone": { _ = try await $0.send(.agents(workspace: "wreck", project: "harbor")) },
     "workspace-agents-dock": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
+    "workspace-agents-dock-signed-in": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
     "workspace-agents-pier": { _ = try await $0.send(.agents(workspace: "pier", project: "harbor")) },
     "workspace-agents-quay": { _ = try await $0.send(.agents(workspace: "quay", project: "harbor")) },
     "workspace-agents-dock-no-login": { _ = try await $0.send(.agents(workspace: "dock", project: "harbor")) },
@@ -207,7 +208,7 @@ func answer<Response>(
         #expect(claude.login?.name == "work" && claude.login?.kind == "api-key")
         #expect(claude.modeDefault == claude.modes.first?.mode)
         #expect(claude.modes.count == 7 && claude.refusal == nil && claude.loginRefusal == nil && claude.inside)
-        #expect(claude.kinds.map(\.label) == ["API key", "GLM Coding Plan key"], "in the order a person is shown them")
+        #expect(claude.kinds.map(\.label) == ["API key"], "its one key")
         let codex = try #require(owned.offered.last)
         #expect(codex.refusal?.code == .known(.harnessNotInstalled) && !codex.inside && codex.login == nil)
         #expect(codex.note?.hasPrefix("Sail starts Codex CLI in a workspace with full access") == true && codex.modes.count == 1)

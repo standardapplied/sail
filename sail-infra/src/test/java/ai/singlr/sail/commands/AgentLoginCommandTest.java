@@ -113,13 +113,11 @@ class AgentLoginCommandTest {
             + ".\n",
         stored.out());
 
-    assertEquals(
-        0,
-        sail("fake-glm-2", "login", "claude-code", "--name", "personal", "--kind", "glm").exit());
+    assertEquals(0, sail("fake-key-2", "login", "claude-code", "--name", "personal").exit());
     var listed = sail("", "login", "list", "--json");
     var logins = (List<Map<String, Object>>) YamlUtil.parseMap(listed.out()).get("logins");
     assertEquals(
-        List.of("default api-key true", "personal glm false"),
+        List.of("default api-key true", "personal api-key false"),
         logins.stream()
             .map(row -> row.get("name") + " " + row.get("kind") + " " + row.get("default"))
             .toList());
@@ -128,21 +126,21 @@ class AgentLoginCommandTest {
     var removed = sail("", "login", "remove", "claude-code", "default");
 
     assertEquals(0, used.exit(), used.err());
-    assertTrue(used.out().contains("Using claude-code login 'personal' (glm, the default)"));
+    assertTrue(used.out().contains("Using claude-code login 'personal' (api-key, the default)"));
     assertEquals(0, removed.exit(), removed.err());
     assertTrue(sail("", "login", "list").out().contains("personal"));
   }
 
   /**
-   * Every command a run's login outcome names works as pasted: the refusal's for a named API key
-   * and for the default GLM key replace exactly the login they name, which stays as it was
-   * otherwise (the default stays the default).
+   * Every command a run's login outcome names works as pasted: the refusal's for a named key and
+   * for the default key replace exactly the login they name, which stays as it was otherwise (the
+   * default stays the default).
    */
   @Test
   void theCommandARefusalNamesReplacesTheLoginItNamesWhenPastedAsPrinted() {
     var uday = new FdeStore(db).byHandle("uday").orElseThrow().id();
     var claude = Harnesses.of("claude-code");
-    new FdeStore(db).logins().store(uday, claude, null, "glm", "fake-glm-old");
+    new FdeStore(db).logins().store(uday, claude, null, "api-key", "sk-ant-api03-default-old");
     new FdeStore(db).logins().store(uday, claude, "work", "api-key", "sk-ant-api03-old");
     var told = new ArrayList<String>();
     var refused = new RunReport(RunUsage.NONE, new LoginOutcome.Refused());
@@ -150,7 +148,8 @@ class AgentLoginCommandTest {
     var runs = new RunStore(db);
     for (var login :
         List.of(
-            new RunStore.RunLogin("work", "api-key"), new RunStore.RunLogin("default", "glm"))) {
+            new RunStore.RunLogin("work", "api-key"),
+            new RunStore.RunLogin("default", "api-key"))) {
       var id = DateTimeUtils.newId().toString();
       Acting.system(
           () -> {
@@ -192,9 +191,9 @@ class AgentLoginCommandTest {
 
     var logins = new FdeStore(db).logins();
     assertEquals(KEY, logins.defaultFor(uday, claude).orElseThrow().value());
-    assertEquals("glm", logins.defaultFor(uday, claude).orElseThrow().row().kind());
+    assertEquals("default", logins.defaultFor(uday, claude).orElseThrow().row().name());
     assertEquals(
-        List.of("default glm true", "work api-key false"),
+        List.of("default api-key true", "work api-key false"),
         logins.list(uday).stream()
             .filter(row -> row.harness().equals("claude-code"))
             .map(row -> row.name() + " " + row.kind() + " " + row.isDefault())
@@ -269,8 +268,7 @@ class AgentLoginCommandTest {
         refused
             .err()
             .contains(
-                "A login's value is printable ASCII with no space, quote, backslash, $ or"
-                    + " backtick."),
+                "A key is printable ASCII with no space, quote, backslash, $ or" + " backtick."),
         refused.err());
     assertFalse(refused.err().contains("has a space"));
     assertEquals(1, unknown.exit());
@@ -280,19 +278,21 @@ class AgentLoginCommandTest {
   }
 
   /**
-   * L1 at the CLI's door: the deleted kind is refused naming the kinds that exist, and nothing is
-   * stored, read from stdin or not.
+   * L1 at the CLI's door: each deleted kind is refused naming the one kind that exists, and nothing
+   * is stored, read from stdin or not.
    */
   @Test
-  void theDeletedTokenKindIsRefusedNamingTheKindsThatExistAndNothingIsStored() {
-    var refused = sail("fake-token-value", "login", "claude-code", "--kind", "token");
+  void eachDeletedKindIsRefusedNamingTheKindThatExistsAndNothingIsStored() {
+    for (var deleted : List.of("token", "glm")) {
+      var refused = sail("fake-deleted-value", "login", "claude-code", "--kind", deleted);
 
-    assertEquals(1, refused.exit());
-    assertTrue(
-        refused
-            .err()
-            .contains("Claude Code takes no login of kind 'token'; it takes api-key, glm."),
-        refused.err());
+      assertEquals(1, refused.exit());
+      assertTrue(
+          refused
+              .err()
+              .contains("Claude Code takes no login of kind '" + deleted + "'; it takes api-key."),
+          refused.err());
+    }
     assertEquals(
         List.of(),
         new FdeStore(db).logins().list(new FdeStore(db).byHandle("uday").orElseThrow().id()));
@@ -304,14 +304,13 @@ class AgentLoginCommandTest {
    */
   @Test
   void aRefusalOfEachChangeUnderJsonIsTheApisErrorEnvelopeWithItsCode() {
-    var kind = sail("fake-token-value", "login", "claude-code", "--kind", "token", "--json");
+    var kind = sail("fake-glm-value", "login", "claude-code", "--kind", "glm", "--json");
     var use = sail("", "login", "use", "claude-code", "missing", "--json");
     var remove = sail("", "login", "remove", "claude-code", "default", "--fde", "ana", "--json");
 
     assertEquals("invalid_request", error(kind).get("code"), kind.out());
     assertEquals(
-        "Claude Code takes no login of kind 'token'; it takes api-key, glm.",
-        error(kind).get("message"));
+        "Claude Code takes no login of kind 'glm'; it takes api-key.", error(kind).get("message"));
     assertEquals("not_found", error(use).get("code"), use.out());
     assertEquals("forbidden_admin_only", error(remove).get("code"), remove.out());
     for (var ran : List.of(kind, use, remove)) {

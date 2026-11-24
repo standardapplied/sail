@@ -139,7 +139,7 @@ class RunReportsTest {
 
   @Test
   void aLimitSaysTheBranchOnlyForALaneThatCommitsAndHoldsNoLane() {
-    var token = new RunStore.RunLogin("default", "glm");
+    var token = new RunStore.RunLogin("default", "api-key");
     var limited = reporting(new LoginOutcome.Limited("15:04"));
     var runs =
         List.of(
@@ -150,8 +150,8 @@ class RunReportsTest {
     runs.forEach(run -> finished(limited, run));
 
     var quota =
-        "auth: Claude Code says the account behind eng's login 'default' (GLM"
-            + " Coding Plan key) is out of quota until 15:04, so its run stopped";
+        "auth: Claude Code says the account behind eng's login 'default' (API key) is out"
+            + " of quota until 15:04, so its run stopped";
     assertEquals(
         List.of(
             quota + "; what it committed stays on branch feat/auth.",
@@ -186,13 +186,13 @@ class RunReportsTest {
 
     finished(refused, run("auth", "b", RunStore.RunLogin.CONTAINER));
     finished(refused, run("auth", "b", null));
-    finished(refused, run(null, "b", new RunStore.RunLogin("default", "glm")));
+    finished(refused, run(null, "b", new RunStore.RunLogin("default", "api-key")));
     finished(
         new RunReports(run -> RunReport.NONE, (spec, body) -> told.add(body), published::add),
-        run("auth", "b", new RunStore.RunLogin("default", "glm")));
+        run("auth", "b", new RunStore.RunLogin("default", "api-key")));
     finished(
         new RunReports(run -> null, (spec, body) -> told.add(body), published::add),
-        run("auth", "b", new RunStore.RunLogin("default", "glm")));
+        run("auth", "b", new RunStore.RunLogin("default", "api-key")));
 
     assertEquals(List.of(), told);
     assertEquals(List.of(), published);
@@ -201,7 +201,7 @@ class RunReportsTest {
   /** A write that does not record the report says nothing: another finisher's write did. */
   @Test
   void aFinishWhoseWriteRecordsNothingSaysNothing() {
-    var run = run("auth", "b", new RunStore.RunLogin("default", "glm"));
+    var run = run("auth", "b", new RunStore.RunLogin("default", "api-key"));
 
     assertFalse(
         Acting.system(
@@ -220,9 +220,9 @@ class RunReportsTest {
   @Test
   void theRoomsLineCommitsWithTheFinishAndARoomThatThrowsStillLetsTheEventOut() {
     var messages = new MessageStore(db);
-    var run = run("auth", "b", new RunStore.RunLogin("default", "glm"));
+    var run = run("auth", "b", new RunStore.RunLogin("default", "api-key"));
     var seenElsewhere = new ArrayList<String>();
-    var first = run("auth", "b", new RunStore.RunLogin("default", "glm"));
+    var first = run("auth", "b", new RunStore.RunLogin("default", "api-key"));
     try (var other = Sqlite.open(tempDir.resolve("test.db"))) {
       var asTold =
           new RunReports(
@@ -265,7 +265,7 @@ class RunReportsTest {
               throw new IllegalStateException("database is locked");
             },
             published::add);
-    assertTrue(finished(throwing, run("auth", "b", new RunStore.RunLogin("default", "glm"))));
+    assertTrue(finished(throwing, run("auth", "b", new RunStore.RunLogin("default", "api-key"))));
     assertEquals(List.of("limited"), published.stream().map(e -> e.data().get("outcome")).toList());
   }
 
@@ -277,7 +277,7 @@ class RunReportsTest {
     System.setErr(new PrintStream(log, true, StandardCharsets.UTF_8));
     RunStore.RunRow run;
     try {
-      run = run("auth", "b", new RunStore.RunLogin("default", "glm"));
+      run = run("auth", "b", new RunStore.RunLogin("default", "api-key"));
       finished(reporting(new LoginOutcome.Undelivered()), run);
     } finally {
       System.setErr(original);
@@ -288,9 +288,8 @@ class RunReportsTest {
     assertEquals(
         "  [api] run "
             + run.id()
-            + ": Claude Code saw no login, though Sail gave it eng's login 'default'"
-            + " (GLM Coding Plan key): Sail's delivery of it failed, and the login"
-            + " itself was never tried.\n",
+            + ": Claude Code saw no login, though Sail gave it eng's login 'default' (API"
+            + " key): Sail's delivery of it failed, and the login itself was never tried.\n",
         log.toString(StandardCharsets.UTF_8));
     assertFalse(runs.findById(run.id()).orElseThrow().stoppedForLogin(), "an ordinary failure");
   }

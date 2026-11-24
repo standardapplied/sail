@@ -51,11 +51,11 @@ import org.junit.jupiter.api.io.TempDir;
 @Timeout(value = 60, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
 class PtyAgentsTest {
 
-  private static final String VALUE = "fake-glm-agents-test-value";
+  private static final String VALUE = "fake-key-agents-test-value";
   private static final LoginStore.Login LOGIN =
       new LoginStore.Login(
-          new LoginStore.Row("claude-code", "work", "glm", true, Instant.EPOCH, "0123abcd"),
-          Harnesses.of("claude-code").loginKind("glm"),
+          new LoginStore.Row("claude-code", "work", "api-key", true, Instant.EPOCH, "0123abcd"),
+          Harnesses.of("claude-code").loginKind("api-key"),
           VALUE);
 
   @TempDir Path dir;

@@ -134,7 +134,7 @@ class RefusedLoginIT extends AbstractIncusIT {
       HeldProjects.hold(db, PROJECT);
       var fdes = new FdeStore(db);
       var id = fdes.add(HANDLE, null, HANDLE + "@sail.invalid", "admin").id();
-      fdes.logins().store(id, Harnesses.of("claude-code"), null, "glm", "fake-glm-it-fake");
+      fdes.logins().store(id, Harnesses.of("claude-code"), null, "api-key", "fake-key-it-fake");
       fdes.logins().store(id, Harnesses.of("codex"), null, "api-key", "sk-proj-it-fake-0000");
       var specs = new SpecStore(db);
       var runs = new RunStore(db);
@@ -202,11 +202,9 @@ class RefusedLoginIT extends AbstractIncusIT {
 
       assertEquals(
           List.of(
-              "Claude Code refused it-node's login 'default' (GLM Coding Plan key), so"
-                  + " its run stopped. Create a GLM Coding Plan API key at"
-                  + " z.ai/manage-apikey/apikey-list, or a Team Plan's at"
-                  + " z.ai/manage-apikey/coding-plan/team/my-plan, then sail agent login"
-                  + " claude-code --kind glm. Then build it again: sail spec dispatch -p sail-it-refused"
+              "Claude Code refused it-node's login 'default' (API key), so its run"
+                  + " stopped. Create an API key in the Claude Console, then sail agent login"
+                  + " claude-code. Then build it again: sail spec dispatch -p sail-it-refused"
                   + " --spec spec-claude --restart."),
           said(messages, "spec-claude"));
       assertEquals(

@@ -463,9 +463,9 @@ Every spec has a room. Agents post progress there, read it before deciding, and 
 ### Your harness login
 
 A run of your spec starts its harness with a key you stored, never one made by hand in the
-container. A stored login is a key its service issues for programs: a Claude Console API key, a
-GLM Coding Plan key (Claude Code sends it to Z.AI; a run on it reports its tokens, not dollars), or
-an OpenAI API key. Store one once; it is read from stdin and never shown again, and it is sent to
+container. Each harness has exactly two ways in: its own sign-in, inside its session in your
+workspace, or one stored key its own vendor issues for programs: a Claude Console API key for
+Claude Code, an OpenAI API key for Codex. Store one once; it is read from stdin and never shown again, and it is sent to
 its own service whatever the container's environment and the harness's user and project settings
 say, an interactive Claude Code session on an API key included. Some ways remain for the container
 to send it elsewhere, and the draft spec `sail-a-stored-login-never-enters-the-container` owns
@@ -477,11 +477,11 @@ harness's environment.
 
 ```bash
 sudo sail agent login claude-code                   # paste a Console API key: stored as 'default', the default
-printf %s "$GLM_KEY" | sudo sail agent login claude-code --name glm --kind glm
+printf %s "$KEY" | sudo sail agent login claude-code --name work   # a second key, by its name
 printf %s "$CODEX_API_KEY" | sudo sail agent login codex      # an API key, the one kind Codex takes
 sudo sail agent login codex --dry-run               # what it would store; reads and stores nothing
 sudo sail agent login list                          # name, kind, default, stored date, fingerprint
-sudo sail agent login use claude-code glm           # the default for runs launched from now on
+sudo sail agent login use claude-code work          # the default for runs launched from now on
 sudo sail agent login remove claude-code default
 ```
 
@@ -491,9 +491,9 @@ starts, saying how to make one. A run whose harness refused your login (expired,
 wrong) or ran out of its account's quota is said so in the spec's room, with the command that
 replaces it. An admin lists or removes another person's logins
 with `--fde <handle>`; nobody, an admin included, can read a value back. A subscription (Claude
-Pro or Max, a ChatGPT plan) is never stored: sign in inside the harness's own session in your
-workspace (Claude Code's `/login`; Codex's "Sign in with Device Code", once device code login is
-on in your ChatGPT security settings), where the sign-in stays. A run that names no spec (`sail
+Pro or Max, a ChatGPT plan) is never stored: the harness asks you to sign in when it starts in a
+workspace that does not hold its sign-in yet (in Codex choose "Sign in with Device Code", after
+turning it on in your ChatGPT security settings), and the sign-in stays in that workspace. A run that names no spec (`sail
 agent run`) uses whatever login its container has.
 
 ### Your git token

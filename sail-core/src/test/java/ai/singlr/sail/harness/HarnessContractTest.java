@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.harness.Harness.Launch;
 import java.util.List;
 import java.util.stream.Stream;
@@ -153,12 +152,13 @@ class HarnessContractTest {
 
   @ParameterizedTest
   @MethodSource("harnesses")
-  void everyHarnessDeclaresKeysOfDistinctKindsAndVariables(Harness harness) {
+  void everyHarnessDeclaresExactlyOneKey(Harness harness) {
     var kinds = harness.loginKinds();
 
-    assertFalse(kinds.isEmpty(), harness.yamlName());
-    assertEquals(kinds.size(), kinds.stream().map(LoginKind::kind).distinct().count());
-    assertEquals(kinds.size(), kinds.stream().map(LoginKind::variable).distinct().count());
+    assertEquals(
+        1,
+        kinds.size(),
+        harness.yamlName() + " has two ways in, its own sign-in or one stored key: " + kinds);
     for (var kind : kinds) {
       assertTrue(kind.variable().matches("[A-Z][A-Z0-9_]*"), kind.variable());
       assertFalse(kind.howToMake().isEmpty(), kind.kind());
@@ -186,15 +186,21 @@ class HarnessContractTest {
 
   @ParameterizedTest
   @MethodSource("harnesses")
-  void everyHarnessSaysHowASubscriptionSignsInInsideItsOwnSession(Harness harness) {
+  void everyHarnessNamesItsOwnSignInInWordsAndTheFileItKeepsItIn(Harness harness) {
     var signIn = harness.signIn();
 
-    assertFalse(signIn.isEmpty(), harness.yamlName());
+    assertFalse(signIn.name().isBlank(), harness.yamlName());
+    assertFalse(signIn.how().isEmpty(), harness.yamlName());
+    assertEquals(
+        List.of(),
+        signIn.how().commands(),
+        "the sign-in's sentence is words a person reads in the panel: " + signIn.how());
     assertTrue(
-        signIn.commands().stream().allMatch(command -> command.runs() == Remedy.Runs.ELSEWHERE),
-        "the sign-in is the harness's own, typed in its session, never a command of the box's"
-            + " account (sudo): "
-            + signIn);
+        harness.storedLogins().contains(signIn.file()),
+        "the file that holds the sign-in is one a workspace loses when it leaves its person: "
+            + signIn.file()
+            + " in "
+            + harness.storedLogins());
   }
 
   @ParameterizedTest

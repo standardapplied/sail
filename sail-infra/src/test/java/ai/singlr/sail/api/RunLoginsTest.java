@@ -69,7 +69,7 @@ class RunLoginsTest {
     assertFalse(RunLogins.replaced(fdes, refused), "the one it was refused, stored before");
     assertFalse(RunLogins.replaced(fdes, stranger), "no login to replace it");
 
-    fdes.logins().store(uday, claude, "work", "glm", "fake-glm-key-work");
+    fdes.logins().store(uday, claude, "work", "api-key", "fake-key-key-work");
     fdes.logins().use(uday, claude, "work");
     assertTrue(RunLogins.replaced(fdes, refused), "another login is the default");
 

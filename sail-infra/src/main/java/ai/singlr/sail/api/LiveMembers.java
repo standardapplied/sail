@@ -1337,7 +1337,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       var kind = harness.declaredKind(run.loginKind());
       var usage = Objects.requireNonNullElse(harness.usage(line), RunUsage.NONE);
       var outcome = kind.isEmpty() ? null : harness.loginOutcome(line).orElse(null);
-      var report = new RunReport(kind.map(given -> given.charged(usage)).orElse(usage), outcome);
+      var report = new RunReport(usage, outcome);
       if (report.usage().reported()) {
         runStore.recordUsage(runId, report);
       }

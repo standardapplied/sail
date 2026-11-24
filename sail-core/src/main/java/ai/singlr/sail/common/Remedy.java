@@ -43,12 +43,7 @@ public record Remedy(List<Part> parts) {
     /** {@code sail} on a thin client, where sail never runs as root. */
     CLIENT,
     /** Another program on the files of the account sail ran as, such as {@code ssh-keygen -R}. */
-    PROGRAM,
-    /**
-     * A program, or a command inside one, the reader runs themselves, such as Claude Code's {@code
-     * /login} in its own session: never this process's, so it is rendered as it is.
-     */
-    ELSEWHERE
+    PROGRAM
   }
 
   /** A command: {@code verb} (the words naming it) and its {@code args}, for {@code runs}. */
@@ -84,11 +79,6 @@ public record Remedy(List<Part> parts) {
   /** {@code <program> <args>} on the files of the account sail ran as. */
   public static Command program(String program, String... args) {
     return new Command(Runs.PROGRAM, program, Arrays.asList(args));
-  }
-
-  /** {@code <program> <args>}, run by the reader themselves, never by this process. */
-  public static Command elsewhere(String program, String... args) {
-    return new Command(Runs.ELSEWHERE, program, Arrays.asList(args));
   }
 
   /**
@@ -155,7 +145,7 @@ public record Remedy(List<Part> parts) {
         command ->
             switch (command.runs()) {
               case SAIL, CLIENT -> "sail " + command.line();
-              case PROGRAM, ELSEWHERE -> command.line();
+              case PROGRAM -> command.line();
             });
   }
 

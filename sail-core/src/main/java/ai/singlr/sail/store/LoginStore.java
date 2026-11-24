@@ -333,7 +333,7 @@ public final class LoginStore {
     var named = Strings.isBlank(name) ? DEFAULT_NAME : name;
     if (!NAME.matcher(named).matches()) {
       throw new IllegalArgumentException(
-          "A login's name is 1 to 32 lowercase letters, digits and hyphens, starting with a letter"
+          "A key's name is 1 to 32 lowercase letters, digits and hyphens, starting with a letter"
               + " or digit, such as work or personal.");
     }
     return named;
@@ -346,18 +346,17 @@ public final class LoginStore {
    */
   static void requireValue(String value) {
     if (Strings.isBlank(value)) {
-      throw new IllegalArgumentException("A login's value is empty: paste the key or token.");
+      throw new IllegalArgumentException("A key is empty: paste the key.");
     }
     if (value.contains("\n") || value.contains("\r")) {
-      throw new IllegalArgumentException(
-          "A login's value is one line: paste only the key or token.");
+      throw new IllegalArgumentException("A key is one line: paste only the key.");
     }
     if (value.getBytes(StandardCharsets.UTF_8).length > MAX_VALUE_BYTES) {
-      throw new IllegalArgumentException("A login's value is at most 16 KiB.");
+      throw new IllegalArgumentException("A key is at most 16 KiB.");
     }
     if (!VALUE.matcher(value).matches()) {
       throw new IllegalArgumentException(
-          "A login's value is printable ASCII with no space, quote, backslash, $ or backtick.");
+          "A key is printable ASCII with no space, quote, backslash, $ or backtick.");
     }
   }
 

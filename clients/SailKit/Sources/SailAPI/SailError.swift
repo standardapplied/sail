@@ -121,7 +121,7 @@ public enum RemedyPart: Codable, Equatable, Sendable {
 /// Who runs a remedy's command: `sail` on the box that answered, `sail` on a thin client, or
 /// another program.
 public enum Runner: String, CaseIterable, Sendable {
-    case sail, client, program, elsewhere
+    case sail, client, program
 }
 
 /// An answer this client could not read: the route that gave it, the field as the server spells

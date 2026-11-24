@@ -141,7 +141,13 @@ class WorkspaceAgentsTest {
                 "[" + workspace("acme", "old", "Stopped", "zed", "fde_zed") + "]")
             .onOk(
                 "incus list ^acme-reused$",
-                "[" + workspace("acme", "reused", "Running", "sam", "fde_another_sam") + "]");
+                "[" + workspace("acme", "reused", "Running", "sam", "fde_another_sam") + "]")
+            .onOk(
+                "incus list ^beta-mute$",
+                "[" + workspace("beta", "mute", "Running", "sam", samId) + "]")
+            .onOk("incus exec acme-try ", ".claude/.credentials.json\n")
+            .onOk("incus exec beta-tom ", ".codex/auth.json\n.claude.json\n")
+            .onFail("incus exec beta-mute ", "Error: websocket: close 1006");
     var operations =
         TestControlPlane.on(
             OperationsFactory.create(db, incus, null, SyncScheduler.disabled(), SessionYield.NONE),
@@ -253,26 +259,23 @@ class WorkspaceAgentsTest {
                 "label",
                 "API key",
                 "how",
-                List.of(Map.of("text", "Create an API key in the Claude Console"))),
-            Map.of(
-                "kind",
-                "glm",
-                "label",
-                "GLM Coding Plan key",
-                "how",
-                List.of(
-                    Map.of(
-                        "text",
-                        "Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, or a"
-                            + " Team Plan's at"
-                            + " z.ai/manage-apikey/coding-plan/team/my-plan")))),
+                List.of(Map.of("text", "Create an API key in the Claude Console")))),
         claude.get("kinds"),
-        "the kinds in the order a person is shown them, an API key first, each a key whose how is"
-            + " words");
+        "its one key, whose how is words");
     assertEquals(
-        Harnesses.of("claude-code").signIn().toMaps(),
+        Map.of(
+            "name",
+            "Your Claude account",
+            "how",
+            List.of(
+                Map.of(
+                    "text",
+                    "Claude Code asks you to sign in with your Claude account when it starts, once"
+                        + " in each workspace.")),
+            "signed_in",
+            true),
         claude.get("sign_in"),
-        "a subscription signs in inside the harness's own session, as the harness says it");
+        "its own sign-in, which the running workspace holds");
     var codex = answer.offer("codex");
     assertEquals(
         refusal(
@@ -320,10 +323,43 @@ class WorkspaceAgentsTest {
             "No Claude Code login stored for tom, so a Claude Code session cannot start in tom."),
         said(noneStored).subList(0, 2));
     assertEquals(true, toms.offer("claude-code").get("inside"));
+    assertEquals(
+        List.of(false, true),
+        List.of(
+            ((Map<?, ?>) toms.offer("claude-code").get("sign_in")).get("signed_in"),
+            ((Map<?, ?>) toms.offer("codex").get("sign_in")).get("signed_in")),
+        "tom's workspace holds Codex's sign-in and Claude Code's own state, not its sign-in");
+    assertEquals(
+        List.of("name", "how"),
+        List.copyOf(((Map<?, ?>) sams.offer("claude-code").get("sign_in")).keySet()),
+        "a stopped workspace is not started to read whether it holds a sign-in");
+    assertTrue(
+        incus.invocations().stream()
+            .noneMatch(command -> command.startsWith("incus exec beta-dock")),
+        "nothing runs in a stopped workspace: " + incus.invocations());
     assertTrue(noneStored.containsKey("remedy"), "the remedy names the command that stores one");
     assertTrue(
         ((String) noneStored.get("action")).startsWith("Create an API key in the Claude Console"),
         "the remedy names the kinds in the order the route offers them: " + noneStored);
+  }
+
+  /**
+   * A running workspace whose read of the sign-ins fails is still offered each harness, with its
+   * sign-in's name and words and nothing said of whether it holds it.
+   */
+  @Test
+  void aWorkspaceThatCannotBeReadIsOfferedEachSignInWithNothingSaidOfWhetherItIsHeld()
+      throws Exception {
+    var answer = ask(sam, "beta-mute");
+
+    assertEquals(200, answer.status(), answer.toString());
+    for (var harness : List.of("claude-code", "codex")) {
+      var signIn = (Map<?, ?>) answer.offer(harness).get("sign_in");
+      assertEquals(
+          List.of(Harnesses.of(harness).signIn().name(), false),
+          List.of(signIn.get("name"), signIn.containsKey("signed_in")),
+          harness);
+    }
   }
 
   private static List<Object> said(Object refusal) {
