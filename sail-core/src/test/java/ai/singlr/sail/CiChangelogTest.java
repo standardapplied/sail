@@ -32,7 +32,7 @@ class CiChangelogTest {
   private static final String README = "One file per change.\n";
   private static final String EDITS_CHANGELOG =
       "ci/changelog: this change edits CHANGELOG.md, which only the release writes. Put its"
-          + " entry in a file of its own instead, changes/<short-slug>.md, holding its bullets as"
+          + " entry in a file of its own instead, changes/<spec-id>.md, holding its bullets as"
           + " they would read under the version heading (changes/README.md).\n";
 
   @TempDir Path repo;
@@ -90,7 +90,7 @@ class CiChangelogTest {
     assertEquals(1, ran.exit());
     assertEquals(
         "ci/changelog: changes/ holds no entry to fold into 0.75.0: each change adds"
-            + " changes/<short-slug>.md.\n",
+            + " changes/<spec-id>.md.\n",
         ran.err());
     assertEquals(RELEASED, Files.readString(repo.resolve("CHANGELOG.md")));
   }
@@ -158,6 +158,86 @@ class CiChangelogTest {
 
     assertEquals(0, ran.exit(), ran.err());
     assertEquals("", ran.err());
+  }
+
+  @Test
+  void aChangeOnASpecsBranchAddsTheEntryNamedForItsSpec() throws Exception {
+    git(Map.of(), "checkout", "-q", "-b", "agent/the-spec");
+    write("changes/the-spec.md", "- **Mine.** New.\n");
+    commit("2026-11-02T00:00:00Z");
+
+    var ran = sh("ci/check", "changelog", base);
+
+    assertEquals(0, ran.exit(), ran.err());
+  }
+
+  @Test
+  void anEntryNamedOtherwiseThanTheBranchsSpecIsRefusedNamingTheOneToAdd() throws Exception {
+    git(Map.of(), "checkout", "-q", "-b", "agent/the-spec");
+    write("changes/mine.md", "- **Mine.** New.\n");
+    commit("2026-11-02T00:00:00Z");
+
+    var ran = sh("ci/check", "changelog", base);
+
+    assertEquals(1, ran.exit());
+    assertEquals(
+        "ci/changelog: this change adds changes/mine.md, but its branch agent/the-spec names its"
+            + " entry changes/the-spec.md: rename it.\n",
+        ran.err());
+  }
+
+  @Test
+  void aPullRequestsBranchIsReadFromItsRunWhereTheCheckoutHasNone() throws Exception {
+    write("changes/mine.md", "- **Mine.** New.\n");
+    commit("2026-11-02T00:00:00Z");
+
+    var ran =
+        run(List.of("bash", "ci/check", "changelog", base), Map.of("GITHUB_HEAD_REF", "agent/x"));
+
+    assertEquals(1, ran.exit());
+    assertEquals(
+        "ci/changelog: this change adds changes/mine.md, but its branch agent/x names its entry"
+            + " changes/x.md: rename it.\n",
+        ran.err());
+  }
+
+  @Test
+  void aChangeThatAddsNoEntryIsRefusedNamingTheOneToAdd() throws Exception {
+    git(Map.of(), "checkout", "-q", "-b", "agent/the-spec");
+    write("README.md", "Changed.\n");
+    commit("2026-11-02T00:00:00Z");
+
+    var ran = sh("ci/check", "changelog", base);
+
+    assertEquals(1, ran.exit());
+    assertEquals(
+        "ci/changelog: this change adds no entry: add changes/the-spec.md holding its bullets as"
+            + " they would read under the version heading (changes/README.md).\n",
+        ran.err());
+  }
+
+  @Test
+  void aChangeThatAddsTwoEntriesIsRefusedNamingBoth() throws Exception {
+    write("changes/one.md", "- **One.** New.\n");
+    write("changes/two.md", "- **Two.** New.\n");
+    commit("2026-11-02T00:00:00Z");
+
+    var ran = sh("ci/check", "changelog", base);
+
+    assertEquals(1, ran.exit());
+    assertEquals(
+        "ci/changelog: this change adds 2 entries (changes/one.md, changes/two.md): a pull request"
+            + " adds exactly one, changes/<spec-id>.md.\n",
+        ran.err());
+  }
+
+  @Test
+  void anEntryNotYetCommittedCountsAsAdded() throws Exception {
+    write("changes/mine.md", "- **Mine.** New.\n");
+
+    var ran = sh("ci/check", "changelog", base);
+
+    assertEquals(0, ran.exit(), ran.err());
   }
 
   @Test
@@ -238,7 +318,7 @@ class CiChangelogTest {
     write("changes/sub/nested.md", "- **Nested.** One folder down.\n");
     commit("2026-11-02T00:00:00Z");
     var refusal =
-        "ci/changelog: changes/sub is not an entry file: changes/ holds only <short-slug>.md"
+        "ci/changelog: changes/sub is not an entry file: changes/ holds only <spec-id>.md"
             + " files, directly in it.\n";
 
     var checked = sh("ci/check", "changelog", base);
@@ -338,6 +418,7 @@ class CiChangelogTest {
     var builder = new ProcessBuilder(command).directory(repo.toFile());
     builder.environment().put("GIT_CONFIG_GLOBAL", "/dev/null");
     builder.environment().put("GIT_CONFIG_NOSYSTEM", "1");
+    builder.environment().remove("GITHUB_HEAD_REF");
     builder.environment().putAll(env);
     var ran = Child.run(builder);
     return new Ran(ran.exit(), ran.stdout(), ran.stderr());

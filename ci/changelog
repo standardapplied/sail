@@ -11,9 +11,12 @@ cd "$(dirname "$0")/.."
 # commit holds yet last, a tie by name; renaming a file re-dates it. The files are then removed.
 # Nothing is written until every file has been read as an entry.
 #
-# ci/changelog check [BASE], for a pull request (ci/check changelog): refuses a change from BASE
-# (default: where it left origin/main) that edits CHANGELOG.md, and a changes/ folder holding
-# anything the fold would refuse. A base that has no changes/README.md yet is not held to it.
+# ci/changelog check [BASE], for a pull request (ci/rules' changes rule): refuses a change from BASE
+# (default: where it left origin/main) that edits CHANGELOG.md, a changes/ folder holding anything
+# the fold would refuse, and a change that adds other than one entry: changes/<spec-id>.md, the id
+# read from its branch agent/<spec-id> (GITHUB_HEAD_REF in a pull request's run, else the branch
+# checked out); on a branch of another name, one entry of any name. A base that has no
+# changes/README.md yet is not held to it.
 #
 # ci/changelog released VERSION, for a release tag: refuses unless the tagged commit folded, its
 # changes/ holding no entry and CHANGELOG.md's first version being VERSION.
@@ -67,7 +70,7 @@ require_entries() {
   local stray file
   [[ -d $CHANGES ]] || return 0
   stray=$(find "$CHANGES" -mindepth 1 -maxdepth 1 \( ! -type f -o ! -name '*.md' \) -print -quit)
-  [[ -z $stray ]] || refuse "$stray is not an entry file: $CHANGES/ holds only <short-slug>.md files, directly in it."
+  [[ -z $stray ]] || refuse "$stray is not an entry file: $CHANGES/ holds only <spec-id>.md files, directly in it."
   for file in "$CHANGES"/*.md; do
     [[ -f $file && $file != "$README" ]] || continue
     if grep -q "$(printf '\r')" "$file"; then
@@ -91,7 +94,7 @@ fold() {
   grep -qxF "## $version" "$CHANGELOG" && refuse "$CHANGELOG already has '## $version'; a version is folded once."
   require_entries
   files=$(entries)
-  [[ -n $files ]] || refuse "$CHANGES/ holds no entry to fold into $version: each change adds $CHANGES/<short-slug>.md."
+  [[ -n $files ]] || refuse "$CHANGES/ holds no entry to fold into $version: each change adds $CHANGES/<spec-id>.md."
   section=$(mktemp)
   folded=$(mktemp)
   trap 'rm -f "$section" "$folded"' EXIT
@@ -118,8 +121,33 @@ check() {
   [[ -n $base ]] || base=$(git merge-base origin/main HEAD)
   git cat-file -e "$base:$README" 2> /dev/null || return 0
   git diff --quiet "$base" -- "$CHANGELOG" ||
-    refuse "this change edits $CHANGELOG, which only the release writes. Put its entry in a file of its own instead, $CHANGES/<short-slug>.md, holding its bullets as they would read under the version heading ($README)."
+    refuse "this change edits $CHANGELOG, which only the release writes. Put its entry in a file of its own instead, $CHANGES/<spec-id>.md, holding its bullets as they would read under the version heading ($README)."
   require_entries
+  require_one_entry "$base"
+}
+
+# The entries a change adds, committed or not, one to a line.
+added_entries() {
+  { git diff --no-renames --name-only --diff-filter=A "$1" -- "$CHANGES"; git ls-files --others --exclude-standard -- "$CHANGES"; } \
+    | grep -E "^$CHANGES/[^/]+\.md\$" | grep -vxF "$README" | sort -u || true
+}
+
+require_one_entry() {
+  local branch expected added count
+  branch=${GITHUB_HEAD_REF:-$(git symbolic-ref --short -q HEAD || true)}
+  expected="$CHANGES/<spec-id>.md"
+  [[ $branch == agent/?* ]] && expected="$CHANGES/${branch#agent/}.md"
+  added=$(added_entries "$1")
+  count=$(grep -c . <<< "$added" || true)
+  if [[ $count == 0 ]]; then
+    refuse "this change adds no entry: add $expected holding its bullets as they would read under the version heading ($README)."
+  fi
+  if [[ $count != 1 ]]; then
+    refuse "this change adds $count entries ($(paste -sd, - <<< "$added" | sed 's/,/, /g')): a pull request adds exactly one, $expected."
+  fi
+  if [[ $branch == agent/?* && $added != "$expected" ]]; then
+    refuse "this change adds $added, but its branch $branch names its entry $expected: rename it."
+  fi
 }
 
 released() {

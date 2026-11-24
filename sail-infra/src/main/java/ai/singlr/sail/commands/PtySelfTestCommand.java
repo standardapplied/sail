@@ -469,6 +469,11 @@ public final class PtySelfTestCommand implements Callable<Integer> {
 
   /** Stringifies one instance of every record a {@code --json} verb prints. */
   static String jsonProbe() {
+    return CliJson.stringify(jsonProbeValues());
+  }
+
+  /** One instance of every record a {@code --json} verb prints. */
+  static List<Object> jsonProbeValues() {
     var info =
         new PtyMessage.SessionInfo("probe", "instance", true, 0, "fde", "", List.of("bash", "-l"));
     var listing = new SessionCommand.Ls.Listing(1, "boot", List.of(info), PtyEventDrops.Drops.NONE);
@@ -509,6 +514,6 @@ public final class PtySelfTestCommand implements Callable<Integer> {
             List.of(
                 new Workspaces.Row(
                     "w", "p-w", "running", "v1", "2026-11-12", null, "spec", "eng")));
-    return CliJson.stringify(List.of(listing, preview, dry, idle, created, changed, rows));
+    return List.of(listing, preview, dry, idle, created, changed, rows);
   }
 }

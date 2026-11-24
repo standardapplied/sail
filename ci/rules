@@ -1,0 +1,459 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# The rules a script can decide over the repository's sources, in seconds and with no build. A
+# finding is one line, 'file:line: rule: what it found: the rule's sentence', on stdout; the count
+# is on stderr and the exit is 1.
+#
+# The Swift under clients/ and the Java under */src/ are read by one lexer, so nothing inside a
+# string literal or a comment is taken for code: Swift's nested block comments, single-line,
+# multi-line and raw strings with their interpolations, bare regex literals; Java's strings, text
+# blocks and character literals.
+#
+# A rule is on or not yet. Every rule on holds in the repository; a rule not yet on still finds
+# something in it (CiRulesTest holds both). The pull request that clears a rule switches it on by
+# moving its name from NOT_YET to ON, and its row in AGENTS.md's "Quality gate" with it.
+
+readonly ON="ellipsis lists"
+readonly NOT_YET="comments sleeps tokens components function-lines parameters nesting file-lines"
+readonly PULL_REQUEST="changes"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  ci/rules check [BASE]      every rule on; with BASE, a pull request's base, also its own rule
+                             (changes: ci/changelog check BASE)
+  ci/rules run RULE...       the rules named, on or not yet (changes is checked from where the
+                             change left origin/main)
+  ci/rules list              every rule, whether it is on, and its sentence
+EOF
+  exit 2
+}
+
+sources() {
+  git ls-files -z --cached --others --exclude-standard -- 'clients/*.swift' '*/src/*.java' \
+    | while IFS= read -r -d '' path; do
+        [[ -f $path ]] && printf '%s\0' "$path"
+      done
+}
+
+# The tree rules named in $1 over every source, their findings on stdout.
+tree() {
+  local list
+  list=$(mktemp)
+  sources > "$list"
+  if [[ -s $list ]]; then
+    LC_ALL=C xargs -0 awk -v rules="$1" "$(program)" < "$list"
+  fi
+  rm -f "$list"
+}
+
+decide() {
+  local rules=$1 base=$2 changes=$3 found count
+  found=$(mktemp)
+  tree "$rules" > "$found"
+  cat "$found"
+  count=$(grep -c . "$found" || true)
+  rm -f "$found"
+  local failed=0
+  if [[ $count != 0 ]]; then
+    [[ $count == 1 ]] && echo "ci/rules: 1 finding; its line names its rule." >&2 \
+      || echo "ci/rules: $count findings; each line names its rule." >&2
+    failed=1
+  fi
+  if $changes; then
+    ci/changelog check $base || failed=1
+  fi
+  if [[ $failed == 0 ]]; then
+    echo "ci/rules: held: $rules$($changes && echo " $PULL_REQUEST")." >&2
+  fi
+  return $failed
+}
+
+check() {
+  [[ $# -le 1 ]] || usage
+  if [[ $# == 1 ]]; then
+    decide "$ON" "$1" true
+  else
+    decide "$ON" "" false
+  fi
+}
+
+run() {
+  [[ $# -ge 1 ]] || usage
+  local rule tree_rules="" changes=false
+  for rule in "$@"; do
+    case " $ON $NOT_YET " in
+      *" $rule "*) tree_rules="${tree_rules:+$tree_rules }$rule" ;;
+      *)
+        if [[ $rule == "$PULL_REQUEST" ]]; then
+          changes=true
+        else
+          echo "ci/rules: '$rule' is no rule; 'ci/rules list' names them." >&2
+          exit 2
+        fi
+        ;;
+    esac
+  done
+  decide "$tree_rules" "" "$changes"
+}
+
+list() {
+  local rule state
+  for rule in $ON $PULL_REQUEST $NOT_YET; do
+    case " $NOT_YET " in
+      *" $rule "*) state="not yet on" ;;
+      *) state="on" ;;
+    esac
+    printf '%s (%s): %s\n' "$rule" "$state" "$(sentence "$rule")"
+  done
+}
+
+sentence() {
+  [[ $1 == "$PULL_REQUEST" ]] && {
+    echo "A pull request adds exactly one entry, changes/<spec-id>.md, and never edits CHANGELOG.md."
+    return
+  }
+  LC_ALL=C awk -v rules="$1" -v sentence="$1" "$(program)" < /dev/null
+}
+
+program() {
+  cat <<'AWK'
+BEGIN {
+  n = split(rules, wanted, " ")
+  for (k = 1; k <= n; k++) on[wanted[k]] = 1
+  ELLIPSIS = "\342\200\246"
+  CONTROLS = "clients/SailApp/Sources/SailControls/"
+  SAY["comments"] = "No inline comments: a documentation comment (/// or /** */) says a non-obvious why; otherwise rename or extract."
+  SAY["sleeps"] = "A Swift test waits for the event it needs, never for time: no Task.sleep, Thread.sleep, usleep, nanosleep or sleep."
+  SAY["ellipsis"] = "A menu item's or a button's label names its action, with no \"" ELLIPSIS "\" or \"...\"; progress text keeps its ellipsis."
+  SAY["tokens"] = "A view takes its colours, fonts, spacing, radii and edge widths from the design system: Look (clients/SailKit/Sources/SailDesign/Look.swift) and the fonts of clients/SailApp/Sources/SailLook/, never a literal."
+  SAY["components"] = "A view outside " CONTROLS " neither makes nor subclasses an AppKit button, editable field, alert, panel or sheet: it uses SailButton, SailTextField or Sheet."
+  SAY["lists"] = "A list is a SailList and its rows are SailList's: a view outside " CONTROLS " neither makes nor subclasses an AppKit table, outline, collection, row or cell view."
+  SAY["function-lines"] = "A function is at most 80 code lines (lines that are not blank and not only a comment): split it."
+  SAY["parameters"] = "A func or subscript takes at most 6 parameters (an init takes its type's stored properties): pass a value that groups them."
+  SAY["nesting"] = "A function's body nests at most 4 blocks deep: extract the inner ones."
+  SAY["file-lines"] = "A file is at most 800 code lines (lines that are not blank and not only a comment): split it."
+  if (sentence != "") { print SAY[sentence]; exit }
+  split("func var let case init deinit subscript class struct enum protocol extension actor typealias associatedtype import static public private internal fileprivate open override mutating nonmutating final convenience required lazy weak unowned package", words, " ")
+  for (k in words) ENDS_SIGNATURE[words[k]] = 1
+}
+
+function finding(rule, line, found) {
+  print file ":" line ": " rule ": " found ": " SAY[rule]
+}
+
+function start(path) {
+  file = path
+  swift = path ~ /\.swift$/
+  java = path ~ /\.java$/
+  sources = path ~ /^clients\/[^\/]+\/Sources\//
+  tooling = path ~ /^clients\/SailApp\/Sources\/(SailDrive|SailTestPasskey)\//
+  design = path ~ /^clients\/SailKit\/Sources\/SailDesign\// || path == "clients/SailKit/Sources/SailVT/Palette.swift" || path ~ /^clients\/SailApp\/Sources\/SailLook\//
+  scope_comments = on["comments"] && ((swift && path ~ /^clients\//) || java)
+  scope_sleeps = on["sleeps"] && swift && path ~ /^clients\/[^\/]+\/Tests\//
+  scope_ellipsis = on["ellipsis"] && swift && sources && !tooling
+  views = swift && sources && !tooling && !design
+  scope_tokens = on["tokens"] && views
+  outside = views && index(path, CONTROLS) != 1
+  scope_components = on["components"] && outside
+  scope_lists = on["lists"] && outside
+  scope_sizes = swift && path ~ /^clients\// && (on["function-lines"] || on["parameters"] || on["nesting"] || on["file-lines"])
+  wanted_here = scope_comments || scope_sleeps || scope_ellipsis || scope_tokens || scope_components || scope_lists || scope_sizes
+  block = 0; sp = 0; codelines = 0
+  braces = 0; fsp = 0; dstate = 0; crossed = 0; prev = ""
+}
+
+function finish() {
+  if (scope_sizes && on["file-lines"] && codelines > 800)
+    finding("file-lines", 1, "the file is " codelines " code lines, over the cap of 800")
+}
+
+function repeat(s, times,    out) {
+  out = ""
+  while (times-- > 0) out = out s
+  return out
+}
+
+function labelled(prefix) {
+  return prefix ~ /(^|[^A-Za-z0-9_])(title|withTitle|button|label|confirm)[ \t]*:[ \t]*$/ || prefix ~ /\.title[ \t]*=[ \t]*$/ || prefix ~ /(^|[^A-Za-z0-9_.])Button\($/
+}
+
+function open_string(quotes, hashes, prefix) {
+  sp++
+  kind[sp] = "s"; squotes[sp] = quotes; shashes[sp] = hashes
+  sbody[sp] = ""; sline[sp] = FNR; slabel[sp] = scope_ellipsis && labelled(prefix)
+}
+
+function close_string() {
+  if (slabel[sp] && (index(sbody[sp], ELLIPSIS) || index(sbody[sp], "...")))
+    finding("ellipsis", sline[sp], "\"" sbody[sp] "\"")
+  sp--
+}
+
+function comment(text, line) {
+  if (!scope_comments) return
+  if (substr(text, 1, 3) == "///" || (substr(text, 1, 3) == "/**" && substr(text, 1, 4) != "/**/")) return
+  if (FNR == 1 && swift && file ~ /(^|\/)Package\.swift$/ && text ~ /^\/\/ swift-tools-version:/) return
+  if (FNR == 1 && java && substr(text, 1, 2) == "/*") return
+  finding("comments", line, text)
+}
+
+# The line with every comment and every string literal's body blanked; strings keep their quotes.
+function lex(line,    i, n, c, two, h, q, j, code, ender, esc, prior) {
+  if (block == 0 && sp == 0 && line !~ /["'\/#]/) {
+    hascode = line ~ /[^ \t]/
+    return line
+  }
+  code = ""; hascode = 0; n = length(line); i = 1
+  while (i <= n) {
+    c = substr(line, i, 1)
+    two = substr(line, i, 2)
+    if (block > 0) {
+      if (two == "*/") { block--; i += 2; continue }
+      if (swift && two == "/*") { block++; i += 2; continue }
+      i++; continue
+    }
+    if (sp > 0 && kind[sp] == "s") {
+      esc = "\\" repeat("#", shashes[sp])
+      if (substr(line, i, length(esc)) == esc) {
+        j = i + length(esc)
+        if (swift && substr(line, j, 1) == "(") {
+          sp++; kind[sp] = "i"; depth[sp] = 1; code = code " "; i = j + 1; continue
+        }
+        sbody[sp] = sbody[sp] substr(line, i, length(esc) + 1); code = code repeat(" ", length(esc) + 1); hascode = 1
+        i = j + 1; continue
+      }
+      ender = repeat("\"", squotes[sp]) repeat("#", shashes[sp])
+      if (substr(line, i, length(ender)) == ender) {
+        close_string(); code = code "\""; hascode = 1; i += length(ender); continue
+      }
+      sbody[sp] = sbody[sp] c; code = code " "
+      if (c != " " && c != "\t") hascode = 1
+      i++; continue
+    }
+    if (two == "//") { comment(substr(line, i), FNR); break }
+    if (two == "/*") { comment(substr(line, i), FNR); block = 1; i += 2; continue }
+    if (c == "\"" || (swift && c == "#")) {
+      j = i
+      while (swift && substr(line, j, 1) == "#") j++
+      if (substr(line, j, 1) == "\"") {
+        h = j - i
+        q = substr(line, j, 3) == "\"\"\"" ? 3 : 1
+        open_string(q, h, code)
+        code = code "\""; hascode = 1; i = j + q; continue
+      }
+    }
+    if (java && c == "'") {
+      j = i + 1
+      while (j <= n && substr(line, j, 1) != "'") j += substr(line, j, 1) == "\\" ? 2 : 1
+      code = code "'" repeat(" ", j - i - 1) "'"; hascode = 1; i = j + 1; continue
+    }
+    if (swift && c == "/" && substr(line, i + 1, 1) !~ /[ \/*=]/ && i < n) {
+      prior = code; sub(/[ \t]+$/, "", prior)
+      if (prior ~ /[(,=:[]$/) {
+        j = i + 1
+        while (j <= n && substr(line, j, 1) != "/") j += substr(line, j, 1) == "\\" ? 2 : 1
+        if (j <= n) { code = code "/" repeat(" ", j - i - 1) "/"; hascode = 1; i = j + 1; continue }
+      }
+    }
+    if (sp > 0 && kind[sp] == "i") {
+      if (c == "(") depth[sp]++
+      if (c == ")" && --depth[sp] == 0) { sp--; code = code " "; i++; continue }
+    }
+    code = code c
+    if (c != " " && c != "\t") hascode = 1
+    i++
+  }
+  if (sp > 0 && kind[sp] == "s") {
+    if (squotes[sp] == 1) close_string()
+    else sbody[sp] = sbody[sp] "\n"
+  }
+  return code
+}
+
+function each(code, pattern, rule,    rest, at) {
+  rest = code
+  while (match(rest, pattern)) {
+    at = substr(rest, RSTART, RLENGTH)
+    sub(/^[^A-Za-z0-9_]/, "", at)
+    finding(rule, FNR, at)
+    rest = substr(rest, RSTART + RLENGTH)
+  }
+}
+
+function nonzero(code, pattern, rule,    rest, at, number) {
+  rest = code
+  while (match(rest, pattern)) {
+    at = substr(rest, RSTART, RLENGTH)
+    sub(/^[^A-Za-z0-9_]/, "", at)
+    number = at
+    sub(/^.*[^0-9.]/, "", number)
+    if (number + 0 != 0) finding(rule, FNR, at)
+    rest = substr(rest, RSTART + RLENGTH)
+  }
+}
+
+function sleeps(code,    rest, at) {
+  rest = code
+  while (match(rest, /(^|[^A-Za-z0-9_.])((Task|Thread)\.sleep|usleep|nanosleep|sleep|(Continuous|Suspending)Clock\(\)\.sleep)[ \t]*\(/)) {
+    at = substr(rest, RSTART, RLENGTH)
+    if (substr(rest, 1, RSTART) !~ /(^|[^A-Za-z0-9_])func[ \t]*$/) {
+      sub(/^[^A-Za-z0-9_]/, "", at)
+      finding("sleeps", FNR, at)
+    }
+    rest = substr(rest, RSTART + RLENGTH)
+  }
+}
+
+function tokens(code,    rest, inset) {
+  each(code, "(^|[^A-Za-z0-9_])(NSColor|CGColor|Color)\\([ \t]*(red|srgbRed|calibratedRed|deviceRed|displayP3Red|white|calibratedWhite|deviceWhite|genericGamma22White|hue|calibratedHue|deviceHue|gray|genericGrayGamma2_2Gray)[ \t]*:", "tokens")
+  each(code, "(^|[^A-Za-z0-9_])NSColor\\.(black|white|red|green|blue|gray|darkGray|lightGray|orange|yellow|purple|brown|cyan|magenta|system[A-Z][A-Za-z]*|[a-z][A-Za-z]*Color)([^A-Za-z0-9_]|$)", "tokens")
+  each(code, "(^|[^A-Za-z0-9_])(RGB|Tint)\\([ \t]*0[xX][0-9A-Fa-f]+", "tokens")
+  each(code, "(^|[^A-Za-z0-9_])NSFont\\.[A-Za-z]*[sS]ystemFont\\(ofSize:[ \t]*[0-9][0-9.]*", "tokens")
+  each(code, "(^|[^A-Za-z0-9_])(NSFont\\(name:|CTFontCreateWithName\\()", "tokens")
+  each(code, "(^|[^A-Za-z0-9_])font\\([ \t]*[0-9][0-9.]*", "tokens")
+  nonzero(code, "(^|[^A-Za-z0-9_])(cornerRadius|lineWidth|borderWidth)[ \t]*=[ \t]*-?[0-9][0-9.]*", "tokens")
+  nonzero(code, "(^|[^A-Za-z0-9_])([xy]Radius|spacing)[ \t]*:[ \t]*-?[0-9][0-9.]*", "tokens")
+  nonzero(code, "(^|[^A-Za-z0-9_])spacing[ \t]*=[ \t]*-?[0-9][0-9.]*", "tokens")
+  rest = code
+  while (match(rest, /(^|[^A-Za-z0-9_])NSEdgeInsets\([^)]*\)/)) {
+    inset = substr(rest, RSTART, RLENGTH)
+    sub(/^[^A-Za-z0-9_]/, "", inset)
+    if (inset ~ /:[ \t]*-?(0*[1-9][0-9]*(\.[0-9]+)?|0*\.[0-9]*[1-9])/) finding("tokens", FNR, inset)
+    rest = substr(rest, RSTART + RLENGTH)
+  }
+}
+
+function subclasses(code, types, rule,    inherits) {
+  if (!match(code, /(^|[^A-Za-z0-9_])class[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*(<[^>]*>)?[ \t]*:/)) return
+  inherits = substr(code, RSTART + RLENGTH)
+  sub(/[{].*$/, "", inherits)
+  if (match(inherits, "(^|[^A-Za-z0-9_])(" types ")([^A-Za-z0-9_]|$)")) {
+    inherits = substr(inherits, RSTART, RLENGTH)
+    gsub(/[^A-Za-z0-9_]/, "", inherits)
+    finding(rule, FNR, "a subclass of " inherits)
+  }
+}
+
+function components(code) {
+  each(code, "(^|[^A-Za-z0-9_.])(NSButton|NSPopUpButton|NSSegmentedControl|NSSecureTextField|NSSearchField|NSAlert|NSPanel)[ \t]*\\(", "components")
+  each(code, "(^|[^A-Za-z0-9_.])NSTextField[ \t]*\\([ \t]*(\\)|string:|frame:)", "components")
+  each(code, "(^|[^A-Za-z0-9_])beginSheet\\(", "components")
+  subclasses(code, "NSButton|NSPopUpButton|NSSegmentedControl|NSTextField|NSSecureTextField|NSSearchField|NSPanel", "components")
+}
+
+function lists(code) {
+  each(code, "(^|[^A-Za-z0-9_.])(NSTableView|NSOutlineView|NSCollectionView|NSTableRowView|NSTableCellView)[ \t]*\\(", "lists")
+  subclasses(code, "NSTableView|NSOutlineView|NSCollectionView|NSTableRowView|NSTableCellView", "lists")
+}
+
+function declared(word) {
+  if (prev == ".") return 0
+  if (word == "func" || word == "subscript" || word == "init") {
+    dstate = 1; dkind = word; dname = word == "func" ? "" : word; dline = FNR; dbefore = codelines - hascode
+    dparams = 0; angle = 0
+    return 1
+  }
+  if (word == "deinit") {
+    dstate = 3; dkind = word; dname = word; dline = FNR; dbefore = codelines - hascode; dparams = 0; crossed = 0
+    return 1
+  }
+  return 0
+}
+
+function open_body() {
+  fsp++
+  fbody[fsp] = braces; fmax[fsp] = 0
+  fkind[fsp] = dkind; fname[fsp] = dname; fline[fsp] = dline; fbefore[fsp] = dbefore; fparams[fsp] = dparams
+  dstate = 0
+}
+
+function close_body(    lines) {
+  lines = codelines - fbefore[fsp]
+  if (on["function-lines"] && lines > 80)
+    finding("function-lines", fline[fsp], fname[fsp] " is " lines " code lines, over the cap of 80")
+  if (on["parameters"] && fkind[fsp] != "init" && fparams[fsp] > 6)
+    finding("parameters", fline[fsp], fname[fsp] " takes " fparams[fsp] " parameters, over the cap of 6")
+  if (on["nesting"] && fmax[fsp] > 4)
+    finding("nesting", fline[fsp], fname[fsp] " nests " fmax[fsp] " blocks deep, over the cap of 4")
+  fsp--
+}
+
+# Declarations and blocks, read from the blanked line: each func, init, deinit and subscript with a
+# body, its parameters (the top-level commas of its clause), its code lines and how deep its blocks go.
+function structure(code,    j, L, c, k, w, first, f) {
+  first = code; sub(/^[ \t]+/, "", first); first = substr(first, 1, 1)
+  if (dstate == 3 && crossed && (first == "@" || first == "#")) dstate = 0
+  L = length(code); j = 1
+  while (j <= L) {
+    c = substr(code, j, 1)
+    if (c ~ /[A-Za-z_]/) {
+      k = j
+      while (k <= L && substr(code, k, 1) ~ /[A-Za-z0-9_]/) k++
+      w = substr(code, j, k - j)
+      if (!declared(w)) {
+        if (dstate == 1 && dname == "") dname = w
+        else if (dstate == 3 && crossed && (w in ENDS_SIGNATURE)) dstate = 0
+      }
+      prev = "a"; j = k; continue
+    }
+    if (dstate == 1) {
+      if (c == "(") { dstate = 2; pdepth = 1; commas = 0; filled = 0 }
+      else if (dname == "" && c ~ /[-=<>!+*\/%&|^~.]/) dname = dname c
+    } else if (dstate == 2) {
+      if (c ~ /[([{]/) pdepth++
+      else if (c ~ /[)\]}]/) pdepth--
+      else if (c == "<") angle++
+      else if (c == ">" && prev != "-" && angle > 0) angle--
+      else if (c == "," && pdepth == 1 && angle == 0) commas++
+      if (pdepth == 0) { dparams = filled ? commas + 1 : 0; dstate = 3; crossed = 0 }
+      else if (c != " " && c != "\t") filled = 1
+    } else if (dstate == 3 && c == "}") {
+      dstate = 0
+    }
+    if (c == "{") {
+      braces++
+      if (dstate == 3) open_body()
+      for (f = 1; f <= fsp; f++) if (braces - fbody[f] > fmax[f]) fmax[f] = braces - fbody[f]
+    } else if (c == "}") {
+      if (fsp > 0 && braces == fbody[fsp]) close_body()
+      braces--
+    }
+    if (c != " " && c != "\t") prev = c
+    j++
+  }
+  if (dstate == 3) crossed = 1
+}
+
+FNR == 1 {
+  if (file != "") finish()
+  start(FILENAME)
+}
+
+!wanted_here { next }
+
+{
+  code = lex($0)
+  codelines += hascode
+  if (scope_sleeps) sleeps(code)
+  if (scope_tokens) tokens(code)
+  if (scope_components) components(code)
+  if (scope_lists) lists(code)
+  if (scope_sizes) structure(code)
+}
+
+END {
+  if (file != "") finish()
+}
+AWK
+}
+
+case ${1:-} in
+  check) shift; check "$@" ;;
+  run) shift; run "$@" ;;
+  list) [[ $# == 1 ]] || usage; list ;;
+  *) usage ;;
+esac
