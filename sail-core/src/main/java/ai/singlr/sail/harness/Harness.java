@@ -338,6 +338,24 @@ public interface Harness {
     return List.of();
   }
 
+  /**
+   * What a stored login of {@code kind} sets beside its own key, in order: every other variable
+   * this harness takes a credential from and every credential switch, empty, then the kind's fixed
+   * values, such as its address. Every launch shape sets them after every profile ({@code
+   * LaunchEnv.loginLines}); a session that cannot keep the kind's fixed values out of reach of the
+   * harness's settings files also sets them where those files cannot outrank them ({@link
+   * #interactiveLogin}).
+   */
+  default SequencedMap<String, String> pinned(LoginKind kind) {
+    var pinned = new LinkedHashMap<String, String>();
+    loginVariables().stream()
+        .filter(variable -> !variable.equals(kind.variable()))
+        .forEach(variable -> pinned.put(variable, ""));
+    credentialSwitches().forEach(variable -> pinned.put(variable, ""));
+    pinned.putAll(kind.fixed());
+    return Collections.unmodifiableSequencedMap(pinned);
+  }
+
   /** The kind of login this harness declares as {@code kind}; empty for none, or a null kind. */
   default Optional<LoginKind> declaredKind(String kind) {
     return loginKinds().stream().filter(declared -> declared.kind().equals(kind)).findFirst();

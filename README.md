@@ -467,13 +467,13 @@ container. A stored login is a key its service issues for programs: a Claude Con
 GLM Coding Plan key (Claude Code sends it to Z.AI; a run on it reports its tokens, not dollars), or
 an OpenAI API key. Store one once; it is read from stdin and never shown again, and it is sent to
 its own service whatever the container's environment and the harness's user and project settings
-say. Some ways remain for the container to send it elsewhere, and the draft spec
-`sail-a-stored-login-never-enters-the-container` owns them: in either harness, a proxy with a CA
-file that the container's profile exports reads the key; Claude Code's managed settings, or a
-settings file naming a proxy and a CA, redirect an interactive API-key session; Codex's
-`/etc/codex/managed_config.toml` or `/etc/codex/requirements.toml`, or a `model_catalog_url` under
-`[model_providers.sail]` in its `config.toml`, sends the key elsewhere; and anything running in the
-container can read it from the harness's environment.
+say, an interactive Claude Code session on an API key included. Some ways remain for the container
+to send it elsewhere, and the draft spec `sail-a-stored-login-never-enters-the-container` owns
+them: in either harness, a proxy with a CA file that the container's profile exports reads the
+key; in an interactive Claude Code session on an API key, Claude Code's managed settings, or any
+settings file naming a proxy and a CA; Codex's `/etc/codex/managed_config.toml` or
+`/etc/codex/requirements.toml`; and anything running in the container can read it from the
+harness's environment.
 
 ```bash
 sudo sail agent login claude-code                   # paste a Console API key: stored as 'default', the default

@@ -7,6 +7,8 @@ package ai.singlr.sail.harness;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.ContainerExec;
+import java.security.SecureRandom;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +23,8 @@ final class Codex implements Harness {
   private static final String TOKEN_COUNT = "\"type\":\"token_count\"";
   private static final String TURN_CONTEXT = "\"type\":\"turn_context\"";
   private static final String TASK_COMPLETE = "\"type\":\"task_complete\"";
+
+  private static final SecureRandom RANDOM = new SecureRandom();
 
   /** The OpenAI API, the one address a stored key is sent to. */
   private static final String OPENAI_API = "https://api.openai.com/v1";
@@ -157,7 +161,7 @@ final class Codex implements Harness {
 
   /**
    * The key of {@code kind} given to Codex by a provider declared on the command line ({@code
-   * model_providers}), the OpenAI API under the id {@code sail}, which Codex does not reserve: it
+   * model_providers}), the OpenAI API under an id of this launch's own ({@link #providerId}): it
    * reads the key from the environment ({@code env_key}), so nothing of it is stored, and it fixes
    * the address. Codex reads no address from its environment ({@code OPENAI_BASE_URL} is not read),
    * but its user config's {@code openai_base_url}, or a {@code model_provider} of its own naming
@@ -168,13 +172,30 @@ final class Codex implements Harness {
    * 0644}, every exported variable in it (codex-cli 0.163 and 0.170).
    */
   private static String provider(LoginKind kind) {
-    return " -c model_provider=sail -c 'model_providers.sail={name=\"OpenAI\", base_url=\""
+    var id = providerId();
+    return " -c model_provider="
+        + id
+        + " -c 'model_providers."
+        + id
+        + "={name=\"OpenAI\", base_url=\""
         + OPENAI_API
         + "\", env_key=\""
         + kind.variable()
         + "\", wire_api=\"responses\"}' -c 'shell_environment_policy.set."
         + kind.variable()
         + "=\"\"'";
+  }
+
+  /**
+   * A provider id no config file can name ahead: a config's table under the id a launch names
+   * merges into the command line's ({@code [model_providers.sail]}'s {@code model_catalog_url}
+   * received the key, 0.163, measured), so each launch draws its own. A session resumed under
+   * another id than it started with resumes, its earlier turns sent with the next (measured).
+   */
+  private static String providerId() {
+    var drawn = new byte[6];
+    RANDOM.nextBytes(drawn);
+    return "sail_" + HexFormat.of().formatHex(drawn);
   }
 
   /**

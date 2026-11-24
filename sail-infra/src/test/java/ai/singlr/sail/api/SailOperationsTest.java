@@ -2042,7 +2042,7 @@ class SailOperationsTest {
   /** A spec's Codex run on its person's stored key, the provider fixing the key's address. */
   private static final String CODEX_ON_ITS_PERSONS_KEY =
       "codex exec --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust -c"
-          + " model_provider=sail -c 'model_providers.sail={name=\"OpenAI\","
+          + " model_provider=sail_ID -c 'model_providers.sail_ID={name=\"OpenAI\","
           + " base_url=\"https://api.openai.com/v1\", env_key=\"CODEX_API_KEY\","
           + " wire_api=\"responses\"}' -c 'shell_environment_policy.set.CODEX_API_KEY=\"\"'"
           + " --model gpt-5.5";
@@ -2056,7 +2056,7 @@ class SailOperationsTest {
             .on("mkdir -p /home/dev/workspace/specs", "")
             .on("printf '%s'", "")
             .on("mkdir -p /home/dev/.sail", "")
-            .on(CODEX_ON_ITS_PERSONS_KEY, "");
+            .on("codex exec --dangerously-bypass-approvals-and-sandbox", "");
     var operations =
         operationsWithStore(
             baseYaml(),
@@ -2085,7 +2085,9 @@ class SailOperationsTest {
         shell.invocations().stream()
             .anyMatch(
                 command ->
-                    command.contains(CODEX_ON_ITS_PERSONS_KEY)
+                    command
+                            .replaceAll("sail_[0-9a-f]{12}", "sail_ID")
+                            .contains(CODEX_ON_ITS_PERSONS_KEY)
                         && command.contains("model_reasoning_effort='\"high\"'")),
         "the run's key goes to the OpenAI API alone, by the provider on its command line");
     assertFalse(
@@ -2133,7 +2135,10 @@ class SailOperationsTest {
         shell.invocations().stream()
             .anyMatch(
                 command ->
-                    command.contains("bash -l -c") && command.contains(CODEX_ON_ITS_PERSONS_KEY)),
+                    command.contains("bash -l -c")
+                        && command
+                            .replaceAll("sail_[0-9a-f]{12}", "sail_ID")
+                            .contains(CODEX_ON_ITS_PERSONS_KEY)),
         "the foreground run's key goes to the OpenAI API alone, by its command line's provider");
   }
 

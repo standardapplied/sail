@@ -293,12 +293,16 @@ class PtySessionHostTest {
    * What reading {@code client} says once its host is closed: -1 for an end. Each side of the
    * handshake writes its magic before it reads the other's, so the client's handshake can finish
    * before the host's thread has read the client's magic; a unix socket closed with bytes unread
-   * resets its peer instead of ending it, and that reset is the host's end closed too.
+   * resets its peer instead of ending it, and that reset, and no other failure, is the host's end
+   * closed too.
    */
   private static int endOf(SocketChannel client) throws IOException {
     try {
       return client.read(ByteBuffer.allocate(1));
-    } catch (SocketException reset) {
+    } catch (SocketException failed) {
+      if (!"Connection reset".equals(failed.getMessage())) {
+        throw failed;
+      }
       return -1;
     }
   }

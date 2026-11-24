@@ -4299,8 +4299,8 @@ to `SAIL_ANTHROPIC_API_KEY` and printed by the session's own `apiKeyHelper` (`--
 key in `ANTHROPIC_API_KEY` is asked about, shown as `sk-ant-…` and its last 20 characters, and
 those 20 kept in `~/.claude.json`; since `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST` ignores a helper,
 that session unsets it and fixes the key's address in the same `--settings` (`env`); Codex's key
-read from `CODEX_API_KEY` by a provider of its own config (`-c model_provider=sail -c
-model_providers.sail={…, env_key="CODEX_API_KEY", …}`), since its built-in provider takes an
+read from `CODEX_API_KEY` by a provider of its own config (`-c model_provider=sail_<id> -c
+model_providers.sail_<id>={…, env_key="CODEX_API_KEY", …}`), since its built-in provider takes an
 interactive key only from `auth.json`, and set empty in the shell Codex starts for its commands
 (`shell_environment_policy.set.CODEX_API_KEY`, one key by its dotted path, so a project's own policy
 stands), whose snapshot Codex writes, `0644`, with every exported variable. The file is withdrawn
@@ -4747,24 +4747,28 @@ no pairing is removed through the gateway as before, and no key file is touched.
     key is sent beside a GLM key, and `ANTHROPIC_CUSTOM_HEADERS`, whose `x-api-key` replaces the
     key's) and every cloud switch, Mantle's and Claude on Google Cloud's measured sending requests
     to whatever address the container names. An interactive API-key session, whose `apiKeyHelper`
-    the flag would ignore, pins the address in its own `--settings` instead, which the user's and
-    the project's settings cannot outrank and managed settings can (measured). Codex reads no
+    the flag would ignore, sets the same list (`Harness.pinned`, the one list both use) and its
+    key's variable empty in its own `--settings` `env` as well, which the user's and the project's
+    settings cannot outrank and managed settings can (measured): without the flag a settings file's
+    `env` outranks the session's environment, and a user's or a repository's cloud switch with its
+    skip-auth sent the helper's key to that cloud's address. Codex reads no
     address from its environment (`OPENAI_BASE_URL` is not read, 0.163), but its user config's
     `openai_base_url` or a `model_provider` naming `CODEX_API_KEY` would send the key elsewhere, so
     every launch on a stored key, headless (`Launch.login`) or interactive, declares Sail's provider
     on the command line with the OpenAI API as its address, which outranks every config file but
-    `/etc/codex/managed_config.toml` and `/etc/codex/requirements.toml`. What still sends a key
+    `/etc/codex/managed_config.toml` and `/etc/codex/requirements.toml`, under an id each launch
+    draws (`sail_` and twelve random hex digits), since a config's table under the id a launch
+    names merges into it, and a user's `[model_providers.sail]` `model_catalog_url` received the
+    key under the fixed id (0.163, measured); a session resumed under a new id resumes with its
+    earlier turns (measured). What still sends a key
     elsewhere, each measured with a fake one: in either harness, a proxy (`HTTPS_PROXY`) with a CA
     file (`NODE_EXTRA_CA_CERTS`; `CODEX_CA_CERTIFICATE` or `SSL_CERT_FILE`) that the container's
     profile exports, which a TLS-intercepting proxy reads the key through, and which are not set
     empty since a container behind a corporate proxy needs them; in the interactive API-key
     session, managed settings' `env` (its address) and a settings file's `env` naming a proxy and a
     CA (the user's, measured); in Codex, `/etc/codex/managed_config.toml` and
-    `/etc/codex/requirements.toml` (the container's root writes them: the dev user has `sudo`), and
-    a user config's `[model_providers.sail]`, which merges into Sail's provider: its query
-    parameters and headers reach the OpenAI API alone, but its `model_catalog_url` receives the key
-    (0.163), and Sail cannot set that URL itself, since a catalog URL breaks every run that names
-    no model; and replacing either binary or reading a running harness's environment. Only a key
+    `/etc/codex/requirements.toml` (the container's root writes them: the dev user has `sudo`);
+    and replacing either binary or reading a running harness's environment. Only a key
     that never enters the container is beyond them.
   - *Where.* `LoginStore`, beside the database (`/var/lib/sail/logins/<fde-id>/<harness>/<name>`
     on a box): `0700` directories, `0600` files, each written whole as a temporary file and renamed,

@@ -6,6 +6,7 @@
 package ai.singlr.sail.harness;
 
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.BoxCredentialFile;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.SailPaths;
@@ -245,24 +246,28 @@ final class ClaudeCode implements Harness {
    * ~/.claude.json} once approved (2.1.327, seen with a throwaway key, with or without {@link
    * #HOST_MANAGED}). A key a session's own {@code apiKeyHelper} prints is neither asked about nor
    * kept, so the key moves to a variable of Sail's own, which the helper prints. {@link
-   * #HOST_MANAGED} ignores a helper, so this session goes without it and pins the kind's address in
-   * the same {@code --settings}, which outranks the user's and the project's settings but not
-   * managed ones. A GLM key is read from {@code ANTHROPIC_AUTH_TOKEN}, which asks nothing and keeps
-   * nothing.
+   * #HOST_MANAGED} ignores a helper, so this session goes without it, and a user's or a project's
+   * settings file's {@code env} then outranks the session's environment: a cloud switch there with
+   * its skip-auth sent the helper's key to that cloud's address (measured). So the same {@code
+   * --settings}, which outranks the user's and the project's settings but not managed ones, sets
+   * everything the session's lines pin ({@link #pinned}) and its key's variable empty. A GLM key is
+   * read from {@code ANTHROPIC_AUTH_TOKEN}, which asks nothing and keeps nothing.
    */
   @Override
   public InteractiveLogin interactiveLogin(LoginKind kind) {
     if (!"ANTHROPIC_API_KEY".equals(kind.variable())) {
       return InteractiveLogin.READS_ITS_VARIABLE;
     }
+    var env = new LinkedHashMap<String, Object>(pinned(kind));
+    env.remove(HOST_MANAGED);
+    env.put(kind.variable(), "");
+    var settings = new LinkedHashMap<String, Object>();
+    settings.put("apiKeyHelper", "printenv SAIL_ANTHROPIC_API_KEY");
+    settings.put("env", env);
     return new InteractiveLogin(
         "export SAIL_ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\"; unset ANTHROPIC_API_KEY "
             + HOST_MANAGED,
-        " --settings '{\"apiKeyHelper\": \"printenv SAIL_ANTHROPIC_API_KEY\", \"env\": {\""
-            + BASE_URL
-            + "\": \""
-            + kind.fixed().get(BASE_URL)
-            + "\"}}'");
+        " --settings '" + YamlUtil.dumpJsonValue(settings) + "'");
   }
 
   /** Claude Code's own {@code /login}, which a subscription signs in with. */

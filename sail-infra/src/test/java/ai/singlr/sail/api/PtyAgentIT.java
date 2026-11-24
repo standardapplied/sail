@@ -302,13 +302,15 @@ class PtyAgentIT extends AbstractIncusIT {
               ada.ask(create("a2", new PtyMessage.Agent("codex", "full-access", false))));
           assertEquals(
               List.of(
-                  "codex --dangerously-bypass-approvals-and-sandbox -c model_provider=sail -c"
-                      + " model_providers.sail={name=\"OpenAI\","
+                  "codex --dangerously-bypass-approvals-and-sandbox -c model_provider=sail_ID -c"
+                      + " model_providers.sail_ID={name=\"OpenAI\","
                       + " base_url=\"https://api.openai.com/v1\", env_key=\"CODEX_API_KEY\","
                       + " wire_api=\"responses\"} -c shell_environment_policy.set.CODEX_API_KEY=\"\"",
                   fingerprint(codex),
                   "set:CODEX_API_KEY"),
-              report());
+              report().stream()
+                  .map(line -> line.replaceAll("sail_[0-9a-f]{12}", "sail_ID"))
+                  .toList());
           assertEquals(
               "0",
               inInstance(
