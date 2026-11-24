@@ -218,8 +218,9 @@ and is burned down in its own pull request.
   they are spelled (concatenated, in a constant, through a unicode escape) and has no switch to
   turn them off, so `ci/exclusions` fails, naming file and line, any Java line holding `NOPMD`,
   `CPD-OFF` or `CPD-ON`, a `@SuppressWarnings` that is not one line of lowercase literals such as
-  `@SuppressWarnings("unchecked")`, `"all"` in one, or a letter written as a unicode escape. That check needs no history and runs first, in
-  `sail-infra`'s Linux unit job and in `ci/check full`.
+  `@SuppressWarnings("unchecked")`, `"all"` in one, or a printable ASCII character written as a
+  unicode escape (a control character such as `\u001b` stays allowed). That check needs no history
+  and runs first, in `sail-infra`'s Linux unit job and in `ci/check full`.
 - **The exclusions file only shrinks.** No class is ever added to it and no rule to an entry. A
   spec that works in a listed class splits it and deletes its entry. `ci/exclusions` (run by
   `sail-infra`'s Linux unit job and `ci/check full`) fails a change whose file names a

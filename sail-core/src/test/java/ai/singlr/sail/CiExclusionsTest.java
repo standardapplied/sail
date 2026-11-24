@@ -143,6 +143,8 @@ class CiExclusionsTest {
         "/* NO\\U0050MD */",
         "// CPD_OFF",
         "// CPD_ON",
+        "// CPD\\U002DOFF",
+        "@SW(\"PMD\\U002ETooManyMethods\")",
       })
   void aLineThatCouldSilencePmdFailsNamingIt(String quiet) throws Exception {
     var line = java(quiet);
@@ -163,7 +165,7 @@ class CiExclusionsTest {
                 + line
                 + "\nFix the code instead: name only javac's warnings, in one-line literal form such"
                 + " as @Suppress"
-                + "Warnings(\"unchecked\"), and spell no letter as a unicode escape.\n"),
+                + "Warnings(\"unchecked\"), and write no printable character as a unicode escape.\n"),
         check(base));
   }
 
@@ -178,7 +180,7 @@ class CiExclusionsTest {
             class Quiet {
               @SW({"unchecked", "rawtypes"})
               Object raw() {
-                return "\\\\u0041 is no escape, \\U001b is not a letter";
+                return "\\\\u0041 is no escape, \\U001b is not printable";
               }
             }
             """));

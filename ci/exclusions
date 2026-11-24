@@ -12,14 +12,14 @@ set -euo pipefail
 # CPD-OFF..CPD-ON pair in a comment and a SuppressWarnings naming PMD, PMD.<rule> or all, also when
 # concatenated, held in a constant or spelled with a unicode escape, and offer no switch to turn
 # them off. So a line naming the annotation must name only javac's warnings, as one-line literals,
-# and no letter may be escaped.
+# and no printable ASCII character may be a unicode escape (a control character still may).
 
 readonly FILE=config/quality/pmd-exclusions.properties
 readonly ENTRY='[A-Za-z][A-Za-z0-9_.]*=[A-Za-z]+(,[A-Za-z]+)*'
 readonly CR=$'\r'
 readonly LINE="^(#[^$CR]*|$ENTRY)?\$"
 readonly JAVAC_WARNINGS='^[[:space:]]*@SuppressWarnings\(\{?"[a-z]+"(, "[a-z]+")*\}?\)$'
-readonly ESCAPED_LETTER='(^|[^\\])(\\\\)*\\u+00(4[1-9A-Fa-f]|5[0-9Aa]|6[1-9A-Fa-f]|7[0-9Aa])'
+readonly ESCAPED_PRINTABLE='(^|[^\\])(\\\\)*\\u+00(2[0-9A-Fa-f]|[3-6][0-9A-Fa-f]|7[0-9A-Ea-e])'
 
 entries() {
   grep -E "^$ENTRY\$" || true
@@ -29,13 +29,13 @@ pairs() {
   entries | awk -F= '{ n = split($2, rules, ","); for (i = 1; i <= n; i++) print $1 "=" rules[i] }' | sort -u
 }
 
-silencing=$(git grep -nE --untracked -e NOPMD --or -e CPD-OFF --or -e CPD-ON --or -e "$ESCAPED_LETTER" \
+silencing=$(git grep -nE --untracked -e NOPMD --or -e CPD-OFF --or -e CPD-ON --or -e "$ESCAPED_PRINTABLE" \
   --or \( -e SuppressWarnings --and --not -e "$JAVAC_WARNINGS" \) \
   --or \( -e SuppressWarnings --and -e '"all"' \) -- '*.java') || [[ $? -eq 1 ]]
 if [[ -n $silencing ]]; then
   echo "ci/exclusions: these Java lines could silence PMD or CPD, which honour NOPMD, CPD-OFF and CPD-ON in a comment and a SuppressWarnings naming PMD, PMD.<rule> or all, however spelled:" >&2
   sed 's/^/  /' <<< "$silencing" >&2
-  echo "Fix the code instead: name only javac's warnings, in one-line literal form such as @SuppressWarnings(\"unchecked\"), and spell no letter as a unicode escape." >&2
+  echo "Fix the code instead: name only javac's warnings, in one-line literal form such as @SuppressWarnings(\"unchecked\"), and write no printable character as a unicode escape." >&2
   exit 1
 fi
 
