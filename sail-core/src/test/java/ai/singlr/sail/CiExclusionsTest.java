@@ -46,7 +46,8 @@ class CiExclusionsTest {
     commitList("# the classes the gate found\na.Big=TooManyMethods\n");
 
     assertEquals(
-        new Ran(0, "ci/exclusions: every class=rule pair of " + FILE + " is in " + base + "'s.\n", ""),
+        new Ran(
+            0, "ci/exclusions: every class=rule pair of " + FILE + " is in " + base + "'s.\n", ""),
         check(base));
   }
 
@@ -59,7 +60,9 @@ class CiExclusionsTest {
 
   @Test
   void aRuleAddedToAnEntryFailsNamingItsPair() throws Exception {
-    commitList(BASE_LIST.replace("a.Wide=CouplingBetweenObjects", "a.Wide=CouplingBetweenObjects,GodClass"));
+    commitList(
+        BASE_LIST.replace(
+            "a.Wide=CouplingBetweenObjects", "a.Wide=CouplingBetweenObjects,GodClass"));
 
     assertEquals(refusedAsAdded("a.Wide=GodClass"), check(base));
   }
@@ -82,12 +85,16 @@ class CiExclusionsTest {
 
   @Test
   void aBaseWithoutTheFileIsTheChangeThatAddsIt() throws Exception {
-    sh("git rm -q " + FILE + " && git -c user.name=CI -c user.email=ci@example.com commit -q -m gone");
+    sh(
+        "git rm -q "
+            + FILE
+            + " && git -c user.name=CI -c user.email=ci@example.com commit -q -m gone");
     var without = sh("git rev-parse HEAD").out().strip();
     commitList(BASE_LIST + "a.New=TooManyMethods\n");
 
     assertEquals(
-        new Ran(0, "ci/exclusions: " + without + " holds no " + FILE + "; this change adds it.\n", ""),
+        new Ran(
+            0, "ci/exclusions: " + without + " holds no " + FILE + "; this change adds it.\n", ""),
         check(without));
   }
 

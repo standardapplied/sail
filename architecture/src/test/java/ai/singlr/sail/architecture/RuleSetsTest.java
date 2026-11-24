@@ -83,9 +83,7 @@ class RuleSetsTest {
     var factory = DocumentBuilderFactory.newInstance();
     factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
     var found = factory.newDocumentBuilder().parse(ruleSet.toFile()).getElementsByTagName("rule");
-    return elements(found).stream()
-        .map(rule -> Map.entry(name(rule), limits(rule)))
-        .toList();
+    return elements(found).stream().map(rule -> Map.entry(name(rule), limits(rule))).toList();
   }
 
   private static String name(Element rule) {
@@ -102,7 +100,9 @@ class RuleSetsTest {
   }
 
   private static List<Element> elements(NodeList nodes) {
-    return IntStream.range(0, nodes.getLength()).mapToObj(index -> (Element) nodes.item(index)).toList();
+    return IntStream.range(0, nodes.getLength())
+        .mapToObj(index -> (Element) nodes.item(index))
+        .toList();
   }
 
   private static List<String> twice(List<String> first, List<String> second) {

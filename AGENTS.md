@@ -202,11 +202,11 @@ new limit, fails.
    `ExcessiveParameterList` 10 (51, 2).
 7. Test size: `NcssCount` in test code, 60 a method and 600 a class (36).
 
-The classes that broke the class-level rules when the gate went on (__CLASSES__ classes,
-__PAIRS__ rule breaks) are listed once in `config/quality/pmd-exclusions.properties`, each with
-only the rules it broke. Test classes that break a class-level rule (coupling, too many fields)
-are listed in the same file on the same terms; test-class size is not a listed rule and is burned
-down in its own pull request.
+The classes that broke the class-level rules when the gate went on (118 classes and 186 rule
+breaks, measured on main d5ffc5e9a) are listed once in `config/quality/pmd-exclusions.properties`,
+each with only the rules it broke. Test classes that break a class-level rule (coupling, too
+many fields) are listed in the same file on the same terms; test-class size is not a listed rule
+and is burned down in its own pull request.
 
 ### Rules of the gate
 
