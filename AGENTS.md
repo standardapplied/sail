@@ -183,9 +183,11 @@ Gated today, failing at the first measured value shown:
 Still to burn down, each family its own pull request in this order, with what it broke on
 1b2ff7fa5. Their rules wait in `config/quality/pmd-main-pending.xml` and `pmd-test-pending.xml`,
 which no build analyses; a family's pull request moves its rules, unchanged, into the gated file,
-and the pending files only shrink. `RuleSetsTest` (architecture) holds the gated and pending sets
-of each kind together to Helios's rules and limits, so a rule deleted from pending, or moved with a
-new limit, fails.
+and the pending files only shrink. `config/quality/helios-pmd-main.xml` and `helios-pmd-test.xml`
+are Helios's two rule files verbatim, which no build reads. `RuleSetsTest` (architecture) holds the
+gated and pending sets of each kind together to them: every rule is in exactly one of the two and
+equals Helios's in every attribute, property and XPath, only its message aside (and Helios's
+test-helper package read as `ai.singlr.sail.test`), so a rule deleted, weakened or in both fails.
 
 1. The wall clock read statically (8 reads in 5 classes), an `HttpClient` built outside one
    factory (11 classes), `Thread.sleep` outside one sleeper (17 sites): ArchUnit rules.
@@ -215,8 +217,12 @@ and is burned down in its own pull request.
   naming a PMD rule; `git grep` for both stays empty.
 - **The exclusions file only shrinks.** No class is ever added to it and no rule to an entry. A
   spec that works in a listed class splits it and deletes its entry. `ci/exclusions` (run by
-  `sail-infra`'s Linux unit job) fails a change whose file names a `class=rule` pair its merge
-  base's does not, or names a class on two lines. `ExclusionsShrinkTest` (architecture) reads
+  `sail-infra`'s Linux unit job and `ci/check full`) fails a change whose file names a
+  `class=rule` pair its merge base's does not, or names a class on two lines. PMD reads the file
+  as Java properties, which also take `:` or a blank as the separator, join a line ending in `\`,
+  read escapes and end a line at a lone carriage return, so `ci/exclusions` also fails any line
+  that is not a `#` comment, blank, or exactly `fully.qualified.Class=Rule1,Rule2` from the first
+  column: what it accepts, Properties reads as it does. `ExclusionsShrinkTest` (architecture) reads
   every module's PMD reports, which the exclusions do not filter, and fails on an entry whose
   class no longer breaks a rule it lists; the change that cleared it deletes it.
 - **Adding an ArchUnit rule.** A spec that establishes or consolidates a pattern adds one `@Test`
@@ -226,7 +232,7 @@ and is burned down in its own pull request.
 ### Running it
 
 ```bash
-mvn -o clean verify                                       # everything, as CI's Linux unit jobs run it together
+ci/check full                                             # everything, as CI's Linux unit jobs run it together
 mvn -o verify -DskipTests                                 # enforcer, PMD and CPD only
 mvn -o pmd:aggregate-cpd@cpd pmd:aggregate-cpd-check@cpd-check   # duplication alone, in seconds
 ci/check exclusions                                       # the exclusions against where they left origin/main

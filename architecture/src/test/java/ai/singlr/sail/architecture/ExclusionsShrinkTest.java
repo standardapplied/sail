@@ -31,9 +31,6 @@ import org.w3c.dom.Element;
  */
 class ExclusionsShrinkTest {
 
-  private static final Path ROOT = Path.of(System.getProperty("sail.root"));
-  private static final Path EXCLUSIONS =
-      Path.of(System.getProperty("sail.quality.config"), "pmd-exclusions.properties");
   private static final List<String> MODULES = List.of("sail-core", "sail-harness", "sail-infra");
   private static final List<String> REPORTS = List.of("target/pmd.xml", "target/pmd-test/pmd.xml");
 
@@ -41,21 +38,22 @@ class ExclusionsShrinkTest {
   void everyListedClassStillBreaksEveryRuleItsEntryNames() throws Exception {
     assumeFalse(
         Boolean.getBoolean("sail.pmd.skip"), "PMD is skipped, so no report says what breaks");
-    var broken = reported();
+    var exclusions = Reactor.path("sail.quality.config").resolve("pmd-exclusions.properties");
+    var broken = reported(Reactor.path("sail.root"));
 
-    var obsolete = listed().stream().filter(entry -> !broken.contains(entry)).toList();
+    var obsolete = listed(exclusions).stream().filter(entry -> !broken.contains(entry)).toList();
 
     assertEquals(
         List.of(),
         obsolete,
         "these classes no longer break the rule their entry lists: delete the rule from the"
             + " entry, and the entry once it lists none, in "
-            + EXCLUSIONS);
+            + exclusions);
   }
 
-  private static List<String> listed() throws IOException {
+  private static List<String> listed(Path exclusions) throws IOException {
     var entries = new Properties();
-    try (Reader reader = Files.newBufferedReader(EXCLUSIONS)) {
+    try (Reader reader = Files.newBufferedReader(exclusions)) {
       entries.load(reader);
     }
     return entries.stringPropertyNames().stream()
@@ -67,11 +65,11 @@ class ExclusionsShrinkTest {
         .toList();
   }
 
-  private static Set<String> reported() throws Exception {
+  private static Set<String> reported(Path root) throws Exception {
     var broken = new HashSet<String>();
     for (var module : MODULES) {
       for (var report : REPORTS) {
-        var file = ROOT.resolve(module).resolve(report);
+        var file = root.resolve(module).resolve(report);
         assertTrue(
             Files.isRegularFile(file),
             "no PMD report at "

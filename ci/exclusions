@@ -5,11 +5,17 @@ set -euo pipefail
 # whose class=rule pairs are not all in BASE's (default: where the change left origin/main), and
 # one that names a class twice, since the later line would replace the earlier one. A base
 # without the file is the change that adds it. Run in the repository's root.
+# PMD reads the file as java.util.Properties, which also splits a key at ':' or a blank, joins a
+# line ending in '\', reads escapes, takes '!' for a comment and ends a line at a lone CR; so every
+# line must be a comment, blank, or exactly one entry, which Properties reads as this check does.
 
 readonly FILE=config/quality/pmd-exclusions.properties
+readonly ENTRY='[A-Za-z][A-Za-z0-9_.]*=[A-Za-z]+(,[A-Za-z]+)*'
+readonly CR=$'\r'
+readonly LINE="^(#[^$CR]*|$ENTRY)?\$"
 
 entries() {
-  grep -vE '^[[:space:]]*(#|$)' | tr -d '[:blank:]\r' || true
+  grep -E "^$ENTRY\$" || true
 }
 
 pairs() {
@@ -25,6 +31,14 @@ fi
 if [[ ! -f $FILE ]]; then
   echo "ci/exclusions: no $FILE, so nothing is excluded."
   exit 0
+fi
+
+strays=$(LC_ALL=C grep -naEv "$LINE" "$FILE" || true)
+if [[ -n $strays ]]; then
+  echo "ci/exclusions: $FILE holds lines that are not a comment, a blank line or one Class=Rule[,Rule] entry, which java.util.Properties, as PMD reads the file, could read as entries this check does not see:" >&2
+  sed 's/^/  /' <<< "$strays" >&2
+  echo "Write each entry as fully.qualified.Class=Rule1,Rule2 from the line's first column, with no space, escape or continuation, and each comment after a # in the first column." >&2
+  exit 1
 fi
 
 twice=$(entries < "$FILE" | cut -d= -f1 | sort | uniq -d)

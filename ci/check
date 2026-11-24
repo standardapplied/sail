@@ -28,7 +28,8 @@ Usage:
   ci/check min-macos BINARY     fail unless the darwin BINARY's minimum macOS (its Mach-O
                                 LC_BUILD_VERSION) is no newer than the app's LSMinimumSystemVersion
   ci/check exclusions [BASE]    fail if the PMD exclusions name a class=rule pair BASE's do not
-                                (default: where it left origin/main), or a class twice (ci/exclusions)
+                                (default: where it left origin/main), a class twice, or a line that is
+                                not a comment, blank or one Class=Rule[,Rule] entry (ci/exclusions)
   ci/check changelog [BASE]     fail if the change from BASE (default: where it left origin/main)
                                 edits CHANGELOG.md or leaves an entry the release could not fold
                                 (ci/changelog check)
@@ -89,6 +90,7 @@ quick() {
 }
 
 full() {
+  ci/exclusions
   mvn -B clean verify
 }
 

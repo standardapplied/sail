@@ -7,111 +7,91 @@ package ai.singlr.sail.architecture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
+import java.io.StringReader;
+import java.nio.file.Files;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.w3c.dom.Element;
+import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+import org.w3c.dom.ls.DOMImplementationLS;
+import org.xml.sax.InputSource;
 
 /**
- * The gated rule set and the pending one of each kind are together Helios's rule set with Helios's
- * limits: every rule is in exactly one of them, and no limit differs. A rule moves from pending to
- * gated unchanged; one deleted from pending, or moved with a new limit, fails here. The limits are
- * the properties a rule sets; a rule that sets none keeps PMD's default, which is Helios's too.
+ * The gated rule set and the pending one of each kind are together Helios's rule set: every rule is
+ * in exactly one of them and equals Helios's in every attribute, property and XPath, its message
+ * aside, whitespace collapsed. {@code helios-pmd-main.xml} and {@code helios-pmd-test.xml} are
+ * Helios's files verbatim, read by no build, so a rule is moved from pending to gated unchanged,
+ * and one deleted, weakened or in both fails here. Helios's test-helper package reads as Sail's,
+ * the one name the two rule sets differ in.
  */
 class RuleSetsTest {
 
-  private static final Path CONFIG = Path.of(System.getProperty("sail.quality.config"));
+  private static final String HELIOS_TEST_PACKAGE = "com.standardapplied.helios.core.test";
+  private static final String SAIL_TEST_PACKAGE = "ai.singlr.sail.test";
 
-  private static final Map<String, List<String>> SHARED =
-      Map.ofEntries(
-          Map.entry("CognitiveComplexity", List.of("reportLevel=15")),
-          Map.entry("NPathComplexity", List.of()),
-          Map.entry("AvoidDeeplyNestedIfStmts", List.of()),
-          Map.entry("NcssCount", List.of("classReportLevel=600", "methodReportLevel=60")),
-          Map.entry("ExcessiveParameterList", List.of()),
-          Map.entry("TooManyFields", List.of()),
-          Map.entry("CouplingBetweenObjects", List.of()),
-          Map.entry("SwitchDensity", List.of()),
-          Map.entry("OnDemandImport", List.of()));
-
-  private static final Map<String, Map<String, List<String>>> HELIOS =
-      Map.of(
-          "main",
-          with(
-              Map.of(
-                  "CyclomaticComplexity",
-                  List.of("classReportLevel=80", "methodReportLevel=15"),
-                  "GodClass",
-                  List.of(),
-                  "TooManyMethods",
-                  List.of("maxmethods=25"))),
-          "test",
-          with(
-              Map.of(
-                  "CyclomaticComplexity",
-                  List.of("classReportLevel=2147483647", "methodReportLevel=15"),
-                  "SleepInTest",
-                  List.of(),
-                  "PipedStreamInTest",
-                  List.of(),
-                  "ClockReadInTest",
-                  List.of(),
-                  "TimedWaitInTest",
-                  List.of())));
-
-  @ParameterizedTest(name = "pmd-{0}.xml and pmd-{0}-pending.xml are Helios's {0} rule set")
+  @ParameterizedTest(name = "pmd-{0}.xml and pmd-{0}-pending.xml are helios-pmd-{0}.xml")
   @ValueSource(strings = {"main", "test"})
-  void theGatedAndPendingRulesAreHeliosRulesWithItsLimits(String kind) throws Exception {
-    var rules = new ArrayList<Map.Entry<String, List<String>>>();
-    rules.addAll(rules(CONFIG.resolve("pmd-" + kind + ".xml")));
-    rules.addAll(rules(CONFIG.resolve("pmd-" + kind + "-pending.xml")));
+  void theGatedAndPendingRulesAreHeliosRules(String kind) throws Exception {
+    var config = Reactor.path("sail.quality.config");
+    var helios = Files.readString(config.resolve("helios-pmd-" + kind + ".xml"));
+    var gated = Files.readString(config.resolve("pmd-" + kind + ".xml"));
+    var pending = Files.readString(config.resolve("pmd-" + kind + "-pending.xml"));
 
-    var byName = new TreeMap<String, List<String>>();
-    rules.forEach(rule -> byName.merge(rule.getKey(), rule.getValue(), RuleSetsTest::twice));
-
-    assertEquals(new TreeMap<>(HELIOS.get(kind)), byName);
+    assertEquals(
+        rules(helios.replace(HELIOS_TEST_PACKAGE, SAIL_TEST_PACKAGE)),
+        rules(gated, pending),
+        "pmd-" + kind + ".xml and pmd-" + kind + "-pending.xml hold each Helios rule once, as is");
   }
 
-  private static List<Map.Entry<String, List<String>>> rules(Path ruleSet) throws Exception {
+  private static Map<String, String> rules(String... ruleSets) throws Exception {
     var factory = DocumentBuilderFactory.newInstance();
     factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-    var found = factory.newDocumentBuilder().parse(ruleSet.toFile()).getElementsByTagName("rule");
-    return elements(found).stream().map(rule -> Map.entry(name(rule), limits(rule))).toList();
+    factory.setIgnoringComments(true);
+    factory.setCoalescing(true);
+    var xpath = XPathFactory.newInstance().newXPath();
+    var rules = new TreeMap<String, String>();
+    for (var ruleSet : ruleSets) {
+      var document = factory.newDocumentBuilder().parse(new InputSource(new StringReader(ruleSet)));
+      nodes(xpath.evaluate("//text()", document, XPathConstants.NODESET))
+          .forEach(
+              text ->
+                  text.setTextContent(
+                      String.join(" ", text.getTextContent().split("\\s+")).strip()));
+      var serializer = ((DOMImplementationLS) document.getImplementation()).createLSSerializer();
+      serializer.getDomConfig().setParameter("xml-declaration", false);
+      nodes(xpath.evaluate("/ruleset/*[not(self::description)]", document, XPathConstants.NODESET))
+          .map(Element.class::cast)
+          .forEach(
+              rule -> {
+                rule.removeAttribute("message");
+                rules.merge(name(rule), serializer.writeToString(rule), RuleSetsTest::twice);
+              });
+    }
+    return rules;
   }
 
   private static String name(Element rule) {
     var ref = rule.getAttribute("ref");
-    return ref.isEmpty() ? rule.getAttribute("name") : ref.substring(ref.lastIndexOf('/') + 1);
+    if (!ref.isEmpty()) {
+      return ref.substring(ref.lastIndexOf('/') + 1);
+    }
+    return rule.hasAttribute("name") ? rule.getAttribute("name") : rule.getTagName();
   }
 
-  private static List<String> limits(Element rule) {
-    return elements(rule.getElementsByTagName("property")).stream()
-        .filter(property -> !property.getAttribute("name").equals("xpath"))
-        .map(property -> property.getAttribute("name") + "=" + property.getAttribute("value"))
-        .sorted()
-        .toList();
+  private static Stream<Node> nodes(Object found) {
+    var nodes = (NodeList) found;
+    return IntStream.range(0, nodes.getLength()).mapToObj(nodes::item);
   }
 
-  private static List<Element> elements(NodeList nodes) {
-    return IntStream.range(0, nodes.getLength())
-        .mapToObj(index -> (Element) nodes.item(index))
-        .toList();
-  }
-
-  private static List<String> twice(List<String> first, List<String> second) {
-    return List.of("in more than one rule set");
-  }
-
-  private static Map<String, List<String>> with(Map<String, List<String>> own) {
-    var all = new TreeMap<>(SHARED);
-    all.putAll(own);
-    return all;
+  private static String twice(String first, String second) {
+    return "in more than one rule set";
   }
 }

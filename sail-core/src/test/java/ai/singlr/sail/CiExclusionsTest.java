@@ -11,9 +11,13 @@ import ai.singlr.sail.engine.Child;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * {@code ci/exclusions}, which keeps the PMD exclusions file a subset of its base's, over a real
@@ -80,6 +84,41 @@ class CiExclusionsTest {
                 + " names a class on more than one line, and the last line replaces the others:\n"
                 + "  a.Big\n"
                 + "Keep one line per class, listing only the rules the base branch lists for it.\n"),
+        check(base));
+  }
+
+  @ParameterizedTest(name = "{index}: refused")
+  @ValueSource(
+      strings = {
+        "a.New:TooManyMethods",
+        "a.New TooManyMethods",
+        " a.New=TooManyMethods",
+        "a.New =TooManyMethods",
+        "a.Wide=CouplingBetweenObjects,\\\n  GodClass",
+        "a.N\\u0065w=TooManyMethods",
+        "!a.New=TooManyMethods",
+        "# a note\ra.New=TooManyMethods",
+        "a.Big=GodClass\r",
+      })
+  void aLineThatPropertiesCouldReadOtherwiseFailsNamingIt(String stray) throws Exception {
+    commitList(BASE_LIST + stray + "\n");
+
+    var lines = stray.split("\n");
+    assertEquals(
+        new Ran(
+            1,
+            "",
+            "ci/exclusions: "
+                + FILE
+                + " holds lines that are not a comment, a blank line or one Class=Rule[,Rule]"
+                + " entry, which java.util.Properties, as PMD reads the file, could read as"
+                + " entries this check does not see:\n"
+                + IntStream.range(0, lines.length)
+                    .mapToObj(index -> "  " + (4 + index) + ":" + lines[index] + "\n")
+                    .collect(Collectors.joining())
+                + "Write each entry as fully.qualified.Class=Rule1,Rule2 from the line's first"
+                + " column, with no space, escape or continuation, and each comment after a # in"
+                + " the first column.\n"),
         check(base));
   }
 
