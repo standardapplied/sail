@@ -243,7 +243,7 @@ import Testing
         #expect(sent, "the request's body is not the kind and the key")
         #expect(panel.isOpen && !panel.popover.stays && panel.loginSheet == nil && !panel.view.veiled)
         #expect(panel.view.rows.first?.line.stringValue == "login “default” · API key" && panel.view.rows.first?.chosen == true)
-        #expect(panel.view.words.contains("Stored Claude Code login “default”. An agent session already running keeps the login it started with until it ends; no workspace keeps any of it.") && !panel.view.words.contains { $0.hasPrefix("No Claude Code login stored") }, "the store, and the server's note on the login it replaced, are not said: \(panel.view.words)")
+        #expect(panel.view.words.contains("Stored Claude Code login “default”. An agent session already running keeps the key it started with until it ends; no workspace keeps any of it.") && !panel.view.words.contains { $0.hasPrefix("No Claude Code login stored") }, "the store, and the server's note on the login it replaced, are not said: \(panel.view.words)")
         let start = try #require(panel.view.primary)
         #expect(start.title == "Start" && start.isEnabled && start.holdsKeys)
         var started: [AgentStart] = []

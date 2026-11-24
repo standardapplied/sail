@@ -360,7 +360,8 @@ class LoginRoutesTest {
     var removed = ask(sam, "DELETE", "/v1/logins/claude-code/work", null);
 
     assertEquals(
-        "2 live runs finish on the old `work`. " + LoginOperations.SESSIONS_KEEP,
+        "2 live runs finish on the old `work`. An agent session already running keeps the key it"
+            + " started with until it ends; no workspace keeps any of it.",
         removed.map().get("note"));
   }
 
@@ -479,7 +480,12 @@ class LoginRoutesTest {
     var badHost = storeToken(sam, "git_hub.com", OTHER);
 
     assertEquals(422, spaced.status());
-    assertTrue(spaced.body().contains("printable ASCII with no space"), spaced.body());
+    assertTrue(
+        spaced
+            .body()
+            .contains(
+                "A git token is printable ASCII with no space, quote, backslash, $ or backtick."),
+        spaced.body());
     assertEquals(422, badHost.status());
     assertTrue(badHost.body().contains("Invalid host: 'git_hub.com'"), badHost.body());
     assertEquals(List.of(), hosts(ask(sam, "GET", "/v1/logins", null)));

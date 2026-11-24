@@ -326,14 +326,24 @@ class AgentLoginCommandTest {
   @Test
   void stdinIsReadWholeItsOneTrailingNewlineDroppedAndMoreThanALoginHoldsRefused()
       throws Exception {
-    assertEquals("a", AgentLoginCommand.trimmed(stream("a\n")));
-    assertEquals("a", AgentLoginCommand.trimmed(stream("a\r\n")));
-    assertEquals("a\nb", AgentLoginCommand.trimmed(stream("a\nb\n")));
+    assertEquals("a", AgentLoginCommand.trimmed(stream("a\n"), "key"));
+    assertEquals("a", AgentLoginCommand.trimmed(stream("a\r\n"), "key"));
+    assertEquals("a\nb", AgentLoginCommand.trimmed(stream("a\nb\n"), "key"));
     assertEquals(
-        "x".repeat(16 * 1024 + 2), AgentLoginCommand.trimmed(stream("x".repeat(16 * 1024 + 2))));
-    assertThrows(
-        CliCommand.Refused.class,
-        () -> AgentLoginCommand.trimmed(stream("x".repeat(16 * 1024 + 3))));
+        "x".repeat(16 * 1024 + 2),
+        AgentLoginCommand.trimmed(stream("x".repeat(16 * 1024 + 2)), "key"));
+    assertEquals(
+        List.of("A key is at most 16 KiB.", "A git token is at most 16 KiB."),
+        List.of("key", "git token").stream()
+            .map(
+                noun ->
+                    assertThrows(
+                            CliCommand.Refused.class,
+                            () ->
+                                AgentLoginCommand.trimmed(stream("x".repeat(16 * 1024 + 3)), noun))
+                        .getMessage())
+            .toList(),
+        "said of what is read, a key or a git token");
   }
 
   @Test

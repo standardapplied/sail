@@ -20,6 +20,7 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
+import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.pty.PtyAdmission;
@@ -28,6 +29,7 @@ import ai.singlr.sail.store.ProjectStore;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -309,20 +311,21 @@ public final class WorkspaceDoors {
           project, name, person, running, refused.get().error(), List.of());
     }
     var fdeId = owners.apply(person).id();
-    var installed =
+    var notInstalled = new HashMap<Harness, ApiError>();
+    for (var harness : Harnesses.all()) {
+      AgentStarts.notInstalled(config, harness)
+          .ifPresent(refusal -> notInstalled.put(harness, refusal.error()));
+    }
+    var signInFiles =
         Harnesses.all().stream()
-            .filter(harness -> AgentStarts.notInstalled(config, harness).isEmpty())
+            .filter(harness -> !notInstalled.containsKey(harness))
+            .map(harness -> harness.signIn().file())
             .toList();
-    var held =
-        running
-            ? signIns.held(
-                found.name(), installed.stream().map(harness -> harness.signIn().file()).toList())
-            : Optional.<Set<String>>empty();
+    var held = running ? signIns.held(found.name(), signInFiles) : Optional.<Set<String>>empty();
     var offered = new ArrayList<AgentOffer>();
     for (var harness : Harnesses.all()) {
-      if (!installed.contains(harness)) {
-        var notInstalled = AgentStarts.notInstalled(config, harness).orElseThrow().error();
-        offered.add(new AgentOffer(harness, null, null, false, null, notInstalled));
+      if (notInstalled.containsKey(harness)) {
+        offered.add(new AgentOffer(harness, null, null, false, null, notInstalled.get(harness)));
         continue;
       }
       var signedIn = held.map(files -> files.contains(harness.signIn().file())).orElse(null);

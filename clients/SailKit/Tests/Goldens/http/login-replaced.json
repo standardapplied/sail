@@ -18,7 +18,7 @@
         "name": "default",
         "stored_at": "2026-11-11T09:00:00.656Z"
       },
-      "note": "An agent session already running keeps the login it started with until it ends; no workspace keeps any of it.",
+      "note": "An agent session already running keeps the key it started with until it ends; no workspace keeps any of it.",
       "schema_version": 1
     },
     "status": 200

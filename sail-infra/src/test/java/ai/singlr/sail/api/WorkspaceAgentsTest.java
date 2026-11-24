@@ -92,6 +92,7 @@ class WorkspaceAgentsTest {
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     HeldProjects.hold(db, "beta");
+    HeldProjects.hold(db, "bare");
     var fdes = new FdeStore(db);
     Acting.system(
         () -> {
@@ -102,6 +103,7 @@ class WorkspaceAgentsTest {
           projects.upsert(
               TestDefinitions.yaml(
                   "name: beta\nagent:\n  type: claude-code\n  install: [claude-code, codex]\n"));
+          projects.upsert(TestDefinitions.yaml("name: bare"));
           var tokens = new TokenStore(db);
           ada =
               tokens
@@ -145,6 +147,9 @@ class WorkspaceAgentsTest {
             .onOk(
                 "incus list ^beta-mute$",
                 "[" + workspace("beta", "mute", "Running", "sam", samId) + "]")
+            .onOk(
+                "incus list ^bare-try$",
+                "[" + workspace("bare", "try", "Running", "sam", samId) + "]")
             .onOk("incus exec acme-try ", ".claude/.credentials.json\n")
             .onOk("incus exec beta-tom ", ".codex/auth.json\n.claude.json\n")
             .onFail("incus exec beta-mute ", "Error: websocket: close 1006");
@@ -360,6 +365,28 @@ class WorkspaceAgentsTest {
           List.of(signIn.get("name"), signIn.containsKey("signed_in")),
           harness);
     }
+  }
+
+  /**
+   * A running workspace of a project that installs no harness offers each harness refused, and
+   * nothing runs in it to read a sign-in no harness there could hold.
+   */
+  @Test
+  void aWorkspaceThatInstallsNoHarnessIsNotReadForASignIn() throws Exception {
+    var answer = ask(sam, "bare-try");
+
+    assertEquals(200, answer.status(), answer.toString());
+    for (var harness : List.of("claude-code", "codex")) {
+      assertEquals(
+          List.of("harness_not_installed", false),
+          List.of(
+              ((Map<?, ?>) answer.offer(harness).get("refusal")).get("code"),
+              answer.offer(harness).get("inside")),
+          harness);
+    }
+    assertTrue(
+        incus.invocations().stream().noneMatch(command -> command.startsWith("incus exec")),
+        "nothing runs in the workspace: " + incus.invocations());
   }
 
   private static List<Object> said(Object refusal) {
