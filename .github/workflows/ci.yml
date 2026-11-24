@@ -55,9 +55,11 @@ jobs:
         run: ci/changes "$EVENT" "$BASE" >> "$GITHUB_OUTPUT"
 
   # The unit verdict, one module per job so the slowest module bounds it, not their sum. `ci/check
-  # unit` runs the module's wildcard-import check, its tests and spotless, with its coverage gates
-  # on Linux. macOS runs the same tests, since a release ships a macOS binary and only its own
-  # tests see Apple's libraries. No other job runs a unit test.
+  # unit` runs the module's tests and spotless with its coverage and quality gates on Linux, where
+  # sail-infra's job also runs the architecture rules and the duplication report. macOS runs the
+  # same tests without the gates, since a release ships a macOS binary and only its own tests see
+  # Apple's libraries, while the gates read the same sources on either system. No other job runs a
+  # unit test or the quality gate.
   unit:
     name: Unit tests (${{ matrix.module }}, ${{ matrix.os }})
     needs: changes
@@ -86,7 +88,7 @@ jobs:
 
       - name: Unit tests and quality gates
         run: >
-          ci/check unit ${{ matrix.module }} ${{ matrix.os != 'ubuntu-24.04' && '--no-coverage' || '' }}
+          ci/check unit ${{ matrix.module }} ${{ matrix.os != 'ubuntu-24.04' && '--tests-only' || '' }}
           2>&1 | tee "$RUNNER_TEMP/maven.log"
 
       - name: Upload coverage reports
@@ -158,6 +160,8 @@ jobs:
           -DskipTests
           -Djacoco.skip=true
           -Dspotless.check.skip=true
+          -Dpmd.skip=true
+          -Dcpd.skip=true
           -Dformat=HTML
           -DfailBuildOnCVSS=7
           -DskipTestScope=true
@@ -405,6 +409,8 @@ jobs:
             -Dfailsafe.failIfNoSpecifiedTests=false \
             -Djacoco.skip=true \
             -Dspotless.check.skip=true \
+            -Dpmd.skip=true \
+            -Dcpd.skip=true \
             -Dsail.it.requireIncus=false \
             -Dsail.it.requireSystemd=false \
             -Dsail.it.requireNative=true \
@@ -450,6 +456,8 @@ jobs:
           -Dsurefire.failIfNoSpecifiedTests=false
           -Djacoco.skip=true
           -Dspotless.check.skip=true
+          -Dpmd.skip=true
+          -Dcpd.skip=true
           2>&1 | tee "$RUNNER_TEMP/maven.log"
 
       - name: Leave the test evidence
@@ -571,6 +579,8 @@ jobs:
             -Dfailsafe.failIfNoSpecifiedTests=false \
             -Djacoco.skip=true \
             -Dspotless.check.skip=true \
+            -Dpmd.skip=true \
+            -Dcpd.skip=true \
             -Dsail.it.requireNative=true \
             -Dsail.it.nativeBinary="$RUNNER_TEMP/native/sail" \
             -Dsail.it.releasedBinary="$RUNNER_TEMP/native/sail-linux-amd64" \

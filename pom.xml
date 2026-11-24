@@ -13,6 +13,7 @@
         <module>sail-core</module>
         <module>sail-harness</module>
         <module>sail-infra</module>
+        <module>architecture</module>
     </modules>
 
     <developers>
@@ -27,6 +28,9 @@
         <picocli-version>4.7.7</picocli-version>
         <snakeyaml-engine-version>3.1.1</snakeyaml-engine-version>
         <junit-version>6.0.2</junit-version>
+        <maven-pmd-plugin-version>3.28.0</maven-pmd-plugin-version>
+        <pmd-version>7.28.0</pmd-version>
+        <archunit-version>1.5.1</archunit-version>
 
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
@@ -36,6 +40,7 @@
 
         <sail.it.requireIncus>false</sail.it.requireIncus>
         <sail.native.optimization>-O2</sail.native.optimization>
+        <sail.quality.config>${maven.multiModuleProjectDirectory}/config/quality</sail.quality.config>
     </properties>
 
     <dependencyManagement>
@@ -61,7 +66,194 @@
     </dependencyManagement>
 
     <build>
+        <!--
+          Every plugin the build runs is versioned here or where it is declared; the enforcer's
+          requirePluginVersions fails a build that lets Maven pick one.
+        -->
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-clean-plugin</artifactId>
+                    <version>3.2.0</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-deploy-plugin</artifactId>
+                    <version>3.1.4</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-enforcer-plugin</artifactId>
+                    <version>3.7.0</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-install-plugin</artifactId>
+                    <version>3.1.4</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-jar-plugin</artifactId>
+                    <version>3.4.2</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-pmd-plugin</artifactId>
+                    <version>${maven-pmd-plugin-version}</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-resources-plugin</artifactId>
+                    <version>3.4.0</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-site-plugin</artifactId>
+                    <version>3.12.1</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.pitest</groupId>
+                    <artifactId>pitest-maven</artifactId>
+                    <version>1.30.1</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-build-versions</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <requireJavaVersion>
+                                    <version>25</version>
+                                </requireJavaVersion>
+                                <requireMavenVersion>
+                                    <version>3.9.14</version>
+                                </requireMavenVersion>
+                                <requirePluginVersions/>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <!--
+                  Quality gate, documented in AGENTS.md. `check` and `aggregate-cpd-check` fork
+                  their own main-code analysis that reads only this plugin-level configuration, so
+                  the main rule set and the shared settings live here; the test-code PMD analysis
+                  and the main-and-test CPD analysis are the explicit executions below, each
+                  followed by a check pointed at its output directory. Only the checks read the
+                  exclusions file, so every report still records what a listed class breaks, which
+                  architecture's ExclusionsShrinkTest reads. CPD reports without failing until the
+                  pull request that burns its duplications down turns it on.
+                -->
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-pmd-plugin</artifactId>
+                <dependencies>
+                    <dependency>
+                        <groupId>net.sourceforge.pmd</groupId>
+                        <artifactId>pmd-core</artifactId>
+                        <version>${pmd-version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>net.sourceforge.pmd</groupId>
+                        <artifactId>pmd-java</artifactId>
+                        <version>${pmd-version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>net.sourceforge.pmd</groupId>
+                        <artifactId>pmd-javascript</artifactId>
+                        <version>${pmd-version}</version>
+                    </dependency>
+                    <dependency>
+                        <groupId>net.sourceforge.pmd</groupId>
+                        <artifactId>pmd-jsp</artifactId>
+                        <version>${pmd-version}</version>
+                    </dependency>
+                </dependencies>
+                <configuration>
+                    <rulesets>
+                        <ruleset>${sail.quality.config}/pmd-main.xml</ruleset>
+                    </rulesets>
+                    <targetJdk>${maven.compiler.release}</targetJdk>
+                    <skipPmdError>false</skipPmdError>
+                    <printFailingErrors>true</printFailingErrors>
+                    <analysisCache>true</analysisCache>
+                    <linkXRef>false</linkXRef>
+                    <minimumTokens>100</minimumTokens>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>pmd-main-check</id>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <excludeFromFailureFile>${sail.quality.config}/pmd-exclusions.properties</excludeFromFailureFile>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>pmd-test</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>pmd</goal>
+                        </goals>
+                        <configuration>
+                            <includeTests>true</includeTests>
+                            <excludeRoots>
+                                <excludeRoot>${project.build.sourceDirectory}</excludeRoot>
+                            </excludeRoots>
+                            <rulesets>
+                                <ruleset>${sail.quality.config}/pmd-test.xml</ruleset>
+                            </rulesets>
+                            <targetDirectory>${project.build.directory}/pmd-test</targetDirectory>
+                            <analysisCacheLocation>${project.build.directory}/pmd-test/pmd.cache</analysisCacheLocation>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>pmd-test-check</id>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <targetDirectory>${project.build.directory}/pmd-test</targetDirectory>
+                            <excludeFromFailureFile>${sail.quality.config}/pmd-exclusions.properties</excludeFromFailureFile>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>cpd</id>
+                        <phase>verify</phase>
+                        <inherited>false</inherited>
+                        <goals>
+                            <goal>aggregate-cpd</goal>
+                        </goals>
+                        <configuration>
+                            <includeTests>true</includeTests>
+                            <targetDirectory>${project.build.directory}/cpd</targetDirectory>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>cpd-check</id>
+                        <inherited>false</inherited>
+                        <goals>
+                            <goal>aggregate-cpd-check</goal>
+                        </goals>
+                        <configuration>
+                            <targetDirectory>${project.build.directory}/cpd</targetDirectory>
+                            <failOnViolation>false</failOnViolation>
+                            <printFailingErrors>false</printFailingErrors>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
@@ -562,6 +754,35 @@
                                 </goals>
                             </execution>
                         </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>mutation</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.pitest</groupId>
+                        <artifactId>pitest-maven</artifactId>
+                        <dependencies>
+                            <dependency>
+                                <groupId>org.pitest</groupId>
+                                <artifactId>pitest-junit5-plugin</artifactId>
+                                <version>1.2.3</version>
+                            </dependency>
+                        </dependencies>
+                        <configuration>
+                            <threads>4</threads>
+                            <timestampedReports>false</timestampedReports>
+                            <outputFormats>
+                                <outputFormat>HTML</outputFormat>
+                                <outputFormat>XML</outputFormat>
+                            </outputFormats>
+                            <mutators>
+                                <mutator>DEFAULTS</mutator>
+                            </mutators>
+                        </configuration>
                     </plugin>
                 </plugins>
             </build>
