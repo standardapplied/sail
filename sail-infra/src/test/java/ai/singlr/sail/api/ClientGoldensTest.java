@@ -1637,9 +1637,10 @@ class ClientGoldensTest {
      * Code's, the run he started earlier ended: his logins listed; an API key stored as "default",
      * his first (`login-stored`, no note); the same name stored again (`login-replaced`, its note
      * on the sessions already running); his logins with it the default, a second key stored beside
-     * it (`work`, not the default) and made the one in use; each refusal of a value, and of a name;
-     * then his logins while he has a Claude Code login that is not the default, where the app asks
-     * a name. Every value sent is an obvious fake.
+     * it (`work`, not the default) and made the one in use, and asked again once it is removed
+     * (`refusal-not-found-login`); each refusal of a value, and of a name; then his logins while he
+     * has a Claude Code login that is not the default, where the app asks a name. Every value sent
+     * is an obvious fake.
      */
     void recordLogins(Map<String, String> goldens) throws Exception {
       var uday = new AuthSessionStore(db).create(idOf("uday"), Duration.ofMinutes(30)).token();
@@ -1678,6 +1679,13 @@ class ClientGoldensTest {
           Map.of("kind", "api-key", "value", fake));
       record(goldens, "login-used", "POST", claudeLogin.formatted("work%3Ause"), uday, null);
       logins.remove(udayId, claude, "work");
+      record(
+          goldens,
+          "refusal-not-found-login",
+          "POST",
+          claudeLogin.formatted("work%3Ause"),
+          uday,
+          null);
       logins.remove(udayId, claude, "default");
       var refused =
           Map.of(

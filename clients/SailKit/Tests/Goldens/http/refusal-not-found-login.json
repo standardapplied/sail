@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/logins/claude-code/work%3Ause"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "not_found",
+        "field_errors": [],
+        "message": "No Claude Code login named 'work' is stored."
+      },
+      "schema_version": 1
+    },
+    "status": 404
+  }
+}

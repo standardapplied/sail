@@ -347,6 +347,7 @@ extension Driver {
         }
         if let shown = step.urlCommandHover, shown.count == 2 {
             guard let view = self.pane?.terminal, let cell = view.cell(of: shown[0]) else { return (false, "the workspace terminal shows no \(shown[0].debugDescription)") }
+            if let card = self.pane?.status.says { return (false, "the terminal's card says \(card.debugDescription) over the address") }
             let window = shell.window.windowNumber
             var rows: [Int] = []
             let (shot, said) = await inBothLooks(shown[1]) { file in

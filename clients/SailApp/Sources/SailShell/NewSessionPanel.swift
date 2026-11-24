@@ -61,7 +61,8 @@ package final class NewSessionPanel: NSObject {
     package private(set) var line: NewSessionView.Line?
     /// Sign in holds the keys (⇥), so Space and ↑ ↓ open its menu.
     package private(set) var signInFocused = false
-    /// What VoiceOver was last told of a key just stored becoming the way in; nil when it was not.
+    /// What VoiceOver was last told of a key just stored: ready on it where it became the way in,
+    /// or the line where it could not be made the one in use; nil when told nothing.
     package private(set) var announced: String?
 
     /// The line saying a key was stored.
@@ -146,8 +147,9 @@ package final class NewSessionPanel: NSObject {
 
     /// What the route answers once a key of `harness` was stored, `harness` chosen with `memory`'s
     /// way in for it, `line` said over the foot until the panel closes, Start holding the keys;
-    /// VoiceOver hears it ready on the key where the key is its way in.
-    func show(_ answer: Answer, memory: ModeMemory, stored line: String, harness: String) {
+    /// VoiceOver hears it ready on the key where the key is its way in, and hears `line` where the
+    /// key is not `inUse`, as a sighted person reads it.
+    func show(_ answer: Answer, memory: ModeMemory, stored line: String, harness: String, inUse: Bool) {
         guard isOpen else { return }
         var shown = Self.content(answer, memory: memory)
         if case var .offered(panel) = shown {
@@ -159,12 +161,15 @@ package final class NewSessionPanel: NSObject {
         signInFocused = false
         announced = nil
         redraw()
+        if !inUse { announce(line) }
         guard case let .offered(panel) = shown, let offer = panel.offer(harness), let start = view.primary else { return }
-        if panel.way(of: harness) == .key, let ready = NewSessionWords.ready(offer) {
-            announced = ready
-            NSAccessibility.post(element: view, notification: .announcementRequested, userInfo: [.announcement: ready, .priority: NSAccessibilityPriorityLevel.high.rawValue])
-        }
+        if inUse, panel.way(of: harness) == .key, let ready = NewSessionWords.ready(offer) { announce(ready) }
         NSAccessibility.post(element: start, notification: .layoutChanged, userInfo: [.uiElements: [start]])
+    }
+
+    private func announce(_ words: String) {
+        announced = words
+        NSAccessibility.post(element: view, notification: .announcementRequested, userInfo: [.announcement: words, .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 
     /// `said` over the foot of what it shows now, until it closes; nil, none.

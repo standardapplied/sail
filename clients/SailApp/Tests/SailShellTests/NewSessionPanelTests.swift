@@ -732,7 +732,7 @@ import Testing
                 let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: try Exchange(scene.golden).body))
                 var chose = ModeMemory()
                 chose.choose(.key, for: "claude-code")
-                panel.show(.agents(agents), memory: chose, stored: Self.storedLine, harness: "claude-code")
+                panel.show(.agents(agents), memory: chose, stored: Self.storedLine, harness: "claude-code", inUse: true)
                 try check("\(scene.golden), a key just stored", panel, window)
             }
         }

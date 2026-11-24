@@ -283,9 +283,10 @@ struct Step: Decodable {
     /// `[text, address]`: ⌘-click on this text where the workspace terminal focused shows it opens
     /// this web address in the browser, and nothing else.
     var urlCommandClick: [String]?
-    /// `[text, shot]`: ⌘ held over this text where the workspace terminal focused shows it
-    /// underlines the web address there on every row it wraps over, shot in both looks under this
-    /// name; then the pointer moves on without ⌘ and the underline goes.
+    /// `[text, shot]`: ⌘ held over this text where the workspace terminal focused shows it, its
+    /// card saying nothing over the address, underlines the web address there on every row it wraps
+    /// over, shot in both looks under this name; then the pointer moves on without ⌘ and the
+    /// underline goes.
     var urlCommandHover: [String]?
     /// `[harness, mode, "stored" | "inside"]`: the focused tab's session was asked of the runner's
     /// door naming exactly this agent, and no command.

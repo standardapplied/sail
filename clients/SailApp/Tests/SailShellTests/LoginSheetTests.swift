@@ -261,11 +261,20 @@ import Testing
         #expect(!inDefaults && !said, "the key is in the defaults or in what the app says")
     }
 
+    /// How the server answers the key stored beside a default being made the one in use.
+    enum Use: CaseIterable {
+        case answered, unreachable, refused
+    }
+
+    static let notUsed = "Stored Claude Code key “work”, but Sign in still offers your earlier key; store “work” again to make it the one Start takes."
+
     /// A key stored beside the default the person already has is made the one in use (`:use`): the
     /// panel's Sign in, its row and VoiceOver say that key, never the old default, and Start takes
-    /// it. Where that is not done, the key is not chosen and the line says why.
-    @Test(arguments: [true, false])
-    func aKeyStoredBesideADefaultBecomesTheOneInUse(_ answered: Bool) async throws {
+    /// it. Where that is not done, not answered or refused (the key removed meanwhile), the key is
+    /// not chosen, and the line and VoiceOver say the one same plain sentence of what that leaves
+    /// and what to do, never the server's words.
+    @Test(arguments: Use.allCases)
+    func aKeyStoredBesideADefaultBecomesTheOneInUse(_ use: Use) async throws {
         let (view, window, _, sheet) = try await Self.asked(
             agents: "workspace-agents-dock", logins: "logins-with-a-default", stored: [try Exchange("login-stored-beside-the-default")]
         )
@@ -274,19 +283,47 @@ import Testing
         #expect(sheet.model.name == "work", "the second key is named \(sheet.model.name)")
         Self.paste(into: sheet)
         let onWork = try Exchange("workspace-agents-dock").altered(at: ["offered", 0, "login", "name"], to: "work")
-        let after = RecordedServer(answered ? [try Exchange("login-used"), onWork] : [try Exchange("workspace-agents-dock")])
+        let answers: [Exchange] = switch use {
+        case .answered: [try Exchange("login-used"), onWork]
+        case .unreachable: [try Exchange("workspace-agents-dock")]
+        case .refused: [try Exchange("refusal-not-found-login"), try Exchange("workspace-agents-dock")]
+        }
+        let after = RecordedServer(answers)
         view.client = SailClient(transport: after, token: "tok")
         try NewSessionPanelTests.press(sheet.store)
         try #require(await RunnerTabTests.until { window.attachedSheet == nil && panel.stored != nil && !view.busy && panel.view.signIn != nil }, "the panel never came back: \(panel.view.words)")
         let asked = await after.requests.map(\.route)
         #expect(asked == ["POST /v1/logins/claude-code/work%3Ause", "GET /v1/projects/harbor/workspaces/dock/agents"], "asked \(asked)")
-        if answered {
+        if use == .answered {
             #expect(panel.view.signIn?.title == "API key “work”" && panel.view.rows.first?.line.stringValue == "API key “work”" && view.memory.ways == ["claude-code": .key])
             #expect(panel.announced == "Claude Code ready, API key work." && panel.stored == "Stored Claude Code key “work”.")
         } else {
             #expect(panel.view.signIn?.title == "Your Claude account" && view.memory.ways["claude-code"] == nil, "a key not in use was chosen: \(panel.view.words)")
-            #expect(panel.announced == nil && panel.stored == "Stored Claude Code key “work”. Can't reach 127.0.0.1, so “work” is not the key Start takes.", "\(String(describing: panel.stored))")
+            #expect(panel.stored == Self.notUsed && panel.view.words.contains(Self.notUsed), "the line says \(String(describing: panel.stored))")
+            #expect(panel.announced == Self.notUsed, "VoiceOver heard \(String(describing: panel.announced))")
         }
+    }
+
+    /// Someone else signs in while the key stored beside a default is being made the one in use:
+    /// once it is, nothing is chosen for them, in their starts or in what is kept of them, and
+    /// nothing more is asked.
+    @Test func aKeyMadeTheOneInUseOnceSomeoneElseSignedInIsChosenForNoOne() async throws {
+        let (view, window, _, sheet) = try await Self.asked(
+            agents: "workspace-agents-dock", logins: "logins-with-a-default", stored: [try Exchange("login-stored-beside-the-default")]
+        )
+        defer { window.orderOut(nil) }
+        var kept: [ModeMemory] = []
+        view.keep = { memory, _ in kept.append(memory) }
+        Self.paste(into: sheet)
+        let held = Held(RecordedServer([try Exchange("login-used"), try Exchange("workspace-agents-dock")]), holding: "work%3Ause")
+        view.client = SailClient(transport: held, token: "tok")
+        try NewSessionPanelTests.press(sheet.store)
+        try #require(await RunnerTabTests.until { held.routes.contains("POST /v1/logins/claude-code/work%3Ause") }, "no :use was sent: \(held.routes)")
+        view.person = WorkspacesViewTests.ana
+        held.release()
+        try #require(await RunnerTabTests.until { !view.busy }, "the store never ended")
+        #expect(view.memory.ways.isEmpty && kept.allSatisfy(\.ways.isEmpty), "ana's starts took uday's key: \(view.memory), kept \(kept)")
+        #expect(!held.routes.contains { $0.hasSuffix("/agents") }, "asked on after someone else signed in: \(held.routes)")
     }
 
     /// The clipboard still holding exactly the key once stored is cleared, and the line says so;

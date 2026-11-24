@@ -64,6 +64,7 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "login-replaced": { _ = try await $0.send(.storeLogin(goldenKey, kind: "api-key", harness: "claude-code", name: "default")) },
     "login-stored-beside-the-default": { _ = try await $0.send(.storeLogin(goldenKey, kind: "api-key", harness: "claude-code", name: "work")) },
     "login-used": { _ = try await $0.send(.useLogin(harness: "claude-code", name: "work")) },
+    "refusal-not-found-login": { _ = try await $0.send(.useLogin(harness: "claude-code", name: "work")) },
     "refusal-invalid-request-login-empty": { _ = try await $0.send(.storeLogin("   ", kind: "api-key", harness: "claude-code", name: "default")) },
     "refusal-invalid-request-login-lines": { _ = try await $0.send(.storeLogin(goldenKey + "\n" + goldenKey, kind: "api-key", harness: "claude-code", name: "default")) },
     "refusal-invalid-request-login-long": { _ = try await $0.send(.storeLogin(String(repeating: "k", count: 16 * 1024 + 1), kind: "api-key", harness: "claude-code", name: "default")) },

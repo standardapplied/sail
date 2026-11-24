@@ -176,17 +176,6 @@ public struct StoreLogin: Equatable, Sendable {
         return .useLogin(harness: harness, name: answer.login.name)
     }
 
-    /// Why the key just stored is not the one Start takes: the server's sentence, or that it did not
-    /// answer.
-    public func notUsed(_ error: SailError) -> String {
-        guard case let .stored(answer, _) = stage else { return "" }
-        return switch error {
-        case let .refused(refusal): refusal.message
-        case .unreachable: "Can't reach \(place), so “\(answer.login.name)” is not the key Start takes."
-        default: error.said(at: place)
-        }
-    }
-
     // MARK: Words
 
     public var title: String {
@@ -241,8 +230,20 @@ public struct StoreLogin: Equatable, Sendable {
     /// The panel's one quiet line once stored: the clipboard's sentence when it was cleared, and
     /// what the server says once of runs on a login it replaced.
     public var stored: String? {
+        line { _ in "." }
+    }
+
+    /// The line in place of ``stored`` where the key could not be made the one Start takes (``use``
+    /// not answered or refused, the key removed meanwhile among them): whatever the reason, the
+    /// same plain sentence of what that leaves and what to do, never the server's words.
+    public var notUsed: String? {
+        line { name in ", but Sign in still offers your earlier key; store “\(name)” again to make it the one Start takes." }
+    }
+
+    private func line(_ ending: (String) -> String) -> String? {
         guard case let .stored(answer, cleared) = stage else { return nil }
         let clipboard = cleared ? " Removed the key from the clipboard." : ""
-        return "Stored \(display) key “\(answer.login.name)”." + clipboard + (answer.note.map { " " + $0 } ?? "")
+        let name = answer.login.name
+        return "Stored \(display) key “\(name)”" + ending(name) + clipboard + (answer.note.map { " " + $0 } ?? "")
     }
 }

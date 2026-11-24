@@ -478,26 +478,31 @@ public final class WorkspacesView: NSView {
 
     /// A key stored: where the panel is still open on its workspace, it says so at once, the
     /// clipboard cleared there and then when it still held the key, so the line that says so shows.
-    /// A key stored beside a default the person had is then made the one in use; once it is, the
-    /// person's starts take the key as the harness's way in, and where it is not, the line says why
-    /// and the way in is left as it was. Then it shows what the route answers now, the harness
-    /// chosen. With the panel gone, nothing says it, so the clipboard is left as it is.
+    /// A key stored beside a default the person had is then made the one in use; once it is, and the
+    /// same person is still signed in there, their starts take the key as the harness's way in, and
+    /// where it is not, the line says so and the way in is left as it was. Then it shows what the
+    /// route answers now, the harness chosen. With the panel gone, nothing says it, so the clipboard
+    /// is left as it is.
     private func loginStored(_ stored: StoreLogin, in place: (project: String, name: String), era: Int) {
-        guard let client, let line = stored.stored, era == self.era, newSession.isOpen, startingIn.map({ $0 == place }) == true else { return }
+        guard let client, let line = stored.stored, let notUsed = stored.notUsed, era == self.era, newSession.isOpen, startingIn.map({ $0 == place }) == true else { return }
         if case .stored(_, clearsClipboard: true) = stored.stage { pasteboard.clearContents() }
         newSession.say(.stored(line))
         byAPerson { [weak self] in
             guard let self else { return }
-            var told = line
-            if let use = stored.use, case let .failure(error) = await Self.result({ () async throws(SailError) in try await client.send(use) }) {
-                told += " " + stored.notUsed(error)
-            } else {
-                memory.choose(.key, for: stored.harness)
-            }
+            let inUse = await Self.inUse(stored, client)
+            guard era == self.era else { return }
+            if inUse { memory.choose(.key, for: stored.harness) }
             let answer = await Self.result { () async throws(SailError) in try await client.send(.agents(workspace: place.name, project: place.project)) }
             guard era == self.era, newSession.isOpen, startingIn.map({ $0 == place }) == true else { return }
-            newSession.show(said(answer), memory: memory, stored: told, harness: stored.harness)
+            newSession.show(said(answer), memory: memory, stored: inUse ? line : notUsed, harness: stored.harness, inUse: inUse)
         }
+    }
+
+    /// Whether the key just stored is the one Start takes: the server made it the default as it
+    /// stored it, or made it so when asked now.
+    private static func inUse(_ stored: StoreLogin, _ client: SailClient) async -> Bool {
+        guard let use = stored.use else { return true }
+        return (try? await client.send(use)) != nil
     }
 
     /// The panel follows its row or closes: a row that moved (the list scrolled or drawn again), went,
