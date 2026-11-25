@@ -213,9 +213,12 @@ function calls(code) {
 
 # Whether a string that starts after prefix, on a line after the open calls carried, is a label:
 # the argument LABEL names of the call it is given to, "_" for an unnamed first argument, either
-# side of a conditional or after a ??, whose second ? the then side's pattern takes.
-function labelled(prefix,    open, argument, callee, key, alone) {
+# side of a conditional, chained or in parentheses, or after a ??, whose second ? the then side's
+# pattern takes.
+function labelled(prefix,    open, argument, callee, key, alone, was) {
   open = calls(carry " " prefix)
+  while (match(open, /[(][^(]*$/) && substr(open, 1, RSTART - 1) !~ /[A-Za-z0-9_][ \t]*$/)
+    open = substr(open, 1, RSTART - 1) " " substr(open, RSTART + 1)
   if (!match(open, /[(][^(]*$/)) return 0
   argument = substr(open, RSTART + 1)
   open = substr(open, 1, RSTART - 1)
@@ -225,8 +228,11 @@ function labelled(prefix,    open, argument, callee, key, alone) {
   sub(/[ \t]+$/, "", callee)
   alone = argument !~ /,/
   sub(/^.*,/, "", argument)
-  sub(/[^:]*[?][^:]*:[ \t]*$/, "", argument)
-  sub(/[^:]*[?][ \t]*$/, "", argument)
+  do {
+    was = argument
+    sub(/[^:]*[?][^:]*:[ \t]*$/, "", argument)
+    sub(/[^:]*[?][ \t]*$/, "", argument)
+  } while (argument != was)
   if (argument ~ /^[ \t]*$/) {
     if (!alone) return 0
     argument = "_"

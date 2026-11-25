@@ -234,6 +234,10 @@ class CiRulesTest {
             let retry = LinkButton(button ?? "Try Again…", look: look, target: nil, action: nil)
             let stop = NSMenuItem(title: busy ? "Stopping" : "Stop…", action: nil, keyEquivalent: "")
             let name = NSMenuItem(title: tab?.title ?? "Untitled…", action: nil, keyEquivalent: "")
+            let next = SailButton(a ? "Back" : b ? "Next…" : "Done", kind: .primary, look: look, target: nil, action: nil)
+            let again = SailButton(a ? (b ? "Retry…" : "Retry") : "Close", kind: .quiet, look: look, target: nil, action: nil)
+            let topics = LinkButton(a ? "Help" : (topic ?? "Topics…"), look: look, target: nil, action: nil)
+            let step = NSMenuItem(title: a ? "First" : b ? "Second…" : "Third", action: nil, keyEquivalent: "")
             """,
             List.of(
                 "1: \"Delete…\"",
@@ -266,7 +270,11 @@ class CiRulesTest {
                 "30: \"Close All…\"",
                 "31: \"Try Again…\"",
                 "32: \"Stop…\"",
-                "33: \"Untitled…\""),
+                "33: \"Untitled…\"",
+                "34: \"Next…\"",
+                "35: \"Retry…\"",
+                "36: \"Topics…\"",
+                "37: \"Second…\""),
             """
             banner.show("Reconnecting…", button: "Reconnect Now")
             let open = NSMenuItem(title: "Open", action: nil, keyEquivalent: "")
@@ -281,6 +289,7 @@ class CiRulesTest {
             let more = SailButton(icon: .more, label: "More", look: look, target: nil, action: nil)
             banner.show(lost ? "Lost…" : "Reconnecting…", button: retrying ? "Retry" : "Reconnect Now")
             let ellipsis = item("Ellipsis", #selector(TerminalView.insertEllipsis(_:)), "…")
+            banner.show((lost ? "Lost…" : "Gone…"), button: (retrying ? "Retry" : "Reconnect Now"))
             """),
         Arguments.of(
             "tokens",
