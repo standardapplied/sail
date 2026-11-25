@@ -180,7 +180,7 @@ class CiChangelogTest {
     assertEquals(1, ran.exit());
     assertEquals(
         "ci/changelog: this change adds changes/mine.md, but its branch agent/the-spec names its"
-            + " entry changes/the-spec.md: rename it.\n",
+            + " entry changes/the-spec.md: put its bullets there instead.\n",
         ran.err());
   }
 
@@ -195,7 +195,7 @@ class CiChangelogTest {
     assertEquals(1, ran.exit());
     assertEquals(
         "ci/changelog: this change adds changes/mine.md, but its branch agent/x names its entry"
-            + " changes/x.md: rename it.\n",
+            + " changes/x.md: put its bullets there instead.\n",
         ran.err());
   }
 
@@ -209,8 +209,8 @@ class CiChangelogTest {
 
     assertEquals(1, ran.exit());
     assertEquals(
-        "ci/changelog: this change adds no entry: add changes/the-spec.md holding its bullets as"
-            + " they would read under the version heading (changes/README.md).\n",
+        "ci/changelog: this change neither adds nor edits changes/the-spec.md: add it, holding its"
+            + " bullets as they would read under the version heading (changes/README.md).\n",
         ran.err());
   }
 
@@ -225,7 +225,108 @@ class CiChangelogTest {
     assertEquals(1, ran.exit());
     assertEquals(
         "ci/changelog: this change adds 2 entries (changes/one.md, changes/two.md): a pull request"
-            + " adds exactly one, changes/<spec-id>.md.\n",
+            + " adds at most one, changes/<spec-id>.md.\n",
+        ran.err());
+  }
+
+  @Test
+  void aLaterPullRequestOfTheSameSpecEditsTheEntryItsFirstAdded() throws Exception {
+    write("changes/the-spec.md", "- **First.** Merged.\n");
+    var merged = commit("2026-11-02T00:00:00Z");
+    git(Map.of(), "checkout", "-q", "-b", "agent/the-spec");
+    write("changes/the-spec.md", "- **First.** Merged.\n- **Second.** Later.\n");
+    commit("2026-11-03T00:00:00Z");
+
+    var ran = sh("ci/changelog", "check", merged);
+
+    assertEquals(0, ran.exit(), ran.err());
+    assertEquals("", ran.err());
+  }
+
+  @Test
+  void aPullRequestMayCorrectAnotherSpecsEntryBesideItsOwn() throws Exception {
+    write("changes/other.md", "- **Other.** Unreleased.\n");
+    var merged = commit("2026-11-02T00:00:00Z");
+    git(Map.of(), "checkout", "-q", "-b", "agent/the-spec");
+    write("changes/other.md", "- **Other.** Unreleased, corrected.\n");
+    write("changes/the-spec.md", "- **Mine.** New.\n");
+    commit("2026-11-03T00:00:00Z");
+
+    var ran = sh("ci/changelog", "check", merged);
+
+    assertEquals(0, ran.exit(), ran.err());
+  }
+
+  @Test
+  void aSpecsBranchThatEditsOnlyAnotherSpecsEntryIsRefusedNamingItsOwn() throws Exception {
+    write("changes/other.md", "- **Other.** Unreleased.\n");
+    var merged = commit("2026-11-02T00:00:00Z");
+    git(Map.of(), "checkout", "-q", "-b", "agent/the-spec");
+    write("changes/other.md", "- **Other.** Unreleased, corrected.\n");
+    commit("2026-11-03T00:00:00Z");
+
+    var ran = sh("ci/changelog", "check", merged);
+
+    assertEquals(1, ran.exit());
+    assertEquals(
+        "ci/changelog: this change neither adds nor edits changes/the-spec.md: add it, holding its"
+            + " bullets as they would read under the version heading (changes/README.md).\n",
+        ran.err());
+  }
+
+  @Test
+  void aSpecsBranchThatAddsASecondEntryIsRefusedNamingIt() throws Exception {
+    git(Map.of(), "checkout", "-q", "-b", "agent/the-spec");
+    write("changes/the-spec.md", "- **Mine.** New.\n");
+    write("changes/more.md", "- **More.** Also new.\n");
+    commit("2026-11-02T00:00:00Z");
+
+    var ran = sh("ci/changelog", "check", base);
+
+    assertEquals(1, ran.exit());
+    assertEquals(
+        "ci/changelog: this change adds changes/more.md, but its branch agent/the-spec names its"
+            + " entry changes/the-spec.md: put its bullets there instead.\n",
+        ran.err());
+  }
+
+  @Test
+  void aChangeOnAnotherBranchMayEditAnEntryInsteadOfAddingOne() throws Exception {
+    write("changes/other.md", "- **Other.** Unreleased.\n");
+    var merged = commit("2026-11-02T00:00:00Z");
+    write("changes/other.md", "- **Other.** Unreleased, corrected.\n");
+    commit("2026-11-03T00:00:00Z");
+
+    var ran = sh("ci/changelog", "check", merged);
+
+    assertEquals(0, ran.exit(), ran.err());
+  }
+
+  @Test
+  void aChangeOnAnotherBranchThatTouchesNoEntryIsRefused() throws Exception {
+    write("README.md", "Changed.\n");
+    commit("2026-11-02T00:00:00Z");
+
+    var ran = sh("ci/changelog", "check", base);
+
+    assertEquals(1, ran.exit());
+    assertEquals(
+        "ci/changelog: this change neither adds nor edits an entry: add changes/<spec-id>.md,"
+            + " holding its bullets as they would read under the version heading"
+            + " (changes/README.md).\n",
+        ran.err());
+  }
+
+  @Test
+  void withNoOriginMainTheDefaultBaseIsRefusedNamingWhatToGive() throws Exception {
+    write("changes/mine.md", "- **Mine.** New.\n");
+
+    var ran = sh("ci/changelog", "check");
+
+    assertEquals(1, ran.exit());
+    assertEquals(
+        "ci/changelog: this clone has no origin/main to find where the change left it: fetch it,"
+            + " or give BASE.\n",
         ran.err());
   }
 

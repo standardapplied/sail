@@ -1,3 +1,3 @@
-One file per change: a pull request adds exactly one file, changes/<spec-id>.md, directly in this folder, and never edits CHANGELOG.md. The id is the one its branch, agent/<spec-id>, names; a branch of another name adds one file of any name.
+One file per change, changes/<spec-id>.md, directly in this folder, the id the one its branch agent/<spec-id> names: a spec's first pull request adds it and its later ones edit it. A pull request may correct another entry not yet released but adds no other (a branch of another name adds at most one), and none edits CHANGELOG.md.
 The file holds the change's entry as it would read under the version heading: one or more `- **…** …` bullets, with LF line ends.
 The release folds every file into CHANGELOG.md with `ci/changelog X.Y.Z` in the version bump's commit, on a full clone, oldest first by the commit that added each (renaming a file re-dates it).

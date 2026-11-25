@@ -12,9 +12,9 @@ cd "$(dirname "$0")/.."
 # multi-line and raw strings with their interpolations, bare regex literals; Java's strings, text
 # blocks and character literals.
 #
-# A rule is on or not yet. Every rule on holds in the repository; a rule not yet on still finds
-# something in it (CiRulesTest holds both). The pull request that clears a rule switches it on by
-# moving its name from NOT_YET to ON, and its row in AGENTS.md's "Quality gate" with it.
+# A rule is on or not yet. check fails on a finding of a rule on, and on a rule not yet on that
+# finds nothing, whose findings it only counts: the pull request that clears a rule switches it on
+# by moving its name from NOT_YET to ON, and its row in AGENTS.md's "Quality gate" with it.
 
 readonly ON="ellipsis lists"
 readonly NOT_YET="comments sleeps tokens components function-lines parameters nesting file-lines"
@@ -23,8 +23,9 @@ readonly PULL_REQUEST="changes"
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  ci/rules check [BASE]      every rule on; with BASE, a pull request's base, also its own rule
-                             (changes: ci/changelog check BASE)
+  ci/rules check [BASE]      every rule on, and every rule not yet on still finds something; with
+                             BASE, a pull request's base, also its own rule (changes: ci/changelog
+                             check BASE)
   ci/rules run RULE...       the rules named, on or not yet (changes is checked from where the
                              change left origin/main)
   ci/rules list              every rule, whether it is on, and its sentence
@@ -39,7 +40,7 @@ sources() {
       done
 }
 
-# The tree rules named in $1 over every source, their findings on stdout.
+# The tree rules named in $1 over every source, each finding on stdout after its rule and a tab.
 tree() {
   local list
   list=$(mktemp)
@@ -50,13 +51,17 @@ tree() {
   rm -f "$list"
 }
 
+# The findings of the rules named in $1 and $2, those of $2 only counted; a rule of $2 that finds
+# nothing is a finding of its own.
 decide() {
-  local rules=$1 base=$2 changes=$3 found count
+  local rules=$1 quiet=$2 base=$3 changes=$4 found said count
   found=$(mktemp)
-  tree "$rules" > "$found"
-  cat "$found"
-  count=$(grep -c . "$found" || true)
-  rm -f "$found"
+  said=$(mktemp)
+  tree "$rules $quiet" > "$found"
+  LC_ALL=C awk -F '\t' -v quiet="$quiet" "$(summary)" "$found" > "$said"
+  cat "$said"
+  count=$(grep -c . "$said" || true)
+  rm -f "$found" "$said"
   local failed=0
   if [[ $count != 0 ]]; then
     [[ $count == 1 ]] && echo "ci/rules: 1 finding; its line names its rule." >&2 \
@@ -64,7 +69,7 @@ decide() {
     failed=1
   fi
   if $changes; then
-    ci/changelog check $base || failed=1
+    ci/changelog check ${base:+"$base"} || failed=1
   fi
   if [[ $failed == 0 ]]; then
     echo "ci/rules: held: $rules$($changes && echo " $PULL_REQUEST")." >&2
@@ -75,9 +80,9 @@ decide() {
 check() {
   [[ $# -le 1 ]] || usage
   if [[ $# == 1 ]]; then
-    decide "$ON" "$1" true
+    decide "$ON" "$NOT_YET" "$1" true
   else
-    decide "$ON" "" false
+    decide "$ON" "$NOT_YET" "" false
   fi
 }
 
@@ -97,7 +102,7 @@ run() {
         ;;
     esac
   done
-  decide "$tree_rules" "" "$changes"
+  decide "$tree_rules" "" "" "$changes"
 }
 
 list() {
@@ -113,10 +118,22 @@ list() {
 
 sentence() {
   [[ $1 == "$PULL_REQUEST" ]] && {
-    echo "A pull request adds exactly one entry, changes/<spec-id>.md, and never edits CHANGELOG.md."
+    echo "A pull request adds or edits its own entry, changes/<spec-id>.md, adds no other, and never edits CHANGELOG.md."
     return
   }
   LC_ALL=C awk -v rules="$1" -v sentence="$1" "$(program)" < /dev/null
+}
+
+summary() {
+  cat <<'AWK'
+BEGIN { n = split(quiet, q, " "); for (k = 1; k <= n; k++) muted[q[k]] = 1 }
+$1 in muted { seen[$1] = 1; next }
+{ print substr($0, length($1) + 2) }
+END {
+  for (k = 1; k <= n; k++)
+    if (!(q[k] in seen)) print "ci/rules: " q[k] " finds nothing now, so it is on: move it from NOT_YET to ON in ci/rules, and its row in AGENTS.md to the rules on."
+}
+AWK
 }
 
 program() {
@@ -126,6 +143,9 @@ BEGIN {
   for (k = 1; k <= n; k++) on[wanted[k]] = 1
   ELLIPSIS = "\342\200\246"
   CONTROLS = "clients/SailApp/Sources/SailControls/"
+  LISTS = "NSTableView|NSOutlineView|NSCollectionView|NSTableRowView|NSTableCellView"
+  split("SailButton:_ SailButton:label LinkButton:_ Action:_ Sheet:confirm Question:confirm show:button show:second ask:action Command:title item:_ directed:_ submenu:_ NSMenuItem:title NSMenu:title NSButton:title NSButton:checkboxWithTitle NSButton:radioButtonWithTitle addItem:withTitle insertItem:withTitle addButton:withTitle", pairs, " ")
+  for (k in pairs) LABEL[pairs[k]] = 1
   SAY["comments"] = "No inline comments: a documentation comment (/// or /** */) says a non-obvious why; otherwise rename or extract."
   SAY["sleeps"] = "A Swift test waits for the event it needs, never for time: no Task.sleep, Thread.sleep, usleep, nanosleep or sleep."
   SAY["ellipsis"] = "A menu item's or a button's label names its action, with no \"" ELLIPSIS "\" or \"...\"; progress text keeps its ellipsis."
@@ -142,7 +162,8 @@ BEGIN {
 }
 
 function finding(rule, line, found) {
-  print file ":" line ": " rule ": " found ": " SAY[rule]
+  gsub(/\n/, "\\n", found)
+  print rule "\t" file ":" line ": " rule ": " found ": " SAY[rule]
 }
 
 function start(path) {
@@ -162,7 +183,7 @@ function start(path) {
   scope_lists = on["lists"] && outside
   scope_sizes = swift && path ~ /^clients\// && (on["function-lines"] || on["parameters"] || on["nesting"] || on["file-lines"])
   wanted_here = scope_comments || scope_sleeps || scope_ellipsis || scope_tokens || scope_components || scope_lists || scope_sizes
-  block = 0; sp = 0; codelines = 0
+  block = 0; sp = 0; codelines = 0; carry = ""; heir_open = 0
   braces = 0; fsp = 0; dstate = 0; crossed = 0; prev = ""
 }
 
@@ -177,8 +198,30 @@ function repeat(s, times,    out) {
   return out
 }
 
-function labelled(prefix) {
-  return prefix ~ /(^|[^A-Za-z0-9_])(title|withTitle|button|label|confirm)[ \t]*:[ \t]*$/ || prefix ~ /\.title[ \t]*=[ \t]*$/ || prefix ~ /(^|[^A-Za-z0-9_.])Button\($/
+# The calls still open at the end of code, with every group closed in it taken out; nothing when
+# no call is open.
+function calls(code,    n) {
+  gsub(/\[/, "(", code); gsub(/\]/, ")", code)
+  do { n = gsub(/[(][^()]*[)]/, "", code) + gsub(/[{][^{}]*[}]/, "", code) } while (n)
+  return code ~ /[(]/ ? code : ""
+}
+
+# Whether a string that starts after prefix, on a line after the open calls carried, is a label:
+# the argument LABEL names of the call it is given to, "_" for an unnamed first argument.
+function labelled(prefix,    open, argument, callee) {
+  open = calls(carry " " prefix)
+  if (!match(open, /[(][^(]*$/)) return 0
+  argument = substr(open, RSTART + 1)
+  open = substr(open, 1, RSTART - 1)
+  sub(/[.]init[ \t]*$/, "", open)
+  if (!match(open, /[A-Za-z_][A-Za-z0-9_]*[ \t]*$/)) return 0
+  callee = substr(open, RSTART, RLENGTH)
+  sub(/[ \t]+$/, "", callee)
+  if (argument ~ /^[ \t]*$/) return (callee ":_") in LABEL
+  sub(/^.*,/, "", argument)
+  if (argument !~ /^[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*:[ \t]*$/) return 0
+  gsub(/[ \t:]/, "", argument)
+  return (callee ":" argument) in LABEL
 }
 
 function open_string(quotes, hashes, prefix) {
@@ -188,7 +231,7 @@ function open_string(quotes, hashes, prefix) {
 }
 
 function close_string() {
-  if (slabel[sp] && (index(sbody[sp], ELLIPSIS) || index(sbody[sp], "...")))
+  if (slabel[sp] && (index(sbody[sp], ELLIPSIS) || index(sbody[sp], "...") || (shashes[sp] == 0 && sbody[sp] ~ /\\u[{]0*2026[}]/)))
     finding("ellipsis", sline[sp], "\"" sbody[sp] "\"")
   sp--
 }
@@ -327,10 +370,20 @@ function tokens(code,    rest, inset) {
   }
 }
 
-function subclasses(code, types, rule,    inherits) {
-  if (!match(code, /(^|[^A-Za-z0-9_])class[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*(<[^>]*>)?[ \t]*:/)) return
-  inherits = substr(code, RSTART + RLENGTH)
+# The types a class on this line inherits, or on the line after a class whose colon ends its line.
+function heritage(code,    inherits) {
+  if (heir_open) {
+    if (code !~ /[^ \t]/) return ""
+    heir_open = 0; inherits = code
+  } else if (match(code, /(^|[^A-Za-z0-9_])class[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*(<[^>]*>)?[ \t]*:/)) {
+    inherits = substr(code, RSTART + RLENGTH)
+  } else return ""
+  if (inherits ~ /^[ \t]*$/) heir_open = 1
   sub(/[{].*$/, "", inherits)
+  return inherits
+}
+
+function subclasses(inherits, types, rule) {
   if (match(inherits, "(^|[^A-Za-z0-9_])(" types ")([^A-Za-z0-9_]|$)")) {
     inherits = substr(inherits, RSTART, RLENGTH)
     gsub(/[^A-Za-z0-9_]/, "", inherits)
@@ -338,16 +391,22 @@ function subclasses(code, types, rule,    inherits) {
   }
 }
 
-function components(code) {
-  each(code, "(^|[^A-Za-z0-9_.])(NSButton|NSPopUpButton|NSSegmentedControl|NSSecureTextField|NSSearchField|NSAlert|NSPanel)[ \t]*\\(", "components")
-  each(code, "(^|[^A-Za-z0-9_.])NSTextField[ \t]*\\([ \t]*(\\)|string:|frame:)", "components")
-  each(code, "(^|[^A-Za-z0-9_])beginSheet\\(", "components")
-  subclasses(code, "NSButton|NSPopUpButton|NSSegmentedControl|NSTextField|NSSecureTextField|NSSearchField|NSPanel", "components")
+# A type made: called, through .init, qualified by AppKit, or as the .init of a declared type.
+function makes(code, types, rule) {
+  each(code, "(^|[^A-Za-z0-9_.])(AppKit[.])?(" types ")([.]init)?[ \t]*[(]", rule)
+  each(code, "(^|[^A-Za-z0-9_.])(AppKit[.])?(" types ")[ \t]*=[ \t]*[.]init[ \t]*[(]", rule)
 }
 
-function lists(code) {
-  each(code, "(^|[^A-Za-z0-9_.])(NSTableView|NSOutlineView|NSCollectionView|NSTableRowView|NSTableCellView)[ \t]*\\(", "lists")
-  subclasses(code, "NSTableView|NSOutlineView|NSCollectionView|NSTableRowView|NSTableCellView", "lists")
+function components(code, inherits) {
+  makes(code, "NSButton|NSPopUpButton|NSSegmentedControl|NSSecureTextField|NSSearchField|NSAlert|NSPanel", "components")
+  each(code, "(^|[^A-Za-z0-9_.])NSTextField[ \t]*\\([ \t]*(\\)|string:|frame:)", "components")
+  each(code, "(^|[^A-Za-z0-9_])beginSheet\\(", "components")
+  subclasses(inherits, "NSButton|NSPopUpButton|NSSegmentedControl|NSTextField|NSSecureTextField|NSSearchField|NSPanel", "components")
+}
+
+function lists(code, inherits) {
+  makes(code, LISTS, "lists")
+  subclasses(inherits, LISTS, "lists")
 }
 
 function declared(word) {
@@ -440,9 +499,11 @@ FNR == 1 {
   codelines += hascode
   if (scope_sleeps) sleeps(code)
   if (scope_tokens) tokens(code)
-  if (scope_components) components(code)
-  if (scope_lists) lists(code)
+  if (scope_components || scope_lists) inherits = heritage(code)
+  if (scope_components) components(code, inherits)
+  if (scope_lists) lists(code, inherits)
   if (scope_sizes) structure(code)
+  if (scope_ellipsis) carry = calls(carry " " code)
 }
 
 END {

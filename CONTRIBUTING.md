@@ -12,7 +12,7 @@ ci/check                                    # format, then the tests of the clas
 ci/check quick                              # format, then every unit test, incrementally and without coverage
 ci/check full                               # every unit test and gate, as CI's unit jobs run them together
 ci/check unit sail-infra                    # one module, exactly as its CI job runs it
-ci/check rules origin/main                  # the rules a script decides, and this change's one entry (AGENTS.md, Quality gate)
+ci/check rules "$(git merge-base origin/main HEAD)"   # the rules a script decides, and this change's entry (AGENTS.md, Quality gate)
 mvn -o -Pintegration -Dsail.it.requireIncus=false clean verify     # plus the multi-node ITs; run before pushing
 JAVA_HOME=/path/to/graalvm-jdk-25 mvn clean package -Pnative -DskipTests   # the native binary
 ```

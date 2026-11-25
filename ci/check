@@ -31,8 +31,9 @@ Usage:
                                 name a class=rule pair BASE's do not (default: where it left
                                 origin/main), a class twice, or a line that is not a comment, blank
                                 or one Class=Rule[,Rule] entry (ci/exclusions)
-  ci/check rules [BASE]         fail on a finding of every rule ci/rules has on; with BASE, a pull
-                                request's base, also on its entry: other than one changes/<spec-id>.md,
+  ci/check rules [BASE]         fail on a finding of every rule ci/rules has on, or on a rule not yet
+                                on that finds nothing; with BASE, a pull request's base, also on its
+                                entry: changes/<spec-id>.md neither added nor edited, another added,
                                 an edit of CHANGELOG.md, or one the release could not fold
                                 (ci/rules check, ci/changelog check)
 EOF

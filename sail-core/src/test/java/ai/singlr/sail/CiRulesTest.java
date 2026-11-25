@@ -6,7 +6,7 @@
 package ai.singlr.sail;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.Child;
 import java.io.IOException;
@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -28,9 +29,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * {@code ci/rules}, the rules a script decides over the sources, each over one offending and one
- * clean fixture in a real repository holding the script, and over this repository itself: every
- * rule on holds in it, and every rule not yet on still finds something in it, so the pull request
- * that clears a rule is the one that switches it on.
+ * clean fixture in a real repository holding the scripts, and over this repository itself, where
+ * {@code ci/rules check} holds every rule on and fails a rule not yet on that finds nothing.
  */
 class CiRulesTest {
 
@@ -39,6 +39,31 @@ class CiRulesTest {
   private static final String KIT = "clients/SailKit/Sources/SailAPI/Kit.swift";
   private static final String TEST = "clients/SailKit/Tests/SailAPITests/KitTests.swift";
   private static final String JAVA = "sail-core/src/main/java/ai/singlr/sail/A.java";
+  private static final String LOCAL = "ci/check rules \"$(git merge-base origin/main HEAD)\"";
+  private static final Pattern CI_STEP =
+      Pattern.compile(
+          "- name: The rules a script decides\n\\s+env:\n\\s+BASE: (.+)\n\\s+run: (.+)\n");
+  private static final String CHANGES =
+      "A pull request adds or edits its own entry, changes/<spec-id>.md, adds no other, and never"
+          + " edits CHANGELOG.md.";
+  private static final String MANY =
+      "func many(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int) {}\n";
+  private static final String DEEP =
+      """
+      func deep() {
+          if a {
+              for b in c {
+                  while d {
+                      do {
+                          let e = f.map { $0 }
+                      }
+                  }
+              }
+          }
+      }
+      """;
+  private static final String HELD = "ci/rules: held: ellipsis lists.\n";
+  private static final String HELD_WITH_ENTRY = "ci/rules: held: ellipsis lists changes.\n";
   private static final Map<String, String> SAY =
       Map.of(
           "comments",
@@ -81,7 +106,7 @@ class CiRulesTest {
   @BeforeEach
   void aRepositoryHoldingTheScripts() throws Exception {
     git("init", "-q");
-    for (var script : List.of("rules", "changelog")) {
+    for (var script : List.of("rules", "changelog", "check")) {
       var copy = repo.resolve("ci").resolve(script);
       Files.createDirectories(copy.getParent());
       Files.copy(ROOT.resolve("ci").resolve(script), copy);
@@ -176,14 +201,74 @@ class CiRulesTest {
             "ellipsis",
             PANE,
             """
+            let delete = SailButton("Delete…", kind: .destructive, look: look, target: nil, action: nil)
+            let more = SailButton(icon: .more, label: "More...", look: look, target: nil, action: nil)
+            let help = LinkButton("Help\\u{2026}", look: look, target: nil, action: nil)
+            let rename = SailList.Action("Rename…") { rename() }
+            let sheet = Sheet(title: "Delete it?", body: "It goes.", confirm: "Delete…", kind: .destructive, look: look, titleFont: titleFont)
+            let asked = Question(project: p, name: n, action: .stop, title: "Stop it?", body: "It stops.", confirm: "Stop…", terminals: nil, detail: nil, asked: 0)
+            banner.show("It ended.", tone: .warning, button: "Open Again…", second: "Close…")
+            Confirmation.ask("End it?", detail: "It ends.", action: "End…", on: window) { _ in }
+            let copy = Command(title: "Copy…", action: #selector(NSText.copy(_:)), key: "c")
+            let items = [item("Account…", #selector(ShellApp.showAccount(_:)), ","), directed("Select Split Above…", select, .up, [.command])]
+            let file = submenu("File…", [])
             let open = NSMenuItem(title: "Open…", action: nil, keyEquivalent: "")
-            button.title = "Save..."
+            let view = NSMenu(title: "View…")
+            let wrap = NSButton(checkboxWithTitle: "Wrap…", target: nil, action: nil), tabs = NSButton(radioButtonWithTitle: "Tabs…", target: nil, action: nil)
+            let push = NSButton(title: "Push…", target: nil, action: nil)
+            menu.addItem(withTitle: "Quit…", action: nil, keyEquivalent: "q"); menu.insertItem(withTitle: "Hide…", action: nil, keyEquivalent: "h", at: 0)
+            alert.addButton(withTitle: "Save…")
+            let saveAs = NSMenuItem(title:
+                "Save As…", action: nil, keyEquivalent: "")
+            let later = SailButton(
+                "Later…", kind: .quiet, look: look, target: nil, action: nil)
+            let print = NSMenuItem(title: \"""
+                Print…
+                \""", action: nil, keyEquivalent: "")
+            let find = NSMenuItem.init(title: "Find…", action: nil, keyEquivalent: "f")
+            let add = SailButton(
+                icon: .plus,
+                label: "New…", look: look, target: nil, action: nil)
             """,
-            List.of("1: \"Open…\"", "2: \"Save...\""),
+            List.of(
+                "1: \"Delete…\"",
+                "2: \"More...\"",
+                "3: \"Help\\u{2026}\"",
+                "4: \"Rename…\"",
+                "5: \"Delete…\"",
+                "6: \"Stop…\"",
+                "7: \"Open Again…\"",
+                "7: \"Close…\"",
+                "8: \"End…\"",
+                "9: \"Copy…\"",
+                "10: \"Account…\"",
+                "10: \"Select Split Above…\"",
+                "11: \"File…\"",
+                "12: \"Open…\"",
+                "13: \"View…\"",
+                "14: \"Wrap…\"",
+                "14: \"Tabs…\"",
+                "15: \"Push…\"",
+                "16: \"Quit…\"",
+                "16: \"Hide…\"",
+                "17: \"Save…\"",
+                "19: \"Save As…\"",
+                "21: \"Later…\"",
+                "22: \"\\n    Print…\\n    \"",
+                "25: \"Find…\"",
+                "28: \"New…\""),
             """
             banner.show("Reconnecting…", button: "Reconnect Now")
             let open = NSMenuItem(title: "Open", action: nil, keyEquivalent: "")
             let cut = words(kept + "…")
+            let note = Banner(.info, title: "Connecting…", look: look)
+            let empty = EmptyState(icon: .box, title: "Loading…", body: "Asking the runner…", actions: [], look: look, titleFont: titleFont, mono: mono)
+            window.title = "Opening…"
+            let name = SailTextField(label: "Name…", placeholder: "my-project…", look: look, mono: mono)
+            let queue = DispatchQueue(label: "sh.standardapplied.sail...")
+            let sheet = Sheet(title: "Delete…?", body: "Deleting…", confirm: "Delete", kind: .destructive, look: look, titleFont: titleFont)
+            let back = SailButton(#"Back\\u{2026}"#, kind: .quiet, look: look, target: nil, action: nil)
+            let more = SailButton(icon: .more, label: "More", look: look, target: nil, action: nil)
             """),
         Arguments.of(
             "tokens",
@@ -225,7 +310,7 @@ class CiRulesTest {
                 "3: beginSheet("),
             """
             let label = NSTextField(labelWithString: ""), menu = NSMenu()
-            let button = SailButton(title: "Create", kind: .primary)
+            let button = SailButton("Create", kind: .primary, look: look, target: nil, action: nil)
             let said = "NSAlert()"
             """),
         Arguments.of(
@@ -233,11 +318,36 @@ class CiRulesTest {
             PANE,
             """
             final class Row: NSTableRowView {}
-            let table = NSTableView()
+            final class Cell:
+                NSTableCellView {}
+            let table = NSTableView(), outline = AppKit.NSOutlineView()
+            let grid = NSCollectionView.init(frame: .zero)
+            let typed: NSTableView = .init()
+            final class Grid<T>: NSCollectionView, Sendable {}
+            final class Tree: AppKit.NSOutlineView {}
+            let cell = NSTableCellView(), row = NSTableRowView(frame: .zero)
+            final class Table: NSTableView {}
             """,
-            List.of("1: a subclass of NSTableRowView", "2: NSTableView("),
+            List.of(
+                "1: a subclass of NSTableRowView",
+                "3: a subclass of NSTableCellView",
+                "4: NSTableView(",
+                "4: AppKit.NSOutlineView(",
+                "5: NSCollectionView.init(",
+                "6: NSTableView = .init(",
+                "7: a subclass of NSCollectionView",
+                "8: a subclass of NSOutlineView",
+                "9: NSTableCellView(",
+                "9: NSTableRowView(",
+                "10: a subclass of NSTableView"),
             """
-            let list = SailList(style: .main)
+            let list = SailList(rowStyle: .tree, look: look, mono: mono)
+            let said = "NSTableView()"
+            func rows(in table: NSTableView) -> Int { table.numberOfRows }
+            let view = table.makeView(withIdentifier: id, owner: nil) as? NSTableCellView
+            final class Holder: NSView {
+                let table: NSTableView? = nil
+            }
             """),
         Arguments.of(
             "function-lines",
@@ -248,9 +358,7 @@ class CiRulesTest {
         Arguments.of(
             "parameters",
             KIT,
-            """
-            func many(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int) {}
-            """,
+            MANY,
             List.of("1: many takes 7 parameters, over the cap of 6"),
             """
             protocol Asks {
@@ -265,19 +373,7 @@ class CiRulesTest {
         Arguments.of(
             "nesting",
             KIT,
-            """
-            func deep() {
-                if a {
-                    for b in c {
-                        while d {
-                            do {
-                                let e = f.map { $0 }
-                            }
-                        }
-                    }
-                }
-            }
-            """,
+            DEEP,
             List.of("1: deep nests 5 blocks deep, over the cap of 4"),
             """
             func deep() {
@@ -394,38 +490,94 @@ class CiRulesTest {
   }
 
   @Test
-  void checkHoldsOnlyTheRulesSwitchedOn() throws Exception {
-    write(KIT, "// a note\n");
+  void checkHoldsTheRulesOnAndOnlyCountsTheRulesNotYetOn() throws Exception {
+    notYetRulesFindOneEach();
+
+    assertEquals(new Ran(0, "", HELD), sh("ci/rules", "check"));
+
     write(PANE, "let table = NSTableView()\n");
 
-    var ran = sh("ci/rules", "check");
-
-    assertEquals(1, ran.exit());
-    assertEquals(PANE + ":1: lists: NSTableView(: " + SAY.get("lists") + "\n", ran.out());
+    assertEquals(
+        new Ran(
+            1,
+            PANE + ":1: lists: NSTableView(: " + SAY.get("lists") + "\n",
+            "ci/rules: 1 finding; its line names its rule.\n"),
+        sh("ci/rules", "check"));
   }
 
   @Test
-  void checkWithAPullRequestsBaseHoldsItsEntryToo() throws Exception {
+  void aRuleNotYetOnThatFindsNothingFailsCheckUntilItIsSwitchedOn() throws Exception {
+    notYetRulesFindOneEach();
+    Files.delete(repo.resolve(TEST));
+
+    assertEquals(
+        new Ran(
+            1,
+            "ci/rules: sleeps finds nothing now, so it is on: move it from NOT_YET to ON in"
+                + " ci/rules, and its row in AGENTS.md to the rules on.\n",
+            "ci/rules: 1 finding; its line names its rule.\n"),
+        sh("ci/rules", "check"));
+  }
+
+  @Test
+  void theStepBothWorkflowsRunHoldsAPullRequestToItsEntryAndAPushToTheRulesOn() throws Exception {
+    var step = ciStep(".github/workflows/ci.yml");
+    assertEquals(step, ciStep(".github/workflows/clients.yml"));
+    assertEquals("${{ github.event.pull_request.base.sha }}", step.get(0));
+    notYetRulesFindOneEach();
     var base = commit();
     git("checkout", "-q", "-b", "agent/the-spec");
-    write(KIT, "let kit = 1\n");
+    write(PANE, "let pane = 1\n");
     commit();
 
-    var refused = sh("ci/rules", "check", base);
-
-    assertEquals(1, refused.exit());
     assertEquals(
-        "ci/changelog: this change adds no entry: add changes/the-spec.md holding its bullets as"
-            + " they would read under the version heading (changes/README.md).\n",
-        refused.err());
+        new Ran(
+            1,
+            "",
+            "ci/changelog: this change neither adds nor edits changes/the-spec.md: add it, holding"
+                + " its bullets as they would read under the version heading"
+                + " (changes/README.md).\n"),
+        bash(step.get(1), Map.of("BASE", base)));
 
-    write("changes/the-spec.md", "- **Kit.** One.\n");
+    write("changes/the-spec.md", "- **Pane.** One.\n");
     commit();
 
-    var held = sh("ci/rules", "check", base);
+    assertEquals(new Ran(0, "", HELD_WITH_ENTRY), bash(step.get(1), Map.of("BASE", base)));
+    assertEquals(new Ran(0, "", HELD), bash(step.get(1), Map.of("BASE", "")));
+  }
 
-    assertEquals(0, held.exit(), held.err());
-    assertEquals("ci/rules: held: ellipsis lists changes.\n", held.err());
+  @Test
+  void theLocalCommandHoldsABranchThatLeftMainBeforeItsLastRelease() throws Exception {
+    assertTrue(Files.readString(ROOT.resolve("CONTRIBUTING.md")).contains(LOCAL));
+    assertTrue(Files.readString(ROOT.resolve("AGENTS.md")).contains(LOCAL));
+    notYetRulesFindOneEach();
+    write("CHANGELOG.md", "# Changelog\n");
+    write("changes/old.md", "- **Old.** Unreleased.\n");
+    var left = commit();
+    git("checkout", "-q", "-b", "agent/fresh");
+    write("changes/fresh.md", "- **Fresh.** New.\n");
+    commit();
+    git("checkout", "-q", "-b", "released", left);
+    git("rm", "-q", "changes/old.md");
+    write("CHANGELOG.md", "# Changelog\n\n## 0.76.0\n\n- **Old.** Unreleased.\n");
+    git("update-ref", "refs/remotes/origin/main", commit());
+    git("checkout", "-q", "agent/fresh");
+
+    assertEquals(new Ran(0, "", HELD_WITH_ENTRY), bash(LOCAL, Map.of()));
+    assertEquals(1, sh("ci/check", "rules", "origin/main").exit());
+  }
+
+  @Test
+  void aBaseThatNamesNoCommitIsRefusedNeverHeld() throws Exception {
+    notYetRulesFindOneEach();
+
+    assertEquals(
+        new Ran(
+            1,
+            "",
+            "ci/changelog: BASE no-such-ref names no commit in this clone: fetch it, or give the"
+                + " commit the change left, git merge-base origin/main HEAD.\n"),
+        sh("ci/check", "rules", "no-such-ref"));
   }
 
   @Test
@@ -438,46 +590,36 @@ class CiRulesTest {
 
   @Test
   void theListSaysOfEveryRuleWhetherItIsOnAndItsSentence() throws Exception {
-    var listed = sh("ci/rules", "list").out().lines().toList();
-
     assertEquals(
-        SAY.keySet().stream().sorted().toList(),
-        listed.stream()
-            .map(line -> line.substring(0, line.indexOf(' ')))
-            .filter(SAY::containsKey)
-            .sorted()
-            .toList());
-    for (var line : listed) {
-      var rule = line.substring(0, line.indexOf(' '));
-      if (SAY.containsKey(rule)) {
-        assertEquals(SAY.get(rule), line.substring(line.indexOf("): ") + 3));
-      }
-    }
+        new Ran(
+            0,
+            Stream.of(
+                    "ellipsis (on)",
+                    "lists (on)",
+                    "changes (on)",
+                    "comments (not yet on)",
+                    "sleeps (not yet on)",
+                    "tokens (not yet on)",
+                    "components (not yet on)",
+                    "function-lines (not yet on)",
+                    "parameters (not yet on)",
+                    "nesting (not yet on)",
+                    "file-lines (not yet on)")
+                .map(
+                    rule ->
+                        rule
+                            + ": "
+                            + SAY.getOrDefault(rule.substring(0, rule.indexOf(' ')), CHANGES))
+                .collect(Collectors.joining("\n", "", "\n")),
+            ""),
+        sh("ci/rules", "list"));
   }
 
   @Test
-  void everyRuleOnHoldsInThisRepository() throws Exception {
+  void everyRuleOnHoldsInThisRepositoryAndEveryRuleNotYetOnStillFindsSomething() throws Exception {
     var ran = here("check");
 
-    assertEquals(0, ran.exit(), ran.out() + ran.err());
-  }
-
-  @Test
-  void everyRuleNotYetOnStillFindsSomethingInThisRepository() throws Exception {
-    var notYet =
-        here("list")
-            .out()
-            .lines()
-            .filter(line -> line.contains(" (not yet on): "))
-            .map(line -> line.substring(0, line.indexOf(' ')))
-            .toList();
-
-    for (var rule : notYet) {
-      assertNotEquals(
-          0,
-          here("run", rule).exit(),
-          rule + " holds in this repository now: switch it on in ci/rules (ON) and in AGENTS.md");
-    }
+    assertEquals(new Ran(0, "", HELD), ran);
   }
 
   private static String function(String name, int statements, String between) {
@@ -496,10 +638,27 @@ class CiRulesTest {
         .collect(Collectors.joining(between));
   }
 
+  private void notYetRulesFindOneEach() throws IOException {
+    write(TEST, "@Test func waits() async throws { try await Task.sleep(for: .seconds(1)) }\n");
+    write(
+        KIT,
+        "// a note\nlet ink = NSColor(white: 0, alpha: 1)\nlet alert = NSAlert()\n"
+            + MANY
+            + DEEP
+            + function("long", 79, "")
+            + lets(801, ""));
+  }
+
+  private static List<String> ciStep(String workflow) throws IOException {
+    var step = CI_STEP.matcher(Files.readString(ROOT.resolve(workflow)));
+    assertTrue(step.find(), workflow + " has no step 'The rules a script decides'");
+    return List.of(step.group(1), step.group(2));
+  }
+
   private Ran here(String... args) throws Exception {
     var command = new ArrayList<>(List.of("bash", ROOT.resolve("ci/rules").toString()));
     command.addAll(Arrays.asList(args));
-    return run(command, ROOT);
+    return run(command, ROOT, Map.of());
   }
 
   private String commit() throws Exception {
@@ -518,7 +677,7 @@ class CiRulesTest {
     var command =
         new ArrayList<>(List.of("git", "-c", "user.name=CI", "-c", "user.email=ci@example.com"));
     command.addAll(Arrays.asList(args));
-    var ran = run(command, repo);
+    var ran = run(command, repo, Map.of());
     assertEquals(0, ran.exit(), String.join(" ", command) + " failed: " + ran.err());
     return ran;
   }
@@ -526,14 +685,19 @@ class CiRulesTest {
   private Ran sh(String... args) throws Exception {
     var command = new ArrayList<>(List.of("bash"));
     command.addAll(Arrays.asList(args));
-    return run(command, repo);
+    return run(command, repo, Map.of());
   }
 
-  private Ran run(List<String> command, Path directory) throws Exception {
+  private Ran bash(String line, Map<String, String> env) throws Exception {
+    return run(List.of("bash", "-c", line), repo, env);
+  }
+
+  private Ran run(List<String> command, Path directory, Map<String, String> env) throws Exception {
     var builder = new ProcessBuilder(command).directory(directory.toFile());
     builder.environment().put("GIT_CONFIG_GLOBAL", "/dev/null");
     builder.environment().put("GIT_CONFIG_NOSYSTEM", "1");
     builder.environment().remove("GITHUB_HEAD_REF");
+    builder.environment().putAll(env);
     var ran = Child.run(builder);
     return new Ran(ran.exit(), ran.stdout(), ran.stderr());
   }
