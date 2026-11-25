@@ -20,6 +20,7 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.Workspaces;
+import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.pty.PtyAdmission;
@@ -28,9 +29,11 @@ import ai.singlr.sail.store.ProjectStore;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -46,13 +49,14 @@ public final class WorkspaceDoors {
 
   private final Workspaces workspaces;
   private final WorkspaceHoldings holdings;
+  private final WorkspaceSignIns signIns;
   private final Function<String, WorkspaceOwner> owners;
   private final SessionYield sessions;
   private final String keeper;
 
   /**
    * @param workspaces the box's workspaces
-   * @param shell runs the delete's read in a workspace
+   * @param shell runs the delete's read and the sign-ins' read in a workspace
    * @param owners the person, by handle, a workspace is given the credentials of
    * @param sessions ends the terminals of a workspace stopped or deleted with force, saying why
    * @param keeper the node's own person on a node; null on main or a standalone box
@@ -65,6 +69,7 @@ public final class WorkspaceDoors {
       String keeper) {
     this.workspaces = Objects.requireNonNull(workspaces, "workspaces");
     this.holdings = new WorkspaceHoldings(shell);
+    this.signIns = new WorkspaceSignIns(shell);
     this.owners = Objects.requireNonNull(owners, "owners");
     this.sessions = Objects.requireNonNull(sessions, "sessions");
     this.keeper = keeper;
@@ -288,7 +293,8 @@ public final class WorkspaceDoors {
    * may enter it: nothing, said why, when it is not theirs or its person is gone; else each harness
    * Sail knows, with the login it starts signed in with from {@code fdes}, or why none, and why one
    * the project does not install does not start. The same decisions a terminal Create of an agent
-   * makes ({@link AgentStarts}).
+   * makes ({@link AgentStarts}). Whether a running workspace holds each installed harness's own
+   * sign-in is read in it ({@link WorkspaceSignIns}); a stopped one is not started to read it.
    */
   public AgentOffersResponse agents(ProjectDefinition config, String name, FdeStore fdes)
       throws Exception {
@@ -305,18 +311,29 @@ public final class WorkspaceDoors {
           project, name, person, running, refused.get().error(), List.of());
     }
     var fdeId = owners.apply(person).id();
+    var notInstalled = new HashMap<Harness, ApiError>();
+    for (var harness : Harnesses.all()) {
+      AgentStarts.notInstalled(config, harness)
+          .ifPresent(refusal -> notInstalled.put(harness, refusal.error()));
+    }
+    var signInFiles =
+        Harnesses.all().stream()
+            .filter(harness -> !notInstalled.containsKey(harness))
+            .map(harness -> harness.signIn().file())
+            .toList();
+    var held = running ? signIns.held(found.name(), signInFiles) : Optional.<Set<String>>empty();
     var offered = new ArrayList<AgentOffer>();
     for (var harness : Harnesses.all()) {
-      var notInstalled = AgentStarts.notInstalled(config, harness);
-      if (notInstalled.isPresent()) {
-        offered.add(new AgentOffer(harness, null, null, false, notInstalled.get().error()));
+      if (notInstalled.containsKey(harness)) {
+        offered.add(new AgentOffer(harness, null, null, false, null, notInstalled.get(harness)));
         continue;
       }
+      var signedIn = held.map(files -> files.contains(harness.signIn().file())).orElse(null);
       try {
         var login = AgentStarts.login(fdes, fdeId, person, harness, name);
-        offered.add(new AgentOffer(harness, login.row(), null, true, null));
+        offered.add(new AgentOffer(harness, login.row(), null, true, signedIn, null));
       } catch (ApiException noLogin) {
-        offered.add(new AgentOffer(harness, null, noLogin.error(), true, null));
+        offered.add(new AgentOffer(harness, null, noLogin.error(), true, signedIn, null));
       }
     }
     return new AgentOffersResponse(project, name, person, running, null, offered);

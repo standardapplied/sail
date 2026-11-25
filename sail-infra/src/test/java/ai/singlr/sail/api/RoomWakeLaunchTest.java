@@ -565,12 +565,9 @@ class RoomWakeLaunchTest {
 
     assertEquals(
         List.of(
-            "No Claude Code login stored for uday, so a run of a spec cannot start: a login made by"
-                + " hand in the project's container is not used by runs. Create an API key in the"
-                + " Claude Console, then sail agent login claude-code. Or: Create a GLM Coding Plan"
-                + " API key at z.ai/manage-apikey/apikey-list, or a Team Plan's at"
-                + " z.ai/manage-apikey/coding-plan/team/my-plan, then sail agent login claude-code"
-                + " --kind glm."),
+            "No Claude Code login stored for uday, so a run of a spec cannot start: a"
+                + " login made by hand in the project's container is not used by runs. Create an"
+                + " API key in the Claude Console, then sail agent login claude-code."),
         messageStore.list("auth", null, 20).stream().map(MessageStore.MessageRow::body).toList());
     assertEquals(List.of(), runStore.listForSpec("auth"));
   }

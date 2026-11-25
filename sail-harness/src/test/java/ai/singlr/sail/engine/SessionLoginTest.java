@@ -40,7 +40,6 @@ import org.junit.jupiter.api.io.TempDir;
 @EnabledOnOs(OS.LINUX)
 class SessionLoginTest {
 
-  private static final String GLM = "fake-glm-coding-plan-key-value";
   private static final String KEY = "sk-proj-test-key-value";
 
   @TempDir Path dir;
@@ -97,7 +96,7 @@ class SessionLoginTest {
   void theLoginIsWrittenAsAPrivateFileOfItsOwnAndNothingThroughANameAlreadyThere()
       throws Exception {
     var file = file("i-1");
-    var lines = LaunchEnv.loginLines(login("claude-code", "glm", GLM));
+    var lines = LaunchEnv.loginLines(login("claude-code", "api-key", KEY));
 
     assertEquals(0, hand(file, lines).status());
     assertEquals(lines, Files.readString(Path.of(file)));
@@ -147,24 +146,26 @@ class SessionLoginTest {
             + Path.of(file).getParent()
             + "' ] && echo still-there\n"
             + "echo \"args: $*\"\n"
-            + "echo \"key: $(fp \"$ANTHROPIC_AUTH_TOKEN\")\"\n"
-            + "echo \"to: $ANTHROPIC_BASE_URL $CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST\"\n"
-            + "echo \"api key: [${ANTHROPIC_API_KEY}]\"\n");
-    var stored = login("claude-code", "glm", GLM);
+            + "echo \"key: $(fp \"$SAIL_ANTHROPIC_API_KEY\")\"\n"
+            + "echo \"to: $ANTHROPIC_BASE_URL\"\n"
+            + "echo \"api key: [${ANTHROPIC_API_KEY-unset}]\"\n");
+    var stored = login("claude-code", "api-key", KEY);
     assertEquals(0, hand(file, LaunchEnv.loginLines(stored)).status());
     var command =
         new ArrayList<>(
             SessionLogin.command(
                 Harnesses.of("claude-code"), "bypassPermissions", Optional.of(stored), file));
 
-    assertFalse(String.join(" ", command).contains(GLM), "the login is on no command line");
+    assertFalse(String.join(" ", command).contains(KEY), "the login is on no command line");
     var ran = run(command, "");
 
     assertEquals(0, ran.status(), ran.output());
     assertEquals(
-        "args: --permission-mode bypassPermissions\nkey: "
-            + fingerprint(GLM)
-            + "\nto: https://api.z.ai/api/anthropic 1\napi key: []\n",
+        "args: --permission-mode bypassPermissions"
+            + Harnesses.of("claude-code").interactiveLogin(stored.kind()).args().replace("'", "")
+            + "\nkey: "
+            + fingerprint(KEY)
+            + "\nto: https://api.anthropic.com\napi key: [unset]\n",
         ran.output());
     assertFalse(Files.exists(Path.of(file).getParent(), LinkOption.NOFOLLOW_LINKS));
     assertEquals(
@@ -174,9 +175,8 @@ class SessionLoginTest {
 
   /**
    * L2 in a session's shape: a workspace whose login profile exports {@link
-   * LaunchEnvTest#HOSTILE_PROFILE} starts Claude Code, for each kind, with the kind's own address,
-   * no socket, the host flag where the kind keeps it and only the stored key, since the login is
-   * read after every profile.
+   * LaunchEnvTest#HOSTILE_PROFILE} starts Claude Code with its key's own address, no socket and
+   * only the stored key, since the login is read after every profile.
    */
   @Test
   void aProfilesAddressSocketAndCredentialsNeverReachASessionsClaudeCode() throws Exception {
@@ -193,9 +193,6 @@ class SessionLoginTest {
     assertEquals(
         "[https://api.anthropic.com][][unset][unset][" + fingerprint("") + "][]\n",
         session(login("claude-code", "api-key", KEY), "i-ha"));
-    assertEquals(
-        "[https://api.z.ai/api/anthropic][][1][][" + fingerprint(GLM) + "][]\n",
-        session(login("claude-code", "glm", GLM), "i-hg"));
   }
 
   private String session(LoginStore.Login stored, String id) throws Exception {
@@ -212,16 +209,13 @@ class SessionLoginTest {
 
   /**
    * Claude Code's environment, which its own processes are started from, holds the login under one
-   * name for its kind and under no other: never the variable Claude Code asks about and stores a
-   * fragment of. What a command it runs then sees is Claude Code's to filter.
+   * name and under no other: never the variable Claude Code asks about and stores a fragment of.
+   * What a command it runs then sees is Claude Code's to filter.
    */
   @Test
-  void claudeCodesEnvironmentHoldsItsLoginUnderOneNameForItsKindAndNoOther() throws Exception {
+  void claudeCodesEnvironmentHoldsItsLoginUnderOneNameAndNoOther() throws Exception {
     stub("claude", "env > \"$HOME/claude.env\"\n");
 
-    assertEquals(
-        List.of("ANTHROPIC_AUTH_TOKEN"),
-        namesItsEnvironmentHolds(login("claude-code", "glm", GLM), "i-t"));
     assertEquals(
         List.of("SAIL_ANTHROPIC_API_KEY"),
         namesItsEnvironmentHolds(login("claude-code", "api-key", KEY), "i-a"));

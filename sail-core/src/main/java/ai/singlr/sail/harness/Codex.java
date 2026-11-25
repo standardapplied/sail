@@ -38,6 +38,9 @@ final class Codex implements Harness {
    */
   private static final List<String> EFFORTS = List.of("none", "low", "medium", "high", "xhigh");
 
+  /** Codex's own store under the dev user's home, which holds its sign-in. */
+  private static final String AUTH = ".codex/auth.json";
+
   /**
    * Codex does not expose a {@code --settings <path>} flag the way Claude Code does: its discovery
    * is fixed to {@code ~/.codex/hooks.json} (plus {@code config.toml} and project-scoped variants),
@@ -199,21 +202,28 @@ final class Codex implements Harness {
   }
 
   /**
-   * Codex's own "Sign in with Device Code", the way a ChatGPT plan signs in from a terminal with no
-   * browser, which ChatGPT allows only once it is turned on (developers.openai.com/codex/auth).
+   * Codex's own sign-in, which it asks for when it starts signed out: its "Sign in with Device
+   * Code", the way a ChatGPT plan signs in from a terminal with no browser, which ChatGPT allows
+   * only once it is turned on (developers.openai.com/codex/auth). Its other "Sign in with ChatGPT"
+   * sends the browser back to a port on the Mac where nothing listens. Its store, {@code
+   * auth.json}, holds it, or a key a person gave Codex there themselves: either way Codex does not
+   * ask again.
    */
   @Override
-  public Remedy signIn() {
-    return Remedy.of(
-        "Turn on device code login in your ChatGPT security settings (in a ChatGPT workspace, its"
-            + " admin turns it on in the workspace's permissions), then start Codex CLI here and"
-            + " choose Sign in with Device Code");
+  public SignIn signIn() {
+    return new SignIn(
+        "Your ChatGPT account",
+        Remedy.of(
+            "Codex CLI asks you to sign in with your ChatGPT account when it starts, once in each"
+                + " workspace. Choose “Sign in with Device Code” there, after turning it on in"
+                + " your ChatGPT security settings."),
+        AUTH);
   }
 
   /** Its own store, where {@code codex login} keeps a ChatGPT sign-in or a key. */
   @Override
   public List<String> storedLogins() {
-    return List.of(".codex/auth.json");
+    return List.of(AUTH);
   }
 
   @Override
@@ -341,8 +351,7 @@ final class Codex implements Harness {
             "CODEX_API_KEY",
             "API key",
             Remedy.of("Create an API key at platform.openai.com/api-keys"),
-            new LinkedHashMap<>(),
-            true));
+            new LinkedHashMap<>()));
   }
 
   /**

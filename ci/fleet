@@ -693,6 +693,33 @@ print("the route:     " + ", ".join(route))
 print("SAME" if claude and claude == route else "DIFFERENT")
 PY'
 
+# Whether the agents route says the workspace holds Claude Code's own sign-in, as its file changes:
+# Claude Code's own state alone, an empty sign-in file, a sign-in file with something in it, and
+# none again. The file holds no credential: the route only stats it.
+readonly SIGNED_IN_FOLLOWS='set -u
+handle=$1 project=$2 workspace=$3
+token=$(sudo sail server token create "signed-$handle" member --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " ")
+[ -n "$token" ] || { echo "no token"; exit 1; }
+as_dev() { sudo incus exec "$project-$workspace" --user 1000 --group 1000 --env HOME=/home/dev -- sh -c "$1"; }
+said() {
+  curl -s -H "Authorization: Bearer $token" "http://127.0.0.1:7070/v1/projects/$project/workspaces/$workspace/agents" |
+    python3 -I -c "import json, sys; o = [o for o in json.load(sys.stdin)[\"offered\"] if o[\"harness\"] == \"claude-code\"][0]; print(str(o[\"sign_in\"].get(\"signed_in\")).lower())"
+}
+as_dev "rm -f ~/.claude/.credentials.json; printf {} > ~/.claude.json"; state=$(said)
+as_dev "mkdir -p ~/.claude && : > ~/.claude/.credentials.json"; empty=$(said)
+as_dev "printf {} > ~/.claude/.credentials.json"; held=$(said)
+as_dev "rm -f ~/.claude/.credentials.json"; gone=$(said)
+sudo sail server token revoke "signed-$handle" > /dev/null 2>&1
+echo "state only: $state; empty: $empty; held: $held; removed: $gone"
+[ "$state $empty $held $gone" = "false false true false" ] && echo SAME'
+
+signed_in_follows_the_file() {
+  local run=$1 box=$2 handle=$3 project=$4 workspace=$5 out
+  out=$(on "$run" "$box" "cat > /tmp/sail-signed-in && bash /tmp/sail-signed-in $handle $project $workspace" <<< "$SIGNED_IN_FOLLOWS")
+  echo "$out"
+  grep -q '^SAME$' <<< "$out"
+}
+
 modes_match_claude() {
   local run=$1 box=$2 handle=$3 project=$4 workspace=$5 out
   out=$(on "$run" "$box" "cat > /tmp/sail-modes && bash /tmp/sail-modes $handle $project $workspace" <<< "$MODES_MATCH")
@@ -2182,6 +2209,8 @@ storage() {
   check "$run" "eng's workspace is labelled hers by her id" owned_by "$run" main acme-eng-own eng
   check "$run" "the Claude Code modes the route offers in eng's workspace are claude --help's, on the version a workspace installs now" \
     modes_match_claude "$run" main eng acme eng-own
+  check "$run" "the agents route says eng's workspace holds Claude Code's own sign-in only while its file is there and not empty, never for Claude Code's own state" \
+    signed_in_follows_the_file "$run" main eng acme eng-own
   check "$run" "eng's workspace commits as eng" commits_as "$run" main acme-eng-own eng@fleet.example
   check "$run" "eng's workspace holds none of main's person's forge token" holds_no_forge_token "$run" main acme-eng-own
   check "$run" "client, a member, is refused eng's workspace on main, naming her" \

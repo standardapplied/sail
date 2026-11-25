@@ -130,7 +130,6 @@ public record OperatorCommand(boolean sudo, boolean rootLogin) {
       case SAIL -> sail(command.line());
       case CLIENT -> client(command.line());
       case PROGRAM -> asThisProcess(command.line());
-      case ELSEWHERE -> command.line();
     };
   }
 }

@@ -19,19 +19,10 @@
               ],
               "kind": "api-key",
               "label": "API key"
-            },
-            {
-              "how": [
-                {
-                  "text": "Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, or a Team Plan's at z.ai/manage-apikey/coding-plan/team/my-plan"
-                }
-              ],
-              "kind": "glm",
-              "label": "GLM Coding Plan key"
             }
           ],
           "login_refusal": {
-            "action": "Create an API key in the Claude Console, then agent login claude-code. Or: Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, or a Team Plan's at z.ai/manage-apikey/coding-plan/team/my-plan, then agent login claude-code --kind glm.",
+            "action": "Create an API key in the Claude Console, then agent login claude-code.",
             "code": "login_not_stored",
             "field_errors": [],
             "message": "No Claude Code login stored for ana, so a Claude Code session cannot start in quay.",
@@ -42,18 +33,6 @@
               {
                 "args": [
                   "claude-code"
-                ],
-                "run": "sail",
-                "verb": "agent login"
-              },
-              {
-                "text": ". Or: Create a GLM Coding Plan API key at z.ai/manage-apikey/apikey-list, or a Team Plan's at z.ai/manage-apikey/coding-plan/team/my-plan, then "
-              },
-              {
-                "args": [
-                  "claude-code",
-                  "--kind",
-                  "glm"
                 ],
                 "run": "sail",
                 "verb": "agent login"
@@ -101,19 +80,14 @@
               "mode": "bypassPermissions"
             }
           ],
-          "sign_in": [
-            {
-              "text": "Start Claude Code here and run "
-            },
-            {
-              "args": [],
-              "run": "elsewhere",
-              "verb": "/login"
-            },
-            {
-              "text": " in it to sign in with your Claude subscription"
-            }
-          ]
+          "sign_in": {
+            "how": [
+              {
+                "text": "Claude Code asks you to sign in with your Claude account when it starts, once in each workspace."
+              }
+            ],
+            "name": "Your Claude account"
+          }
         },
         {
           "display": "Codex CLI",

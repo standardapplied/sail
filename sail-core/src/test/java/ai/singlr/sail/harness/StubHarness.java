@@ -116,13 +116,12 @@ public record StubHarness(String yamlName, HookFile hooks, OptionalInt loginTunn
             yamlName.toUpperCase().replace('-', '_') + "_KEY",
             "key",
             Remedy.NONE,
-            new LinkedHashMap<>(),
-            true));
+            new LinkedHashMap<>()));
   }
 
   @Override
-  public Remedy signIn() {
-    return Remedy.of("Sign in inside");
+  public SignIn signIn() {
+    return new SignIn("Your account", Remedy.of("Sign in inside"), ".stub/sign-in");
   }
 
   @Override

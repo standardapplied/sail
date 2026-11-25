@@ -1369,7 +1369,7 @@ class MissedStopReconcilerTest {
             sessionStore.recordLaunch(
                 newest,
                 new RunStore.Launched(
-                    null, null, null, new RunStore.RunLogin("default", "glm"), null)));
+                    null, null, null, new RunStore.RunLogin("default", "api-key"), null)));
     var refused = new RunReport(RunUsage.NONE, new LoginOutcome.Refused());
     var reconciler = reconciler(new CountingProbe(false), run -> refused, PAST_GRACE);
 
@@ -1379,12 +1379,10 @@ class MissedStopReconcilerTest {
     assertEquals("stopped", sessionStore.findById(newest).orElseThrow().status());
     assertEquals(
         List.of(
-            "auth: Claude Code refused node-a's login 'default' (GLM Coding Plan"
-                + " key), so its run stopped. Create a GLM Coding Plan API key at"
-                + " z.ai/manage-apikey/apikey-list, or a Team Plan's at"
-                + " z.ai/manage-apikey/coding-plan/team/my-plan, then sail agent login claude-code"
-                + " --kind glm. Then build it again: sail spec dispatch -p test-project"
-                + " --spec auth --restart."),
+            "auth: Claude Code refused node-a's login 'default' (API key), so its run"
+                + " stopped. Create an API key in the Claude Console, then sail agent login"
+                + " claude-code. Then build it again: sail spec dispatch -p test-project --spec"
+                + " auth --restart."),
         roomLines);
   }
 

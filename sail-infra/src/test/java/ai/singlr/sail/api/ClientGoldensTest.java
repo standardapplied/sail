@@ -1557,12 +1557,13 @@ class ClientGoldensTest {
               "[" + workspace("quay", "Stopped", "ana", idOf("ana")) + "]")
           .onOk(
               "incus list ^harbor-wreck$",
-              "[" + workspace("wreck", "Stopped", "zed", "fde_zed") + "]");
+              "[" + workspace("wreck", "Stopped", "zed", "fde_zed") + "]")
+          .onOk("incus exec harbor-berth ", "");
       var agents = "/v1/projects/" + PROJECT + "/workspaces/%s/agents";
       record(goldens, "workspace-agents", "GET", agents.formatted("berth"), dana, null);
       record(
           goldens, "workspace-agents-stopped-no-login", "GET", agents.formatted("quay"), ana, null);
-      logins.store(idOf("ana"), claude, "work", "glm", "fake-glm-golden-ana-work");
+      logins.store(idOf("ana"), claude, "work", "api-key", "fake-key-golden-ana-work");
       logins.store(idOf("ana"), claude, "home", "api-key", "sk-ant-api03-golden-ana-home");
       logins.remove(idOf("ana"), claude, "work");
       record(goldens, "workspace-agents-no-default", "GET", agents.formatted("quay"), ana, null);
@@ -1581,9 +1582,9 @@ class ClientGoldensTest {
     /**
      * Records what can start in the drive's own workspaces of harbor, as uday asks, so the app's
      * New Session frames name the rows they open from: dock, uday's and running, with a Claude Code
-     * login and a Codex login; pier, uday's and stopped; quay, ana's; dock with no Claude Code
-     * login stored, then with harbor installing Claude Code alone; and pier once its person is
-     * gone.
+     * login and a Codex login, holding Codex's own sign-in and not Claude Code's; dock once it
+     * holds both; pier, uday's and stopped; quay, ana's; dock with no Claude Code login stored,
+     * then with harbor installing Claude Code alone; and pier once its person is gone.
      */
     void recordDriveAgents(Map<String, String> goldens) throws Exception {
       var uday = new AuthSessionStore(db).create(idOf("uday"), Duration.ofMinutes(30)).token();
@@ -1602,8 +1603,12 @@ class ClientGoldensTest {
               "incus list ^harbor-pier$", "[" + workspace("pier", "Stopped", "uday", udayId) + "]")
           .onOk(
               "incus list ^harbor-quay$",
-              "[" + workspace("quay", "Running", "ana", idOf("ana")) + "]");
+              "[" + workspace("quay", "Running", "ana", idOf("ana")) + "]")
+          .onOk("incus exec harbor-dock ", ".claude/.credentials.json\n.codex/auth.json\n");
       var agents = "/v1/projects/" + PROJECT + "/workspaces/%s/agents";
+      record(
+          goldens, "workspace-agents-dock-signed-in", "GET", agents.formatted("dock"), uday, null);
+      incus.onOk("incus exec harbor-dock ", ".codex/auth.json\n");
       record(goldens, "workspace-agents-dock", "GET", agents.formatted("dock"), uday, null);
       record(goldens, "workspace-agents-pier", "GET", agents.formatted("pier"), uday, null);
       record(goldens, "workspace-agents-quay", "GET", agents.formatted("quay"), uday, null);

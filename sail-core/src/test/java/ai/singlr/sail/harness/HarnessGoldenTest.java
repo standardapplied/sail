@@ -9,11 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.harness.Harness.Launch;
 import ai.singlr.sail.harness.Harness.LiveLaunch;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -438,16 +438,13 @@ class HarnessGoldenTest {
 
   /**
    * How an interactive session takes each kind, so the harness keeps nothing of it and sends it
-   * nowhere but its service: Claude Code's GLM key from its variable; its API key through a helper
-   * of the session's own settings, so it is neither asked about nor kept, which the host flag would
-   * ignore, so the session drops the flag and fixes the address in the same settings; Codex's key
-   * through a provider of its own config reading the variable, never its store.
+   * nowhere but its service: Claude Code's API key through a helper of the session's own settings,
+   * so it is neither asked about nor kept, which the host flag would ignore, so the session drops
+   * the flag and fixes the address in the same settings; Codex's key through a provider of its own
+   * config reading the variable, never its store.
    */
   @Test
   void anInteractiveSessionTakesEachLoginWithoutTheHarnessKeepingIt() {
-    assertEquals(
-        Harness.InteractiveLogin.READS_ITS_VARIABLE,
-        CLAUDE_CODE.interactiveLogin(CLAUDE_CODE.loginKind("glm")));
     assertEquals(
         new Harness.InteractiveLogin(
             "export SAIL_ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\"; unset ANTHROPIC_API_KEY"
@@ -474,25 +471,30 @@ class HarnessGoldenTest {
   }
 
   /**
-   * L4: a subscription signs in inside the harness's own session, in words true for it: Claude
-   * Code's {@code /login}, typed in it; Codex's device code, after the ChatGPT setting it needs.
+   * L4: every harness's own sign-in, by the name a person knows it by, in a sentence true for it,
+   * and the one file under the dev user's home that holds it: Claude Code's {@code /login} keeps it
+   * in {@code .credentials.json}, never in {@code .claude.json}, its own state; Codex's ChatGPT
+   * sign-in, by device code once ChatGPT allows it, in {@code auth.json}.
    */
   @Test
-  void eachHarnessSaysHowASubscriptionSignsInInsideIt() {
+  void eachHarnessNamesItsOwnSignInAndTheFileThatHoldsIt() {
     assertEquals(
-        List.of(
-            Map.of("text", "Start Claude Code here and run "),
-            Map.of("run", "elsewhere", "verb", "/login", "args", List.of()),
-            Map.of("text", " in it to sign in with your Claude subscription")),
-        CLAUDE_CODE.signIn().toMaps());
+        new SignIn(
+            "Your Claude account",
+            Remedy.of(
+                "Claude Code asks you to sign in with your Claude account when it starts, once in"
+                    + " each workspace."),
+            ".claude/.credentials.json"),
+        CLAUDE_CODE.signIn());
     assertEquals(
-        List.of(
-            Map.of(
-                "text",
-                "Turn on device code login in your ChatGPT security settings (in a ChatGPT"
-                    + " workspace, its admin turns it on in the workspace's permissions), then"
-                    + " start Codex CLI here and choose Sign in with Device Code")),
-        CODEX.signIn().toMaps());
+        new SignIn(
+            "Your ChatGPT account",
+            Remedy.of(
+                "Codex CLI asks you to sign in with your ChatGPT account when it starts, once in"
+                    + " each workspace. Choose “Sign in with Device Code” there, after"
+                    + " turning it on in your ChatGPT security settings."),
+            ".codex/auth.json"),
+        CODEX.signIn());
   }
 
   @Test
@@ -534,14 +536,9 @@ class HarnessGoldenTest {
         List.of(
             "api-key ANTHROPIC_API_KEY Create an API key in the Claude Console"
                 + " {ANTHROPIC_BASE_URL=https://api.anthropic.com,"
-                + " ANTHROPIC_UNIX_SOCKET=, CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1}",
-            "glm ANTHROPIC_AUTH_TOKEN Create a GLM Coding Plan API key at"
-                + " z.ai/manage-apikey/apikey-list, or a Team Plan's at"
-                + " z.ai/manage-apikey/coding-plan/team/my-plan"
-                + " {ANTHROPIC_BASE_URL=https://api.z.ai/api/anthropic,"
                 + " ANTHROPIC_UNIX_SOCKET=, CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1}"),
         described(CLAUDE_CODE),
-        "each key fixes the address it is sent to, and makes Claude Code take it from its"
+        "its key fixes the address it is sent to, and makes Claude Code take it from its"
             + " environment alone");
     assertEquals(
         List.of("api-key CODEX_API_KEY Create an API key at platform.openai.com/api-keys {}"),

@@ -128,13 +128,21 @@ class GitCommandTest {
     var host = sail(KEY, "login", "git_hub.com");
     var unread = System.in.available();
     var value = sail("has a space", "login", "github.com");
+    var oversized = sail("x".repeat(16 * 1024 + 3), "login", "github.com");
 
     assertEquals(1, host.exit());
     assertTrue(host.err().contains("Invalid host: 'git_hub.com'"), host.err());
     assertEquals(KEY.length(), unread, "a refused host reads no value");
     assertEquals(1, value.exit());
-    assertTrue(value.err().contains("printable ASCII with no space"), value.err());
+    assertTrue(
+        value
+            .err()
+            .contains(
+                "A git token is printable ASCII with no space, quote, backslash, $ or backtick."),
+        value.err());
     assertFalse(value.err().contains("has a space"));
+    assertEquals(1, oversized.exit());
+    assertTrue(oversized.err().contains("A git token is at most 16 KiB."), oversized.err());
   }
 
   /**

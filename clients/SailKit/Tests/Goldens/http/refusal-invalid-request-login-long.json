@@ -12,7 +12,7 @@
       "error": {
         "code": "invalid_request",
         "field_errors": [],
-        "message": "A login's value is at most 16 KiB."
+        "message": "A key is at most 16 KiB."
       },
       "schema_version": 1
     },
