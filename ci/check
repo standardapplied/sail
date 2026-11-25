@@ -31,9 +31,12 @@ Usage:
                                 name a class=rule pair BASE's do not (default: where it left
                                 origin/main), a class twice, or a line that is not a comment, blank
                                 or one Class=Rule[,Rule] entry (ci/exclusions)
-  ci/check changelog [BASE]     fail if the change from BASE (default: where it left origin/main)
-                                edits CHANGELOG.md or leaves an entry the release could not fold
-                                (ci/changelog check)
+  ci/check rules [BASE]         fail on a finding of every rule ci/rules has on, or on a rule not yet
+                                on that finds nothing; with BASE, a pull request's base, also on its
+                                entry: changes/<name>.md of its branch agent/<name> neither added
+                                nor edited, another added or one deleted, an edit of CHANGELOG.md,
+                                or one the release could not fold
+                                (ci/rules check, ci/changelog check)
 EOF
   exit 2
 }
@@ -313,13 +316,13 @@ exclusions() {
   ci/exclusions "$@"
 }
 
-# A pull request's entry is a file of changes/, never an edit of CHANGELOG.md (ci/changelog).
-changelog() {
-  ci/changelog check "$@"
+# The rules a script decides, in seconds (ci/rules); with a pull request's base, its entry too.
+rules() {
+  ci/rules check "$@"
 }
 
 changed() {
-  changelog
+  rules
   mvn -B -q spotless:apply
   local tests
   tests=$(changed_tests)
@@ -342,6 +345,6 @@ case ${1:-} in
   local-host) shift; local_host "$@" ;;
   min-macos) shift; min_macos "$@" ;;
   exclusions) shift; exclusions "$@" ;;
-  changelog) shift; changelog "$@" ;;
+  rules) shift; rules "$@" ;;
   *) usage ;;
 esac

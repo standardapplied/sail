@@ -11,9 +11,14 @@ cd "$(dirname "$0")/.."
 # commit holds yet last, a tie by name; renaming a file re-dates it. The files are then removed.
 # Nothing is written until every file has been read as an entry.
 #
-# ci/changelog check [BASE], for a pull request (ci/check changelog): refuses a change from BASE
-# (default: where it left origin/main) that edits CHANGELOG.md, and a changes/ folder holding
-# anything the fold would refuse. A base that has no changes/README.md yet is not held to it.
+# ci/changelog check [BASE], for a pull request (ci/rules' changes rule): refuses a BASE that is no
+# commit here, a change from BASE (default: where it left origin/main) that edits CHANGELOG.md, a
+# changes/ folder holding anything the fold would refuse, a change that deletes or renames an entry
+# (only the fold removes one), and a change that does not add or edit its own entry or adds another.
+# A branch agent/<name> (GITHUB_HEAD_REF in a pull request's run, else the branch checked out) keeps
+# its entry in changes/<name>.md; a branch of another name adds at most one entry and adds or edits
+# one. Editing another entry, to correct what is not yet released, is no refusal. A base that has
+# no changes/README.md yet is not held to it.
 #
 # ci/changelog released VERSION, for a release tag: refuses unless the tagged commit folded, its
 # changes/ holding no entry and CHANGELOG.md's first version being VERSION.
@@ -67,7 +72,7 @@ require_entries() {
   local stray file
   [[ -d $CHANGES ]] || return 0
   stray=$(find "$CHANGES" -mindepth 1 -maxdepth 1 \( ! -type f -o ! -name '*.md' \) -print -quit)
-  [[ -z $stray ]] || refuse "$stray is not an entry file: $CHANGES/ holds only <short-slug>.md files, directly in it."
+  [[ -z $stray ]] || refuse "$stray is not an entry file: $CHANGES/ holds only <spec-id>.md files, directly in it."
   for file in "$CHANGES"/*.md; do
     [[ -f $file && $file != "$README" ]] || continue
     if grep -q "$(printf '\r')" "$file"; then
@@ -91,7 +96,7 @@ fold() {
   grep -qxF "## $version" "$CHANGELOG" && refuse "$CHANGELOG already has '## $version'; a version is folded once."
   require_entries
   files=$(entries)
-  [[ -n $files ]] || refuse "$CHANGES/ holds no entry to fold into $version: each change adds $CHANGES/<short-slug>.md."
+  [[ -n $files ]] || refuse "$CHANGES/ holds no entry to fold into $version: each change adds $CHANGES/<spec-id>.md."
   section=$(mktemp)
   folded=$(mktemp)
   trap 'rm -f "$section" "$folded"' EXIT
@@ -115,11 +120,47 @@ fold() {
 
 check() {
   local base=${1:-}
-  [[ -n $base ]] || base=$(git merge-base origin/main HEAD)
+  if [[ -z $base ]]; then
+    base=$(git merge-base origin/main HEAD 2> /dev/null) ||
+      refuse "this clone has no origin/main to find where the change left it: fetch it, or give BASE."
+  fi
+  git rev-parse -q --verify "$base^{commit}" > /dev/null ||
+    refuse "BASE $base names no commit in this clone: fetch it, or give the commit the change left, git merge-base origin/main HEAD."
   git cat-file -e "$base:$README" 2> /dev/null || return 0
   git diff --quiet "$base" -- "$CHANGELOG" ||
-    refuse "this change edits $CHANGELOG, which only the release writes. Put its entry in a file of its own instead, $CHANGES/<short-slug>.md, holding its bullets as they would read under the version heading ($README)."
+    refuse "this change edits $CHANGELOG, which only the release writes. Put its entry in a file of its own instead, $CHANGES/<spec-id>.md, holding its bullets as they would read under the version heading ($README)."
   require_entries
+  require_own_entry "$base"
+}
+
+# The entries a change makes with FILTER (A added, AM added or edited) from BASE, committed or not,
+# one to a line.
+entries_made() {
+  { git diff --no-renames --name-only --diff-filter="$2" "$1" -- "$CHANGES"; git ls-files --others --exclude-standard -- "$CHANGES"; } \
+    | grep -E "^$CHANGES/[^/]+\.md\$" | grep -vxF "$README" | sort -u || true
+}
+
+require_own_entry() {
+  local branch own added others deleted count why="a branch agent/<name> keeps its entry in $CHANGES/<name>.md"
+  branch=${GITHUB_HEAD_REF:-$(git symbolic-ref --short -q HEAD || true)}
+  deleted=$(git diff --no-renames --name-only --diff-filter=D "$1" -- "$CHANGES" | grep -vxF "$README" || true)
+  [[ -z $deleted ]] ||
+    refuse "this change deletes $(paste -sd, - <<< "$deleted" | sed 's/,/, /g'), an entry not yet released: only the release's fold removes an entry."
+  added=$(entries_made "$1" A)
+  if [[ $branch == agent/?* ]]; then
+    own="$CHANGES/${branch#agent/}.md"
+    others=$(grep -vxF "$own" <<< "$added" || true)
+    [[ -z $others ]] ||
+      refuse "this change adds $(paste -sd, - <<< "$others" | sed 's/,/, /g'), but its branch $branch names its entry $own ($why): put its bullets there instead."
+    grep -qxF "$own" <<< "$(entries_made "$1" AM)" ||
+      refuse "this change neither adds nor edits $own, the entry its branch $branch names ($why): add it, holding its bullets as they would read under the version heading ($README)."
+    return 0
+  fi
+  count=$(grep -c . <<< "$added" || true)
+  [[ $count -le 1 ]] ||
+    refuse "this change adds $count entries ($(paste -sd, - <<< "$added" | sed 's/,/, /g')): a pull request adds at most one, $CHANGES/<spec-id>.md."
+  [[ -n $(entries_made "$1" AM) ]] ||
+    refuse "this change neither adds nor edits an entry: add $CHANGES/<spec-id>.md, holding its bullets as they would read under the version heading ($README)."
 }
 
 released() {
