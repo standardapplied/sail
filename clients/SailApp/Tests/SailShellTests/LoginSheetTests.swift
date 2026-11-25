@@ -266,7 +266,7 @@ import Testing
         case answered, unreachable, refused
     }
 
-    static let notUsed = "Stored Claude Code key “work”, but Sign in still offers your earlier key; store “work” again to make it the one Start takes."
+    static let notUsed = "Stored Claude Code key “work”, but Sign in still offers your earlier key; store it again to make it the one Start takes."
 
     /// A key stored beside the default the person already has is made the one in use (`:use`): the
     /// panel's Sign in, its row and VoiceOver say that key, never the old default, and Start takes
