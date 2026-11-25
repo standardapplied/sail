@@ -271,6 +271,12 @@ public final class Screen: Sendable {
         parts.withLock { $0.core.selectedText() }
     }
 
+    /// The address of the OSC 8 link each of `cells` of the viewport is part of, in order; nil for
+    /// a cell in none. Read under one taking of the lock.
+    public func hyperlinks(at cells: [CellPoint]) -> [String?] {
+        parts.withLock { parts in cells.map { parts.core.hyperlink(at: $0) } }
+    }
+
     private struct Wait {
         let time: Duration
         let slices: Int

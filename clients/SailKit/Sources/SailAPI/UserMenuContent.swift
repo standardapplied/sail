@@ -25,15 +25,15 @@ public struct UserMenuContent: Equatable, Sendable {
 
     /// What the menu offers, in its order; Appearance is offered whoever is signed in.
     public enum Item: String, Equatable, Sendable, CaseIterable {
-        case account = "Account", logins = "Logins", signOut = "Sign Out", signIn = "Sign In"
+        case account = "Account", keys = "Keys", signOut = "Sign Out", signIn = "Sign In"
 
-        /// Logins waits for its own spec; the menu shows it, and says why it cannot be chosen.
+        /// Keys waits for its own spec; the menu shows it, and says why it cannot be chosen.
         public var enabled: Bool {
-            self != .logins
+            self != .keys
         }
 
         public var why: String? {
-            self == .logins ? "Logins come in a later version of Sail." : nil
+            self == .keys ? "Keys come in a later version of Sail." : nil
         }
 
         /// The key that chooses it with ⌘ from anywhere.
@@ -75,7 +75,7 @@ public struct UserMenuContent: Equatable, Sendable {
         let plane = Plane(unreachable: unreachable, refreshing: refreshing)
         return Self(
             name: name, disc: name.first.map { .initial(String($0).uppercased()) }, detail: "@\(handle)" + (role.map { " · \($0)" } ?? ""),
-            address: address, plane: plane, items: [.account, .logins, .signOut]
+            address: address, plane: plane, items: [.account, .keys, .signOut]
         )
     }
 }

@@ -15,10 +15,10 @@ public struct WorkspaceAgents: Codable, Equatable, Sendable {
 }
 
 /// One harness as a workspace offers it: its modes in its own words, the first the one it starts in
-/// until a person chooses (`modeDefault`), and why it has no others (`note`); the login it starts
-/// signed in with, or why there is none (`loginRefusal`, whose remedy stores one or chooses one),
-/// and the kinds a person stores one of; whether a person may start it and sign in inside it; and
-/// why it does not start at all (`refusal`).
+/// until a person chooses (`modeDefault`), and why it has no others (`note`); its two ways in, the
+/// default key the person stored (`login`, of the `kinds` it takes) and its own sign-in inside the
+/// session (`signIn`, when a person may start it so: `inside`); and why it does not start at all
+/// (`refusal`).
 public struct AgentOffer: Codable, Equatable, Sendable {
     public let harness: String
     public let display: String
@@ -26,15 +26,34 @@ public struct AgentOffer: Codable, Equatable, Sendable {
     public let modeDefault: String
     public let note: String?
     public let login: AgentLogin?
-    public let loginRefusal: Refusal?
     public let kinds: [AgentLoginKind]
     public let inside: Bool
+    public let signIn: AgentSignIn?
     public let refusal: Refusal?
 
     private enum CodingKeys: String, CodingKey {
         case harness, display, modes, note, login, kinds, inside, refusal
         case modeDefault = "mode_default"
-        case loginRefusal = "login_refusal"
+        case signIn = "sign_in"
+    }
+}
+
+/// A harness's own sign-in, which the person makes inside its session and Sail never holds: the
+/// name they know it by, how it goes in the server's words, and whether the workspace holds it
+/// already; nil where the server could not tell.
+public struct AgentSignIn: Codable, Equatable, Sendable {
+    public let name: String
+    public let how: [RemedyPart]
+    public let signedIn: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case name, how
+        case signedIn = "signed_in"
+    }
+
+    /// How it goes as a sentence a person reads; nil when it names a command.
+    public var said: String? {
+        how.sentence
     }
 }
 
@@ -62,8 +81,16 @@ public struct AgentLoginKind: Codable, Equatable, Sendable {
     /// How to make one as a sentence a person reads, its words alone; nil when it names a command,
     /// since a person is never shown one.
     public var said: String? {
+        how.sentence
+    }
+}
+
+extension [RemedyPart] {
+    /// The parts as a sentence a person reads, their words alone; nil when they name a command or
+    /// say nothing.
+    var sentence: String? {
         var words = ""
-        for part in how {
+        for part in self {
             guard case let .words(text) = part else { return nil }
             words += text
         }

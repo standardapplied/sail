@@ -106,7 +106,7 @@ extension Driver {
     }
 
     /// What the user menu shows, as one line: closed, and whether its button has the keys; or open,
-    /// whom and where it says, what is highlighted, the Appearance chosen, whether Logins says why.
+    /// whom and where it says, what is highlighted, the Appearance chosen, whether Keys says why.
     var menuSaid: String {
         let menu = shell.userMenu, view = menu.view
         guard menu.isOpen else { return "closed" + (shell.window.firstResponder === shell.rail.button(.account) ? ", the keys on its button" : "") }
@@ -115,7 +115,7 @@ extension Driver {
         if let address = content.address { place = " at " + address + ", " + (content.plane?.said ?? "") }
         var highlighted = "nothing"
         if let index = view.highlighted { highlighted = index == view.items.count ? "Appearance" : view.items[index].item.rawValue }
-        let tip = view.tip.isShown ? "; Logins says why" : ""
+        let tip = view.tip.isShown ? "; Keys says why" : ""
         return "open: " + content.name + place + "; " + highlighted + " highlighted; " + view.chosenLook.said + " chosen" + tip
     }
 
@@ -175,7 +175,7 @@ extension Driver {
         guard await click(row, at: at) else { return (false, "the click was not made") }
         let done: Bool
         switch row.item {
-        case .logins: done = await waitUntil(2) { view.tip.isShown } && menu.isOpen
+        case .keys: done = await waitUntil(2) { view.tip.isShown } && menu.isOpen
         case .account, .signIn: done = await waitUntil(2) { !menu.isOpen && self.shell.rail.selected == .account }
         case .signOut:
             done = await waitUntil(step.seconds ?? 20) { self.shell.account.actions > began && !self.shell.account.isActing && self.shell.account.standing == nil }
@@ -183,7 +183,7 @@ extension Driver {
         let took = (ContinuousClock.now - clickedAt) / .milliseconds(1)
         let reached = "\(title) took \(row.downs - before.0) mouse-down and \(row.ups - before.1) mouse-up in \(Self.ms(took)) ms; at the click \(scene); "
             + "the app's current event after it \(NSApp.currentEvent.map { "\($0.type.rawValue) in window \($0.windowNumber)" } ?? "none")"
-        return (done && (row.item == .logins || !menu.isOpen), "\(menuSaid); \(reached)" + (row.item == .signOut ? "; \(said)" : ""))
+        return (done && (row.item == .keys || !menu.isOpen), "\(menuSaid); \(reached)" + (row.item == .signOut ? "; \(said)" : ""))
     }
 
     /// Where a click at `point` in `view` lands, as the window server and AppKit see it just before

@@ -66,12 +66,16 @@ public final class TerminalView: NSView {
     var rightReported = false
     /// The menu a right-click or a control-click offers; none unless the app gives one.
     public var contextMenu: @MainActor () -> NSMenu? = { nil }
-    /// The characters a link takes in a row's text, given that text and the 1-based character
-    /// under the pointer: asked only while ⌘ is held, nil where there is none. None unless the app
-    /// gives it, as it does for a workspace's terminals, whose paths it can open.
+    /// The characters a link of the app's own takes in a row's text, given that text and the
+    /// 1-based character under the pointer: asked only while ⌘ is held and no web address is there,
+    /// nil where there is none. None unless the app gives it, as it does for a workspace's
+    /// terminals, whose paths it can open.
     public var linkIn: @MainActor (_ text: String, _ column: Int) -> Range<Int>? = { _, _ in nil }
-    /// A ⌘-click on a link: its row's text and the 1-based character clicked.
+    /// A ⌘-click on a link of the app's own: its row's text and the 1-based character clicked.
     public var onLink: @MainActor (_ text: String, _ column: Int) -> Void = { _, _ in }
+    /// A ⌘-click on a web address, the program's own (OSC 8) or one in its text: opened in the
+    /// person's browser; the drive's own.
+    public var openURL: @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) }
     /// The link underlined now, ⌘ held over it.
     public internal(set) var shownLink: OverlayLink?
     /// The cell the link was last looked for under, to look again when the text there changes.

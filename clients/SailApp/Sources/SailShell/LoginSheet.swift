@@ -4,7 +4,7 @@ import SailControls
 import SailLook
 import SailWorkbench
 
-/// Store a Login (`login-store-mockup.html`): a sheet on the window, over the New Session panel,
+/// Store a Key (`login-store-mockup.html`): a sheet on the window, over the New Session panel,
 /// 420 pt or, on a narrow page, the window less 12 pt each side. Its title; the kind's label over
 /// one secure field holding the keys, with the server's how under it, or a refusal in its place;
 /// where the person has a login of the harness, the name as words with Change, which puts the key's

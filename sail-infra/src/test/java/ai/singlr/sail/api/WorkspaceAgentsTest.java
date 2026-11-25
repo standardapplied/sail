@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
@@ -28,7 +29,9 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -254,7 +257,6 @@ class WorkspaceAgentsTest {
             "Researches and proposes changes, and edits nothing until you approve the plan."),
         ((List<?>) claude.get("modes")).get(3));
     assertFalse(claude.containsKey("refusal"));
-    assertFalse(claude.containsKey("login_refusal"));
     assertFalse(claude.containsKey("note"));
     assertEquals(
         List.of(
@@ -298,36 +300,25 @@ class WorkspaceAgentsTest {
   }
 
   /**
-   * A stopped workspace is said to be stopped, never refused: a start starts it. A person with
-   * logins of a harness but no default is told which they stored and how to choose one; one with
-   * none is told how to store one; each may still start it and sign in inside.
+   * A stopped workspace is said to be stopped, never refused: a start starts it. A person with keys
+   * of a harness but no default, or none at all, is offered no key and no refusal: the harness's
+   * own sign-in is the other way in, and nothing is said of it that is not true.
    */
   @Test
-  void aLoginNotStoredOrNotTheDefaultIsSaidWithItsRemedyAndAStoppedWorkspaceIsNoRefusal()
-      throws Exception {
+  void noDefaultKeyIsNoRefusalAndAStoppedWorkspaceIsNotReadForItsSignIns() throws Exception {
     var sams = ask(sam, "beta-dock");
     var toms = ask(tom, "beta-tom");
 
     assertEquals(200, sams.status(), sams.toString());
     assertEquals(false, sams.body().get("running"));
-    var noDefault = sams.offer("codex");
-    assertEquals(true, noDefault.get("inside"));
-    assertFalse(noDefault.containsKey("login"));
-    assertEquals(
-        List.of(
-            "login_not_stored",
-            "sam has no default Codex CLI login, so a Codex CLI session cannot start in dock;"
-                + " stored: home.",
-            "Choose one: agent login use codex home."),
-        said(noDefault.get("login_refusal")));
     assertEquals(Map.of("name", "work", "kind", "api-key"), sams.offer("claude-code").get("login"));
-    var noneStored = (Map<?, ?>) toms.offer("claude-code").get("login_refusal");
-    assertEquals(
-        List.of(
-            "login_not_stored",
-            "No Claude Code login stored for tom, so a Claude Code session cannot start in tom."),
-        said(noneStored).subList(0, 2));
-    assertEquals(true, toms.offer("claude-code").get("inside"));
+    for (var offer : List.of(sams.offer("codex"), toms.offer("claude-code"), toms.offer("codex"))) {
+      assertEquals(
+          List.of(true, false, false),
+          List.of(
+              offer.get("inside"), offer.containsKey("login"), offer.containsKey("login_refusal")),
+          offer.toString());
+    }
     assertEquals(
         List.of(false, true),
         List.of(
@@ -342,10 +333,6 @@ class WorkspaceAgentsTest {
         incus.invocations().stream()
             .noneMatch(command -> command.startsWith("incus exec beta-dock")),
         "nothing runs in a stopped workspace: " + incus.invocations());
-    assertTrue(noneStored.containsKey("remedy"), "the remedy names the command that stores one");
-    assertTrue(
-        ((String) noneStored.get("action")).startsWith("Create an API key in the Claude Console"),
-        "the remedy names the kinds in the order the route offers them: " + noneStored);
   }
 
   /**
@@ -365,6 +352,30 @@ class WorkspaceAgentsTest {
           List.of(signIn.get("name"), signIn.containsKey("signed_in")),
           harness);
     }
+  }
+
+  /**
+   * The route reads only the default key of each harness the project installs: a key that is not
+   * the default, or of a harness the project does not install, is never read, so one that cannot be
+   * read leaves the offer answered.
+   */
+  @Test
+  void theRouteReadsOnlyTheDefaultKeyOfEachHarnessItOffers() throws Exception {
+    assumeFalse("root".equals(System.getProperty("user.name")), "root opens a file of mode 000");
+    var logins = new FdeStore(db).logins();
+    logins.store(samId, Harnesses.of("claude-code"), "spare", "api-key", "sk-ant-api03-sam-spare");
+    logins.store(samId, Harnesses.of("codex"), "spare", "api-key", "sk-proj-sam-spare");
+    var unreadable = PosixFilePermissions.fromString("---------");
+    for (var harness : List.of("claude-code", "codex")) {
+      Files.setPosixFilePermissions(
+          tempDir.resolve("logins").resolve(samId).resolve(harness).resolve("spare"), unreadable);
+    }
+
+    var answer = ask(sam, "acme-try");
+
+    assertEquals(200, answer.status(), answer.toString());
+    assertEquals(
+        Map.of("name", "work", "kind", "api-key"), answer.offer("claude-code").get("login"));
   }
 
   /**

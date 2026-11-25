@@ -256,6 +256,17 @@ final class TerminalCore {
         return GhosttySelection(start: start, end: end, rectangle: false)
     }
 
+    /// The address of the OSC 8 link the cell at `point` of the viewport is part of; nil for a cell
+    /// in none, or outside the viewport.
+    func hyperlink(at point: CellPoint) -> String? {
+        guard var ref = gridRef(point) else { return nil }
+        var length = 0
+        guard ghostty_grid_ref_hyperlink_uri(&ref, nil, 0, &length) == GHOSTTY_OUT_OF_SPACE, length > 0 else { return nil }
+        var bytes = [UInt8](repeating: 0, count: length)
+        guard ghostty_grid_ref_hyperlink_uri(&ref, &bytes, length, &length) == GHOSTTY_SUCCESS else { return nil }
+        return String(decoding: bytes.prefix(length), as: UTF8.self)
+    }
+
     /// Whether something is selected, without making its text.
     var hasSelection: Bool {
         var selection = GhosttySelection()

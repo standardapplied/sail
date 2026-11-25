@@ -8,11 +8,11 @@ import Testing
 @Suite struct UserMenuContentTests {
     static let uday = Whoami(fde: "uday", displayName: "Uday Chandra", role: .known(.admin), capabilities: [])
 
-    @Test func signedInItSaysWhoAndWhereAndOffersAccountLoginsAndSignOut() {
+    @Test func signedInItSaysWhoAndWhereAndOffersAccountKeysAndSignOut() {
         let menu = UserMenuContent.signedIn(handle: "uday", address: "sail.example.com", whoami: Self.uday, unreachable: false, refreshing: false)
         #expect(menu.name == "Uday Chandra" && menu.disc == .initial("U") && menu.detail == "@uday · Admin")
         #expect(menu.address == "sail.example.com" && menu.plane == .connected)
-        #expect(menu.items == [.account, .logins, .signOut])
+        #expect(menu.items == [.account, .keys, .signOut])
     }
 
     @Test func withNoNameFromTheServerTheHandleIsTheName() {
@@ -53,9 +53,9 @@ import Testing
         #expect(menu.items == [.account])
     }
 
-    /// Logins is offered and not yet usable: it says so, the server's spec not built.
-    @Test func loginsIsShownButNotYetUsable() {
-        #expect(!UserMenuContent.Item.logins.enabled && UserMenuContent.Item.logins.why == "Logins come in a later version of Sail.")
+    /// Keys is offered and not yet usable: it says so, the server's spec not built.
+    @Test func keysIsShownButNotYetUsable() {
+        #expect(!UserMenuContent.Item.keys.enabled && UserMenuContent.Item.keys.why == "Keys come in a later version of Sail.")
         #expect(UserMenuContent.Item.account.enabled && UserMenuContent.Item.account.key == "," && UserMenuContent.Item.signOut.key == nil)
     }
 

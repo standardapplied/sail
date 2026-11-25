@@ -2138,20 +2138,14 @@ record AgentOffersResponse(
 
 /**
  * One harness as a workspace offers it: its modes, the first the one it starts in until a person
- * chooses, and why there are no others ({@code note}); the login it starts signed in with, or why
- * there is none ({@code loginRefusal}), and the kinds a person stores one of; whether it starts
- * with the person signing in inside it ({@code inside}), and then its own sign-in ({@code
- * sign_in}): its name, how it goes, and whether the workspace holds it ({@code signed_in}), said
- * only when that was read ({@code signedIn} null when not); and why it does not start at all
- * ({@code refusal}).
+ * chooses, and why there are no others ({@code note}); its two ways in, the default key its person
+ * stored ({@code login}, none when they have none), of the kinds it takes, and, where it starts
+ * with the person signing in inside it ({@code inside}), its own sign-in ({@code sign_in}): its
+ * name, how it goes, and whether the workspace holds it ({@code signed_in}), said only when that
+ * was read ({@code signedIn} null when not); and why it does not start at all ({@code refusal}).
  */
 record AgentOffer(
-    Harness harness,
-    LoginStore.Row login,
-    ApiError loginRefusal,
-    boolean inside,
-    Boolean signedIn,
-    ApiError refusal)
+    Harness harness, LoginStore.Row login, boolean inside, Boolean signedIn, ApiError refusal)
     implements Mappable {
   @Override
   public Map<String, Object> toMap() {
@@ -2174,9 +2168,6 @@ record AgentOffer(
     harness.modesNote().ifPresent(note -> m.put("note", note));
     if (login != null) {
       m.put("login", Map.of("name", login.name(), "kind", login.kind()));
-    }
-    if (loginRefusal != null) {
-      m.put("login_refusal", loginRefusal.toMap());
     }
     m.put(
         "kinds",

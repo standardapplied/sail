@@ -1051,7 +1051,7 @@ extension Driver {
 
     /// Returns once the window has drawn what it owes and that drawing is committed to the window
     /// server (the transaction's completion), at most 2 s: the fact a shot of the screen waits on.
-    private func drawnAndCommitted(_ window: NSWindow? = nil) async {
+    func drawnAndCommitted(_ window: NSWindow? = nil) async {
         (window ?? shell.window).displayIfNeeded()
         let committed = Mutex(false)
         CATransaction.begin()
