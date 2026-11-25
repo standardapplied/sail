@@ -1,7 +1,7 @@
 import Foundation
 import SailAPI
 
-/// The Store a Login sheet's model for one harness (`login-store-mockup.html`): the kind it stores,
+/// The Store a Key sheet's model for one harness (`login-store-mockup.html`): the kind it stores,
 /// the name a store takes, and where it stands. The kind is the first the server names that a
 /// person makes without running anything (``SailAPI/AgentOffer/storable``). The name is `default`
 /// and not asked while the person has no login of the harness; with one, a free name is suggested
@@ -169,10 +169,17 @@ public struct StoreLogin: Equatable, Sendable {
         }
     }
 
+    /// What makes the key just stored the one Start takes, where the server did not make it the
+    /// default itself (the person had one already): nil before it is stored, and for the default.
+    public var use: Endpoint<LoginStored>? {
+        guard case let .stored(answer, _) = stage, !answer.login.isDefault else { return nil }
+        return .useLogin(harness: harness, name: answer.login.name)
+    }
+
     // MARK: Words
 
     public var title: String {
-        "Store a \(display) login"
+        "Store a \(display) key"
     }
 
     /// The field's label: the kind's, as a label starts.
@@ -217,14 +224,25 @@ public struct StoreLogin: Equatable, Sendable {
 
     /// Store as VoiceOver names it.
     public var storeName: String {
-        "Store \(display) login"
+        "Store \(display) key"
     }
 
     /// The panel's one quiet line once stored: the clipboard's sentence when it was cleared, and
     /// what the server says once of runs on a login it replaced.
     public var stored: String? {
+        line(".")
+    }
+
+    /// The line in place of ``stored`` where the key could not be made the one Start takes (``use``
+    /// not answered or refused, the key removed meanwhile among them): whatever the reason, the
+    /// same plain sentence of what that leaves and what to do, never the server's words.
+    public var notUsed: String? {
+        line(", but Sign in still offers your earlier key; store it again to make it the one Start takes.")
+    }
+
+    private func line(_ ending: String) -> String? {
         guard case let .stored(answer, cleared) = stage else { return nil }
         let clipboard = cleared ? " Removed the key from the clipboard." : ""
-        return "Stored \(display) login “\(answer.login.name)”." + clipboard + (answer.note.map { " " + $0 } ?? "")
+        return "Stored \(display) key “\(answer.login.name)”" + ending + clipboard + (answer.note.map { " " + $0 } ?? "")
     }
 }

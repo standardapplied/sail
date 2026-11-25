@@ -26,7 +26,7 @@ import Testing
     }
 
     static let claude = AgentStart(harness: "claude-code", display: "Claude Code", mode: "default")
-    static let storedLine = "Stored Claude Code login “default”. Removed the key from the clipboard."
+    static let storedLine = "Stored Claude Code key “default”. Removed the key from the clipboard."
 
     /// harbor listed for uday (dock and pier his, quay ana's), what starts in each answered as
     /// `agents` recorded, `width` wide in `look`.
@@ -80,6 +80,13 @@ import Testing
     static func press(_ button: NSButton?) throws {
         let button = try #require(button)
         #expect(button.sendAction(button.action, to: button.target), "\(button.title) sent nothing")
+    }
+
+    /// Store a Key chosen in `panel`'s Sign in pop-up, as its menu chooses it.
+    static func storeKey(_ panel: NewSessionPanel) throws {
+        let menu = try #require(panel.view.signIn?.menu, "no Sign in pop-up: \(panel.view.words)")
+        let index = try #require(menu.items.firstIndex { $0.title == NewSessionWords.storeKey }, "Sign in offers no Store a Key")
+        menu.performActionForItem(at: index)
     }
 
     static func down() throws -> NSEvent {
@@ -178,13 +185,16 @@ import Testing
         #expect(quick.started == [inside] && !quick.view.newSession.isOpen, "started \(quick.started)")
     }
 
-    @Test func theQuickItemOpensThePanelWhenItsLoginIsGone() async throws {
+    /// The key it last started on gone, the quick item opens the panel at the harness on its own
+    /// sign-in rather than start it another way unasked.
+    @Test func theQuickItemOpensThePanelWhenItsKeyIsGone() async throws {
         let plan = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan")
         let quick = try await Self.quickItem("workspace-agents-dock-no-login", last: plan)
         defer { quick.window.orderOut(nil) }
         let panel = quick.view.newSession
         #expect(quick.started.isEmpty && panel.isOpen, "started \(quick.started), the panel \(panel.isOpen ? "open" : "closed")")
-        #expect(panel.view.rows.first(where: \.chosen)?.name.stringValue == "Claude Code" && panel.view.words.contains("No Claude Code login stored for uday, so a Claude Code session cannot start in dock."))
+        #expect(panel.view.rows.first(where: \.chosen)?.name.stringValue == "Claude Code" && panel.view.signIn?.title == "Your Claude account")
+        #expect(panel.view.primary?.title == "Start and Sign In")
     }
 
     @Test func theQuickItemOpensThePanelAtAHarnessNoLongerInstalled() async throws {
@@ -327,21 +337,23 @@ import Testing
 
     // MARK: The panel
 
-    /// The usual case (dock, signed in): the title names the workspace; one row per harness offered
-    /// in the route's order with its login as the server names its kind, then the Shell; the
-    /// first chosen, with Mode at the harness's own default and that mode's words; Start the one
-    /// primary. It hangs 4 pt under the row, its trailing edge on ⋯'s, 372 pt wide.
+    /// The usual case (dock, holding both sign-ins): the title names the workspace; one row per
+    /// harness offered in the route's order with its sign-in's name, then the Shell; the first
+    /// chosen, with Mode at the harness's own default and that mode's words, then Sign in on its
+    /// account and no sentence; Start the one primary. It hangs 4 pt under the row, its trailing
+    /// edge on ⋯'s, 372 pt wide.
     @Test func thePanelListsWhatTheRouteOffersInItsWords() async throws {
-        let (view, window, _) = try await Self.listed(["workspace-agents-dock"])
+        let (view, window, _) = try await Self.listed(["workspace-agents-dock-signed-in"])
         defer { window.orderOut(nil) }
         let panel = try await Self.open("dock", in: view)
         let shown = panel.view
         #expect(shown.rows.map(\.name.stringValue) == ["Claude Code", "Codex CLI", "Shell"])
-        #expect(shown.rows.map(\.line.stringValue) == ["login “default” · API key", "login “work” · API key", "a terminal, no agent"])
+        #expect(shown.rows.map(\.line.stringValue) == ["Your Claude account", "Your ChatGPT account", "a terminal, no agent"])
         #expect(shown.rows.map(\.chosen) == [true, false, false])
         #expect(shown.words.first == "New session in dock")
-        #expect(shown.modes?.title == "Claude Code's own")
+        #expect(shown.modes?.title == "Claude Code's own" && shown.signIn?.title == "Your Claude account")
         #expect(shown.words.contains("Starts as Claude Code starts by itself: the project's default mode, else Auto where it is available, else Manual."))
+        #expect(!shown.words.contains { $0.contains("asks you to sign in") }, "a workspace holding the sign-in was told to sign in")
         #expect(shown.primary?.title == "Start" && shown.primary?.isEnabled == true && shown.words.contains(NewSessionWords.hint))
         #expect(!shown.words.contains { $0.contains("stopped") }, "a running workspace said it is stopped")
         let row = try #require(view.project.rowFrame("dock").map { window.convertToScreen($0) }), box = panel.popover.frame
@@ -352,8 +364,9 @@ import Testing
 
     /// ↓ and ↑ choose and stop at the ends; the chosen harness alone shows its mode; Codex, of one
     /// mode, shows it as words with the server's note; ⌘M opens the mode's menu, its labels the
-    /// server's with the chosen one checked; a mode chosen there is what Return starts, with no
-    /// command, and is remembered for that harness with the start.
+    /// server's with the chosen one checked; a mode chosen there is what Return starts, on the
+    /// harness's own sign-in where nothing else was chosen, with no command, and is remembered for
+    /// that harness with the start.
     @Test func theKeysChooseAndStartAndTheChoiceIsRemembered() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-dock"])
         defer { window.orderOut(nil) }
@@ -379,11 +392,11 @@ import Testing
         var started: [(AgentStart, String, String)] = []
         view.onStart = { started.append(($0, $1, $2)) }
         try Self.press(try Self.returnKey(), in: window)
-        let plan = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan")
+        let plan = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan", inside: true)
         #expect(started.count == 1 && started.first?.0 == plan && started.first?.1 == "harbor" && started.first?.2 == "dock")
-        #expect(plan.wire.harness == "claude-code" && plan.wire.mode == "plan" && !plan.wire.inside)
+        #expect(plan.wire.harness == "claude-code" && plan.wire.mode == "plan" && plan.wire.inside)
         #expect(!panel.isOpen && window.firstResponder === view.project.list, "the keys did not go back to the list")
-        #expect(view.memory == ModeMemory(modes: ["claude-code": "plan"], last: plan))
+        #expect(view.memory == ModeMemory(modes: ["claude-code": "plan"], ways: ["claude-code": .signIn], last: plan))
         let reopened = try await Self.open("dock", in: view)
         #expect(reopened.view.modes?.title == "Plan", "the mode chosen was not remembered")
     }
@@ -419,36 +432,103 @@ import Testing
         #expect(!view.newSession.isOpen, "the + again did not close it")
     }
 
-    /// A stopped workspace is a fact under the title; Start is unchanged.
+    /// A stopped workspace is a fact under the title; it is not read for its sign-in, so Start signs
+    /// in as for a workspace not holding it.
     @Test func aStoppedWorkspaceIsSaidAsAFact() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-pier"])
         defer { window.orderOut(nil) }
         let panel = try await Self.open("pier", in: view)
         #expect(panel.view.words.contains("pier is stopped. Starting a session starts it."))
-        #expect(panel.view.primary?.title == "Start" && panel.view.primary?.isEnabled == true)
+        #expect(panel.view.primary?.title == "Start and Sign In" && panel.view.primary?.isEnabled == true)
     }
 
-    /// No login stored, the harness signing in inside: the server's sentence, Store a Claude Code
-    /// Login with how to make the kind it stores under it, the sign-in-inside line, and Start and
-    /// Sign In There, which starts it with `inside`. No command shows, ever.
-    @Test func noLoginStoredOffersBothActions() async throws {
+    /// No key stored: no refusal, the harness's own sign-in is the way in. Sign in reads its name and
+    /// lists it, a separator and Store a Key; the server's sentence says what happens, once; Start
+    /// and Sign In starts it with `inside`. No command shows, ever.
+    @Test func noKeyStoredTheSignInIsTheWayIn() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-dock-no-login"])
         defer { window.orderOut(nil) }
         let panel = try await Self.open("dock", in: view)
         let words = panel.view.words
-        #expect(panel.view.rows.first?.line.stringValue == "no login stored")
-        #expect(words.contains("No Claude Code login stored for uday, so a Claude Code session cannot start in dock."))
-        let order = try ["Store a Claude Code Login", "Create an API key in the Claude Console.", "Or start it and sign in inside Claude Code: that login stays in dock only."].map { said in
+        #expect(panel.view.rows.first?.line.stringValue == "Your Claude account")
+        let menu = try #require(panel.view.signIn?.menu)
+        #expect(menu.items.map { $0.isSeparatorItem ? "-" : $0.title } == ["Your Claude account", "-", "Store a Key"])
+        #expect(menu.items.filter { $0.state == .on }.map(\.title) == ["Your Claude account"])
+        #expect(panel.view.signIn?.title == "Your Claude account")
+        let order = try ["Mode", "Claude Code's own", "Sign in", "Claude Code asks you to sign in with your Claude account when it starts, once in each workspace."].map { said in
             try #require(words.firstIndex(of: said), "\(said) is not said: \(words)")
         }
         #expect(order == order.sorted(), "\(words)")
-        #expect(panel.view.primary?.title == "Start and Sign In There" && panel.view.primary?.isEnabled == true && panel.view.modes == nil)
+        #expect(!words.contains { $0.contains("login stored") || $0.contains("Store a") }, "a refusal or a link of the old panel shows: \(words)")
+        #expect(panel.view.primary?.title == "Start and Sign In" && panel.view.primary?.isEnabled == true)
         #expect(!words.contains { $0.contains("agent login") || $0.contains("/login") || $0.contains("sail ") }, "a command shows: \(words)")
         var started: [AgentStart] = []
         view.onStart = { start, _, _ in started.append(start) }
         try Self.press(try Self.returnKey(), in: window)
         #expect(started.map { [$0.wire.harness, $0.wire.mode] } == [["claude-code", "default"]] && started.allSatisfy(\.wire.inside))
-        #expect(view.memory.last == AgentStart(harness: "claude-code", display: "Claude Code", mode: "default", inside: true), "a start that signed in there is not remembered as one")
+        #expect(view.memory.last == AgentStart(harness: "claude-code", display: "Claude Code", mode: "default", inside: true), "a start that signed in is not remembered as one")
+    }
+
+    /// With a key stored, Sign in lists the account first, then the key, a separator and Store a
+    /// Key; the account is chosen until the key is. The key chosen: the row says it, the sentence
+    /// goes, Start is plain and starts on the key, and the choice is remembered for that harness.
+    @Test func theSignInPopUpOffersTheAccountThenTheKeyAndTheChoiceIsRemembered() async throws {
+        let (view, window, _) = try await Self.listed(["workspace-agents-dock"])
+        defer { window.orderOut(nil) }
+        let panel = try await Self.open("dock", in: view)
+        let menu = try #require(panel.view.signIn?.menu)
+        #expect(menu.items.map { $0.isSeparatorItem ? "-" : $0.title } == ["Your Claude account", "API key “default”", "-", "Store a Key"])
+        #expect(panel.view.signIn?.title == "Your Claude account" && panel.view.primary?.title == "Start and Sign In")
+        #expect(panel.view.signIn?.accessibilityLabel() == "Sign in" && panel.view.signIn?.accessibilityValue() as? String == "Your Claude account")
+        menu.performActionForItem(at: 1)
+        #expect(panel.view.signIn?.title == "API key “default”" && panel.view.rows.first?.line.stringValue == "API key “default”")
+        #expect(panel.view.primary?.title == "Start" && !panel.view.words.contains { $0.contains("asks you to sign in") })
+        var started: [AgentStart] = []
+        view.onStart = { start, _, _ in started.append(start) }
+        try Self.press(try Self.returnKey(), in: window)
+        #expect(started.map { [$0.wire.harness, $0.wire.mode] } == [["claude-code", "default"]] && started.allSatisfy { !$0.wire.inside })
+        let reopened = try await Self.open("dock", in: view)
+        #expect(reopened.view.signIn?.title == "API key “default”", "the key chosen was not remembered")
+        try Self.press(try Self.down(), in: window)
+        #expect(reopened.view.signIn?.title == "Your ChatGPT account", "Codex took Claude Code's choice")
+    }
+
+    /// ⇥ reaches Sign in, drawn holding the keys; Space and ↑ ↓ open its menu there; ⇥ again gives
+    /// the keys back to the rows, which ↓ then moves. Choosing a row puts Sign in's focus away.
+    @Test func tabReachesSignInAndSpaceOrTheArrowsOpenIt() async throws {
+        let (view, window, _) = try await Self.listed(["workspace-agents-dock"])
+        defer { window.orderOut(nil) }
+        let panel = try await Self.open("dock", in: view)
+        var popped: [SailButton] = []
+        panel.popUp = { popped.append($0) }
+        try Self.press(try Self.key(48, "\t"), in: window)
+        #expect(panel.signInFocused && panel.view.signIn?.holdsKeys == true)
+        try Self.press(try Self.key(49, " "), in: window)
+        try Self.press(try Self.down(), in: window)
+        try Self.press(try Self.up(), in: window)
+        #expect(popped.count == 3 && popped.allSatisfy { $0 === panel.view.signIn }, "Space and the arrows opened \(popped.count) menus")
+        #expect(panel.view.rows.map(\.chosen) == [true, false, false], "an arrow moved the rows while Sign in held the keys")
+        try Self.press(try Self.key(48, "\t", .shift), in: window)
+        #expect(!panel.signInFocused && panel.view.signIn?.holdsKeys == false)
+        try Self.press(try Self.down(), in: window)
+        #expect(panel.view.rows.map(\.chosen) == [false, true, false] && popped.count == 3)
+        try Self.press(try Self.key(48, "\t"), in: window)
+        try Self.press(try Self.down(), in: window)
+        try Self.press(try Self.key(48, "\t"), in: window)
+        try Self.press(try Self.down(), in: window)
+        #expect(panel.view.rows.map(\.chosen) == [false, false, true] && !panel.signInFocused)
+        try Self.press(try Self.key(48, "\t"), in: window)
+        #expect(!panel.signInFocused, "⇥ focused a Sign in the Shell does not have")
+    }
+
+    /// Mode and Sign in stand on one column: their pop-ups start at the same place.
+    @Test func modeAndSignInStandOnOneColumn() async throws {
+        let (view, window, _) = try await Self.listed(["workspace-agents-dock"])
+        defer { window.orderOut(nil) }
+        let panel = try await Self.open("dock", in: view)
+        let mode = try #require(panel.view.modes), signIn = try #require(panel.view.signIn)
+        #expect(near(mode.frame.minX, signIn.frame.minX), "Mode's pop-up starts at \(mode.frame.minX), Sign in's at \(signIn.frame.minX)")
+        #expect(signIn.frame.minY > mode.frame.maxY)
     }
 
     /// A harness not installed: its row says so in the quiet ink; chosen, the server's sentence and
@@ -595,31 +675,6 @@ import Testing
         #expect(opened == 0, "a hidden list's Return opened dock")
     }
 
-    /// Store a Login's words stand on the text column: as drawn, their ink starts where the
-    /// sentence above them starts.
-    @Test func theLinkStandsOnTheTextColumn() async throws {
-        let (view, window, _) = try await Self.listed(["workspace-agents-dock-no-login"])
-        defer { window.orderOut(nil) }
-        let panel = try await Self.open("dock", in: view)
-        let link = try #require(panel.view.storeLogin)
-        let sentence = try #require(WorkspacesViewTests.found(NSTextField.self, in: panel.view).first { $0.stringValue.hasPrefix("No Claude Code login stored") })
-        let drawn = try #require(panel.view.bitmapImageRepForCachingDisplay(in: panel.view.bounds))
-        panel.view.cacheDisplay(in: panel.view.bounds, to: drawn)
-        let scale = Double(drawn.pixelsWide) / Double(panel.view.bounds.width)
-        func ink(in band: NSRect) -> Double? {
-            let rows = Int(Double(band.minY) * scale) ..< Int(Double(band.maxY) * scale), columns = Int(Double(band.minX) * scale) ..< Int(Double(band.maxX) * scale)
-            for x in columns {
-                for y in rows {
-                    guard let colour = drawn.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
-                    if colour.redComponent + colour.greenComponent + colour.blueComponent < 1.2 { return Double(x) / scale }
-                }
-            }
-            return nil
-        }
-        let words = try #require(ink(in: link.frame)), column = try #require(ink(in: sentence.frame))
-        #expect(abs(words - column) <= 0.5, "the link's ink starts at \(words) pt, the sentence's at \(column) pt")
-    }
-
     /// The panel closes when its section goes, another project is chosen, or the window is resized.
     @Test func thePanelGoesWithItsPlace() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-dock"])
@@ -637,7 +692,7 @@ import Testing
     /// the next shell into its Workspaces section for whoever it signs in as.
     @Test func theStartsAreKeptBetweenLaunches() throws {
         let defaults = ReattachTests.defaults()
-        let kept = ModeMemory(modes: ["claude-code": "plan"], last: AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan"))
+        let kept = ModeMemory(modes: ["claude-code": "plan"], ways: ["claude-code": .key], last: AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan"))
         #expect(ModeMemory.stored(in: defaults, for: WorkspacesViewTests.uday) == ModeMemory())
         kept.store(in: defaults, for: WorkspacesViewTests.uday)
         #expect(ModeMemory.stored(in: defaults, for: WorkspacesViewTests.uday) == kept)
@@ -650,10 +705,11 @@ import Testing
 
     // MARK: Look, reach and calm
 
-    /// Every scene the panel draws: each harness of dock chosen, a login just stored, no login, not
-    /// installed, stopped, someone else's and an owner gone.
+    /// Every scene the panel draws: each harness of dock chosen, a key just stored, dock holding its
+    /// sign-ins, no key, not installed, stopped, someone else's and an owner gone.
     static let scenes: [(golden: String, row: String, choices: Int)] = [
-        ("workspace-agents-dock", "dock", 3), ("workspace-agents-dock-no-login", "dock", 1), ("workspace-agents-dock-not-installed", "dock", 2),
+        ("workspace-agents-dock", "dock", 3), ("workspace-agents-dock-signed-in", "dock", 2), ("workspace-agents-dock-no-login", "dock", 1),
+        ("workspace-agents-dock-not-installed", "dock", 2),
         ("workspace-agents-pier", "pier", 1), ("workspace-agents-quay", "quay", 0), ("workspace-agents-pier-owner-gone", "pier", 0),
     ]
 
@@ -674,8 +730,10 @@ import Testing
             }
             if scene.golden == "workspace-agents-dock" {
                 let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: try Exchange(scene.golden).body))
-                panel.show(.agents(agents), memory: ModeMemory(), stored: Self.storedLine, harness: "claude-code")
-                try check("\(scene.golden), a login just stored", panel, window)
+                var chose = ModeMemory()
+                chose.choose(.key, for: "claude-code")
+                panel.show(.agents(agents), memory: chose, stored: Self.storedLine, harness: "claude-code", inUse: true)
+                try check("\(scene.golden), a key just stored", panel, window)
             }
         }
     }
@@ -720,19 +778,19 @@ import Testing
     }
 
     /// What the panel shows takes a click in the turn it opens and each time it is drawn again,
-    /// before any display pass: its rows, the mode's pop-up, Store a Login and its button.
+    /// before any display pass: its rows, the mode's and Sign in's pop-ups and its button.
     @Test func whatThePanelShowsTakesAClickAtOnce() async throws {
         var faults: [String] = []
         try await Self.eachScene(width: 1000) { scene, panel, _ in
-            let controls: [NSView] = panel.view.rows + [panel.view.primary, panel.view.secondary, panel.view.modes, panel.view.storeLogin].compactMap { $0 }
+            let controls: [NSView] = panel.view.rows + [panel.view.primary, panel.view.secondary, panel.view.modes, panel.view.signIn].compactMap { $0 }
             faults += controls.compactMap { WorkspacesReachTests.missesAClick($0).map { "\(scene): \($0)" } }
         }
         #expect(faults.isEmpty, "\(faults.count) faults: \(faults.joined(separator: "\n"))")
     }
 
     /// Calm, in both looks: the panel's one accent fill is its primary (Start, on or off), none
-    /// where nothing starts; its accent lines the chosen row's bar, Store a Login's underline and,
-    /// once a login is stored, Start's halo;
+    /// where nothing starts; its accent lines the chosen row's bar and, once a key is stored,
+    /// Start's halo;
     /// no tint, no grey; and the page under it draws no more than before it opened.
     @Test(arguments: [Look.light, .dark])
     func thePanelIsCalm(_ look: Look) async throws {
@@ -740,7 +798,7 @@ import Testing
         try await Self.eachScene(width: 1000, look: look) { scene, panel, _ in
             let count = CalmTests.Count(marks(in: panel.view))
             let primary = panel.view.primary == nil ? 0 : 1, halo = panel.view.primary?.holdsKeys == true ? 1 : 0
-            let lines = (panel.view.rows.contains(where: \.chosen) ? 1 : 0) + (panel.view.storeLogin == nil ? 0 : 1) + halo
+            let lines = (panel.view.rows.contains(where: \.chosen) ? 1 : 0) + halo
             if count.fill != primary || count.line != lines || count.tint != 0 || count.neutral != 0 || count.error != 0 {
                 faults.append("\(scene): \(count), wanted \(primary) fills and \(lines) lines")
             }

@@ -2,10 +2,12 @@ import AppKit
 import SailSurface
 import SailVT
 
-/// A link in the terminal's text, as the app finds one (``TerminalView/linkIn``): underlined, with
-/// the pointing hand, while ⌘ is held over it, and opened by a ⌘-click (``TerminalView/onLink``).
-/// A ⌘-click on a link goes to the link alone: neither the selection nor a program that tracks the
-/// mouse gets it. Every other click, ⌘ held or not, is as before.
+/// A link in the terminal: a program's own (OSC 8) to a web address, a web address in its text
+/// (``TerminalURL``), each opened in the browser (``TerminalView/openURL``), or one the app finds
+/// (``TerminalView/linkIn``, opened by ``TerminalView/onLink``). Underlined, with the pointing hand,
+/// while ⌘ is held over it, across every row its line is soft-wrapped over, and opened whole by a
+/// ⌘-click. A ⌘-click on a link goes to the link alone: neither the selection nor a program that
+/// tracks the mouse gets it. Every other click, ⌘ held or not, is as before.
 extension TerminalView {
     /// The text of the line holding row `y`, the rows it is soft-wrapped across joined into one,
     /// the cell each character starts at with its width, and whether the screen's edge cuts it:
@@ -36,13 +38,14 @@ extension TerminalView {
         return (text, starts, (first == 0 && rows[first].continues, last == rows.count - 1 && rows[last].wrapped))
     }
 
-    /// The link under `cell`: its line's text, the 1-based character there, and the cells it takes,
-    /// a run in each row its line is soft-wrapped across; none in a word the screen's edge cuts, as
-    /// what is left of it is not it.
-    func linkUnder(_ cell: CellPoint) -> (text: String, column: Int, link: OverlayLink)? {
+    /// The link under `cell`: its line's text, the 1-based character there, the cells it takes, a
+    /// run in each row its line is soft-wrapped across, and the web address it opens, none for one
+    /// of the app's own; none in a word the screen's edge cuts, as what is left of it is not it.
+    func linkUnder(_ cell: CellPoint) -> (text: String, column: Int, link: OverlayLink, url: URL?)? {
         guard let (text, starts, cut) = lineText(cell.y),
               let index = starts.lastIndex(where: { $0.cell.y < cell.y || $0.cell.y == cell.y && $0.cell.x <= cell.x }),
-              let range = linkIn(text, index + 1), !range.isEmpty, range.lowerBound >= 0, range.upperBound <= starts.count else { return nil }
+              let (range, url) = target(in: text, at: index, of: starts.map(\.cell)),
+              !range.isEmpty, range.lowerBound >= 0, range.upperBound <= starts.count else { return nil }
         let characters = Array(text)
         if cut.start, !characters[..<range.lowerBound].contains(where: \.isWhitespace) { return nil }
         if cut.end, !characters[range.upperBound...].contains(where: \.isWhitespace) { return nil }
@@ -52,7 +55,21 @@ extension TerminalView {
             guard let first = cells.map(\.cell.x).min(), let end = cells.map({ $0.cell.x + $0.width }).max() else { continue }
             spans.append(OverlayLink.Span(row: row, columns: first ..< end))
         }
-        return (text, index + 1, OverlayLink(spans: spans))
+        return (text, index + 1, OverlayLink(spans: spans), url)
+    }
+
+    /// What character `index` of a line's `text`, drawn in `cells`, is part of: a program's own
+    /// link to a web address, the run of cells around it naming that address; a web address in the
+    /// text; or a link of the app's own. A program's link to anything else is no link of its own.
+    private func target(in text: String, at index: Int, of cells: [CellPoint]) -> (Range<Int>, URL?)? {
+        if let screen = link?.screen, case let address?? = screen.hyperlinks(at: [cells[index]]).first, let url = URL(string: address), TerminalURL.opens(url) {
+            let addresses = screen.hyperlinks(at: cells)
+            let start = addresses[..<index].lastIndex { $0 != address }.map { $0 + 1 } ?? 0
+            let end = addresses[index...].firstIndex { $0 != address } ?? addresses.count
+            return (start ..< end, url)
+        }
+        if let found = TerminalURL.find(in: text, at: index + 1) { return (found.range, found.url) }
+        return linkIn(text, index + 1).map { ($0, nil) }
     }
 
     /// ⌘ held over `cell`, or not: the link there underlined and the pointing hand over it, or

@@ -4332,20 +4332,21 @@ someone it does not know): a workspace whose person is gone (`owner_gone`) or th
 asker's (`not_your_workspace`, which is what an admin sees in another person's, with
 nothing offered and nothing of that person's logins) is refused whole; otherwise every harness Sail
 knows is offered with its modes (`Harness.modes()`, `mode_default` the first) and `note`, the kinds
-of login it takes and how to make one, and either the login it starts signed in with (`{name,
-kind}`, never a value) or why none (`login_refusal`: `login_not_stored`, with the remedy that
-stores one or makes one the default), with `inside` true and `sign_in`, the harness's own sign-in
-(`Harness.signIn`, a `SignIn`): its `name` ("Your Claude account", "Your ChatGPT account"), `how`
-it goes (words the New Session panel says) and `signed_in`, whether the workspace holds it: its
-`SignIn.file` (`~/.claude/.credentials.json`, never `~/.claude.json`, Claude Code's own state;
-`~/.codex/auth.json`) is a regular file and not empty, as `test -f` and `test -s` stat it through
-a link as the harness would read it, never opened (`WorkspaceSignIns`, one `incus exec` as the dev
-user for every installed harness, bounded by five seconds, none when none is installed). `signed_in`
-is said only when it was read: a stopped workspace is not started to read it, and a read that fails
-or does not answer says nothing. A harness the project does not install carries
-`harness_not_installed` and `inside` false. Every harness has exactly two ways in, its own sign-in
-or one stored key (`HarnessContractTest`), so a later harness is one adapter and no client change.
-Each refusal is the API's error shape (`code`, `message`, `action`, `remedy`).
+of login it takes and how to make one, the person's default key of each harness the project
+installs (`login`, `{name, kind}`, never answered with its value; none when they have no default,
+which is no refusal: the harness's own sign-in is the other way in), with `inside` true and
+`sign_in`, the harness's own sign-in (`Harness.signIn`, a `SignIn`): its `name` ("Your Claude
+account", "Your ChatGPT account"), `how` it goes (words the New Session panel says) and `signed_in`,
+whether the workspace holds it: its `SignIn.file` (`~/.claude/.credentials.json`, never
+`~/.claude.json`, Claude Code's own state; `~/.codex/auth.json`) is a regular file and not empty, as
+`test -f` and `test -s` stat it through a link as the harness would read it, never opened
+(`WorkspaceSignIns`, one `incus exec` as the dev user for every installed harness, bounded by five
+seconds, none when none is installed). `signed_in` is said only when it was read: a stopped
+workspace is not started to read it, and a read that fails or does not answer says nothing. A
+harness the project does not install carries `harness_not_installed` and `inside` false. Every
+harness has exactly two ways in, its own sign-in or one stored key (`HarnessContractTest`), so a
+later harness is one adapter and no client change. Each refusal is the API's error shape (`code`,
+`message`, `action`, `remedy`).
 
 What a command the agent runs can read, measured with fake keys on Claude Code 2.1.327 (its Bash
 tool's `env`, against a stand-in API) and Codex 0.170: a run's key, in `ANTHROPIC_API_KEY`, or an

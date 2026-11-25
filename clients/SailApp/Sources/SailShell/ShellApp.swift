@@ -31,7 +31,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public let account: AccountPane
     /// The card's outline on the chrome, over its edge, taking no clicks; none in light.
     let cardEdge: CardEdge
-    /// The menu behind the rail's user button: who is signed in and where, Account, Logins,
+    /// The menu behind the rail's user button: who is signed in and where, Account, Keys,
     /// Appearance and Sign Out.
     package let userMenu: UserMenu
     /// Where the app keeps what a person chose: the Appearance among it.
@@ -271,7 +271,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         switch item {
         case .account, .signIn: select(.account)
         case .signOut: account.signOutHere(nil)
-        case .logins: break
+        case .keys: break
         }
     }
 
@@ -504,9 +504,9 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         workspaces.remembered = { [defaults] person in ModeMemory.stored(in: defaults, for: person) }
         workspaces.memory = workspaces.remembered(workspaces.person)
+        workspaces.keep = { [defaults] memory, person in memory.store(in: defaults, for: person) }
         workspaces.onStart = { [weak self] start, project, name in
             guard let self else { return }
-            workspaces.memory.store(in: defaults, for: workspaces.person)
             select(.thisMac)
             thisMac.openAgent(start, project: project, name: name)
         }

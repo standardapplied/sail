@@ -125,7 +125,7 @@ import Testing
         let view = shell.userMenu.view
         let labels = WorkspacesViewTests.found(NSTextField.self, in: view).filter { !$0.isHiddenOrHasHiddenAncestor }.map(\.stringValue)
         #expect(labels == ["Uday Chandra", "@uday · Admin", "main.acme.dev", "Connected", "Appearance"], "the menu says \(labels)")
-        #expect(view.items.map(\.item) == [.account, .logins, .signOut] && view.items.allSatisfy { near($0.frame.height, UserMenuView.row) && near($0.frame.minX, 6) })
+        #expect(view.items.map(\.item) == [.account, .keys, .signOut] && view.items.allSatisfy { near($0.frame.height, UserMenuView.row) && near($0.frame.minX, 6) })
         #expect(near(view.avatarDisc.width, 32) && near(view.avatarDisc.minX, 16) && view.planeInk == Tint(look.success))
         for words in ["Connected", "Reconnecting", "Can’t reach"] {
             let label = try #require(WorkspacesViewTests.found(NSTextField.self, in: view).first { $0.stringValue == "Connected" || $0.stringValue == "Reconnecting" || $0.stringValue == "Can’t reach" })
@@ -137,7 +137,7 @@ import Testing
         }
         shell.userMenu.update(Self.uday, appearance: .auto)
         view.layoutSubtreeIfNeeded()
-        let signOut = try #require(view.items.last), logins = try #require(view.items.first { $0.item == .logins })
+        let signOut = try #require(view.items.last), logins = try #require(view.items.first { $0.item == .keys })
         #expect(signOut.frame.minY - logins.frame.maxY > UserMenuView.appearanceRow, "Sign Out is not in a section apart: \(signOut.frame) after \(logins.frame)")
         shell.userMenu.update(.signedOut(lastUsed: nil), appearance: .auto)
         view.layoutSubtreeIfNeeded()
@@ -191,7 +191,7 @@ import Testing
     }
 
     /// The button opens the menu and, again, closes it; a click outside it closes it, as does the
-    /// window giving up the keys; Logins, which cannot be chosen, says why when clicked or pointed
+    /// window giving up the keys; Keys, which cannot be chosen, says why when clicked or pointed
     /// at and leaves the menu open; Account shows the Account pane; an Appearance leaves it open.
     @Test func thePointerWorksTheMenu() throws {
         let shell = try Self.shell()
@@ -212,11 +212,11 @@ import Testing
         NotificationCenter.default.post(name: shell.userMenu.popover.keysLeft, object: shell.window)
         #expect(!shell.userMenu.isOpen, "the window giving up the keys left it open")
         try Self.open(shell)
-        let logins = try #require(view.items.first { $0.item == .logins })
-        #expect(view.tip.text == "Logins come in a later version of Sail." && view.tip.anchor === logins && !view.tip.isShown, "the Logins tooltip says \(view.tip.text)")
+        let logins = try #require(view.items.first { $0.item == .keys })
+        #expect(view.tip.text == "Keys come in a later version of Sail." && view.tip.anchor === logins && !view.tip.isShown, "the Keys tooltip says \(view.tip.text)")
         logins.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: logins.bounds.midX, y: logins.bounds.midY), in: logins))
-        #expect(shell.userMenu.isOpen && view.tip.isShown && logins.accessibilityHelp() == UserMenuContent.Item.logins.why, "Logins did not say why")
-        #expect(logins.drawn.fill == nil && logins.drawn.ink == shell.look.textTertiary, "Logins is drawn as one that can be chosen")
+        #expect(shell.userMenu.isOpen && view.tip.isShown && logins.accessibilityHelp() == UserMenuContent.Item.keys.why, "Keys did not say why")
+        #expect(logins.drawn.fill == nil && logins.drawn.ink == shell.look.textTertiary, "Keys is drawn as one that can be chosen")
         let account = try #require(view.items.first { $0.item == .account })
         account.mouseEntered(with: try Self.mouse(.mouseMoved, at: .zero, in: account))
         #expect(!view.tip.isShown && account.highlighted && account.drawn.fill == shell.look.menuHighlight.fill, "pointing at Account did not highlight it")
@@ -247,7 +247,7 @@ import Testing
         signIn.mouseDown(with: try Self.mouse(.leftMouseDown, at: NSPoint(x: signIn.bounds.midX, y: signIn.bounds.midY), in: signIn))
         shell.userMenu.update(Self.uday, appearance: .auto)
         signIn.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: -10, y: -10), in: signIn))
-        #expect(shell.userMenu.isOpen && view.items.map(\.item) == [.account, .logins, .signOut], "let go outside, the menu says \(view.items.map(\.item))")
+        #expect(shell.userMenu.isOpen && view.items.map(\.item) == [.account, .keys, .signOut], "let go outside, the menu says \(view.items.map(\.item))")
         #expect(near(shell.userMenu.box.height, view.fittingSize.height) && view.items.allSatisfy { near($0.frame.height, UserMenuView.row) }, "the box was not sized again")
         shell.userMenu.close()
     }
@@ -277,7 +277,7 @@ import Testing
         #expect(taken == .some(nil) && Self.appearance(of: shell) == nil && Appearance.stored(in: shell.defaults) == .auto, "Auto set an appearance of the app's own")
     }
 
-    /// VoiceOver hears a menu named Account, its items as menu items by their titles (Logins
+    /// VoiceOver hears a menu named Account, its items as menu items by their titles (Keys
     /// dimmed, saying why), and Appearance as a group of three choices, the chosen one on; pressing
     /// Account by VoiceOver chooses it.
     /// The window giving up the keys closes the menu, by the window's own notice: the one test whose
@@ -315,8 +315,8 @@ import Testing
         #expect(segments.accessibilityRole() == .radioGroup && segments.accessibilityLabel() == "Appearance")
         let said = segments.buttons.map { "\($0.accessibilityLabel() ?? "?")=\($0.accessibilityValue() as? Int ?? -1)" }
         #expect(said == ["Light=0", "Dark=0", "Auto=1"], "Appearance says \(said)")
-        let logins = try #require(view.items.first { $0.item == .logins })
-        #expect(!logins.isAccessibilityEnabled() && logins.accessibilityHelp() == "Logins come in a later version of Sail.")
+        let logins = try #require(view.items.first { $0.item == .keys })
+        #expect(!logins.isAccessibilityEnabled() && logins.accessibilityHelp() == "Keys come in a later version of Sail.")
         let button = try #require(shell.rail.button(.account))
         #expect(button.accessibilityRole() == .menuButton && button.accessibilityHelp()?.contains("Opens a menu") == true, "the rail's button does not say it opens a menu")
         let keys = try #require(shell.window.firstResponder as? MenuKeys)

@@ -42,11 +42,14 @@ public final class WorkspacesView: NSView {
     var onStart: @MainActor (_ start: AgentStart, _ project: String, _ name: String) -> Void = { _, _, _ in }
     /// Reads the starts kept for a person on a control plane: asked again whenever someone else signs in.
     var remembered: @MainActor (WorkspacesModel.Person) -> ModeMemory = { _ in ModeMemory() }
-    /// The person's starts: the mode chosen for each harness and the last start, which their own
-    /// rows offer to start again.
+    /// Keeps the person's starts between launches, told each time they change.
+    var keep: @MainActor (ModeMemory, WorkspacesModel.Person) -> Void = { _, _ in }
+    /// The person's starts: the mode and the way in chosen for each harness and the last start,
+    /// which their own rows offer to start again.
     var memory = ModeMemory() {
         didSet {
             guard memory != oldValue else { return }
+            keep(memory, person)
             model.lastStarted = memory.last?.display
             render()
         }
@@ -137,7 +140,7 @@ public final class WorkspacesView: NSView {
         panel.onChoose = { [weak self] name in self?.choose(name) }
         project.on = { [weak self] act in self?.act(act) }
         newSession.onStart = { [weak self] start, memory in self?.started(start, memory) }
-        newSession.onStoreLogin = { [weak self] offer in self?.storeLogin(offer) }
+        newSession.onStoreKey = { [weak self] offer in self?.storeKey(offer) }
         newSession.onClose = { [weak self] in
             self?.panelRow = nil
             self?.project.list.primaryElsewhere = false
@@ -446,11 +449,11 @@ public final class WorkspacesView: NSView {
         }
     }
 
-    /// Store a Login on `offer`: the person's logins asked, so the sheet asks a name only where they
+    /// Store a Key on `offer`: the person's keys asked, so the sheet asks a name only where they
     /// have one of the harness; not read, the panel says why and no sheet opens (a name not asked
     /// could replace one they have). Then the sheet over the panel, 420 pt or the window less 12 pt
     /// each side on a narrow page. Asked for a workspace the panel no longer shows, nothing opens.
-    private func storeLogin(_ offer: AgentOffer) {
+    private func storeKey(_ offer: AgentOffer) {
         guard let client, let place = startingIn else { return }
         let era = self.era
         byAPerson { [weak self] in
@@ -473,20 +476,33 @@ public final class WorkspacesView: NSView {
         }
     }
 
-    /// A login stored: where the panel is still open on its workspace, it says so at once, the
-    /// clipboard cleared there and then when it still held the key, so the line that says so shows;
-    /// then it shows what the route answers now, the harness chosen. With the panel gone, nothing
-    /// says it, so the clipboard is left as it is.
+    /// A key stored: where the panel is still open on its workspace, it says so at once, the
+    /// clipboard cleared there and then when it still held the key, so the line that says so shows.
+    /// A key stored beside a default the person had is then made the one in use; once it is, and the
+    /// same person is still signed in there, their starts take the key as the harness's way in, and
+    /// where it is not, the line says so and the way in is left as it was. Then it shows what the
+    /// route answers now, the harness chosen. With the panel gone, nothing says it, so the clipboard
+    /// is left as it is.
     private func loginStored(_ stored: StoreLogin, in place: (project: String, name: String), era: Int) {
-        guard let client, let line = stored.stored, era == self.era, newSession.isOpen, startingIn.map({ $0 == place }) == true else { return }
+        guard let client, let line = stored.stored, let notUsed = stored.notUsed, era == self.era, newSession.isOpen, startingIn.map({ $0 == place }) == true else { return }
         if case .stored(_, clearsClipboard: true) = stored.stage { pasteboard.clearContents() }
         newSession.say(.stored(line))
         byAPerson { [weak self] in
             guard let self else { return }
+            let inUse = await Self.inUse(stored, client)
+            guard era == self.era else { return }
+            if inUse { memory.choose(.key, for: stored.harness) }
             let answer = await Self.result { () async throws(SailError) in try await client.send(.agents(workspace: place.name, project: place.project)) }
             guard era == self.era, newSession.isOpen, startingIn.map({ $0 == place }) == true else { return }
-            newSession.show(said(answer), memory: memory, stored: line, harness: stored.harness)
+            newSession.show(said(answer), memory: memory, stored: inUse ? line : notUsed, harness: stored.harness, inUse: inUse)
         }
+    }
+
+    /// Whether the key just stored is the one Start takes: the server made it the default as it
+    /// stored it, or made it so when asked now.
+    private static func inUse(_ stored: StoreLogin, _ client: SailClient) async -> Bool {
+        guard let use = stored.use else { return true }
+        return (try? await client.send(use)) != nil
     }
 
     /// The panel follows its row or closes: a row that moved (the list scrolled or drawn again), went,

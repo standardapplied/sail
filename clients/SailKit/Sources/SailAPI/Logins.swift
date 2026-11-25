@@ -42,4 +42,9 @@ extension Endpoint where Response == LoginStored {
     public static func storeLogin(_ value: String, kind: String, harness: String, name: String) throws(SailError) -> Self {
         Self(.put, Route.logins + [harness, name], body: try SailJSON.encode(["kind": kind, "value": value]))
     }
+
+    /// Makes the caller's login `name` of `harness` the default, the one its starts take.
+    public static func useLogin(harness: String, name: String) -> Self {
+        Self(.post, Route.logins + [harness, name + ":use"])
+    }
 }

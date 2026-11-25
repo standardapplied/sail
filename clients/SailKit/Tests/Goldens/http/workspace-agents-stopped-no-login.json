@@ -21,27 +21,6 @@
               "label": "API key"
             }
           ],
-          "login_refusal": {
-            "action": "Create an API key in the Claude Console, then agent login claude-code.",
-            "code": "login_not_stored",
-            "field_errors": [],
-            "message": "No Claude Code login stored for ana, so a Claude Code session cannot start in quay.",
-            "remedy": [
-              {
-                "text": "Create an API key in the Claude Console, then "
-              },
-              {
-                "args": [
-                  "claude-code"
-                ],
-                "run": "sail",
-                "verb": "agent login"
-              },
-              {
-                "text": "."
-              }
-            ]
-          },
           "mode_default": "default",
           "modes": [
             {

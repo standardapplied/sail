@@ -1,7 +1,7 @@
 {
   "request": {
     "method": "GET",
-    "path": "/v1/projects/harbor/workspaces/quay/agents"
+    "path": "/v1/projects/harbor/workspaces/dock/agents"
   },
   "response": {
     "body": {
@@ -21,27 +21,9 @@
               "label": "API key"
             }
           ],
-          "login_refusal": {
-            "action": "Choose one: agent login use claude-code home.",
-            "code": "login_not_stored",
-            "field_errors": [],
-            "message": "ana has no default Claude Code login, so a Claude Code session cannot start in quay; stored: home.",
-            "remedy": [
-              {
-                "text": "Choose one: "
-              },
-              {
-                "args": [
-                  "claude-code",
-                  "home"
-                ],
-                "run": "sail",
-                "verb": "agent login use"
-              },
-              {
-                "text": "."
-              }
-            ]
+          "login": {
+            "kind": "api-key",
+            "name": "default"
           },
           "mode_default": "default",
           "modes": [
@@ -87,13 +69,14 @@
                 "text": "Claude Code asks you to sign in with your Claude account when it starts, once in each workspace."
               }
             ],
-            "name": "Your Claude account"
+            "name": "Your Claude account",
+            "signed_in": false
           }
         },
         {
           "display": "Codex CLI",
           "harness": "codex",
-          "inside": false,
+          "inside": true,
           "kinds": [
             {
               "how": [
@@ -105,6 +88,10 @@
               "label": "API key"
             }
           ],
+          "login": {
+            "kind": "api-key",
+            "name": "work"
+          },
           "mode_default": "full-access",
           "modes": [
             {
@@ -114,19 +101,22 @@
             }
           ],
           "note": "Sail starts Codex CLI in a workspace with full access, running every command without asking and without its sandbox: that sandbox, bubblewrap, cannot start in a workspace's container.",
-          "refusal": {
-            "action": "An admin adds codex to harbor's agent install list and builds its template again.",
-            "code": "harness_not_installed",
-            "field_errors": [],
-            "message": "Codex CLI is not installed in harbor's workspaces; its agent installation lists Claude Code."
+          "sign_in": {
+            "how": [
+              {
+                "text": "Codex CLI asks you to sign in with your ChatGPT account when it starts, once in each workspace. Choose “Sign in with Device Code” there, after turning it on in your ChatGPT security settings."
+              }
+            ],
+            "name": "Your ChatGPT account",
+            "signed_in": false
           }
         }
       ],
-      "owner": "ana",
+      "owner": "uday",
       "project": "harbor",
-      "running": false,
+      "running": true,
       "schema_version": 1,
-      "workspace": "quay"
+      "workspace": "dock"
     },
     "status": 200
   }

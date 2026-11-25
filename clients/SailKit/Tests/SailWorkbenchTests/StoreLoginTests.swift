@@ -4,7 +4,7 @@ import SailKitTestSupport
 @testable import SailWorkbench
 import Testing
 
-/// The Store a Login sheet's model and its request, read from the goldens the server recorded: the
+/// The Store a Key sheet's model and its request, read from the goldens the server recorded: the
 /// kind is the first whose how names no command, the name is `default` unless the person has a login
 /// of the harness, the store is one request holding the value in its body alone, each refusal is
 /// the server's sentence under the key or, for a name, the name named again, and the clipboard is cleared only while it
@@ -89,8 +89,8 @@ import Testing
     @Test func theKindIsTheFirstWhoseHowNamesNoCommand() throws {
         let sheet = try #require(StoreLogin(try Self.offer(), logins: [], address: Self.address))
         #expect(sheet.kind.kind == "api-key" && sheet.label == "API key" && sheet.placeholder == "Paste your API key")
-        #expect(sheet.help == "Create an API key in the Claude Console." && sheet.title == "Store a Claude Code login")
-        #expect(sheet.fieldName == "Claude Code API key" && sheet.storeName == "Store Claude Code login")
+        #expect(sheet.help == "Create an API key in the Claude Console." && sheet.title == "Store a Claude Code key")
+        #expect(sheet.fieldName == "Claude Code API key" && sheet.storeName == "Store Claude Code key")
         #expect(sheet.kept == "Kept on 127.0.0.1:7979 for your sessions only. Sail never shows it again.")
         let codex = try #require(StoreLogin(try Self.offer(at: 1), logins: [], address: "https://sail.example.com"))
         #expect(codex.kind.kind == "api-key" && codex.help == "Create an API key at platform.openai.com/api-keys." && codex.place == "sail.example.com")
@@ -178,11 +178,11 @@ import Testing
         guard case let .stored(answer, cleared) = sheet.stage else { Issue.record("not stored: \(sheet.stage)"); return }
         let login = answer.login
         #expect(login.name == "default" && login.kind == "api-key" && login.harness == "claude-code" && login.isDefault && !cleared)
-        #expect(sheet.stored == "Stored Claude Code login “default”.")
+        #expect(sheet.stored == "Stored Claude Code key “default”.")
         var replacing = try Self.filled()
         _ = replacing.store(Self.pasted, clipboard: Self.elsewhere)
         replacing.answered(try Self.answer("login-replaced"), clipboard: 7)
-        #expect(replacing.stored == "Stored Claude Code login “default”." + Self.note, "the server's note on the login it replaced is not said")
+        #expect(replacing.stored == "Stored Claude Code key “default”." + Self.note, "the server's note on the login it replaced is not said")
         sheet.typed(holdsSomething: true)
         sheet.answered(try Self.answer("login-stored"), clipboard: 7)
         #expect(sheet.stage == .stored(answer, clearsClipboard: false), "a stored sheet changed")
@@ -263,7 +263,7 @@ import Testing
             sheet.answered(try Self.answer(each.answer), clipboard: each.now)
             guard case let .stored(_, cleared) = sheet.stage else { Issue.record("case \(index) not stored"); continue }
             #expect(cleared == each.clears, "case \(index): cleared \(cleared)")
-            #expect(sheet.stored == "Stored Claude Code login “default”." + (each.clears ? " Removed the key from the clipboard." : ""), "case \(index)")
+            #expect(sheet.stored == "Stored Claude Code key “default”." + (each.clears ? " Removed the key from the clipboard." : ""), "case \(index)")
         }
         var refused = try Self.filled()
         _ = refused.store(Self.pasted, clipboard: Clipboard(count: 4, text: Self.pasted))
