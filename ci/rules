@@ -42,7 +42,7 @@ sources() {
 }
 
 # The tree rules named in $1 over every source, each finding on stdout after its rule and a tab;
-# with $2 "first", only each rule's first finding, the read ending once every rule has one.
+# with $2 "first", a rule is read in no file after the one of its first finding.
 tree() {
   local list
   list=$(mktemp)
@@ -144,8 +144,7 @@ program() {
   cat <<'AWK'
 BEGIN {
   n = split(rules, wanted, " ")
-  for (k = 1; k <= n; k++) { on[wanted[k]] = 1; pending[wanted[k]] = 1 }
-  left = n
+  for (k = 1; k <= n; k++) on[wanted[k]] = 1
   ELLIPSIS = "\342\200\246"
   CONTROLS = "clients/SailApp/Sources/SailControls/"
   LISTS = "NSTableView|NSOutlineView|NSCollectionView|NSTableRowView|NSTableCellView"
@@ -167,13 +166,9 @@ BEGIN {
 }
 
 function finding(rule, line, found) {
-  if (first) {
-    if (!(rule in pending)) return
-    delete pending[rule]; on[rule] = 0; left--
-  }
+  if (first) on[rule] = 0
   gsub(/\n/, "\\n", found)
   print rule "\t" file ":" line ": " rule ": " found ": " SAY[rule]
-  if (first && left == 0) exit
 }
 
 function start(path) {
@@ -218,7 +213,7 @@ function calls(code) {
 
 # Whether a string that starts after prefix, on a line after the open calls carried, is a label:
 # the argument LABEL names of the call it is given to, "_" for an unnamed first argument, either
-# side of a conditional or after a ?? in it.
+# side of a conditional or after a ??, whose second ? the then side's pattern takes.
 function labelled(prefix,    open, argument, callee, key, alone) {
   open = calls(carry " " prefix)
   if (!match(open, /[(][^(]*$/)) return 0
@@ -230,7 +225,6 @@ function labelled(prefix,    open, argument, callee, key, alone) {
   sub(/[ \t]+$/, "", callee)
   alone = argument !~ /,/
   sub(/^.*,/, "", argument)
-  sub(/[^:]*[?][?][ \t]*$/, "", argument)
   sub(/[^:]*[?][^:]*:[ \t]*$/, "", argument)
   sub(/[^:]*[?][ \t]*$/, "", argument)
   if (argument ~ /^[ \t]*$/) {
