@@ -79,11 +79,9 @@ decide() {
 
 check() {
   [[ $# -le 1 ]] || usage
-  if [[ $# == 1 ]]; then
-    decide "$ON" "$NOT_YET" "$1" true
-  else
-    decide "$ON" "$NOT_YET" "" false
-  fi
+  local changes=false
+  [[ $# == 1 ]] && changes=true
+  decide "$ON" "$NOT_YET" "${1:-}" "$changes"
 }
 
 run() {
@@ -208,7 +206,7 @@ function calls(code,    n) {
 
 # Whether a string that starts after prefix, on a line after the open calls carried, is a label:
 # the argument LABEL names of the call it is given to, "_" for an unnamed first argument.
-function labelled(prefix,    open, argument, callee) {
+function labelled(prefix,    open, argument, callee, key) {
   open = calls(carry " " prefix)
   if (!match(open, /[(][^(]*$/)) return 0
   argument = substr(open, RSTART + 1)
@@ -217,11 +215,14 @@ function labelled(prefix,    open, argument, callee) {
   if (!match(open, /[A-Za-z_][A-Za-z0-9_]*[ \t]*$/)) return 0
   callee = substr(open, RSTART, RLENGTH)
   sub(/[ \t]+$/, "", callee)
-  if (argument ~ /^[ \t]*$/) return (callee ":_") in LABEL
-  sub(/^.*,/, "", argument)
-  if (argument !~ /^[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*:[ \t]*$/) return 0
-  gsub(/[ \t:]/, "", argument)
-  return (callee ":" argument) in LABEL
+  if (argument ~ /^[ \t]*$/) argument = "_"
+  else {
+    sub(/^.*,/, "", argument)
+    if (argument !~ /^[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*:[ \t]*$/) return 0
+    gsub(/[ \t:]/, "", argument)
+  }
+  key = callee ":" argument
+  return key in LABEL
 }
 
 function open_string(quotes, hashes, prefix) {
