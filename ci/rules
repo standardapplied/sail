@@ -13,8 +13,9 @@ cd "$(dirname "$0")/.."
 # blocks and character literals.
 #
 # A rule is on or not yet. check fails on a finding of a rule on, and on a rule not yet on that
-# finds nothing, whose findings it only counts: the pull request that clears a rule switches it on
-# by moving its name from NOT_YET to ON, and its row in AGENTS.md's "Quality gate" with it.
+# finds nothing; it reads a rule not yet on only to its first finding. The pull request that clears
+# a rule switches it on by moving its name from NOT_YET to ON, and its row in AGENTS.md's "Quality
+# gate" with it.
 
 readonly ON="ellipsis lists"
 readonly NOT_YET="comments sleeps tokens components function-lines parameters nesting file-lines"
@@ -40,29 +41,30 @@ sources() {
       done
 }
 
-# The tree rules named in $1 over every source, each finding on stdout after its rule and a tab.
+# The tree rules named in $1 over every source, each finding on stdout after its rule and a tab;
+# with $2 "first", only each rule's first finding, the read ending once every rule has one.
 tree() {
   local list
   list=$(mktemp)
   sources > "$list"
   if [[ -s $list ]]; then
-    LC_ALL=C xargs -0 awk -v rules="$1" "$(program)" < "$list"
+    LC_ALL=C xargs -0 awk -v rules="$1" -v first="${2:-}" "$(program)" < "$list"
   fi
   rm -f "$list"
 }
 
-# The findings of the rules named in $1 and $2, those of $2 only counted; a rule of $2 that finds
-# nothing is a finding of its own.
+# The findings of the rules named in $1; a rule named in $2 is read to its first finding only, and
+# fails when it has none.
 decide() {
-  local rules=$1 quiet=$2 base=$3 changes=$4 found said count
+  local rules=$1 quiet=$2 base=$3 changes=$4 found said count failed=0
   found=$(mktemp)
   said=$(mktemp)
-  tree "$rules $quiet" > "$found"
-  LC_ALL=C awk -F '\t' -v quiet="$quiet" "$(summary)" "$found" > "$said"
+  tree "$rules" > "$found"
+  [[ -z $quiet ]] || tree "$quiet" first >> "$found"
+  LC_ALL=C awk -F '\t' -v quiet="$quiet" "$(summary)" "$found" > "$said" || failed=1
   cat "$said"
   count=$(grep -c . "$said" || true)
   rm -f "$found" "$said"
-  local failed=0
   if [[ $count != 0 ]]; then
     [[ $count == 1 ]] && echo "ci/rules: 1 finding; its line names its rule." >&2 \
       || echo "ci/rules: $count findings; each line names its rule." >&2
@@ -116,7 +118,7 @@ list() {
 
 sentence() {
   [[ $1 == "$PULL_REQUEST" ]] && {
-    echo "A pull request adds or edits its own entry, changes/<spec-id>.md, adds no other, and never edits CHANGELOG.md."
+    echo "A pull request adds or edits its own entry, changes/<name>.md of its branch agent/<name>, adds or deletes no other, and never edits CHANGELOG.md."
     return
   }
   LC_ALL=C awk -v rules="$1" -v sentence="$1" "$(program)" < /dev/null
@@ -129,7 +131,11 @@ $1 in muted { seen[$1] = 1; next }
 { print substr($0, length($1) + 2) }
 END {
   for (k = 1; k <= n; k++)
-    if (!(q[k] in seen)) print "ci/rules: " q[k] " finds nothing now, so it is on: move it from NOT_YET to ON in ci/rules, and its row in AGENTS.md to the rules on."
+    if (!(q[k] in seen)) {
+      print "ci/rules: " q[k] " is not yet on and finds nothing now: switch it on, moving it from NOT_YET to ON in ci/rules and its row in AGENTS.md to the rules on." > "/dev/stderr"
+      held = 1
+    }
+  exit held
 }
 AWK
 }
@@ -138,7 +144,8 @@ program() {
   cat <<'AWK'
 BEGIN {
   n = split(rules, wanted, " ")
-  for (k = 1; k <= n; k++) on[wanted[k]] = 1
+  for (k = 1; k <= n; k++) { on[wanted[k]] = 1; pending[wanted[k]] = 1 }
+  left = n
   ELLIPSIS = "\342\200\246"
   CONTROLS = "clients/SailApp/Sources/SailControls/"
   LISTS = "NSTableView|NSOutlineView|NSCollectionView|NSTableRowView|NSTableCellView"
@@ -160,8 +167,13 @@ BEGIN {
 }
 
 function finding(rule, line, found) {
+  if (first) {
+    if (!(rule in pending)) return
+    delete pending[rule]; on[rule] = 0; left--
+  }
   gsub(/\n/, "\\n", found)
   print rule "\t" file ":" line ": " rule ": " found ": " SAY[rule]
+  if (first && left == 0) exit
 }
 
 function start(path) {
@@ -198,15 +210,16 @@ function repeat(s, times,    out) {
 
 # The calls still open at the end of code, with every group closed in it taken out; nothing when
 # no call is open.
-function calls(code,    n) {
+function calls(code) {
   gsub(/\[/, "(", code); gsub(/\]/, ")", code)
-  do { n = gsub(/[(][^()]*[)]/, "", code) + gsub(/[{][^{}]*[}]/, "", code) } while (n)
+  while (gsub(/[(][^()]*[)]/, "", code)) ;
   return code ~ /[(]/ ? code : ""
 }
 
 # Whether a string that starts after prefix, on a line after the open calls carried, is a label:
-# the argument LABEL names of the call it is given to, "_" for an unnamed first argument.
-function labelled(prefix,    open, argument, callee, key) {
+# the argument LABEL names of the call it is given to, "_" for an unnamed first argument, either
+# side of a conditional or after a ?? in it.
+function labelled(prefix,    open, argument, callee, key, alone) {
   open = calls(carry " " prefix)
   if (!match(open, /[(][^(]*$/)) return 0
   argument = substr(open, RSTART + 1)
@@ -215,9 +228,15 @@ function labelled(prefix,    open, argument, callee, key) {
   if (!match(open, /[A-Za-z_][A-Za-z0-9_]*[ \t]*$/)) return 0
   callee = substr(open, RSTART, RLENGTH)
   sub(/[ \t]+$/, "", callee)
-  if (argument ~ /^[ \t]*$/) argument = "_"
-  else {
-    sub(/^.*,/, "", argument)
+  alone = argument !~ /,/
+  sub(/^.*,/, "", argument)
+  sub(/[^:]*[?][?][ \t]*$/, "", argument)
+  sub(/[^:]*[?][^:]*:[ \t]*$/, "", argument)
+  sub(/[^:]*[?][ \t]*$/, "", argument)
+  if (argument ~ /^[ \t]*$/) {
+    if (!alone) return 0
+    argument = "_"
+  } else {
     if (argument !~ /^[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*:[ \t]*$/) return 0
     gsub(/[ \t:]/, "", argument)
   }

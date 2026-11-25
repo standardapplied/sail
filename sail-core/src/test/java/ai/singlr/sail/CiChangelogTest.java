@@ -35,6 +35,10 @@ class CiChangelogTest {
           + " entry in a file of its own instead, changes/<spec-id>.md, holding its bullets as"
           + " they would read under the version heading (changes/README.md).\n";
 
+  private static final String DELETES_X =
+      "ci/changelog: this change deletes changes/x.md, an entry not yet released: only the"
+          + " release's fold removes an entry.\n";
+
   @TempDir Path repo;
   private String base;
 
@@ -180,7 +184,8 @@ class CiChangelogTest {
     assertEquals(1, ran.exit());
     assertEquals(
         "ci/changelog: this change adds changes/mine.md, but its branch agent/the-spec names its"
-            + " entry changes/the-spec.md: put its bullets there instead.\n",
+            + " entry changes/the-spec.md (a branch agent/<name> keeps its entry in"
+            + " changes/<name>.md): put its bullets there instead.\n",
         ran.err());
   }
 
@@ -195,7 +200,8 @@ class CiChangelogTest {
     assertEquals(1, ran.exit());
     assertEquals(
         "ci/changelog: this change adds changes/mine.md, but its branch agent/x names its entry"
-            + " changes/x.md: put its bullets there instead.\n",
+            + " changes/x.md (a branch agent/<name> keeps its entry in changes/<name>.md): put its"
+            + " bullets there instead.\n",
         ran.err());
   }
 
@@ -209,8 +215,10 @@ class CiChangelogTest {
 
     assertEquals(1, ran.exit());
     assertEquals(
-        "ci/changelog: this change neither adds nor edits changes/the-spec.md: add it, holding its"
-            + " bullets as they would read under the version heading (changes/README.md).\n",
+        "ci/changelog: this change neither adds nor edits changes/the-spec.md, the entry its branch"
+            + " agent/the-spec names (a branch agent/<name> keeps its entry in changes/<name>.md):"
+            + " add it, holding its bullets as they would read under the version heading"
+            + " (changes/README.md).\n",
         ran.err());
   }
 
@@ -269,8 +277,10 @@ class CiChangelogTest {
 
     assertEquals(1, ran.exit());
     assertEquals(
-        "ci/changelog: this change neither adds nor edits changes/the-spec.md: add it, holding its"
-            + " bullets as they would read under the version heading (changes/README.md).\n",
+        "ci/changelog: this change neither adds nor edits changes/the-spec.md, the entry its branch"
+            + " agent/the-spec names (a branch agent/<name> keeps its entry in changes/<name>.md):"
+            + " add it, holding its bullets as they would read under the version heading"
+            + " (changes/README.md).\n",
         ran.err());
   }
 
@@ -286,8 +296,57 @@ class CiChangelogTest {
     assertEquals(1, ran.exit());
     assertEquals(
         "ci/changelog: this change adds changes/more.md, but its branch agent/the-spec names its"
-            + " entry changes/the-spec.md: put its bullets there instead.\n",
+            + " entry changes/the-spec.md (a branch agent/<name> keeps its entry in"
+            + " changes/<name>.md): put its bullets there instead.\n",
         ran.err());
+  }
+
+  @Test
+  void aSecondBranchOfOneSpecKeepsItsOwnEntryAndIsToldWhy() throws Exception {
+    write("changes/x.md", "- **X.** Merged.\n");
+    var merged = commit("2026-11-02T00:00:00Z");
+    git(Map.of(), "checkout", "-q", "-b", "agent/x-app");
+    write("changes/x.md", "- **X.** Merged.\n- **X, the app.** Later.\n");
+    commit("2026-11-03T00:00:00Z");
+
+    var ran = sh("ci/changelog", "check", merged);
+
+    assertEquals(1, ran.exit());
+    assertEquals(
+        "ci/changelog: this change neither adds nor edits changes/x-app.md, the entry its branch"
+            + " agent/x-app names (a branch agent/<name> keeps its entry in changes/<name>.md):"
+            + " add it, holding its bullets as they would read under the version heading"
+            + " (changes/README.md).\n",
+        ran.err());
+  }
+
+  @Test
+  void aChangeThatDeletesAnotherSpecsEntryIsRefused() throws Exception {
+    write("changes/x.md", "- **X.** Unreleased.\n");
+    var merged = commit("2026-11-02T00:00:00Z");
+    git(Map.of(), "checkout", "-q", "-b", "agent/y");
+    git(Map.of(), "rm", "-q", "changes/x.md");
+    write("changes/y.md", "- **Y.** New.\n");
+    commit("2026-11-03T00:00:00Z");
+
+    var ran = sh("ci/changelog", "check", merged);
+
+    assertEquals(1, ran.exit());
+    assertEquals(DELETES_X, ran.err());
+  }
+
+  @Test
+  void aChangeThatRenamesAnotherSpecsEntryIsRefused() throws Exception {
+    write("changes/x.md", "- **X.** Unreleased.\n");
+    var merged = commit("2026-11-02T00:00:00Z");
+    git(Map.of(), "checkout", "-q", "-b", "agent/y");
+    git(Map.of(), "mv", "changes/x.md", "changes/y.md");
+    commit("2026-11-03T00:00:00Z");
+
+    var ran = sh("ci/changelog", "check", merged);
+
+    assertEquals(1, ran.exit());
+    assertEquals(DELETES_X, ran.err());
   }
 
   @Test

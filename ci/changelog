@@ -13,12 +13,12 @@ cd "$(dirname "$0")/.."
 #
 # ci/changelog check [BASE], for a pull request (ci/rules' changes rule): refuses a BASE that is no
 # commit here, a change from BASE (default: where it left origin/main) that edits CHANGELOG.md, a
-# changes/ folder holding anything the fold would refuse, and a change that does not add or edit its
-# own entry or adds another. On a branch agent/<spec-id> (GITHUB_HEAD_REF in a pull request's run,
-# else the branch checked out) its own entry is changes/<spec-id>.md, which a spec's later pull
-# requests edit; on a branch of another name, the one it adds or any it edits. Editing another
-# entry, to correct what is not yet released, is no refusal. A base that has no changes/README.md
-# yet is not held to it.
+# changes/ folder holding anything the fold would refuse, a change that deletes or renames an entry
+# (only the fold removes one), and a change that does not add or edit its own entry or adds another.
+# A branch agent/<name> (GITHUB_HEAD_REF in a pull request's run, else the branch checked out) keeps
+# its entry in changes/<name>.md; a branch of another name adds at most one entry and adds or edits
+# one. Editing another entry, to correct what is not yet released, is no refusal. A base that has
+# no changes/README.md yet is not held to it.
 #
 # ci/changelog released VERSION, for a release tag: refuses unless the tagged commit folded, its
 # changes/ holding no entry and CHANGELOG.md's first version being VERSION.
@@ -141,16 +141,19 @@ entries_made() {
 }
 
 require_own_entry() {
-  local branch own added others count
+  local branch own added others deleted count why="a branch agent/<name> keeps its entry in $CHANGES/<name>.md"
   branch=${GITHUB_HEAD_REF:-$(git symbolic-ref --short -q HEAD || true)}
+  deleted=$(git diff --no-renames --name-only --diff-filter=D "$1" -- "$CHANGES" | grep -vxF "$README" || true)
+  [[ -z $deleted ]] ||
+    refuse "this change deletes $(paste -sd, - <<< "$deleted" | sed 's/,/, /g'), an entry not yet released: only the release's fold removes an entry."
   added=$(entries_made "$1" A)
   if [[ $branch == agent/?* ]]; then
     own="$CHANGES/${branch#agent/}.md"
     others=$(grep -vxF "$own" <<< "$added" || true)
     [[ -z $others ]] ||
-      refuse "this change adds $(paste -sd, - <<< "$others" | sed 's/,/, /g'), but its branch $branch names its entry $own: put its bullets there instead."
+      refuse "this change adds $(paste -sd, - <<< "$others" | sed 's/,/, /g'), but its branch $branch names its entry $own ($why): put its bullets there instead."
     grep -qxF "$own" <<< "$(entries_made "$1" AM)" ||
-      refuse "this change neither adds nor edits $own: add it, holding its bullets as they would read under the version heading ($README)."
+      refuse "this change neither adds nor edits $own, the entry its branch $branch names ($why): add it, holding its bullets as they would read under the version heading ($README)."
     return 0
   fi
   count=$(grep -c . <<< "$added" || true)

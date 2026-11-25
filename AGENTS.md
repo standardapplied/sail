@@ -41,9 +41,11 @@ and contracts: `ARCHITECTURE.md`. Build, gates, migrations, releases: `CONTRIBUT
 - A ruling in the spec that is wrong, or a scenario that cannot hold, is asked in the room
   (`spec comment <id> --question`) with your recommendation; never built around. Go on with the
   rest meanwhile.
-- A change's entry is one file, `changes/<spec-id>.md` (`changes/README.md`), which a spec's first
-  pull request adds and its later ones edit; a pull request may correct another entry not yet
-  released but adds no other, and none edits `CHANGELOG.md`, which only the release writes
+- A change's entry is one file (`changes/README.md`): a branch `agent/<name>` keeps it in
+  `changes/<name>.md`, so a spec's branch `agent/<spec-id>` adds `changes/<spec-id>.md`, its later
+  pull requests edit it (or add it again once a release has folded it), and a second branch of one
+  spec has an entry file of its own. A pull request may correct another entry not yet released
+  but adds or deletes no other, and none edits `CHANGELOG.md`, which only the release writes
   (`ci/changelog`). A schema or wire change is bumped once and said in that entry.
 - A change to what a working install does changes its `ci/fleet` rows in the same pull request;
   a task given to a fleet agent is one no repository already meets and asks no question.
@@ -253,7 +255,8 @@ and is burned down in its own pull request.
 
 ### The rules a script decides (`ci/rules`)
 
-`ci/check rules [BASE]` (`ci/rules check`) decides these in seconds, with no build. CI runs it in the
+`ci/check rules [BASE]` (`ci/rules check`) decides these with no build, in about a second on the devbox; it
+reads a rule not yet on only to its first finding. CI runs it in the
 first job of both workflows (`What the change touches`), which every other job needs, so no lane,
 and no macOS lane, starts on a change that breaks one; a pull request's run gives it the pull
 request's base, which also holds the pull request to its entry. It fails on a finding of a rule
@@ -266,9 +269,9 @@ blocks and character literals). `CiRulesTest` holds each rule to an offending an
 
 | Rule | On | Decides | Where, and what is exempt by role |
 |---|---|---|---|
-| `ellipsis` | yes | A menu item's or a button's label names its action, with no "…", "..." or `\u{2026}`; progress text keeps its ellipsis. Decided on a literal given as a label of the app's controls, on its call's line or a later one: `SailButton`'s title and `label:`, `LinkButton`'s title, `SailList.Action`'s title, `Sheet`'s and `WorkspacesModel.Question`'s `confirm:`, `Card.show`'s `button:` and `second:`, `Confirmation.ask`'s `action:`, `Command`'s `title:`, the menu bar's `item`, `directed` and `submenu` (`ShellApp.menu()`), AppKit's `NSMenuItem`, `NSMenu` and `NSButton` titles and `addItem`, `insertItem` and `addButton(withTitle:)` | `clients/*/Sources/`; the drive, `SailTestPasskey` |
+| `ellipsis` | yes | A menu item's or a button's label names its action, with no "…", "..." or `\u{2026}`; progress text keeps its ellipsis. Decided on a literal given as a label of the app's controls, on its call's line or a later one, either side of a conditional or after a `??`: `SailButton`'s title and `label:`, `LinkButton`'s title, `SailList.Action`'s title, `Sheet`'s and `WorkspacesModel.Question`'s `confirm:`, `Card.show`'s `button:` and `second:`, `Confirmation.ask`'s `action:`, `Command`'s `title:`, the menu bar's `item`, `directed` and `submenu` (`ShellApp.menu()`), AppKit's `NSMenuItem`, `NSMenu` and `NSButton` titles and `addItem`, `insertItem` and `addButton(withTitle:)` | `clients/*/Sources/`; the drive, `SailTestPasskey` |
 | `lists` | yes | A list is a `SailList` and its rows are its: an AppKit table, outline, collection, row or cell view made (called, through `.init`, qualified by `AppKit.`, or as a declared type's `.init()`) or inherited, also on the line after the class's colon | `clients/*/Sources/` outside `clients/SailApp/Sources/SailControls/`; the design system, the drive, `SailTestPasskey` |
-| `changes` | yes, a pull request's | Its entry (`ci/changelog check BASE`): on `agent/<spec-id>` it adds or edits `changes/<spec-id>.md` and adds no other; on a branch of another name it adds at most one and adds or edits one; it may edit another entry; it never edits `CHANGELOG.md` | a push to main, where the release folds, has no base |
+| `changes` | yes, a pull request's | Its entry (`ci/changelog check BASE`): on `agent/<name>` it adds or edits `changes/<name>.md` and adds no other; on a branch of another name it adds at most one and adds or edits one; it may edit another entry, never delete or rename one; it never edits `CHANGELOG.md` | a push to main, where the release folds, has no base |
 | `comments` | not yet | "No inline comments" (Code): a `//` or `/* */` comment that is not `///` or `/** */`; a `// MARK:` is one | Swift under `clients/`, Java under `*/src/`; a `Package.swift`'s first-line tools-version, a Java file's licence header (a block comment opening its first line) |
 | `sleeps` | not yet | A Swift test waits for the event it needs, never for time: a call of `Task.sleep`, `Thread.sleep`, `usleep`, `nanosleep`, `sleep`, or a `ContinuousClock()` or `SuspendingClock()` `sleep` | `clients/*/Tests/`; a fake clock's own `sleep`, declared or called on it |
 | `tokens` | not yet | A view takes its colours, fonts, spacing, radii and edge widths from the design system, never a literal: no colour or font constructor, no system colour but `.clear`, no literal but 0 for `spacing`, `NSEdgeInsets`, `cornerRadius`, `x`/`yRadius`, `lineWidth` or `borderWidth` | `clients/*/Sources/`; the design system (`clients/SailKit/Sources/SailDesign/`, `SailVT/Palette.swift`, `clients/SailApp/Sources/SailLook/`), the drive, `SailTestPasskey` |
@@ -316,7 +319,9 @@ A lesson from a red lane ends as a sentence here and, where a script can decide 
   file it must not judge is named once, in the script, by its role. The pull request that clears a
   rule moves its name from `NOT_YET` to `ON` in `ci/rules` and turns its row above on:
   `ci/rules check` fails on a rule not yet on that finds nothing, so it fails that pull request,
-  whichever lanes it runs, until it does.
+  whichever lanes it runs, until it does. A control that takes a label a person presses or
+  chooses adds its `callee:argument` to `LABEL` in `ci/rules`, with an offending fixture, in the
+  pull request that adds the control.
 - **Adding an ArchUnit rule.** A spec that establishes or consolidates a pattern adds one `@Test`
   to `ArchitectureRulesTest`, named for the rule, whose `because` names the one allowed way. A new
   module is added to `architecture/pom.xml` and to `ExclusionsShrinkTest`'s modules.

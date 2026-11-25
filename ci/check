@@ -33,8 +33,9 @@ Usage:
                                 or one Class=Rule[,Rule] entry (ci/exclusions)
   ci/check rules [BASE]         fail on a finding of every rule ci/rules has on, or on a rule not yet
                                 on that finds nothing; with BASE, a pull request's base, also on its
-                                entry: changes/<spec-id>.md neither added nor edited, another added,
-                                an edit of CHANGELOG.md, or one the release could not fold
+                                entry: changes/<name>.md of its branch agent/<name> neither added
+                                nor edited, another added or one deleted, an edit of CHANGELOG.md,
+                                or one the release could not fold
                                 (ci/rules check, ci/changelog check)
 EOF
   exit 2

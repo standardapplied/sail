@@ -44,8 +44,8 @@ class CiRulesTest {
       Pattern.compile(
           "- name: The rules a script decides\n\\s+env:\n\\s+BASE: (.+)\n\\s+run: (.+)\n");
   private static final String CHANGES =
-      "A pull request adds or edits its own entry, changes/<spec-id>.md, adds no other, and never"
-          + " edits CHANGELOG.md.";
+      "A pull request adds or edits its own entry, changes/<name>.md of its branch agent/<name>,"
+          + " adds or deletes no other, and never edits CHANGELOG.md.";
   private static final String MANY =
       "func many(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int) {}\n";
   private static final String DEEP =
@@ -229,6 +229,11 @@ class CiRulesTest {
             let add = SailButton(
                 icon: .plus,
                 label: "New…", look: look, target: nil, action: nil)
+            let shell = SailButton(open ? "Open a Shell…" : "Close", kind: .secondary, look: look, target: nil, action: nil)
+            let close = SailButton(open ? "Close" : "Close All…", kind: .secondary, look: look, target: nil, action: nil)
+            let retry = LinkButton(button ?? "Try Again…", look: look, target: nil, action: nil)
+            let stop = NSMenuItem(title: busy ? "Stopping" : "Stop…", action: nil, keyEquivalent: "")
+            let name = NSMenuItem(title: tab?.title ?? "Untitled…", action: nil, keyEquivalent: "")
             """,
             List.of(
                 "1: \"Delete…\"",
@@ -256,7 +261,12 @@ class CiRulesTest {
                 "21: \"Later…\"",
                 "22: \"\\n    Print…\\n    \"",
                 "25: \"Find…\"",
-                "28: \"New…\""),
+                "28: \"New…\"",
+                "29: \"Open a Shell…\"",
+                "30: \"Close All…\"",
+                "31: \"Try Again…\"",
+                "32: \"Stop…\"",
+                "33: \"Untitled…\""),
             """
             banner.show("Reconnecting…", button: "Reconnect Now")
             let open = NSMenuItem(title: "Open", action: nil, keyEquivalent: "")
@@ -269,6 +279,8 @@ class CiRulesTest {
             let sheet = Sheet(title: "Delete…?", body: "Deleting…", confirm: "Delete", kind: .destructive, look: look, titleFont: titleFont)
             let back = SailButton(#"Back\\u{2026}"#, kind: .quiet, look: look, target: nil, action: nil)
             let more = SailButton(icon: .more, label: "More", look: look, target: nil, action: nil)
+            banner.show(lost ? "Lost…" : "Reconnecting…", button: retrying ? "Retry" : "Reconnect Now")
+            let ellipsis = item("Ellipsis", #selector(TerminalView.insertEllipsis(_:)), "…")
             """),
         Arguments.of(
             "tokens",
@@ -513,9 +525,9 @@ class CiRulesTest {
     assertEquals(
         new Ran(
             1,
-            "ci/rules: sleeps finds nothing now, so it is on: move it from NOT_YET to ON in"
-                + " ci/rules, and its row in AGENTS.md to the rules on.\n",
-            "ci/rules: 1 finding; its line names its rule.\n"),
+            "",
+            "ci/rules: sleeps is not yet on and finds nothing now: switch it on, moving it from"
+                + " NOT_YET to ON in ci/rules and its row in AGENTS.md to the rules on.\n"),
         sh("ci/rules", "check"));
   }
 
@@ -534,9 +546,10 @@ class CiRulesTest {
         new Ran(
             1,
             "",
-            "ci/changelog: this change neither adds nor edits changes/the-spec.md: add it, holding"
-                + " its bullets as they would read under the version heading"
-                + " (changes/README.md).\n"),
+            "ci/changelog: this change neither adds nor edits changes/the-spec.md, the entry its"
+                + " branch agent/the-spec names (a branch agent/<name> keeps its entry in"
+                + " changes/<name>.md): add it, holding its bullets as they would read under the"
+                + " version heading (changes/README.md).\n"),
         bash(step.get(1), Map.of("BASE", base)));
 
     write("changes/the-spec.md", "- **Pane.** One.\n");
@@ -544,6 +557,22 @@ class CiRulesTest {
 
     assertEquals(new Ran(0, "", HELD_WITH_ENTRY), bash(step.get(1), Map.of("BASE", base)));
     assertEquals(new Ran(0, "", HELD), bash(step.get(1), Map.of("BASE", "")));
+  }
+
+  @Test
+  void theReleasesFoldPassesTheStepAPushToMainRuns() throws Exception {
+    var step = ciStep(".github/workflows/ci.yml");
+    notYetRulesFindOneEach();
+    write("CHANGELOG.md", "# Changelog\n");
+    write("changes/one.md", "- **One.** Unreleased.\n");
+    write("changes/two.md", "- **Two.** Unreleased.\n");
+    commit();
+
+    assertEquals(0, sh("ci/changelog", "0.77.0").exit());
+    commit();
+
+    assertEquals(new Ran(0, "", HELD), bash(step.get(1), Map.of("BASE", "")));
+    assertEquals(0, sh("ci/changelog", "released", "0.77.0").exit());
   }
 
   @Test
