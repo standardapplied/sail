@@ -31,6 +31,11 @@ public final class WorkbenchView: NSView {
     var onSignIn: @MainActor () -> Void = {}
     /// A runner tab in a workspace attached or went, so what counts its sessions counts again.
     var onRunnerTabs: @MainActor (_ project: String, _ name: String) -> Void = { _, _ in }
+    /// This Mac's terminals changed (one opened, went, was titled, moved folder or ended), which
+    /// This Mac's page lists (``localSessions``).
+    var onSessions: @MainActor () -> Void = {}
+    /// How each of this Mac's panes whose session ended, the pane kept, ended ("exited 3 · 11:02").
+    private var endings: [PaneID: String] = [:]
     /// The window is closed or in the Dock: no workspace's files are followed.
     var filesAway = false
     /// Starts a workspace for its files panel's Start, answering nil once started or what refused it.
@@ -120,9 +125,24 @@ public final class WorkbenchView: NSView {
     /// The first showing restores what lives; every showing gives the focused pane the keys.
     func shown() {
         if let focused { window?.makeFirstResponder(focused.terminal) }
+        restoreOnce()
+    }
+
+    /// What lives restored, once, whether or not the terminals are shown: This Mac's page lists them.
+    func restoreOnce() {
         guard !started else { return }
         started = true
         Task { await restore() }
+    }
+
+    /// This Mac's terminals as its page lists them, a row each.
+    var localSessions: [LocalSession] {
+        model.localSessions(ended: endings, hostNames: [Self.hostName], home: NSHomeDirectory())
+    }
+
+    /// Pane `id` focused and its tab chosen: Open on This Mac's row.
+    func focus(_ id: PaneID) {
+        change { $0.focus(id) }
     }
 
     private func restore() async {
@@ -250,6 +270,7 @@ public final class WorkbenchView: NSView {
         }
         strip.show(items, selected: model.selected)
         onTitle(model.selectedTab.map { model.title(of: $0.id) } ?? ShellApp.title)
+        onSessions()
     }
 
     /// The selected tab laid out again, the rest as it was: a divider moved by drag or key.
@@ -370,6 +391,7 @@ public final class WorkbenchView: NSView {
     }
 
     private func remove(_ view: TerminalPane) {
+        endings[view.id] = nil
         model.close(view.id)
         view.removeFromSuperview()
         panes[view.id] = nil
@@ -390,10 +412,14 @@ public final class WorkbenchView: NSView {
             showTitles()
         case let .screen(.workingDirectory(folder)):
             model.setFolder(folder, of: view.id)
+            onSessions()
         case let .phase(.ended(.ended(reason))) where Ending.closesPane(reason: reason, lived: ContinuousClock.now - view.opened):
             view.detach()
             remove(view)
             apply()
+        case let .phase(.ended(end)) where !view.place.onRunner && end != .closed:
+            endings[view.id] = Self.said(end, at: Date())
+            onSessions()
         default:
             break
         }
@@ -444,10 +470,26 @@ public final class WorkbenchView: NSView {
         .thisMac(folder: model.folderForNewPane(hostNames: [Self.hostName], isFolder: Self.isFolder) ?? NSHomeDirectory())
     }
 
+    /// How a session of this Mac ended, its pane kept, and when: "exited 3 · 11:02".
+    static func said(_ end: SessionEnd, at date: Date) -> String {
+        let how = if case let .ended(reason) = end, reason.hasPrefix("exited("), reason.hasSuffix(")") {
+            "exited " + reason.dropFirst("exited(".count).dropLast()
+        } else {
+            end.description
+        }
+        return "\(how) · \(clock.string(from: date))"
+    }
+
+    private static let clock = {
+        let clock = DateFormatter()
+        clock.dateFormat = "HH:mm"
+        return clock
+    }()
+
     /// This Mac's name as `hostname` says it, read from the kernel: `ProcessInfo.hostName` asks
     /// the network, which can hold the main thread for seconds and has macOS ask the person for
-    /// local network access.
-    private static let hostName: String = {
+    /// local network access. It is said on This Mac's page and sent nowhere.
+    package static let hostName: String = {
         var name = [CChar](repeating: 0, count: 256)
         gethostname(&name, name.count)
         return String(decoding: name.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
@@ -570,7 +612,14 @@ public final class WorkbenchView: NSView {
 
     @objc public func closePane(_: Any?) {
         if let file = filePaneHoldingKeys { return file.closePressed() }
-        guard let pane = focused, !leaving(elsewhere: [pane]).isEmpty else { return }
+        guard let pane = focused else { return }
+        endSession(pane.id)
+    }
+
+    /// Ends pane `id`'s session as closing it does, asking first as Close asks: Close, and End
+    /// Session on This Mac's row.
+    func endSession(_ id: PaneID) {
+        guard let pane = panes[id], !leaving(elsewhere: [pane]).isEmpty else { return }
         confirm(ending: [pane], question: "Close this terminal?", detail: "The program running in it will end.")
     }
 

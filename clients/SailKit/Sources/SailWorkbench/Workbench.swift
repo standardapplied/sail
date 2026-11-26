@@ -3,6 +3,22 @@ import CoreGraphics
 #endif
 import Foundation
 
+/// One of This Mac's terminals as its project lists it (``Workbench/localSessions(ended:hostNames:home:)``).
+public struct LocalSession: Hashable, Sendable {
+    public let pane: PaneID
+    public let title: String
+    public let folder: String
+    /// How its session ended ("exited 3 · 11:02"), nil while it runs.
+    public let ended: String?
+
+    public init(pane: PaneID, title: String, folder: String, ended: String?) {
+        self.pane = pane
+        self.title = title
+        self.folder = folder
+        self.ended = ended
+    }
+}
+
 /// One tab; `history` holds its panes in the order last focused, the focused one last.
 public struct Tab: Hashable, Sendable {
     public let id: TabID
@@ -285,16 +301,38 @@ public struct Workbench: Hashable, Sendable {
         if panes[pane]?.firstHost == nil { panes[pane]?.firstHost = ReportedFolder.host(reported) ?? "" }
     }
 
-    /// The person's name for the tab, else where its focused pane is when that is a workspace (the
-    /// second unnamed tab in one workspace "acme · try 2", so two are told apart), else that pane's
-    /// program title, else ``untitled``.
+    /// The person's name for the tab, else where its focused pane is when that is a workspace, else
+    /// that pane's program title, else ``untitled``; an unnamed tab of a workspace, or untitled, is
+    /// numbered after the tabs before it called the same (the second "acme · try 2", "This Mac 2"),
+    /// so two are told apart.
     public func title(of tab: TabID) -> String {
         guard let tab = tabs.first(where: { $0.id == tab }) else { return Self.untitled }
-        let program = panes[tab.focused]?.programTitle ?? ""
         if let name = tab.name { return name }
-        guard let label = panes[tab.focused]?.label else { return program.isEmpty ? Self.untitled : program }
-        let before = tabs.prefix { $0.id != tab.id }.filter { $0.name == nil && panes[$0.focused]?.label == label }.count
+        guard let label = numbered(tab) else { return panes[tab.focused]?.programTitle ?? Self.untitled }
+        let before = tabs.prefix { $0.id != tab.id }.filter { numbered($0) == label }.count
         return before == 0 ? label : "\(label) \(before + 1)"
+    }
+
+    /// What an unnamed tab is called before its number: its focused pane's workspace, or
+    /// ``untitled`` while its program has said no title; nil for a named tab or a program's title.
+    private func numbered(_ tab: Tab) -> String? {
+        guard tab.name == nil, let pane = panes[tab.focused] else { return nil }
+        return pane.label ?? (pane.programTitle.isEmpty ? Self.untitled : nil)
+    }
+
+    /// This Mac's terminals as the This Mac project lists them: a row per pane on this Mac, in the
+    /// order of their tabs and, in a tab, reading order, each called by its tab's title, in the
+    /// folder its shell last reported on this Mac (``ReportedFolder``) or else opened in, `home` said
+    /// as ~, and ended as `ended` says (nil while its session runs).
+    public func localSessions(ended: [PaneID: String], hostNames: Set<String>, home: String) -> [LocalSession] {
+        tabs.flatMap { tab in
+            tab.layout.leaves.compactMap { id -> LocalSession? in
+                guard let pane = panes[id], !pane.place.onRunner else { return nil }
+                let folder = ReportedFolder.path(pane.reportedFolder, hostNames: hostNames) ?? pane.place.folder
+                let short = folder == home ? "~" : folder.hasPrefix(home + "/") ? "~" + folder.dropFirst(home.count) : folder
+                return LocalSession(pane: id, title: title(of: tab.id), folder: short, ended: ended[id])
+            }
+        }
     }
 
     /// Where a new tab or split opens: the selected tab's focused pane's reported folder when it is

@@ -337,6 +337,18 @@ struct Step: Decodable {
     /// The left panel's project of this name clicked once the panel lists it; the section then
     /// names it, within `seconds` (10 by default).
     var chooseProject: String?
+    /// The left panel's group heads are these, in order, each its title and its count when it has
+    /// one ("127.0.0.1:7979 9"), within `seconds` (10 by default).
+    var panelHeads: [String]?
+    /// This Mac's session row of this title clicked as a person clicks it: chosen, the list holding
+    /// the keys, within `seconds` (5 by default).
+    var chooseSession: String?
+    /// This Mac's session row of this title clicked, then Return: Terminals shows its tab, within
+    /// `seconds` (5 by default).
+    var openSession: String?
+    /// No request the control plane was asked names This Mac or this Mac's host, in its path or
+    /// its body.
+    var nothingNamesThisMac: Bool?
     /// The window's frame made `[width, height]`, its top left kept: each frame shot at the
     /// design's size.
     var window: [Double]?

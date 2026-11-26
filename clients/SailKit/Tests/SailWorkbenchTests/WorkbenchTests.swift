@@ -294,6 +294,45 @@ import Testing
         #expect(place.onRunner && !Place.thisMac(folder: "/").onRunner)
     }
 
+    /// This Mac's untitled shells are told apart as two tabs in one workspace are: "This Mac", then
+    /// "This Mac 2"; a shell its program titles, or a tab the person named, keeps that title and
+    /// takes no number.
+    @Test func thisMacsUntitledShellsAreToldApart() {
+        var bench = Workbench()
+        _ = bench.newTab(session: "mac-1", place: Self.home)
+        let titled = bench.newTab(session: "mac-2", place: Self.home)
+        _ = bench.newTab(session: "app-1", place: .workspace(project: "acme", name: "try"))
+        _ = bench.newTab(session: "mac-3", place: Self.home)
+        _ = bench.newTab(session: "mac-4", place: Self.home)
+        _ = bench.newTab(session: "mac-5", place: Self.home)
+        bench.setTitle("vim", of: titled)
+        bench.rename(bench.tabs[4].id, to: "api")
+        #expect(bench.tabs.map { bench.title(of: $0.id) } == ["This Mac", "vim", "acme · try", "This Mac 2", "api", "This Mac 3"])
+    }
+
+    /// The This Mac project's sessions are this Mac's panes as they are now, a row each in the order
+    /// of their tabs and, in a split, reading order: its tab's title, its folder (where its shell
+    /// last reported it was on this Mac, else where it opened, the home folder said as ~) and how its
+    /// session ended. A workspace's pane is none of them, and a pane closed leaves the list.
+    @Test func thisMacsSessionsAreItsPanesAsTheyAreNow() throws {
+        var bench = Workbench()
+        let first = bench.newTab(session: "mac-1", place: .thisMac(folder: "/home/u/workspace/sail"))
+        _ = bench.newTab(session: "app-1", place: .workspace(project: "acme", name: "try"))
+        let second = bench.newTab(session: "mac-2", place: Self.home)
+        let split = bench.split(.sideBySide, session: "mac-3", place: .thisMac(folder: "/tmp"), in: Self.room, minimum: Self.least, scale: 2)
+        let third = try #require(split)
+        bench.setFolder("file://elsewhere/srv", of: first)
+        bench.setFolder("file://box.local/home/u/Downloads", of: third)
+        let rows = bench.localSessions(ended: [third: "exited 3 · 11:02"], hostNames: ["box.local"], home: "/home/u")
+        #expect(rows == [
+            LocalSession(pane: first, title: "This Mac", folder: "~/workspace/sail", ended: nil),
+            LocalSession(pane: second, title: "This Mac 2", folder: "~", ended: nil),
+            LocalSession(pane: third, title: "This Mac 2", folder: "~/Downloads", ended: "exited 3 · 11:02"),
+        ])
+        bench.close(second)
+        #expect(bench.localSessions(ended: [:], hostNames: ["box.local"], home: "/home/u").map(\.pane) == [first, third])
+    }
+
     /// brings back none of its panes.
     @Test func aWorkspaceTabSaysWhereItIsAndStaysOutOfThisMacs() throws {
         var bench = Self.bench()

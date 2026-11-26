@@ -4,11 +4,12 @@ import SailControls
 import SailLook
 
 /// The app's one left panel, as the approved navigation draws it, with the Workspaces section's
-/// projects: a 46 pt header with the section's title over a hairline, and the projects as the
-/// panel's project rows (tile, name, readiness pill) under a "Projects" head, to its bottom edge:
-/// who is signed in and where is the user menu's to say. With no project it says so under the head;
-/// before any is listed it shows skeleton rows. It is 236 pt by default; its trailing edge drags it
-/// between 200 and 360 pt, remembered on this Mac.
+/// projects: a 46 pt header with the section's title over a hairline, then two groups to its
+/// bottom edge: THIS MAC, holding the one local project, and the control plane's projects under its
+/// host with their count, as the panel's project rows (tile, name, readiness pill). Who is signed in
+/// and where is the user menu's to say. With no project it says so under the control plane's head;
+/// before any is listed it shows skeleton rows there. It is 236 pt by default; its trailing edge
+/// drags it between 200 and 360 pt, remembered on this Mac.
 @MainActor
 package final class LeftPanel: NSView {
     static let width = (standard: 236.0, least: 200.0, most: 360.0), header = 46.0, edge = 6.0
@@ -32,6 +33,7 @@ package final class LeftPanel: NSView {
     private let mono: LabelFont
     private(set) var widthConstraint: NSLayoutConstraint!
     private var projects: [WorkspacesModel.Project] = []
+    private var heading: String?
     /// The names are drawn in the secondary ink: what is shown failed to refresh.
     private var stale = false
     /// What it last showed, drawn again in a new look.
@@ -97,6 +99,7 @@ package final class LeftPanel: NSView {
             name.look = look
         }
         projects = []
+        heading = nil
         if let shown {
             scroll.keepingScroll { render(shown) }
         }
@@ -111,10 +114,11 @@ package final class LeftPanel: NSView {
         emptyLine.attributedStringValue = NSAttributedString(string: panel.emptyLine ?? "", attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .foregroundColor: NSColor(look.textTertiary),
         ])
-        if panel.projects != projects || panel.stale != stale {
+        if panel.projects != projects || panel.stale != stale || panel.controlPlane != heading {
             projects = panel.projects
             stale = panel.stale
-            list.entries = [.head("Projects", count: panel.projects.count)] + panel.projects.map { project in
+            heading = panel.controlPlane
+            list.entries = thisMac + [.head(panel.controlPlane, count: panel.projects.count, icon: .cloud)] + panel.projects.map { project in
                 .item(row(project))
             }
         }
@@ -122,11 +126,13 @@ package final class LeftPanel: NSView {
         needsLayout = true
     }
 
-    /// The PROJECTS head with skeleton rows under it in place of the projects.
-    func renderLoading() {
+    /// This Mac's group, then the control plane's head with skeleton rows under it in place of its
+    /// projects.
+    func renderLoading(controlPlane: String) {
         shown = nil
         projects = []
-        list.entries = [.head("Projects", count: nil)]
+        heading = nil
+        list.entries = thisMac + [.head(controlPlane, count: nil, icon: .cloud)]
         loading(true)
         emptyLine.isHidden = true
     }
@@ -138,6 +144,15 @@ package final class LeftPanel: NSView {
         }
         needsLayout = true
     }
+
+    /// The THIS MAC head and its one project: the terminal in its well and a plain Local pill, no
+    /// action of any kind.
+    private var thisMac: [SailList.Entry] {
+        let name = WorkspacesModel.thisMac, cell = SidebarRowCell(name, icon: .terminal, template: nil, tag: Self.local, look: look, mono: mono)
+        return [.head(name, count: nil, icon: .laptop), .item(SailList.Item(id: name, name: name, voice: "\(name), \(Self.local.lowercased())", content: cell))]
+    }
+
+    static let local = "Local"
 
     /// A project's row: its tile, its name and its template's pill; VoiceOver reads its name and pill.
     private func row(_ project: WorkspacesModel.Project) -> SailList.Item {
@@ -163,7 +178,7 @@ package final class LeftPanel: NSView {
         let rows = Double(list.rect(ofRow: max(list.numberOfRows - 1, 0)).maxY)
         scroll.frame = NSRect(x: 0, y: top, width: Double(bounds.width) - Look.hairline, height: min(rows, max(Double(bounds.height) - top, 0)))
         list.frame = NSRect(x: 0, y: 0, width: Double(scroll.contentSize.width), height: rows)
-        let under = top + RowStyle.sidebar.head
+        let under = top + rows
         emptyLine.frame = NSRect(x: 14, y: under + 8, width: max(Double(bounds.width) - 28, 0), height: Double(emptyLine.intrinsicContentSize.height))
         for (index, (tile, name)) in skeletons.enumerated() {
             let middle = under + (Double(index) + 0.5) * RowStyle.sidebar.height

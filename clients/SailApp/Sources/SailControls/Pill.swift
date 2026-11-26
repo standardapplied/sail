@@ -3,9 +3,19 @@ import SailLook
 
 /// A workspace's or a template's state (`PillPaint`): a hairline frame in inner corners, a square
 /// dot carrying the colour, and the state in mono capitals. Starting, creating and building pulse
-/// their dot every 1.2 s, held still while motion is reduced.
+/// their dot every 1.2 s, held still while motion is reduced. A plain pill says words of its own
+/// in the same frame, with no dot, after an icon when it has one (This Mac's "Local").
 @MainActor
 public final class Pill: NSView {
+    /// A plain pill's words and icon.
+    private struct Plain {
+        let words: String
+        let icon: LineIcon?
+    }
+
+    /// A plain pill's icon, at the size of the type beside it.
+    static let iconSide = Look.Step.micro.points
+
     public var look: Look {
         didSet { repaint() }
     }
@@ -16,15 +26,27 @@ public final class Pill: NSView {
 
     public let size: PillSize
     private let mono: LabelFont
+    private let plain: Plain?
     let dot = PillDot()
 
-    public init(_ state: PillState, size: PillSize = .regular, look: Look, mono: LabelFont) {
+    public convenience init(_ state: PillState, size: PillSize = .regular, look: Look, mono: LabelFont) {
+        self.init(state, plain: nil, size: size, look: look, mono: mono)
+    }
+
+    /// A plain pill saying `words`, `icon` before them.
+    public convenience init(plain words: String, icon: LineIcon? = nil, size: PillSize = .regular, look: Look, mono: LabelFont) {
+        self.init(.unknown, plain: Plain(words: words, icon: icon), size: size, look: look, mono: mono)
+    }
+
+    private init(_ state: PillState, plain: Plain?, size: PillSize, look: Look, mono: LabelFont) {
         self.state = state
+        self.plain = plain
         self.size = size
         self.look = look
         self.mono = mono
         super.init(frame: .zero)
         dot.wantsLayer = true
+        dot.isHidden = plain != nil
         addSubview(dot)
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
@@ -46,11 +68,17 @@ public final class Pill: NSView {
     }
 
     private var label: NSAttributedString {
-        Draw.text(state.label, mono.font(size.text) as NSFont, paint.text, tracking: size.tracking, upper: true)
+        Draw.text(plain?.words ?? state.label, mono.font(size.text) as NSFont, paint.text, tracking: size.tracking, upper: true)
+    }
+
+    /// The room a plain pill's icon takes before its words.
+    private var iconRoom: Double {
+        plain?.icon == nil ? 0 : Self.iconSide + size.gap
     }
 
     override public var intrinsicContentSize: NSSize {
-        NSSize(width: size.width(label: Double(ceil(label.size().width))), height: size.height)
+        let words = Double(ceil(label.size().width))
+        return NSSize(width: plain == nil ? size.width(label: words) : size.leading + iconRoom + words + size.trailing, height: size.height)
     }
 
     override public func setFrameSize(_ newSize: NSSize) {
@@ -67,15 +95,18 @@ public final class Pill: NSView {
 
     override public func draw(_: NSRect) {
         Draw.box(bounds, radius: Look.innerRadius, fill: nil, edge: paint.edge, dash: paint.dashed ? PillSize.dash.map { CGFloat($0) } : [])
-        let label = self.label
-        let x = userInterfaceLayoutDirection == .rightToLeft ? size.trailing : size.leading + size.dot + size.gap
+        let label = self.label, leftToRight = userInterfaceLayoutDirection != .rightToLeft
+        let x = leftToRight ? size.leading + (plain == nil ? size.dot + size.gap : iconRoom) : size.trailing
         Draw.line(label, x: x, baseline: TextLine.baseline(top: (Double(bounds.height) - size.text) / 2, points: size.text, lineHeight: size.text))
+        guard let icon = plain?.icon else { return }
+        let side = Self.iconSide, width = Double(bounds.width)
+        Draw.icon(icon, in: NSRect(x: leftToRight ? size.leading : width - size.leading - side, y: (Double(bounds.height) - side) / 2, width: side, height: side), ink: paint.text)
     }
 
     private func repaint() {
         dot.ink = paint.dot
         dot.hollow = paint.hollow
-        setAccessibilityLabel(state.label)
+        setAccessibilityLabel(plain?.words ?? state.label)
         invalidateIntrinsicContentSize()
         Motion.pulse(dot.layer, state.pulses && window != nil)
         needsDisplay = true

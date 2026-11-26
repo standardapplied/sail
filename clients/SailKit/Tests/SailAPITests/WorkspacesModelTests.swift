@@ -22,6 +22,57 @@ import Testing
     }
     static let at = Date(timeIntervalSince1970: 1_800_000_000)
 
+    /// The panel's two groups: This Mac, the one local project, first, and chosen when it is; then
+    /// the control plane's projects under its host as a person reads it, with their count.
+    @Test func thisMacIsListedFirstApartFromTheControlPlanesProjects() throws {
+        var model = WorkspacesModel(person: WorkspacesModel.Person(handle: "uday", admin: true, confirmed: true, controlPlane: "https://main.acme.dev:8443"))
+        model.projectsListed(Self.answer(.projects, "projects"))
+        guard case let .shown(panel, .project) = model.screen else {
+            Issue.record("no project shown: \(model.screen)")
+            return
+        }
+        #expect(panel.controlPlane == "main.acme.dev:8443" && panel.projects.map(\.name) == ["harbor"] && panel.chosen == "harbor")
+        model.chooseThisMac()
+        guard case let .shown(local, .thisMac) = model.screen else {
+            Issue.record("This Mac not shown: \(model.screen)")
+            return
+        }
+        #expect(local.chosen == WorkspacesModel.thisMac && local.controlPlane == "main.acme.dev:8443" && local.projects.map(\.name) == ["harbor"])
+    }
+
+    /// Choosing This Mac asks the control plane nothing and sends no name of it anywhere: the
+    /// project chosen there stays the one its requests name, and listing the projects again lists
+    /// that project, never This Mac. Chosen last, This Mac opens again; choosing a project leaves it.
+    @Test func thisMacIsChosenWithoutAskingTheControlPlane() throws {
+        var model = Self.listed(Self.uday)
+        model.chooseThisMac()
+        #expect(model.chosen == "harbor", "This Mac took the control plane's project: \(model.chosen ?? "none")")
+        let again = model.projectsListed(Self.answer(.projects, "projects"))
+        #expect(again != nil && model.chosen == "harbor")
+        guard case .shown(_, .thisMac) = model.screen else {
+            Issue.record("listing the projects left This Mac: \(model.screen)")
+            return
+        }
+        var reopened = WorkspacesModel(person: Self.uday, chosen: WorkspacesModel.thisMac)
+        reopened.projectsListed(Self.answer(.projects, "projects"))
+        guard case let .shown(panel, .thisMac) = reopened.screen else {
+            Issue.record("This Mac chosen last did not open: \(reopened.screen)")
+            return
+        }
+        #expect(panel.chosen == WorkspacesModel.thisMac && reopened.chosen == "harbor")
+        _ = reopened.choose("harbor")
+        guard case .shown(_, .project) = reopened.screen else {
+            Issue.record("harbor chosen, still \(reopened.screen)")
+            return
+        }
+    }
+
+    /// This Mac's page names the Mac and the control plane it is kept from, and says what it is not.
+    @Test func thisMacsPageSaysItIsKeptHere() {
+        #expect(WorkspacesModel.thisMacLede(host: "mara-mbp", controlPlane: "sail.example.com") == "Shells on mara-mbp. Only this Mac sees them; nothing here is sent to sail.example.com.")
+        #expect(WorkspacesModel.thisMacNote == "This Mac has no repositories, agents, size or template, and cannot be renamed or deleted. Agents run in workspaces on the runner.")
+    }
+
     static func answer<Response>(_ endpoint: Endpoint<Response>, _ golden: String) -> Result<Response, SailError> {
         do {
             return .success(try endpoint.decode(response(try Exchange(golden))))

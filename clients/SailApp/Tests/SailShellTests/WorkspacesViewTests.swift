@@ -4,6 +4,8 @@ import SailControls
 import SailKitTestSupport
 import SailLook
 @testable import SailShell
+import SailTestPasskey
+import SailWorkbench
 import Testing
 
 /// The Workspaces section drawn from the server's recorded answers: the left panel and a project's
@@ -703,6 +705,129 @@ import Testing
         #expect(panel.widthConstraint.constant == 200)
         panel.resize(to: 260)
         #expect(panel.widthConstraint.constant == 260)
+    }
+
+    // MARK: This Mac
+
+    static let shells = [
+        LocalSession(pane: PaneID(1), title: "This Mac", folder: "~/workspace/sail", ended: nil),
+        LocalSession(pane: PaneID(2), title: "This Mac 2", folder: "~/Downloads", ended: "exited 3 · 11:02"),
+    ]
+
+    /// A list's entries as a line each: a head's title, count and icon; an item's id and actions.
+    static func said(_ entries: [SailList.Entry]) -> [String] {
+        entries.map { entry in
+            switch entry {
+            case let .head(title, count, icon): "head \(title) \(count.map { "\($0)" } ?? "-") \(icon?.rawValue ?? "-")"
+            case let .item(item): "item \(item.id) \(item.actions.map { "\($0.title)\($0.onRow ? "" : " in ⋯")\($0.key.isEmpty ? "" : " ⌘\($0.key)")" })"
+            }
+        }
+    }
+
+    /// The item at `index` of `entries`, nil for a head or none.
+    static func item(_ entries: [SailList.Entry], _ index: Int) -> SailList.Item? {
+        guard entries.indices.contains(index), case let .item(item) = entries[index] else { return nil }
+        return item
+    }
+
+    /// The panel's two groups: THIS MAC with its laptop, holding the one local project (the terminal
+    /// in its well, a plain Local pill, no action of any kind, so no Delete, Build Template or New
+    /// Workspace), then the control plane's projects under its host with their count.
+    @Test func thisMacIsListedFirstUnderItsOwnHead() async throws {
+        let (view, window, _) = try await Self.listed()
+        defer { window.orderOut(nil) }
+        #expect(Self.said(view.panel.list.entries) == ["head This Mac - laptop", "item This Mac []", "head 127.0.0.1 1 cloud", "item harbor []"])
+        let local = try #require(Self.item(view.panel.list.entries, 1), "no This Mac row")
+        #expect(local.voice == "This Mac, local" && Self.found(Pill.self, in: local.content).map { $0.accessibilityLabel() } == ["Local"])
+    }
+
+    /// Choosing This Mac shows its page with this Mac's terminals and asks the control plane
+    /// nothing: no request names This Mac or this Mac's host, then or at the next listing, which
+    /// leaves This Mac shown.
+    @Test func thisMacsPageAsksTheControlPlaneNothing() async throws {
+        let (view, window, server) = try await Self.listed()
+        defer { window.orderOut(nil) }
+        var shown = 0
+        view.onThisMacShown = { shown += 1 }
+        view.sessions = Self.shells
+        let before = await server.requests.count
+        view.panel.onChoose(WorkspacesModel.thisMac)
+        let lines = [
+            "Workspaces", "This Mac", "Shells on \(WorkbenchView.hostName). Only this Mac sees them; nothing here is sent to 127.0.0.1.",
+            "This Mac · running · ~/workspace/sail · \(LocalProjectView.program)", "This Mac 2 · ended · ~/Downloads · exited 3 · 11:02",
+        ]
+        #expect(view.text == lines.joined(separator: "\n") && view.project.isHidden && !view.local.isHidden && shown > 0, "\(view.text)")
+        #expect(await server.requests.count == before, "choosing This Mac asked the control plane")
+        await view.refresh()
+        let requests = await server.requests, host = WorkbenchView.hostName
+        let named = requests.filter { request in
+            [request.path, String(decoding: request.body ?? Data(), as: UTF8.self)].contains { sent in
+                ["This Mac", "This%20Mac", "This+Mac"].contains { sent.contains($0) } || !host.isEmpty && sent.contains(host)
+            }
+        }
+        #expect(named.isEmpty, "requests named This Mac: \(named.map(\.path))")
+        #expect(view.text.hasPrefix("Workspaces\nThis Mac\n") && view.panel.list.chosen == WorkspacesModel.thisMac, "\(view.text)")
+    }
+
+    /// This Mac's rows are its terminals as the workbench tells them, a row each: Open, and in its ⋯
+    /// only End Session (⌘W), nothing else; a terminal gone leaves the list at once.
+    @Test func thisMacsRowsAreItsTerminalsNow() async throws {
+        let (view, window, _) = try await Self.listed()
+        defer { window.orderOut(nil) }
+        view.panel.onChoose(WorkspacesModel.thisMac)
+        view.sessions = Self.shells
+        let row = { (id: String) in "item \(id) [\"Open\", \"End Session in ⋯ ⌘w\"]" }
+        #expect(Self.said(view.local.list.entries) == ["head Sessions 2 -", row("1"), row("2")])
+        var acts: [LocalProjectView.Act] = []
+        view.local.on = { acts.append($0) }
+        let second = try #require(Self.item(view.local.list.entries, 2), "no second row")
+        second.actions.forEach { $0.run() }
+        #expect(acts == [.open(PaneID(2)), .end(PaneID(2))])
+        view.sessions = [Self.shells[0]]
+        #expect(Self.said(view.local.list.entries) == ["head Sessions 1 -", row("1")])
+    }
+
+    /// The keys under This Mac's rows show only while a row is chosen in the list holding the keys;
+    /// New Shell holds ⌘T and opens a shell, nothing else: no chooser.
+    @Test func thisMacsKeysShowOnlyWhileARowIsChosen() async throws {
+        let (view, window, _) = try await Self.listed()
+        defer { window.orderOut(nil) }
+        view.panel.onChoose(WorkspacesModel.thisMac)
+        view.sessions = Self.shells
+        let shown = { view.local.keys.arrangedSubviews.filter { !$0.isHidden }.count }
+        #expect(window.makeFirstResponder(view.local.list) && shown() == 0, "keys shown with no row chosen")
+        view.local.list.choose("1")
+        #expect(shown() == 3, "\(shown()) keys shown with a row chosen")
+        let words = view.local.keys.arrangedSubviews.flatMap { Self.found(NSTextField.self, in: $0).map(\.stringValue) }
+        #expect(words == ["open", "new shell", "end session"])
+        var acts: [LocalProjectView.Act] = []
+        view.local.on = { acts.append($0) }
+        let button = view.local.newShell
+        #expect(button.keyEquivalent == "t" && button.keyEquivalentModifierMask == .command && !button.isHidden)
+        let action = try #require(button.action)
+        #expect(NSApp.sendAction(action, to: button.target, from: button))
+        #expect(acts == [.newShell] && !view.newSession.isOpen)
+    }
+
+    /// This Mac's page acts in Terminals: Open shows its row's tab with that terminal focused, New
+    /// Shell goes to Terminals with no chooser, and the page's rows are the workbench's panes, a
+    /// pane closed leaving them at once.
+    @Test func thisMacsPageActsInTerminals() throws {
+        let file = FileManager.default.temporaryDirectory.appending(path: "sail-this-mac-\(UUID().uuidString.prefix(8)).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let shell = try ShellApp(fonts: LookTests.fonts, helper: nil, look: .light, passkeys: { _ in SoftwarePasskey(file: file) }, defaults: ReattachTests.defaults())
+        let place = Place.thisMac(folder: NSHomeDirectory())
+        let first = shell.thisMac.model.newTab(session: "mac-this-a", place: place)
+        let second = shell.thisMac.model.newTab(session: "mac-this-b", place: place)
+        shell.thisMac.apply()
+        #expect(shell.workspaces.sessions.map(\.pane) == [first, second] && shell.workspaces.sessions.map(\.title) == ["This Mac", "This Mac 2"])
+        shell.workspaces.local.on(.open(first))
+        #expect(shell.rail.selected == .terminals && shell.thisMac.model.focusedPane?.id == first)
+        shell.select(.workspaces)
+        shell.workspaces.local.on(.newShell)
+        #expect(shell.rail.selected == .terminals && !shell.workspaces.newSession.isOpen)
+        shell.thisMac.change { _ = $0.close(second) }
+        #expect(shell.workspaces.sessions.map(\.pane) == [first])
     }
 }
 

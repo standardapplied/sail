@@ -316,6 +316,18 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if rail.selected == .workspaces { select(.workspaces) }
     }
 
+    /// What a person does on This Mac's page, done in Terminals: a row's Open shows its tab with
+    /// that terminal focused, New Shell opens a shell there at once, End Session ends it as Close does.
+    private func onThisMac(_ act: LocalProjectView.Act) {
+        switch act {
+        case let .open(pane):
+            thisMac.focus(pane)
+            select(.terminals)
+        case .newShell: thisMac.newTab(nil)
+        case let .end(pane): thisMac.endSession(pane)
+        }
+    }
+
     /// Who is signed in now and the API as them, which every runner tab asks at each ticket.
     private func signedIn() -> (handle: String, tickets: any TicketSource)? {
         guard let standing = flow.standing, let client = flow.client() else { return nil }
@@ -552,6 +564,12 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         workspaces.onSignIn = { [weak self] in self?.select(.account) }
         thisMac.onRunnerTabs = { [weak self] project, name in self?.workspaces.recount(project: project, name: name) }
+        thisMac.onSessions = { [weak self] in
+            guard let self else { return }
+            workspaces.sessions = thisMac.localSessions
+        }
+        workspaces.onThisMacShown = { [weak self] in self?.thisMac.restoreOnce() }
+        workspaces.local.on = { [weak self] act in self?.onThisMac(act) }
         workspaces.onOpen = { [weak self] project, name in
             self?.select(.terminals)
             self?.thisMac.openWorkspace(project: project, name: name)

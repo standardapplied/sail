@@ -1,10 +1,22 @@
 import Foundation
 
 /// What the Workspaces view shows, from what the person did and what the server answered: the left
-/// panel's projects, and the chosen project's workspaces (yours, then other people's) with opening
-/// and creating one. The view only draws ``screen`` and sends the person's actions
-/// here; every word a person reads is the server's or this model's, never a command or a route.
+/// panel's projects, This Mac's first, and the chosen project's workspaces (yours, then other
+/// people's) with opening and creating one. The view only draws ``screen`` and sends the person's
+/// actions here; every word a person reads is the server's or this model's, never a command or a
+/// route.
 public struct WorkspacesModel: Sendable {
+    /// The one local project: this Mac's own shells, which exists on this Mac alone and is never
+    /// named to the control plane. No server project is called so (a name there is lowercase).
+    public static let thisMac = "This Mac"
+    /// What This Mac's page says it is not.
+    public static let thisMacNote = "This Mac has no repositories, agents, size or template, and cannot be renamed or deleted. Agents run in workspaces on the runner."
+
+    /// The line under This Mac's name: the Mac it is, and the control plane it is kept from.
+    public static func thisMacLede(host: String, controlPlane: String) -> String {
+        "Shells on \(host). Only this Mac sees them; nothing here is sent to \(controlPlane)."
+    }
+
     public struct Person: Equatable, Sendable {
         public let handle: String
         public let admin: Bool
@@ -19,6 +31,11 @@ public struct WorkspacesModel: Sendable {
             self.admin = admin
             self.confirmed = confirmed
             self.controlPlane = controlPlane
+        }
+
+        /// The control plane as a person reads it: its host, and its port when it has one.
+        public var named: String {
+            (try? ControlPlane(address: controlPlane))?.named ?? controlPlane
         }
 
         /// Who `signedIn` is, as its `whoami` confirmed this time, at the control plane's full
@@ -41,9 +58,13 @@ public struct WorkspacesModel: Sendable {
         case shown(Panel, Content)
     }
 
+    /// The left panel: This Mac's group, then the control plane's projects under its host.
     public struct Panel: Equatable, Sendable {
         public let projects: [Project]
+        /// The project chosen, ``WorkspacesModel/thisMac`` while This Mac is.
         public let chosen: String?
+        /// The control plane's host, which heads its projects' group.
+        public let controlPlane: String
         /// Who is signed in and their role ("ana · member"), which the empty card's line says.
         public let who: String
         /// What the panel says when it lists no project.
@@ -75,6 +96,8 @@ public struct WorkspacesModel: Sendable {
     public enum Content: Equatable, Sendable {
         case noProjects(Empty)
         case project(Page)
+        /// This Mac's page, its sessions this Mac's own.
+        case thisMac
     }
 
     public struct Page: Equatable, Sendable {
@@ -238,7 +261,10 @@ public struct WorkspacesModel: Sendable {
     public var lastStarted: String?
     /// The workspace whose agents route is being asked, for its New Session panel.
     public var askingAgentsIn: String?
+    /// The control plane's project chosen, kept while This Mac is shown in its place.
     public private(set) var chosen: String?
+    /// This Mac is shown, not ``chosen``.
+    public private(set) var thisMacChosen = false
     public private(set) var chosenRow: String?
     private var projects: [ProjectSummary]?
     private var projectsFailure: SailError?
@@ -264,7 +290,8 @@ public struct WorkspacesModel: Sendable {
     /// The model for `person`, the project they chose last (`chosen`) kept chosen while it is listed.
     public init(person: Person, chosen: String? = nil) {
         self.person = person
-        self.chosen = chosen
+        thisMacChosen = chosen == Self.thisMac
+        self.chosen = thisMacChosen ? nil : chosen
     }
 
     // MARK: Projects and lists
@@ -284,7 +311,7 @@ public struct WorkspacesModel: Sendable {
                 listing.clear()
                 return nil
             }
-            return name == chosen ? listAgain() : choose(name)
+            return name == chosen ? listAgain() : select(name)
         case let .failure(error):
             projectsFailure = error
             return nil
@@ -300,9 +327,19 @@ public struct WorkspacesModel: Sendable {
         return projectsAsked
     }
 
-    /// Chooses project `name`, its list's request. A create row typed or sent in a project stays
-    /// with it.
+    /// Chooses project `name` in This Mac's place, its list's request. A create row typed or sent in
+    /// a project stays with it.
     public mutating func choose(_ name: String) -> Int {
+        thisMacChosen = false
+        return select(name)
+    }
+
+    /// Shows This Mac: nothing is asked, and the control plane's project chosen stays so.
+    public mutating func chooseThisMac() {
+        thisMacChosen = true
+    }
+
+    private mutating func select(_ name: String) -> Int {
         chosen = name
         chosenRow = nil
         sessions = [:]
@@ -567,10 +604,12 @@ public struct WorkspacesModel: Sendable {
     public var screen: Screen {
         guard let projects else { return projectsFailure.map { .unreachable(unreachable($0)) } ?? .loading }
         let panel = Panel(
-            projects: projects.map { Project(name: $0.name, mark: Self.mark($0.template)) }, chosen: chosen, who: who,
+            projects: projects.map { Project(name: $0.name, mark: Self.mark($0.template)) }, chosen: thisMacChosen ? Self.thisMac : chosen,
+            controlPlane: person.named, who: who,
             emptyLine: projects.isEmpty ? "No project is open to you yet." : nil,
             stale: projectsFailure != nil || (chosen != nil && listing.listed == chosen && listFailure != nil)
         )
+        if thisMacChosen { return .shown(panel, .thisMac) }
         guard let project = projects.first(where: { $0.name == chosen }) else {
             let body = person.admin
                 ? "Add a project on \(person.controlPlane), or add yourself to one. It then appears on the left, and you can create your own workspaces in it."
