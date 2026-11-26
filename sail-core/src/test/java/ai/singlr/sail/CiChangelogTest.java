@@ -19,6 +19,8 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * {@code ci/changelog}, the release's fold of {@code changes/} into {@code CHANGELOG.md}, and
@@ -30,6 +32,11 @@ class CiChangelogTest {
   private static final Path CI = Path.of("..", "ci").toAbsolutePath();
   private static final String RELEASED = "# Changelog\n\n## 0.74.0\n\n- **Old.** Released.\n";
   private static final String README = "One file per change.\n";
+  private static final String NO_HEADLINE =
+      "ci/changelog: changes/mine.md:%d is a bullet that does not open with its bold headline"
+          + " closed on the same line: write it as '- **…** …'.\n";
+  private static final String SHELL =
+      "- **Shell opens a new shell.** A new tab runs the login shell.";
   private static final String EDITS_CHANGELOG =
       "ci/changelog: this change edits CHANGELOG.md, which only the release writes. Put its"
           + " entry in a file of its own instead, changes/<spec-id>.md, holding its bullets as"
@@ -437,6 +444,63 @@ class CiChangelogTest {
     var ran = sh("ci/changelog", "check", before);
 
     assertEquals(0, ran.exit(), ran.err());
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(
+      strings = {
+        "- fixed a thing",
+        "- fixed a thing - **bold only later.**",
+        "- ** Spaced.** Before its headline.",
+        "- **Unclosed headline.",
+        "- ****",
+        "* **Starred.** Not a dash.",
+        "+ **Plus.** Not a dash.",
+        "-\tfixed a thing"
+      })
+  void aBulletWithoutItsBoldHeadlineIsRefusedNamingItsLineAtThePullRequestAndAtTheFold(
+      String bullet) throws Exception {
+    write("changes/mine.md", SHELL + "\n" + bullet);
+    commit("2026-11-02T00:00:00Z");
+    var refusal = NO_HEADLINE.formatted(2);
+
+    var checked = sh("ci/changelog", "check", base);
+    var folded = sh("ci/changelog", "0.75.0");
+
+    assertEquals(new Ran(1, "", refusal), checked);
+    assertEquals(new Ran(1, "", refusal), folded);
+    assertEquals(RELEASED, Files.readString(repo.resolve("CHANGELOG.md")));
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(
+      strings = {
+        SHELL,
+        "- **The cursor blinks**, as the program asks.",
+        "- **A** headline of one character.",
+        "- **`ci/changelog` reads `changes/*.md`.**",
+        "  - fixed a thing, nested under the bullet above",
+        "and a line that goes on with the bullet above",
+        "**Note:** a line that goes on with the bullet above"
+      })
+  void aBulletThatOpensWithItsBoldHeadlinePassesAndFolds(String line) throws Exception {
+    write("changes/mine.md", SHELL + "\n" + line + "\n");
+    commit("2026-11-02T00:00:00Z");
+
+    assertEquals(new Ran(0, "", ""), sh("ci/changelog", "check", base));
+    assertEquals(0, sh("ci/changelog", "0.75.0").exit());
+  }
+
+  @Test
+  void theReadmeQuotesTheShapeTheCheckAsksFor() throws Exception {
+    write("changes/mine.md", "- fixed a thing\n");
+
+    var asked = sh("ci/changelog", "check", base).err();
+
+    assertEquals(NO_HEADLINE.formatted(1), asked);
+    assertTrue(
+        Files.readString(CI.resolveSibling("changes").resolve("README.md"))
+            .contains("its bold headline closed on the same line, `- **…** …`"));
   }
 
   @Test
