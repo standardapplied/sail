@@ -544,7 +544,7 @@ actor Desk: Transport {
         let desk = try Desk(Self.goldens)
         let (pane, window) = try await Self.signedIn(desk)
         defer { window.orderOut(nil) }
-        #expect(Self.names(pane.passkeyList) == ["Sail for Mac", "Sail for iPhone"] && Self.names(pane.keyList) == ["Claude Code", "Claude Code", "Codex CLI"])
+        try #require(Self.names(pane.passkeyList) == ["Sail for Mac", "Sail for iPhone"] && Self.names(pane.keyList) == ["Claude Code", "Claude Code", "Codex CLI"], "\(pane.text)")
         #expect(pane.text.contains("Sail for Mac · This Mac · Added 11 November 2026"))
         #expect(pane.text.contains("Claude Code · No key in use. Sessions sign in with your Claude account.\nClaude Code · API key “home” · not in use"), "\(pane.text)")
         let actions = Self.items(pane.keyList).map { $0.actions.map(\.title) }
