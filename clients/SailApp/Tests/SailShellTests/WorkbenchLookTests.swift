@@ -168,7 +168,7 @@ import Testing
                 if pane == .thisMac {
                     let firstTab = try #require(strip.tabs.first)
                     let tab = firstTab.convert(firstTab.bounds, to: nil), gap = Double(tab.minX) - buttonsEnd
-                    #expect(gap >= 16 - 0.5 && gap <= 16 + Look.Space.s, "\(name): the first tab starts \(gap) pt after the window buttons, which end at \(buttonsEnd)")
+                    #expect(abs(gap - 16) < 0.5, "\(name): the first tab starts \(gap) pt after the window buttons, which end at \(buttonsEnd)")
                     #expect(abs(Double(tab.midY) - (Double(root.bounds.height) - band / 2)) < 0.5 && abs(Double(tab.height) - 26) < 0.5,
                             "\(name): the first tab \(tab) is not 26 pt and centred in the \(band) pt band")
                 }

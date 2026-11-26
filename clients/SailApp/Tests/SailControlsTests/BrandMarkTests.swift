@@ -108,6 +108,49 @@ extension ControlsTests {
         #expect(!still.isDrawing, "the still mark moves")
     }
 
+    /// Held at a point of its cycle and then let go, the mark draws itself again from the start of
+    /// its cycle, at full speed.
+    @Test func aHeldMarkLetGoDrawsAgain() throws {
+        let motion = Motion.shared, was = motion.reduced
+        defer { motion.reduced = was }
+        motion.reduced = false
+        let mark = BrandMark(.drawing(label: nil), look: .light, mono: try Self.mono())
+        let window = Self.shown(mark)
+        defer { window.orderOut(nil) }
+        mark.held = 0.45
+        mark.held = nil
+        for (name, layer) in [("sigma", mark.sigma), ("line", mark.line)] {
+            let animation = try #require(layer.animation(forKey: BrandMark.drawKey), "let go, the \(name) has no animation")
+            #expect(animation.speed == 1 && animation.timeOffset == 0, "let go, the \(name) runs at speed \(animation.speed), \(animation.timeOffset) s in")
+        }
+    }
+
+    /// The drawing mark moves only while it can be seen: hidden, under a hidden ancestor (a pane
+    /// not chosen) or out of its window it has no animation, and shown again it draws.
+    @Test func theMarkDrawsOnlyWhileItCanBeSeen() throws {
+        let motion = Motion.shared, was = motion.reduced
+        defer { motion.reduced = was }
+        motion.reduced = false
+        let mark = BrandMark(.drawing(label: nil), look: .light, mono: try Self.mono())
+        let window = Self.shown(mark)
+        defer { window.orderOut(nil) }
+        let pane = try #require(mark.superview)
+        func animated() -> [String] {
+            [mark.sigma, mark.line].flatMap { $0.animationKeys() ?? [] }
+        }
+        #expect(mark.isDrawing, "shown, the mark does not draw")
+        mark.isHidden = true
+        #expect(animated().isEmpty, "hidden, the mark keeps \(animated())")
+        mark.isHidden = false
+        #expect(mark.isDrawing, "shown again, the mark does not draw")
+        pane.isHidden = true
+        #expect(animated().isEmpty, "under a hidden pane, the mark keeps \(animated())")
+        pane.isHidden = false
+        #expect(mark.isDrawing, "its pane shown again, the mark does not draw")
+        mark.removeFromSuperview()
+        #expect(animated().isEmpty, "out of its window, the mark keeps \(animated())")
+    }
+
     /// The design's mark at 44 pt: the 34/150 tile in `inverse` under the sigma in `onInverse`, or no
     /// tile and the sigma in `textSecondary`; the line in the accent; 14 and 6 of 150 with round caps
     /// and joins; the line above the sigma as drawn, not under it.

@@ -131,17 +131,29 @@ public final class BrandMark: NSView {
         move()
     }
 
-    /// Whether the mark is drawing itself now.
-    var isDrawing: Bool {
-        sigma.animation(forKey: Self.drawKey) != nil || line.animation(forKey: Self.drawKey) != nil
+    override public func viewDidHide() {
+        super.viewDidHide()
+        move()
+    }
+
+    override public func viewDidUnhide() {
+        super.viewDidUnhide()
+        move()
+    }
+
+    /// Whether the mark is drawing itself now: one held at a point of its cycle stands still.
+    package var isDrawing: Bool {
+        [sigma, line].contains { $0.animation(forKey: Self.drawKey).map { $0.speed != 0 } ?? false }
     }
 
     @objc private func motionChanged() {
         move()
     }
 
+    /// The mark draws itself only where it can be seen: in a window, not hidden nor under a hidden
+    /// view, motion not reduced (or held, for the kit's shots).
     private func move() {
-        guard presentation != .still, window != nil, held != nil || !Motion.shared.reduced else {
+        guard presentation != .still, window != nil, !isHiddenOrHasHiddenAncestor, held != nil || !Motion.shared.reduced else {
             sigma.removeAnimation(forKey: Self.drawKey)
             line.removeAnimation(forKey: Self.drawKey)
             return

@@ -84,7 +84,7 @@ public final class WorkspacesView: NSView {
     /// Where the panel's row was when it opened, and what it said: the panel follows it or closes.
     private var panelRow: (frame: NSRect, line: WorkspacesModel.Line)?
     /// The card shown in place of the panel and the project: an empty state saying why.
-    let card = NSView()
+    package let card = NSView()
     /// The card's first action as last drawn: Sign In or Try Again.
     private(set) var tryAgain: SailButton
     private var cardSaid: [String] = []
@@ -230,7 +230,7 @@ public final class WorkspacesView: NSView {
     // MARK: The door
 
     /// Until the sign-in is known, at a launch onto this section.
-    func waitForSignIn() {
+    package func waitForSignIn() {
         door = .asking
         render()
     }
@@ -704,13 +704,13 @@ public final class WorkspacesView: NSView {
     }
 
     /// The card while who is signed in is asked: that wait, Sail's mark drawing itself over its words.
-    static let asking = "Asking who is signed in"
+    package static let asking = "Asking who is signed in"
 
     /// The card: who is signed in being asked, or an empty state saying the person is signed out,
     /// not known, or the control plane out of reach with when it was last tried.
     private func showCard(_ screen: WorkspacesModel.Screen?) {
-        card.subviews.forEach { $0.removeFromSuperview() }
         guard door != .asking else { return showAsking() }
+        card.subviews.forEach { $0.removeFromSuperview() }
         let (icon, title, body, button, line): (LineIcon, String, String, String?, String?) = switch (door, screen) {
         case (.signedOut, _): (.box, "Sign in to see your workspaces", "You are signed out of the control plane.", "Sign In", nil)
         case let (.unknown(lines), _): (.cloudOff, lines.first ?? "", lines.dropFirst().joined(separator: " "), "Try Again", nil)
@@ -732,8 +732,15 @@ public final class WorkspacesView: NSView {
         ])
     }
 
+    /// The mark already drawing stays, in this look, so a redraw while asking does not begin its
+    /// cycle again.
     private func showAsking() {
         cardSaid = [Self.asking]
+        if card.subviews.count == 1, let drawing = card.subviews.first as? BrandMark {
+            drawing.look = look
+            return
+        }
+        card.subviews.forEach { $0.removeFromSuperview() }
         let mark = BrandMark(.drawing(label: Self.asking), look: look, mono: mono)
         mark.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(mark)

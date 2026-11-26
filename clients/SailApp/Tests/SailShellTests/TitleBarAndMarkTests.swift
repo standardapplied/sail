@@ -1,14 +1,13 @@
 import AppKit
-import SailControls
+@testable import SailControls
 import SailKitTestSupport
 import SailLook
 @testable import SailShell
 import SailWorkbench
 import Testing
 
-/// The title bar's strip right to left, and the one wait that owns the Workspaces card today; both
-/// with no window, so they run wherever the suite does. (The band's geometry in a window is
-/// `WorkbenchLookTests`'.)
+/// The title bar's strip right to left, and the one wait that owns the Workspaces card today. (The
+/// band's geometry in a window is `WorkbenchLookTests`'.)
 @MainActor @Suite struct TitleBarAndMarkTests {
     init() {
         ExitWatch.install()
@@ -24,6 +23,46 @@ import Testing
         #expect(view.text == "Workspaces\nAsking who is signed in")
         view.signedOut()
         #expect(view.card.subviews.count == 1 && view.card.subviews.first is EmptyState, "signed out, the card holds \(view.card.subviews)")
+    }
+
+    /// A redraw while asking, for a change of look or the same wait told again, keeps the mark that
+    /// is drawing and its cycle: only its look changes.
+    @Test func aRedrawWhileAskingKeepsTheMarkDrawingOn() throws {
+        let motion = Motion.shared, was = motion.reduced
+        defer { motion.reduced = was }
+        motion.reduced = false
+        let view = WorkspacesView(look: .light, title: try TitleFont(directory: LookTests.fonts), mono: try LabelFont(directory: LookTests.fonts))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 480), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        view.waitForSignIn()
+        let mark = try #require(view.card.subviews.first as? BrandMark, "the card holds \(view.card.subviews)")
+        let cycle = try #require(mark.sigma.animation(forKey: BrandMark.drawKey), "in a window, asking, the mark does not draw")
+        view.look = .dark
+        view.waitForSignIn()
+        #expect(view.card.subviews.count == 1 && view.card.subviews.first === mark, "redrawn, the card holds \(view.card.subviews), not the mark it drew")
+        #expect(mark.look == .dark && mark.sigma.animation(forKey: BrandMark.drawKey) === cycle, "redrawn, the mark is not in the dark look or began its cycle again")
+    }
+
+    /// Right to left is AppKit's one answer, the window's title bar's direction: whatever the
+    /// strip's own direction was, the strip is placed and runs its tabs that way, its first tab
+    /// `buttonsGap` from the window buttons.
+    @Test func theStripRunsTheWayTheTitleBarIsLaidOut() throws {
+        let shell = try WorkbenchLookTests.shell(.light)
+        let window = shell.window
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        shell.select(.thisMac)
+        let strip = shell.thisMac.strip, titleBar = window.windowTitlebarLayoutDirection
+        strip.userInterfaceLayoutDirection = titleBar == .rightToLeft ? .leftToRight : .rightToLeft
+        shell.placeTheStrip()
+        strip.show(WorkbenchLookTests.items(), selected: TabID(1))
+        strip.layoutSubtreeIfNeeded()
+        let buttons = try #require(ShellApp.buttons(of: window)), first = try #require(strip.tabs.first)
+        let tab = first.convert(first.bounds, to: nil)
+        let gap = titleBar == .rightToLeft ? Double(buttons.minX - tab.maxX) : Double(tab.minX - buttons.maxX)
+        #expect(strip.userInterfaceLayoutDirection == titleBar, "the strip runs \(strip.userInterfaceLayoutDirection.rawValue), the title bar \(titleBar.rawValue)")
+        #expect(abs(gap - ShellApp.buttonsGap) < 0.5, "the first tab \(tab) is \(gap) pt from the window buttons \(buttons)")
     }
 
     /// Right to left the strip runs from its right edge, beside the window buttons AppKit puts

@@ -475,6 +475,9 @@ extension Driver {
             shell.account.signOutHere(nil)
             return (true, "")
         }
+        if let name = step.askingWhoIsSignedIn {
+            return await askingWhoIsSignedIn(name)
+        }
         if let open = step.createRowOpen {
             let shown = await waitUntil(step.seconds ?? 5) { (pane.project.field.window != nil) == open }
             return (shown, "the create row \(pane.project.field.window != nil ? "open" : "gone")")
@@ -734,6 +737,41 @@ extension Driver {
             MenuOpener.shared.open(button)
             await shot.taken()
         }
+    }
+
+    /// The Workspaces card while the app asks who is signed in, as a launch onto the section shows
+    /// it: Sail's mark alone in the card, centred in it, drawing itself (still under Reduce Motion),
+    /// the same mark in each look and in that look. The window's content is drawn by AppKit at 2x,
+    /// whatever the screen's scale, in both looks as `<name>-<look>.png`.
+    private func askingWhoIsSignedIn(_ name: String) async -> (Bool, String) {
+        let pane = shell.workspaces
+        pane.waitForSignIn()
+        guard pane.text == "Workspaces\n\(WorkspacesView.asking)", pane.card.subviews.count == 1, let mark = pane.card.subviews.first as? BrandMark else {
+            return (false, "asking, the card holds \(pane.card.subviews) and says \(pane.text)")
+        }
+        var held = true, said: [String] = []
+        let (taken, shots) = await inBothLooks(name) { file in
+            pane.layoutSubtreeIfNeeded()
+            let card = pane.card.convert(pane.card.bounds, to: nil), drawn = mark.convert(mark.bounds, to: nil)
+            let same = pane.card.subviews.count == 1 && pane.card.subviews.first === mark && mark.look == self.shell.look
+            let centred = abs(Double(drawn.midX - card.midX)) < 0.5, drawing = mark.isDrawing == !Motion.shared.reduced
+            held = held && same && centred && drawing
+            let place = String(format: "the mark %.0f × %.0f pt, its centre %+.1f from the card's", drawn.width, drawn.height, Double(drawn.midX - card.midX))
+            said.append("\(self.shell.look == .dark ? "dark" : "light"): \(place), \(mark.isDrawing ? "drawing" : "still")" + (same ? "" : ", not the same mark in this look"))
+            Self.drawnAtTwice(self.shell.window.contentView, to: file)
+        }
+        return (held && taken, said.joined(separator: "; ") + "; " + shots)
+    }
+
+    /// `view` as AppKit draws it (`cacheDisplay`), at twice its size, into `file` as a PNG.
+    private static func drawnAtTwice(_ view: NSView?, to file: URL) {
+        guard let view, view.bounds.width > 0, view.bounds.height > 0, let image = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(view.bounds.width * 2), pixelsHigh: Int(view.bounds.height * 2), bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return }
+        image.size = view.bounds.size
+        view.cacheDisplay(in: view.bounds, to: image)
+        try? image.representation(using: .png, properties: [:])?.write(to: file)
     }
 
     /// Store a Key's steps: a key pasted as a person pastes it, the sheet read, and the clipboard.

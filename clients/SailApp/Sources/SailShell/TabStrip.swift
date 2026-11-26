@@ -95,7 +95,8 @@ public final class TabStrip: NSView {
     private var selectedIndex: Int?
 
     /// The strip's own empty space before the first tab, the title bar's to drag and double-click:
-    /// what the window buttons' inset leaves of it.
+    /// what the room after the window buttons leaves of it; none right to left, where the strip
+    /// ends that room before the buttons.
     var leading = Look.Space.s {
         didSet { needsLayout = true }
     }

@@ -2,7 +2,6 @@ import AppKit
 import ImageIO
 import SailAccount
 import SailAPI
-import SailLook
 import SailShell
 import SailTestPasskey
 import SailVT
@@ -391,7 +390,7 @@ extension Driver {
     /// The band as AppKit and the shell laid it out, said in window points: its height (AppKit's,
     /// or in full screen the one the window draws) against `bandHeight`; each window button's frame
     /// and its centre against the band's, within 1 pt; the shown tabs' centres, within half a point;
-    /// the room from the buttons to the nearest of the strip's tabs and `+`, `buttonsGap` (8 pt more at most);
+    /// the room from the buttons to the nearest of the strip's tabs and `+`, `buttonsGap` within half a point;
     /// the card's top flush under the band; and no view of the shell over a button.
     func bandGeometry() -> (Bool, String) {
         let window = shell.window
@@ -428,7 +427,7 @@ extension Driver {
             let gaps = controls.map { onTheRight ? Double(buttons.minX - $0.maxX) : Double($0.minX - buttons.maxX) }
             if let gap = gaps.min() {
                 said.append(String(format: "%.1f pt from the buttons to the nearest tab", gap) + (onTheRight ? ", the buttons on the right" : ""))
-                if gap < ShellApp.buttonsGap - 0.5 || gap > ShellApp.buttonsGap + Look.Space.s + 0.5 {
+                if abs(gap - ShellApp.buttonsGap) >= 0.5 {
                     misses.append(String(format: "the nearest tab is %.1f pt from the buttons, not %.0f", gap, ShellApp.buttonsGap))
                 }
             }

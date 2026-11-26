@@ -332,10 +332,10 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// The band's height in full screen, where the band is drawn by the window: the compact unified
     /// title bar–toolbar area's in a window (AppKit sets that one).
     package static let bandHeight = 38.0
-    /// The least frame the window takes. AppKit keeps the unified toolbar's row out of `minSize` and
-    /// adds it above: with `.unified` a frame asked for at 620 pt with `minSize` 600 was held at 624,
-    /// that band less a 28 pt title bar. So `minSize` is this less that row, and the drive and the
-    /// tests read this alone.
+    /// The least frame the window takes. AppKit keeps the compact toolbar's row out of `minSize` and
+    /// adds it above: with `minSize` 600 a frame asked for at 100 pt is held at 610, the 38 pt band
+    /// less a 28 pt title bar. So `minSize` is this less that row, and the drive and the tests read
+    /// this alone.
     public static let leastFrame = NSSize(width: 480, height: 610)
     /// The unified toolbar's row: the band less a plain title bar.
     static var toolbarRow: Double {
@@ -365,13 +365,16 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// The strip in the title bar's accessory after the window's buttons; in full screen, where the
-    /// title bar and its toolbar hide, across the band the window draws at its top, 8 pt in.
+    /// title bar and its toolbar hide, across the band the window draws at its top, 8 pt in. Its
+    /// direction is AppKit's for the title bar (`windowTitlebarLayoutDirection`), the one answer
+    /// both where the strip is fitted and which way its tabs run read.
     func placeTheStrip(fullScreen: Bool? = nil) {
         let strip = thisMac.strip
         let full = fullScreen ?? window.styleMask.contains(.fullScreen)
         if let index = window.titlebarAccessoryViewControllers.firstIndex(of: titleBarRow) { window.removeTitlebarAccessoryViewController(at: index) }
         strip.removeFromSuperview()
         NSLayoutConstraint.deactivate(stripInTheWindow)
+        strip.userInterfaceLayoutDirection = window.windowTitlebarLayoutDirection
         band.isVisible = !full
         if full {
             strip.translatesAutoresizingMaskIntoConstraints = false
@@ -393,18 +396,23 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// The accessory reaches the window's far edge, so all the row beside the buttons is the title
     /// bar's (AppKit sets a `.left` accessory's height, its view's frame its width), its first tab
-    /// `buttonsGap` past the buttons. Right to left AppKit puts the buttons at the window's right
-    /// and the accessory at its left: the strip, whose tabs then run from its right edge, ends
-    /// just short of the buttons, its first tab `buttonsGap` before them.
+    /// `buttonsGap` past the buttons, wherever AppKit starts the accessory (9 pt after them on one
+    /// Mac, 8 or less on CI's runner). Right to left (the strip's direction, the title bar's) AppKit
+    /// puts the buttons at the window's right and the accessory at its left: the strip, whose tabs
+    /// then run from its right edge, ends `buttonsGap` before the buttons.
     private func fitTheStrip() {
         let strip = thisMac.strip
-        guard !window.styleMask.contains(.fullScreen), strip.superview != nil else { return }
+        guard !window.styleMask.contains(.fullScreen), strip.window != nil else { return }
         window.contentView?.superview?.layoutSubtreeIfNeeded()
-        let buttons = Self.buttons(of: window) ?? .zero, width = Double(window.frame.width)
-        let start = strip.window == nil ? Double(buttons.maxX) : Double(strip.convert(NSPoint.zero, to: nil).x)
-        let onTheRight = Double(buttons.midX) > width / 2
-        strip.leading = onTheRight ? Look.Space.s : max(Look.Space.s, Double(buttons.maxX) + Self.buttonsGap - start)
-        let end = onTheRight ? Double(buttons.minX) - Self.buttonsGap + Look.Space.s : width
+        let buttons = Self.buttons(of: window) ?? .zero, start = Double(strip.convert(NSPoint.zero, to: nil).x)
+        let end: Double
+        if strip.userInterfaceLayoutDirection == .rightToLeft {
+            strip.leading = 0
+            end = Double(buttons.minX) - Self.buttonsGap
+        } else {
+            strip.leading = max(0, Double(buttons.maxX) + Self.buttonsGap - start)
+            end = Double(window.frame.width)
+        }
         strip.setFrameSize(NSSize(width: max(0, end - start), height: strip.frame.height))
     }
 
