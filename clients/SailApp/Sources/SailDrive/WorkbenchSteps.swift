@@ -1089,9 +1089,10 @@ extension Driver {
         await shot.taken()
     }
 
-    /// The window in full screen once AppKit says the transition ended, filling its screen, the whole
-    /// screen taken in both looks, then out of it again once AppKit says so, to the frame it had
-    /// before, inside its screen; each frame seen on the way back is said. A window that does not enter full screen fails the step; one that cannot (on no screen,
+    /// The window in full screen once AppKit says the transition ended, filling its screen, its band
+    /// measured there (``bandGeometry()``), the whole screen taken in both looks, then out of it again once AppKit says so, to the frame it had
+    /// before, inside its screen, its band measured again there, the buttons back and the tabs `buttonsGap` from them; each frame seen on
+    /// the way back is said. A window that does not enter full screen fails the step; one that cannot (on no screen,
     /// or not allowing full screen) is skipped, saying why.
     private func fullScreen(_ name: String) async -> (Bool, String) {
         let window = shell.window
@@ -1111,7 +1112,9 @@ extension Driver {
         guard await waitUntil(10, { entered.withLock { $0 } && window.frame == screen.frame }) else {
             return (false, "the window did not finish entering full screen within 10 s: its frame \(NSStringFromRect(window.frame)), the screen's \(NSStringFromRect(screen.frame))")
         }
-        let (taken, said) = await inBothLooks(name) { file in await self.capture(.screen, to: file) }
+        let (band, bandSaid) = bandGeometry()
+        let (taken, shots) = await inBothLooks(name) { file in await self.capture(.screen, to: file) }
+        let said = "in full screen " + bandSaid + "; " + shots
         var passed: [String] = []
         func sample() {
             let frame = NSStringFromRect(window.frame)
@@ -1122,12 +1125,13 @@ extension Driver {
             sample()
             return exited.withLock { $0 } && window.frame == before
         }
+        let (bandBack, bandBackSaid) = bandGeometry()
         let after = window.frame, visible = window.screen?.visibleFrame ?? .zero
         let same = abs(after.width - before.width) < 1 && abs(after.height - before.height) < 1
         let inside = after.width <= visible.width + 1 && after.height <= visible.height + 1
         let frames = "before \(NSStringFromRect(before)), after \(NSStringFromRect(after)), the screen's visible frame \(NSStringFromRect(visible)); "
-            + "on the way back: \(passed.joined(separator: " → "))"
-        return (taken && back && same && inside, said + (back ? "; " : "; the window did not come back to its frame within 10 s; ") + frames)
+            + "on the way back: \(passed.joined(separator: " → ")); back from full screen " + bandBackSaid
+        return (band && taken && back && same && inside && bandBack, said + (back ? "; " : "; the window did not come back to its frame within 10 s; ") + frames)
     }
 
     /// P4 and the design note's rule, against another copy's host with a client on it

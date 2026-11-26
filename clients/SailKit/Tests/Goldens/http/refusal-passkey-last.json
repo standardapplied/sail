@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/v1/passkeys/Z29sZGVuIGNyZWRlbnRpYWxfaWQgNg"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Enroll another passkey with a ticket from your admin, then remove this one.",
+        "code": "conflict",
+        "field_errors": [],
+        "message": "This is your only passkey, so removing it would leave you no way to sign in."
+      },
+      "schema_version": 1
+    },
+    "status": 409
+  }
+}

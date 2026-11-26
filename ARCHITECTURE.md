@@ -585,7 +585,24 @@ message at all is reported as that, never blamed on main's version.
 Passkeys stay box-local by design: identity crosses boxes via the roster pull, but a
 WebAuthn credential is an RP-scoped secret bound to one box's origin and never leaves it.
 Each box enrolls its own passkeys (`sail fde enroll`), and each box lists and revokes them
-on its own (`sail fde passkey list|rm`).
+on its own (`sail fde passkey list|rm`). A person lists and removes their own over HTTP (Keep
+passkeys, `PasskeyOperations`): `GET /v1/passkeys` answers each one's `id` (base64url), `label`,
+`created_at`, `last_used_at` once used and `current`, true for the passkey the calling session was
+signed in with (`sessions.credential_id`, written by the sign-in that minted it, which looks the
+passkey up in the write transaction that inserts the session, so a passkey removed mid sign-in mints
+none; none for a gateway's session or a token); `DELETE /v1/passkeys/{id}` removes one and ends every
+session it signed in, `204`. Only a session signed in with one of the caller's passkeys that still
+exists removes one: a person's token at any role, a session that names no passkey and one whose
+passkey an admin removed at the host are `403 forbidden`, the same for every id, before the id is
+looked up; a session a removal that went first ended is `403 invalid_bearer_token`, as an ended
+session always is. Another person's id is `404` as an unknown one is, so ids are not probed; the last
+passkey and the one the caller signed in with are `409`, the last said first. The whole decision,
+from reading the caller's session and passkeys to the delete and the revoke, is one write
+transaction, so two removals at once, in one process or two, never leave a person none
+(`PasskeyRoutesTest.twoRemovalsAtOnceLeaveTheirPersonAPasskey`): a person never locks or signs
+themselves out; the lost-device case stays the admin's `sail fde passkey rm`. A removal ends the
+sessions' next requests; a stream or terminal those sessions already opened is
+`sail-an-ended-session-ends-what-it-opened`'s.
 
 ### The engine
 
@@ -808,7 +825,8 @@ definition or one `--section` in `$EDITOR` as JSON and writes each section that 
 HTTP, `GET /v1/projects/{p}/definition` answers the document with each section's tag,
 `PUT /v1/projects/{p}/definition/{section}` writes `{"value": …}` (null unsets it) over the tag
 its `If-Match` names and answers 412 when the section changed, and `POST /v1/projects`
-creates one, 409 when the name is taken; each is a project not found to a caller whose scope
+creates one, 409 when the name is taken or an instance holds it, its `field_errors` naming
+`name` so a client says it under the name; each is a project not found to a caller whose scope
 does not admit it
 (`ProjectStoreTest.aSectionWriteIsOneRevisionOverTheSectionItsWriterRead`,
 `ProjectStoreTest.aWriteOfSeveralSectionsIsOneRevisionOrNone`,
@@ -1317,7 +1335,10 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
   - `GET /v1/projects/{p}/template` changes nothing and waits on nothing: a probe of the lock, the
     record, one Incus read. It answers `state` (`ready` while a version is current, `building`,
     `failed` when none is current and the last build failed or was cut short, else `missing`),
-    `version`, `stale`, `steps` (20) and `build`, the last build's record, so a rebuild that failed
+    `version`, `stale`, `steps` (20), `step_names` (`TemplateBuild.STEP_NAMES`: step n is the n-th,
+    the `ProjectPhase`s lower-cased in their order, then `template_finished`; the provisioner numbers
+    each step by `ProjectPhase.step()`, the same order) and `build`, the last
+    build's record, so a rebuild that failed
     while an older version serves is told beside that version. `GET /v1/projects` gives each
     project's `template` state, Incus listed once for all.
   - **The record.** Each build, from either door, keeps `<projects>/<p>/template-build.json`, written
@@ -3680,6 +3701,7 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 | Prune | erase a spec everywhere, once archived, cancelled or deleted | no | owner | yes | no | no | no |
 | Purge | erase a project everywhere; a retention sweep | no | no | yes | no | no | no |
 | Keep logins | store, replace, choose the default of, list or remove your own harness logins and git tokens | yes | yes | yes | no | no | no |
+| Keep passkeys | list or remove your own passkeys | yes | yes | yes | no | no | no |
 | Manage people | add, change role, grant, remove, pair, mint tokens | no | no | yes | no | no | no |
 | Operate the box | sync now; read sync health and bus stats; point the box at another main | owner | owner | yes | no | no | no |
 
@@ -4334,7 +4356,9 @@ a node the node's own person only for one no one is labelled for, never for one 
 someone it does not know): a workspace whose person is gone (`owner_gone`) or that is not the
 asker's (`not_your_workspace`, which is what an admin sees in another person's, with
 nothing offered and nothing of that person's logins) is refused whole; otherwise every harness Sail
-knows is offered with its modes (`Harness.modes()`, `mode_default` the first) and `note`, the kinds
+knows is offered with its modes (`Harness.modes()`, `mode_default` the first, each with `risky`, true
+for a mode that skips the harness's own permission checks entirely: Claude Code's
+`bypassPermissions`, Codex's `full-access`) and `note`, the kinds
 of login it takes and how to make one, the person's default key of each harness the project
 installs (`login`, `{name, kind}`, never answered with its value; none when they have no default,
 which is no refusal: the harness's own sign-in is the other way in), with `inside` true and
@@ -4346,7 +4370,11 @@ whether the workspace holds it: its `SignIn.file` (`~/.claude/.credentials.json`
 (`WorkspaceSignIns`, one `incus exec` as the dev user for every installed harness, bounded by five
 seconds, none when none is installed). `signed_in` is said only when it was read: a stopped
 workspace is not started to read it, and a read that fails or does not answer says nothing. A
-harness the project does not install carries `harness_not_installed` and `inside` false. Every
+harness the project does not install carries `harness_not_installed`, `unavailable` beside it ("Not
+installed in harbor", the few words a list row says, declared with the refusal it shortens in
+`AgentStarts.OfferRefusal`, which takes no refusal without them) and `inside` false.
+`GET /v1/agents` says each harness's `sign_in` (without `signed_in`) and `kinds` from the same mapping
+(`HarnessWaysIn`). Every
 harness has exactly two ways in, its own sign-in or one stored key (`HarnessContractTest`), so a
 later harness is one adapter and no client change. Each refusal is the API's error shape (`code`,
 `message`, `action`, `remedy`).

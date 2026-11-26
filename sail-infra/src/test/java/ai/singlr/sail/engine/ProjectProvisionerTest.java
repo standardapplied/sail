@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -270,6 +271,71 @@ class ProjectProvisionerTest {
     assertEquals(35, steps.size());
     assertTrue(steps.stream().anyMatch(s -> s.contains("done:1/")));
     assertTrue(steps.stream().anyMatch(s -> s.contains("done:19/")));
+  }
+
+  /**
+   * Each step a provision reports is named, by the names a template's build sends, for the phase it
+   * reports: a step starts at the phase the run resumes from and is done or skipped once that phase
+   * is recorded, so every one of the 19 is the phase at its number and step 13 is the clone.
+   */
+  @Test
+  void eachStepAProvisionReportsIsNamedForThePhaseItRecords() throws Exception {
+    var tracker = tracker();
+    var named = new ArrayList<String>();
+    var listener =
+        new ProvisionListener() {
+          @Override
+          public void onStep(int step, int total, String description) {
+            named(step, "starts", tracker.resumePoint());
+          }
+
+          @Override
+          public void onStepDone(int step, int total, String detail) {
+            named(step, "done", recorded());
+          }
+
+          @Override
+          public void onStepSkipped(int step, int total, String detail) {
+            named(step, "skipped", recorded());
+          }
+
+          private Optional<ProjectPhase> recorded() {
+            return Optional.ofNullable(tracker.currentState().completedPhase())
+                .map(ProjectPhase::valueOf);
+          }
+
+          private void named(int step, String event, Optional<ProjectPhase> phase) {
+            named.add(
+                step
+                    + " "
+                    + event
+                    + " "
+                    + TemplateBuild.STEP_NAMES.get(step - 1)
+                    + (phase
+                            .map(ProjectProvisionerTest::named)
+                            .orElse("")
+                            .equals(TemplateBuild.STEP_NAMES.get(step - 1))
+                        ? ""
+                        : " but records " + phase));
+          }
+        };
+
+    new ProjectProvisioner(
+            allSuccessShell(), tracker, listener, Optional.empty(), OperatorCommand.PLAIN)
+        .provision(fullConfig(), hostYaml(), none(fullConfig()), GIT, null);
+
+    assertEquals(List.of(), named.stream().filter(line -> line.contains(" but ")).toList());
+    assertTrue(
+        named.stream().anyMatch(line -> line.startsWith("13 ") && line.endsWith(" repos_cloned")),
+        named.toString());
+    assertEquals(
+        TemplateBuild.STEPS - 1,
+        named.stream().map(line -> line.split(" ")[0]).distinct().count(),
+        "every phase is a step");
+  }
+
+  private static String named(ProjectPhase phase) {
+    return phase.name().toLowerCase(Locale.ROOT);
   }
 
   @Test

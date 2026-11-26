@@ -44,6 +44,7 @@ class AccessTest {
 
   private static final String READ_ONLY_FIX = "Ask an admin for a member or admin credential.";
   private static final String LANE_FIX = "Only an operator lane (CLI or API token) may do this.";
+  private static final String PASSKEYS_LANE_FIX = "Only their person may.";
   private static final String DRAFT_IT =
       "An agent acts only on the work sail launched it for; draft a follow-up spec for anything"
           + " else.";
@@ -347,6 +348,15 @@ class AccessTest {
               null,
               "Do it from outside the container: 'sail agent login <harness>' or 'sail git login"
                   + " <host>' on the host, or Mast."),
+          new Expected(
+              Action.KEEP_PASSKEYS,
+              PEOPLE,
+              PEOPLE,
+              "keep passkeys",
+              List.of(ALLOWED, ALLOWED, ALLOWED, LANE, LANE, LANE, LANE, LANE),
+              null,
+              null,
+              "Do it from outside the container: with sail on the host, or in Mast."),
           new Expected(
               Action.OPERATE_BOX,
               BOX_ADA,
@@ -1033,6 +1043,34 @@ class AccessTest {
         Access.atAll(Actors.ADMIN_IN_CONTAINER, Action.KEEP_LOGINS, Resource.Kind.PEOPLE));
   }
 
+  /**
+   * Every person keeps their own passkeys, a viewer too, and doing so writes no synced row, so a
+   * viewer stays read-only; no agent and no credential in a container keeps any.
+   */
+  @Test
+  void everyPersonKeepsTheirOwnPasskeysAndNoAgentOrContainerCredentialDoes() {
+    for (var person : List.of(Actors.VIEWER, Actors.OWNER_API, Actors.OWNER_CLI, Actors.ADMIN)) {
+      assertEquals(
+          Optional.empty(), Access.atAll(person, Action.KEEP_PASSKEYS, Resource.Kind.PEOPLE));
+    }
+    assertFalse(Access.mayWrite(Actors.VIEWER), "keeping passkeys writes no synced row");
+    for (var agent : List.of(Actors.AGENT, Actors.ROOM)) {
+      assertEquals(
+          refusedAtAll(
+              Refusal.Kind.LANE_FORBIDDEN,
+              "Agent principals cannot keep passkeys.",
+              PASSKEYS_LANE_FIX),
+          Access.atAll(agent, Action.KEEP_PASSKEYS, Resource.Kind.PEOPLE));
+    }
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.LANE_FORBIDDEN,
+                "The credential in a project container cannot keep passkeys.",
+                Remedy.of("Do it from outside the container: with sail on the host, or in Mast."))),
+        Access.atAll(Actors.ADMIN_IN_CONTAINER, Action.KEEP_PASSKEYS, Resource.Kind.PEOPLE));
+  }
+
   private static Decision refused(Refusal.Kind kind, String message, Remedy fix) {
     return new Decision.Refused(new Refusal(kind, message, fix));
   }
@@ -1318,7 +1356,7 @@ class AccessTest {
               : refused(
                   Refusal.Kind.LANE_FORBIDDEN,
                   "Agent principals cannot " + row.act() + ".",
-                  LANE_FIX);
+                  row.action() == Action.KEEP_PASSKEYS ? PASSKEYS_LANE_FIX : LANE_FIX);
     };
   }
 

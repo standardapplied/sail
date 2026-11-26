@@ -24,6 +24,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -105,6 +106,10 @@ class PasskeyServiceTest {
     assertEquals("uday", result.fdeHandle());
     assertTrue(result.sessionToken().startsWith("sess_"));
     assertTrue(sessions.validate(result.sessionToken()).isPresent());
+    assertEquals(
+        Optional.of(Passkeys.encodeId(authenticator.credentialId())),
+        sessions.passkeyOf(result.sessionToken()),
+        "the session names the passkey it was signed in with");
     var remaining = Duration.between(Instant.now(), result.expiresAt());
     assertTrue(
         remaining.toHours() >= 29 * 24 && remaining.toHours() <= 30 * 24, remaining::toString);

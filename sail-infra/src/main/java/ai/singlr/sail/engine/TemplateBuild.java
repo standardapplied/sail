@@ -17,12 +17,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 /**
  * A build of a project's template, the one implementation both doors run: {@code sail project
@@ -35,8 +39,19 @@ import java.util.function.Supplier;
  */
 public final class TemplateBuild {
 
-  /** The steps a build reports: the provisioner's own, then the lane's finish. */
-  public static final int STEPS = ProjectPhase.values().length + 1;
+  /**
+   * The name of each step a build reports, step n the n-th: the provisioner's own phases, then the
+   * lane's finish.
+   */
+  public static final List<String> STEP_NAMES =
+      Stream.concat(
+              Arrays.stream(ProjectPhase.values())
+                  .map(phase -> phase.name().toLowerCase(Locale.ROOT)),
+              Stream.of("template_finished"))
+          .toList();
+
+  /** How many steps a build reports. */
+  public static final int STEPS = STEP_NAMES.size();
 
   /** Why a build cut short ended, once sail-api cleaned its template. */
   public static final String CUT_SHORT =

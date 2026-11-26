@@ -127,6 +127,11 @@ public enum Action {
       "store, replace, choose the default of, list or remove your own harness logins and git tokens",
       "keep",
       "harness logins and git tokens"),
+  /**
+   * Keeping one's own passkeys: listing or removing them. Each door acts on its caller's own; an
+   * admin removes another person's only on the host.
+   */
+  KEEP_PASSKEYS("Keep passkeys", "list or remove your own passkeys", "keep", "passkeys"),
   /** Changing the roster: adding, re-roling, granting, removing, pairing, minting tokens. */
   MANAGE_PEOPLE("Manage people", "add, change role, grant, remove, pair, mint tokens", "manage"),
   /** Acting for a box: a sync round, its sync health and bus stats, the main it points at. */

@@ -20,7 +20,10 @@ import Testing
     /// session parks, where it used to retry every 0.5 s forever.
     @Test func aHostThatAttachesAndDropsParksTheSessionAfterFiveTries() async throws {
         let naps = Naps()
-        let (host, session, peer, watch) = try await attachedLocally(stableAfter: TerminalSession.stableAttachment, sleep: naps.sleep)
+        let hands = Hands()
+        let (host, session, peer, watch) = try await attachedLocally(
+            stableAfter: TerminalSession.stableAttachment, sleep: naps.sleep, now: { hands.now }
+        )
         peer.close()
         try await watch.until("lost the connection") { session.state.phase != .attached }
         var attaches = 1
@@ -49,7 +52,7 @@ import Testing
     /// session still blocked in its read with the end of the stream waiting; a close always wakes it.
     @Test func aPeerTheFakeHostClosesIsClosedNotOnlyShutDown() async throws {
         let host = try FakeHost()
-        let client = try Connection.connect(to: host.address, timeout: 5)
+        let client = try Connection.connect(to: host.address, timeout: Patience.answer)
         let peer = try await host.accept()
         let accepted = peer.descriptor
         let before = Self.inode(accepted)
@@ -61,17 +64,42 @@ import Testing
         _ = client
     }
 
+    /// The fake host takes what a client writes while the test reads none of it: the paste is
+    /// written on the test's own thread, which waits for its host to read, and a write that waits
+    /// past its limit gives the connection up, so a fake that read only when the test asked would
+    /// never see the paste whole.
+    @Test func whatAClientWritesIsTakenWhileTheTestReadsNothing() async throws {
+        let (host, session, peer, _) = try await attachedLocally()
+        let text = String(repeating: "line of text\n", count: 100_000)
+        guard case .send = session.paste(text, confirmed: true) else {
+            Issue.record("the paste was not sent")
+            return
+        }
+        var received = 0
+        while received < text.utf8.count {
+            guard case let .input(_, bytes) = try await peer.read() else { continue }
+            received += bytes.count
+        }
+        #expect(received == text.utf8.count)
+        session.close()
+        _ = host
+    }
+
     private static func inode(_ descriptor: Int32) -> Int64 {
         var status = stat()
         return fstat(descriptor, &status) == 0 ? Int64(truncatingIfNeeded: UInt64(status.st_ino)) : -1
     }
 
     /// A runner's door goes on at the 8 s cap until a minute of waits is spent: the open, then 11
-    /// reconnects.
+    /// reconnects. The session's clock stands still, so no attachment lasts long enough to count and
+    /// the attempts add no time to the waits, however long the runner takes over them.
     @Test func aRunnerThatAttachesAndClosesIsAskedTwelveTicketsThenParks() async throws {
         let host = try FakeHost(tcp: ())
         let desk = TicketDesk(address: host.address)
-        let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: 5, sleep: Naps().sleep)
+        let hands = Hands()
+        let session = TerminalSession(
+            open: create, door: .runner(desk), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep, now: { hands.now }
+        )
         let watch = Watch(session)
         session.start()
         for _ in 1 ... 12 {
@@ -88,15 +116,27 @@ import Testing
         session.close()
     }
 
+    /// A connection attached for ``TerminalSession/stableAttachment`` on the session's clock, which
+    /// only the test moves, was a success: each drop after one is the first failure again, waited
+    /// for with the first wait, however long the runner took over it.
     @Test func aConnectionThatStayedAttachedLongEnoughStartsTheCountAgain() async throws {
         let naps = Naps()
-        let (host, session, peer, watch) = try await attachedLocally(stableAfter: .zero, sleep: naps.sleep)
-        peer.close()
-        let again = try await host.accept()
-        try await again.welcome()
-        _ = try await again.acceptAttach()
-        try await watch.attached()
-        #expect(naps.durations == [TerminalSession.retryWaits[0]])
+        let hands = Hands()
+        let (host, session, first, watch) = try await attachedLocally(
+            stableAfter: TerminalSession.stableAttachment, sleep: naps.sleep, now: { hands.now }
+        )
+        var peer = first
+        for drops in 1 ... 3 {
+            hands.advance(TerminalSession.stableAttachment)
+            peer.close()
+            peer = try await host.accept()
+            try await peer.welcome()
+            _ = try await peer.acceptAttach()
+            try await watch.until("took the attach's prologue again") {
+                watch.seen.filter { if case .writerChanged("ada", _) = $0 { true } else { false } }.count == drops + 1
+            }
+        }
+        #expect(naps.durations == Array(repeating: TerminalSession.retryWaits[0], count: 3))
         session.close()
     }
 
@@ -134,7 +174,7 @@ import Testing
 
     @Test func aTCPConnectionIsGivenUpWhenItsDataStaysUnacknowledged() async throws {
         let host = try FakeHost(tcp: ())
-        let socket = try Socket.connect(to: host.address, timeout: 5)
+        let socket = try Socket.connect(to: host.address, timeout: Patience.answer)
         #if os(Linux)
         #expect(socket.retransmitDrop == Int32(Socket.deadAfter * 1000))
         #else
@@ -187,7 +227,7 @@ import Testing
     /// shut, and never sends an attach after the next one has.
     @Test func anAttemptOvertakenByADetachAndAnAttachSendsNothing() async throws {
         let host = try FakeHost()
-        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen(), timeout: 5, sleep: Naps().sleep)
+        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep)
         let watch = Watch(session)
         session.start()
         let stale = try await host.accept()
@@ -209,12 +249,12 @@ import Testing
     }
 
     /// MINOR 3: a close during the handshake (here, waiting for the host's welcome) shuts the
-    /// connection at once, not after the handshake's timeout: the host reads the client closing it,
-    /// never its own read running out (30 s), and the handshake's own timeout (120 s) is past both,
-    /// so only the close can end the read whatever the runner's speed.
-    @Test func aCloseDuringTheHandshakeShutsTheConnectionAtOnce() async throws {
+    /// connection, not leaving it to the handshake's timeout: that is `Patience.answer`, past the
+    /// suite's minute, and the fake reads until the connection ends, so the read ends by the
+    /// client's close or the test fails at its limit.
+    @Test func aCloseDuringTheHandshakeShutsTheConnection() async throws {
         let host = try FakeHost()
-        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen(), timeout: 120, sleep: Naps().sleep)
+        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep)
         session.start()
         let peer = try await host.accept()
         _ = try await peer.hello()
@@ -272,7 +312,7 @@ import Testing
 
     @Test func aReadOnlyAttachAnswersNoQuery() async throws {
         let host = try FakeHost()
-        let session = TerminalSession(attach: "theirs", write: false, door: .local(host.address), screen: try screen(), timeout: 5, sleep: Naps().sleep)
+        let session = TerminalSession(attach: "theirs", write: false, door: .local(host.address), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep)
         let watch = Watch(session)
         session.start()
         let peer = try await host.accept()
@@ -288,7 +328,7 @@ import Testing
     /// MINOR 7: a client's input numbers start above the session's, so its marks are its own.
     @Test func inputIsNumberedAboveWhatTheSessionHadApplied() async throws {
         let host = try FakeHost()
-        let session = TerminalSession(attach: "old", write: true, door: .local(host.address), screen: try screen(), timeout: 5, sleep: Naps().sleep)
+        let session = TerminalSession(attach: "old", write: true, door: .local(host.address), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep)
         let watch = Watch(session)
         session.start()
         let peer = try await host.accept()
@@ -305,10 +345,11 @@ import Testing
     /// An attached session on this Mac is ended as any other: a Kill on a connection of its own,
     /// the host's answer awaited, never a Kill written to the attached connection and forgotten.
     @Test func anAttachedSessionsEndIsAKillWhoseAnswerIsAwaited() async throws {
-        let (host, session, attached, _) = try await attachedLocally()
+        let hands = Hands()
+        let (host, session, attached, _) = try await attachedLocally(now: { hands.now })
         let deadline = Timeline()
         defer { deadline.passAll() }
-        let ended = Task { await session.end(within: Self.unhurried, sleep: deadline.sleep) }
+        let ended = Task { await session.end(within: .seconds(Patience.answer), sleep: deadline.sleep) }
         let killer = try await host.accept()
         try await killer.welcome()
         #expect(try await killer.read() == .kill(session: "work"))
@@ -317,18 +358,15 @@ import Testing
         #expect(try await attached.control() == .detach, "the attached connection only detaches")
     }
 
-    /// An end's limit when the test decides it: held until the test lets it pass, and so long that
-    /// no read of the end's times out first. What an end with it comes to is the host's answers and
-    /// the test's, never how fast the runner is (a limit of 1 s once ran out on a loaded runner
-    /// before the fake host had welcomed the Kill's connection).
-    static let unhurried = Duration.seconds(120)
-
     /// A Kill that cannot reach the host is no end: unconfirmed, saying why.
     @Test func anAttachedSessionWhoseKillCannotBeSentIsNotEnded() async throws {
-        let (host, session, attached, _) = try await attachedLocally()
+        let hands = Hands()
+        let (host, session, attached, _) = try await attachedLocally(now: { hands.now })
         defer { withExtendedLifetime(attached) {} }
+        let deadline = Timeline()
+        defer { deadline.passAll() }
         host.stop()
-        let outcome = await session.end(within: .seconds(5))
+        let outcome = await session.end(within: .seconds(Patience.answer), sleep: deadline.sleep)
         guard case let .unconfirmed(why) = outcome, why.count == 1 else {
             Issue.record("the end was \(outcome)")
             return
@@ -340,11 +378,12 @@ import Testing
     /// A Kill the host refuses, the session still in its list, is no end: unconfirmed in the
     /// host's words.
     @Test func anAttachedSessionWhoseKillIsRefusedIsNotEnded() async throws {
-        let (host, session, attached, _) = try await attachedLocally()
+        let hands = Hands()
+        let (host, session, attached, _) = try await attachedLocally(now: { hands.now })
         defer { withExtendedLifetime(attached) {} }
         let deadline = Timeline()
         defer { deadline.passAll() }
-        let ended = Task { await session.end(within: Self.unhurried, sleep: deadline.sleep) }
+        let ended = Task { await session.end(within: .seconds(Patience.answer), sleep: deadline.sleep) }
         let words = "Session 'work' is not yours."
         try await Self.refuseTheKill(at: host, saying: words, listing: [SessionListingTests.info("work")])
         #expect(await ended.value == .unconfirmed([words]))
@@ -353,30 +392,33 @@ import Testing
     /// A Kill refused because the host no longer holds the session is the session gone already, by
     /// the host's own list, not by its words.
     @Test func anAttachedSessionTheHostNoLongerListsIsGone() async throws {
-        let (host, session, attached, _) = try await attachedLocally()
+        let hands = Hands()
+        let (host, session, attached, _) = try await attachedLocally(now: { hands.now })
         defer { withExtendedLifetime(attached) {} }
         let deadline = Timeline()
         defer { deadline.passAll() }
-        let ended = Task { await session.end(within: Self.unhurried, sleep: deadline.sleep) }
+        let ended = Task { await session.end(within: .seconds(Patience.answer), sleep: deadline.sleep) }
         try await Self.refuseTheKill(at: host, saying: "No session 'work'.", listing: [SessionListingTests.info("other")])
         #expect(await ended.value == .gone)
     }
 
     /// A Kill answered after the end's limit is no end: unconfirmed at the limit, in this Mac's
     /// words. The limit passes once the host has read the Kill, and the Kill is never answered: an
-    /// end that waited for its answer would wait out its reads' 120 s, past the test's minute.
+    /// end that waited for its answer would wait out its reads' `Patience.answer`, past the test's
+    /// minute. The session's clock is held still, so the end's limit is held whole.
     @Test func anAttachedSessionWhoseKillIsAnsweredLateIsNotEnded() async throws {
-        let (host, session, attached, _) = try await attachedLocally()
+        let hands = Hands()
+        let (host, session, attached, _) = try await attachedLocally(now: { hands.now })
         defer { withExtendedLifetime(attached) {} }
         let deadline = Timeline()
-        let ended = Task { await session.end(within: Self.unhurried, sleep: deadline.sleep) }
+        let ended = Task { await session.end(within: .seconds(Patience.answer), sleep: deadline.sleep) }
         let killer = try await host.accept()
         defer { withExtendedLifetime(killer) {} }
         try await killer.welcome()
         #expect(try await killer.read() == .kill(session: "work"))
-        try await deadline.until(holding: 1)
+        try await deadline.until(held: [.seconds(Patience.answer)])
         deadline.passAll()
-        #expect(await ended.value == .unconfirmed(["This Mac's terminal host did not answer within 120 s."]))
+        #expect(await ended.value == .unconfirmed(["This Mac's terminal host did not answer within \(Patience.answer) s."]))
     }
 
     /// The end's own reads time out with the limit too, and may do so first, on a busy machine:
@@ -488,7 +530,7 @@ import Testing
     ) async throws -> (FakeHost, TerminalSession, FakeHost.Peer) {
         let host = try FakeHost()
         let session = TerminalSession(
-            attach: "theirs", write: false, door: .local(host.address), screen: try screen(columns: 80, rows: 24), timeout: 5,
+            attach: "theirs", write: false, door: .local(host.address), screen: try screen(columns: 80, rows: 24), timeout: Patience.answer,
             stableAfter: .zero, sleep: sleep
         )
         let watch = Watch(session)
@@ -510,7 +552,7 @@ import Testing
         let create = SessionCreate(session: "work", command: [], workingDirectory: "/tmp", project: "", room: "", size: TerminalSize(columns: 20, rows: 3))
         let screen = try Screen(size: GridSize(columns: 20, rows: 3), scrollbackBytes: 0, palette: .dark, now: { hands.now })
         let session = TerminalSession(
-            open: create, door: .local(host.address), screen: screen, timeout: 5, stableAfter: .zero, sleep: Naps().sleep,
+            open: create, door: .local(host.address), screen: screen, timeout: Patience.answer, stableAfter: .zero, sleep: Naps().sleep,
             after: timers.after
         )
         let ticks = Mutex(0)
@@ -604,13 +646,13 @@ import Testing
     /// Closing a pane that holds no connection ends its session at the host on one of its own.
     @Test func aSessionIsEndedWithoutAttaching() async throws {
         let host = try FakeHost()
-        async let ended: Void = SessionListing.end("mac-a", at: host.address, timeout: 5)
+        async let ended: Void = SessionListing.end("mac-a", at: host.address, timeout: Patience.answer)
         let peer = try await host.accept()
         #expect(try await peer.welcome() == "")
         #expect(try await peer.read() == .kill(session: "mac-a"))
         try peer.send(.accepted)
         try await ended
-        let refused = Task { try await SessionListing.end("mac-b", at: host.address, timeout: 5) }
+        let refused = Task { try await SessionListing.end("mac-b", at: host.address, timeout: Patience.answer) }
         let second = try await host.accept()
         try await second.welcome()
         _ = try await second.read()
@@ -625,7 +667,7 @@ import Testing
     @Test func aRunnersSessionIsEndedThroughItsDoorAsItsWriter() async throws {
         let host = try FakeHost(tcp: ())
         let desk = TicketDesk(address: host.address)
-        async let ended = Door.runner(desk).end("app-a")
+        async let ended = Door.runner(desk).end("app-a", within: .seconds(Patience.answer))
         let peer = try await host.accept()
         #expect(try await peer.welcome() == "ticket-1")
         #expect(try await peer.read().unnamed == .attach(session: "app-a", write: true))
@@ -641,7 +683,7 @@ import Testing
     @Test func aRunnersSessionAnotherHoldsIsNotEndedAndTheDoorsWordsAreSaid() async throws {
         let host = try FakeHost(tcp: ())
         let desk = TicketDesk(address: host.address)
-        let ended = Task { await Door.runner(desk).end("app-a") }
+        let ended = Task { await Door.runner(desk).end("app-a", within: .seconds(Patience.answer)) }
         let peer = try await host.accept()
         try await peer.welcome()
         #expect(try await peer.read().unnamed == .attach(session: "app-a", write: true))
@@ -653,13 +695,16 @@ import Testing
     }
 
     /// M5: a session the API has no ticket to attach to, refused as not found by its code, ended
-    /// already: it is gone, never "could not be ended"; nothing is connected to.
+    /// already: it is gone, never "could not be ended"; nothing is connected to. The end's limit is
+    /// held, so only the refusal decides.
     @Test func aRunnersSessionTheAPIFindsNoneOfIsGoneAlready() async throws {
         let desk = TicketDesk(address: .tcp(host: "127.0.0.1", port: 9))
+        let deadline = Timeline()
+        defer { deadline.passAll() }
         desk.refuse(Refusal(code: .known(.notFound), message: "There is no session 'app-a' on this box that you may attach."))
-        #expect(await Door.runner(desk).end("app-a") == .gone)
+        #expect(await Door.runner(desk).end("app-a", sleep: deadline.sleep) == .gone)
         desk.refuse(Refusal(code: .known(.forbidden), message: "Session 'app-a' is not yours."))
-        #expect(await Door.runner(desk).end("app-a") == .unconfirmed(["Session 'app-a' is not yours."]), "any other refusal is said")
+        #expect(await Door.runner(desk).end("app-a", sleep: deadline.sleep) == .unconfirmed(["Session 'app-a' is not yours."]), "any other refusal is said")
     }
 
     /// M3: a tab closes only once its session ended, or had; an end not confirmed keeps the tab.
@@ -670,12 +715,12 @@ import Testing
 
     /// A host that streams the session forever and never answers the Kill is given up on at the
     /// end's deadline, not read for ever: the deadline passes once the host streams, and an end
-    /// that read on would read for its 120 s, past the test's minute.
+    /// that read on would read for its `Patience.answer`, past the test's minute.
     @Test(.timeLimit(.minutes(1))) func aRunnerThatNeverAnswersTheKillIsGivenUpOn() async throws {
         let host = try FakeHost(tcp: ())
         let desk = TicketDesk(address: host.address)
         let deadline = Timeline()
-        let ended = Task { await Door.runner(desk).end("app-a", within: SessionFixTests.unhurried, sleep: deadline.sleep) }
+        let ended = Task { await Door.runner(desk).end("app-a", within: .seconds(Patience.answer), sleep: deadline.sleep) }
         let peer = try await host.accept()
         defer { withExtendedLifetime(peer) {} }
         try await peer.welcome()
@@ -685,11 +730,11 @@ import Testing
         let streaming = Task.detached {
             while !Task.isCancelled { try peer.send(output("x")) }
         }
-        try await deadline.until(held: [SessionFixTests.unhurried])
+        try await deadline.until(held: [.seconds(Patience.answer)])
         deadline.passAll()
         let outcome = await ended.value
         streaming.cancel()
-        #expect(outcome == .unconfirmed(["The runner did not answer within 120 s."]))
+        #expect(outcome == .unconfirmed(["The runner did not answer within \(Patience.answer) s."]))
     }
 
     /// M4: the ticket is inside the end's deadline: a control plane that never answers it leaves the
@@ -709,7 +754,7 @@ import Testing
 
     @Test func everyPageIsReadInOrder() async throws {
         let host = try FakeHost()
-        async let listed = SessionListing.sessions(at: host.address, timeout: 5)
+        async let listed = SessionListing.sessions(at: host.address, timeout: Patience.answer)
         let peer = try await host.accept()
         #expect(try await peer.welcome() == "")
         #expect(try await peer.read() == .listSessions(after: "", limit: SessionListing.pageSize))
@@ -721,7 +766,7 @@ import Testing
 
     @Test func aCursorThatDoesNotMoveForwardIsAProtocolViolation() async throws {
         let host = try FakeHost()
-        let listed = Task { try await SessionListing.sessions(at: host.address, timeout: 5) }
+        let listed = Task { try await SessionListing.sessions(at: host.address, timeout: Patience.answer) }
         let peer = try await host.accept()
         try await peer.welcome()
         _ = try await peer.read()
@@ -742,7 +787,7 @@ import Testing
 
     @Test func aRefusalIsThrownInTheHostsWords() async throws {
         let host = try FakeHost()
-        let listed = Task { try await SessionListing.sessions(at: host.address, timeout: 5) }
+        let listed = Task { try await SessionListing.sessions(at: host.address, timeout: Patience.answer) }
         let peer = try await host.accept()
         try await peer.welcome()
         _ = try await peer.read()
@@ -753,7 +798,7 @@ import Testing
 
     @Test func anAnswerThatIsNotAPageIsAProtocolViolation() async throws {
         let host = try FakeHost()
-        let listed = Task { try await SessionListing.sessions(at: host.address, timeout: 5) }
+        let listed = Task { try await SessionListing.sessions(at: host.address, timeout: Patience.answer) }
         let peer = try await host.accept()
         try await peer.welcome()
         _ = try await peer.read()
@@ -763,7 +808,7 @@ import Testing
 
     @Test func aListingPastTheLargestIsAProtocolViolation() async throws {
         let host = try FakeHost()
-        let listed = Task { try await SessionListing.sessions(at: host.address, timeout: 5) }
+        let listed = Task { try await SessionListing.sessions(at: host.address, timeout: Patience.answer) }
         let peer = try await host.accept()
         try await peer.welcome()
         let pages = SessionListing.largest / Int(SessionListing.pageSize) + 1

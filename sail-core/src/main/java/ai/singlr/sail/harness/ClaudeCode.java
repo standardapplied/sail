@@ -314,34 +314,40 @@ final class ClaudeCode implements Harness {
             "Claude Code's own",
             "Starts as Claude Code starts by itself: the project's default mode, else Auto where it"
                 + " is available, else Manual.",
-            ""),
+            "",
+            false),
         permissionMode(
-            "manual", "Manual", "Asks before edits, shell commands and network actions."),
+            "manual", "Manual", "Asks before edits, shell commands and network actions.", false),
         permissionMode(
             "acceptEdits",
             "Accept edits",
-            "Makes file edits and common filesystem commands without asking."),
+            "Makes file edits and common filesystem commands without asking.",
+            false),
         permissionMode(
             "plan",
             "Plan",
-            "Researches and proposes changes, and edits nothing until you approve the plan."),
+            "Researches and proposes changes, and edits nothing until you approve the plan.",
+            false),
         permissionMode(
             "auto",
             "Auto",
             "Runs everything, with a classifier reviewing each action first; Manual where auto is"
-                + " not available."),
+                + " not available.",
+            false),
         permissionMode(
             "dontAsk",
             "Don't ask",
-            "Refuses anything that would ask, and runs only what is approved beforehand."),
+            "Refuses anything that would ask, and runs only what is approved beforehand.",
+            false),
         permissionMode(
             "bypassPermissions",
             "Bypass permissions",
-            "Skips every permission prompt and safety check."));
+            "Skips every permission prompt and safety check.",
+            true));
   }
 
-  private static Mode permissionMode(String name, String label, String about) {
-    return new Mode(name, label, about, " --permission-mode " + name);
+  private static Mode permissionMode(String name, String label, String about, boolean risky) {
+    return new Mode(name, label, about, " --permission-mode " + name, risky);
   }
 
   @Override

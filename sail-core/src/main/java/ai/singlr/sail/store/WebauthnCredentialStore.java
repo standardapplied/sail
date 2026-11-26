@@ -75,7 +75,9 @@ public final class WebauthnCredentialStore {
 
   public List<Credential> listForFde(String fdeId) {
     return db.query(
-        SELECT + " WHERE fde_id = ? ORDER BY created_at", WebauthnCredentialStore::map, fdeId);
+        SELECT + " WHERE fde_id = ? ORDER BY created_at, rowid",
+        WebauthnCredentialStore::map,
+        fdeId);
   }
 
   /** Deletes a single credential; returns whether a row was removed. */

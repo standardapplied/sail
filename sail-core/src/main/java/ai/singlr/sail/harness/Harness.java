@@ -168,9 +168,10 @@ public interface Harness {
   /**
    * A mode a person starts an interactive session of this harness in: its {@code name} as a start
    * asks for it, what the harness calls it ({@code label}) and does in it ({@code about}), in its
-   * own words, and the {@code args} its command takes for it, empty for none.
+   * own words, the {@code args} its command takes for it, empty for none, and whether it skips the
+   * harness's own permission checks entirely ({@code risky}), which a client warns of.
    */
-  record Mode(String name, String label, String about, String args) {}
+  record Mode(String name, String label, String about, String args, boolean risky) {}
 
   /**
    * The modes an interactive session of this harness starts in inside a workspace, each distinct

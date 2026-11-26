@@ -30,37 +30,44 @@
             {
               "about": "Starts as Claude Code starts by itself: the project's default mode, else Auto where it is available, else Manual.",
               "label": "Claude Code's own",
-              "mode": "default"
+              "mode": "default",
+              "risky": false
             },
             {
               "about": "Asks before edits, shell commands and network actions.",
               "label": "Manual",
-              "mode": "manual"
+              "mode": "manual",
+              "risky": false
             },
             {
               "about": "Makes file edits and common filesystem commands without asking.",
               "label": "Accept edits",
-              "mode": "acceptEdits"
+              "mode": "acceptEdits",
+              "risky": false
             },
             {
               "about": "Researches and proposes changes, and edits nothing until you approve the plan.",
               "label": "Plan",
-              "mode": "plan"
+              "mode": "plan",
+              "risky": false
             },
             {
               "about": "Runs everything, with a classifier reviewing each action first; Manual where auto is not available.",
               "label": "Auto",
-              "mode": "auto"
+              "mode": "auto",
+              "risky": false
             },
             {
               "about": "Refuses anything that would ask, and runs only what is approved beforehand.",
               "label": "Don't ask",
-              "mode": "dontAsk"
+              "mode": "dontAsk",
+              "risky": false
             },
             {
               "about": "Skips every permission prompt and safety check.",
               "label": "Bypass permissions",
-              "mode": "bypassPermissions"
+              "mode": "bypassPermissions",
+              "risky": true
             }
           ],
           "sign_in": {
@@ -96,7 +103,8 @@
             {
               "about": "Runs every command without asking and outside Codex's sandbox.",
               "label": "Full access",
-              "mode": "full-access"
+              "mode": "full-access",
+              "risky": true
             }
           ],
           "note": "Sail starts Codex CLI in a workspace with full access, running every command without asking and without its sandbox: that sandbox, bubblewrap, cannot start in a workspace's container.",

@@ -475,6 +475,9 @@ extension Driver {
             shell.account.signOutHere(nil)
             return (true, "")
         }
+        if let name = step.askingWhoIsSignedIn {
+            return await askingWhoIsSignedIn(name)
+        }
         if let open = step.createRowOpen {
             let shown = await waitUntil(step.seconds ?? 5) { (pane.project.field.window != nil) == open }
             return (shown, "the create row \(pane.project.field.window != nil ? "open" : "gone")")
@@ -734,6 +737,99 @@ extension Driver {
             MenuOpener.shared.open(button)
             await shot.taken()
         }
+    }
+
+    /// The Workspaces card while the app asks who is signed in, on the pane already chosen
+    /// (`waitForSignIn()` is what a launch onto it calls; the launch's own order, the mark made under
+    /// the hidden pane and then shown, is `ControlsTests.theMarkDrawsOnlyWhileItCanBeSeen`'s): Sail's
+    /// mark alone in the card, the same mark in each look and in that look, and what it draws centred
+    /// on the card's centre: the sigma's ink and the label's, each, as AppKit draws the window's
+    /// content at 1x and at 2x, within half a backing pixel (or half a drawn pixel where that is
+    /// coarser), so a one-point miss fails at either. The 2x drawing is `<name>-<look>.png`. Then the
+    /// mark draws itself with motion on and holds still with it reduced, whatever the runner's
+    /// setting (GitHub's macOS images turn Reduce Motion on), which is put back after.
+    private func askingWhoIsSignedIn(_ name: String) async -> (Bool, String) {
+        let pane = shell.workspaces
+        pane.waitForSignIn()
+        guard pane.text == "Workspaces\n\(WorkspacesView.asking)", pane.card.subviews.count == 1, let mark = pane.card.subviews.first as? BrandMark else {
+            return (false, "asking, the card holds \(pane.card.subviews) and says \(pane.text)")
+        }
+        var held = true, said: [String] = []
+        let (taken, shots) = await inBothLooks(name) { file in
+            pane.layoutSubtreeIfNeeded()
+            let same = pane.card.subviews.count == 1 && pane.card.subviews.first === mark && mark.look == self.shell.look
+            let centring = [1.0, 2.0].map { scale -> (Bool, String) in
+                let image = Self.drawn(self.shell.window.contentView, at: scale)
+                if scale == 2 { try? image?.representation(using: .png, properties: [:])?.write(to: file) }
+                return self.centring(of: mark, on: pane.card, in: image, at: scale)
+            }
+            held = held && same && centring.allSatisfy(\.0)
+            said.append("\(self.shell.look == .dark ? "dark" : "light"): " + centring.map(\.1).joined(separator: "; ") + ", \(mark.isDrawing ? "drawing" : "still")"
+                + (same ? "" : ", not the same mark in this look"))
+        }
+        let motion = Motion.shared, was = motion.reduced
+        defer { motion.reduced = was }
+        motion.reduced = false
+        let draws = mark.isDrawing
+        motion.reduced = true
+        let stands = !mark.isDrawing
+        let moves = "Reduce Motion \(was ? "on" : "off") here; with motion on the mark \(draws ? "draws" : "does not draw"), reduced it \(stands ? "stands still" : "moves")"
+        return (held && taken && draws && stands, said.joined(separator: "; ") + "; " + moves + "; " + shots)
+    }
+
+    /// Where the sigma's ink and the label's stand from `card`'s centre, in points, in `image` (the
+    /// window's content drawn at `scale`), and whether each is within half a backing pixel, or half
+    /// a drawn pixel where that is coarser.
+    private func centring(of mark: BrandMark, on card: NSView, in image: NSBitmapImageRep?, at scale: Double) -> (Bool, String) {
+        guard let image, let content = shell.window.contentView else { return (false, "at \(Int(scale))x nothing was drawn") }
+        let across = card.convert(card.bounds, to: mark), centre = Double(card.convert(card.bounds, to: content).midX)
+        let bound = 0.5 / min(Double(shell.window.backingScaleFactor), scale)
+        let bands = [
+            ("sigma", NSRect(x: across.minX, y: 0, width: across.width, height: mark.markSide)),
+            ("label", NSRect(x: across.minX, y: mark.markSide, width: across.width, height: Double(mark.bounds.height) - mark.markSide)),
+        ]
+        var within = true
+        let found = bands.map { name, band -> String in
+            guard let ink = Self.inkCentre(in: image, of: content, region: mark.convert(band, to: content), scale: scale) else {
+                within = false
+                return "the \(name) drew nothing"
+            }
+            within = within && abs(ink - centre) <= bound
+            return String(format: "the %@'s ink %+.2f", name, ink - centre)
+        }
+        return (within, "at \(Int(scale))x " + found.joined(separator: " and ") + String(format: " pt from the card's centre (within %.2f)", bound))
+    }
+
+    /// The horizontal centre, in `view`'s points, of the ink in `region` (`view`'s points) of `image`,
+    /// `view` drawn at `scale`: the columns holding a pixel that differs from the region's first by
+    /// more than 16 of 255 in a channel. Nil where nothing differs.
+    private static func inkCentre(in image: NSBitmapImageRep, of view: NSView, region: NSRect, scale: Double) -> Double? {
+        let top = view.isFlipped ? Double(region.minY) : Double(view.bounds.height - region.maxY)
+        let rows = max(0, Int((top * scale).rounded())) ..< min(image.pixelsHigh, Int(((top + Double(region.height)) * scale).rounded()))
+        let columns = max(0, Int((Double(region.minX) * scale).rounded())) ..< min(image.pixelsWide, Int((Double(region.maxX) * scale).rounded()))
+        guard let first = rows.first, let left = columns.first else { return nil }
+        var ground = [Int](repeating: 0, count: 4), pixel = ground
+        image.getPixel(&ground, atX: left, y: first)
+        var inked: ClosedRange<Int>?
+        for y in rows {
+            for x in columns {
+                image.getPixel(&pixel, atX: x, y: y)
+                guard zip(pixel.prefix(3), ground.prefix(3)).contains(where: { abs($0 - $1) > 16 }) else { continue }
+                inked = inked.map { min($0.lowerBound, x) ... max($0.upperBound, x) } ?? x ... x
+            }
+        }
+        return inked.map { Double($0.lowerBound + $0.upperBound + 1) / 2 / scale }
+    }
+
+    /// `view` as AppKit draws it (`cacheDisplay`), at `scale` times its size.
+    private static func drawn(_ view: NSView?, at scale: Double) -> NSBitmapImageRep? {
+        guard let view, view.bounds.width > 0, view.bounds.height > 0, let image = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: Int(Double(view.bounds.width) * scale), pixelsHigh: Int(Double(view.bounds.height) * scale), bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return nil }
+        image.size = view.bounds.size
+        view.cacheDisplay(in: view.bounds, to: image)
+        return image
     }
 
     /// Store a Key's steps: a key pasted as a person pastes it, the sheet read, and the clipboard.

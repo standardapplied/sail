@@ -321,6 +321,7 @@ final class Kit {
         case "field": fields()
         case "pill": pills()
         case "spinner": spinners()
+        case "mark": marks()
         case "row": listRows()
         case "sidebar": sidebarRows()
         case "tooltip": tooltips()
@@ -407,6 +408,19 @@ final class Kit {
         row("Spinner · on accent", [held("spinner", Spinner(look: look)), busy])
         let frame = SkeletonFrame(look: look)
         row("Skeleton row", [held("skeleton-row", frame)])
+    }
+
+    /// Sail's mark at 44 pt: still on its tile; drawing, held at 0, 45 and 85 % of its cycle; and
+    /// drawing under Reduce Motion, as the gallery runs, whole and still, with its label.
+    private func marks() {
+        var specimens = [held("mark-still", BrandMark(.still, look: look, mono: mono))]
+        for percent in [0, 45, 85] {
+            let mark = BrandMark(.drawing(label: nil), look: look, mono: mono)
+            mark.held = Double(percent) / 100
+            specimens.append(held("mark-drawing-\(percent)", mark))
+        }
+        specimens.append(held("mark-drawing-reduced", BrandMark(.drawing(label: "Connecting"), look: look, mono: mono)))
+        row("Mark · still, drawing at 0, 45 and 85 %, and under Reduce Motion", specimens)
     }
 
     /// The library's sheet as Stop, Delete and Delete Anyway ask it, each at its own size.

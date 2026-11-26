@@ -223,6 +223,7 @@ class ClientGoldensTest {
   private static final String RP_ID = "sail.standardapplied.com";
   private static final String ORIGIN = "https://" + RP_ID;
   private static final String PASSKEYS = "/v1/auth";
+  private static final String OWN_PASSKEYS = "/v1/passkeys";
   private static final Base64.Encoder B64URL = Base64.getUrlEncoder().withoutPadding();
   private static final Base64.Decoder B64URL_DECODE = Base64.getUrlDecoder();
 
@@ -260,10 +261,12 @@ class ClientGoldensTest {
         var bus = new EventBus();
         var box = new Box(db, bus, tempDir)) {
       var uday = box.session("uday", "Uday", "uday@example.com", Role.ADMIN);
+      var http = new TreeMap<String, String>();
+      box.record(http, "projects-none", "GET", "/v1/projects", uday, null);
+      HeldProjects.hold(db, PROJECT);
       box.holdsDockOf("uday");
       var vik = box.token("vik", Role.VIEWER);
       var sam = box.scopedToken("sam");
-      var http = new TreeMap<String, String>();
       box.seed("POST", "/v1/rooms", uday, room());
       box.seed("POST", "/v1/rooms", uday, bare(QUIET_ROOM, "Quay"));
       var stream = box.stream("/v1/events/stream", uday);
@@ -282,6 +285,8 @@ class ClientGoldensTest {
       box.reviewPassedWithAFindingOpen();
 
       box.record(http, "whoami", "GET", "/v1/whoami", uday, null);
+      box.record(http, "health", "GET", "/v1/health", null, null);
+      box.record(http, "agents", "GET", "/v1/agents", uday, null);
       box.record(http, "projects", "GET", "/v1/projects", uday, null);
       box.record(http, "rooms", "GET", "/v1/rooms?project=" + PROJECT, uday, null);
       box.record(http, "room", "GET", "/v1/rooms/" + ROOM, uday, null);
@@ -366,7 +371,7 @@ class ClientGoldensTest {
       box.record(http, "board-specs", "GET", "/v1/specs?project=" + PROJECT, uday, null);
       box.record(http, "board-rooms", "GET", "/v1/rooms?project=" + PROJECT, uday, null);
       box.record(http, "refusal-resync-required", "GET", "/v1/changes?since=999999999", uday, null);
-      box.recordPasskeys(http);
+      box.recordPasskeys(http, uday);
       var resumed = box.resumed(uday, beginning, "id: " + changes.get("next"));
       var resync = box.resumed(uday, "999999999", "event: resync");
 
@@ -433,6 +438,14 @@ class ClientGoldensTest {
       box.recordLogins(http);
       box.recordTemplates(
           http, dana, box.session("ike", "Ike", "ike@example.com", Role.ADMIN), ana, vik);
+      box.record(http, "project-created", "POST", "/v1/projects", dana, marina());
+      box.record(
+          http,
+          "refusal-project-name-taken",
+          "POST",
+          "/v1/projects",
+          dana,
+          Map.of("name", PROJECT));
 
       assertAll(
           () -> GoldenFiles.check(GOLDENS.resolve("http"), http),
@@ -539,6 +552,24 @@ class ClientGoldensTest {
   /** {@code value} as a golden holds it: its keys sorted, one to a line. */
   private static String json(Object value) {
     return YamlUtil.dumpJsonPretty(Scrub.canonical(value, UnaryOperator.identity())) + "\n";
+  }
+
+  /**
+   * A whole definition as the app's Create Project sends it: a name, two repos, both harnesses
+   * installed and the Medium size.
+   */
+  private static Map<String, Object> marina() {
+    return Map.of(
+        "name",
+        "marina",
+        "repos",
+        List.of(
+            Map.of("url", "https://github.com/harbor/app.git", "path", "app"),
+            Map.of("url", "https://github.com/harbor/docs.git", "path", "docs")),
+        "agent",
+        Map.of("install", List.of("claude-code", "codex")),
+        "resources",
+        Map.of("cpu", 4, "memory", "8GB", "disk", "50GB"));
   }
 
   private static String messages() {
@@ -902,7 +933,6 @@ class ClientGoldensTest {
     Box(Sqlite db, EventBus bus, Path dir) throws IOException {
       this.projects = dir;
       new SchemaManager(db).migrate();
-      HeldProjects.hold(db, PROJECT);
       this.db = db;
       this.bus = bus;
       this.streamClock = new ManualClock(AT, Duration.ofMinutes(1));
@@ -1040,9 +1070,10 @@ class ClientGoldensTest {
      * A passkey enrolled by ticket and signed in with, as a native client does it, each answer
      * recorded: the ticket refused once spent, a second registration offering the enrolled passkey
      * as excluded, a passkey the box never enrolled, an origin it does not accept, and the routes
-     * on a box with no relying party.
+     * on a box with no relying party; then the person's own passkeys, listed and removed, and
+     * {@code plainSession}, a session no passkey signed in, refused a removal.
      */
-    void recordPasskeys(Map<String, String> goldens) throws Exception {
+    void recordPasskeys(Map<String, String> goldens, String plainSession) throws Exception {
       var passkey = new TestAuthenticator(RP_ID);
       var ticket = enrollment().issue("uday").ticket();
       var started =
@@ -1070,7 +1101,7 @@ class ClientGoldensTest {
       login.put("client_data_json", B64URL.encodeToString(assertion.clientDataJson()));
       login.put("authenticator_data", B64URL.encodeToString(assertion.authenticatorData()));
       login.put("signature", B64URL.encodeToString(assertion.signature()));
-      ceremony(goldens, "passkey-login-finish", base(), "login/finish", null, login);
+      var signedIn = ceremony(goldens, "passkey-login-finish", base(), "login/finish", null, login);
       var stranger = new TestAuthenticator(RP_ID).assertResponse(new byte[32], ORIGIN);
       var unknown = new LinkedHashMap<>(login);
       unknown.put("credential_id", B64URL.encodeToString(stranger.credentialId()));
@@ -1093,6 +1124,46 @@ class ClientGoldensTest {
           "login/start",
           null,
           Map.of());
+      var session = signedIn.get("session_token").toString();
+      var other = enroll(goldens, "Sail for iPhone");
+      var first = B64URL.encodeToString(passkey.credentialId());
+      record(goldens, "passkeys", "GET", OWN_PASSKEYS, session, null);
+      record(
+          goldens,
+          "refusal-passkey-no-passkey-session",
+          "DELETE",
+          ownPasskey(first),
+          plainSession,
+          null);
+      record(goldens, "refusal-passkey-current", "DELETE", ownPasskey(first), session, null);
+      record(goldens, "passkey-removed", "DELETE", ownPasskey(other), session, null);
+      record(goldens, "refusal-passkey-last", "DELETE", ownPasskey(first), session, null);
+      record(
+          goldens,
+          "refusal-passkey-not-yours",
+          "DELETE",
+          ownPasskey(B64URL.encodeToString(stranger.credentialId())),
+          session,
+          null);
+    }
+
+    /** Enrolls another passkey of uday's, labelled {@code label}, recording nothing; its id. */
+    private String enroll(Map<String, String> goldens, String label) throws Exception {
+      var another = new TestAuthenticator(RP_ID);
+      var ticket = enrollment().issue("uday").ticket();
+      var started = ceremony(goldens, null, base(), "register/start", ticket, Map.of());
+      var made = another.register(challenge(started.get("public_key")), ORIGIN);
+      var finish = new LinkedHashMap<String, Object>();
+      finish.put("challenge_id", started.get("challenge_id"));
+      finish.put("client_data_json", B64URL.encodeToString(made.clientDataJson()));
+      finish.put("attestation_object", B64URL.encodeToString(made.attestationObject()));
+      finish.put("label", label);
+      ceremony(goldens, null, base(), "register/finish", ticket, finish);
+      return B64URL.encodeToString(another.credentialId());
+    }
+
+    private static String ownPasskey(String id) {
+      return OWN_PASSKEYS + "/" + id;
     }
 
     private static byte[] challenge(Object options) {
@@ -1365,7 +1436,8 @@ class ClientGoldensTest {
         Map<String, Object> body)
         throws Exception {
       var response = send(method, path, token, body);
-      var parsed = YamlUtil.parseMap(response.body());
+      var parsed =
+          response.body().isEmpty() ? Map.<String, Object>of() : YamlUtil.parseMap(response.body());
       var request = new LinkedHashMap<String, Object>();
       request.put("method", method);
       request.put("path", path);
@@ -1890,6 +1962,9 @@ class ClientGoldensTest {
     String renamed(String text) {
       if (text.equals(HostInfo.hostname())) {
         return "box";
+      }
+      if (text.startsWith(OWN_PASSKEYS + "/")) {
+        return OWN_PASSKEYS + "/" + renamed(text.substring(OWN_PASSKEYS.length() + 1));
       }
       if (pinned.containsKey(text)) {
         return pinned.get(text);

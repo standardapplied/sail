@@ -9,16 +9,29 @@ struct Runner {
     let follower: Follower
     let host: LocalHostProcess?
     let echoBudget: Double
+    /// How long a step waits, in seconds, when its script names no limit; nil waits for what the
+    /// step needs alone, an attach too.
+    let patience: Int?
+    /// How long a close waits for the host to end the session.
+    let ending: Duration
     /// Told each step's result as it finishes.
     let progress: @Sendable (StepResult) -> Void
     private let clock = ContinuousClock()
 
-    init(session: TerminalSession, host: LocalHostProcess?, echoBudget: Double, progress: @escaping @Sendable (StepResult) -> Void) {
+    /// A probe's run waits 5 s for what a step needs and 30 s for an attach, those limits timed by
+    /// `sleep`, and ``Door/endLimit`` for a close, which the session times itself.
+    init(
+        session: TerminalSession, host: LocalHostProcess?, echoBudget: Double, patience: Int? = 5, ending: Duration = Door.endLimit,
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        progress: @escaping @Sendable (StepResult) -> Void
+    ) {
         self.session = session
         self.host = host
         self.echoBudget = echoBudget
+        self.patience = patience
+        self.ending = ending
         self.progress = progress
-        follower = Follower(session)
+        follower = Follower(session, patience: patience, sleep: sleep)
     }
 
     func run(_ script: Script) async -> Report {
@@ -29,7 +42,7 @@ struct Runner {
         var budgets: [Budget] = []
         var uploads: [UploadResult] = []
         do {
-            try await follower.attached(within: 30)
+            try await follower.attached(within: attaching)
             results.append(StepResult(step: "attach", ok: true, milliseconds: 0, detail: nil))
         } catch {
             results.append(StepResult(step: "attach", ok: false, milliseconds: 0, detail: "\(error)"))
@@ -55,6 +68,11 @@ struct Runner {
             steps: results, latency: session.latencyReport, droppedInputs: session.state.droppedInputs, budgets: budgets,
             uploads: uploads
         )
+    }
+
+    /// How long an attach waits, in seconds: longer than a step, as a host may be starting.
+    private var attaching: Int? {
+        patience.map { _ in 30 }
     }
 
     /// The screens a script kept, and how many replays the session had finished when it last
@@ -91,7 +109,7 @@ struct Runner {
         case .attach:
             kept.replays = session.replays
             session.attach()
-            try await follower.attached(within: 30)
+            try await follower.attached(within: attaching)
         case .killHost:
             guard let host else { throw ProbeError("killHost needs --host-binary, so the probe owns the host") }
             host.crash()
@@ -101,7 +119,7 @@ struct Runner {
         case let .hold(seconds):
             try await Task.sleep(for: .seconds(seconds))
         case .close:
-            let outcome = await session.end()
+            let outcome = await session.end(within: ending)
             session.close()
             if case let .unconfirmed(said) = outcome {
                 throw ProbeError("not ended: " + said.joined(separator: " "))

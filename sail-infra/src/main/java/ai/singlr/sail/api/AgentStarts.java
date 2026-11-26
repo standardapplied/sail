@@ -16,6 +16,7 @@ import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.LoginStore;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 
@@ -65,10 +66,22 @@ final class AgentStarts {
   }
 
   /**
-   * Why {@code harness} does not start in a workspace of {@code config}'s project: empty when the
-   * project's agent installation lists it.
+   * Why a harness a workspace offers does not start ({@code why}), and the few words a list row
+   * says of it ({@code unavailable}), declared beside the refusal it shortens: every refusal an
+   * offer carries has both.
    */
-  static Optional<ApiException> notInstalled(ProjectDefinition config, Harness harness) {
+  record OfferRefusal(ApiException why, String unavailable) {
+    OfferRefusal {
+      Objects.requireNonNull(why, "why");
+      Objects.requireNonNull(unavailable, "unavailable");
+    }
+  }
+
+  /**
+   * Why {@code harness} does not start in a workspace of {@code config}'s project, "Not installed
+   * in" it in a row's few words: empty when the project's agent installation lists it.
+   */
+  static Optional<OfferRefusal> notInstalled(ProjectDefinition config, Harness harness) {
     var installs =
         Optional.ofNullable(config.agent())
             .map(ProjectDefinition.Agent::installs)
@@ -77,7 +90,7 @@ final class AgentStarts {
       return Optional.empty();
     }
     var project = config.name();
-    return Optional.of(
+    var why =
         new ApiException(
             ErrorCode.HARNESS_NOT_INSTALLED,
             harness.displayName()
@@ -95,7 +108,8 @@ final class AgentStarts {
                     + harness.yamlName()
                     + " to "
                     + project
-                    + "'s agent install list and builds its template again.")));
+                    + "'s agent install list and builds its template again."));
+    return Optional.of(new OfferRefusal(why, "Not installed in " + project));
   }
 
   /**

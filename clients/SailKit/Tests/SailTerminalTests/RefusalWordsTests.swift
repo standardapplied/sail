@@ -125,10 +125,10 @@ import Testing
 
     static func opened(_ door: FakeRunnerDoor, _ name: String) async throws -> TerminalSession {
         let create = SessionCreate(session: name, command: [], workingDirectory: "/tmp", project: "acme", room: "", size: TerminalSize(columns: 80, rows: 24), workspace: "try")
-        let session = TerminalSession(open: create, door: .runner(Tickets(door)), screen: try screen())
+        let session = TerminalSession(open: create, door: .runner(Tickets(door)), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep)
         let watch = Watch(session)
         session.start()
-        try await watch.attached(within: 10)
+        try await watch.attached()
         return session
     }
 
@@ -142,17 +142,19 @@ import Testing
         }
         func attached(_ name: String) async throws -> TerminalSession {
             let create = SessionCreate(session: name, command: [], workingDirectory: "/tmp", project: "", room: "", size: TerminalSize(columns: 80, rows: 24))
-            let session = TerminalSession(open: create, door: .local(.tcp(host: "127.0.0.1", port: door.port)), screen: try screen())
+            let session = TerminalSession(
+                open: create, door: .local(.tcp(host: "127.0.0.1", port: door.port)), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep
+            )
             let watch = Watch(session)
             session.start()
-            try await watch.attached(within: 10)
+            try await watch.attached()
             return session
         }
         let ended = try await attached("mac-a")
-        #expect(await ended.end() == .ended)
+        #expect(await ended.end(within: .seconds(Patience.answer)) == .ended)
         door.refuseKills(saying: "Session 'mac-b' is not yours.")
         let refused = try await attached("mac-b")
-        #expect(await refused.end() == .unconfirmed(["Session 'mac-b' is not yours."]))
+        #expect(await refused.end(within: .seconds(Patience.answer)) == .unconfirmed(["Session 'mac-b' is not yours."]))
         #expect(door.sessions == ["mac-b"])
         let late = try await attached("mac-c")
         door.holdKills()
@@ -168,16 +170,16 @@ import Testing
         let theirs = try await Self.opened(door, "app-theirs")
         #expect(door.sessions == ["app-ours", "app-theirs"])
         ours.close()
-        #expect(await Door.runner(Tickets(door)).end("app-ours") == .ended)
+        #expect(await Door.runner(Tickets(door)).end("app-ours", within: .seconds(Patience.answer)) == .ended)
         door.holdWrite("app-theirs")
         theirs.close()
-        #expect(await Door.runner(Tickets(door)).end("app-theirs") == .unconfirmed([FakeRunnerDoor.notTheWriter]))
+        #expect(await Door.runner(Tickets(door)).end("app-theirs", within: .seconds(Patience.answer)) == .unconfirmed([FakeRunnerDoor.notTheWriter]))
         #expect(door.sessions == ["app-theirs"], "the host's session list after the ends")
         let ticket = door.issue(for: .attach(session: "app-theirs"))
         let spent = try await onThread { () throws -> [String] in
             var said: [String] = []
             for _ in 0 ..< 2 {
-                let connection = try Connection.connect(to: try HostAddress(ticketAddress: ticket.address), timeout: 5)
+                let connection = try Connection.connect(to: try HostAddress(ticketAddress: ticket.address), timeout: Patience.answer)
                 defer { connection.close() }
                 do {
                     _ = try connection.admit(token: ticket.ticket)
@@ -199,7 +201,7 @@ import Testing
         defer { door.stop() }
         let ticket = door.issue(for: .attach(session: "app-ours"))
         let said = try await onThread { () throws -> String in
-            let connection = try Connection.connect(to: try HostAddress(ticketAddress: ticket.address), timeout: 5)
+            let connection = try Connection.connect(to: try HostAddress(ticketAddress: ticket.address), timeout: Patience.answer)
             defer { connection.close() }
             _ = try connection.admit(token: ticket.ticket)
             let create = SessionCreate(session: "app-new", command: [], workingDirectory: "/tmp", project: "acme", room: "", size: TerminalSize(columns: 80, rows: 24), workspace: "try")

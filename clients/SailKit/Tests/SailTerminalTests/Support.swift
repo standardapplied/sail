@@ -1,5 +1,6 @@
 import Foundation
 import SailAPI
+import SailKitTestSupport
 @testable import SailTerminal
 import SailTerminalWire
 import SailVT
@@ -31,7 +32,7 @@ final class Timeline: Sendable {
     }
 
     private let waiting = Mutex<(next: Int, held: [Waiting])>((0, []))
-    private let changed = Alarm { try await Task.sleep(for: $0) }
+    private let changed = Alarm { _ in }
 
     func sleep(_ duration: Duration) async throws {
         let id = waiting.withLock { state in
@@ -63,23 +64,15 @@ final class Timeline: Sendable {
         waiting.withLock { $0.held.map(\.duration) }
     }
 
-    /// Waits until the waits held are `durations`, failing after ``FakeHost/deadline`` seconds.
+    /// Waits until the waits held are `durations`, for as long as the test runs.
     func until(held durations: [Duration]) async throws {
         try await until("\(durations)") { held == durations }
     }
 
-    /// Waits until `count` waits are held, whatever they are, failing after ``FakeHost/deadline``
-    /// seconds: an end's limit less the time it took to begin is no duration a test can name.
-    func until(holding count: Int) async throws {
-        try await until("\(count) of them") { held.count == count }
-    }
-
     private func until(_ wanted: String, _ done: () -> Bool) async throws {
-        let deadline = ContinuousClock.now + .seconds(FakeHost.deadline)
         while !done() {
-            let left = deadline - ContinuousClock.now
-            guard left > .zero else { throw HostError("the waits held are \(held), never \(wanted)") }
-            await changed.wait(left)
+            guard !Task.isCancelled else { throw HostError("the waits held are \(held), never \(wanted)") }
+            await changed.wait(nil)
         }
     }
 
@@ -110,34 +103,44 @@ final class ManualTimers: Sendable {
         }
     }
 
-    private let entries = Mutex<[Entry]>([])
-    private let set = DispatchSemaphore(value: 0)
+    private let entries = Mutex<(set: Int, live: [Entry])>((0, []))
+    private let changed = Alarm { _ in }
+    private let awaited = Mutex(0)
 
     var after: HoldTick.After {
         { delay, work in
             let entry = Entry(delay: delay, work: work)
-            self.entries.withLock { $0.append(entry) }
-            self.set.signal()
+            self.entries.withLock { entries in
+                entries.set += 1
+                entries.live.append(entry)
+            }
+            self.changed.ring()
             return entry
         }
     }
 
     /// The delays of the timers set and neither fired nor called off.
     var live: [Duration] {
-        entries.withLock { $0.filter { !$0.cancelled.withLock { $0 } }.map(\.delay) }
+        entries.withLock { $0.live.filter { !$0.cancelled.withLock { $0 } }.map(\.delay) }
     }
 
-    /// Returns once a timer is set, at most `seconds` after the call.
-    func awaitSet(within seconds: Int = FakeHost.deadline) async throws {
-        let came = try await onThread { [set] in set.wait(timeout: .now() + .seconds(seconds)) == .success }
-        if !came { throw HostError("no timer was set within \(seconds) s") }
+    /// Returns once one more timer is set than this has returned for, for as long as the test runs.
+    func awaitSet() async throws {
+        let wanted = awaited.withLock { awaited in
+            awaited += 1
+            return awaited
+        }
+        while entries.withLock({ $0.set }) < wanted {
+            guard !Task.isCancelled else { throw HostError("timer \(wanted) was never set") }
+            await changed.wait(nil)
+        }
     }
 
     /// Runs every live timer's work on this thread, as its timer would.
     func fireAll() {
         let due = entries.withLock { entries in
-            defer { entries = [] }
-            return entries
+            defer { entries.live = [] }
+            return entries.live
         }
         due.filter { !$0.cancelled.withLock { $0 } }.forEach { $0.work() }
     }
@@ -230,14 +233,15 @@ func residentBytes() -> Int? {
 /// `stableAfter` says otherwise.
 func attachedLocally(
     columns: Int = 80, rows: Int = 24, stableAfter: Duration = .zero,
-    sleep: @escaping @Sendable (Duration) async throws -> Void = Naps().sleep
+    sleep: @escaping @Sendable (Duration) async throws -> Void = Naps().sleep,
+    now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now }
 ) async throws -> (FakeHost, TerminalSession, FakeHost.Peer, Watch) {
     let host = try FakeHost()
     let size = TerminalSize(columns: Int32(columns), rows: Int32(rows))
     let create = SessionCreate(session: "work", command: [], workingDirectory: "/tmp", project: "", room: "", size: size)
     let session = TerminalSession(
-        open: create, door: .local(host.address), screen: try screen(columns: columns, rows: rows), timeout: 5,
-        stableAfter: stableAfter, sleep: sleep
+        open: create, door: .local(host.address), screen: try screen(columns: columns, rows: rows), timeout: Patience.answer,
+        stableAfter: stableAfter, sleep: sleep, now: now
     )
     let watch = Watch(session)
     session.start()

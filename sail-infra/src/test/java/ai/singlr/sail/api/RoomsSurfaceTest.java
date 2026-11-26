@@ -139,11 +139,18 @@ class RoomsSurfaceTest {
     var agents = ((Result.Success<AgentsResponse>) ops.agents()).value().agents();
 
     var claude =
-        agents.stream().filter(a -> a.name().equals("claude-code")).findFirst().orElseThrow();
-    var codex = agents.stream().filter(a -> a.name().equals("codex")).findFirst().orElseThrow();
+        agents.stream()
+            .filter(a -> a.harness().yamlName().equals("claude-code"))
+            .findFirst()
+            .orElseThrow();
+    var codex =
+        agents.stream()
+            .filter(a -> a.harness().yamlName().equals("codex"))
+            .findFirst()
+            .orElseThrow();
     assertEquals(
         List.of("claude-code", "codex"),
-        agents.stream().map(AgentView::name).toList(),
+        agents.stream().map(agent -> agent.harness().yamlName()).toList(),
         "every harness sail knows, in the order it lists them");
     assertTrue(claude.modes().stream().allMatch(AgentModeView::supported));
     assertTrue(

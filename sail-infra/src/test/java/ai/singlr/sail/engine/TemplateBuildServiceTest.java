@@ -885,4 +885,37 @@ class TemplateBuildServiceTest {
       assertTrue(record(recordFile()).outcome() != null, "the build ended under its lock");
     }
   }
+
+  /**
+   * Each step a build reports has a name a client draws, step n the n-th: the provisioner's phases
+   * in their order, then the lane's finish, so step 13 is the clone.
+   */
+  @Test
+  void eachStepIsNamedInTheOrderABuildCountsIt() {
+    assertEquals(
+        List.of(
+            "container_launched",
+            "disk_quota_set",
+            "resource_limits_set",
+            "network_ready",
+            "packages_installed",
+            "ssh_configured",
+            "podman_installed",
+            "testcontainers_configured",
+            "jdk_installed",
+            "node_installed",
+            "git_configured",
+            "maven_installed",
+            "repos_cloned",
+            "workspace_files_pushed",
+            "services_provisioned",
+            "prune_cron_configured",
+            "agent_tools_installed",
+            "skills_installed",
+            "complete",
+            "template_finished"),
+        TemplateBuild.STEP_NAMES);
+    assertEquals(TemplateBuild.STEPS, TemplateBuild.STEP_NAMES.size());
+    assertEquals("repos_cloned", TemplateBuild.STEP_NAMES.get(13 - 1));
+  }
 }

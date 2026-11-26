@@ -13,7 +13,7 @@ readonly MAX_RUN=6h
 readonly SECRETS="fleet-anthropic-key fleet-openai-key fleet-github-token"
 readonly LOOP_REPO=standardapplied/nocaptcha
 readonly LOOP_AGENTS=${FLEET_LOOP_AGENTS:-claude-code}
-readonly SCHEMA_CHANGED_IN=0.76.0
+readonly SCHEMA_CHANGED_IN=0.77.0
 
 usage() {
   cat >&2 <<'EOF'
@@ -58,7 +58,13 @@ Usage:
                                 dry run, and uday's dispatch of it on main is placement; eng cannot add a
                                 person at its node's CLI or at main's gateway; main refuses a sync session
                                 whose token is no session; eng reads sync health and bus stats on its own
-                                box but not on main, nor runs main's rounds; row 4, a push into a project
+                                box but not on main, nor runs main's rounds; eng and obs list their own
+                                passkeys on main over HTTP, neither eng's token nor uday's admin token removes
+                                one, whatever the id (only a session signed in with a passkey does), and
+                                eng's in-container credential reaches no passkey door; a removal that ends
+                                its sessions, the last passkey, the one signed in with, two removals at once
+                                and a sign-in a removal overtakes are proven by the unit tests
+                                (PasskeyRoutesTest), which enroll a passkey; row 4, a push into a project
                                 client is not granted, is proven by the unit tests (AccessScenarioTest row
                                 4), as client's box drops an ungranted project before it offers anything and
                                 only a forged sync client reaches main; row 26, a disabled person's passkey
@@ -677,7 +683,8 @@ sudo sail server token revoke "door-$handle" > /dev/null 2>&1
 echo "HTTP $status"; head -c 400 /tmp/door.json; echo'
 
 # The modes the route offers for Claude Code are its own: on the version a workspace installs now,
-# claude --help's --permission-mode choices are the route's modes beside its own start (default).
+# claude --help's --permission-mode choices are the route's modes beside its own start (default),
+# and the one mode the route marks risky is bypassPermissions.
 readonly MODES_MATCH='set -u
 handle=$1 project=$2 workspace=$3
 token=$(sudo sail server token create "modes-$handle" member --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " ")
@@ -695,7 +702,9 @@ found = re.search(r"--permission-mode <mode>.*?\\(choices: (.*?)\\)", open("/tmp
 claude = sorted(re.findall(r"\"([^\"]+)\"", found.group(1))) if found else []
 print("claude --help: " + ", ".join(claude))
 print("the route:     " + ", ".join(route))
-print("SAME" if claude and claude == route else "DIFFERENT")
+risky = sorted(m["mode"] for m in offer["modes"] if m["risky"])
+print("risky modes:   " + ", ".join(risky))
+print("SAME" if claude and claude == route and risky == ["bypassPermissions"] else "DIFFERENT")
 PY'
 
 # Whether the agents route says the workspace holds Claude Code's own sign-in, as its file changes:
@@ -717,6 +726,24 @@ as_dev "rm -f ~/.claude/.credentials.json"; gone=$(said)
 sudo sail server token revoke "signed-$handle" > /dev/null 2>&1
 echo "state only: $state; empty: $empty; held: $held; removed: $gone"
 [ "$state $empty $held $gone" = "false false true false" ] && echo SAME'
+
+# The in-container credential asking the socket it holds for the caller's passkeys, its status line
+# after the body; the command fails unless the socket answered 200.
+readonly IN_CONTAINER_PASSKEYS='curl -s -w "\nHTTP %{http_code}\n" --unix-socket /var/lib/sail/run/api.sock -H "Authorization: Bearer $(cat /var/lib/sail/run/box.credential)" http://sail/v1/passkeys | tee /dev/stderr | grep -q "^HTTP 200$"'
+
+# Whether acme's template on main names each of its steps: as many names as steps, ending with the
+# lane's finish.
+readonly TEMPLATE_STEPS='set -u
+handle=$1 project=$2
+token=$(sudo sail server token create "steps-$handle" admin --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " ")
+[ -n "$token" ] || { echo "no token"; exit 1; }
+curl -s -H "Authorization: Bearer $token" "http://127.0.0.1:7070/v1/projects/$project/template" > /tmp/steps.json
+sudo sail server token revoke "steps-$handle" > /dev/null 2>&1
+python3 -I -c "import json, sys; t = json.load(open(\"/tmp/steps.json\")); n = t[\"step_names\"]; print(\"steps %s, names %s, last %s\" % (t[\"steps\"], len(n), n[-1])); sys.exit(0 if len(n) == t[\"steps\"] and n[-1] == \"template_finished\" else 1)"'
+
+template_names_its_steps() {
+  on "$1" "$2" "cat > /tmp/sail-template-steps && bash /tmp/sail-template-steps $3 $4" <<< "$TEMPLATE_STEPS"
+}
 
 signed_in_follows_the_file() {
   local run=$1 box=$2 handle=$3 project=$4 workspace=$5 out
@@ -1594,6 +1621,16 @@ access() {
     naming "$ASK_AN_ADMIN_TO_DO_IT" gateway_door "$run" eng "$ADMIN_MANAGES_PEOPLE" fde add zed --name Zed
   check "$run" "eng lists its own passkeys at main's gateway [gateway]" \
     gateway_allows "$run" eng fde passkey list eng
+  check "$run" "eng, a member, lists her own passkeys on main [HTTP]" \
+    http_token_door "$run" main eng member 200 GET /v1/passkeys '' '"passkeys": ['
+  check "$run" "obs, a viewer, lists their own passkeys on main [HTTP]" \
+    http_token_door "$run" main obs viewer 200 GET /v1/passkeys '' '"passkeys": ['
+  check "$run" "eng's token removes no passkey on main, an id not hers as any: only a session signed in with a passkey removes one [HTTP]" \
+    http_token_door "$run" main eng member 403 DELETE /v1/passkeys/bm90LWhlcnM '' "Passkeys are removed only from a session signed in with a passkey."
+  check "$run" "uday's admin token removes no passkey on main either [HTTP]" \
+    http_token_door "$run" main uday admin 403 DELETE /v1/passkeys/bm90LWhlcnM '' "Passkeys are removed only from a session signed in with a passkey."
+  check "$run" "eng's in-container credential lists no passkeys: the socket serves no passkey door, and the lane is refused at every door that does (the unit tests' container column) [socket]" \
+    container_refuses "$run" eng acme "HTTP 404" "$IN_CONTAINER_PASSKEYS"
   check "$run" "obs asks main's gateway to stop a run: agent stop would run as main's own person, refused [gateway]" \
     naming "$FOLLOW_WITH_SPEC" gateway_door "$run" observer "$AGENT_VERB_RUNS_AS_THE_BOX" agent stop acme --dry-run
   check "$run" "eng lists acme's agent sessions at main's gateway: an agent verb that asks the API runs [gateway]" \
@@ -2233,6 +2270,8 @@ storage() {
     on "$run" main "sudo sh -c 'sail git login github.com < /root/.fleet/gh'"
   check "$run" "acme's template is built once on main, its time in the report" \
     timed_on "$run" main "sudo sail project template build acme"
+  check "$run" "acme's template on main names each of its steps, as many as it counts, the lane's finish last" \
+    template_names_its_steps "$run" main uday acme
   check "$run" "eng, a member, creates her own workspace of acme on main through main's API" \
     http_token_door "$run" main eng member 201 POST /v1/projects/acme/workspaces '{"name":"eng-own"}' '"owner": "eng"'
   check "$run" "eng's workspace is labelled hers by her id" owned_by "$run" main acme-eng-own eng
