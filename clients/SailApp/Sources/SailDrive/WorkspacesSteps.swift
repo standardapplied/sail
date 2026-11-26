@@ -58,6 +58,15 @@ actor GoldenDesk: Transport {
         held[route] = after
     }
 
+    /// From now on a sign-in ends `days` from now: the recorded sign-in's answer, its `expires_at`
+    /// moved.
+    func signInEnds(in days: Double) throws {
+        let ends = Date(timeIntervalSinceNow: days * 86_400).formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+        let exchange = try Exchange("passkey-login-finish").altered(at: ["expires_at"], to: ends)
+        answers["\(exchange.method) \(exchange.path)"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: exchange.body)
+        held["\(exchange.method) \(exchange.path)"] = .zero
+    }
+
     /// From now on the projects are listed as the golden `projects` lists them, but these: each a
     /// name and its template's state.
     func answerProjects(_ projects: [[String]]) throws {

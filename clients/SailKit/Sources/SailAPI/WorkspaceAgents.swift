@@ -98,12 +98,55 @@ extension [RemedyPart] {
     }
 }
 
-extension AgentOffer {
+/// A harness as it declares itself wherever the server names it: its name, what it is called, and
+/// the kinds of login it takes. A workspace's offer and the server's list of harnesses both carry
+/// it, so whatever is built from it is the same from either.
+public struct AgentDeclaration: Equatable, Sendable {
+    public let harness: String
+    public let display: String
+    public let kinds: [AgentLoginKind]
+
     /// The kind a person stores from the app: the first the server names whose how names no
     /// command, so the app says how to make it and stores what is pasted; nil when every kind is
     /// made by running something.
     public var storable: AgentLoginKind? {
         kinds.first { $0.said != nil }
+    }
+}
+
+extension AgentOffer {
+    public var declaration: AgentDeclaration {
+        AgentDeclaration(harness: harness, display: display, kinds: kinds)
+    }
+}
+
+/// A harness the server knows, as its list of harnesses names it: its declaration and its own
+/// sign-in, which a person makes inside a session (none where it has no such way in).
+public struct KnownAgent: Codable, Equatable, Sendable {
+    public let name: String
+    public let displayName: String
+    public let kinds: [AgentLoginKind]
+    public let signIn: AgentSignIn?
+
+    private enum CodingKeys: String, CodingKey {
+        case name, kinds
+        case displayName = "display_name"
+        case signIn = "sign_in"
+    }
+
+    public var declaration: AgentDeclaration {
+        AgentDeclaration(harness: name, display: displayName, kinds: kinds)
+    }
+}
+
+/// Every harness the server knows, in its order.
+public struct KnownAgents: Codable, Equatable, Sendable {
+    public let agents: [KnownAgent]
+}
+
+extension Endpoint where Response == KnownAgents {
+    public static var knownAgents: Self {
+        Self(.get, Route.agents)
     }
 }
 

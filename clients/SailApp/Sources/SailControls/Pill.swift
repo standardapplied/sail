@@ -3,7 +3,8 @@ import SailLook
 
 /// A workspace's or a template's state (`PillPaint`): a hairline frame in inner corners, a square
 /// dot carrying the colour, and the state in mono capitals. Starting, creating and building pulse
-/// their dot every 1.2 s, held still while motion is reduced.
+/// their dot every 1.2 s, held still while motion is reduced. A pill may say its own words in a
+/// state's paint (the control plane's "Connected"), or, plain, words alone with no dot (a role).
 @MainActor
 public final class Pill: NSView {
     public var look: Look {
@@ -17,14 +18,23 @@ public final class Pill: NSView {
     public let size: PillSize
     private let mono: LabelFont
     let dot = PillDot()
+    /// What it says in place of its state's label.
+    public var saying: String? {
+        didSet { repaint() }
+    }
 
-    public init(_ state: PillState, size: PillSize = .regular, look: Look, mono: LabelFont) {
+    public let plain: Bool
+
+    public init(_ state: PillState, saying: String? = nil, plain: Bool = false, size: PillSize = .regular, look: Look, mono: LabelFont) {
         self.state = state
+        self.saying = saying
+        self.plain = plain
         self.size = size
         self.look = look
         self.mono = mono
         super.init(frame: .zero)
         dot.wantsLayer = true
+        dot.isHidden = plain
         addSubview(dot)
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
@@ -46,11 +56,16 @@ public final class Pill: NSView {
     }
 
     private var label: NSAttributedString {
-        Draw.text(state.label, mono.font(size.text) as NSFont, paint.text, tracking: size.tracking, upper: true)
+        Draw.text(said, mono.font(size.text) as NSFont, paint.text, tracking: size.tracking, upper: true)
+    }
+
+    public var said: String {
+        saying ?? state.label
     }
 
     override public var intrinsicContentSize: NSSize {
-        NSSize(width: size.width(label: Double(ceil(label.size().width))), height: size.height)
+        let words = Double(ceil(label.size().width))
+        return NSSize(width: plain ? size.leading + words + size.trailing : size.width(label: words), height: size.height)
     }
 
     override public func setFrameSize(_ newSize: NSSize) {
@@ -68,14 +83,14 @@ public final class Pill: NSView {
     override public func draw(_: NSRect) {
         Draw.box(bounds, radius: Look.innerRadius, fill: nil, edge: paint.edge, dash: paint.dashed ? PillSize.dash.map { CGFloat($0) } : [])
         let label = self.label
-        let x = userInterfaceLayoutDirection == .rightToLeft ? size.trailing : size.leading + size.dot + size.gap
+        let x = userInterfaceLayoutDirection == .rightToLeft ? size.trailing : size.leading + (plain ? 0 : size.dot + size.gap)
         Draw.line(label, x: x, baseline: TextLine.baseline(top: (Double(bounds.height) - size.text) / 2, points: size.text, lineHeight: size.text))
     }
 
     private func repaint() {
         dot.ink = paint.dot
         dot.hollow = paint.hollow
-        setAccessibilityLabel(state.label)
+        setAccessibilityLabel(said)
         invalidateIntrinsicContentSize()
         Motion.pulse(dot.layer, state.pulses && window != nil)
         needsDisplay = true
@@ -165,19 +180,30 @@ public final class Keycap: NSView {
     }
 }
 
-/// A person's initial in a 20 pt circle on the hover fill, ringed by a hairline.
+/// A person's initial in a circle on the hover fill, ringed by a hairline: 20 pt in a caption, or
+/// as large as a header asks in its own face.
 @MainActor
 public final class Initial: NSView {
     public var look: Look {
         didSet { needsDisplay = true }
     }
 
-    private let name: String
+    public var name: String {
+        didSet {
+            setAccessibilityLabel(name)
+            needsDisplay = true
+        }
+    }
 
-    public init(_ name: String, look: Look) {
+    private let side: Double
+    private let font: NSFont
+
+    public init(_ name: String, side: Double = 20, font: NSFont = .systemFont(ofSize: Look.Step.caption.points, weight: .semibold), look: Look) {
         self.name = name
         self.look = look
-        super.init(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
+        self.side = side
+        self.font = font
+        super.init(frame: NSRect(x: 0, y: 0, width: side, height: side))
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
         setAccessibilityLabel(name)
@@ -193,7 +219,7 @@ public final class Initial: NSView {
     }
 
     override public var intrinsicContentSize: NSSize {
-        NSSize(width: 20, height: 20)
+        NSSize(width: side, height: side)
     }
 
     override public func draw(_: NSRect) {
@@ -208,7 +234,7 @@ public final class Initial: NSView {
             ring.lineWidth = 1
             ring.stroke()
         }
-        let letter = Draw.text(String(name.prefix(1)).uppercased(), .systemFont(ofSize: Look.Step.caption.points, weight: .semibold), mark.ink)
+        let letter = Draw.text(String(name.prefix(1)).uppercased(), font, mark.ink)
         letter.draw(at: NSPoint(x: ((bounds.width - letter.size().width) / 2).rounded(), y: ((bounds.height - letter.size().height) / 2).rounded()))
     }
 }

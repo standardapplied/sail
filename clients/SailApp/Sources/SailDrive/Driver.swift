@@ -244,6 +244,7 @@ final class Driver {
         "filesShot", "filesAct", "filesName", "filesNameSays", "filesDropInto", "filesHover", "filesMenu", "filesAsks", "filesAnswer", "terminalTyped", "shot", "shotScreen", "deletesAsked", "questionsWaiting", "releaseAnswers", "relistAs", "golden", "proxyFails",
         "press", "modifiers", "menuItem", "contextMenu", "choose", "arrangement", "at", "fontPoints", "items", "seconds", "name",
         "pasteLogin", "loginSheetSays", "loginSheetIs", "loginSheetClick", "pasteboardHolds", "setPasteboard", "holdAnswers", "unreachable",
+        "accountShot", "accountSays",
     ]
 
     /// The step's keys that are set.

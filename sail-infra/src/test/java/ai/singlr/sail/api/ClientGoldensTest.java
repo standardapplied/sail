@@ -1130,17 +1130,18 @@ class ClientGoldensTest {
       record(goldens, "passkeys", "GET", OWN_PASSKEYS, session, null);
       record(
           goldens,
-          "refusal-passkey-no-passkey-session",
+          "refusal-forbidden-passkey-no-passkey-session",
           "DELETE",
           ownPasskey(first),
           plainSession,
           null);
-      record(goldens, "refusal-passkey-current", "DELETE", ownPasskey(first), session, null);
+      record(
+          goldens, "refusal-conflict-passkey-current", "DELETE", ownPasskey(first), session, null);
       record(goldens, "passkey-removed", "DELETE", ownPasskey(other), session, null);
-      record(goldens, "refusal-passkey-last", "DELETE", ownPasskey(first), session, null);
+      record(goldens, "refusal-conflict-passkey-last", "DELETE", ownPasskey(first), session, null);
       record(
           goldens,
-          "refusal-passkey-not-yours",
+          "refusal-not-found-passkey-not-yours",
           "DELETE",
           ownPasskey(B64URL.encodeToString(stranger.credentialId())),
           session,
@@ -1450,7 +1451,9 @@ class ClientGoldensTest {
           .headers()
           .firstValue(ChangeFeed.SEQ_HEADER)
           .ifPresent(seq -> answer.put("headers", Map.of("seq", seq)));
-      answer.put("body", untimed(parsed));
+      if (!response.body().isEmpty()) {
+        answer.put("body", untimed(parsed));
+      }
       var exchange = Map.of("request", request, "response", answer);
       goldens.put(name + ".json", json(Scrub.canonical(exchange, this::renamed)));
       return parsed;
@@ -1710,9 +1713,9 @@ class ClientGoldensTest {
      * his first (`login-stored`, no note); the same name stored again (`login-replaced`, its note
      * on the sessions already running); his logins with it the default, a second key stored beside
      * it (`work`, not the default) and made the one in use, and asked again once it is removed
-     * (`refusal-not-found-login`); each refusal of a value, and of a name; then his logins while he
-     * has a Claude Code login that is not the default, where the app asks a name. Every value sent
-     * is an obvious fake.
+     * (`refusal-not-found-login`); the first removed (`login-removed`); each refusal of a value,
+     * and of a name; then his logins while he has a Claude Code login that is not the default,
+     * where the app asks a name. Every value sent is an obvious fake.
      */
     void recordLogins(Map<String, String> goldens) throws Exception {
       var uday = new AuthSessionStore(db).create(idOf("uday"), Duration.ofMinutes(30)).token();
@@ -1758,7 +1761,7 @@ class ClientGoldensTest {
           claudeLogin.formatted("work%3Ause"),
           uday,
           null);
-      logins.remove(udayId, claude, "default");
+      record(goldens, "login-removed", "DELETE", claudeLogin.formatted("default"), uday, null);
       var refused =
           Map.of(
               "empty",

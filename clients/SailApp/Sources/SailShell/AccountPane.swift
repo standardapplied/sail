@@ -3,19 +3,32 @@ import SailAPI
 import SailControls
 import SailLook
 import SailTerminalView
+import SailWorkbench
 
-/// The account signed in, in the user menu's language: the person's name as the display heading,
-/// `@handle · Role` under SIGNED IN AS, the control plane as the menu's line under CONTROL PLANE
-/// (its address, state square and word, live as checks start and end), the session's end in quiet
-/// text, and Sign Out (secondary). Why `whoami` could not confirm the session, or why the vault
-/// would not forget it, is said under the control plane's line: its sentence in crimson after the
-/// error's mark, the rest in the secondary ink. Signed out it shows nothing: the welcome is on
-/// Workspaces.
+/// The Account view (`first-impressions-mockup.html`, section 2): a header (the initial's 52 pt
+/// disc, the name in Newsreader, `@handle`, the role as a plain pill, the email: the user menu's own
+/// name, handle and role), then four groups in the list frame, each under its eyebrow. The control
+/// plane: its address, when the session ends, and its state as a pill; out of reach, a banner in the
+/// group with Try Again; under three days left, the end in the warning ink and Sign In Again. Your
+/// passkeys and your keys, each a list of the server's rows, the drawing mark in the frame until
+/// the first answer, the last answer dimmed while the call that drew it fails, each refusal said
+/// where it happened. Then Sign Out, beside what it ends and what it does not. No button here is
+/// primary. Signed out it shows nothing: the welcome is on Workspaces. Laid out whole by
+/// arithmetic in a scrolling column, mirrored right to left.
 @MainActor
 public final class AccountPane: NSView, NSMenuItemValidation {
-    public let signOut: SailButton
-    public let said = NSTextField(wrappingLabelWithString: "")
+    package static let inset = (top: 36.0, sides: 48.0)
+    static let column = 640.0, groupGap = 28.0, headGap = 8.0, disc = 52.0, row = 56.0
+    static let padding = (vertical: 9.0, leading: 14.0, trailing: 12.0), dimmed = 0.45
+
+    /// The harnesses the server lists and the person's logins: what the Keys group is drawn from.
+    package struct KeyLists: Equatable, Sendable {
+        package let agents: [KnownAgent]
+        package let logins: [StoredLogin]
+    }
+
     public let flow: AccountFlow
+    public let signOut: SailButton
 
     /// The look it is drawn in; a new one repaints it.
     var look: Look {
@@ -28,38 +41,80 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     /// look.
     package private(set) var lookPaints = 0
 
-    override public func viewDidUnhide() {
-        super.viewDidUnhide()
-        painter.shown()
-    }
+    /// What a group drew from its call.
+    package private(set) var passkeys = AccountPage.Answered<[OwnPasskey]>()
+    package private(set) var keys = AccountPage.Answered<KeyLists>()
+    /// Why a removal of a row was refused, by the row's id, said under it.
+    package private(set) var refusals: [String: [String]] = [:]
+    /// The groups' last load, a person's last action: what a test awaits.
+    package private(set) var loading: Task<Void, Never>?
+    package private(set) var acting: Task<Void, Never>?
+    /// The question asked now, or the Store a Key sheet up.
+    package private(set) var question: Sheet?
+    package private(set) var loginSheet: LoginSheet?
+    var now: @MainActor () -> Date = { Date() }
+    var clock = AccountPage.Clock()
+    var pasteboard = NSPasteboard.general
 
-    private let mono: TerminalFonts
-    /// What the pane says now under the control plane's line, a line each.
-    private(set) var lines: [String] = []
-    /// Why the vault would not forget the session at Sign Out, said until who is signed in changes.
+    private var signInLines: [String] = []
     private var signOutLines: [String] = []
-    private var shownFor: SignedIn?
-    /// The facts' mono eyebrows.
-    private(set) var eyebrows: [NSTextField] = []
-    /// The display heading: who is signed in; cut at its end, said in full on hover.
+    private var storedLine: String?
+    /// Whose groups these are, the control plane and the handle: another's are cleared.
+    private var whose: String?
+    private var era = 0
+    /// Keys was chosen: the view goes to its keys once the groups' answers have drawn them.
+    private var toKeys = false
+
+    private let titleFont: TitleFont
+    private let mono: TerminalFonts
+    private let labels: LabelFont
+    package let scroll: QuietScrollView
+    private let page = AccountColumn()
+    let disc: Initial
     let heading = NSTextField(labelWithString: "")
-    /// `@handle · Role`; cut at its end, said in full on hover.
     let handle = NSTextField(labelWithString: "")
-    private(set) lazy var headingTip = Tooltip("", look: look, mono: nil)
-    private(set) lazy var handleTip = Tooltip("", look: look, mono: nil)
-    private let headingFont: NSFont
-    /// The control plane as the user menu draws it.
-    let planeRow: ControlPlaneRow
-    /// Until when the session lasts, or that it is not yet confirmed, in quiet text that wraps.
-    let until = NSTextField(wrappingLabelWithString: "")
+    let role: Pill
+    let email = NSTextField(labelWithString: "")
+    /// The groups' mono eyebrows: the control plane, passkeys, keys.
+    package private(set) var eyebrows: [NSTextField] = []
+    let planeFrame = ListFrame(look: .light)
+    private(set) var planeRow: AccountRowView
+    let state: Pill
+    let signInAgain: SailButton
+    private(set) var banner: Banner?
+    let passkeyFrame: ListFrame
+    package let passkeyList: SailList
+    let passkeyMark: BrandMark
+    let passkeySaid = NSTextField(wrappingLabelWithString: "")
+    let passkeyNote = NSTextField(wrappingLabelWithString: AccountPage.passkeysNote)
+    let keyFrame: ListFrame
+    package let keyList: SailList
+    let keyMark: BrandMark
+    let keySaid = NSTextField(wrappingLabelWithString: "")
+    let keyNote = NSTextField(wrappingLabelWithString: AccountPage.keysNote)
+    let outWords = NSTextField(wrappingLabelWithString: "")
+    let outNote = NSTextField(wrappingLabelWithString: AccountPage.signOutNote)
+    let outSaid = NSTextField(wrappingLabelWithString: "")
 
     init(flow: AccountFlow, look: Look, title: TitleFont, mono: TerminalFonts, labels: LabelFont) {
         self.flow = flow
         self.look = look
+        titleFont = title
         self.mono = mono
-        planeRow = ControlPlaneRow(look: look, mono: labels, points: Look.Step.callout.points)
-        headingFont = title.font(.title2) as NSFont
-        signOut = SailButton("Sign Out", kind: .secondary, look: look, target: nil, action: nil)
+        self.labels = labels
+        scroll = QuietScrollView(look: look)
+        disc = Initial("", side: Self.disc, font: CTFontCreateCopyWithAttributes(title.font(.title1), 24, nil, nil) as NSFont, look: look)
+        role = Pill(.unknown, plain: true, size: .small, look: look, mono: labels)
+        state = Pill(.running, look: look, mono: labels)
+        signInAgain = SailButton("Sign In Again", kind: .secondary, size: .small, look: look, target: nil, action: nil)
+        signOut = SailButton("Sign Out", kind: .secondary, icon: .out, look: look, target: nil, action: nil)
+        passkeyList = SailList(rowStyle: .list, look: look, mono: labels)
+        keyList = SailList(rowStyle: .list, look: look, mono: labels)
+        passkeyFrame = ListFrame(scrolling: passkeyList, look: look)
+        keyFrame = ListFrame(scrolling: keyList, look: look)
+        passkeyMark = BrandMark(.drawing(label: nil), side: 28, look: look, mono: labels)
+        keyMark = BrandMark(.drawing(label: nil), side: 28, look: look, mono: labels)
+        planeRow = AccountRowView(.icon(.cloud), title: "", mono: true, look: look, labels: labels)
         super.init(frame: .zero)
         compose()
         show()
@@ -70,18 +125,101 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         nil
     }
 
-    /// Everything the pane says now, a line each, as the drive reads it.
-    public var text: String {
-        guard flow.standing != nil else { return "" }
-        return ([heading.stringValue, handle.stringValue, "\(planeRow.said) · \(planeRow.plane?.said ?? "")", until.stringValue] + lines).filter { !$0.isEmpty }.joined(separator: "\n")
+    override public func viewDidUnhide() {
+        super.viewDidUnhide()
+        painter.shown()
     }
+
+    // MARK: What it says
+
+    /// The control plane's address as the view names it, and as a key's sheet is told it.
+    private var place: String {
+        flow.standing?.controlPlane.named ?? ""
+    }
+
+    var ending: AccountPage.Ending? {
+        flow.standing.map { AccountPage.ending($0.until, now: now(), clock: clock) }
+    }
+
+    var passkeyRows: [AccountPage.PasskeyRow] {
+        AccountPage.passkeyRows(passkeys.value ?? [], now: now(), clock: clock)
+    }
+
+    var keyRows: [AccountPage.KeyRow] {
+        keys.value.map { AccountPage.keyRows($0.agents, logins: $0.logins) } ?? []
+    }
+
+    /// What is said in the control plane's group under its row: why the check could not confirm the
+    /// session (out of reach in the view's own words), else why Sign In Again was refused.
+    var planeLines: [String] {
+        guard case let .failure(refusal)? = flow.standing?.whoami else { return signInLines }
+        return refusal.reason == .unreachable ? AccountPage.unreachable(at: place) : refusal.lines
+    }
+
+    /// Everything the view says now, a line each, as the drive reads it.
+    public var text: String {
+        guard let standing = flow.standing else { return "" }
+        let content = flow.menuContent
+        var lines = [content.name, [content.handle, content.role, (try? standing.whoami.get())?.email].compactMap { $0 }.joined(separator: " · ")]
+        lines.append("\(content.address ?? "") · \(state.said)")
+        lines += [ending?.said ?? ""] + planeLines
+        lines += passkeyRows.flatMap { row in [[row.label, row.thisMac ? AccountPage.thisMac : nil, row.detail].compactMap { $0 }.joined(separator: " · ")] + (refusals[row.id] ?? []) }
+        lines += passkeys.failure ?? []
+        lines += keyRows.flatMap { row in ["\(row.display) · \(row.detail)"] + (refusals[row.id] ?? []) }
+        lines += (keys.failure ?? []) + [storedLine].compactMap { $0 }
+        return (lines + [outWords.stringValue] + signOutLines).filter { !$0.isEmpty }.joined(separator: "\n")
+    }
+
+    // MARK: Asking
+
+    /// Shown (the rail's Account, the menu's Account or Keys): the groups asked again.
+    func shown() {
+        load()
+    }
+
+    /// Asks the server for the groups' answers while someone is signed in: their own passkeys, the
+    /// harnesses it knows and their keys. An answer for another sign-in is dropped; a group keeps
+    /// its last answer until a call answers again.
+    func load() {
+        guard let client = flow.client(), !place.isEmpty else { return }
+        let era = self.era, place = self.place
+        loading = Task { [weak self] in
+            let passkeys = await Self.result { () async throws(SailError) in try await client.send(.passkeys).passkeys }
+            let agents = await Self.result { () async throws(SailError) in try await client.send(.knownAgents).agents }
+            let logins = await Self.result { () async throws(SailError) in try await client.send(.logins).logins }
+            guard let self, era == self.era else { return }
+            self.passkeys.take(passkeys, at: place)
+            keys.take(agents.flatMap { agents in logins.map { KeyLists(agents: agents, logins: $0) } }, at: place)
+            show()
+            if toKeys {
+                toKeys = false
+                scrollNowToKeys()
+            }
+        }
+    }
+
+    private static func result<Value>(_ work: () async throws(SailError) -> Value) async -> Result<Value, SailError> {
+        do throws(SailError) {
+            return .success(try await work())
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    /// `error` as said where it happened: the server's words, or the control plane failing.
+    private func lines(_ error: SailError) -> [String] {
+        if case let .refused(refusal) = error { return refusal.lines }
+        return [error.said(at: place)]
+    }
+
+    // MARK: Acting
 
     /// Signs out at once, asking nothing: what the sign-in opened on the runner lives on there,
     /// for the same person's next sign-in.
     @objc public func signOutHere(_: Any?) {
         let refused = flow.signOut()
         signOutLines = refused?.lines ?? []
-        shownFor = flow.standing
+        whose = flow.standing.map(Self.whose)
         show()
     }
 
@@ -89,102 +227,637 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         item.action != #selector(signOutHere(_:)) || (flow.standing != nil && !flow.isActing)
     }
 
-    /// Draws what the flow knows now: who is signed in, the control plane's line, the session's
-    /// end, and why `whoami` could not confirm it. Sign Out is held while a person's action runs.
-    func show() {
-        let standing = flow.standing
-        if standing != shownFor {
-            signOutLines = []
-            shownFor = standing
+    /// Try Again: who is signed in asked again, then the groups.
+    @objc func tryAgain(_: Any?) {
+        acting = Task { [weak self] in
+            await self?.flow.refresh()
+            self?.load()
         }
-        let whoami = try? standing?.whoami.get()
-        let ends = standing?.until.formatted(date: .long, time: .shortened) ?? ""
-        until.stringValue = standing == nil ? "" : whoami == nil ? "Not yet confirmed: remembered on this Mac until \(ends)" : "Signed in until \(ends)"
-        signOut.isEnabled = !flow.isActing
-        paintFacts()
-        var now = signOutLines
-        if case let .failure(refusal)? = standing?.whoami { now += refusal.lines }
-        say(now)
     }
 
-    /// The heading, the handle and the control plane's line, from what the menu says.
-    private func paintFacts() {
+    /// Sign In Again: the sign-in ceremony at this control plane, the view kept; a refusal said in
+    /// the control plane's group.
+    @objc func signInAgainNow(_: Any?) {
+        signInLines = []
+        guard flow.signInAgain(refused: { [weak self] refusal in
+            self?.signInLines = refusal.lines
+            self?.show()
+        }) else { return }
+        acting = flow.underWay
+        show()
+    }
+
+    /// What a row's Remove removes.
+    enum Removal {
+        case passkey(String)
+        case login(harness: String, name: String)
+    }
+
+    /// Remove on a row asks first, Cancel the default; confirmed, `remove` is sent and its refusal
+    /// said under the row, the row kept. Either way the groups are asked again.
+    private func ask(_ asked: AccountPage.Question, row id: String, remove: Removal) {
+        guard let window, question == nil, loginSheet == nil, flow.client() != nil else { return }
+        let sheet = Sheet(title: asked.title, body: asked.body, confirm: "Remove", kind: .destructive, look: look, titleFont: titleFont)
+        question = sheet
+        sheet.ask(on: window) { [weak self] confirmed in
+            guard let self else { return }
+            question = nil
+            guard confirmed, let client = flow.client() else { return }
+            refusals[id] = nil
+            show()
+            let era = self.era
+            acting = Task { [weak self] in
+                let answer = await Self.result { () async throws(SailError) in
+                    switch remove {
+                    case let .passkey(passkey): _ = try await client.send(.removePasskey(passkey))
+                    case let .login(harness, name): _ = try await client.send(.removeLogin(harness: harness, name: name))
+                    }
+                }
+                guard let self, era == self.era else { return }
+                if case let .failure(error) = answer { refusals[id] = lines(error) }
+                show()
+                load()
+            }
+        }
+    }
+
+    /// Add Key and Replace: the Store a Key sheet for the row's harness, storing under the key it
+    /// replaces. Once stored, the clipboard is cleared where it still holds the key, the key is made
+    /// the one new sessions take where the server did not make it so, and the keys asked again.
+    private func storeKey(_ row: AccountPage.KeyRow) {
+        guard let window, question == nil, loginSheet == nil, let client = flow.client(), let lists = keys.value,
+              let asked = StoreLogin(row.agent, logins: lists.logins, address: place, naming: row.login)
+        else { return }
+        let width = min(LoginSheet.width, Double(window.contentLayoutRect.width) - 2 * LoginSheet.inset)
+        let sheet = LoginSheet(asked, width: width, direction: userInterfaceLayoutDirection, look: look, titleFont: titleFont, mono: labels, pasteboard: pasteboard)
+        sheet.send = { endpoint in await Self.result { () async throws(SailError) in try await client.send(endpoint) } }
+        sheet.onStored = { [weak self] stored in self?.stored(stored, by: client) }
+        sheet.onEnd = { [weak self, weak sheet] in
+            guard let self, loginSheet === sheet else { return }
+            loginSheet = nil
+        }
+        loginSheet = sheet
+        window.beginSheet(sheet)
+    }
+
+    private func stored(_ stored: StoreLogin, by client: SailClient) {
+        if case .stored(_, clearsClipboard: true) = stored.stage { pasteboard.clearContents() }
+        storedLine = stored.stored
+        let era = self.era
+        acting = Task { [weak self] in
+            let used = await Self.result { () async throws(SailError) in if let use = stored.use { _ = try await client.send(use) } }
+            guard let self, era == self.era else { return }
+            if case .failure = used { storedLine = stored.notUsed }
+            show()
+            load()
+        }
+    }
+
+    /// Keys, from the user menu: the view at its keys, as far as the page scrolls, and again once
+    /// the groups asked as it was shown have answered.
+    func scrollToKeys() {
+        toKeys = true
+        scrollNowToKeys()
+    }
+
+    private func scrollNowToKeys() {
+        layoutSubtreeIfNeeded()
+        let top = Double(eyebrows[2].frame.minY) - Self.inset.top
+        let most = max(Double(page.frame.height) - Double(scroll.contentSize.height), 0)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: min(max(top, 0), most)))
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
+
+    /// Where the view is scrolled to, for the tests and the drive.
+    package var scrolledTo: Double {
+        Double(scroll.contentView.bounds.minY)
+    }
+
+    // MARK: Drawing
+
+    private static func whose(_ standing: SignedIn) -> String {
+        standing.controlPlane.named + "\u{1F}" + standing.fde
+    }
+
+    /// Draws what the flow and the groups know now. Another sign-in clears the groups and asks again.
+    package func show() {
+        let standing = flow.standing, who = standing.map(Self.whose)
+        if who != whose {
+            whose = who
+            era += 1
+            passkeys = .init()
+            keys = .init()
+            refusals = [:]
+            signInLines = []
+            storedLine = nil
+            if who != nil { signOutLines = [] }
+            if who != nil, !isHiddenOrHasHiddenAncestor { load() }
+        }
         let content = flow.menuContent
-        let signedIn = flow.standing != nil
-        set(heading, to: signedIn ? content.name : "", font: headingFont, ink: look.text, tip: headingTip)
-        set(handle, to: signedIn ? content.detail ?? "" : "", font: monoFont(.callout, from: mono), ink: look.textSecondary, tip: handleTip)
-        if signedIn, let address = content.address, let plane = content.plane { planeRow.show(address: address, plane: plane) }
+        heading.attributedStringValue = words(content.name, titleFont.font(.title1) as NSFont, look.text, cut: true)
+        disc.name = content.name
+        handle.attributedStringValue = words(content.handle ?? "", labels.font(Look.Step.footnote.points) as NSFont, look.textSecondary, cut: true)
+        role.saying = content.role
+        role.isHidden = content.role == nil
+        email.attributedStringValue = words((try? standing?.whoami.get())?.email ?? "", .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary, cut: true)
+        showPlane(content.plane)
+        showPasskeys()
+        showKeys()
+        outWords.attributedStringValue = words(standing.map { AccountPage.signedInHere((try? $0.whoami.get())?.fde ?? $0.fde) } ?? "", .systemFont(ofSize: Look.Step.footnote.points), look.textSecondary)
+        outNote.attributedStringValue = words(AccountPage.signOutNote, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary)
+        outSaid.attributedStringValue = refusalWords(signOutLines, look: look, scale: scale)
+        outSaid.isHidden = signOutLines.isEmpty
+        signOut.isEnabled = !flow.isActing
+        needsLayout = true
+        page.needsLayout = true
     }
 
-    /// `label` saying `words` on one line, cut at its end, with `tip` saying them in full when cut.
-    private func set(_ label: NSTextField, to words: String, font: NSFont, ink: Tint, tip: Tooltip) {
+    private var scale: Double {
+        Double(window?.backingScaleFactor ?? 2)
+    }
+
+    private func showPlane(_ plane: UserMenuContent.Plane?) {
+        let ending = self.ending
+        planeRow.removeFromSuperview()
+        planeRow = AccountRowView(.icon(.cloud), title: place, mono: true, detail: ending?.said ?? "", warns: ending?.soon == true, look: look, labels: labels)
+        planeFrame.addSubview(planeRow)
+        let (paint, said): (PillState, String) = switch plane {
+        case .reconnecting?: (.starting, UserMenuContent.Plane.reconnecting.said)
+        case .unreachable?: (.error, UserMenuContent.Plane.unreachable.said)
+        case .connected?, nil: (.running, UserMenuContent.Plane.connected.said)
+        }
+        state.state = paint
+        state.saying = said
+        signInAgain.isHidden = ending?.soon != true
+        signInAgain.isEnabled = !flow.isActing
+        banner?.removeFromSuperview()
+        banner = nil
+        let lines = planeLines
+        guard let first = lines.first else { return }
+        let unreachable: Bool = if case let .failure(refusal)? = flow.standing?.whoami { refusal.reason == .unreachable } else { false }
+        let again = unreachable ? SailButton("Try Again", kind: .secondary, size: .small, look: look, target: self, action: #selector(tryAgain(_:))) : nil
+        again?.isEnabled = !flow.busy
+        let made = Banner(.error, title: first, line: lines.dropFirst().joined(separator: " ").nilIfEmpty, action: again, look: look)
+        planeFrame.addSubview(made)
+        banner = made
+    }
+
+    private func showPasskeys() {
+        let rows = passkeyRows
+        passkeyList.entries = rows.flatMap { row -> [SailList.Entry] in
+            let remove = SailList.Action("Remove", key: "\u{8}", modifiers: .command, onRow: false, destructive: true) { [weak self] in
+                self?.ask(row.removing, row: row.id, remove: .passkey(row.id))
+            }
+            let voice = [row.label, row.thisMac ? AccountPage.thisMac : nil, row.detail].compactMap { $0 }.joined(separator: ", ")
+            let item = SailList.Item(
+                id: row.id, name: row.label, voice: voice, content: self.rowView(.icon(.fingerprint), title: row.label, tag: row.thisMac ? AccountPage.thisMac : nil, detail: row.detail),
+                actions: [remove], height: Self.row
+            )
+            return [.item(item)] + refused(row.id)
+        }
+        showGroup(passkeys, frame: passkeyFrame, list: passkeyList, mark: passkeyMark, said: passkeySaid, note: passkeyNote, extra: nil)
+    }
+
+    private func showKeys() {
+        keyList.entries = keyRows.flatMap { row -> [SailList.Entry] in
+            let add = SailList.Action(row.login == nil ? "Add Key" : "Replace") { [weak self] in self?.storeKey(row) }
+            var actions = [add]
+            if let removing = row.removing, let login = row.login {
+                actions.append(SailList.Action("Remove", key: "\u{8}", modifiers: .command, onRow: false, destructive: true) { [weak self] in
+                    self?.ask(removing, row: row.id, remove: .login(harness: row.agent.harness, name: login))
+                })
+            }
+            let offered = row.login == nil ? add : nil
+            let item = SailList.Item(
+                id: row.id, name: row.display, voice: "\(row.display), \(row.detail)",
+                content: self.rowView(.letters(row.monogram), title: row.display, detail: row.detail, offer: offered),
+                actions: actions, height: Self.row, full: offered != nil
+            )
+            return [.item(item)] + refused(row.id)
+        }
+        showGroup(keys, frame: keyFrame, list: keyList, mark: keyMark, said: keySaid, note: keyNote, extra: storedLine)
+    }
+
+    /// A row of a list, made each time its list asks: an always-shown button of its own runs `offer`.
+    private func rowView(_ mark: AccountRowView.Mark, title: String, tag: String? = nil, detail: String, offer: SailList.Action? = nil) -> AccountRowView {
+        let row = AccountRowView(mark, title: title, tag: tag, detail: detail, look: look, labels: labels)
+        if let offer {
+            let run = RowRun(offer)
+            let button = SailButton(offer.title, kind: .secondary, size: .small, icon: .plus, look: look, target: run, action: #selector(RowRun.go(_:)))
+            button.setAccessibilityLabel("\(offer.title), \(title)")
+            row.offer(button, keeping: run)
+        }
+        return row
+    }
+
+    /// The refusal of row `id`'s removal, as words under it that the keys pass.
+    private func refused(_ id: String) -> [SailList.Entry] {
+        guard let lines = refusals[id] else { return [] }
+        let width = max(listWidth - RowStyle.list.leading - RowStyle.list.trailing, 1), look = look, scale = scale
+        let height = RefusalLines.height(lines, width: width, look: look, scale: scale) + 2 * Self.padding.vertical
+        let item = SailList.Item(
+            id: id + "\u{1F}refused", name: "", voice: lines.joined(separator: " "), content: RefusalLines(lines, width: width, look: look, scale: scale), height: height, inert: true
+        )
+        return [.item(item)]
+    }
+
+    private func showGroup<Value>(_ answered: AccountPage.Answered<Value>, frame: ListFrame, list: SailList, mark: BrandMark, said: NSTextField, note: NSTextField, extra: String?) {
+        mark.isHidden = !answered.waiting
+        list.isHidden = answered.value == nil
+        frame.isHidden = !answered.waiting && answered.value == nil
+        frame.alphaValue = answered.dimmed ? Self.dimmed : 1
+        let failure = answered.failure ?? []
+        let told = NSMutableAttributedString(attributedString: refusalWords(failure, look: look, scale: scale))
+        if let extra { told.append(words((failure.isEmpty ? "" : "\n") + extra, .systemFont(ofSize: Look.Step.footnote.points), look.textSecondary)) }
+        said.attributedStringValue = told
+        said.isHidden = told.length == 0
+        note.attributedStringValue = words(note.stringValue, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary)
+    }
+
+    private func words(_ text: String, _ font: NSFont, _ ink: Tint, cut: Bool = false) -> NSAttributedString {
         let style = NSMutableParagraphStyle()
-        style.lineBreakMode = .byTruncatingTail
-        label.attributedStringValue = NSAttributedString(string: words, attributes: [.font: font, .foregroundColor: NSColor(ink), .paragraphStyle: style])
-        tip.text = words
+        style.lineBreakMode = cut ? .byTruncatingTail : .byWordWrapping
+        style.alignment = userInterfaceLayoutDirection == .rightToLeft ? .right : .left
+        return NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: NSColor(ink), .paragraphStyle: style])
     }
 
     private func paint() {
         lookPaints += 1
         layer?.backgroundColor = NSColor(look.canvas).cgColor
-        until.textColor = NSColor(look.textTertiary)
-        headingTip.look = look
-        handleTip.look = look
+        scroll.look = look
+        disc.look = look
+        for view in [role, state] { view.look = look }
+        for button in [signInAgain, signOut] { button.look = look }
+        for frame in [planeFrame, passkeyFrame, keyFrame] { frame.look = look }
+        for list in [passkeyList, keyList] { list.look = look }
+        for mark in [passkeyMark, keyMark] { mark.look = look }
         eyebrows.forEach { $0.textColor = NSColor(look.textSecondary) }
-        planeRow.look = look
-        signOut.look = look
+        page.look = look
         show()
-    }
-
-    /// Says `lines` under the control plane's line, the first a refusal's sentence.
-    private func say(_ lines: [String]) {
-        self.lines = lines
-        said.attributedStringValue = refusalWords(lines, look: look, scale: Double(window?.backingScaleFactor ?? 2))
-        said.isHidden = lines.isEmpty
-    }
-
-    private func label(_ text: String) -> NSTextField {
-        let label = eyebrow(text, mono: mono)
-        eyebrows.append(label)
-        return label
     }
 
     private func compose() {
         wantsLayer = true
-        until.font = .systemFont(ofSize: Look.Step.footnote.points)
-        for (label, tip) in [(heading, headingTip), (handle, handleTip)] {
-            label.maximumNumberOfLines = 1
-            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            tip.onlyWhenCut = true
-            tip.attach(to: label, saying: "")
+        scroll.documentView = page
+        addSubview(scroll)
+        eyebrows = ["Control plane", "Passkeys", "Keys"].map { eyebrow($0, mono: mono) }
+        planeFrame.height = nil
+        planeFrame.addSubview(state)
+        planeFrame.addSubview(signInAgain)
+        passkeyFrame.addSubview(passkeyMark)
+        keyFrame.addSubview(keyMark)
+        for list in [passkeyList, keyList] {
+            list.primaryElsewhere = true
+            list.returnKeyShown = false
         }
-        until.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for label in [heading, handle, email] {
+            label.maximumNumberOfLines = 1
+            label.lineBreakMode = .byTruncatingTail
+        }
+        for label in [passkeySaid, keySaid, outSaid] { label.isSelectable = true }
+        let views: [NSView] = [disc, heading, handle, role, email] + eyebrows + [planeFrame, passkeyFrame, passkeySaid, passkeyNote, keyFrame, keySaid, keyNote, outWords, outNote, outSaid, signOut]
+        views.forEach(page.addSubview)
+        signInAgain.target = self
+        signInAgain.action = #selector(signInAgainNow(_:))
         signOut.target = self
         signOut.action = #selector(signOutHere(_:))
-        said.isSelectable = true
-        said.isHidden = true
-        let rows = NSStackView(views: [label("Signed in as"), handle, label("Control plane"), planeRow, said, until, signOut])
-        rows.orientation = .vertical
-        rows.alignment = .leading
-        rows.spacing = Look.Space.s
-        rows.setCustomSpacing(Look.Space.l, after: handle)
-        rows.setCustomSpacing(Look.Space.l, after: until)
-        let column = NSStackView(views: [heading, rows])
-        column.orientation = .vertical
-        column.alignment = .leading
-        column.spacing = Look.Space.l
-        column.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(column)
-        let wide = planeRow.widthAnchor.constraint(equalToConstant: WelcomeView.columnWidth)
-        wide.priority = .defaultHigh
-        NSLayoutConstraint.activate([
-            column.topAnchor.constraint(equalTo: topAnchor, constant: Look.Space.x3l + Look.Space.l),
-            column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Look.Space.x3l),
-            column.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -Look.Space.x3l),
-            said.widthAnchor.constraint(lessThanOrEqualTo: planeRow.widthAnchor),
-            until.widthAnchor.constraint(lessThanOrEqualTo: planeRow.widthAnchor), wide,
-        ])
         paint()
+    }
+
+    override public func layout() {
+        super.layout()
+        scroll.frame = bounds
+        let width = Double(scroll.contentSize.width)
+        if Double(page.frame.width) != width { page.setFrameSize(NSSize(width: width, height: page.frame.height)) }
+        let height = max(lay(), Double(scroll.contentSize.height))
+        if Double(page.frame.height) != height { page.setFrameSize(NSSize(width: width, height: height)) }
+    }
+
+    /// The width of a list's rows: the column's, less the frame's hairlines.
+    private var listWidth: Double {
+        columnWidth - 2
+    }
+
+    private var columnWidth: Double {
+        min(Self.column, max(Double(scroll.contentSize.width) - 2 * Self.inset.sides, 1))
+    }
+
+    /// Every frame of the column, top to bottom, left to right then turned about the page's middle
+    /// right to left; the column's height.
+    private func lay() -> Double {
+        let width = columnWidth, x = Self.inset.sides
+        var y = Self.inset.top
+        let mirror = { [weak self] (rect: NSRect) -> NSRect in
+            guard let self, userInterfaceLayoutDirection == .rightToLeft else { return rect }
+            return NSRect(x: Double(page.bounds.width) - Double(rect.maxX), y: Double(rect.minY), width: Double(rect.width), height: Double(rect.height))
+        }
+        func put(_ view: NSView, _ rect: NSRect) {
+            let frame = mirror(rect)
+            if view.frame != frame { view.frame = frame }
+        }
+        func line(_ label: NSTextField, width: Double) -> Double {
+            Double(ceil(label.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: 10000)).height ?? 0))
+        }
+        put(disc, NSRect(x: x, y: y, width: Self.disc, height: Self.disc))
+        let text = x + Self.disc + Look.Space.l, textWidth = max(width - Self.disc - Look.Space.l, 1)
+        let headingHeight = line(heading, width: textWidth), sub = 5.0
+        let subHeight = max(Double(role.intrinsicContentSize.height), line(handle, width: textWidth))
+        let top = y + (Self.disc - headingHeight - sub - subHeight) / 2
+        put(heading, NSRect(x: text, y: top, width: textWidth, height: headingHeight))
+        var subX = text
+        let subY = top + headingHeight + sub
+        for view in [handle, role, email] as [NSView] where !view.isHidden {
+            let wanted = (view as? NSTextField).map { Double(ceil($0.attributedStringValue.size().width)) + 4 } ?? Double(view.intrinsicContentSize.width)
+            let room = max(text + textWidth - subX, 0), shown = min(wanted, room)
+            let height = (view as? NSTextField).map { line($0, width: shown) } ?? Double(view.intrinsicContentSize.height)
+            put(view, NSRect(x: subX, y: subY + (subHeight - height) / 2, width: shown, height: height))
+            subX += shown + Look.Space.s
+        }
+        y += Self.disc + Self.groupGap
+        y = group(eyebrows[0], frame: planeFrame, y: y, x: x, width: width, put: put) { inner in self.layPlane(width: inner) } + Self.groupGap
+        y = group(eyebrows[1], frame: passkeyFrame, y: y, x: x, width: width, put: put) { inner in self.layList(passkeyList, in: passkeyFrame, mark: passkeyMark, width: inner) }
+        y = notes([passkeySaid, passkeyNote], y: y, x: x, width: width, put: put, line: line) + Self.groupGap
+        y = group(eyebrows[2], frame: keyFrame, y: y, x: x, width: width, put: put) { inner in self.layList(keyList, in: keyFrame, mark: keyMark, width: inner) }
+        y = notes([keySaid, keyNote], y: y, x: x, width: width, put: put, line: line) + Self.groupGap
+        let rule = y
+        y += 1 + 18
+        let button = signOut.intrinsicContentSize
+        let wordsWidth = max(width - Double(button.width) - Look.Space.l, 1)
+        let start = y
+        for label in [outWords, outNote, outSaid] where !label.isHidden {
+            let height = line(label, width: wordsWidth)
+            put(label, NSRect(x: x, y: y, width: wordsWidth, height: height))
+            y += height + 2
+        }
+        let buttonTop = start + max((y - start - Double(button.height)) / 2, 0)
+        put(signOut, signOut.frame(forAlignmentRect: NSRect(x: x + width - Double(button.width), y: buttonTop, width: Double(button.width), height: Double(button.height))))
+        page.rule = mirror(NSRect(x: x, y: rule, width: width, height: 1))
+        return max(y, buttonTop + Double(button.height)) + Self.inset.top
+    }
+
+    /// A group's eyebrow, then its frame holding what `inner` lays out at its width; where it ends.
+    private func group(_ eyebrow: NSTextField, frame: ListFrame, y: Double, x: Double, width: Double, put: (NSView, NSRect) -> Void, inner: (Double) -> Double) -> Double {
+        let eyebrowHeight = Double(ceil(eyebrow.fittingSize.height))
+        put(eyebrow, NSRect(x: x, y: y, width: width, height: eyebrowHeight))
+        var bottom = y + eyebrowHeight + Self.headGap
+        guard !frame.isHidden else { return bottom }
+        let height = inner(width - 2)
+        put(frame, NSRect(x: x, y: bottom, width: width, height: height + 2))
+        bottom += height + 2
+        return bottom
+    }
+
+    /// Lines under a group's frame, each wrapped to the column; where they end.
+    private func notes(_ labels: [NSTextField], y: Double, x: Double, width: Double, put: (NSView, NSRect) -> Void, line: (NSTextField, Double) -> Double) -> Double {
+        var y = y
+        for label in labels where !label.isHidden {
+            y += Self.headGap
+            let height = line(label, min(width, 560))
+            put(label, NSRect(x: x, y: y, width: min(width, 560), height: height))
+            y += height
+        }
+        return y
+    }
+
+    /// The control plane's row inside its frame, `width` wide, and the banner under it; its height.
+    private func layPlane(width: Double) -> Double {
+        let rightToLeft = userInterfaceLayoutDirection == .rightToLeft
+        func at(_ rect: NSRect) -> NSRect {
+            rightToLeft ? NSRect(x: width + 2 - Double(rect.maxX), y: Double(rect.minY), width: Double(rect.width), height: Double(rect.height)) : rect
+        }
+        var trailing = 1 + width - Self.padding.trailing
+        let pill = state.intrinsicContentSize
+        state.frame = at(NSRect(x: trailing - Double(pill.width), y: 1 + (Self.row - Double(pill.height)) / 2, width: Double(pill.width), height: Double(pill.height)))
+        trailing -= Double(pill.width) + Look.Space.s
+        if !signInAgain.isHidden {
+            let size = signInAgain.intrinsicContentSize
+            signInAgain.frame = at(signInAgain.frame(forAlignmentRect: NSRect(x: trailing - Double(size.width), y: 1 + (Self.row - Double(size.height)) / 2, width: Double(size.width), height: Double(size.height))))
+            trailing -= Double(size.width) + Look.Space.s
+        }
+        let rowHeight = Double(planeRow.intrinsicContentSize.height), lead = 1 + Self.padding.leading
+        planeRow.frame = at(NSRect(x: lead, y: 1 + (Self.row - rowHeight) / 2, width: max(trailing - lead, 1), height: rowHeight))
+        guard let banner else { return Self.row }
+        let start = Self.padding.leading + AccountRowView.tile + AccountRowView.gap, bannerWidth = max(width - start - Self.padding.trailing, 1)
+        banner.frame = NSRect(x: 0, y: 0, width: bannerWidth, height: 10)
+        let height = Double(banner.intrinsicContentSize.height)
+        banner.frame = at(NSRect(x: 1 + start, y: 1 + Self.row, width: bannerWidth, height: height))
+        return Self.row + height + Self.padding.trailing
+    }
+
+    /// A list's rows in its frame, which holds them at their height, or the drawing mark while its
+    /// first answer is awaited; their height.
+    private func layList(_ list: SailList, in frame: ListFrame, mark: BrandMark, width: Double) -> Double {
+        let height = list.isHidden ? Self.row : list.entries.indices.reduce(0.0) { $0 + Double(list.tableView(list, heightOfRow: $1)) }
+        if frame.height != height { frame.height = height }
+        mark.frame = NSRect(x: 1 + (width - 28) / 2, y: 1 + (Self.row - 28) / 2, width: 28, height: 28)
+        return height
+    }
+}
+
+/// The column the Account view scrolls: flipped, its views laid out by the view, a hairline over
+/// Sign Out.
+@MainActor
+final class AccountColumn: NSView {
+    var look = Look.light {
+        didSet { needsDisplay = true }
+    }
+
+    var rule = NSRect.zero {
+        didSet { if rule != oldValue { needsDisplay = true } }
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override func draw(_: NSRect) {
+        NSColor(look.separator).setFill()
+        rule.fill()
+    }
+}
+
+/// A row of the Account view, as the page's `.li` draws it: a 28 pt tile in 6 pt corners holding an
+/// icon or a harness's monogram, the title (mono for an address) with a tag after it, the detail
+/// under it in the tertiary ink (the warning's when it warns), and a button of its own at its
+/// trailing edge where it offers one whatever the pointer does (Add Key). Mirrored right to left.
+@MainActor
+final class AccountRowView: NSView {
+    enum Mark: Equatable {
+        case icon(LineIcon), letters(String)
+    }
+
+    static let tile = 28.0, gap = 12.0, lineGap = 3.0
+
+    let mark: Mark
+    let title = NSTextField(labelWithString: "")
+    let detail = NSTextField(labelWithString: "")
+    let tagged: String?
+    private(set) var offered: SailButton?
+    private var keep: AnyObject?
+    private let look: Look
+    private let labels: LabelFont
+    private let mono: Bool
+
+    init(_ mark: Mark, title words: String, mono: Bool = false, tag: String? = nil, detail said: String = "", warns: Bool = false, look: Look, labels: LabelFont) {
+        self.mark = mark
+        self.tagged = tag
+        self.look = look
+        self.labels = labels
+        self.mono = mono
+        super.init(frame: .zero)
+        let titleFont = mono ? labels.font(Look.Step.callout.points) as NSFont : NSFont.systemFont(ofSize: 13.5, weight: .medium)
+        title.attributedStringValue = Self.words(words, titleFont, look.text)
+        detail.attributedStringValue = Self.words(said, .systemFont(ofSize: Look.Step.footnote.points), warns ? Tint(look.warning) : look.textTertiary)
+        for label in [title, detail] {
+            label.maximumNumberOfLines = 1
+            label.lineBreakMode = .byTruncatingTail
+            addSubview(label)
+        }
+        setAccessibilityElement(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    /// `button` at its trailing edge, `keeping` what it runs.
+    func offer(_ button: SailButton, keeping run: AnyObject) {
+        offered = button
+        keep = run
+        addSubview(button)
+    }
+
+    private static func words(_ text: String, _ font: NSFont, _ ink: Tint) -> NSAttributedString {
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingTail
+        return NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: NSColor(ink), .paragraphStyle: style])
+    }
+
+    private var lines: (title: Double, detail: Double) {
+        (Double(ceil(title.attributedStringValue.size().height)), Double(ceil(detail.attributedStringValue.size().height)))
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: max(Self.tile, lines.title + Self.lineGap + lines.detail))
+    }
+
+    private var tagWords: NSAttributedString? {
+        tagged.map { NSAttributedString(string: $0.uppercased(), attributes: [.font: labels.font(9.5) as NSFont, .foregroundColor: NSColor(look.textTertiary), .kern: 0.95]) }
+    }
+
+    /// The tag's box after the title's words.
+    var tagBox: NSRect? {
+        guard let tagWords else { return nil }
+        let size = tagWords.size(), words = Double(ceil(title.attributedStringValue.size().width))
+        let x = Self.tile + Self.gap + min(words, Double(title.frame.width)) + 8
+        return mirrored(NSRect(x: x, y: Double(title.frame.midY) - 8, width: Double(ceil(size.width)) + 10, height: 16))
+    }
+
+    private func mirrored(_ rect: NSRect) -> NSRect {
+        guard userInterfaceLayoutDirection == .rightToLeft else { return rect }
+        return NSRect(x: Double(bounds.width) - Double(rect.maxX), y: Double(rect.minY), width: Double(rect.width), height: Double(rect.height))
+    }
+
+    override func layout() {
+        super.layout()
+        let width = Double(bounds.width), height = Double(bounds.height), (titleLine, detailLine) = lines
+        var end = width
+        if let offered {
+            let size = offered.intrinsicContentSize
+            offered.frame = offered.frame(forAlignmentRect: mirrored(NSRect(x: width - Double(size.width), y: (height - Double(size.height)) / 2, width: Double(size.width), height: Double(size.height))))
+            end -= Double(size.width) + Self.gap
+        }
+        let start = Self.tile + Self.gap, top = (height - titleLine - Self.lineGap - detailLine) / 2
+        let room = max(end - start - (tagWords.map { Double(ceil($0.size().width)) + 18 } ?? 0), 1)
+        title.frame = mirrored(NSRect(x: start - 2, y: top, width: min(room, Double(ceil(title.attributedStringValue.size().width)) + 4), height: titleLine))
+        detail.frame = mirrored(NSRect(x: start - 2, y: top + titleLine + Self.lineGap, width: max(end - start, 1) + 4, height: detailLine))
+        needsDisplay = true
+    }
+
+    var tileBox: NSRect {
+        mirrored(NSRect(x: 0, y: (Double(bounds.height) - Self.tile) / 2, width: Self.tile, height: Self.tile))
+    }
+
+    override func draw(_: NSRect) {
+        let box = tileBox, shape = NSBezierPath(roundedRect: box.insetBy(dx: 0.5, dy: 0.5), xRadius: Look.contentRadius - 0.5, yRadius: Look.contentRadius - 0.5)
+        NSColor(look.canvas).setFill()
+        shape.fill()
+        NSColor(look.separatorStrong).setStroke()
+        shape.lineWidth = 1
+        shape.stroke()
+        switch mark {
+        case let .icon(icon):
+            Draw.icon(icon, in: box.insetBy(dx: (Self.tile - 15) / 2, dy: (Self.tile - 15) / 2), ink: look.textSecondary)
+        case let .letters(letters):
+            let words = NSAttributedString(string: letters, attributes: [.font: labels.font(11, .semibold) as NSFont, .foregroundColor: NSColor(look.textSecondary)])
+            let size = words.size()
+            words.draw(at: NSPoint(x: Double(box.midX) - Double(size.width) / 2, y: Double(box.midY) - Double(size.height) / 2))
+        }
+        guard let box = tagBox, let tagWords else { return }
+        let edge = NSBezierPath(roundedRect: box.insetBy(dx: 0.5, dy: 0.5), xRadius: 2.5, yRadius: 2.5)
+        NSColor(look.separator).setStroke()
+        edge.lineWidth = 1
+        edge.stroke()
+        let size = tagWords.size()
+        tagWords.draw(at: NSPoint(x: Double(box.midX) - Double(size.width) / 2, y: Double(box.midY) - Double(size.height) / 2))
+    }
+}
+
+/// The words of a refusal under a row, as a field's refusal is said: the sentence in the error's
+/// ink after its mark, the rest in the secondary ink, wrapped to `width`.
+@MainActor
+final class RefusalLines: NSTextField {
+    let height: Double
+
+    static func height(_ lines: [String], width: Double, look: Look, scale: Double) -> Double {
+        Double(ceil(refusalWords(lines, look: look, scale: scale).boundingRect(with: NSSize(width: width - 4, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin]).height))
+    }
+
+    init(_ lines: [String], width: Double, look: Look, scale: Double) {
+        let said = refusalWords(lines, look: look, scale: scale)
+        height = Self.height(lines, width: width, look: look, scale: scale)
+        super.init(frame: .zero)
+        isEditable = false
+        isBordered = false
+        drawsBackground = false
+        isSelectable = true
+        maximumNumberOfLines = 0
+        attributedStringValue = said
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: height)
+    }
+}
+
+/// What a row's own button runs: its list's action.
+@MainActor
+final class RowRun: NSObject {
+    let action: SailList.Action
+
+    init(_ action: SailList.Action) {
+        self.action = action
+    }
+
+    @objc func go(_: Any?) {
+        guard action.enabled() else { return }
+        action.run()
+    }
+}
+
+extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }
 

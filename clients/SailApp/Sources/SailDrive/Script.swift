@@ -122,6 +122,22 @@ struct Step: Decodable {
     /// handle, a long name, a long control plane, confirmed), "long-unconfirmed" (the same, not yet
     /// confirmed: the control plane out of reach), or "none".
     var accountShows: String?
+    /// On the Account view's row titled `[1]` in its `[0]` group ("passkeys" or "keys"): "hover"
+    /// (the pointer held over it), a button's title on it (Add Key, Replace), or "⋯ <item>" (its
+    /// menu's item chosen).
+    var accountRow: [String]?
+    /// The Account view shows these words, whatever is under way (a check held in mid-air).
+    var accountSays: String?
+    /// The Account view is shown, scrolled to its keys as far as it scrolls.
+    var accountAtKeys: Bool?
+    /// From now on a sign-in ends this many days from now: the recorded sign-in's answer with its
+    /// `expires_at` moved.
+    var sessionEndsIn: Double?
+    /// The Account view laid out right to left, or left to right again.
+    var accountRightToLeft: Bool?
+    /// The window as the frames name it, in both looks, at 1024 × 800 then at its least frame, then
+    /// as it was.
+    var accountShot: String?
     /// The user menu opened from the rail's user button: "click", a click on the button as a
     /// person makes it (again, it closes the menu), or "keys", the button given the keys and Space
     /// pressed (the kit runs, which turn Keyboard Navigation on).

@@ -474,7 +474,7 @@ public final class WorkspacesView: NSView {
             case let .failure(error): return newSession.say(.unread(StoreLogin.unread(error, address: address)))
             }
             if case .unread = newSession.line { newSession.say(nil) }
-            guard let asked = StoreLogin(offer, logins: logins, address: address) else { return }
+            guard let asked = StoreLogin(offer.declaration, logins: logins, address: address) else { return }
             let width = project.narrow ? Double(window.contentLayoutRect.width) - 2 * LoginSheet.inset : LoginSheet.width
             let sheet = LoginSheet(asked, width: width, direction: project.userInterfaceLayoutDirection, look: look, titleFont: titleFont, mono: mono, pasteboard: pasteboard)
             sheet.send = { endpoint in await Self.result { () async throws(SailError) in try await client.send(endpoint) } }
