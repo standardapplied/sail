@@ -38,8 +38,9 @@ public final class WorkspacesView: NSView {
     }
 
     var onOpen: @MainActor (_ project: String, _ name: String) -> Void = { _, _ in }
-    /// Told an agent to start in workspace `name` of `project`, after ``memory`` took it.
-    var onStart: @MainActor (_ start: AgentStart, _ project: String, _ name: String) -> Void = { _, _, _ in }
+    /// Told a new session to start in workspace `name` of `project`: an agent, after ``memory`` took
+    /// it, or a shell when `start` is nil.
+    var onStart: @MainActor (_ start: AgentStart?, _ project: String, _ name: String) -> Void = { _, _, _ in }
     /// Reads the starts kept for a person on a control plane: asked again whenever someone else signs in.
     var remembered: @MainActor (WorkspacesModel.Person) -> ModeMemory = { _ in ModeMemory() }
     /// Keeps the person's starts between launches, told each time they change.
@@ -144,6 +145,7 @@ public final class WorkspacesView: NSView {
         newSession.onClose = { [weak self] in
             self?.panelRow = nil
             self?.project.list.primaryElsewhere = false
+            self?.project.showKeys()
         }
         if let clip = project.listScroll?.contentView {
             clip.postsBoundsChangedNotifications = true
@@ -151,7 +153,7 @@ public final class WorkspacesView: NSView {
         }
         newSession.onShell = { [weak self] in
             guard let self, let place = startingIn else { return }
-            onOpen(place.project, place.name)
+            onStart(nil, place.project, place.name)
         }
         paint()
         render()
@@ -437,6 +439,7 @@ public final class WorkspacesView: NSView {
             guard newSession.isOpen else { return }
             panelRow = (row, line)
             project.list.primaryElsewhere = true
+            project.showKeys()
         }
     }
 

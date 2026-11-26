@@ -287,11 +287,13 @@ final class ClaudeCode implements Harness {
 
   /**
    * Its sign-in ({@link #signIn}) and its own state, which holds an approved key's last 20
-   * characters and the signed-in account.
+   * characters and the signed-in account, with the copies of that state it keeps in {@code backups}
+   * each time it writes it: a start that finds a copy and no state says so before its welcome, so a
+   * home holds both or neither.
    */
   @Override
   public List<String> storedLogins() {
-    return List.of(CREDENTIALS, ".claude.json");
+    return List.of(CREDENTIALS, ".claude.json", ".claude/backups");
   }
 
   @Override

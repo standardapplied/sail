@@ -95,7 +95,8 @@ Usage:
                                 acme's template is built on tank with the forge token client's person
                                 stored with sail git login (none in the environment), and a copy of
                                 its snapshot holds no token (searched for by content), git
-                                identity, key or gh login, a
+                                identity, key, gh login or harness state (Claude's
+                                ~/.claude.json and its ~/.claude/backups, neither), a
                                 workspace of it is a clone of its snapshot with a machine-id of its
                                 own (create time in the report) that commits as client's person;
                                 on client's node eng is refused one of her own, told hers live on
@@ -2023,6 +2024,9 @@ for f in /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do
   [ $s -le 1 ] || { echo "$f unreadable"; exit 2; }; [ $s -eq 1 ] || held="$held $f"
 done
 [ ! -e /home/dev/.config/gh/hosts.yml ] || held="$held a-gh-login"
+for f in /home/dev/.claude/.credentials.json /home/dev/.claude.json /home/dev/.claude/backups /home/dev/.codex/auth.json; do
+  [ ! -e "$f" ] || held="$held $f"
+done
 [ -z "$held" ] || { echo "the snapshot holds:$held"; exit 1; }'
 
 template_holds_nothing() {
@@ -2188,7 +2192,7 @@ storage() {
     on "$run" client "sudo sh -c 'sail git login github.com < /root/.fleet/gh'"
   check "$run" "acme's template is built on tank with client's stored forge token" \
     on "$run" client "sudo sail project template build acme"
-  check "$run" "acme's template snapshot holds no token, git identity, key or gh login" \
+  check "$run" "acme's template snapshot holds no token, git identity, key, gh login or harness state (Claude's with its backups)" \
     template_holds_nothing "$run" client
   check "$run" "a workspace of acme is a clone of its template's snapshot on tank, with its own machine-id" \
     workspace_on "$run" client

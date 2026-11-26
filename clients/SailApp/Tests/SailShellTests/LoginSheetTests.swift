@@ -252,7 +252,7 @@ import Testing
         #expect(panel.view.signIn?.holdsKeys == true && panel.view.primary?.holdsKeys == false, "⇥ to Sign in left Start's ring on too")
         try NewSessionPanelTests.press(try NewSessionPanelTests.key(48, "\t", .shift), in: window)
         #expect(panel.view.primary?.holdsKeys == true && panel.view.signIn?.holdsKeys == false, "⇧⇥ back did not give Start its ring again")
-        var started: [AgentStart] = []
+        var started: [AgentStart?] = []
         view.onStart = { start, _, _ in started.append(start) }
         try NewSessionPanelTests.press(try NewSessionPanelTests.returnKey(), in: window)
         #expect(started == [AgentStart(harness: "claude-code", display: "Claude Code", mode: "default")], "Return started \(started)")

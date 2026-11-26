@@ -112,7 +112,7 @@ import Testing
         let tickets = DoorTickets(runner)
         bench.signedIn = { ("uday", tickets) }
         let start = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan")
-        bench.openAgent(start, project: "harbor", name: "dock")
+        bench.startSession(start, project: "harbor", name: "dock")
         #expect(!bench.restored && bench.model.tabs.isEmpty)
         bench.shown()
         #expect(await RunnerTabTests.until(10) { bench.restored && Self.runnerSessions(bench).count == 1 }, "the agent's tab never opened")
@@ -132,7 +132,7 @@ import Testing
         let tickets = DoorTickets(runner)
         let who = Who("uday")
         bench.signedIn = { who.handle.map { ($0, tickets) } }
-        bench.openAgent(AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan"), project: "harbor", name: "dock")
+        bench.startSession(AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan"), project: "harbor", name: "dock")
         who.handle = "ana"
         bench.shown()
         #expect(await RunnerTabTests.until(10) { bench.restored })
@@ -149,7 +149,7 @@ import Testing
         bench.signedIn = { ("uday", tickets) }
         var plane = "main.acme.dev"
         bench.controlPlane = { plane }
-        bench.openAgent(AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan"), project: "harbor", name: "dock")
+        bench.startSession(AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan"), project: "harbor", name: "dock")
         plane = "main.other.dev"
         bench.shown()
         #expect(await RunnerTabTests.until(10) { bench.restored })
@@ -177,6 +177,29 @@ import Testing
         bench.openWorkspace(project: "harbor", name: "dock")
         #expect(await RunnerTabTests.until(10) { bench.model.focusedPane?.id == newest.id }, "the newest's tab is chosen")
         #expect(Self.runnerSessions(bench).count == 2 && runner.createsReceived == 0, "nothing started")
+    }
+
+    /// A shell started in a workspace whose sessions are all in tabs already opens a third tab with
+    /// a new session, focused; it never chooses a tab there.
+    @Test func aShellStartedWhereEverySessionHasATabOpensANewOne() async throws {
+        let (local, runner) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(person: "uday"))
+        defer { local.stop(); runner.stop() }
+        runner.hold("app-old")
+        runner.hold("app-new")
+        let bench = try await Self.workbench(local: local, runner: runner, who: Who("uday"))
+        bench.openWorkspace(project: "harbor", name: "dock")
+        try #require(await RunnerTabTests.until(10) { Self.runnerSessions(bench).count == 2 })
+        try #require(await Self.attached(bench))
+
+        bench.startSession(nil, project: "harbor", name: "dock")
+
+        #expect(await RunnerTabTests.until(10) { runner.createsReceived == 1 }, "no session started")
+        let started = try #require(Self.runnerSessions(bench).last)
+        #expect(Self.runnerSessions(bench).count == 3 && !["app-old", "app-new"].contains(started))
+        #expect(bench.model.focusedPane?.session == started, "the new shell's tab is not the one chosen")
+        #expect(bench.model.tabs.count == 3)
+        let create = try #require(runner.create(of: started))
+        #expect(create.agent.harness.isEmpty && create.agent.mode.isEmpty && !create.agent.inside, "a shell started as \(create.agent)")
     }
 
     /// R8, R9: a reattach the runner refuses says, from the workspace's listing, that the terminal

@@ -14,6 +14,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -258,6 +259,7 @@ class WorkspaceCredentialsTest {
         List.of(
             "/home/dev/.claude/.credentials.json",
             "/home/dev/.claude.json",
+            "/home/dev/.claude/backups",
             "/home/dev/.codex/auth.json"),
         WorkspaceCredentials.HARNESS_LOGINS);
   }
@@ -279,14 +281,42 @@ class WorkspaceCredentialsTest {
     assertFalse(Files.exists(root.resolve(WorkspaceCredentials.SESSIONS.substring(1))));
   }
 
+  /**
+   * Claude Code copies {@code ~/.claude.json} into {@code ~/.claude/backups} each time it writes it
+   * (its installer writes it during the template's build), and a start that finds a backup and no
+   * {@code ~/.claude.json} prints "Claude configuration file not found" twice before its welcome
+   * (2.1.327, measured in a clean home). A strip takes both, and leaves the rest of {@code
+   * ~/.claude} (the template's settings and skills).
+   */
+  @Test
+  void theStripTakesClaudesStateWithItsBackupsAndLeavesTheRestOfItsFolder() throws Exception {
+    var state = root.resolve("home/dev/.claude.json");
+    var backup = root.resolve("home/dev/.claude/backups/.claude.json.backup.1795580418419");
+    var settings = root.resolve("home/dev/.claude/settings.json");
+    Files.createDirectories(backup.getParent());
+    Files.writeString(state, "{\"installMethod\": \"native\"}\n");
+    Files.writeString(backup, "{\"installMethod\": \"native\"}\n");
+    Files.writeString(settings, "{}\n");
+
+    var stripped = script(WorkspaceCredentials.STRIP, "");
+
+    assertEquals(0, stripped.exit(), stripped.said());
+    assertFalse(Files.exists(state));
+    assertFalse(Files.exists(backup.getParent()));
+    assertEquals("{}\n", Files.readString(settings));
+  }
+
   /** A strip whose harness file could not be removed fails, by what is left, never silently. */
   @Test
   void aHarnessLoginTheStripCannotRemoveFailsIt() throws Exception {
+    Assumptions.assumeFalse("root".equals(System.getProperty("user.name")), "root removes it");
     var held = root.resolve("home/dev/.codex/auth.json");
-    Files.createDirectories(held);
-    Files.writeString(held.resolve("inside"), TOKEN);
+    Files.createDirectories(held.getParent());
+    Files.writeString(held, TOKEN);
+    Files.setPosixFilePermissions(held.getParent(), PosixFilePermissions.fromString("r-xr-xr-x"));
 
     var stripped = script(WorkspaceCredentials.STRIP, "");
+    Files.setPosixFilePermissions(held.getParent(), PosixFilePermissions.fromString("rwxr-xr-x"));
 
     assertEquals(1, stripped.exit(), stripped.said());
     assertTrue(stripped.said().contains(".codex/auth.json"), stripped.said());

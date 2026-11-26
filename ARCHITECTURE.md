@@ -4308,9 +4308,11 @@ stands), whose snapshot Codex writes, `0644`, with every exported variable. The 
 and when an agent session ends whatever happened (`ended`, beside the uploads' cleanup); every give
 removes `~/.sail/sessions`. `inside` starts the harness with nothing handed over, for a person who
 signs in with the harness's own login there; Sail never holds that one, and what each harness keeps
-of it (`Harness.storedLogins`: `~/.claude/.credentials.json`, `~/.claude.json`,
-`~/.codex/auth.json`) stays across the person's own starts and goes with every strip, so a re-own
-(which strips before it gives), a disown and a template build take it. The listing, the sidecar and
+of it (`Harness.storedLogins`: `~/.claude/.credentials.json`, `~/.claude.json` with the copies of
+it Claude Code keeps in `~/.claude/backups`, `~/.codex/auth.json`) stays across the person's own
+starts and goes with every strip, so a re-own (which strips before it gives), a disown and a
+template build take it. A home holds `~/.claude.json` and its backups both or neither: Claude Code
+started with a backup and no `~/.claude.json` says the file is missing before its welcome. The listing, the sidecar and
 every event carry the harness's own command (`["claude", "--permission-mode", "plan"]`) and
 `agent`, never the line that started it; no argv on the runner or in the workspace holds a login.
 A pty host that dies between the hand-over and the read leaves the file until the next agent start

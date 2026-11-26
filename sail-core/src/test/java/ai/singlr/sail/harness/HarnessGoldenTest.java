@@ -466,7 +466,9 @@ class HarnessGoldenTest {
         new Harness.InteractiveLogin("", PINNED_OPENAI),
         new Harness.InteractiveLogin(
             "", withoutId(CODEX.interactiveLogin(CODEX.loginKind("api-key")).args())));
-    assertEquals(List.of(".claude/.credentials.json", ".claude.json"), CLAUDE_CODE.storedLogins());
+    assertEquals(
+        List.of(".claude/.credentials.json", ".claude.json", ".claude/backups"),
+        CLAUDE_CODE.storedLogins());
     assertEquals(List.of(".codex/auth.json"), CODEX.storedLogins());
   }
 

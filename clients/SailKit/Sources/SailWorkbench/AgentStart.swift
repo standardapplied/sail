@@ -200,7 +200,10 @@ public enum NewSessionWords {
     }
 
     public static let shell = (name: "Shell", line: "a terminal, no agent")
-    public static let hint = "↑↓ choose · ⌘M mode"
+    /// The keys the foot names: ⌘M only while the chosen harness has a mode menu for it to open.
+    public static func hint(modes: Bool) -> String {
+        modes ? "↑↓ choose · ⌘M mode" : "↑↓ choose"
+    }
     public static let mode = "Mode"
     public static let signIn = "Sign in"
     public static let storeKey = "Store a Key"

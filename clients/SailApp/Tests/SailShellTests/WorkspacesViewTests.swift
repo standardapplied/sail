@@ -227,6 +227,40 @@ import Testing
         #expect(notes == ["Only uday or an admin opens it"], "\(notes)")
     }
 
+    /// What the foot's keys say, the count aside.
+    static func footSays(_ project: ProjectView) -> [String] {
+        Self.found(NSTextField.self, in: project.foot).filter { $0 !== project.count }.map(\.stringValue)
+    }
+
+    /// The foot names a key only while it works: none with no row chosen; on a chosen row of the
+    /// person's own Return by what it presses, ⌥⌘T and ⌘N; on someone else's no Return, which
+    /// presses nothing there; ⌘N only while a workspace can be made; none again once no row is.
+    @Test func theFootNamesAKeyOnlyWhileItWorks() throws {
+        let rows = [
+            WorkspaceRow(name: "dock", instance: "harbor-dock", state: .known(.running), owner: "uday"),
+            WorkspaceRow(name: "pier", instance: "harbor-pier", state: .known(.stopped), owner: "uday"),
+        ]
+        let (project, window) = try Self.project(width: 1000)
+        defer { window.orderOut(nil) }
+        project.render(try #require(Self.page(rows)))
+        #expect(project.list.chosen == nil && Self.footSays(project).isEmpty, "with no row chosen the foot says \(Self.footSays(project))")
+        project.list.choose("dock")
+        #expect(Self.footSays(project) == ["Open", "New Session", "New"])
+        project.list.choose("pier")
+        #expect(Self.footSays(project) == ["Start and Open", "New Session", "New"])
+        project.list.deselectAll(nil)
+        #expect(Self.footSays(project).isEmpty, "with the row let go the foot says \(Self.footSays(project))")
+        #expect(project.foot.fittingSize.height >= project.count.fittingSize.height, "the foot with no key is lower than its count")
+
+        let building = try #require(Self.page(rows, template: .building))
+        project.render(building)
+        project.list.choose("dock")
+        #expect(Self.footSays(project) == ["Open", "New Session"], "⌘N is named while no workspace can be made")
+        project.render(try #require(Self.page(rows, for: Self.ana)))
+        project.list.choose("dock")
+        #expect(Self.footSays(project) == ["New Session", "New"], "Return is named on a row it presses nothing on")
+    }
+
     private struct Shadowed {
         let y: Double, blur: Double, alpha: Double
     }

@@ -508,7 +508,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         workspaces.onStart = { [weak self] start, project, name in
             guard let self else { return }
             select(.thisMac)
-            thisMac.openAgent(start, project: project, name: name)
+            thisMac.startSession(start, project: project, name: name)
         }
         thisMac.onShow = { [weak self] in
             guard let self, rail.selected != .thisMac else { return }

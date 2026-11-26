@@ -156,12 +156,12 @@ import Testing
     /// The row's quick item, "New Claude Code Session", asks what starts in the workspace first:
     /// the last start starts at once while it still can (a stored login; signing in there when
     /// that is how it last started), else the panel opens at that harness saying why, nothing started.
-    static func quickItem(_ golden: String, last: AgentStart, row: String = "dock") async throws -> (view: WorkspacesView, window: KeyWindow, started: [AgentStart], asked: Int) {
+    static func quickItem(_ golden: String, last: AgentStart, row: String = "dock") async throws -> (view: WorkspacesView, window: KeyWindow, started: [AgentStart?], asked: Int) {
         let (view, window, server) = try await Self.listed([golden])
         var memory = ModeMemory()
         memory.remember(last)
         view.memory = memory
-        var started: [AgentStart] = []
+        var started: [AgentStart?] = []
         view.onStart = { start, _, _ in started.append(start) }
         let menu = try Self.menu(row, in: view)
         let index = try #require(menu.items.firstIndex { $0.title == "New \(last.display) Session" })
@@ -354,7 +354,7 @@ import Testing
         #expect(shown.modes?.title == "Claude Code's own" && shown.signIn?.title == "Your Claude account")
         #expect(shown.words.contains("Starts as Claude Code starts by itself: the project's default mode, else Auto where it is available, else Manual."))
         #expect(!shown.words.contains { $0.contains("asks you to sign in") }, "a workspace holding the sign-in was told to sign in")
-        #expect(shown.primary?.title == "Start" && shown.primary?.isEnabled == true && shown.words.contains(NewSessionWords.hint))
+        #expect(shown.primary?.title == "Start" && shown.primary?.isEnabled == true && shown.words.contains("↑↓ choose · ⌘M mode"))
         #expect(!shown.words.contains { $0.contains("stopped") }, "a running workspace said it is stopped")
         let row = try #require(view.project.rowFrame("dock").map { window.convertToScreen($0) }), box = panel.popover.frame
         #expect(near(box.width, NewSessionPanel.width) && near(box.maxY, row.minY - NewSessionPanel.gap), "the panel is at \(box), the row at \(row)")
@@ -378,8 +378,10 @@ import Testing
         #expect(panel.view.words.contains("Full access") && panel.view.words.contains { $0.hasPrefix("Sail starts Codex CLI in a workspace with full access") })
         try Self.press(try Self.key(46, "m", .command), in: window)
         #expect(popped.isEmpty, "⌘M opened a menu for a harness of one mode")
+        #expect(panel.view.words.contains("↑↓ choose") && !panel.view.words.contains { $0.contains("⌘M") }, "⌘M is named where it opens nothing")
         for _ in 0 ..< 3 { try Self.press(try Self.down(), in: window) }
         #expect(panel.view.rows.map(\.chosen) == [false, false, true], "↓ went past the Shell")
+        #expect(panel.view.words.contains("↑↓ choose") && !panel.view.words.contains { $0.contains("⌘M") }, "⌘M is named on the Shell")
         for _ in 0 ..< 4 { try Self.press(try Self.up(), in: window) }
         #expect(panel.view.rows.map(\.chosen) == [true, false, false], "↑ went past the first")
         try Self.press(try Self.key(46, "m", .command), in: window)
@@ -389,7 +391,7 @@ import Testing
         #expect(modes.items.filter { $0.state == .on }.map(\.title) == ["Claude Code's own"])
         modes.performActionForItem(at: 3)
         #expect(panel.view.modes?.title == "Plan" && panel.view.words.contains("Researches and proposes changes, and edits nothing until you approve the plan."))
-        var started: [(AgentStart, String, String)] = []
+        var started: [(AgentStart?, String, String)] = []
         view.onStart = { started.append(($0, $1, $2)) }
         try Self.press(try Self.returnKey(), in: window)
         let plan = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan", inside: true)
@@ -401,17 +403,21 @@ import Testing
         #expect(reopened.view.modes?.title == "Plan", "the mode chosen was not remembered")
     }
 
-    /// The Shell is the row's Open; Escape closes and nothing starts; so does a click outside; the
-    /// + again closes it.
-    @Test func theShellOpensTheRowAndEscapeStartsNothing() async throws {
+    /// The Shell starts a new shell in the workspace, never the row's Open; Escape closes and
+    /// nothing starts; so does a click outside; the + again closes it.
+    @Test func theShellStartsANewShellAndEscapeStartsNothing() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-dock"])
         defer { window.orderOut(nil) }
-        var opened: [String] = [], started = 0
+        var opened: [String] = [], shells: [String] = [], started = 0
         view.onOpen = { opened.append("\($0) \($1)") }
-        view.onStart = { _, _, _ in started += 1 }
+        view.onStart = { start, project, name in
+            if start == nil { shells.append("\(project) \(name)") } else { started += 1 }
+        }
         _ = try await Self.open("dock", in: view)
+        #expect(WorkspacesViewTests.footSays(view.project) == ["New Session", "New"], "the foot names Return's Open while Return starts")
         try Self.press(try Self.escape(), in: window)
         #expect(!view.newSession.isOpen && started == 0 && opened.isEmpty, "Escape left it open or started something")
+        #expect(WorkspacesViewTests.footSays(view.project) == ["Open", "New Session", "New"])
         _ = try await Self.open("dock", in: view)
         let outside = try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: NSPoint(x: 5, y: 5), modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
         view.newSession.popover.clickedAnywhere(outside)
@@ -425,7 +431,7 @@ import Testing
         for _ in 0 ..< 2 { try Self.press(try Self.down(), in: window) }
         #expect(panel.view.primary?.title == "Start" && panel.view.modes == nil)
         try Self.press(try Self.returnKey(), in: window)
-        #expect(opened == ["harbor dock"] && started == 0, "the Shell opened \(opened)")
+        #expect(shells == ["harbor dock"] && opened.isEmpty && started == 0, "the Shell started \(shells) and opened \(opened)")
         view.project.on(.newSession("dock"))
         #expect(await RunnerTabTests.until { view.newSession.isOpen })
         view.project.on(.newSession("dock"))
@@ -462,10 +468,10 @@ import Testing
         #expect(!words.contains { $0.contains("login stored") || $0.contains("Store a") }, "a refusal or a link of the old panel shows: \(words)")
         #expect(panel.view.primary?.title == "Start and Sign In" && panel.view.primary?.isEnabled == true)
         #expect(!words.contains { $0.contains("agent login") || $0.contains("/login") || $0.contains("sail ") }, "a command shows: \(words)")
-        var started: [AgentStart] = []
+        var started: [AgentStart?] = []
         view.onStart = { start, _, _ in started.append(start) }
         try Self.press(try Self.returnKey(), in: window)
-        #expect(started.map { [$0.wire.harness, $0.wire.mode] } == [["claude-code", "default"]] && started.allSatisfy(\.wire.inside))
+        #expect(started.map { [$0?.wire.harness, $0?.wire.mode] } == [["claude-code", "default"]] && started.allSatisfy { $0?.wire.inside == true })
         #expect(view.memory.last == AgentStart(harness: "claude-code", display: "Claude Code", mode: "default", inside: true), "a start that signed in is not remembered as one")
     }
 
@@ -483,10 +489,10 @@ import Testing
         menu.performActionForItem(at: 1)
         #expect(panel.view.signIn?.title == "API key “default”" && panel.view.rows.first?.line.stringValue == "API key “default”")
         #expect(panel.view.primary?.title == "Start" && !panel.view.words.contains { $0.contains("asks you to sign in") })
-        var started: [AgentStart] = []
+        var started: [AgentStart?] = []
         view.onStart = { start, _, _ in started.append(start) }
         try Self.press(try Self.returnKey(), in: window)
-        #expect(started.map { [$0.wire.harness, $0.wire.mode] } == [["claude-code", "default"]] && started.allSatisfy { !$0.wire.inside })
+        #expect(started.map { [$0?.wire.harness, $0?.wire.mode] } == [["claude-code", "default"]] && started.allSatisfy { $0?.wire.inside == false })
         let reopened = try await Self.open("dock", in: view)
         #expect(reopened.view.signIn?.title == "API key “default”", "the key chosen was not remembered")
         try Self.press(try Self.down(), in: window)
@@ -549,18 +555,19 @@ import Testing
     }
 
     /// Someone else's workspace, by ⌥⌘T on its row: no list, the server's sentence and remedy, and
-    /// Open a Shell, its row's Open. An owner gone: the sentence, no remedy (it names a command),
-    /// and Close.
+    /// Open a Shell, which starts a new shell there. An owner gone: the sentence, no remedy (it
+    /// names a command), and Close.
     @Test func whereNoAgentStartsForThePersonItSaysWhy() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-quay"])
         defer { window.orderOut(nil) }
-        var opened: [String] = []
+        var opened: [String] = [], shells: [String] = []
         view.onOpen = { opened.append("\($0) \($1)") }
+        view.onStart = { start, project, name in if start == nil { shells.append("\(project) \(name)") } }
         let panel = try await Self.open("quay", in: view)
         #expect(panel.view.rows.isEmpty && panel.view.primary == nil)
         #expect(panel.view.words == ["New session in quay", "quay is ana's workspace, so an agent starts in it only as ana, with ana's login.", "Open a shell in it, or start the agent in a workspace of your own.", "Open a Shell"])
         try Self.press(panel.view.secondary)
-        #expect(opened == ["harbor quay"] && !panel.isOpen)
+        #expect(shells == ["harbor quay"] && opened.isEmpty && !panel.isOpen)
         let (gone, goneWindow, _) = try await Self.listed(["workspace-agents-pier-owner-gone"])
         defer { goneWindow.orderOut(nil) }
         let refused = try await Self.open("pier", in: gone)

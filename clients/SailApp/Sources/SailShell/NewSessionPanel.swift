@@ -41,7 +41,7 @@ package final class NewSessionPanel: NSObject {
 
     /// Told the start Start made, and what the person's starts now remember.
     var onStart: @MainActor (AgentStart, ModeMemory) -> Void = { _, _ in }
-    /// Told when Start opens the Shell, or Open a Shell is pressed: the row's Open.
+    /// Told when Start opens the Shell, or Open a Shell is pressed: a new shell in the workspace.
     var onShell: @MainActor () -> Void = {}
     /// Told when it closes, however it closes.
     var onClose: @MainActor () -> Void = {}
@@ -470,7 +470,7 @@ package final class NewSessionView: NSView {
             start.holdsKeys = line.map { if case .stored = $0 { true } else { false } } == true && enabled && !focused
             start.why = enabled ? nil : Self.refusal(panel.readiness)?.message
             primary = start
-            let hint = Self.label(Self.text(NewSessionWords.hint, mono.font(Look.Step.micro.points, .regular) as NSFont, look.textTertiary, direction: direction).cut(.byTruncatingTail))
+            let hint = Self.label(Self.text(NewSessionWords.hint(modes: modes != nil), mono.font(Look.Step.micro.points, .regular) as NSFont, look.textTertiary, direction: direction).cut(.byTruncatingTail))
             y = foot(start, hint: hint, y: y, width: width)
         case let .refused(sentence, remedy, shell):
             hairlines.append(y)
