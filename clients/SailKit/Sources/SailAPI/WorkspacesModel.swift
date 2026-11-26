@@ -67,7 +67,10 @@ public struct WorkspacesModel: Sendable {
         public let controlPlane: String
         /// Who is signed in and their role ("ana · member"), which the empty card's line says.
         public let who: String
-        /// What the panel says when it lists no project.
+        /// The control plane's projects were listed: until then its head counts nothing.
+        public let listed: Bool
+        /// What the panel says when it lists no project: none open to the person, or, never listed,
+        /// that the control plane could not be asked.
         public let emptyLine: String?
         /// What is shown is the last listed, its refresh having failed: the panel is drawn dimmed.
         public let stale: Bool
@@ -630,15 +633,28 @@ public struct WorkspacesModel: Sendable {
 
     // MARK: What is shown
 
-    public var screen: Screen {
-        guard let projects else { return projectsFailure.map { .unreachable(unreachable($0)) } ?? .loading }
-        let panel = Panel(
-            projects: projects.map { Project(name: $0.name, mark: Self.mark($0.template)) }, chosen: thisMacChosen ? Self.thisMac : chosen,
-            controlPlane: person.named, who: who,
-            emptyLine: projects.isEmpty ? "No project is open to you yet." : nil,
-            stale: projectsFailure != nil || (chosen != nil && listing.listed == chosen && listFailure != nil)
+    /// The left panel, This Mac's group listed whether or not the control plane's projects are.
+    public var panel: Panel {
+        Panel(
+            projects: (projects ?? []).map { Project(name: $0.name, mark: Self.mark($0.template)) }, chosen: thisMacChosen ? Self.thisMac : chosen,
+            controlPlane: person.named, who: who, listed: projects != nil, emptyLine: emptyLine,
+            stale: projects != nil && (projectsFailure != nil || (chosen != nil && listing.listed == chosen && listFailure != nil))
         )
+    }
+
+    /// What the panel says under the control plane's head: none of its projects open to the person,
+    /// or, none ever listed, why they could not be.
+    private var emptyLine: String? {
+        guard projects == nil else { return projects?.isEmpty == true ? "No project is open to you yet." : nil }
+        guard let projectsFailure else { return nil }
+        if case .unreachable = projectsFailure { return "Can’t reach \(person.named)." }
+        return "Couldn’t list your projects."
+    }
+
+    public var screen: Screen {
+        let panel = panel
         if thisMacChosen { return .shown(panel, .thisMac) }
+        guard let projects else { return projectsFailure.map { .unreachable(unreachable($0)) } ?? .loading }
         guard let project = projects.first(where: { $0.name == chosen }) else {
             let body = person.admin
                 ? "Add a project on \(person.controlPlane), or add yourself to one. It then appears on the left, and you can create your own workspaces in it."

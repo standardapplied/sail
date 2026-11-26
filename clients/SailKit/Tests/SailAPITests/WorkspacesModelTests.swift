@@ -67,6 +67,50 @@ import Testing
         }
     }
 
+    /// This Mac needs nothing from the control plane: chosen last it opens before any project is
+    /// listed, chosen while they load it shows at once, and it stays when their first listing fails,
+    /// the control plane's group then counting nothing and saying why under its head. Not chosen,
+    /// the section waits or says why as before, the same panel beside it.
+    @Test func thisMacIsShownWhileNoProjectIsListed() {
+        var reopened = WorkspacesModel(person: Self.uday, chosen: WorkspacesModel.thisMac)
+        guard case let .shown(loading, .thisMac) = reopened.screen else {
+            Issue.record("This Mac chosen last waited for the control plane: \(reopened.screen)")
+            return
+        }
+        #expect(!loading.listed && loading.projects.isEmpty && loading.emptyLine == nil && loading.chosen == WorkspacesModel.thisMac)
+        reopened.projectsListed(.failure(.unreachable("The network connection was lost.")))
+        guard case let .shown(failed, .thisMac) = reopened.screen else {
+            Issue.record("a failed listing took This Mac away: \(reopened.screen)")
+            return
+        }
+        #expect(!failed.listed && !failed.stale && failed.emptyLine == "Can’t reach main.acme.dev.")
+        reopened.projectsListed(.failure(.unexpected(route: "GET /v1/projects", status: 502)))
+        #expect(reopened.panel.emptyLine == "Couldn’t list your projects.")
+        reopened.projectsListed(Self.answer(.projects, "projects"))
+        #expect(reopened.panel.listed && reopened.panel.emptyLine == nil && reopened.panel.projects.map(\.name) == ["harbor"])
+
+        var clicked = WorkspacesModel(person: Self.uday)
+        #expect(clicked.screen == .loading && !clicked.panel.listed && clicked.panel.emptyLine == nil)
+        clicked.chooseThisMac()
+        guard case .shown(_, .thisMac) = clicked.screen else {
+            Issue.record("This Mac chosen while the projects load is not shown: \(clicked.screen)")
+            return
+        }
+        clicked.projectsListed(.failure(.unreachable("lost")))
+        guard case .shown(_, .thisMac) = clicked.screen else {
+            Issue.record("the listing then failed and took This Mac away: \(clicked.screen)")
+            return
+        }
+
+        var away = WorkspacesModel(person: Self.uday)
+        away.projectsListed(.failure(.unreachable("lost")))
+        guard case .unreachable = away.screen else {
+            Issue.record("no card while nothing could be listed: \(away.screen)")
+            return
+        }
+        #expect(!away.panel.listed && away.panel.emptyLine == "Can’t reach main.acme.dev.")
+    }
+
     /// This Mac's page names the Mac and the control plane it is kept from, and says what it is not.
     @Test func thisMacsPageSaysItIsKeptHere() {
         #expect(WorkspacesModel.thisMacLede(host: "mara-mbp", controlPlane: "sail.example.com") == "Shells on mara-mbp. Only this Mac sees them; nothing here is sent to sail.example.com.")

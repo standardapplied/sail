@@ -5,9 +5,9 @@ import SailLook
 import SailWorkbench
 
 /// The Workspaces section: the left panel with This Mac and the projects and, beside it, the
-/// chosen project's Workspaces view, or This Mac's page; while a session held at launch is
-/// checked, Sail's mark drawing itself; with nothing listed, one card saying why (signed out, the
-/// welcome stands in its place). It asks
+/// chosen project's Workspaces view, or This Mac's page, which needs nothing listed; while a session
+/// held at launch is checked, Sail's mark drawing itself; with no project listed, a card beside the
+/// panel saying why (signed out, the welcome stands in their place). It asks
 /// the control plane, hands the answers to ``WorkspacesModel`` and draws what the model says. Only
 /// a person's action holds a control (#462): a refresh never does. Under a 720 pt card the panel
 /// hides, and ⌃⌘S (View ▸ Show Sidebar) shows it over the content until a project is chosen or
@@ -147,8 +147,8 @@ public final class WorkspacesView: NSView {
         NSLayoutConstraint.activate([
             panel.leadingAnchor.constraint(equalTo: leadingAnchor), panel.topAnchor.constraint(equalTo: topAnchor), panel.bottomAnchor.constraint(equalTo: bottomAnchor),
             project.topAnchor.constraint(equalTo: topAnchor), project.bottomAnchor.constraint(equalTo: bottomAnchor), project.trailingAnchor.constraint(equalTo: trailingAnchor),
-            card.centerXAnchor.constraint(equalTo: centerXAnchor), card.centerYAnchor.constraint(equalTo: centerYAnchor), cardWidth,
-            card.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -32),
+            card.centerXAnchor.constraint(equalTo: project.centerXAnchor), card.centerYAnchor.constraint(equalTo: project.centerYAnchor), cardWidth,
+            card.widthAnchor.constraint(lessThanOrEqualTo: project.widthAnchor, constant: -32),
             panelShadow.leadingAnchor.constraint(equalTo: panel.leadingAnchor), panelShadow.trailingAnchor.constraint(equalTo: panel.trailingAnchor),
             panelShadow.topAnchor.constraint(equalTo: panel.topAnchor), panelShadow.bottomAnchor.constraint(equalTo: panel.bottomAnchor),
             local.leadingAnchor.constraint(equalTo: project.leadingAnchor), local.trailingAnchor.constraint(equalTo: project.trailingAnchor),
@@ -158,6 +158,7 @@ public final class WorkspacesView: NSView {
         contentFull = project.leadingAnchor.constraint(equalTo: leadingAnchor)
         contentLeading.isActive = true
         panel.onChoose = { [weak self] name in self?.choose(name) }
+        panel.onTryAgain = { [weak self] in self?.askAgain(nil) }
         project.on = { [weak self] act in self?.act(act) }
         newSession.onStart = { [weak self] start, memory in self?.started(start, memory) }
         newSession.onStoreKey = { [weak self] offer in self?.storeKey(offer) }
@@ -729,14 +730,15 @@ public final class WorkspacesView: NSView {
         case (_, .loading?):
             card.isHidden = true
             local.isHidden = true
-            panel.renderLoading(controlPlane: person.named)
+            panel.render(model.panel)
             setPanel(shown: true)
             project.isHidden = false
             project.renderLoading()
         default:
             project.isHidden = true
             local.isHidden = true
-            setPanel(shown: false)
+            if door == .signedIn { panel.render(model.panel) }
+            setPanel(shown: door == .signedIn)
             card.isHidden = false
             showCard(screen)
         }

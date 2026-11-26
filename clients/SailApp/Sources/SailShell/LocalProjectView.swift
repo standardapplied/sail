@@ -18,7 +18,7 @@ package final class LocalProjectView: NSView {
         case open(PaneID), end(PaneID), newShell
     }
 
-    static let endSession = "End Session", noteGap = 22.0, hintGap = 16.0
+    static let endSession = "End Session", noteGap = 22.0, hintGap = 16.0, noteWidth = 520.0
 
     /// The program a shell of this Mac runs: the person's login shell, as this Mac's terminal host
     /// reads it from the account database.
@@ -204,14 +204,16 @@ package final class LocalProjectView: NSView {
         }
         keys.spacing = Self.hintGap
         buildKeys()
-        let foot = NSView()
+        let foot = NSView(), noted = NSView()
         keys.translatesAutoresizingMaskIntoConstraints = false
         foot.addSubview(keys)
+        note.translatesAutoresizingMaskIntoConstraints = false
+        noted.addSubview(note)
         column.orientation = .vertical
         column.alignment = .width
         column.spacing = 0
         column.setClippingResistancePriority(.defaultLow, for: .horizontal)
-        column.setViews([head, spacer(ProjectView.listGap), frameView, spacer(ProjectView.footGap), foot, spacer(Self.noteGap), note], in: .top)
+        column.setViews([head, ProjectView.spacer(ProjectView.listGap), frameView, ProjectView.spacer(ProjectView.footGap), foot, ProjectView.spacer(Self.noteGap), noted], in: .top)
         column.translatesAutoresizingMaskIntoConstraints = false
         addSubview(column)
         let above = column.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -ProjectView.padding.bottom)
@@ -221,6 +223,9 @@ package final class LocalProjectView: NSView {
         NSLayoutConstraint.activate([
             words.leadingAnchor.constraint(equalTo: head.leadingAnchor), words.topAnchor.constraint(equalTo: head.topAnchor),
             lede.widthAnchor.constraint(equalTo: words.widthAnchor), buttons.trailingAnchor.constraint(equalTo: head.trailingAnchor),
+            note.leadingAnchor.constraint(equalTo: noted.leadingAnchor), note.trailingAnchor.constraint(lessThanOrEqualTo: noted.trailingAnchor),
+            note.topAnchor.constraint(equalTo: noted.topAnchor), note.bottomAnchor.constraint(equalTo: noted.bottomAnchor),
+            note.widthAnchor.constraint(lessThanOrEqualToConstant: Self.noteWidth),
             buttons.topAnchor.constraint(equalTo: head.topAnchor), buttons.leadingAnchor.constraint(equalTo: words.trailingAnchor, constant: ProjectView.headGap),
             head.bottomAnchor.constraint(greaterThanOrEqualTo: words.bottomAnchor), head.bottomAnchor.constraint(greaterThanOrEqualTo: buttons.bottomAnchor), hug,
             keys.leadingAnchor.constraint(equalTo: foot.leadingAnchor), keys.centerYAnchor.constraint(equalTo: foot.centerYAnchor),
@@ -229,12 +234,6 @@ package final class LocalProjectView: NSView {
             column.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ProjectView.padding.sides),
             column.topAnchor.constraint(equalTo: topAnchor, constant: ProjectView.padding.top), above,
         ])
-    }
-
-    private func spacer(_ height: Double) -> NSView {
-        let view = NSView()
-        view.heightAnchor.constraint(equalToConstant: height).isActive = true
-        return view
     }
 
     /// The widest actions a row shows, Open (with ⏎ when `returnKey`) and ⋯, measured.

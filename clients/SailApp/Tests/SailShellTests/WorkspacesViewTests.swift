@@ -15,7 +15,7 @@ import Testing
 /// test shares, while the sweeps beside it hold that actor; on the owner's Mac on its efficiency
 /// cores the suite was red in 10 of 10 runs side by side (listings never shown within 5 s) and
 /// green in 3 of 3 one at a time.
-@MainActor @Suite(.serialized) struct WorkspacesViewTests {
+@MainActor @Suite(.serialized, .timeLimit(.minutes(1))) struct WorkspacesViewTests {
     init() {
         ExitWatch.install()
     }
@@ -23,8 +23,9 @@ import Testing
     static let uday = WorkspacesModel.Person(handle: "uday", admin: true, confirmed: true, controlPlane: "127.0.0.1")
     static let ana = WorkspacesModel.Person(handle: "ana", admin: false, confirmed: true, controlPlane: "127.0.0.1")
 
-    static func view(_ transport: any Transport, width: Double = 1000) throws -> (WorkspacesView, KeyWindow) {
+    static func view(_ transport: any Transport, width: Double = 1000, chosenLast: String? = nil) throws -> (WorkspacesView, KeyWindow) {
         let view = WorkspacesView(look: .light, title: try TitleFont(directory: LookTests.fonts), mono: try LabelFont(directory: LookTests.fonts))
+        view.lastChosen = { _ in chosenLast }
         view.person = Self.uday
         view.client = SailClient(transport: transport, token: "tok")
         let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
@@ -894,12 +895,16 @@ import Testing
     }
 
     /// This Mac's rows are its terminals as the workbench tells them, a row each: Open, and in its ⋯
-    /// only End Session (⌘W), nothing else; a terminal gone leaves the list at once.
+    /// only End Session (⌘W), nothing else; a terminal gone leaves the list at once. The note under
+    /// them runs at most the design's 520 pt.
     @Test func thisMacsRowsAreItsTerminalsNow() async throws {
         let (view, window, _) = try await Self.listed()
         defer { window.orderOut(nil) }
         view.panel.onChoose(WorkspacesModel.thisMac)
         view.sessions = Self.shells
+        view.layoutSubtreeIfNeeded()
+        let note = Double(view.local.note.alignmentRect(forFrame: view.local.note.frame).width), room = Double(view.local.frame.width) - 2 * ProjectView.padding.sides
+        #expect(room > LocalProjectView.noteWidth && note > 0 && note <= LocalProjectView.noteWidth + 0.5, "the note runs \(note) pt of \(room)")
         let row = { (id: String) in "item \(id) [\"Open\", \"End Session in ⋯ ⌘w\"]" }
         #expect(Self.said(view.local.list.entries) == ["head Sessions 2 -", row("1"), row("2")])
         var acts: [LocalProjectView.Act] = []
@@ -912,8 +917,8 @@ import Testing
     }
 
     /// The keys under This Mac's rows show only while a row is chosen in the list holding the keys,
-    /// told again as the keys leave it and come back;
-    /// New Shell holds ⌘T and opens a shell, nothing else: no chooser.
+    /// told again as the keys leave it and come back; New Shell holds ⌘T and asks for a shell, its
+    /// one act (⌘T itself reaching it is the drive's `m-command-t`).
     @Test func thisMacsKeysShowOnlyWhileARowIsChosen() async throws {
         let (view, window, _) = try await Self.listed()
         defer { window.orderOut(nil) }
@@ -935,12 +940,12 @@ import Testing
         #expect(button.keyEquivalent == "t" && button.keyEquivalentModifierMask == .command && !button.isHidden)
         let action = try #require(button.action)
         #expect(NSApp.sendAction(action, to: button.target, from: button))
-        #expect(acts == [.newShell] && !view.newSession.isOpen)
+        #expect(acts == [.newShell])
     }
 
     /// This Mac's page acts in Terminals: Open shows its row's tab with that terminal focused, New
-    /// Shell goes to Terminals with no chooser, and the page's rows are the workbench's panes, a
-    /// pane closed leaving them at once.
+    /// Shell goes to Terminals, End Session ends its own row's terminal, not the one focused, asking
+    /// by its name, and the page's rows are the workbench's panes, a pane ended leaving them at once.
     @Test func thisMacsPageActsInTerminals() throws {
         let file = FileManager.default.temporaryDirectory.appending(path: "sail-this-mac-\(UUID().uuidString.prefix(8)).json")
         defer { try? FileManager.default.removeItem(at: file) }
@@ -954,9 +959,92 @@ import Testing
         #expect(shell.rail.selected == .terminals && shell.thisMac.model.focusedPane?.id == first)
         shell.select(.workspaces)
         shell.workspaces.local.on(.newShell)
-        #expect(shell.rail.selected == .terminals && !shell.workspaces.newSession.isOpen)
-        shell.thisMac.change { _ = $0.close(second) }
+        #expect(shell.rail.selected == .terminals)
+        shell.select(.workspaces)
+        for id in [first, second] {
+            let pane = try #require(shell.thisMac.model.panes[id])
+            _ = try #require(shell.thisMac.makeView(pane, start: .attach, points: 15))
+        }
+        #expect(shell.thisMac.model.focusedPane?.id == first && shell.thisMac.endQuestion(second) == "Close This Mac 2?", "\(shell.thisMac.endQuestion(second))")
+        shell.workspaces.local.on(.end(second))
+        #expect(shell.thisMac.model.panes[second] == nil && shell.thisMac.model.panes[first] != nil, "End Session on This Mac 2 ended another terminal")
         #expect(shell.workspaces.sessions.map(\.pane) == [first])
+    }
+
+    /// Choosing This Mac in Workspaces before Terminals was ever shown restores the terminals, so
+    /// its page lists those a person had before quitting.
+    @Test func choosingThisMacFirstRestoresTheTerminals() throws {
+        let file = FileManager.default.temporaryDirectory.appending(path: "sail-this-mac-\(UUID().uuidString.prefix(8)).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let shell = try ShellApp(fonts: LookTests.fonts, helper: nil, look: .light, passkeys: { _ in SoftwarePasskey(file: file) }, defaults: ReattachTests.defaults())
+        shell.workspaces.person = Self.uday
+        shell.workspaces.client = SailClient(transport: RecordedServer([]), token: "tok")
+        shell.workspaces.shown()
+        #expect(!shell.thisMac.started, "the terminals were restored before This Mac was chosen")
+        shell.workspaces.panel.onChoose(WorkspacesModel.thisMac)
+        #expect(shell.thisMac.started && shell.rail.selected != .terminals, "choosing This Mac restored nothing")
+    }
+
+    /// This Mac needs nothing from the control plane. Chosen last, it opens offline at once, and
+    /// the listing that then fails says so in the control plane's group, with Try Again, which asks
+    /// again; the card stays away.
+    @Test func thisMacChosenLastOpensOffline() async throws {
+        let server = RecordedServer([])
+        let (view, window) = try Self.view(server, chosenLast: WorkspacesModel.thisMac)
+        defer { window.orderOut(nil) }
+        view.sessions = Self.shells
+        view.shown()
+        #expect(!view.local.isHidden && view.project.isHidden && view.card.isHidden && view.text.hasPrefix("Workspaces\nThis Mac\n"), "\(view.text)")
+        try #require(await RunnerTabTests.until { !view.panel.tryAgain.isHiddenOrHasHiddenAncestor }, "the failed listing never said so: \(view.panel.emptyLine.stringValue)")
+        #expect(view.panel.emptyLine.stringValue == "Can’t reach 127.0.0.1." && !view.panel.isHidden && !view.local.isHidden && view.card.isHidden)
+        #expect(Self.said(view.panel.list.entries) == ["head This Mac - laptop", "item This Mac []", "head 127.0.0.1 - cloud"])
+        let action = try #require(view.panel.tryAgain.action)
+        #expect(NSApp.sendAction(action, to: view.panel.tryAgain.target, from: view.panel.tryAgain))
+        #expect(view.panel.tryAgain.isHidden && !view.local.isHidden, "Try Again did not ask again")
+        try #require(await RunnerTabTests.until { !view.panel.tryAgain.isHidden }, "the second listing never answered")
+        #expect(await server.requests.map(\.route) == ["GET /v1/projects", "GET /v1/projects"])
+    }
+
+    /// Chosen while the projects load, This Mac's page shows at once, the control plane's head
+    /// counting nothing; their listing then failing leaves it shown, the failure said in their group.
+    @Test func thisMacChosenWhileLoadingStaysWhenTheListingFails() async throws {
+        let transport = Held(RecordedServer([]), holding: "GET /v1/projects")
+        let (view, window) = try Self.view(transport)
+        defer { window.orderOut(nil) }
+        view.shown()
+        #expect(Self.said(view.panel.list.entries) == ["head This Mac - laptop", "item This Mac []", "head 127.0.0.1 - cloud"] && !view.project.isHidden)
+        view.panel.onChoose(WorkspacesModel.thisMac)
+        #expect(!view.local.isHidden && view.project.isHidden && view.panel.list.chosen == WorkspacesModel.thisMac, "\(view.text)")
+        transport.release()
+        try #require(await RunnerTabTests.until { !view.panel.tryAgain.isHiddenOrHasHiddenAncestor }, "the failed listing never said so")
+        #expect(!view.local.isHidden && view.card.isHidden && view.panel.emptyLine.stringValue == "Can’t reach 127.0.0.1.")
+    }
+
+    /// A slow control plane holds This Mac's page behind nothing: chosen last it shows before the
+    /// projects answer, and stays shown once they do, the head then counting them.
+    @Test func aSlowListingHoldsThisMacsPageBehindNothing() async throws {
+        let transport = Held(RecordedServer([try Exchange("projects"), try Exchange("workspaces-three")]), holding: "GET /v1/projects")
+        let (view, window) = try Self.view(transport, chosenLast: WorkspacesModel.thisMac)
+        defer { window.orderOut(nil) }
+        view.shown()
+        #expect(!view.local.isHidden && view.project.isHidden && view.panel.tryAgain.isHidden, "\(view.text)")
+        transport.release()
+        try #require(await RunnerTabTests.until { Self.said(view.panel.list.entries).contains("head 127.0.0.1 1 cloud") }, "\(Self.said(view.panel.list.entries))")
+        #expect(!view.local.isHidden && view.panel.list.chosen == WorkspacesModel.thisMac)
+    }
+
+    /// Signed in with nothing listed and This Mac not chosen, the card saying why stands in the
+    /// content beside the panel, which still lists This Mac.
+    @Test func theUnreachableCardStandsBesideThisMac() async throws {
+        let (view, window) = try Self.view(RecordedServer([]))
+        defer { window.orderOut(nil) }
+        view.shown()
+        try #require(await RunnerTabTests.until { !view.card.isHidden }, "\(view.text)")
+        view.layoutSubtreeIfNeeded()
+        #expect(!view.panel.isHidden && Self.said(view.panel.list.entries).first == "head This Mac - laptop")
+        #expect(near(view.card.frame.midX, view.project.frame.midX) && view.project.frame.minX >= view.panel.frame.maxX - 0.5, "the card \(view.card.frame), beside \(view.panel.frame)")
+        view.panel.onChoose(WorkspacesModel.thisMac)
+        #expect(!view.local.isHidden && view.card.isHidden, "This Mac is not reached from the card's section")
     }
 }
 

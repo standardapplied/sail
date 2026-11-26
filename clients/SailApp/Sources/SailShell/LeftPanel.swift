@@ -8,14 +8,16 @@ import SailLook
 /// bottom edge: THIS MAC, holding the one local project, and the control plane's projects under its
 /// host with their count, as the panel's project rows (tile, name, readiness pill). Who is signed in
 /// and where is the user menu's to say. With no project it says so under the control plane's head;
-/// before any is listed it shows skeleton rows there. It is 236 pt by default; its trailing edge
-/// drags it between 200 and 360 pt, remembered on this Mac.
+/// before any is listed it shows skeleton rows there, and, when none could be, why, with Try Again.
+/// It is 236 pt by default; its trailing edge drags it between 200 and 360 pt, remembered on this Mac.
 @MainActor
 package final class LeftPanel: NSView {
     static let width = (standard: 236.0, least: 200.0, most: 360.0), header = 46.0, edge = 6.0
     static let remembered = "leftPanel.width"
 
     var onChoose: @MainActor (String) -> Void = { _ in }
+    /// Try Again under the control plane's head, which could list no project.
+    var onTryAgain: @MainActor () -> Void = {}
     /// Its look; a change redraws its words and rows in it.
     var look: Look {
         didSet { relook() }
@@ -26,14 +28,18 @@ package final class LeftPanel: NSView {
     /// drag edge, so a reach for the thumb never resizes the panel.
     package let scroll: QuietScrollView
     let heading = NSTextField(labelWithString: "Workspaces")
-    /// "No project is open to you yet.", with none listed.
+    /// "No project is open to you yet.", with none listed, or why none could be.
     let emptyLine = NSTextField(labelWithString: "")
+    /// Under the empty line while no project could be listed: the projects asked again.
+    package let tryAgain: SailButton
     /// Skeleton rows, each a tile and a name, before any project is listed.
     private let skeletons: [(tile: Skeleton, name: Skeleton)]
     private let mono: LabelFont
     private(set) var widthConstraint: NSLayoutConstraint!
     private var projects: [WorkspacesModel.Project] = []
     private var headed: String?
+    /// The control plane's head's count as drawn, nil before its projects are listed.
+    private var counted: Int?
     /// The names are drawn in the secondary ink: what is shown failed to refresh.
     private var stale = false
     /// What it last showed, drawn again in a new look.
@@ -46,9 +52,14 @@ package final class LeftPanel: NSView {
         list.barInset = look.cardEdge == nil ? 0 : Look.hairline
         scroll = QuietScrollView(look: look)
         skeletons = [70.0, 52, 88, 60, 74].map { (tile: Skeleton(width: TilePaint.side, height: TilePaint.side, look: look), name: Skeleton(width: $0, look: look)) }
+        tryAgain = SailButton("Try Again", kind: .quiet, size: .small, look: look, target: nil, action: nil)
         super.init(frame: .zero)
         emptyLine.isHidden = true
         addSubview(emptyLine)
+        tryAgain.isHidden = true
+        tryAgain.target = self
+        tryAgain.action = #selector(askAgain(_:))
+        addSubview(tryAgain)
         for (tile, name) in skeletons {
             tile.isHidden = true
             name.isHidden = true
@@ -94,6 +105,7 @@ package final class LeftPanel: NSView {
         list.look = look
         scroll.look = look
         list.barInset = look.cardEdge == nil ? 0 : Look.hairline
+        tryAgain.look = look
         for (tile, name) in skeletons {
             tile.look = look
             name.look = look
@@ -106,19 +118,24 @@ package final class LeftPanel: NSView {
         needsDisplay = true
     }
 
-    /// Shows `panel`'s projects, its chosen one chosen.
+    /// Shows `panel`: This Mac's group, then the control plane's projects, its chosen one chosen;
+    /// before they are listed, skeleton rows in their place, or why none could be with Try Again.
     func render(_ panel: WorkspacesModel.Panel) {
         shown = panel
-        loading(false)
+        let failed = !panel.listed && panel.emptyLine != nil
+        loading(!panel.listed && !failed)
+        tryAgain.isHidden = !failed
         emptyLine.isHidden = panel.emptyLine == nil
         emptyLine.attributedStringValue = NSAttributedString(string: panel.emptyLine ?? "", attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .foregroundColor: NSColor(look.textTertiary),
         ])
-        if panel.projects != projects || panel.stale != stale || panel.controlPlane != headed {
+        let count = panel.listed ? panel.projects.count : nil
+        if panel.projects != projects || panel.stale != stale || panel.controlPlane != headed || count != counted {
             projects = panel.projects
             stale = panel.stale
             headed = panel.controlPlane
-            list.entries = thisMac + [.head(panel.controlPlane, count: panel.projects.count, icon: .cloud)] + panel.projects.map { project in
+            counted = count
+            list.entries = thisMac + [.head(panel.controlPlane, count: count, icon: .cloud)] + panel.projects.map { project in
                 .item(row(project))
             }
         }
@@ -126,15 +143,8 @@ package final class LeftPanel: NSView {
         needsLayout = true
     }
 
-    /// This Mac's group, then the control plane's head with skeleton rows under it in place of its
-    /// projects.
-    func renderLoading(controlPlane: String) {
-        shown = nil
-        projects = []
-        headed = nil
-        list.entries = thisMac + [.head(controlPlane, count: nil, icon: .cloud)]
-        loading(true)
-        emptyLine.isHidden = true
+    @objc private func askAgain(_: Any?) {
+        onTryAgain()
     }
 
     private func loading(_ loading: Bool) {
@@ -180,6 +190,9 @@ package final class LeftPanel: NSView {
         list.frame = NSRect(x: 0, y: 0, width: Double(scroll.contentSize.width), height: rows)
         let under = top + rows
         emptyLine.frame = NSRect(x: 14, y: under + 8, width: max(Double(bounds.width) - 28, 0), height: Double(emptyLine.intrinsicContentSize.height))
+        let button = tryAgain.intrinsicContentSize, leftToRight = userInterfaceLayoutDirection != .rightToLeft
+        let buttonX = leftToRight ? 14 : Double(bounds.width) - 14 - Double(button.width)
+        tryAgain.frame = tryAgain.frame(forAlignmentRect: NSRect(x: buttonX, y: Double(emptyLine.frame.maxY) + 6, width: Double(button.width), height: Double(button.height)))
         for (index, (tile, name)) in skeletons.enumerated() {
             let middle = under + (Double(index) + 0.5) * RowStyle.sidebar.height
             tile.frame = NSRect(x: Self.tileX, y: middle - TilePaint.side / 2, width: TilePaint.side, height: TilePaint.side)

@@ -322,4 +322,62 @@ import Testing
         let again = try #require(pane.end(), "End Again")
         #expect(await again.value == .gone && !pane.unended)
     }
+
+    /// This Mac's workbench over `door`, never shown.
+    static func unshown(at door: FakeRunnerDoor) throws -> WorkbenchView {
+        try WorkbenchView(fonts: LookTests.fonts, host: Self.host(at: door), look: .light, defaults: ReattachTests.defaults())
+    }
+
+    /// Restored for This Mac's page, Terminals not yet shown, the workbench lists the shells that
+    /// live and opens none when none does; the terminals shown first, a restore that finds none
+    /// opens one, as it always did.
+    @Test func thisMacsPageRestoresWhatLivesAndStartsNothing() async throws {
+        let (door, other) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(thisMac: true))
+        defer {
+            door.stop()
+            other.stop()
+        }
+        let empty = try Self.unshown(at: door)
+        empty.restoreOnce()
+        try #require(await RunnerTabTests.until(10) { empty.restored }, "the restore never ended")
+        #expect(empty.model.tabs.isEmpty && door.createsReceived == 0, "the page's restore started a shell nobody asked for")
+        let kept = Place.thisMac(folder: "/").newSessionName
+        door.hold(kept)
+        let restored = try Self.unshown(at: door)
+        restored.restoreOnce()
+        try #require(await RunnerTabTests.until(10) { restored.restored }, "the restore never ended")
+        #expect(restored.localSessions.map(\.title) == ["This Mac"] && restored.model.panes.values.map(\.session) == [kept], "\(restored.localSessions)")
+        let shown = try Self.unshown(at: other)
+        shown.shown()
+        #expect(await RunnerTabTests.until(10) { shown.restored && shown.model.tabs.count == 1 }, "the terminals shown first opened no tab")
+    }
+
+    /// A pane of this Mac kept after its session ended is said Ended on This Mac's page, as its host
+    /// said it and when, and the page is told.
+    @Test func aKeptPaneThatEndedIsSaidEnded() async throws {
+        let door = try FakeRunnerDoor(thisMac: true)
+        defer { door.stop() }
+        let bench = try Self.unshown(at: door)
+        var told = 0
+        bench.onSessions = { told += 1 }
+        let id = bench.model.newTab(session: "mac-gone", place: .thisMac(folder: "/"))
+        let pane = try #require(bench.model.panes[id])
+        _ = try #require(bench.makeView(pane, start: .attach, points: 15))
+        bench.apply()
+        let before = told
+        try #require(await RunnerTabTests.until(10) { bench.localSessions.first?.ended != nil }, "the refused attach was never said ended")
+        let ended = bench.localSessions.first?.ended ?? ""
+        #expect(ended.hasPrefix("No live session 'mac-gone' to attach. · ") && told > before, "\(ended)")
+    }
+
+    /// An exit is said by its code, any other end as the host said it, each with its time as the
+    /// locale tells the time.
+    @Test func anEndIsSaidWithItsTime() throws {
+        let at = try #require(Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 26, hour: 11, minute: 2)))
+        let british = Locale(identifier: "en_GB")
+        #expect(WorkbenchView.said(.ended("exited(3)"), at: at, locale: british) == "exited 3 · 11:02")
+        #expect(WorkbenchView.said(.hostRestarted, at: at, locale: british) == "the host restarted, which ends every session it held · 11:02")
+        let american = WorkbenchView.said(.ended("exited(3)"), at: at, locale: Locale(identifier: "en_US"))
+        #expect(american.hasPrefix("exited 3 · 11:02") && american.hasSuffix("AM"), "\(american)")
+    }
 }

@@ -39,6 +39,14 @@ public struct Workbench: Hashable, Sendable {
     public private(set) var selected: TabID?
     public private(set) var panes: [PaneID: Pane] = [:]
     private var made = 0
+    /// Each unnamed tab's number among the tabs called as it is, given as it opens or its name is
+    /// cleared and kept until it is named or closed: closing or moving another renumbers none.
+    private var numbers: [TabID: Numbered] = [:]
+
+    private struct Numbered: Hashable, Sendable {
+        let label: String
+        let number: Int
+    }
 
     public init() {}
 
@@ -98,6 +106,7 @@ public struct Workbench: Hashable, Sendable {
     mutating func adoptTab(_ layout: Layout, focused: PaneID) -> TabID {
         let id = TabID(mint())
         tabs.append(Tab(id: id, layout: layout, name: nil, focused: focused, history: layout.leaves.filter { $0 != focused } + [focused], zoomed: nil))
+        number(id, focused: focused)
         return id
     }
 
@@ -106,6 +115,7 @@ public struct Workbench: Hashable, Sendable {
         let pane = makePane(session: session, place: place, agent: agent)
         let tab = Tab(id: TabID(mint()), layout: .pane(pane), name: nil, focused: pane, history: [pane], zoomed: nil)
         tabs.append(tab)
+        number(tab.id, focused: pane)
         selected = tab.id
         return pane
     }
@@ -150,6 +160,7 @@ public struct Workbench: Hashable, Sendable {
 
     private mutating func removeTab(at index: Int) {
         let wasSelected = tabs[index].id == selected
+        numbers[tabs[index].id] = nil
         tabs.remove(at: index)
         if wasSelected { selected = tabs.isEmpty ? nil : tabs[max(0, index - 1)].id }
     }
@@ -289,7 +300,9 @@ public struct Workbench: Hashable, Sendable {
     public mutating func rename(_ tab: TabID, to name: String) {
         guard let index = tabs.firstIndex(where: { $0.id == tab }) else { return }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleared = tabs[index].name != nil && trimmed.isEmpty
         tabs[index].name = trimmed.isEmpty ? nil : trimmed
+        if cleared { number(tab, focused: tabs[index].focused) } else if !trimmed.isEmpty { numbers[tab] = nil }
     }
 
     public mutating func setTitle(_ title: String, of pane: PaneID) {
@@ -303,21 +316,32 @@ public struct Workbench: Hashable, Sendable {
 
     /// The person's name for the tab, else where its focused pane is when that is a workspace, else
     /// that pane's program title, else ``untitled``; an unnamed tab of a workspace, or untitled, is
-    /// numbered after the tabs before it called the same (the second "acme · try 2", "This Mac 2"),
-    /// so two are told apart.
+    /// numbered as it opens (the second "acme · try 2", "This Mac 2"), so two are told apart, and
+    /// keeps that number, under a program's title too, until the person names it: closing or moving
+    /// another tab changes no title.
     public func title(of tab: TabID) -> String {
         guard let tab = tabs.first(where: { $0.id == tab }) else { return Self.untitled }
         if let name = tab.name { return name }
-        guard let label = numbered(tab) else { return panes[tab.focused]?.programTitle ?? Self.untitled }
-        let before = tabs.prefix { $0.id != tab.id }.filter { numbered($0) == label }.count
-        return before == 0 ? label : "\(label) \(before + 1)"
+        guard let label = label(tab) else { return panes[tab.focused]?.programTitle ?? Self.untitled }
+        guard let numbered = numbers[tab.id], numbered.label == label, numbered.number > 1 else { return label }
+        return "\(label) \(numbered.number)"
     }
 
     /// What an unnamed tab is called before its number: its focused pane's workspace, or
     /// ``untitled`` while its program has said no title; nil for a named tab or a program's title.
-    private func numbered(_ tab: Tab) -> String? {
+    private func label(_ tab: Tab) -> String? {
         guard tab.name == nil, let pane = panes[tab.focused] else { return nil }
         return pane.label ?? (pane.programTitle.isEmpty ? Self.untitled : nil)
+    }
+
+    /// Numbers `tab` by its `focused` pane's workspace, or as ``untitled``: the least number no
+    /// other tab called so holds.
+    private mutating func number(_ tab: TabID, focused: PaneID) {
+        let label = panes[focused]?.label ?? Self.untitled
+        let taken = Set(numbers.values.filter { $0.label == label }.map(\.number))
+        var number = 1
+        while taken.contains(number) { number += 1 }
+        numbers[tab] = Numbered(label: label, number: number)
     }
 
     /// This Mac's terminals as the This Mac project lists them: a row per pane on this Mac, in the

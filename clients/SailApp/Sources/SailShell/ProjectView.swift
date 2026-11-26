@@ -174,8 +174,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             button.why = page.createWhy
         }
         centred?.removeFromSuperview()
-        var views: [NSView] = [head, spacer(Self.listGap)]
-        if let notice = page.banner { views += [banner(notice), spacer(12)] }
+        var views: [NSView] = [head, Self.spacer(Self.listGap)]
+        if let notice = page.banner { views += [banner(notice), Self.spacer(12)] }
         switch page.body {
         case .loading: views.append(loadingList)
         case .unlisted: break
@@ -194,7 +194,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             ages = page.stale ? Timer.scheduledTimer(withTimeInterval: Self.ageTick, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.retellAge() }
             } : nil
-            views += [frameView, spacer(Self.footGap), foot]
+            views += [frameView, Self.spacer(Self.footGap), foot]
             showKeys()
         }
         show(views)
@@ -253,7 +253,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         drawn = .loading
         ages = nil
         centred?.removeFromSuperview()
-        show([loadingWords, spacer(Self.listGap + 11), loadingList])
+        show([loadingWords, Self.spacer(Self.listGap + 11), loadingList])
     }
 
     /// Bars for the name and the line under it, made once: a skeleton shows 150 ms after it enters
@@ -539,7 +539,8 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         NSAttributedString(string: words, attributes: [.font: mono.font(Look.Step.micro.points, .regular) as NSFont, .foregroundColor: NSColor(look.textTertiary)])
     }
 
-    private func spacer(_ height: Double) -> NSView {
+    /// A gap `height` tall down a column: this page's and This Mac's.
+    static func spacer(_ height: Double) -> NSView {
         let view = NSView()
         view.heightAnchor.constraint(equalToConstant: height).isActive = true
         return view

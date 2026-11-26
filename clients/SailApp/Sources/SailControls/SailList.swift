@@ -571,7 +571,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         switch entries[row] {
         case let .head(title, count, icon):
             let sidebar = rowStyle == .sidebar
-            let leading = sidebar ? rowStyle.margin + rowStyle.leading + RowStyle.disclosure + RowStyle.gap : RowStyle.list.leading
+            let leading = sidebar ? HeadCell.sidebarLeading : RowStyle.list.leading
             let trailing = sidebar ? rowStyle.margin + rowStyle.trailing + (actionsColumn ?? 0) : nil
             return HeadCell(title, count: count, icon: icon, at: (leading, trailing), look: look, mono: mono, hairline: rowStyle.hairline && row > 0)
         case let .item(item):
@@ -852,20 +852,20 @@ final class SailRowView: NSTableRowView {
     }
 }
 
-/// A group head's words: mono capitals 20 pt in, after its icon when it has one, the count 8 pt
-/// after them (in a sidebar, at its rows' trailing end), on the line the browser puts a 10 pt line
-/// in the row's middle.
+/// A group head's words: mono capitals 20 pt in (14 pt in a sidebar, as the design's panel draws
+/// its heads), after its icon when it has one, the count 8 pt after them (in a sidebar, at its rows'
+/// trailing end), on the line the browser puts a 10 pt line in the row's middle.
 @MainActor
-final class HeadCell: NSView {
-    static let countGap = 8.0, iconSide = 12.0, iconGap = 6.0
+package final class HeadCell: NSView {
+    static let countGap = 8.0, iconSide = 12.0, iconGap = 6.0, sidebarLeading = 14.0
 
     private let title: NSAttributedString
     private let count: NSAttributedString
     private let icon: LineIcon?
     private let ink: Tint
     private let hairline: Bool
-    /// Where its words start: a list's leading inset, or a sidebar's tiles.
-    private let leading: Double
+    /// Where it starts, its icon or else its words: a list's leading inset, or a sidebar's 14 pt.
+    package let leading: Double
     /// How far before its trailing edge the count ends, nil for the count after the words.
     private let trailing: Double?
 
@@ -889,11 +889,11 @@ final class HeadCell: NSView {
         nil
     }
 
-    override var isFlipped: Bool {
+    override package var isFlipped: Bool {
         true
     }
 
-    override func draw(_: NSRect) {
+    override package func draw(_: NSRect) {
         let points = Look.Step.caption.points, top = hairline ? 1.0 : 0
         let baseline = TextLine.baseline(top: top + (Double(bounds.height) - top - points) / 2, points: points, lineHeight: points)
         let titleWidth = Double(title.size().width), countWidth = Double(count.size().width), width = Double(bounds.width)

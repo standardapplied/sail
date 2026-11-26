@@ -8,7 +8,7 @@ import Testing
 
 /// The list and the left panel scroll with the quiet scroller while their heads and feet stay put;
 /// the panel's foot and loading head as the frames draw them; and the words that must fit, fit.
-@MainActor @Suite struct WorkspacesScrollTests {
+@MainActor @Suite(.timeLimit(.minutes(1))) struct WorkspacesScrollTests {
     init() {
         ExitWatch.install()
     }
@@ -256,18 +256,20 @@ import Testing
     }
 
     /// The loading panel lists This Mac, then keeps the control plane's head, with no count, over
-    /// its skeleton rows.
+    /// its skeleton rows; each head starts 14 pt in, its icon first, as the design's panel draws it.
     @Test(arguments: [Look.light, .dark])
     func theLoadingPanelHasItsHead(_ look: Look) throws {
         let panel = LeftPanel(look: look, mono: try LabelFont(directory: LookTests.fonts))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: LeftPanel.width.standard, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
         defer { window.orderOut(nil) }
         window.contentView = panel
-        panel.renderLoading(controlPlane: "127.0.0.1")
+        panel.render(WorkspacesModel(person: WorkspacesViewTests.uday).panel)
         panel.layoutSubtreeIfNeeded()
         #expect(!panel.scroll.isHidden && panel.list.numberOfRows == 3, "the loading panel shows \(panel.list.numberOfRows) rows")
-        let heads = try [0, 2].map { try #require(panel.list.view(atColumn: 0, row: $0, makeIfNecessary: true)).accessibilityLabel() }
-        #expect(heads == ["This Mac", "127.0.0.1"], "the heads say \(heads)")
+        let heads = try [0, 2].map { try #require(panel.list.view(atColumn: 0, row: $0, makeIfNecessary: true) as? HeadCell) }
+        #expect(heads.map { $0.accessibilityLabel() } == ["This Mac", "127.0.0.1"], "the heads say \(heads.map { $0.accessibilityLabel() })")
+        #expect(heads.map(\.leading) == [14, 14], "the heads start \(heads.map(\.leading)) pt in")
+        #expect(panel.tryAgain.isHidden && panel.emptyLine.isHidden, "the loading panel says it failed")
     }
 
     /// r3-2: the longest taken name at the narrowest card: "Show …" is cut at its end yet reads as a

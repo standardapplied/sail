@@ -55,7 +55,10 @@ public final class WorkbenchView: NSView {
     private let banner: Card
     private let emptyLabel = NSTextField(labelWithString: "No terminal is open")
     private let newTerminal: SailButton
-    private var started = false
+    /// The first restore is under way or done.
+    package private(set) var started = false
+    /// The terminals were shown: a restore that leaves no tab then opens one.
+    private var shownOnce = false
     private var pendingKeep: DispatchWorkItem?
     private var kept: Data?
     static let keepDelay = 0.3
@@ -124,10 +127,12 @@ public final class WorkbenchView: NSView {
     /// The first showing restores what lives; every showing gives the focused pane the keys.
     func shown() {
         if let focused { window?.makeFirstResponder(focused.terminal) }
+        shownOnce = true
         restoreOnce()
     }
 
-    /// What lives restored, once, whether or not the terminals are shown: This Mac's page lists them.
+    /// What lives restored, once, whether or not the terminals are shown: This Mac's page lists
+    /// them. A restore that finds none opens a tab only for the terminals shown, never for the page.
     func restoreOnce() {
         guard !started else { return }
         started = true
@@ -171,7 +176,7 @@ public final class WorkbenchView: NSView {
         model.fit(in: room, minimum: minimum(of: Array(panes.values)), scale: scale)
         let waiting = pending
         pending = []
-        if model.tabs.isEmpty, waiting.isEmpty, held.isEmpty { openTab() } else { apply() }
+        if shownOnce, model.tabs.isEmpty, waiting.isEmpty, held.isEmpty { openTab() } else { apply() }
         waiting.forEach { $0() }
     }
 
@@ -462,21 +467,16 @@ public final class WorkbenchView: NSView {
         .thisMac(folder: model.folderForNewPane(hostNames: [Self.hostName], isFolder: Self.isFolder) ?? NSHomeDirectory())
     }
 
-    /// How a session of this Mac ended, its pane kept, and when: "exited 3 · 11:02".
-    static func said(_ end: SessionEnd, at date: Date) -> String {
+    /// How a session of this Mac ended, its pane kept, and when, as `locale` tells the time:
+    /// "exited 3 · 11:02", or "exited 3 · 11:02 AM".
+    static func said(_ end: SessionEnd, at date: Date, locale: Locale = .autoupdatingCurrent) -> String {
         let how = if case let .ended(reason) = end, reason.hasPrefix("exited("), reason.hasSuffix(")") {
             "exited " + reason.dropFirst("exited(".count).dropLast()
         } else {
             end.description
         }
-        return "\(how) · \(clock.string(from: date))"
+        return "\(how) · \(date.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: locale)))"
     }
-
-    private static let clock = {
-        let clock = DateFormatter()
-        clock.dateFormat = "HH:mm"
-        return clock
-    }()
 
     /// This Mac's name as `hostname` says it, read from the kernel: `ProcessInfo.hostName` asks
     /// the network, which can hold the main thread for seconds and has macOS ask the person for
@@ -611,14 +611,24 @@ public final class WorkbenchView: NSView {
     @objc public func closePane(_: Any?) {
         if let file = filePaneHoldingKeys { return file.closePressed() }
         guard let pane = focused else { return }
-        endSession(pane.id)
+        end(pane, asking: "Close this terminal?")
     }
 
-    /// Ends pane `id`'s session as closing it does, asking first as Close asks: Close, and End
-    /// Session on This Mac's row.
+    /// End Session on This Mac's row: pane `id`'s session ended as Close ends it, its question
+    /// naming the terminal, which is not on screen there.
     func endSession(_ id: PaneID) {
-        guard let pane = panes[id], !leaving(elsewhere: [pane]).isEmpty else { return }
-        confirm(ending: [pane], question: "Close this terminal?", detail: "The program running in it will end.")
+        guard let pane = panes[id] else { return }
+        end(pane, asking: endQuestion(id))
+    }
+
+    /// What End Session asks: "Close This Mac 2?", the terminal's tab as the strip names it.
+    func endQuestion(_ id: PaneID) -> String {
+        "Close \(model.tab(holding: id).map { model.title(of: $0.id) } ?? "this terminal")?"
+    }
+
+    private func end(_ pane: TerminalPane, asking question: String) {
+        guard !leaving(elsewhere: [pane]).isEmpty else { return }
+        confirm(ending: [pane], question: question, detail: "The program running in it will end.")
     }
 
     /// Closes those of `views` whose keyboard is elsewhere by detaching them only: each session goes
