@@ -103,14 +103,22 @@ class ProjectDefinitionOperationsTest {
     return ProjectDefinitionJson.read(response.document());
   }
 
+  /**
+   * A name taken is a conflict a client says under the name: the field it names, the sentence the
+   * app draws, and a remedy in words.
+   */
   @Test
-  void aProjectIsCreatedOnceAndAnExistingNameIsAConflict() {
+  void aProjectIsCreatedOnceAndAnExistingNameIsAConflictUnderTheName() {
     var created = operations.create(Map.of("name", "beta", "description", "Second"));
     var taken = assertThrows(ApiException.class, () -> operations.create(Map.of("name", "beta")));
 
     assertEquals("beta", created.name());
     assertEquals(ErrorCode.CONFLICT, taken.failure().errorCode());
-    assertEquals("A project named 'beta' already exists.", taken.getMessage());
+    assertEquals("A project named beta already exists.", taken.failure().errorMessage());
+    assertEquals("Choose another name, or open beta.", taken.failure().remedy().plain());
+    assertEquals(
+        List.of(FieldError.of("name", "A project named beta already exists.")),
+        taken.failure().fieldErrors());
   }
 
   @Test
@@ -133,6 +141,13 @@ class ProjectDefinitionOperationsTest {
     assertEquals(
         "Project acme-fix cannot take instance acme-fix: it is workspace fix of project acme.",
         workspace.failure().errorMessage());
+    assertEquals(
+        List.of(
+            FieldError.of(
+                "name",
+                "Project acme-fix cannot take instance acme-fix: it is workspace fix of project"
+                    + " acme.")),
+        workspace.failure().fieldErrors());
     assertTrue(projects.findByName("acme-fix").isEmpty());
     assertEquals("plain", onThisBox.create(Map.of("name", "plain")).name());
     assertEquals("acme-fix", operations.create(Map.of("name", "acme-fix")).name());

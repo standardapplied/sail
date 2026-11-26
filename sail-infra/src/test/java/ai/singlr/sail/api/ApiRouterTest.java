@@ -28,6 +28,7 @@ import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.engine.Workspaces;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -2037,8 +2038,22 @@ class ApiRouterTest {
       assertTrue(response.body().contains("\"mode\": \"read_only\""));
       assertTrue(response.body().contains("\"supported\": true"));
       assertTrue(response.body().contains("\"supported\": false"));
-      assertTrue(
-          response.body().contains("\"reason\": \"no harness-enforced sandbox\""),
+      var codex =
+          ((List<?>) YamlUtil.parseMap(response.body()).get("agents"))
+              .stream()
+                  .map(Map.class::cast)
+                  .filter(agent -> agent.get("name").equals("codex"))
+                  .findFirst()
+                  .orElseThrow();
+      assertEquals(
+          Map.of(
+              "mode",
+              "read_only",
+              "supported",
+              false,
+              "reason",
+              Harnesses.of("codex").readOnlyRefusal().orElseThrow()),
+          ((List<?>) codex.get("modes")).getFirst(),
           "an unsupported mode travels with its reason so clients grey it honestly");
       assertTrue(response.body().contains("\"schema_version\": 1"));
     }
@@ -2614,21 +2629,7 @@ class ApiRouterTest {
 
     @Override
     public Result<AgentsResponse> agents() {
-      return Result.success(
-          new AgentsResponse(
-              List.of(
-                  new AgentView(
-                      "claude-code",
-                      "Claude Code",
-                      List.of(
-                          new AgentModeView("read_only", true, null),
-                          new AgentModeView("full", true, null))),
-                  new AgentView(
-                      "codex",
-                      "Codex CLI",
-                      List.of(
-                          new AgentModeView("read_only", false, "no harness-enforced sandbox"),
-                          new AgentModeView("full", true, null))))));
+      return Result.success(AgentsResponse.known());
     }
 
     String lastMembersRoom;

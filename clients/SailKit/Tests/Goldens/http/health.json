@@ -1,0 +1,13 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/health"
+  },
+  "response": {
+    "body": {
+      "schema_version": 1,
+      "status": "ok"
+    },
+    "status": 200
+  }
+}

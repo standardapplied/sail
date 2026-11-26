@@ -84,8 +84,9 @@ final class Wording {
   /**
    * The lane step's refusal of {@code action} on {@code resource}, or on some resource of {@code
    * kind} when it is null, in the words of {@code actor}'s lane: the in-container credential is
-   * told the door outside the container that takes it, and an agent's move of a spec's status, or a
-   * spec it bears ready, what an agent may make instead.
+   * told the door outside the container that takes it, an agent's move of a spec's status, or a
+   * spec it bears ready, what an agent may make instead, and an agent's ask of a person's passkeys
+   * the one credential that removes one, never a token.
    */
   static Refusal laneForbidden(Actor actor, Action action, Resource.Kind kind, Resource resource) {
     if (actor.lane() == Actor.Lane.CONTAINER) {
@@ -103,7 +104,9 @@ final class Wording {
     return new Refusal(
         Refusal.Kind.LANE_FORBIDDEN,
         "Agent principals cannot " + action.act(kind) + ".",
-        "Only an operator lane (CLI or API token) may do this.");
+        action == Action.KEEP_PASSKEYS
+            ? "Only their person may."
+            : "Only an operator lane (CLI or API token) may do this.");
   }
 
   /**

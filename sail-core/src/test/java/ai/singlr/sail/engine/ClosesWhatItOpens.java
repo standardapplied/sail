@@ -47,8 +47,18 @@ public final class ClosesWhatItOpens implements BeforeAllCallback, AfterAllCallb
   private static final Predicate<String> RANDOM_SOURCE =
       target -> target.equals("/dev/random") || target.equals("/dev/urandom");
 
-  /** What the fork itself opens for its life, whichever class runs at the time. */
-  private static final List<Predicate<String>> THE_FORKS = List.of(CLASS_PATH_JAR, RANDOM_SOURCE);
+  /**
+   * The cgroup's files, which the JVM reads from its own threads while it runs in a container: a
+   * compiler thread asks the cgroup's {@code memory.current} how much memory is free each time it
+   * adds a compiler thread ({@code -Xlog:os+container=trace} and {@code -Xlog:jit+thread=debug}
+   * show both), opening and closing it inside whichever class is running then.
+   */
+  private static final Predicate<String> CGROUP_READ =
+      target -> target.startsWith("/sys/fs/cgroup/");
+
+  /** What the fork itself opens, for its life or for a read of its own, whichever class runs. */
+  private static final List<Predicate<String>> THE_FORKS =
+      List.of(CLASS_PATH_JAR, RANDOM_SOURCE, CGROUP_READ);
 
   /**
    * The JDK's classes whose first use opens descriptors for the fork's life that no target tells

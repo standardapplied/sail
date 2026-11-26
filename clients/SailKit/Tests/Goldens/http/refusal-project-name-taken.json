@@ -1,0 +1,26 @@
+{
+  "request": {
+    "body": {
+      "name": "harbor"
+    },
+    "method": "POST",
+    "path": "/v1/projects"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Choose another name, or open harbor.",
+        "code": "conflict",
+        "field_errors": [
+          {
+            "field": "name",
+            "message": "A project named harbor already exists."
+          }
+        ],
+        "message": "A project named harbor already exists."
+      },
+      "schema_version": 1
+    },
+    "status": 409
+  }
+}

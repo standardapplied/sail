@@ -202,7 +202,7 @@ class ProjectStoreTest {
 
     assertEquals("v1", created.definition().description());
     assertEquals(
-        "A project named 'acme' already exists.",
+        "A project named acme already exists.",
         assertThrows(
                 ProjectStore.NameTaken.class,
                 () -> store.create(TestDefinitions.described("acme", "v2")))

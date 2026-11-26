@@ -172,7 +172,7 @@ class ProjectCatalogTest {
             ProjectStore.NameTaken.class,
             () -> catalog.create(TestDefinitions.described("web", "second"), uday));
 
-    assertEquals("A project named 'web' already exists.", taken.getMessage());
+    assertEquals("A project named web already exists.", taken.getMessage());
     assertEquals("first", catalog.read("web").orElseThrow().description());
   }
 
