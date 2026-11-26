@@ -245,8 +245,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             reloadKeepingHover()
             select(kept)
             reloading = false
-            forgetUnchosen()
-            if chosen != kept { tell() }
+            if chosen != kept { onChoose(chosen) }
         }
     }
 
@@ -285,7 +284,6 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             insertRows(at: IndexSet(integer: row), withAnimation: [])
             endUpdates()
             reloading = false
-            forgetUnchosen()
         }
     }
 
@@ -346,7 +344,6 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         endUpdates()
         appliedRows += inserted.count
         reloading = false
-        forgetUnchosen()
         if let hovered, remade.contains(hovered), let row = entries.firstIndex(where: { Self.id($0) == hovered }),
            let point = pointerNow, rect(ofRow: row).contains(convert(point, from: nil)) {
             (rowView(atRow: row, makeIfNecessary: true) as? SailRowView)?.hovered = true
@@ -591,31 +588,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     }
 
     public func tableViewSelectionDidChange(_: Notification) {
-        if !reloading { tell() }
-    }
-
-    /// A press moves the choice while the button is still down, and AppKit says so only after it
-    /// comes up: told now, the owner draws what the list shows, so a redraw during the press keeps
-    /// the person's row rather than putting its own back. Each row a press drags across is told, as
-    /// each arrow key's is.
-    public func tableViewSelectionIsChanging(_: Notification) {
-        if !reloading { tell() }
-    }
-
-    /// Every id chosen when `onChoose` was last told: the change AppKit says as a press comes up is
-    /// the one told as it went down, and is not told again.
-    private var told: [String] = []
-
-    private func tell() {
-        guard chosenIDs != told else { return }
-        told = chosenIDs
-        onChoose(chosen)
-    }
-
-    /// A row made again in place leaves the choice untold: it is no longer counted as told, so
-    /// choosing it again (a ⌘-click back into several) is told.
-    private func forgetUnchosen() {
-        told.removeAll { !chosenIDs.contains($0) }
+        if !reloading { onChoose(chosen) }
     }
 
     // MARK: Moving rows by a drag

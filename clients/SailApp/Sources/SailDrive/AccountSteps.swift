@@ -278,14 +278,14 @@ extension Driver {
         func named(_ window: NSWindow?) -> String {
             window.map { "\(type(of: $0)) \($0.windowNumber)" } ?? "none"
         }
-        let screen = window.convertPoint(toScreen: view.convert(point, to: nil))
+        let screen = window.convertPoint(toScreen: clickPoint(point, in: view))
         let number = NSWindow.windowNumber(at: screen, belowWindowWithWindowNumber: 0)
         let under = NSApp.window(withWindowNumber: number)
         let hit = under.flatMap { under in under.contentView?.superview?.hitTest(under.convertPoint(fromScreen: screen)) }
-        let inWindow = view.convert(point, to: nil)
+        let inWindow = clickPoint(point, in: view)
         let hitThere = window.contentView?.superview?.hitTest(inWindow)
         let first = NSEvent.mouseEvent(
-            with: .leftMouseDown, location: view.convert(point, to: nil), modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
+            with: .leftMouseDown, location: clickPoint(point, in: view), modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
             eventNumber: 0, clickCount: 1, pressure: 1
         )
         return "key \(named(NSApp.keyWindow)), main \(named(NSApp.mainWindow)), under the point \(under.map { named($0) } ?? "window \(number), not the app's") hitting "

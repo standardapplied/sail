@@ -290,17 +290,12 @@ public final class WorkspacesView: NSView {
     /// The projects asked for last: what a test awaits.
     package private(set) var projectsAsked: Task<Void, Never>?
 
-    /// The chosen project's workspaces being asked: a newer ask cancels it, so a project passed
-    /// over (a press dragged across it, an arrow key) leaves no request running.
-    private var listing: Task<Void, Never>?
-
     private func list(_ request: Int) {
         guard let client, let name = model.chosen else { return }
         let era = self.era
-        listing?.cancel()
-        listing = Task {
+        Task {
             let answer = await Self.result { () async throws(SailError) in try await client.send(.workspaces(project: name)) }
-            guard era == self.era, !Task.isCancelled else { return }
+            guard era == self.era else { return }
             model.listed(answer, request: request, at: Date())
             render()
             if case let .success(list) = answer { countSessions(in: list, by: client) }

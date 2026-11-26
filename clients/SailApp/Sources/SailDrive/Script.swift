@@ -337,14 +337,6 @@ struct Step: Decodable {
     /// The left panel's project of this name clicked once the panel lists it; the section then
     /// names it, within `seconds` (10 by default).
     var chooseProject: String?
-    /// The left panel's rows pressed as a person drags over them: the button down on the first,
-    /// dragged over each after it and let up on the last; with `releasing`, that held route is
-    /// answered while the button is down (the press has already cancelled its listing, so it draws
-    /// nothing) and the section must name the first row before the button comes up. The section
-    /// then names the last within `seconds` (10 by default).
-    var pressProject: [String]?
-    /// The held route `pressProject` answers while its button is down.
-    var releasing: String?
     /// The window's frame made `[width, height]`, its top left kept: each frame shot at the
     /// design's size.
     var window: [Double]?
