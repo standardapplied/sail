@@ -244,6 +244,51 @@ class UploadCopyTest {
   }
 
   /**
+   * The temporaries of uploads given up, removed while the next open sizes the directory, as their
+   * aborts remove them, count as not there: the next upload opens and is stored.
+   */
+  @Test
+  void temporariesRemovedWhileTheDirectoryIsSizedCountAsNotThere() throws Exception {
+    var givenUp = List.of(givenUp("a"), givenUp("b"));
+    c.sizing = ContainerDirectory.Sizing.VANISHED;
+
+    var copy = stored("c", new byte[] {1});
+
+    assertEquals(session() + "/1-c", copy.path());
+    var left = held(session());
+    assertEquals(2, left.size(), "one temporary went while the directory was sized: " + left);
+    assertTrue(List.of(".1-a.part", ".1-b.part").contains(left.get(0)), left::toString);
+    assertEquals("1-c", left.get(1));
+    for (var each : givenUp) {
+      assertEquals(0, each.abort());
+    }
+    assertEquals(List.of("1-c"), held(session()));
+  }
+
+  /** A directory the open cannot read as it sizes it refuses the upload as a failure. */
+  @Test
+  void aDirectoryThatCannotBeReadAsItIsSizedRefusesTheUploadAsAFailure() throws Exception {
+    c.sizing = ContainerDirectory.Sizing.UNREADABLE;
+    try {
+      var copy = copies.open("acme", ID, "a", 1, process -> {});
+
+      assertFalse(copy.opened());
+      assertEquals(PutRefusal.FAILED, copy.refusal());
+    } finally {
+      Files.setPosixFilePermissions(session(), PosixFilePermissions.fromString("rwx------"));
+    }
+    assertEquals(List.of(), held(session()));
+  }
+
+  /** A copy opened and ended before its bytes came, its temporary left for its abort. */
+  private UploadCopy.Copy givenUp(String name) throws Exception {
+    var copy = copies.open("acme", ID, name, 1, process -> {});
+    assertTrue(copy.opened(), () -> "the container refused " + name + ": " + copy.refusal());
+    copy.close();
+    return copy;
+  }
+
+  /**
    * Round 3 Minor 1: an abort ends what holds its own temporary open and nothing else, not a
    * process holding another upload's temporary whose name begins with this one's.
    */

@@ -13,6 +13,7 @@ import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -55,6 +56,35 @@ final class ContainerDirectory {
 
   /** Whether the open's measurement of the directory fails, as a missing tool's would. */
   volatile boolean findFails;
+
+  /**
+   * What the open's sizing of the directory meets, by a {@code find} first on its path that hands
+   * the real one its sizing, when set.
+   */
+  volatile Sizing sizing;
+
+  /** What the sizing of the directory meets, at the moment a real container's could. */
+  enum Sizing {
+    /**
+     * Every temporary but the first one {@code find} visits removed once it has read the directory,
+     * before it sizes the rest, as other uploads' aborts remove theirs.
+     */
+    VANISHED,
+
+    /** The directory made unreadable just before {@code find} reads it. */
+    UNREADABLE
+  }
+
+  private static final String SIZING_FIND =
+      """
+      #!/bin/sh
+      case "$*" in *%s*) ;; *) exec /usr/bin/find "$@" ;; esac
+      case $SAIL_SIZING in
+      UNREADABLE) chmod 0300 . ;;
+      VANISHED) exec /usr/bin/find "$@" , -exec sh -c '[ -e "$1" ] && exit; : > "$1"; for f in ./.*.part; do [ "$f" = "$2" ] || rm -f "$f"; done' vanish "$SAIL_VANISHED" {} \\; ;;
+      esac
+      exec /usr/bin/find "$@"
+      """;
 
   /** Whose the root must be, when not this account's, standing as root. */
   String rootOwner;
@@ -209,13 +239,29 @@ final class ContainerDirectory {
         if (script.equals(hangs)) {
           inner = new ArrayList<>(List.of("sh", "-c", "exec tail -f /dev/null"));
         }
-        var process =
-            new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD).start();
+        var builder = new ProcessBuilder(inner).redirectError(ProcessBuilder.Redirect.DISCARD);
+        var meets = sizing;
+        if (script.equals(UploadCopy.OPEN) && meets != null) {
+          sized(builder, meets);
+        }
+        var process = builder.start();
         if (script.equals(UploadCopy.OPEN)) {
           copies.add(process);
         }
         return new HeldCopy(process, script);
       };
+
+  /** {@code builder}'s open given the {@code find} whose sizing meets {@code meets}. */
+  private void sized(ProcessBuilder builder, Sizing meets) throws IOException {
+    var bin = Files.createDirectories(dir.resolve("sizing"));
+    var find = bin.resolve("find");
+    Files.writeString(find, SIZING_FIND);
+    Files.setPosixFilePermissions(find, PosixFilePermissions.fromString("rwx------"));
+    var env = builder.environment();
+    env.put("PATH", bin + ":" + env.get("PATH"));
+    env.put("SAIL_SIZING", meets.name());
+    env.put("SAIL_VANISHED", dir.resolve("vanished").toString());
+  }
 
   /** A script that says {@link #SAYS} on stderr, then exits {@code status}. */
   private static ArrayList<String> saying(int status) {

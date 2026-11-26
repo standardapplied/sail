@@ -105,8 +105,10 @@ final class Silent: Transport, Sendable {
     }
 }
 
-/// What this Mac remembers, and the screen it shows from that alone.
-@Suite struct SignInMemoryTests {
+/// What this Mac remembers, and the screen it shows from that alone. On the main actor, as the app
+/// uses its defaults: Foundation's `UserDefaults` on Linux loses a write when suites are written
+/// from several threads at once.
+@MainActor @Suite struct SignInMemoryTests {
     @Test func noControlPlaneKnownIsTheWelcome() throws {
         let memory = SignInMemory(try freshDefaults())
         #expect(memory.plane == nil && memory.welcome.screen == .address)

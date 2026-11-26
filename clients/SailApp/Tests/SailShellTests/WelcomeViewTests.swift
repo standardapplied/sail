@@ -174,14 +174,17 @@ final class Reached: Sendable {
         #expect(welcome.ticketField.remedy == "A ticket lasts 15 minutes and enrolls one passkey. Ask your admin for a new one.")
     }
 
-    /// Cancelled at Touch ID on Welcome back: said under the primary, the chip under it.
+    /// Cancelled at Touch ID on Welcome back: said under the primary, the chip under it. Return is
+    /// the primary's only while it is free.
     @Test func cancelledAtTouchIDIsSaidUnderThePrimary() async throws {
         let (welcome, window) = try Self.shown(RecordedServer([try Exchange("passkey-login-start")]), defaults: Self.signedInBefore(), passkey: Signs(failing: .cancelled))
         defer { window.orderOut(nil) }
         welcome.signInWithPasskey(nil)
         #expect(welcome.signIn.busyWord == "Signing In" && welcome.text.hasSuffix("Confirm with Touch ID."))
+        #expect(welcome.signIn.keyEquivalent.isEmpty, "Sign In with Passkey holds Return while signing in")
         await welcome.flow.underWay?.value
         welcome.layoutSubtreeIfNeeded()
+        #expect(welcome.signIn.keyEquivalent == "\r", "free again, Sign In with Passkey does not take Return")
         #expect(welcome.text == "Welcome back, Uday\n127.0.0.1:7979\nCancelled.\nIf this Mac holds no passkey for 127.0.0.1:7979, enroll with a ticket from your admin.")
         let primary = welcome.convert(welcome.signIn.bounds, from: welcome.signIn), said = welcome.convert(welcome.said.bounds, from: welcome.said)
         let chip = welcome.convert(welcome.chipUnder.bounds, from: welcome.chipUnder)
