@@ -469,15 +469,16 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     /// The keys the foot shows now.
     private var footShows: [WorkspacesModel.Key] = []
 
-    /// The keys the foot names now, for the row chosen and whether the list holds the keys
-    /// (``WorkspacesModel/Page/keys(chosen:listHoldsKeys:)``): the New Session panel or another
-    /// list holding them, the list's own keys do nothing.
+    /// The keys the foot names now, for the row chosen and what holds the keys
+    /// (``WorkspacesModel/Page/keys(chosen:held:)``, asked of ``KeyHolder``): the New Session panel
+    /// or another list holding them, the list's own keys do nothing; a sheet over the window, or
+    /// another window, holding them, none does.
     private var footKeys: [WorkspacesModel.Key] {
-        page?.keys(chosen: list.chosen, listHoldsKeys: list.holdsKeys) ?? []
+        page?.keys(chosen: list.chosen, held: list.holdsKeys ? .list : KeyHolder.isKey(window) ? .window : .none) ?? []
     }
 
     /// The foot drawn again when the keys it names changed: the row chosen, its state, the page, or
-    /// the list taking or giving up the keys.
+    /// what holds the keys (``SailList/onKeys``).
     func showKeys() {
         guard footKeys != footShows else { return }
         buildFoot()

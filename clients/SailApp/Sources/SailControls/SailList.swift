@@ -207,25 +207,23 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     public var onChoose: @MainActor (String?) -> Void = { _ in }
     /// A key the list's owner takes before the list does (a tree's → and ←): true, taken.
     package var onKey: (@MainActor (NSEvent) -> Bool)?
-    /// The list took the keys or gave them up, ``holdsKeys`` saying which.
+    /// What holds its window's keys changed (the list or another view taking them, the window
+    /// becoming or ceasing to be key), ``holdsKeys`` saying whether the list holds them now.
     package var onKeys: @MainActor () -> Void = {}
-    /// It holds its window's keys: it is the window's first responder.
-    package private(set) var holdsKeys = false
+    private lazy var keysWatch = HolderWatch { [weak self] in self?.keysChanged() }
 
-    override public func becomeFirstResponder() -> Bool {
-        let taken = super.becomeFirstResponder()
-        if taken { keys(held: true) }
-        return taken
+    /// It holds the keys (``KeyHolder``): the chosen row's first action names ⏎ only then.
+    package var holdsKeys: Bool {
+        KeyHolder.holds(self)
     }
 
-    override public func resignFirstResponder() -> Bool {
-        let given = super.resignFirstResponder()
-        if given { keys(held: false) }
-        return given
+    override public func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        keysWatch.watch(newWindow)
     }
 
-    private func keys(held: Bool) {
-        holdsKeys = held
+    private func keysChanged() {
+        enumerateAvailableRowViews { row, _ in (row as? SailRowView)?.refresh() }
         onKeys()
     }
     private let mono: LabelFont
@@ -763,7 +761,8 @@ final class SailRowView: NSTableRowView {
     func refresh() {
         let paint = self.paint
         if numberOfColumns > 0, let cell = view(atColumn: 0) as? RowCell {
-            cell.show(paint.actions, chosen: isSelected, keys: isEmphasized, quiet: (superview as? SailList)?.primaryElsewhere == true)
+            let list = superview as? SailList
+            cell.show(paint.actions, chosen: isSelected, keys: list?.holdsKeys == true, quiet: list?.primaryElsewhere == true)
             (cell.content as? MarkedRow)?.mark(chosen: isSelected, strong: paint.strong)
         }
         needsDisplay = true

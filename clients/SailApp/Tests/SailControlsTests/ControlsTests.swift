@@ -218,21 +218,66 @@ import Testing
         #expect((rtlMark?.minX ?? 0) > rtlLabel.maxX && (rtlHint?.maxX ?? .infinity) < rtlLabel.minX)
     }
 
-    /// A disabled button names no key, not even dimmed: its key does nothing. Enabled again, it
-    /// names it again, as wide as it was.
-    @Test func aDisabledButtonNamesNoKey() throws {
-        let start = SailButton("Start", kind: .primary, size: .small, look: .light, target: nil, action: nil)
-        start.hint("\r", mono: try Self.mono())
-        let named = start.intrinsicContentSize.width
-        #expect(start.arrangement().hint != nil)
-        start.isEnabled = false
-        #expect(start.arrangement().hint == nil && start.intrinsicContentSize.width < named, "a disabled Start names ⏎")
-        start.isEnabled = true
-        #expect(start.arrangement().hint != nil && start.intrinsicContentSize.width == named)
-        let create = SailButton("New Workspace", kind: .secondary, icon: .plus, look: .light, target: nil, action: nil)
-        create.shortcut("n", modifiers: .command, mono: try Self.mono())
-        create.isEnabled = false
-        #expect(create.arrangement().hint == nil, "a disabled New Workspace names ⌘N")
+    /// A button names its key, after its label and in its tooltip, only while the key does what it
+    /// says (``KeyHolder``): enabled, not in flight, and, for a key equivalent, its window key; for a
+    /// key reached through another view (Create's ⏎, through its name field), that view holding the
+    /// keys. In no window it names none. The key's room is kept whichever, so the button never
+    /// changes width and its neighbours never move.
+    @Test func aButtonNamesItsKeyOnlyWhileItWorksAndKeepsItsWidth() throws {
+        let mono = try Self.mono()
+        let open = SailButton("Open", kind: .secondary, size: .small, look: .light, target: nil, action: nil)
+        open.shortcut("\r", mono: mono)
+        let field = NSTextField(string: "")
+        let create = SailButton("Create", kind: .secondary, size: .small, look: .light, target: nil, action: nil)
+        create.hint("\r", through: field, mono: mono)
+        let icon = SailButton(icon: .plus, label: "New Workspace", kind: .secondary, look: .light, target: nil, action: nil)
+        icon.shortcut("n", modifiers: .command, mono: mono)
+        #expect(!open.namesKey && !create.namesKey && icon.tooltip?.chip.showsHint == false, "a button in no window names its key")
+        let holder = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        for (view, x) in [(open, 20.0), (create, 140), (icon, 260), (field, 300)] as [(NSView, Double)] {
+            let size = view === field ? NSSize(width: 80, height: 22) : view.intrinsicContentSize
+            view.frame = NSRect(x: x, y: 80, width: Double(size.width) + 2 * Look.haloRoom, height: Double(size.height) + 2 * Look.haloRoom)
+            holder.addSubview(view)
+        }
+        let (window, backdrop) = Self.window(holding: holder, on: .white)
+        defer { window.orderOut(nil) }
+        let widths = [open, create].map(\.intrinsicContentSize.width)
+        func drawsItsKey(_ button: SailButton) -> Bool {
+            guard let hint = button.arrangement().hint else { return false }
+            let at = backdrop.convert(hint, from: button)
+            return Set(backdrop.colours(along: Double(at.midY), from: Double(at.minX), to: Double(at.maxX), scale: 2)).count > 1
+        }
+        func keptWidth() -> Bool {
+            [open, create].map(\.intrinsicContentSize.width) == widths && [open, create].allSatisfy { $0.arrangement().hint != nil }
+        }
+        #expect(open.namesKey && drawsItsKey(open) && icon.tooltip?.chip.showsHint == true, "Open in a key window does not name ⏎, or New Workspace's tooltip ⌘N")
+        #expect(window.makeFirstResponder(nil) && !create.namesKey && !drawsItsKey(create), "Create names ⏎ while its field does not hold the keys")
+        let told = create.holderChanges
+        #expect(window.makeFirstResponder(field) && create.holderChanges > told, "Create is not drawn again as its field takes the keys")
+        #expect(create.namesKey && drawsItsKey(create), "Create does not name ⏎ while its field holds the keys")
+        window.key = false
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+        #expect(!open.namesKey && !create.namesKey && !drawsItsKey(open) && icon.tooltip?.chip.showsHint == false, "a key is named in a window that is not key")
+        #expect(keptWidth(), "a button changed width as its key stopped being named")
+        window.key = true
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+        #expect(open.namesKey && create.namesKey && icon.tooltip?.chip.showsHint == true, "the window key again, a key is not named")
+        for button in [open, create, icon] {
+            button.isEnabled = false
+        }
+        #expect(!open.namesKey && !create.namesKey && !drawsItsKey(open) && icon.tooltip?.chip.showsHint == false, "a disabled button names its key")
+        #expect(keptWidth(), "a disabled button changed width")
+        for button in [open, create, icon] {
+            button.isEnabled = true
+        }
+        #expect(open.namesKey && keptWidth())
+        open.fly("Opening")
+        #expect(!open.namesKey, "a button in flight names its key")
+        open.fly(nil)
+        open.keyEquivalent = ""
+        #expect(!open.namesKey && keptWidth(), "Open with its key equivalent taken away names it, or gives up its room")
+        open.keyEquivalent = "\r"
+        #expect(window.makeFirstResponder(nil) && !create.namesKey, "Create names ⏎ after its field gave up the keys")
     }
 
     /// The label is drawn, centred in the box within a point.

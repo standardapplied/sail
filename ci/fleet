@@ -75,9 +75,10 @@ Usage:
                                 builds (eng is given a ZFS pool in a file, its git token through
                                 sail git login and acme's template first, whose snapshot holds no
                                 token, git identity, key, gh login or harness state, Claude's
-                                ~/.claude.json and its ~/.claude/backups among it, and in a new
-                                workspace of which Claude Code's first start says nothing of a
-                                missing configuration file; the two builds overlap,
+                                ~/.claude.json and its ~/.claude/backups among it, and, with
+                                claude-code among FLEET_LOOP_AGENTS, in a new workspace of which
+                                Claude Code's first start says nothing of a missing configuration
+                                file; the two builds overlap,
                                 each in its own workspace of acme, committing as eng);
                                 the pull request, the room and every box's status are checked,
                                 main's measures of the spec count the reviews and the build runs listed for it,
@@ -2048,13 +2049,18 @@ template_holds_nothing() {
 # Claude Code's first start in a new workspace of acme on BOX says nothing of a missing
 # configuration file, as the workspace's person. claude auth status reads ~/.claude.json at start-up
 # as a session does and needs no sign-in or network; claude --version and --help leave before that
-# read, so they could never fail. Its answer ("loggedIn") proves Claude ran; its exit is not read.
+# read, so they could never fail. Its answer ("loggedIn") proves Claude ran; its exit is not read,
+# and a Claude that has not answered in 60 s fails it. The workspace is deleted whatever happened,
+# a create that failed part way included.
 claude_starts_clean() {
   local run=$1 box=$2 said status=0
-  on "$run" "$box" "sudo sail project workspace create acme fleet-first > /dev/null" || return 1
-  said=$(on "$run" "$box" "sudo incus exec acme-fleet-first --user 1000 --group 1000 --cwd /home/dev --env HOME=/home/dev -- bash -lc '~/.local/bin/claude auth status' < /dev/null 2>&1 || true")
-  echo "$said"
-  [[ $said == *'"loggedIn"'* && $said != *"configuration file not found"* ]] || status=1
+  if on "$run" "$box" "sudo sail project workspace create acme fleet-first > /dev/null"; then
+    said=$(on "$run" "$box" "sudo incus exec acme-fleet-first --user 1000 --group 1000 --cwd /home/dev --env HOME=/home/dev -- bash -lc 'timeout 60 ~/.local/bin/claude auth status' < /dev/null 2>&1 || true")
+    echo "$said"
+    [[ $said == *'"loggedIn"'* && $said != *"configuration file not found"* ]] || status=1
+  else
+    status=1
+  fi
   on "$run" "$box" "sudo sail project workspace delete acme fleet-first --force --yes > /dev/null" || status=1
   return $status
 }
@@ -2772,10 +2778,10 @@ loop() {
     on "$run" eng "sudo sail host init --storage zfs --pool-file-size 20GiB --pool tank --yes"
   check "$run" "eng builds acme's template with its stored forge token" \
     on "$run" eng "sudo sail project template build acme"
-  check "$run" "acme's template snapshot on eng, which installs $LOOP_AGENTS, holds no token, git identity, key, gh login or harness state (Claude's ~/.claude.json with its backups)" \
+  check "$run" "acme's template snapshot on eng, which installs $LOOP_AGENTS, holds no token, git identity, key, gh login or harness state" \
     template_holds_nothing "$run" eng
   if [[ " $LOOP_AGENTS " == *" claude-code "* ]]; then
-    check "$run" "Claude Code's first start in a new workspace of acme on eng says nothing of a missing configuration file" \
+    check "$run" "with claude-code installed, Claude Code's first start in a new workspace of acme on eng says nothing of a missing configuration file" \
       claude_starts_clean "$run" eng
   fi
   check "$run" "eng stores each agent's key as its harness login, nothing in the container" gives_agents_their_keys "$run" eng

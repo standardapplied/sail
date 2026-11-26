@@ -37,7 +37,6 @@ import org.junit.jupiter.api.io.TempDir;
 class WorkspaceCredentialsTest {
 
   private static final String TOKEN = "ghp_builderSecret123";
-  private static final String CLAUDE_BACKUPS = "/home/dev/.claude/backups";
 
   @TempDir Path root;
   private Path bin;
@@ -234,7 +233,7 @@ class WorkspaceCredentialsTest {
   private void harnessesSignedIn() throws Exception {
     for (var file : WorkspaceCredentials.HARNESS_LOGINS) {
       var at = root.resolve(file.substring(1));
-      var held = file.equals(CLAUDE_BACKUPS) ? at.resolve(".claude.json.backup.1795580418419") : at;
+      var held = file.endsWith("/backups") ? at.resolve(".claude.json.backup.1795580418419") : at;
       Files.createDirectories(held.getParent());
       Files.writeString(held, "{\"approved\": [\"" + TOKEN + "\"]}\n");
     }

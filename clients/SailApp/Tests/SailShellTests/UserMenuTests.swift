@@ -156,7 +156,7 @@ import Testing
         let shell = try Self.shell()
         defer { shell.window.orderOut(nil) }
         let view = shell.userMenu.view, button = try #require(shell.rail.button(.account))
-        let had = Popover.holder(of: shell.window.firstResponder)
+        let had = KeyHolder.of(shell.window.firstResponder)
         try Self.open(shell, withKeys: true)
         var walked = [Self.highlighted(view)]
         for code in [Self.down, Self.down, Self.down, Self.up] {
@@ -176,18 +176,18 @@ import Testing
         // The rail's button takes the keys on this Mac with Keyboard Navigation off as well (CI's
         // runner gave them to it); where it refuses them, they go back where they were.
         let back: NSResponder? = button.acceptsFirstResponder ? button : had
-        #expect(!shell.userMenu.isOpen && !shell.rail.menuOpen && Popover.holder(of: shell.window.firstResponder) === back,
+        #expect(!shell.userMenu.isOpen && !shell.rail.menuOpen && KeyHolder.of(shell.window.firstResponder) === back,
                 "Escape left the keys on \(String(describing: shell.window.firstResponder)), not \(String(describing: back))")
         try Self.open(shell, withKeys: true)
         try Self.press(Self.enter, in: shell)
         #expect(!shell.userMenu.isOpen && shell.rail.selected == .account, "Return on Account showed \(shell.rail.selected?.rawValue ?? "nothing")")
         let field = shell.account.address
         shell.window.makeFirstResponder(field)
-        let before = Popover.holder(of: shell.window.firstResponder)
+        let before = KeyHolder.of(shell.window.firstResponder)
         try Self.open(shell)
         #expect(Self.highlighted(view) == "nothing", "opened with the pointer, \(Self.highlighted(view)) is highlighted")
         try Self.press(Self.escape, in: shell)
-        #expect(Popover.holder(of: shell.window.firstResponder) === before && before === field, "the keys went to \(String(describing: shell.window.firstResponder))")
+        #expect(KeyHolder.of(shell.window.firstResponder) === before && before === field, "the keys went to \(String(describing: shell.window.firstResponder))")
     }
 
     /// The button opens the menu and, again, closes it; a click outside it closes it, as does the
@@ -408,7 +408,7 @@ import Testing
         try Self.open(shell)
         gone.removeFromSuperview()
         try Self.press(Self.escape, in: shell)
-        let now = Popover.holder(of: shell.window.firstResponder)
+        let now = KeyHolder.of(shell.window.firstResponder)
         #expect(!(shell.window.firstResponder is MenuKeys) && now === field, "the keys went to \(String(describing: shell.window.firstResponder)), not the Account pane's field")
     }
 

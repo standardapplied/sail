@@ -31,8 +31,8 @@ public final class SailButton: NSButton {
                 self.tooltip = tooltip
             }
             tooltip?.text = why ?? (iconOnly ? title : "")
-            tooltip?.chip.showsHint = why == nil
             tooltip?.isOn = iconOnly || why != nil
+            retell()
         }
     }
 
@@ -109,22 +109,58 @@ public final class SailButton: NSButton {
         keyEquivalentModifierMask = modifiers
         showsShortcut = true
         self.mono = mono
+        heldWords = shortcutWords
         if let words = shortcutWords { tooltip?.chip.hint(words, mono: mono) }
         invalidateIntrinsicContentSize()
-        needsDisplay = true
+        retell()
     }
 
-    /// The key that presses it shown after the label, where the key reaches it another way than its
-    /// key equivalent (Create ⏎, pressed by Return in the name field it sits beside).
-    public func hint(_ key: String, mono: LabelFont) {
+    /// The key that presses it shown after the label, where the key reaches it through `holder`,
+    /// not its key equivalent (Create ⏎, pressed by Return in the name field it sits beside; Start ⏎,
+    /// by Return in the New Session panel's keys): named only while `holder` holds the keys, asked
+    /// again whenever what holds its window's keys changes.
+    public func hint(_ key: String, through holder: NSView? = nil, mono: LabelFont) {
         hintKey = key
+        keysThrough = holder
         self.mono = mono
+        holderWatch.watch(window.flatMap { holder?.window ?? $0 })
         invalidateIntrinsicContentSize()
-        needsDisplay = true
+        retell()
     }
 
-    /// The key shown by ``hint(_:mono:)``.
+    private lazy var holderWatch = HolderWatch { [weak self] in self?.holderChanged() }
+
+    /// How many times what holds the keys where its key reaches it changed while it watched.
+    private(set) var holderChanges = 0
+
+    private func holderChanged() {
+        holderChanges += 1
+        retell()
+    }
+
+    /// The key shown by ``hint(_:through:mono:)``, and what its key reaches it through.
     private var hintKey: String?
+    private weak var keysThrough: NSView?
+    /// The words of the key it was given, which keep their room after the label while the key
+    /// equivalent is taken away (a row's Open while another row is chosen).
+    private var heldWords: String?
+
+    /// Its key does what it says now, so it is named, after the label and in the tooltip: it is
+    /// enabled, not in flight, and what the key reaches it through holds the keys (``KeyHolder``):
+    /// `hint`'s holder, else its window, whose key equivalents reach it. Asked as it is drawn: a
+    /// field takes the keys through its window's field editor in steps, the last of them after
+    /// the window says its first responder changed.
+    package var namesKey: Bool {
+        guard isEnabled, busyWord == nil, shortcutWords != nil else { return false }
+        return keysThrough.map { KeyHolder.holds($0) } ?? KeyHolder.isKey(window)
+    }
+
+    /// Anything its key working depends on changed: it is drawn again, and its tooltip's keycap
+    /// told whether it says the key.
+    private func retell() {
+        tooltip?.chip.showsHint = namesKey
+        needsDisplay = true
+    }
 
     /// The shortcut's words, from the key equivalent or the hint; nil when it shows none.
     var shortcutWords: String? {
@@ -148,7 +184,7 @@ public final class SailButton: NSButton {
         didSet {
             guard keyEquivalent != oldValue else { return }
             invalidateIntrinsicContentSize()
-            needsDisplay = true
+            retell()
         }
     }
 
@@ -171,7 +207,7 @@ public final class SailButton: NSButton {
         spinner.turn(word != nil)
         invalidateIntrinsicContentSize()
         needsLayout = true
-        needsDisplay = true
+        retell()
     }
 
     /// Drawn focused, its halo on, while Return reaches it through a view that holds the window's
@@ -206,10 +242,10 @@ public final class SailButton: NSButton {
         Draw.text(busyWord ?? title, labelFont, paint.label)
     }
 
-    /// The key that presses it, said after the label only while it is enabled: a disabled button's
-    /// key does nothing, so it names none, not even dimmed.
+    /// The key that presses it, after the label: its room is kept whether or not it is named now
+    /// (``namesKey``), so the button keeps its width and its neighbours their place.
     private var hintText: NSAttributedString? {
-        guard isEnabled, busyWord == nil, !iconOnly, let words = shortcutWords, let mono else { return nil }
+        guard busyWord == nil, !iconOnly, let words = shortcutWords ?? heldWords, let mono else { return nil }
         return Draw.text(words, mono.font(Look.Step.caption.points) as NSFont, Tint(paint.label.rgb, alpha: paint.label.alpha * ButtonSize.hintOpacity))
     }
 
@@ -256,7 +292,7 @@ public final class SailButton: NSButton {
         if busyWord == nil, let mark, let icon { Draw.icon(icon, in: mark, ink: paint.label) }
         if !iconOnly { label.draw(in: labelRect) }
         if let hintRect, popUp, busyWord == nil { Draw.icon(.down, in: hintRect, ink: paint.label) }
-        if let hintRect, let hintText {
+        if let hintRect, let hintText, namesKey {
             let points = Look.Step.caption.points, top = Double(box.minY) + (Double(box.height) - TextLine.height(points: points)) / 2
             Draw.line(hintText, x: Double(hintRect.minX), baseline: TextLine.baseline(top: top, points: points))
         }
@@ -279,7 +315,13 @@ public final class SailButton: NSButton {
 
     @objc private func keyChanged() {
         keyChanges += 1
-        needsDisplay = true
+        retell()
+    }
+
+    override public func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if hintKey != nil { holderWatch.watch(window.flatMap { keysThrough?.window ?? $0 }) }
+        retell()
     }
 
     override public func layout() {
@@ -295,8 +337,8 @@ public final class SailButton: NSButton {
 
     override public var isEnabled: Bool {
         didSet {
-            if isEnabled != oldValue { invalidateIntrinsicContentSize() }
             repaint()
+            retell()
         }
     }
 

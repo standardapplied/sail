@@ -215,7 +215,8 @@ import Testing
     }
 
     /// The usual case: the panel stays open behind the sheet, which asks no name; Store is off
-    /// until the key is pasted. Stored, the field is empty at once, the one request held the key in
+    /// until the key is pasted; under it neither the panel nor the Workspaces foot names a key, all
+    /// of which the sheet takes. Stored, the field is empty at once, the one request held the key in
     /// its body; the sheet goes, the panel shows dock's agents asked again, Claude Code ready on the
     /// key just stored, which is chosen (Sign in reads it) and remembered, the store said in one line,
     /// Start (no longer Start and Sign In) holding the keys, and Return starts it on the key; the
@@ -231,7 +232,8 @@ import Testing
         let underSheet = CalmTests.Count(marks(in: window))
         #expect(underSheet.fill == 1 && underSheet.tint == 0 && underSheet.neutral == 0, "the window with the sheet up draws \(underSheet): one primary on screen, the sheet's Store")
         #expect(panel.view.primary?.kind == .secondary && panel.view.veiled, "the panel behind the sheet keeps its primary or is not under the sheet's veil")
-        #expect(panel.view.primary?.arrangement().hint == nil && !panel.view.words.contains { $0.contains("↑↓") || $0.contains("⌘M") }, "the panel under the sheet names keys the sheet takes: \(panel.view.words)")
+        #expect(panel.view.primary?.namesKey == false && !panel.view.words.contains { $0.contains("↑↓") || $0.contains("⌘M") }, "the panel under the sheet names keys the sheet takes: \(panel.view.words)")
+        #expect(WorkspacesViewTests.footSays(view.project).isEmpty, "the Workspaces foot under the sheet names keys the sheet takes: \(WorkspacesViewTests.footSays(view.project))")
         Self.paste(into: sheet)
         #expect(sheet.store.isEnabled)
         view.client = SailClient(transport: RecordedServer([try Exchange("workspace-agents-dock")]), token: "tok")
@@ -248,12 +250,13 @@ import Testing
         #expect(panel.view.signIn?.title == "API key “default”" && view.memory.ways == ["claude-code": .key], "storing a key did not choose it")
         #expect(panel.view.words.contains("Stored Claude Code key “default”. An agent session already running keeps the key it started with until it ends; no workspace keeps any of it.") && !panel.view.words.contains { $0.contains("asks you to sign in") }, "the store, and the server's note on the key it replaced, are not said: \(panel.view.words)")
         let start = try #require(panel.view.primary)
-        #expect(start.title == "Start" && start.isEnabled && start.holdsKeys && start.arrangement().hint != nil)
+        #expect(start.title == "Start" && start.isEnabled && start.holdsKeys && start.namesKey)
+        #expect(WorkspacesViewTests.footSays(view.project) == ["New"], "the sheet gone, the foot under the panel says \(WorkspacesViewTests.footSays(view.project))")
         #expect(panel.view.words.contains("↑↓ choose · ⌘M mode"))
         try NewSessionPanelTests.press(try NewSessionPanelTests.key(48, "\t"), in: window)
         #expect(panel.view.signIn?.holdsKeys == true && panel.view.primary?.holdsKeys == false, "⇥ to Sign in left Start's ring on too")
         #expect(panel.view.words.contains("⌘M mode") && !panel.view.words.contains("↑↓ choose · ⌘M mode"), "↑↓ choose is named while ↑↓ open Sign in's menu: \(panel.view.words)")
-        #expect(panel.view.primary?.arrangement().hint != nil, "Return, which still presses Start, is not named on it")
+        #expect(panel.view.primary?.namesKey == true, "Return, which still presses Start, is not named on it")
         try NewSessionPanelTests.press(try NewSessionPanelTests.key(48, "\t", .shift), in: window)
         #expect(panel.view.primary?.holdsKeys == true && panel.view.signIn?.holdsKeys == false, "⇧⇥ back did not give Start its ring again")
         #expect(panel.view.words.contains("↑↓ choose · ⌘M mode"), "the rows' keys are not named again: \(panel.view.words)")

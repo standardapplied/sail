@@ -7,11 +7,63 @@ import SailLook
 enum KeyWatch {
     static let names = [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification]
 
-    static func move(_ view: NSView, from old: NSWindow?, to new: NSWindow?, calling selector: Selector) {
+    static func move(_ watcher: NSObject, from old: NSWindow?, to new: NSWindow?, calling selector: Selector) {
         for name in names {
-            if let old { NotificationCenter.default.removeObserver(view, name: name, object: old) }
-            if let new { NotificationCenter.default.addObserver(view, selector: selector, name: name, object: new) }
+            if let old { NotificationCenter.default.removeObserver(watcher, name: name, object: old) }
+            if let new { NotificationCenter.default.addObserver(watcher, selector: selector, name: name, object: new) }
         }
+    }
+}
+
+/// Who holds the keys: the one answer every key hint asks, as a hint is on screen only while its key
+/// does what it says. A view holds them while it is the first responder of a window that is key; a
+/// sheet over the window, or another window, taking key status takes them from it.
+@MainActor
+public enum KeyHolder {
+    /// `window` is key: its first responder holds the keys, and a key equivalent reaches any of its views.
+    public static func isKey(_ window: NSWindow?) -> Bool {
+        window?.isKeyWindow == true
+    }
+
+    /// `view` holds the keys: it is the first responder of its window, which is key.
+    public static func holds(_ view: NSView) -> Bool {
+        guard let window = view.window, isKey(window) else { return false }
+        return of(window.firstResponder) === view
+    }
+
+    /// Who holds the keys through `responder`: a field being edited, not the window's field editor,
+    /// which forgets the field once its editing ends.
+    public static func of(_ responder: NSResponder?) -> NSResponder? {
+        guard let editor = responder as? NSText, editor.isFieldEditor else { return responder }
+        return editor.delegate as? NSResponder
+    }
+}
+
+/// A watch on what holds a window's keys (``KeyHolder``): it tells whenever the window becomes or
+/// ceases to be key, or its first responder changes (once AppKit has recorded it), watching only
+/// the window last given it.
+@MainActor
+public final class HolderWatch: NSObject {
+    private let changed: @MainActor () -> Void
+    private weak var window: NSWindow?
+    private var responder: NSKeyValueObservation?
+
+    public init(_ changed: @escaping @MainActor () -> Void) {
+        self.changed = changed
+    }
+
+    /// Watches `window` from now on, and no longer the one before.
+    public func watch(_ window: NSWindow?) {
+        guard window !== self.window || responder == nil else { return }
+        KeyWatch.move(self, from: self.window, to: window, calling: #selector(told))
+        self.window = window
+        responder = window?.observe(\.firstResponder) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.changed() }
+        }
+    }
+
+    @objc private func told() {
+        changed()
     }
 }
 
