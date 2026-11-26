@@ -1,5 +1,5 @@
 {"steps": [
-  {"name": "p6-this-mac", "select": "thisMac"},
+  {"name": "p6-this-mac", "select": "terminals"},
   {"name": "p6-another-copy-with-a-client-is-not-ended-and-what-holds-it-is-said", "otherHost": "kept"},
   {"name": "p6-the-other-copys-client-quits", "kill": "/other-build/sail session attach held"},
   {"name": "p6-its-host-has-seen-the-client-leave", "otherHost": "free"},

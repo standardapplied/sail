@@ -154,6 +154,18 @@ public struct PasskeyAssertion: Equatable, Sendable {
     }
 }
 
+/// What a control plane says of itself, unasked who is calling: Sail's answers `ok`.
+public struct Health: Decodable, Equatable, Sendable {
+    public let status: String
+}
+
+extension Endpoint where Response == Health {
+    /// The liveness probe, the one route a control plane answers anyone.
+    public static var health: Self {
+        Self(.get, Route.health)
+    }
+}
+
 extension Endpoint where Response == RegistrationCeremony {
     /// The ceremony that enrolls a passkey for the FDE `ticket` names.
     public static func registrationStart(ticket: String) -> Self {

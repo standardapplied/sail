@@ -5136,7 +5136,7 @@ what each control is in each state, pure Swift tested on Linux), `SailControls` 
 pane is drawn from, each a thin AppKit view over `SailDesign`'s tables; the drive's `kit` run shoots
 each in every state and look), `SailRenderer` (Metal and Core Text,
 no AppKit), `SailTerminalView` (the `NSView`), `SailAccount` (the platform's passkeys and the
-Keychain), `SailShell` (the app: window, rail, the account and "This Mac"), `SailTestPasskey` (a
+Keychain), `SailShell` (the app: window, rail, Workspaces with the welcome, Terminals and the account), `SailTestPasskey` (a
 software passkey, never shipped), and two executables: `Sail`, shipped, and `SailDrive`, the drive
 harness, never shipped. `ci/bundle` assembles a `.app` from `swift build -c release` (the bundled
 `sail` in `Contents/Helpers`), `ci/sign` signs with the hardened runtime (Developer ID from a

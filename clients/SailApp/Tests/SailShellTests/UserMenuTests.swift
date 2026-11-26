@@ -32,8 +32,11 @@ import Testing
     /// The window's sizes: the least, and widths and heights from narrow to wide.
     static let sizes: [NSSize] = [ShellApp.leastFrame, NSSize(width: 720, height: ShellApp.leastFrame.height), NSSize(width: 1024, height: 768), NSSize(width: 1180, height: 800), NSSize(width: 1440, height: 900)]
 
-    static func shell(_ look: Look = .light) throws -> ShellApp {
+    /// A shell in a window, someone signed in unless `signedIn` is false: the Account pane is then
+    /// the menu's Account.
+    static func shell(_ look: Look = .light, signedIn: Bool = true) throws -> ShellApp {
         let shell = try WorkbenchLookTests.shell(look)
+        if signedIn { shell.flow.show(AccountPaneTests.someone) }
         shell.window.orderFront(nil)
         own(shell)
         return shell
@@ -181,7 +184,8 @@ import Testing
         try Self.open(shell, withKeys: true)
         try Self.press(Self.enter, in: shell)
         #expect(!shell.userMenu.isOpen && shell.rail.selected == .account, "Return on Account showed \(shell.rail.selected?.rawValue ?? "nothing")")
-        let field = shell.account.address
+        let field = NSTextField(string: "sail.example.com")
+        shell.window.contentView?.addSubview(field)
         shell.window.makeFirstResponder(field)
         let before = Popover.holder(of: shell.window.firstResponder)
         try Self.open(shell)
@@ -241,7 +245,7 @@ import Testing
         shell.userMenu.update(Self.uday, appearance: .auto)
         #expect(view.items.map(\.item) == [.signIn] && view.items.first === signIn, "the pressed Sign In was taken: \(view.items.map(\.item))")
         signIn.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: signIn.bounds.midX, y: signIn.bounds.midY), in: signIn))
-        #expect(!shell.userMenu.isOpen && shell.rail.selected == .account, "the click on Sign In chose nothing")
+        #expect(!shell.userMenu.isOpen && shell.rail.selected == .workspaces, "the click on Sign In did not open Workspaces")
         try Self.open(shell, .signedOut(lastUsed: nil))
         signIn = try #require(view.items.first)
         signIn.mouseDown(with: try Self.mouse(.leftMouseDown, at: NSPoint(x: signIn.bounds.midX, y: signIn.bounds.midY), in: signIn))
@@ -351,12 +355,12 @@ import Testing
     }
 
     /// M1: the control plane's state is true as a check ends and as one starts, with the menu open:
-    /// "Checking…" while who is signed in is not yet known, "Can’t reach" once the check found it out
+    /// "Checking" while who is signed in is not yet known, "Can’t reach" once the check found it out
     /// of reach (not "Reconnecting", still counted under way when it answered), "Reconnecting" while
     /// a check asks again, then its answer.
     @Test func theControlPlanesStateIsTrueAsChecksStartAndEnd() async throws {
         let defaults = ReattachTests.defaults()
-        defaults.set("http://127.0.0.1:7979", forKey: AccountPane.addressKey)
+        defaults.set("http://127.0.0.1:7979", forKey: SignInMemory.addressKey)
         let transport = OutOfReach()
         let shell = try ShellApp(
             fonts: LookTests.fonts, helper: nil, look: .light, passkeys: { _ in Signs(sheet: nil) }, connect: { _ in transport },
@@ -366,20 +370,20 @@ import Testing
         shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }
         let view = shell.userMenu.view
-        try Self.open(shell, shell.account.menuContent)
+        try Self.open(shell, shell.flow.menuContent)
         #expect(view.content.name == "Not signed in" && view.content.detail == "127.0.0.1:7979")
-        let said = { "the menu \(shell.userMenu.isOpen ? "open" : "closed (its window gave up the keys)") says \(view.content.name), \(view.content.plane.map { "\($0)" } ?? "no state"); the account \(shell.account.standing == nil ? "knows no one" : "knows uday"), \(shell.account.checks) checks" }
-        let check = Task { await shell.account.refresh() }
-        #expect(await RunnerTabTests.until { transport.asked == 1 }, "the check asked nothing")
-        #expect(shell.userMenu.isOpen && view.content.name == "Checking…" && view.content.items == [.account], "during the first check \(said())")
+        let said = { "the menu \(shell.userMenu.isOpen ? "open" : "closed (its window gave up the keys)") says \(view.content.name), \(view.content.plane.map { "\($0)" } ?? "no state"); the account \(shell.flow.standing == nil ? "knows no one" : "knows uday"), \(shell.flow.checks) checks" }
+        let check = Task { await shell.flow.refresh() }
+        await transport.arrived(1)
+        #expect(shell.userMenu.isOpen && view.content.name == "Checking" && view.content.items == [.account], "during the first check \(said())")
         transport.answer()
         await check.value
         #expect(shell.userMenu.isOpen && view.content.name == "uday" && view.content.plane == .unreachable, "the check ended: \(said())")
-        #expect(view.content == shell.account.menuContent, "the menu and the account disagree: \(view.content) against \(shell.account.menuContent)")
-        let again = Task { await shell.account.refresh() }
-        #expect(await RunnerTabTests.until { transport.asked == 2 }, "the check asked nothing again: \(transport.asked) asked")
+        #expect(view.content == shell.flow.menuContent, "the menu and the account disagree: \(view.content) against \(shell.flow.menuContent)")
+        let again = Task { await shell.flow.refresh() }
+        await transport.arrived(2)
         #expect(shell.userMenu.isOpen && view.content.plane == .reconnecting, "asking again: \(said())")
-        #expect(view.content == shell.account.menuContent, "the menu and the account disagree asking again")
+        #expect(view.content == shell.flow.menuContent, "the menu and the account disagree asking again")
         transport.answer()
         await again.value
         #expect(shell.userMenu.isOpen && view.content.plane == .unreachable, "asked again: \(said())")
@@ -390,10 +394,10 @@ import Testing
     /// selected; and to the shown pane's own, never the menu's catcher, when the view that held them
     /// has left the window (a tab closed, a rename ended).
     @Test func theKeysGoBackWhereTheyCan() throws {
-        let shell = try Self.shell()
+        let shell = try Self.shell(signedIn: false)
         defer { shell.window.orderOut(nil) }
-        shell.select(.account)
-        let field = shell.account.address
+        shell.select(.workspaces)
+        let field = shell.welcome.addressField.field
         field.stringValue = "sail.example.com"
         shell.window.makeFirstResponder(field)
         let editor = try #require(field.currentEditor())
@@ -409,7 +413,7 @@ import Testing
         gone.removeFromSuperview()
         try Self.press(Self.escape, in: shell)
         let now = Popover.holder(of: shell.window.firstResponder)
-        #expect(!(shell.window.firstResponder is MenuKeys) && now === field, "the keys went to \(String(describing: shell.window.firstResponder)), not the Account pane's field")
+        #expect(!(shell.window.firstResponder is MenuKeys) && now === field, "the keys went to \(String(describing: shell.window.firstResponder)), not the welcome's field")
     }
 
     /// Minor 2: a press let go after the menu closed (Escape while the mouse was held) chooses
@@ -542,7 +546,7 @@ import Testing
 /// A control plane that does not answer: each request waits until answered, then fails as the
 /// network does, counting the checks of who is signed in asked (not the lists a sign-in starts).
 final class OutOfReach: Transport, Sendable {
-    private let state = Mutex<(asked: Int, gates: [Gate])>((0, []))
+    private let state = Mutex<(asked: Int, gates: [Gate], arrivals: [Int: Gate])>((0, [], [:]))
 
     var asked: Int {
         state.withLock { $0.asked }
@@ -550,12 +554,26 @@ final class OutOfReach: Transport, Sendable {
 
     func send(_ request: HTTPRequest) async throws(SailError) -> HTTPResponse {
         let gate = Gate()
-        state.withLock {
-            if request.route.contains("whoami") { $0.asked += 1 }
-            $0.gates.append(gate)
+        let arrival = state.withLock { state -> Gate? in
+            state.gates.append(gate)
+            guard request.route.contains("whoami") else { return nil }
+            state.asked += 1
+            return state.arrivals[state.asked, default: Gate()]
         }
+        arrival?.open()
         await gate.wait()
         throw .unreachable("The network connection was lost.")
+    }
+
+    /// Returns once the `count`th check has asked.
+    func arrived(_ count: Int) async {
+        let arrival = state.withLock { state -> Gate in
+            let gate = state.arrivals[count] ?? Gate()
+            state.arrivals[count] = gate
+            if state.asked >= count { gate.open() }
+            return gate
+        }
+        await arrival.wait()
     }
 
     func open(_: HTTPRequest) async throws(SailError) -> HTTPStream {

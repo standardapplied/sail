@@ -2,11 +2,12 @@ import AppKit
 import SailLook
 
 /// A text field with an optional eyebrow label above it and one line under it, help or an error
-/// with its mark (`FieldPaint`). The field is a plain `NSTextField` (or `NSSecureTextField`) with
-/// its own box, bezel and ring off, inside a box this view draws, with the halo around the box;
-/// the frame keeps `Look.haloRoom` on every side (the alignment rect is the content), so nothing
-/// of its own clips the halo. The caret and the selection are the look's. VoiceOver reads the
-/// eyebrow as the field's label and the help or the error as its help, and hears a new error.
+/// with its mark (`FieldPaint`), the error's remedy under it in the secondary ink. The field is a
+/// plain `NSTextField` (or `NSSecureTextField`) with its own box, bezel and ring off, inside a box
+/// this view draws, with the halo around the box; the frame keeps `Look.haloRoom` on every side
+/// (the alignment rect is the content), so nothing of its own clips the halo. The caret and the
+/// selection are the look's. VoiceOver reads the eyebrow as the field's label and the help or the
+/// error as its help, and hears a new error.
 @MainActor
 public final class SailTextField: NSView {
     public let field: NSTextField
@@ -31,6 +32,11 @@ public final class SailTextField: NSView {
             }
             relaid()
         }
+    }
+
+    /// What to do about the error, said under it; nothing without an error.
+    public var remedy: String? {
+        didSet { relaid() }
     }
 
     /// The box's widest, when the line under it may run wider than the box.
@@ -111,16 +117,21 @@ public final class SailTextField: NSView {
         label.map { Draw.text($0, mono.font(Look.Step.caption.points) as NSFont, paint.eyebrow, tracking: Look.Tracking.eyebrow, upper: true) }
     }
 
-    private var lineText: NSAttributedString? {
+    var lineText: NSAttributedString? {
         guard let said = error ?? help else { return nil }
         let style = NSMutableParagraphStyle(), font = NSFont.systemFont(ofSize: Look.Step.footnote.points)
         style.alignment = rightToLeft ? .right : .left
         style.minimumLineHeight = Look.Step.footnote.points * 1.4
         style.maximumLineHeight = style.minimumLineHeight
-        return NSAttributedString(string: said, attributes: [
-            .font: font, .paragraphStyle: style, .foregroundColor: NSColor(error == nil ? look.textTertiary : Tint(look.error)),
-            .baselineOffset: TextLine.centring(lineHeight: Double(style.minimumLineHeight), ascent: Double(font.ascender), descent: -Double(font.descender)),
-        ])
+        func words(_ text: String, _ ink: Tint) -> NSAttributedString {
+            NSAttributedString(string: text, attributes: [
+                .font: font, .paragraphStyle: style, .foregroundColor: NSColor(ink),
+                .baselineOffset: TextLine.centring(lineHeight: Double(style.minimumLineHeight), ascent: Double(font.ascender), descent: -Double(font.descender)),
+            ])
+        }
+        let line = NSMutableAttributedString(attributedString: words(said, error == nil ? look.textTertiary : Tint(look.error)))
+        if error != nil, let remedy { line.append(words("\n" + remedy, look.textSecondary)) }
+        return line
     }
 
     private var rightToLeft: Bool {
@@ -181,7 +192,7 @@ public final class SailTextField: NSView {
     }
 
     private func relaid() {
-        field.setAccessibilityHelp(error ?? help)
+        field.setAccessibilityHelp(error.map { [$0, remedy].compactMap { $0 }.joined(separator: " ") } ?? help)
         invalidateIntrinsicContentSize()
         repaint()
     }

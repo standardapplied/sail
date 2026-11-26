@@ -7,11 +7,11 @@ import SailTestPasskey
 import SailVT
 import Security
 
-/// The drive's steps on the account: they act through the pane's own fields and buttons, and read
-/// what the pane says. No step's detail holds a ticket or a token.
+/// The drive's steps on the account: they act through the welcome's and the Account pane's own
+/// fields and buttons, and read what they say. No step's detail holds a ticket or a token.
 extension Driver {
     func performAccount(_ step: Step) async -> (Bool, String)? {
-        let pane = shell.account
+        let welcome = shell.welcome, flow = shell.flow
         if let item = step.select {
             guard let chosen = Rail.Item(rawValue: item), let button = shell.rail.button(chosen) else { return (false, "no rail item \(item)") }
             if chosen == .account { return await accountByTheMenu() }
@@ -20,6 +20,9 @@ extension Driver {
         }
         if let shows = step.accountShows {
             return accountShows(shows)
+        }
+        if let state = step.welcomeShows {
+            return welcomeShows(state)
         }
         if let how = step.menu {
             return await openMenu(how)
@@ -32,8 +35,34 @@ extension Driver {
             return (said, menuSaid)
         }
         if let address = step.address {
-            pane.address.stringValue = address
-            return (true, "")
+            if welcome.welcome.screen != .address, let chip = welcome.shownChip { chip.change.performClick(nil) }
+            welcome.addressField.field.stringValue = address
+            return (welcome.welcome.screen == .address, said)
+        }
+        if let typed = step.typeTicket {
+            if welcome.welcome.screen == .back { welcome.toEnroll.performClick(nil) }
+            welcome.ticketField.field.stringValue = typed
+            return (welcome.welcome.screen == .ticket, said)
+        }
+        if let word = step.welcomeBusy {
+            let busy = await waitUntil(step.seconds ?? 10) { welcome.primary.busyWord == word && flow.isActing }
+            return (busy, "the primary says \(welcome.primary.busyWord ?? welcome.primary.title); \(said)")
+        }
+        if let selected = step.rail {
+            return railReads(selected)
+        }
+        if step.proceed == true {
+            let acted = await clicked(welcome.proceed, named: "Continue", step)
+            return (acted.ok, (acted.why.map { "\($0); " } ?? "") + said)
+        }
+        if step.change == true {
+            guard let chip = welcome.shownChip else { return (false, "no chip shown: \(said)") }
+            let typed = welcome.welcome.typed
+            chip.change.performClick(nil)
+            let field = welcome.addressField.field, chosen = (field.currentEditor() as? NSTextView)?.selectedRange()
+            let selected = shell.window.firstResponder === field.currentEditor() && chosen == NSRange(location: 0, length: (typed as NSString).length)
+            return (welcome.welcome.screen == .address && field.stringValue == typed && selected,
+                    "the field holds \(field.stringValue), \(selected ? "selected, with the keys" : "not selected with the keys"); \(said)")
         }
         if let answer = step.passkey {
             guard let chosen = SoftwarePasskey.Answer(rawValue: answer) else { return (false, "no passkey answer \(answer)") }
@@ -42,27 +71,29 @@ extension Driver {
         }
         if let variable = step.enroll {
             guard let ticket = Self.secret(variable) else { return (false, "neither \(variable) nor the file \(variable)_FILE names holds a ticket") }
-            pane.ticket.stringValue = ticket
-            let acted = await clicked(pane.enroll, named: "Enroll", step)
-            return (acted.ok && pane.ticket.stringValue.isEmpty, (acted.why.map { "\($0); " } ?? "") + "the ticket field is \(pane.ticket.stringValue.isEmpty ? "empty" : "not empty"); \(said)")
+            if welcome.welcome.screen == .back { welcome.toEnroll.performClick(nil) }
+            welcome.ticketField.field.stringValue = ticket
+            let acted = await clicked(welcome.create, named: "Create Passkey", step)
+            keepTheToken()
+            let empty = welcome.ticketField.field.stringValue.isEmpty
+            return (acted.ok && empty, (acted.why.map { "\($0); " } ?? "") + "the ticket field is \(empty ? "empty" : "not empty"); \(said)")
         }
         if step.signIn == true {
-            let acted = await clicked(pane.signIn, named: "Sign In", step)
-            if signed, let plane = try? ControlPlane(address: pane.address.stringValue), let held = try? KeychainVault().session(for: plane) {
-                tokens.insert(held.sessionToken)
-            }
+            let button: NSButton = welcome.welcome.screen == .back ? welcome.signIn : welcome.toSignIn
+            let acted = await clicked(button, named: "Sign In with Passkey", step)
+            keepTheToken()
             return (acted.ok, (acted.why.map { "\($0); " } ?? "") + said)
         }
         if step.signOut == true {
-            let acted = await clicked(pane.signOut, named: "Sign Out", step)
+            let acted = await clicked(shell.account.signOut, named: "Sign Out", step)
             return (acted.ok, (acted.why.map { "\($0); " } ?? "") + said)
         }
         if let lines = step.exactly {
-            let found = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.split(separator: "\n").map(String.init) == lines }
+            let found = await waitUntil(step.seconds ?? 10) { !flow.busy && self.shown.split(separator: "\n").map(String.init) == lines }
             return (found, said)
         }
         if let text = step.pane {
-            let found = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.contains(text) }
+            let found = await waitUntil(step.seconds ?? 10) { !flow.busy && self.shown.contains(text) }
             return (found, said)
         }
         if let words = step.sail {
@@ -91,9 +122,56 @@ extension Driver {
         return nil
     }
 
+    /// The rail's items top to bottom, Workspaces, Terminals and Account, each shown, with
+    /// `selected` the one chosen.
+    private func railReads(_ selected: String) -> (Bool, String) {
+        let buttons = Rail.Item.allCases.compactMap { shell.rail.button($0) }.filter { !$0.isHiddenOrHasHiddenAncestor }
+        let order = buttons.sorted { $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY }.map { $0.toolTip ?? "" }
+        let chosen = shell.rail.selected?.rawValue ?? "nothing"
+        return (order == ["Workspaces", "Terminals", "Account"] && chosen == selected, "the rail reads \(order.joined(separator: ", ")), \(chosen) chosen")
+    }
+
+    /// A signed build's session token, kept for the sweep.
+    private func keepTheToken() {
+        guard signed, let plane = shell.flow.memory.plane, let held = try? KeychainVault().session(for: plane) else { return }
+        tokens.insert(held.sessionToken)
+    }
+
+    /// The welcome in one of its states, as the page's frames draw it (sail.example.com, Mara), for
+    /// the frames of each; "none" puts back the screen this Mac's memory chooses.
+    private func welcomeShows(_ state: String) -> (Bool, String) {
+        guard state != "none" else {
+            shell.welcome.reset()
+            return (true, shell.welcome.text)
+        }
+        guard let plane = try? ControlPlane(address: "sail.example.com") else { return (false, "no control plane") }
+        let mara = RememberedSignIn(handle: "mara", name: "Mara Quill")
+        var welcome = Welcome(plane: nil, person: nil)
+        switch state {
+        case "welcome": break
+        case "connecting": welcome.began(.connecting)
+        case "unreachable": welcome.refused(AccountRefusal(.unreachable("Could not connect to the server."), at: plane, step: .reaching))
+        case "enroll": welcome.reached(plane, person: nil)
+        case "creating", "signing-after-enrolling", "ticket-refused":
+            welcome.reached(plane, person: nil)
+            welcome.began(state == "creating" ? .creating : .signingAfterEnrolling(handle: "mara"))
+            let forbidden = Refusal(code: .known(.forbidden), message: "Enrollment ticket is invalid or expired.")
+            if state == "ticket-refused" { welcome.refused(AccountRefusal(.refused(forbidden), at: plane, step: .enrolling)) }
+        case "back", "signing-in", "cancelled", "ended":
+            welcome.reached(plane, person: mara)
+            if state == "signing-in" { welcome.began(.signingIn) }
+            if state == "cancelled" { welcome.refused(AccountRefusal(.cancelled, signingIn: true, at: plane)) }
+            if state == "ended" { welcome.ended(on: Date(timeIntervalSince1970: 1_795_608_000)) }
+        default: return (false, "no welcome state named \(state)")
+        }
+        shell.welcome.show(welcome)
+        shell.select(.workspaces)
+        return (!shell.welcome.isHiddenOrHasHiddenAncestor, shell.welcome.text.replacingOccurrences(of: "\n", with: " | "))
+    }
+
     private func accountShows(_ shows: String) -> (Bool, String) {
         guard shows != "none" else {
-            shell.account.show(nil)
+            shell.flow.show(nil)
             return (true, shell.account.text)
         }
         let handle = String(repeating: "k", count: 63)
@@ -102,7 +180,7 @@ extension Driver {
         }
         let whoami = Whoami(fde: handle, name: handle, displayName: "Uday Chandra-Bhattacharyya of the Standard Applied Mac app team", role: .known(.member), capabilities: [])
         let answer: Swift.Result<Whoami, AccountRefusal> = shows == "long" ? .success(whoami) : .failure(AccountRefusal(.unreachable("The network connection was lost."), at: plane, step: .asking))
-        shell.account.show(SignedIn(controlPlane: plane, fde: handle, until: Date(timeIntervalSinceNow: 30 * 86400), whoami: answer))
+        shell.flow.show(SignedIn(controlPlane: plane, fde: handle, until: Date(timeIntervalSinceNow: 30 * 86400), whoami: answer))
         return (true, shell.account.text)
     }
 
@@ -121,13 +199,13 @@ extension Driver {
     }
 
     /// The Account pane through the user menu, as a person reaches it: the button, then Account
-    /// (Sign In when signed out).
+    /// (Sign In when signed out, which opens Workspaces).
     private func accountByTheMenu() async -> (Bool, String) {
         let (opened, said) = await openMenu("click")
         guard opened else { return (false, said) }
-        let title = shell.userMenu.view.items.first { $0.item == .account || $0.item == .signIn }?.item.rawValue ?? "Account"
-        let (chosen, detail) = await clickInMenu(title, Step())
-        return (chosen && shell.rail.selected == .account, "\(detail); the rail shows \(shell.rail.selected?.rawValue ?? "nothing")")
+        let item = shell.userMenu.view.items.first { $0.item == .account || $0.item == .signIn }?.item ?? .account
+        let (chosen, detail) = await clickInMenu(item.rawValue, Step())
+        return (chosen && shell.rail.selected == (item == .signIn ? .workspaces : .account), "\(detail); the rail shows \(shell.rail.selected?.rawValue ?? "nothing")")
     }
 
     func openMenu(_ how: String) async -> (Bool, String) {
@@ -169,7 +247,7 @@ extension Driver {
             return (taken && drawn && menu.isOpen, "\(menuSaid); the app's look \(shell.look == .dark ? "dark" : "light")\(drawn ? "" : ", not drawn by every terminal shown")")
         }
         guard let row = view.items.first(where: { $0.item.rawValue == title }) else { return (false, "the menu has no \(title): \(menuSaid)") }
-        let began = shell.account.actions
+        let began = shell.flow.actions
         let before = (row.downs, row.ups), clickedAt = ContinuousClock.now
         let at = NSPoint(x: row.bounds.midX, y: row.bounds.midY)
         let scene = clickScene(row, at: at)
@@ -177,9 +255,10 @@ extension Driver {
         let done: Bool
         switch row.item {
         case .keys: done = await waitUntil(2) { view.tip.isShown } && menu.isOpen
-        case .account, .signIn: done = await waitUntil(2) { !menu.isOpen && self.shell.rail.selected == .account }
+        case .account: done = await waitUntil(2) { !menu.isOpen && self.shell.rail.selected == .account }
+        case .signIn: done = await waitUntil(2) { !menu.isOpen && self.shell.rail.selected == .workspaces }
         case .signOut:
-            done = await waitUntil(step.seconds ?? 20) { self.shell.account.actions > began && !self.shell.account.isActing && self.shell.account.standing == nil }
+            done = await waitUntil(step.seconds ?? 20) { self.shell.flow.actions > began && !self.shell.flow.isActing && self.shell.flow.standing == nil }
         }
         let took = (ContinuousClock.now - clickedAt) / .milliseconds(1)
         let reached = "\(title) took \(row.downs - before.0) mouse-down and \(row.ups - before.1) mouse-up in \(Self.ms(took)) ms; at the click \(scene); "
@@ -220,9 +299,14 @@ extension Driver {
         return await click(segments, at: NSPoint(x: rect.midX, y: rect.midY))
     }
 
-    /// What the pane says, as one line.
+    /// What the welcome says while no one is signed in, else the Account pane.
+    private var shown: String {
+        shell.flow.standing == nil ? shell.welcome.text : shell.account.text
+    }
+
+    /// What is shown, as one line.
     private var said: String {
-        "the pane says: " + shell.account.text.replacingOccurrences(of: "\n", with: " | ")
+        "it says: " + shown.replacingOccurrences(of: "\n", with: " | ")
     }
 
     /// Does `act` and waits until the pane has ended what it started.
@@ -231,8 +315,8 @@ extension Driver {
     /// click started no action within 2 s (a click a check of who is signed in swallowed once
     /// ended in 0.03 s with nothing said, read as the sign-in's end).
     private func clicked(_ button: NSButton, named name: String, _ step: Step) async -> (ok: Bool, why: String?) {
-        let pane = shell.account
-        guard button.isEnabled else { return (false, "\(name) was disabled when clicked\(pane.busy ? ", the pane busy" : "")") }
+        let pane = shell.flow
+        guard button.isEnabled else { return (false, "\(name) was disabled when clicked\(pane.busy ? ", an action under way" : "")") }
         let began = pane.actions
         button.performClick(nil)
         guard await waitUntil(2, { pane.actions > began }) else { return (false, "the click on \(name) started nothing within 2 s") }
@@ -241,9 +325,9 @@ extension Driver {
     }
 
     private func settled(_ step: Step, _ act: () -> Void) async -> Bool {
-        let before = shell.account.ended
+        let before = shell.flow.ended
         act()
-        return await waitUntil(step.seconds ?? 20) { self.shell.account.ended > before && !self.shell.account.busy }
+        return await waitUntil(step.seconds ?? 20) { self.shell.flow.ended > before && !self.shell.flow.busy }
     }
 
     private func run(_ words: [String]) -> (Bool, String) {
@@ -268,7 +352,7 @@ extension Driver {
     /// Scenarios 3, 16 and S2: the item as item 3 says, holding a session 30 days long, or gone; or
     /// an item of the earlier shape put in its place, as a build before this one kept it.
     private func keychain(_ wanted: String) -> (Bool, String) {
-        guard let plane = try? ControlPlane(address: shell.account.address.stringValue) else { return (false, "the address names no control plane") }
+        guard let plane = shell.flow.memory.plane else { return (false, "no control plane was reached") }
         if wanted == "oldShape" {
             var item = KeychainVault.item(plane)
             item[kSecValueData as String] = Data(#"{"token":"old-shape-token","fde":"uday","expiresAt":815000000}"#.utf8)
@@ -325,7 +409,7 @@ extension Driver {
     /// the colour furthest from it the label, each within 2 of 255 of the token (the label `onAccent`:
     /// white in the light appearance, ink in the dark), whatever the system accent is.
     private func accent() -> (Bool, String) {
-        guard let context = Self.drawn(shell.account.signIn), let bytes = context.data else { return (false, "the button could not be drawn") }
+        guard let context = Self.drawn(shell.welcome.primary), let bytes = context.data else { return (false, "the button could not be drawn") }
         let width = context.width, height = context.height
         let pixels = bytes.bindMemory(to: UInt8.self, capacity: width * height * 4)
         var counts: [UInt32: Int] = [:]
@@ -491,6 +575,7 @@ extension Driver {
             if !found.isEmpty { places.append(found.joined(separator: " and ") + " in " + place) }
         }
         search(Data(shell.account.text.utf8), at: "the account pane")
+        search(Data(shell.welcome.text.utf8), at: "the welcome")
         search(Data(shell.workspaces.text.utf8), at: "the workspaces section")
         search(Data(results.map(\.detail).joined(separator: "\n").utf8), at: "the drive's report")
         let library = FileManager.default.homeDirectoryForCurrentUser.appending(path: "Library")

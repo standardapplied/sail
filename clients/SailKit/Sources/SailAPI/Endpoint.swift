@@ -21,6 +21,7 @@ public struct Endpoint<Response: Decodable & Sendable>: Sendable {
 /// The API's paths, each spelled once, as the segments a request escapes.
 package enum Route {
     package static let whoami = ["v1", "whoami"]
+    package static let health = ["v1", "health"]
     package static let projects = ["v1", "projects"]
     package static let rooms = ["v1", "rooms"]
     package static let specs = ["v1", "specs"]

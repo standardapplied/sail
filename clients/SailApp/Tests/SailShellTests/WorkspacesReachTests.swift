@@ -43,7 +43,7 @@ import Testing
     /// its middle.
     @Test func whatIsShownTakesAClickAtOnce() throws {
         var faults: [String] = []
-        let shell = try UserMenuTests.shell()
+        let shell = try UserMenuTests.shell(signedIn: false)
         defer { shell.window.orderOut(nil) }
         for (round, content) in [UserMenuTests.uday, .signedOut(lastUsed: nil), UserMenuTests.uday].enumerated() {
             try UserMenuTests.open(shell, content)
@@ -51,8 +51,8 @@ import Testing
             faults += (menu.items as [NSView] + [menu.segments]).compactMap { Self.missesAClick($0).map { "the user menu, opening \(round + 1): \($0)" } }
             shell.userMenu.close()
         }
-        shell.select(.account)
-        faults += [shell.account.signIn, shell.account.enroll].compactMap { Self.missesAClick($0).map { "the Account pane: \($0)" } }
+        shell.select(.workspaces)
+        faults += [shell.welcome.proceed, shell.welcome.toTerminals].compactMap { Self.missesAClick($0).map { "the welcome: \($0)" } }
         let sheet = Sheet(title: "Delete dock?", body: "Its files on the runner go with it.", confirm: "Delete Workspace", kind: .destructive, look: .light, titleFont: try TitleFont(directory: LookTests.fonts))
         sheet.ask(on: shell.window) { _ in }
         faults += [sheet.cancel, sheet.confirm].compactMap { Self.missesAClick($0).map { "the sheet: \($0)" } }

@@ -3,6 +3,8 @@
 /// shows is the design's, not a system symbol.
 public enum LineIcon: String, CaseIterable, Sendable {
     case refresh, hammer, plus, more, info, warning, error, box, layers, cloudOff, close
+    /// The welcome's: the control plane's chip, a passkey's Touch ID, a passkey made.
+    case cloud, fingerprint, check
     /// A folder's disclosure: shut (pointing along the line, mirrored right to left) and open.
     case right, down
 
@@ -53,6 +55,20 @@ public enum LineIcon: String, CaseIterable, Sendable {
                 .arc(Point(6.7, 14.9), radius: 3.61, from: 85.2, to: 265.2), .arc(Point(12.33, 12.23), radius: 6, from: -171.1, to: -21.8),
                 .arc(Point(17, 14.2), radius: 4.3, from: -77.9, to: 87.3), line((17.2, 18.5), (7, 18.5)), line((4, 4), (20, 20)),
             ]
+        case .cloud:
+            return [
+                line((7, 18.5), (17.5, 18.5)), .arc(Point(7.44, 14.02), radius: 4.5, from: 95.6, to: 259.3),
+                .arc(Point(12.21, 11.72), radius: 6, from: -159.3, to: -11.2), .arc(Point(17.47, 14.5), radius: 4, from: -80.9, to: 89.6),
+            ]
+        case .fingerprint:
+            return [
+                line((12, 11.5), (12, 15.5)), .arc(Point(11.9, 11.44), radius: 3.6, from: -156.5, to: 1),
+                line((15.5, 11.5), (15.5, 13.7), (15.44, 14.77), (15.23, 15.82), (14.88, 16.84), (14.4, 17.8)),
+                line((8.4, 13.4), (8.29, 15.1), (7.97, 16.5), (7.47, 17.67), (6.8, 18.7)),
+                .arc(Point(12, 12.21), radius: 7.4, from: -149.9, to: -1.6), line((19.4, 12), (19.4, 13.6)), line((4.6, 12.6), (4.6, 13.8)),
+                line((17.2, 18.6), (17.61, 17.82), (17.95, 16.97), (18.21, 16.1), (18.4, 15.2)),
+            ]
+        case .check: return [line((5, 12.5), (9.5, 17), (19, 7.5))]
         case .right: return [line((9, 6), (15, 12), (9, 18))]
         case .down: return [line((6, 9), (12, 15), (18, 9))]
         case .more: return [.dot(Point(5.5, 12), radius: 1.2), .dot(Point(12, 12), radius: 1.2), .dot(Point(18.5, 12), radius: 1.2)]

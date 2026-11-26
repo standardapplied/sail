@@ -363,6 +363,24 @@ import Testing
         #expect(field.field.accessibilityHelp() == "Lowercase letters, digits and dashes." && near(field.intrinsicContentSize.height, helped))
     }
 
+    /// A refusal's remedy stands under its sentence in the secondary ink, a line of its own, and
+    /// VoiceOver hears both; with no error the remedy says nothing.
+    @Test func aRemedyStandsUnderTheErrorInTheSecondaryInk() throws {
+        let field = try Self.field(.light)
+        field.remedy = "Check the address."
+        let helped = field.intrinsicContentSize.height
+        field.error = "Sail cannot reach it."
+        let alone = field.intrinsicContentSize.height
+        field.remedy = nil
+        #expect(field.intrinsicContentSize.height < alone && alone > helped, "the remedy took no line of its own")
+        field.remedy = "Check the address."
+        #expect(field.field.accessibilityHelp() == "Sail cannot reach it. Check the address.")
+        let words = try #require(field.lineText)
+        let at = (words.string as NSString).range(of: "Check").location
+        #expect(words.attribute(.foregroundColor, at: at, effectiveRange: nil) as? NSColor == NSColor(Look.light.textSecondary))
+        #expect(words.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(Tint(Look.light.error)))
+    }
+
     /// Disabled: the box and its text at 45%, the eyebrow and the help as they were.
     @Test func aDisabledFieldDimsOnlyItsBox() throws {
         let look = Look.light, canvas = NSColor(Tint(look.canvas))

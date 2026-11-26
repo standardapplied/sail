@@ -88,16 +88,32 @@ struct Step: Decodable {
     var attached: Bool?
     /// The view's font size must be this many points.
     var fontPoints: Double?
-    /// The rail's item to select: "thisMac" or "account".
+    /// The rail's item to select: "workspaces", "terminals" or "account" (through the user menu).
     var select: String?
-    /// The control plane's address, typed into the account's field.
+    /// The control plane's address, typed into the welcome's field (Change pressed first when
+    /// another screen shows).
     var address: String?
+    /// Continue pressed, then waits until it ended.
+    var proceed: Bool?
+    /// The chip's Change pressed: the welcome's field must hold the control plane, selected.
+    var change: Bool?
+    /// Typed into the welcome's ticket field (Enroll with a Ticket pressed first on Welcome back),
+    /// and nothing pressed: a made-up ticket the goldens answer, never one the server minted.
+    var typeTicket: String?
+    /// The welcome's primary says this "-ing" word while an action is under way, within `seconds`.
+    var welcomeBusy: String?
+    /// The rail reads Workspaces, Terminals, Account, top to bottom, with this item chosen.
+    var rail: String?
+    /// The welcome in a state as the page draws it, for its frames: "welcome", "connecting",
+    /// "unreachable", "enroll", "creating", "signing-after-enrolling", "ticket-refused", "back",
+    /// "signing-in", "cancelled", "ended"; "none" puts back what this Mac's memory chooses.
+    var welcomeShows: String?
     /// What the software passkey answers from now on: "credential", "none" or "cancel".
     var passkey: String?
-    /// Enrolls with the ticket the environment variable of this name holds, then waits until the
-    /// pane is idle.
+    /// Enrolls with the ticket the environment variable of this name holds (Enroll with a Ticket
+    /// pressed first on Welcome back), which signs in after it, then waits until it ended.
     var enroll: String?
-    /// Signs in, or out, then waits until the pane is idle.
+    /// Signs in (Welcome back's primary, or Enroll's link), or out, then waits until it ended.
     var signIn: Bool?
     var signOut: Bool?
     /// The Account pane shows a sign-in of the drive's own, for its frames: "long" (the longest
@@ -114,7 +130,8 @@ struct Step: Decodable {
     var menuClick: String?
     /// The user menu says exactly this (``Driver/menuSaid``), within `seconds` (2 by default).
     var menuSays: String?
-    /// Waits until the account pane's text contains this, or, with `exactly`, equals these lines.
+    /// Waits until what is shown (the welcome signed out, else the Account pane) contains this, or,
+    /// with `exactly`, equals these lines.
     var pane: String?
     var exactly: [String]?
     /// Runs the bundled `sail` with these words, `{credential}` the software passkey's newest
@@ -124,9 +141,9 @@ struct Step: Decodable {
     var activate: Bool?
     /// The software passkey was asked for this many ceremonies since the drive started.
     var asked: Int?
-    /// The Keychain item of `address`'s control plane: "kept", with item 3's attributes, or "gone".
+    /// The Keychain item of the control plane reached: "kept", with item 3's attributes, or "gone".
     var keychain: String?
-    /// The sign-in pane's button drawn: its fill terracotta and its label `onAccent`.
+    /// The welcome's primary drawn: its fill terracotta and its label `onAccent`.
     var accent: Bool?
     /// The window's title bar: transparent, the platform's buttons, the rail and the pane under it.
     var titleBar: Bool?
@@ -325,8 +342,8 @@ struct Step: Decodable {
     var leastWindow: Bool?
     /// The Workspaces section no longer says this, within `seconds` (10 by default).
     var notSaid: String?
-    /// The Workspaces button of this title clicked with a real mouse-down and mouse-up through the
-    /// window ("Create", "Cancel").
+    /// The button of this title shown in the window clicked with a real mouse-down and mouse-up
+    /// ("Create", "Cancel", "Continue").
     var clickButton: String?
     /// The create row is open (true) or gone (false), within `seconds` (5 by default).
     var createRowOpen: Bool?

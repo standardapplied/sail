@@ -71,7 +71,7 @@ import Testing
     @Test func theViewItemSaysWhatItWillDoInEachPlace() throws {
         let door = try FakeRunnerDoor(person: "uday")
         let (shell, bench) = try Self.shell(door)
-        shell.select(.thisMac)
+        shell.select(.terminals)
         #expect(Self.command(shell) == ("Show Files", true, nil))
         shell.toggleSidebar(nil)
         #expect(Self.command(shell) == ("Hide Files", true, nil), "the item does not say it will hide the files")
@@ -80,6 +80,9 @@ import Testing
         _ = bench.model.newTab(session: "mac-1", place: .thisMac(folder: "/"))
         bench.apply()
         #expect(Self.command(shell) == ("Show Files", false, "Files are for workspaces; this tab is this Mac's."))
+        shell.select(.workspaces)
+        #expect(Self.command(shell) == ("Show Sidebar", false, "The sidebar lists projects once you sign in."), "signed out, the welcome has no sidebar")
+        shell.flow.show(AccountPaneTests.someone)
         shell.select(.workspaces)
         let sidebar = Self.command(shell)
         #expect(sidebar.title == (shell.workspaces.panel.isHidden ? "Show Sidebar" : "Hide Sidebar") && sidebar.enabled == shell.workspaces.sidebarCommand.enabled)

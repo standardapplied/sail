@@ -133,9 +133,9 @@ final class Driver {
         pane?.terminal ?? standIn
     }
 
-    /// Whether the steps are on "This Mac" with a session drawn.
+    /// Whether the steps are on Terminals with a session drawn.
     var onTerminal: Bool {
-        shell.rail.selected == .thisMac && pane?.session != nil
+        shell.rail.selected == .terminals && pane?.session != nil
     }
 
     /// Runs the script once, holding no process activity: the app is measured as a person runs it,
@@ -938,7 +938,7 @@ final class Driver {
     private func save(index: Int, name: String) {
         let stem = String(format: "%02d-", index) + name
         guard onTerminal else {
-            try? shell.account.text.write(to: out.appending(path: stem + ".txt"), atomically: true, encoding: .utf8)
+            try? (shell.flow.standing == nil ? shell.welcome.text : shell.account.text).write(to: out.appending(path: stem + ".txt"), atomically: true, encoding: .utf8)
             try? windowImage()?.write(to: out.appending(path: stem + ".png"))
             return
         }

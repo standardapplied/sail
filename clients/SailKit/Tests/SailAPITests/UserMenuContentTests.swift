@@ -49,7 +49,7 @@ import Testing
     /// and Account, which shows what the pane knows.
     @Test func whileCheckingItSaysSo() {
         let menu = UserMenuContent.checking(at: "sail.example.com")
-        #expect(menu.name == "Checking…" && menu.disc == nil && menu.detail == "sail.example.com" && menu.address == nil && menu.plane == nil)
+        #expect(menu.name == "Checking" && menu.disc == nil && menu.detail == "sail.example.com" && menu.address == nil && menu.plane == nil)
         #expect(menu.items == [.account])
     }
 

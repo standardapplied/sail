@@ -90,6 +90,20 @@ public struct Account: Sendable {
         self.connect = connect
     }
 
+    /// The control plane `typed` names, once it answers Sail's health: one unauthenticated
+    /// `GET /v1/health`, and only `ok` moves on. A bare host is taken as `https://`.
+    public func reach(_ typed: String) async throws(AccountRefusal) -> ControlPlane {
+        let plane = try ControlPlane(address: typed)
+        let health = try await call(.health, on: connect(plane), at: plane, step: .reaching)
+        guard health.status == "ok" else { throw AccountRefusal(.unreadable, at: plane) }
+        return plane
+    }
+
+    /// Until when the session held for `plane` lasts, nil with none held or none readable.
+    public func heldUntil(at plane: ControlPlane) -> Date? {
+        (try? vault.session(for: plane))?.expiresAt
+    }
+
     /// Enrolls a passkey with the ticket in `text`. It signs no one in: that is a second ceremony.
     public func enroll(ticket text: String, at plane: ControlPlane) async throws(AccountRefusal) -> Enrollment {
         let ticket = try EnrollmentTicket.parse(text)

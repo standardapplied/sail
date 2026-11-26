@@ -99,7 +99,7 @@ func answer<Response>(
 
 @Suite struct GoldenRoutesTests {
     @Test func everyRecordedExchangeIsOneThisClientMakes() throws {
-        #expect(Set(calls.keys).union(refusalsOfRoutesNotYetCalled).union(answersOfRoutesNotYetCalled).union(passkeyExchanges)
+        #expect(Set(calls.keys).union(refusalsOfRoutesNotYetCalled).union(answersOfRoutesNotYetCalled).union(passkeyExchanges).union(reachExchanges)
             == Set(try Goldens.names(in: "http")))
     }
 
@@ -578,7 +578,7 @@ let answersOfRoutesNotYetCalled: Set<String> = [
     "template-2c-missing", "template-2d-missing", "template-2e-building", "template-2f-building",
     "template-2f-joined", "template-2g-built", "template-2g-current", "template-2h-failed",
     "template-2h-interrupted", "template-2h-cut-pending",
-    "health", "agents", "passkeys", "passkey-removed", "project-created", "projects-none",
+    "agents", "passkeys", "passkey-removed", "project-created", "projects-none",
 ]
 
 /// The member the golden writer seats in the room.

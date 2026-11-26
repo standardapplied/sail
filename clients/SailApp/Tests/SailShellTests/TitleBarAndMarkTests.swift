@@ -13,16 +13,17 @@ import Testing
         ExitWatch.install()
     }
 
-    /// Asking the control plane who is signed in is Sail's mark drawing itself over what it waits
-    /// for; the card's other states stay empty states.
-    @Test func askingWhoIsSignedInIsTheMarkDrawingItself() throws {
+    /// Checking the session held at launch is Sail's mark drawing itself, "Connecting to" the
+    /// control plane with no ellipsis; signed out the card holds nothing (the welcome stands in the
+    /// section's place).
+    @Test func checkingTheHeldSessionIsTheMarkDrawingItself() throws {
         let view = WorkspacesView(look: .light, title: try TitleFont(directory: LookTests.fonts), mono: try LabelFont(directory: LookTests.fonts))
-        view.waitForSignIn()
+        view.waitForSignIn(at: "sail.example.com")
         let mark = try #require(view.card.subviews.first as? BrandMark, "the card holds \(view.card.subviews)")
-        #expect(view.card.subviews.count == 1 && mark.presentation == .drawing(label: "Asking who is signed in") && mark.markSide == BrandMark.side)
-        #expect(view.text == "Workspaces\nAsking who is signed in")
+        #expect(view.card.subviews.count == 1 && mark.presentation == .drawing(label: "Connecting to sail.example.com") && mark.markSide == BrandMark.side)
+        #expect(view.text == "Workspaces\nConnecting to sail.example.com" && view.asking)
         view.signedOut()
-        #expect(view.card.subviews.count == 1 && view.card.subviews.first is EmptyState, "signed out, the card holds \(view.card.subviews)")
+        #expect(view.card.subviews.isEmpty && !view.asking, "signed out, the card holds \(view.card.subviews)")
     }
 
     /// The asking mark's centre is the card's, exactly, in a window of either parity: the mark then
@@ -33,7 +34,7 @@ import Testing
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 480), styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = view
-        view.waitForSignIn()
+        view.waitForSignIn(at: "sail.example.com")
         view.layoutSubtreeIfNeeded()
         let mark = try #require(view.card.subviews.first as? BrandMark, "the card holds \(view.card.subviews)")
         #expect(mark.frame.midX == view.card.bounds.midX, "in a window \(width) pt wide the mark \(mark.frame) stands off the card's centre \(view.card.bounds.midX)")
@@ -49,11 +50,11 @@ import Testing
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 480), styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = view
-        view.waitForSignIn()
+        view.waitForSignIn(at: "sail.example.com")
         let mark = try #require(view.card.subviews.first as? BrandMark, "the card holds \(view.card.subviews)")
         let cycle = try #require(mark.sigma.animation(forKey: BrandMark.drawKey), "in a window, asking, the mark does not draw")
         view.look = .dark
-        view.waitForSignIn()
+        view.waitForSignIn(at: "sail.example.com")
         #expect(view.card.subviews.count == 1 && view.card.subviews.first === mark, "redrawn, the card holds \(view.card.subviews), not the mark it drew")
         #expect(mark.look == .dark && mark.sigma.animation(forKey: BrandMark.drawKey) === cycle, "redrawn, the mark is not in the dark look or began its cycle again")
     }
@@ -66,7 +67,7 @@ import Testing
         let window = shell.window
         window.orderFront(nil)
         defer { window.orderOut(nil) }
-        shell.select(.thisMac)
+        shell.select(.terminals)
         let strip = shell.thisMac.strip, titleBar = window.windowTitlebarLayoutDirection
         strip.userInterfaceLayoutDirection = titleBar == .rightToLeft ? .leftToRight : .rightToLeft
         shell.placeTheStrip()
