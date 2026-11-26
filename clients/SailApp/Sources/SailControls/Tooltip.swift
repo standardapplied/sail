@@ -20,7 +20,7 @@ public final class TooltipChip: NSView {
     }
 
     /// The shortcut is said; off while the key does nothing (a disabled button saying why).
-    var showsHint = true {
+    package var showsHint = true {
         didSet { if showsHint != oldValue { fit() } }
     }
 

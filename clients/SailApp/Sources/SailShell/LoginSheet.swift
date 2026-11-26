@@ -155,7 +155,7 @@ package final class LoginSheet: NSPanel, NSTextFieldDelegate {
         done.isHidden = naming == nil
         store.isEnabled = model.storable
         done.isEnabled = model.nameGiven
-        store.keyEquivalent = busy || naming != nil ? "" : "\r"
+        store.keyEquivalent = naming != nil ? "" : "\r"
         done.keyEquivalent = naming == nil ? "" : "\r"
         store.setAccessibilityLabel(busy ? StoreLogin.storing : model.storeName)
         change?.isEnabled = !busy

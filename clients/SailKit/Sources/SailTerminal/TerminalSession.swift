@@ -176,7 +176,7 @@ public final class TerminalSession: Sendable {
 
     private init(
         intent: Intent, door: Door, screen: Screen, timeout: Int = 10, stableAfter: Duration = TerminalSession.stableAttachment,
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        sleep: @escaping @Sendable (Duration) async throws -> Void = Door.wallClock,
         after: @escaping HoldTick.After = HoldTick.dispatch,
         patience: Duration = TerminalSession.runnerPatience,
         now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now }
@@ -290,18 +290,18 @@ public final class TerminalSession: Sendable {
     /// Ends this session at its host on a connection of its own, within `limit` in all. An open
     /// whose `Create` is still unanswered is waited for first, inside the same limit, so a session
     /// the host is still making is ended, never left behind unseen; a session never made is gone
-    /// already. This client detaches either way.
-    public func end(within limit: Duration = Door.endLimit) async -> EndOutcome {
+    /// already. This client detaches either way. `sleep` waits the limit out.
+    public func end(within limit: Duration = Door.endLimit, sleep: @escaping @Sendable (Duration) async throws -> Void = Door.wallClock) async -> EndOutcome {
         let began = now()
         let coming = core.withLock { core -> Bool in
             core.detaching = true
             return core.atHost == .coming
         }
-        if coming { _ = await Door.within(limit) { await self.createAnswered() } }
+        if coming { _ = await Door.within(limit, sleep: sleep) { await self.createAnswered() } }
         let held = self.atHost
         detach()
         guard held != .none else { return .gone }
-        return await door.end(state.session, within: limit - (now() - began), of: limit)
+        return await door.end(state.session, within: limit - (now() - began), of: limit, sleep: sleep)
     }
 
     /// Ends this client's part: the connection, or the one being admitted, closes and nothing

@@ -1,4 +1,5 @@
 import AppKit
+import SailControls
 import SailLook
 
 /// Every text field of the app's panes, a secure one included, drawn in the look: its text 8 pt
@@ -17,7 +18,7 @@ public final class FieldFrame: NSView {
         didSet { repaint() }
     }
 
-    private var focusWatch: NSKeyValueObservation?
+    private lazy var keysWatch = HolderWatch { [weak self] in self?.repaint() }
 
     /// Refused: what it holds was refused, until it is edited again or another action starts.
     var failed = false {
@@ -56,11 +57,9 @@ public final class FieldFrame: NSView {
         return editing ? (2, NSColor(look.accent)) : (1, NSColor(look.separatorStrong))
     }
 
-    override public func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        focusWatch = window?.observe(\.firstResponder) { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.repaint() }
-        }
+    override public func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        keysWatch.watch(newWindow)
     }
 
     override public func draw(_: NSRect) {

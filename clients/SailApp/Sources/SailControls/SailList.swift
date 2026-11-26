@@ -207,13 +207,30 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     public var onChoose: @MainActor (String?) -> Void = { _ in }
     /// A key the list's owner takes before the list does (a tree's → and ←): true, taken.
     package var onKey: (@MainActor (NSEvent) -> Bool)?
-    /// The list took the keys.
-    package var onFocus: @MainActor () -> Void = {}
+    /// What holds its window's keys changed (the list or another view taking them, the window
+    /// becoming or ceasing to be key), ``holdsKeys`` saying whether the list holds them now.
+    package var onKeys: @MainActor () -> Void = {}
+    private lazy var keysWatch = HolderWatch { [weak self] in self?.keysChanged() }
 
-    override public func becomeFirstResponder() -> Bool {
-        let taken = super.becomeFirstResponder()
-        if taken { onFocus() }
-        return taken
+    /// It holds the keys (``KeyHolder``): the chosen row's first action names ⏎ only then.
+    package var holdsKeys: Bool {
+        KeyHolder.holds(self)
+    }
+
+    /// It is its window's first responder, the window key or not: the chosen row's first action has
+    /// Return as its key then, and so keeps the key's room while a sheet or another window takes it.
+    var leadsKeys: Bool {
+        KeyHolder.isFirst(self)
+    }
+
+    override public func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        keysWatch.watch(newWindow)
+    }
+
+    private func keysChanged() {
+        enumerateAvailableRowViews { row, _ in (row as? SailRowView)?.refresh() }
+        onKeys()
     }
     private let mono: LabelFont
 
@@ -750,7 +767,8 @@ final class SailRowView: NSTableRowView {
     func refresh() {
         let paint = self.paint
         if numberOfColumns > 0, let cell = view(atColumn: 0) as? RowCell {
-            cell.show(paint.actions, chosen: isSelected, keys: isEmphasized, quiet: (superview as? SailList)?.primaryElsewhere == true)
+            let list = superview as? SailList
+            cell.show(paint.actions, chosen: isSelected, keys: list?.leadsKeys == true, quiet: list?.primaryElsewhere == true)
             (cell.content as? MarkedRow)?.mark(chosen: isSelected, strong: paint.strong)
         }
         needsDisplay = true
@@ -1036,12 +1054,21 @@ final class RowCell: NSView {
 
     /// The actions shown (over 120 ms, at once while motion is reduced) or gone; the primary loud
     /// while the row is chosen and the one primary is not elsewhere (`quiet`), and Return its key
-    /// (shown as ⏎) only while the list holds the keys.
+    /// only while the list is its window's first responder (`keys`), named (⏎) only while that
+    /// window is key too; laid out again whenever its Open's width changes, as the key's room comes
+    /// or goes, or its label turns bold with the primary.
     func show(_ shown: Bool, chosen: Bool, keys: Bool, quiet: Bool = false) {
         if let first {
             let kind: ButtonKind = chosen && !quiet ? .primary : .secondary, key = chosen && keys && returnKey ? "\r" : ""
-            if first.kind != kind { first.kind = kind }
-            if first.keyEquivalent != key { first.keyEquivalent = key }
+            if first.kind != kind || first.keyEquivalent != key {
+                let width = first.intrinsicContentSize.width
+                first.kind = kind
+                first.keyEquivalent = key
+                if first.intrinsicContentSize.width != width {
+                    actions.needsLayout = true
+                    needsLayout = true
+                }
+            }
         }
         if shown, let owed = moreOwed {
             moreOwed = nil
