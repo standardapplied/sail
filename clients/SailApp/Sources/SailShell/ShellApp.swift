@@ -571,7 +571,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         workspaces.onThisMacShown = { [weak self] in self?.thisMac.restoreOnce() }
         workspaces.local.on = { [weak self] act in self?.onThisMac(act) }
         workspaces.onOpen = { [weak self] project, name in
-            self?.select(.terminals)
+            self?.thisMac.showForATab()
             self?.thisMac.openWorkspace(project: project, name: name)
         }
         workspaces.remembered = { [defaults] person in ModeMemory.stored(in: defaults, for: person) }
@@ -581,7 +581,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         workspaces.keepChosen = { [defaults] name, person in defaults.set(name, forKey: Self.chosenKey(person)) }
         workspaces.onStart = { [weak self] start, project, name in
             guard let self else { return }
-            select(.terminals)
+            thisMac.showForATab()
             thisMac.startSession(start, project: project, name: name)
         }
         thisMac.onShow = { [weak self] in

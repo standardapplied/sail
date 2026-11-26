@@ -113,11 +113,14 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         case item(Item)
     }
 
-    /// Its look: a change redraws the rows and never tells `onChoose`, as no one chose.
+    /// Its look: a change redraws the rows, the chosen one still chosen, and never tells
+    /// `onChoose`, as no one chose.
     public var look: Look {
         didSet {
+            let kept = chosen
             reloading = true
             reloadKeepingHover()
+            select(kept)
             reloading = false
         }
     }

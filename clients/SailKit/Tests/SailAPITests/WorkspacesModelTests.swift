@@ -83,7 +83,7 @@ import Testing
             Issue.record("a failed listing took This Mac away: \(reopened.screen)")
             return
         }
-        #expect(!failed.listed && !failed.stale && failed.emptyLine == "Can’t reach main.acme.dev.")
+        #expect(!failed.listed && !failed.stale && failed.emptyLine == "Can’t reach the control plane.")
         reopened.projectsListed(.failure(.unexpected(route: "GET /v1/projects", status: 502)))
         #expect(reopened.panel.emptyLine == "Couldn’t list your projects.")
         reopened.projectsListed(Self.answer(.projects, "projects"))
@@ -108,7 +108,7 @@ import Testing
             Issue.record("no card while nothing could be listed: \(away.screen)")
             return
         }
-        #expect(!away.panel.listed && away.panel.emptyLine == "Can’t reach main.acme.dev.")
+        #expect(!away.panel.listed && away.panel.emptyLine == "Can’t reach the control plane.")
     }
 
     /// This Mac's page names the Mac and the control plane it is kept from, and says what it is not.

@@ -30,7 +30,8 @@ package final class LeftPanel: NSView {
     let heading = NSTextField(labelWithString: "Workspaces")
     /// "No project is open to you yet.", with none listed, or why none could be.
     let emptyLine = NSTextField(labelWithString: "")
-    /// Under the empty line while no project could be listed: the projects asked again.
+    /// Under the empty line while no project could be listed and This Mac's page is shown, where
+    /// no card offers its own: the projects asked again.
     package let tryAgain: SailButton
     /// Skeleton rows, each a tile and a name, before any project is listed.
     private let skeletons: [(tile: Skeleton, name: Skeleton)]
@@ -124,7 +125,7 @@ package final class LeftPanel: NSView {
         shown = panel
         let failed = !panel.listed && panel.emptyLine != nil
         loading(!panel.listed && !failed)
-        tryAgain.isHidden = !failed
+        tryAgain.isHidden = !failed || panel.chosen != WorkspacesModel.thisMac
         emptyLine.isHidden = panel.emptyLine == nil
         emptyLine.attributedStringValue = NSAttributedString(string: panel.emptyLine ?? "", attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .foregroundColor: NSColor(look.textTertiary),

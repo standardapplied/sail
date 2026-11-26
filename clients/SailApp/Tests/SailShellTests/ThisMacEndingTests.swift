@@ -352,6 +352,50 @@ import Testing
         #expect(await RunnerTabTests.until(10) { shown.restored && shown.model.tabs.count == 1 }, "the terminals shown first opened no tab")
     }
 
+    /// Terminals shown first once This Mac's page restored none opens a shell, as a first showing
+    /// always did, and only one: a later showing opens none, and New Shell's own showing opens its
+    /// shell alone.
+    @Test func terminalsShownAfterThePagesEmptyRestoreOpenOneShell() async throws {
+        let (door, other) = (try FakeRunnerDoor(thisMac: true), try FakeRunnerDoor(thisMac: true))
+        defer {
+            door.stop()
+            other.stop()
+        }
+        let shown = try Self.unshown(at: door)
+        shown.restoreOnce()
+        try #require(await RunnerTabTests.until(10) { shown.restored }, "the restore never ended")
+        shown.shown()
+        #expect(shown.model.tabs.count == 1, "Terminals' first showing opened \(shown.model.tabs.count) shells")
+        shown.shown()
+        #expect(shown.model.tabs.count == 1, "a second showing opened another shell")
+        let asked = try Self.unshown(at: other)
+        asked.onShow = { [weak asked] in asked?.shown() }
+        asked.restoreOnce()
+        try #require(await RunnerTabTests.until(10) { asked.restored }, "the restore never ended")
+        asked.newTab(nil)
+        #expect(asked.model.tabs.count == 1, "New Shell opened \(asked.model.tabs.count) shells")
+    }
+
+    /// End Session asks by its row's terminal, which Workspaces does not show, never Close's own
+    /// "Close this terminal?"; cancelled, the terminal stays.
+    @Test func endSessionAsksByTheRowsTerminal() async throws {
+        let door = try FakeRunnerDoor(thisMac: true)
+        defer { door.stop() }
+        let bench = try await Self.workbench(at: door, tabs: 2)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.orderOut(nil) }
+        window.contentView = bench
+        window.orderFront(nil)
+        let second = bench.model.tabs[1].focused
+        #expect(bench.panes[second]?.mayEndAProgram == true, "nothing would be asked")
+        bench.endSession(second)
+        let sheet = try #require(window.attachedSheet, "End Session asked nothing")
+        let words = WorkspacesViewTests.found(NSTextField.self, in: try #require(sheet.contentView)).map(\.stringValue)
+        #expect(words.contains("Close This Mac 2?"), "End Session asked \(words)")
+        window.endSheet(sheet, returnCode: .alertSecondButtonReturn)
+        #expect(bench.panes[second] != nil && door.sessions.count == 2, "cancelled, the terminal went")
+    }
+
     /// A pane of this Mac kept after its session ended is said Ended on This Mac's page, as its host
     /// said it and when, and the page is told.
     @Test func aKeptPaneThatEndedIsSaidEnded() async throws {

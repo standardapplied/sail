@@ -913,12 +913,35 @@ import Testing
         second.actions.forEach { $0.run() }
         #expect(acts == [.open(PaneID(2)), .end(PaneID(2))])
         view.sessions = [Self.shells[0]]
-        #expect(Self.said(view.local.list.entries) == ["head Sessions 1 -", row("1")])
+        #expect(Self.said(view.local.list.entries) == ["head Sessions 1 -", row("1")] && view.local.empty.isHidden)
+        view.sessions = []
+        view.layoutSubtreeIfNeeded()
+        let empty = view.local.empty, frame = try #require(empty.superview)
+        #expect(Self.said(view.local.list.entries) == ["head Sessions 0 -"] && !empty.isHidden && empty.stringValue == "No shell is open on this Mac.")
+        #expect(empty.frame.minY >= RowStyle.list.head && empty.frame.maxY <= frame.bounds.maxY && view.text.hasSuffix("\nNo shell is open on this Mac."), "\(empty.frame) in \(frame.bounds)")
+    }
+
+    /// This Mac's page follows the window from its least width back to a wide one: the window
+    /// keeps the size it is given, and the page, wide again, stands inside the section.
+    @Test func thisMacsPageFollowsTheWindowBackFromItsLeast() async throws {
+        let (view, window, _) = try await Self.listed()
+        defer { window.orderOut(nil) }
+        view.panel.onChoose(WorkspacesModel.thisMac)
+        view.sessions = Self.shells
+        let wide = window.frame
+        window.setFrame(NSRect(x: wide.minX, y: wide.maxY - 600, width: 420, height: 600), display: true)
+        window.layoutIfNeeded()
+        #expect(view.local.narrow, "the page is not narrow at \(view.local.frame.width) pt")
+        window.setFrame(wide, display: true)
+        window.layoutIfNeeded()
+        #expect(near(window.frame, wide), "the window is \(window.frame), given \(wide)")
+        #expect(!view.local.narrow && view.local.frame.minX >= -0.5 && view.local.frame.maxX <= view.bounds.maxX + 0.5, "the page \(view.local.frame) in \(view.bounds)")
     }
 
     /// The keys under This Mac's rows show only while a row is chosen in the list holding the keys,
-    /// told again as the keys leave it and come back; New Shell holds ⌘T and asks for a shell, its
-    /// one act (⌘T itself reaching it is the drive's `m-command-t`).
+    /// told again as the keys leave it and come back, and kept with the chosen row across a change
+    /// of look; New Shell holds ⌘T and asks for a shell, its one act (⌘T itself reaching it is the
+    /// drive's `m-command-t`).
     @Test func thisMacsKeysShowOnlyWhileARowIsChosen() async throws {
         let (view, window, _) = try await Self.listed()
         defer { window.orderOut(nil) }
@@ -934,6 +957,9 @@ import Testing
         #expect(await RunnerTabTests.until { shown() == 0 }, "\(shown()) keys shown with the keys out of the list")
         #expect(window.makeFirstResponder(view.local.list))
         #expect(await RunnerTabTests.until { shown() == 3 }, "the keys did not come back with the list holding them")
+        let chosen = view.local.list.chosen
+        view.look = .dark
+        #expect(chosen != nil && view.local.list.chosen == chosen && window.firstResponder === view.local.list && shown() == 3, "a change of look took the chosen row or its keys: \(view.local.list.chosen ?? "none"), \(String(describing: window.firstResponder))")
         var acts: [LocalProjectView.Act] = []
         view.local.on = { acts.append($0) }
         let button = view.local.newShell
@@ -996,7 +1022,7 @@ import Testing
         view.shown()
         #expect(!view.local.isHidden && view.project.isHidden && view.card.isHidden && view.text.hasPrefix("Workspaces\nThis Mac\n"), "\(view.text)")
         try #require(await RunnerTabTests.until { !view.panel.tryAgain.isHiddenOrHasHiddenAncestor }, "the failed listing never said so: \(view.panel.emptyLine.stringValue)")
-        #expect(view.panel.emptyLine.stringValue == "Can’t reach 127.0.0.1." && !view.panel.isHidden && !view.local.isHidden && view.card.isHidden)
+        #expect(view.panel.emptyLine.stringValue == "Can’t reach the control plane." && !view.panel.isHidden && !view.local.isHidden && view.card.isHidden)
         #expect(Self.said(view.panel.list.entries) == ["head This Mac - laptop", "item This Mac []", "head 127.0.0.1 - cloud"])
         let action = try #require(view.panel.tryAgain.action)
         #expect(NSApp.sendAction(action, to: view.panel.tryAgain.target, from: view.panel.tryAgain))
@@ -1017,7 +1043,7 @@ import Testing
         #expect(!view.local.isHidden && view.project.isHidden && view.panel.list.chosen == WorkspacesModel.thisMac, "\(view.text)")
         transport.release()
         try #require(await RunnerTabTests.until { !view.panel.tryAgain.isHiddenOrHasHiddenAncestor }, "the failed listing never said so")
-        #expect(!view.local.isHidden && view.card.isHidden && view.panel.emptyLine.stringValue == "Can’t reach 127.0.0.1.")
+        #expect(!view.local.isHidden && view.card.isHidden && view.panel.emptyLine.stringValue == "Can’t reach the control plane.")
     }
 
     /// A slow control plane holds This Mac's page behind nothing: chosen last it shows before the
@@ -1034,7 +1060,8 @@ import Testing
     }
 
     /// Signed in with nothing listed and This Mac not chosen, the card saying why stands in the
-    /// content beside the panel, which still lists This Mac.
+    /// content beside the panel, which still lists This Mac; the card's Try Again is the only one
+    /// until This Mac's page takes the card's place, the group's then offered.
     @Test func theUnreachableCardStandsBesideThisMac() async throws {
         let (view, window) = try Self.view(RecordedServer([]))
         defer { window.orderOut(nil) }
@@ -1043,8 +1070,27 @@ import Testing
         view.layoutSubtreeIfNeeded()
         #expect(!view.panel.isHidden && Self.said(view.panel.list.entries).first == "head This Mac - laptop")
         #expect(near(view.card.frame.midX, view.project.frame.midX) && view.project.frame.minX >= view.panel.frame.maxX - 0.5, "the card \(view.card.frame), beside \(view.panel.frame)")
+        #expect(view.panel.tryAgain.isHidden && !view.panel.emptyLine.isHidden, "two Try Again buttons beside the card")
         view.panel.onChoose(WorkspacesModel.thisMac)
         #expect(!view.local.isHidden && view.card.isHidden, "This Mac is not reached from the card's section")
+        #expect(!view.panel.tryAgain.isHidden, "This Mac's page shown, no Try Again is offered")
+    }
+
+    /// The group's can't-reach line leaves the control plane's name to the head above it, and at
+    /// the panel's least width it is drawn whole, a long host name notwithstanding.
+    @Test func theCantReachLineIsWholeAtThePanelsLeastWidth() async throws {
+        let (view, window) = try Self.view(RecordedServer([]), chosenLast: WorkspacesModel.thisMac)
+        defer { window.orderOut(nil) }
+        view.person = WorkspacesModel.Person(handle: "uday", admin: true, confirmed: true, controlPlane: "sail.standardapplied.com")
+        view.shown()
+        try #require(await RunnerTabTests.until { !view.panel.tryAgain.isHiddenOrHasHiddenAncestor }, "the failed listing never said so")
+        view.panel.setFrameSize(NSSize(width: LeftPanel.width.least, height: view.panel.frame.height))
+        view.panel.layoutSubtreeIfNeeded()
+        let line = view.panel.emptyLine
+        let fitted = line.intrinsicContentSize
+        #expect(line.stringValue == "Can’t reach the control plane.", "\(line.stringValue)")
+        #expect(fitted.width <= line.frame.width + 0.5 && fitted.height <= line.frame.height + 0.5, "the line needs \(fitted) and is drawn in \(line.frame.size)")
+        #expect(line.frame.maxX <= view.panel.bounds.width - 14 + 0.5 && view.panel.tryAgain.frame.minY >= line.frame.maxY, "\(line.frame), Try Again at \(view.panel.tryAgain.frame)")
     }
 }
 

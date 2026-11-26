@@ -228,7 +228,7 @@ public final class WorkspacesView: NSView {
         case let .shown(_, .noProjects(empty)): return (["Workspaces", empty.title, empty.body] + (empty.line.map { [$0] } ?? [])).joined(separator: "\n")
         case let .shown(panel, .thisMac):
             let lede = WorkspacesModel.thisMacLede(host: WorkbenchView.hostName, controlPlane: panel.controlPlane)
-            return (["Workspaces", WorkspacesModel.thisMac, lede] + sessions.map(LocalProjectView.said)).joined(separator: "\n")
+            return (["Workspaces", WorkspacesModel.thisMac, lede] + (sessions.isEmpty ? [LocalProjectView.noShell] : sessions.map(LocalProjectView.said))).joined(separator: "\n")
         case let .shown(_, .project(page)):
             var lines = ["Workspaces", page.name, page.lede] + (page.banner.map { [$0.title, $0.line] } ?? [])
             switch page.body {

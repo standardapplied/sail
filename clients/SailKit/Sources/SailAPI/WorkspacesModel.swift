@@ -643,11 +643,11 @@ public struct WorkspacesModel: Sendable {
     }
 
     /// What the panel says under the control plane's head: none of its projects open to the person,
-    /// or, none ever listed, why they could not be.
+    /// or, none ever listed, why they could not be, in words that leave its name to the head.
     private var emptyLine: String? {
         guard projects == nil else { return projects?.isEmpty == true ? "No project is open to you yet." : nil }
         guard let projectsFailure else { return nil }
-        if case .unreachable = projectsFailure { return "Can’t reach \(person.named)." }
+        if case .unreachable = projectsFailure { return "Can’t reach the control plane." }
         return "Couldn’t list your projects."
     }
 

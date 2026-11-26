@@ -19,6 +19,7 @@ package final class LocalProjectView: NSView {
     }
 
     static let endSession = "End Session", noteGap = 22.0, hintGap = 16.0, noteWidth = 520.0
+    static let noShell = "No shell is open on this Mac."
 
     /// The program a shell of this Mac runs: the person's login shell, as this Mac's terminal host
     /// reads it from the account database.
@@ -39,6 +40,8 @@ package final class LocalProjectView: NSView {
     package let newShell: SailButton
     let newShellIcon: SailButton
     let note = NSTextField(wrappingLabelWithString: "")
+    /// Under SESSIONS while this Mac has no terminal, in a row's place.
+    let empty = NSTextField(labelWithString: "")
     /// The keys that act on the chosen row, shown only while they do.
     let keys = NSStackView()
     private let frameView: ListFrame
@@ -126,13 +129,17 @@ package final class LocalProjectView: NSView {
         note.attributedStringValue = NSAttributedString(string: WorkspacesModel.thisMacNote, attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .foregroundColor: NSColor(look.textTertiary),
         ])
+        empty.attributedStringValue = NSAttributedString(string: Self.noShell, attributes: [
+            .font: NSFont.systemFont(ofSize: Look.Step.callout.points), .foregroundColor: NSColor(look.textTertiary),
+        ])
+        empty.isHidden = !shown.sessions.isEmpty
         newShell.isHidden = narrow
         newShellIcon.isHidden = !narrow
         list.actionsColumn = narrow ? columns.narrow : columns.wide
         list.returnKeyShown = !narrow
         let entries: [SailList.Entry] = [.head("Sessions", count: shown.sessions.count)] + shown.sessions.map { .item(item($0)) }
         list.entries = entries
-        frameView.height = entries.indices.reduce(0.0) { $0 + Double(list.tableView(list, heightOfRow: $1)) }
+        frameView.height = entries.indices.reduce(empty.isHidden ? 0.0 : RowStyle.list.height) { $0 + Double(list.tableView(list, heightOfRow: $1)) }
         showKeys()
     }
 
@@ -183,7 +190,7 @@ package final class LocalProjectView: NSView {
     }
 
     private func compose() {
-        for label in [title, lede, note] {
+        for label in [title, lede, note, empty] {
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
         title.lineBreakMode = .byTruncatingTail
@@ -209,6 +216,9 @@ package final class LocalProjectView: NSView {
         foot.addSubview(keys)
         note.translatesAutoresizingMaskIntoConstraints = false
         noted.addSubview(note)
+        empty.lineBreakMode = .byTruncatingTail
+        empty.translatesAutoresizingMaskIntoConstraints = false
+        frameView.addSubview(empty)
         column.orientation = .vertical
         column.alignment = .width
         column.spacing = 0
@@ -226,6 +236,9 @@ package final class LocalProjectView: NSView {
             note.leadingAnchor.constraint(equalTo: noted.leadingAnchor), note.trailingAnchor.constraint(lessThanOrEqualTo: noted.trailingAnchor),
             note.topAnchor.constraint(equalTo: noted.topAnchor), note.bottomAnchor.constraint(equalTo: noted.bottomAnchor),
             note.widthAnchor.constraint(lessThanOrEqualToConstant: Self.noteWidth),
+            empty.leadingAnchor.constraint(equalTo: frameView.leadingAnchor, constant: Look.hairline + RowStyle.list.leading),
+            empty.trailingAnchor.constraint(lessThanOrEqualTo: frameView.trailingAnchor, constant: -RowStyle.list.trailing),
+            empty.centerYAnchor.constraint(equalTo: frameView.bottomAnchor, constant: -Look.hairline - RowStyle.list.height / 2),
             buttons.topAnchor.constraint(equalTo: head.topAnchor), buttons.leadingAnchor.constraint(equalTo: words.trailingAnchor, constant: ProjectView.headGap),
             head.bottomAnchor.constraint(greaterThanOrEqualTo: words.bottomAnchor), head.bottomAnchor.constraint(greaterThanOrEqualTo: buttons.bottomAnchor), hug,
             keys.leadingAnchor.constraint(equalTo: foot.leadingAnchor), keys.centerYAnchor.constraint(equalTo: foot.centerYAnchor),

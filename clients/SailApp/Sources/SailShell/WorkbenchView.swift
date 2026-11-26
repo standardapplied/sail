@@ -57,7 +57,8 @@ public final class WorkbenchView: NSView {
     private let newTerminal: SailButton
     /// The first restore is under way or done.
     package private(set) var started = false
-    /// The terminals were shown: a restore that leaves no tab then opens one.
+    /// The terminals were shown, or asked to show for a tab about to open in them: a restore that
+    /// leaves no tab then opens one, and a later first showing opens none.
     private var shownOnce = false
     private var pendingKeep: DispatchWorkItem?
     private var kept: Data?
@@ -124,11 +125,19 @@ public final class WorkbenchView: NSView {
         model.focusedPane.flatMap { panes[$0.id] }
     }
 
-    /// The first showing restores what lives; every showing gives the focused pane the keys.
+    /// The first showing restores what lives, or, This Mac's page having restored none, opens a
+    /// shell as a first showing always did; every showing gives the focused pane the keys.
     func shown() {
         if let focused { window?.makeFirstResponder(focused.terminal) }
+        if !shownOnce, restored, model.tabs.isEmpty, held.isEmpty { openTab() }
         shownOnce = true
         restoreOnce()
+    }
+
+    /// The terminals shown for a tab about to open in them, so their first showing opens no other.
+    func showForATab() {
+        shownOnce = true
+        onShow()
     }
 
     /// What lives restored, once, whether or not the terminals are shown: This Mac's page lists
@@ -586,7 +595,7 @@ public final class WorkbenchView: NSView {
     }
 
     @objc public func newTab(_: Any?) {
-        onShow()
+        showForATab()
         guard restored else { return }
         openTab()
     }
