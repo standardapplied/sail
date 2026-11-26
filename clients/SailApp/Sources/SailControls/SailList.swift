@@ -245,6 +245,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             reloadKeepingHover()
             select(kept)
             reloading = false
+            forgetUnchosen()
             if chosen != kept { tell() }
         }
     }
@@ -284,6 +285,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             insertRows(at: IndexSet(integer: row), withAnimation: [])
             endUpdates()
             reloading = false
+            forgetUnchosen()
         }
     }
 
@@ -344,6 +346,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         endUpdates()
         appliedRows += inserted.count
         reloading = false
+        forgetUnchosen()
         if let hovered, remade.contains(hovered), let row = entries.firstIndex(where: { Self.id($0) == hovered }),
            let point = pointerNow, rect(ofRow: row).contains(convert(point, from: nil)) {
             (rowView(atRow: row, makeIfNecessary: true) as? SailRowView)?.hovered = true
@@ -607,6 +610,12 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         guard chosenIDs != told else { return }
         told = chosenIDs
         onChoose(chosen)
+    }
+
+    /// A row made again in place leaves the choice untold: it is no longer counted as told, so
+    /// choosing it again (a ⌘-click back into several) is told.
+    private func forgetUnchosen() {
+        told.removeAll { !chosenIDs.contains($0) }
     }
 
     // MARK: Moving rows by a drag

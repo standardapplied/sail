@@ -1105,10 +1105,11 @@ extension Driver {
 
     /// A press over the rows of `ids` as a person makes one: the button down on the first; then,
     /// from inside AppKit's tracking of the press, where a person's next events arrive, the request
-    /// held for `route` answered when given, and the section waited on for up to 5 s to name the
-    /// row pressed (long past that answer's own drawing, which would put another row back); a drag
-    /// over each row after the first; and the button let up on the last. Should that tracking never
-    /// run the app's work, the button is let up after 5 s and the press is said to have failed.
+    /// held for `route` answered when given, and the section waited on to name the row pressed; a
+    /// drag over each row after the first; and the button let up on the last. With `route`, the
+    /// press holds only when that answer came and the row was named while the button was down.
+    /// Should the tracking never run the app's work, the button is let up after ``Press/rescueAfter``
+    /// seconds, later than those waits together, and nothing more is posted.
     func press(_ ids: [String], in list: SailList, releasing route: String?, drawn: @escaping @MainActor () -> Bool) async -> (ok: Bool, said: String) {
         list.layoutSubtreeIfNeeded()
         guard let window = list.window else { return (false, "the panel is in no window") }
@@ -1128,16 +1129,21 @@ extension Driver {
                 let before = await GoldenDesk.shared.answered.filter { $0 == route }.count
                 await GoldenDesk.shared.release(route)
                 let answered = await waitUntilAsync(5) { await GoldenDesk.shared.answered.filter { $0 == route }.count > before }
-                let shown = await waitUntil(5, drawn)
-                press.said = "\(route) \(answered ? "answered" : "never answered") and \(shown ? "drawn" : "not drawn") during the press, \(list.chosen ?? "nothing") chosen then"
+                let named = await waitUntil(5, drawn)
+                press.held = answered && named
+                press.said = answered
+                    ? named ? "\(route) answered while the button was down, \(ids[0]) named" : "the section did not name \(ids[0]) while the button was down, \(list.chosen ?? "nothing") chosen then: the press was put back"
+                    : "\(route) was never answered while the button was down"
             } else {
                 press.said = "pressed"
             }
+            guard !press.rescued else { return }
             press.dragAndLetUp()
         }
         NSApp.sendEvent(press.down)
         await Task.yield()
-        return (!press.rescued, press.rescued ? "the press's tracking never ran the app's work; let up after 5 s" : press.said)
+        guard !press.rescued else { return (false, "the press's tracking never ran the app's work; let up after \(Int(Press.rescueAfter)) s") }
+        return (press.held, press.said)
     }
 
     private static func row(_ id: String, in list: SailList) -> Int? {
@@ -1178,7 +1184,7 @@ extension Driver {
 
 /// The events of one press over rows, at window points: the button down on the first, a drag over
 /// each after it, up on the last; and, should the press's tracking never run the app's work, the
-/// button let up after 5 s from a timer the tracking's run loop mode still fires.
+/// button let up after ``rescueAfter`` seconds by a perform the tracking's run loop mode still fires.
 @MainActor
 final class Press: NSObject {
     let down: NSEvent
@@ -1186,6 +1192,10 @@ final class Press: NSObject {
     private let up: NSEvent
     private(set) var rescued = false
     var said = "nothing ran during the press"
+    /// What the press was to show while the button was down, it showed.
+    var held = true
+    /// Later than a press's own waits together (5 s for the answer, 5 s for the row named).
+    static let rescueAfter = 12.0
 
     init?(_ points: [NSPoint], in window: NSWindow) {
         func event(_ type: NSEvent.EventType, at point: NSPoint) -> NSEvent? {
@@ -1201,7 +1211,7 @@ final class Press: NSObject {
     }
 
     func rescueLater() {
-        perform(#selector(rescue), with: nil, afterDelay: 5, inModes: [.common])
+        perform(#selector(rescue), with: nil, afterDelay: Self.rescueAfter, inModes: [.common])
     }
 
     @objc private func rescue() {

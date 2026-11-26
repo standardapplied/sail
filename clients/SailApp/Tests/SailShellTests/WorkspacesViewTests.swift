@@ -953,17 +953,17 @@ final class KeyWindow: NSWindow {
 }
 
 /// A press as AppKit makes one, its tracking played by hand, as no unit test runs AppKit's: the
-/// choice moves while the button is down and is told only as changing; ``letGo()`` lets it up,
-/// telling the change.
+/// choice moves while the button is down (`adding`, a ⌘-press adding the row to the choice) and is
+/// told only as changing; ``letGo()`` lets it up, telling the change.
 extension SailList {
-    func pressed(_ id: String) {
+    func pressed(_ id: String, adding: Bool = false) {
         guard let row = entries.firstIndex(where: { if case let .item(item) = $0 { item.id == id } else { false } }) else {
             Issue.record("no row \(id) to press")
             return
         }
         let told = delegate
         delegate = nil
-        selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        selectRowIndexes(IndexSet(integer: row), byExtendingSelection: adding)
         delegate = told
         tableViewSelectionIsChanging(Notification(name: NSTableView.selectionIsChangingNotification, object: self))
     }

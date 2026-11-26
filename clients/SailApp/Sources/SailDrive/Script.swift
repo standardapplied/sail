@@ -339,8 +339,9 @@ struct Step: Decodable {
     var chooseProject: String?
     /// The left panel's rows pressed as a person drags over them: the button down on the first,
     /// dragged over each after it and let up on the last; with `releasing`, that held route is
-    /// answered and drawn while the button is down. The section then names the last within
-    /// `seconds` (10 by default).
+    /// answered while the button is down (the press has already cancelled its listing, so it draws
+    /// nothing) and the section must name the first row before the button comes up. The section
+    /// then names the last within `seconds` (10 by default).
     var pressProject: [String]?
     /// The held route `pressProject` answers while its button is down.
     var releasing: String?

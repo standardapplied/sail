@@ -395,6 +395,22 @@ import Testing
         #expect(panel.list.chosen == b && panel.chosenPath == FileName(b), "the press left \(panel.list.chosen ?? "nothing") chosen, the panel \(panel.chosenPath.map { "\($0)" } ?? "nothing")")
     }
 
+    /// A file dropped from a choice of several when its row is made again (its unsaved dot coming),
+    /// then ⌘-pressed back into the choice, is told: the panel's chosen file is it again.
+    @Test func aFileMadeAgainOutOfAChoiceOfSeveralIsToldWhenPressedBack() throws {
+        let panel = try Self.played([Self.file("a.txt"), Self.file("b.txt"), Self.file("c.txt")])
+        let a = Self.root + "/a.txt", b = Self.root + "/b.txt"
+        panel.list.choose(a)
+        panel.list.pressed(b, adding: true)
+        panel.list.letGo()
+        try #require(panel.list.chosenIDs == [a, b] && panel.chosenPath == FileName(b), "chosen \(panel.list.chosenIDs)")
+        panel.unsaved = FileName(a)
+        try #require(panel.list.chosenIDs == [b], "a.txt's row made again stayed chosen: \(panel.list.chosenIDs)")
+        panel.list.pressed(a, adding: true)
+        panel.list.letGo()
+        #expect(panel.list.chosenIDs == [a, b] && panel.chosenPath == FileName(a), "pressed back, the panel holds \(panel.chosenPath.map { "\($0)" } ?? "nothing")")
+    }
+
     /// Calm: a tick, or a beat with nothing changed, makes no row and draws no line.
     @Test func aTickThatChangesNothingTouchesNoView() throws {
         let panel = try Self.played((0 ..< 40).map { Self.file("berth-\($0).json") })
