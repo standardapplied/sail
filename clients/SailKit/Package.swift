@@ -101,7 +101,7 @@ let package = Package(
             dependencies: ["SailWorkbench", "SailAPI", "SailTerminalWire", "SailKitTestSupport"],
             swiftSettings: strict
         ),
-        .testTarget(name: "SailMeasuresTests", dependencies: ["SailMeasures", "SailSurface"], swiftSettings: strict),
+        .testTarget(name: "SailMeasuresTests", dependencies: ["SailKitTestSupport", "SailMeasures", "SailSurface"], swiftSettings: strict),
         .testTarget(name: "SailDesignTests", dependencies: ["SailDesign", "SailVT"], swiftSettings: strict),
         .testTarget(
             name: "SailSurfaceTests",

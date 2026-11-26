@@ -4,6 +4,8 @@ import Glibc
 import Darwin
 #endif
 import Foundation
+import SailAPI
+import SailTerminal
 import Synchronization
 
 /// `sail _pty-host --local`, run by the probe (or a test) as its child: started, found serving by
@@ -14,10 +16,21 @@ final class LocalHostProcess: Sendable {
     static let startDeadline = 20
 
     private let binary: String
+    private let sleep: @Sendable (Duration) async throws -> Void
+    private let spawn: Spawning
     private let child = Mutex<pid_t?>(nil)
 
-    init(binary: String) {
+    /// Starts `executable` with `arguments` and its standard error where it is told.
+    typealias Spawning = @Sendable (_ executable: String, _ arguments: [String], _ errors: Spawn.Standard) throws(SpawnRefused) -> pid_t
+
+    /// `sleep` waits out the start's deadline; `spawn` starts the host.
+    init(
+        binary: String, sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        spawn: @escaping Spawning = { executable, arguments, errors throws(SpawnRefused) in try Spawn.process(executable, arguments, errors: errors) }
+    ) {
         self.binary = binary
+        self.sleep = sleep
+        self.spawn = spawn
     }
 
     deinit {
@@ -25,21 +38,41 @@ final class LocalHostProcess: Sendable {
     }
 
     /// Starts the host and returns once it says it serves; its standard error is read to its end
-    /// meanwhile and after, so the host never waits on a full pipe.
+    /// meanwhile and after, so the host never waits on a full pipe. This process gives up its own
+    /// copy of the pipe's writing end at once, so a host that ends is seen ending then. A host that
+    /// did not say it serves is killed and reaped before the start throws, so none is left behind.
     func start() async throws {
-        var ends: [Int32] = [0, 0]
-        guard pipe(&ends) == 0 else { throw ProbeError("no pipe for the host's output: \(errno)") }
-        let pid = try spawn(errorsTo: ends[1])
-        close(ends[1])
+        guard let ends = Descriptors.pipe() else { throw ProbeError("no pipe for the host's output: \(errno)") }
+        let spawned = Result { () throws(SpawnRefused) in try spawn(binary, ["_pty-host", "--local"], .descriptor(ends.write)) }
+        close(ends.write)
+        let pid: pid_t
+        do {
+            pid = try spawned.get()
+        } catch {
+            close(ends.read)
+            throw ProbeError("\(binary) could not be run: \(error)")
+        }
         child.withLock { $0 = pid }
-        let reading = ends[0]
-        let serving = await withCheckedContinuation { (said: CheckedContinuation<Bool, Never>) in
-            Thread { said.resume(returning: Self.readUntilServing(reading)) }.start()
+        let said = await said(ends.read)
+        guard said != true else { return }
+        crash()
+        guard said == nil else { throw ProbeError("\(binary) _pty-host --local ended before it said it serves") }
+        try Task.checkCancellation()
+        throw ProbeError("\(binary) _pty-host --local did not say it serves within \(Self.startDeadline) s")
+    }
+
+    /// Whether the host said it serves before its output ended; nil when the deadline passed first,
+    /// or the start was cancelled.
+    private func said(_ reading: Int32) async -> Bool? {
+        let first = Handoff<Bool?>()
+        Thread { first.answer(.success(Self.readUntilServing(reading))) }.start()
+        let deadline = Task { [sleep] in
+            try? await sleep(.seconds(Self.startDeadline))
+            first.answer(.success(nil))
         }
-        guard serving else {
-            crash()
-            throw ProbeError("\(binary) _pty-host --local did not say it serves within \(Self.startDeadline) s")
-        }
+        let said = await withTaskCancellationHandler { try? await first.value() } onCancel: { deadline.cancel() }
+        deadline.cancel()
+        return said
     }
 
     /// Stops the host with SIGTERM, as launchd and systemd do, and waits for it to exit: it ends
@@ -61,47 +94,24 @@ final class LocalHostProcess: Sendable {
         while waitpid(pid, &status, 0) < 0, errno == EINTR {}
     }
 
-    private func spawn(errorsTo descriptor: Int32) throws -> pid_t {
-        #if canImport(Darwin)
-        var actions: posix_spawn_file_actions_t?
-        #else
-        var actions = posix_spawn_file_actions_t()
-        #endif
-        posix_spawn_file_actions_init(&actions)
-        defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_adddup2(&actions, descriptor, 2)
-        posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0)
-        let words: [String] = [binary, "_pty-host", "--local"]
-        let settings: [String] = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" }
-        let arguments: [UnsafeMutablePointer<CChar>?] = words.map { strdup($0) } + [nil]
-        let environment: [UnsafeMutablePointer<CChar>?] = settings.map { strdup($0) } + [nil]
-        defer { (arguments + environment).forEach { free($0) } }
-        var pid: pid_t = 0
-        let spawned = posix_spawn(&pid, binary, &actions, nil, arguments, environment)
-        guard spawned == 0 else { throw ProbeError("\(binary) could not be run: \(String(cString: strerror(spawned)))") }
-        return pid
-    }
-
-    /// Reads the host's standard error until it says it serves, the deadline passes or it closes:
-    /// whether it said so. A thread of its own then drains the rest.
+    /// Reads the host's standard error until it says it serves or its output ends: whether it said
+    /// so. A thread of its own then drains the rest.
     private static func readUntilServing(_ descriptor: Int32) -> Bool {
-        let deadline = ContinuousClock.now + .seconds(startDeadline)
         var said = Data()
         var buffer = [UInt8](repeating: 0, count: 4096)
-        while ContinuousClock.now < deadline {
-            let left = Int32((deadline - ContinuousClock.now).components.seconds * 1000 + 1)
-            var ready = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
-            guard poll(&ready, 1, left) > 0 else { continue }
+        while true {
             let count = read(descriptor, &buffer, buffer.count)
-            guard count > 0 else { break }
+            if count < 0, errno == EINTR { continue }
+            guard count > 0 else {
+                close(descriptor)
+                return false
+            }
             said = (said + buffer[..<count]).suffix(64 * 1024)
             if String(decoding: said, as: UTF8.self).contains("pty-host: serving ") {
                 Thread { drain(descriptor) }.start()
                 return true
             }
         }
-        close(descriptor)
-        return false
     }
 
     private static func drain(_ descriptor: Int32) {

@@ -14,7 +14,7 @@ import Testing
 /// it answers, so closing never resets a connection with bytes unread.
 final class HTTPListener: Sendable {
     let port: UInt16
-    private let descriptor: Int32
+    private let listener: HeldListener
     private let heads = Heads()
 
     private final class Heads: Sendable {
@@ -22,21 +22,17 @@ final class HTTPListener: Sendable {
     }
 
     init(answer: @escaping @Sendable (_ requestLine: String) -> String) throws {
-        let descriptor = socket(AF_INET, Self.streamType, 0)
-        var address = sockaddr_in()
-        address.sin_family = sa_family_t(AF_INET)
-        address.sin_addr.s_addr = inet_addr("127.0.0.1")
-        var size = socklen_t(MemoryLayout<sockaddr_in>.size)
-        let bound = withUnsafeMutablePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(descriptor, $0, size) == 0 && getsockname(descriptor, $0, &size) == 0 }
-        }
-        guard descriptor >= 0, bound, Self.listening(descriptor) else { throw GoldenError(reason: "no loopback listener: \(errno)") }
-        port = UInt16(bigEndian: address.sin_port)
-        self.descriptor = descriptor
+        let listener = try HeldListener.loopback()
+        port = listener.port
+        self.listener = listener
         Thread { [heads] in
             while true {
-                let client = accept(descriptor, nil, nil)
-                guard client >= 0 else { return }
+                let client: Int32
+                switch listener.next() {
+                case let .connection(accepted): client = accepted
+                case .nothing: continue
+                case .failed, .closed: return
+                }
                 var received: [UInt8] = []
                 var buffer = [UInt8](repeating: 0, count: 4096)
                 func headEnd() -> Int? {
@@ -66,8 +62,7 @@ final class HTTPListener: Sendable {
     }
 
     deinit {
-        shutdown(descriptor, Int32(SHUT_RDWR))
-        close(descriptor)
+        listener.close()
     }
 
     /// The heads of the requests it was sent.
@@ -75,15 +70,6 @@ final class HTTPListener: Sendable {
         heads.list.withLock { $0 }
     }
 
-    private static func listening(_ descriptor: Int32) -> Bool {
-        listen(descriptor, 8) == 0
-    }
-
-    #if canImport(Glibc)
-    private static let streamType = Int32(SOCK_STREAM.rawValue)
-    #else
-    private static let streamType = SOCK_STREAM
-    #endif
 }
 
 /// S1 and S4 past the first hop: a control plane answering with a redirect to a name the address

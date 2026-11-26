@@ -96,23 +96,20 @@ import Testing
     /// A host in this process at `path` that admits any client and lists no session, as another
     /// program's would; the closure returned stops it.
     static func answeringHost(at path: String) throws -> @Sendable () -> Void {
-        let listener = socket(AF_UNIX, SOCK_STREAM, 0)
-        var address = sockaddr_un()
-        address.sun_family = sa_family_t(AF_UNIX)
-        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: path.utf8) }
-        let bound = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(listener, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
-        try #require(bound == 0 && listen(listener, 8) == 0)
+        let listener = try HeldListener.unix(path)
         let stopped = Flag()
         Thread {
             defer {
-                close(listener)
+                listener.close()
                 unlink(path)
             }
             while !stopped.raised.load(ordering: .relaxed) {
-                var ready = pollfd(fd: listener, events: Int16(POLLIN), revents: 0)
-                guard poll(&ready, 1, 50) == 1 else { continue }
-                let client = accept(listener, nil, nil)
-                guard client >= 0 else { continue }
+                let client: Int32
+                switch listener.next() {
+                case let .connection(accepted): client = accepted
+                case .nothing: continue
+                case .failed, .closed: return
+                }
                 answer(client)
                 close(client)
             }
@@ -219,20 +216,16 @@ import Testing
         let address = try HostAddress.local(home: folder.path)
         guard case let .unix(path) = address else { throw CancellationError() }
         try FileManager.default.createDirectory(atPath: URL(filePath: path).deletingLastPathComponent().path, withIntermediateDirectories: true)
-        let listener = socket(AF_UNIX, SOCK_STREAM, 0)
-        defer {
-            shutdown(listener, SHUT_RDWR)
-            close(listener)
-        }
-        var name = sockaddr_un()
-        name.sun_family = sa_family_t(AF_UNIX)
-        withUnsafeMutableBytes(of: &name.sun_path) { $0.copyBytes(from: path.utf8) }
-        let bound = withUnsafePointer(to: &name) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(listener, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
-        try #require(bound == 0 && listen(listener, 8) == 0)
+        let listener = try HeldListener.unix(path)
+        defer { listener.close() }
         Thread {
             while true {
-                let client = accept(listener, nil, nil)
-                guard client >= 0 else { return }
+                let client: Int32
+                switch listener.next() {
+                case let .connection(accepted): client = accepted
+                case .nothing: continue
+                case .failed, .closed: return
+                }
                 var one: Int32 = 1
                 setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
                 answer(client)
@@ -296,16 +289,11 @@ import Testing
     /// The process serving at a socket is found by its pid and its executable: here, this test's own.
     @Test func theProcessServingAtASocketIsFound() throws {
         let path = FileManager.default.temporaryDirectory.appending(path: "sail-peer-\(UUID().uuidString.prefix(8)).sock").path
-        let listener = socket(AF_UNIX, SOCK_STREAM, 0)
+        let listener = try HeldListener.unix(path)
         defer {
-            close(listener)
+            listener.close()
             unlink(path)
         }
-        var address = sockaddr_un()
-        address.sun_family = sa_family_t(AF_UNIX)
-        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: path.utf8) }
-        let bound = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(listener, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
-        try #require(bound == 0 && listen(listener, 1) == 0)
         let host = LocalHost(binary: nil, address: .unix(path: path), log: path + ".log", copies: URL(filePath: path + ".copies"))
         let serving = try #require(host.servingProcess())
         #expect(serving.pid == getpid())

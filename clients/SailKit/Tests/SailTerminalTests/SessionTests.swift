@@ -276,7 +276,7 @@ import Testing
         #expect(naps.durations == waits)
         #expect(naps.durations.dropLast().reduce(.zero, +) < TerminalSession.runnerPatience)
         #expect(naps.durations.reduce(.zero, +) >= TerminalSession.runnerPatience)
-        #expect(watch.seen.contains(.phase(.reconnecting(attempt: 11))))
+        try await watch.until("told its 11th attempt") { watch.seen.contains(.phase(.reconnecting(attempt: 11))) }
         let attach = TicketRequest.attach(session: "work")
         #expect(desk.requests == [.open(project: "", workspace: ""), attach, attach, attach], "a ticket never presented serves the attempts of its 20 s")
         let attempts = naps.durations.count
