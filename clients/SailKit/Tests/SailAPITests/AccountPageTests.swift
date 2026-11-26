@@ -42,6 +42,33 @@ import Testing
         #expect(!edge.soon && edge.said.hasSuffix(" · 3 days left"), "three days left is not soon: \(edge.said)")
         #expect(AccountPage.ending(now.addingTimeInterval(86_400), now: now, clock: Self.clock).said.hasSuffix(" · ends in 1 day"))
         #expect(AccountPage.ending(now.addingTimeInterval(3600), now: now, clock: Self.clock).said.hasSuffix(" · ends within a day"))
+        let almostThree = AccountPage.ending(now.addingTimeInterval(2 * 86_400 + 23 * 3600), now: now, clock: Self.clock)
+        #expect(almostThree.soon && almostThree.said.hasSuffix(" · ends in 2 days"), "2 days 23 hours left reads \(almostThree.said)")
+    }
+
+    /// A session whose end has passed says it ended, in plain words, and offers Sign In Again.
+    @Test func aSessionPastItsEndSaysItEnded() throws {
+        let now = try Self.instant("2026-11-26T16:47:00Z")
+        let ended = AccountPage.ending(now.addingTimeInterval(-600), now: now, clock: Self.clock)
+        #expect(ended == AccountPage.Ending(said: "Your sign-in ended on 26 November 2026, 16:37.", soon: true))
+        #expect(AccountPage.ending(now, now: now, clock: Self.clock).said == "Your sign-in ended on 26 November 2026, 16:47.")
+    }
+
+    /// Dates are said in the clock's own time zone, not the machine's: the end in Auckland falls on
+    /// the next day there, and a passkey used on a UTC day that is already over in Auckland was not
+    /// used today there.
+    @Test func datesAreSaidInTheClocksTimeZone() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "Pacific/Auckland"))
+        let auckland = AccountPage.Clock(calendar: calendar, locale: Locale(identifier: "en_GB"))
+        let now = try Self.instant("2026-11-26T16:47:00Z")
+        let later = AccountPage.ending(try Self.instant("2026-12-25T16:47:00Z"), now: now, clock: auckland)
+        #expect(later.said == "Signed in until 26 December 2026, 05:47 · 29 days left", "\(later.said)")
+        let passkeys = try Self.decoded(.passkeys, "passkeys").passkeys
+        let noonInUTC = try Self.instant("2026-11-11T12:00:00Z")
+        #expect(AccountPage.passkeyRows(passkeys, now: noonInUTC, clock: Self.clock).first?.detail == "Added 11 November 2026 · last used today")
+        let rows = AccountPage.passkeyRows(passkeys, now: noonInUTC, clock: auckland)
+        #expect(rows.first?.detail == "Added 11 November 2026 · last used 11 November", "\(rows.map(\.detail))")
     }
 
     /// A row per passkey of the caller's, in the server's order: its label, "This Mac" on the one
@@ -79,8 +106,16 @@ import Testing
         #expect(rows.map(\.login) == ["default", "work"] && rows.map(\.agent.harness) == ["claude-code", "codex"])
         let none = AccountPage.keyRows(try Self.agents(), logins: try Self.logins("logins-no-default"))
         #expect(none.map(\.display) == ["Claude Code", "Claude Code", "Codex CLI"])
-        #expect(none.map(\.detail) == ["No key. Sessions sign in with your Claude account.", "API key “home”", "API key “work” · new sessions and spec runs use it"])
+        #expect(none.map(\.detail) == ["No key in use. Sessions sign in with your Claude account.", "API key “home” · not in use", "API key “work” · new sessions and spec runs use it"])
         #expect(none.map(\.login) == [nil, "home", "work"] && Set(none.map(\.id)).count == 3)
+    }
+
+    /// Add Key on a harness with no key in use and Replace on its default; a key not in use offers
+    /// Remove alone, so replacing never changes which key new sessions take.
+    @Test func onlyTheKeyInUseIsReplacedAndAKeyNotInUseIsOnlyRemoved() throws {
+        let rows = AccountPage.keyRows(try Self.agents(), logins: try Self.logins("logins-no-default"))
+        #expect(rows.map(\.login) == [nil, "home", "work"] && rows.map(\.stores) == [true, false, true], "\(rows.map(\.detail))")
+        #expect(AccountPage.keyRows(try Self.agents(), logins: []).allSatisfy(\.stores))
     }
 
     /// The rows are the server's list, never one written in the app: a harness it stops listing has

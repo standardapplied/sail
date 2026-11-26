@@ -10,16 +10,16 @@ import SailWorkbench
 /// name, handle and role), then four groups in the list frame, each under its eyebrow. The control
 /// plane: its address, when the session ends, and its state as a pill; out of reach, a banner in the
 /// group with Try Again; under three days left, the end in the warning ink and Sign In Again. Your
-/// passkeys and your keys, each a list of the server's rows, the drawing mark in the frame until
-/// the first answer, the last answer dimmed while the call that drew it fails, each refusal said
-/// where it happened. Then Sign Out, beside what it ends and what it does not. No button here is
+/// passkeys and your keys, each a list of the server's rows asked at once and drawn as its own
+/// answer lands, the drawing mark in the frame until its first answer, the last answer dimmed while
+/// the call that drew it fails, each refusal said where it happened. Then Sign Out, beside what it ends and what it does not. No button here is
 /// primary. Signed out it shows nothing: the welcome is on Workspaces. Laid out whole by
 /// arithmetic in a scrolling column, mirrored right to left.
 @MainActor
 public final class AccountPane: NSView, NSMenuItemValidation {
     package static let inset = (top: 36.0, sides: 48.0)
     static let column = 640.0, groupGap = 28.0, headGap = 8.0, disc = 52.0, row = 56.0
-    static let padding = (vertical: 9.0, leading: 14.0, trailing: 12.0), dimmed = 0.45
+    static let refusalPadding = 9.0, bannerFoot = 12.0, dimmed = 0.45
 
     /// The harnesses the server lists and the person's logins: what the Keys group is drawn from.
     package struct KeyLists: Equatable, Sendable {
@@ -49,6 +49,13 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     /// The groups' last load, a person's last action: what a test awaits.
     package private(set) var loading: Task<Void, Never>?
     package private(set) var acting: Task<Void, Never>?
+    /// Told each time a group draws an answer: what a test awaits of one group alone.
+    var onDrawn: @MainActor () -> Void = {}
+    /// The rows whose removal is under way, by id: each takes no second Remove meanwhile.
+    package private(set) var removing: Set<String> = []
+    /// Makes a key just stored the one new sessions take where the server did not, and New Session
+    /// start with it: whether it is. The shell's is the New Session panel's own.
+    var useStored: @MainActor (StoreLogin, SailClient) async -> Bool = { stored, client in await WorkspacesView.inUse(stored, client) }
     /// The question asked now, or the Store a Key sheet up.
     package private(set) var question: Sheet?
     package private(set) var loginSheet: LoginSheet?
@@ -62,8 +69,12 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     /// Whose groups these are, the control plane and the handle: another's are cleared.
     private var whose: String?
     private var era = 0
-    /// Keys was chosen: the view goes to its keys once the groups' answers have drawn them.
-    private var toKeys = false
+    /// How many loads were started: only the latest one's answers are taken.
+    private var loads = 0
+    /// Keys was chosen as this load was started: the view goes to its keys once it has drawn them.
+    private var keysAfter: Int?
+    /// What the control plane's row and banner say now: they are made again only when it changes.
+    private var planeSaid: PlaneSaid?
 
     private let titleFont: TitleFont
     private let mono: TerminalFonts
@@ -103,8 +114,8 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         self.mono = mono
         self.labels = labels
         scroll = QuietScrollView(look: look)
-        disc = Initial("", side: Self.disc, font: CTFontCreateCopyWithAttributes(title.font(.title1), 24, nil, nil) as NSFont, look: look)
-        role = Pill(.unknown, plain: true, size: .small, look: look, mono: labels)
+        disc = Initial("", side: Self.disc, font: CTFontCreateCopyWithAttributes(title.font(.title1), 24, nil, nil) as NSFont, mark: \.headerAvatar, look: look)
+        role = Pill(plain: "", size: .small, look: look, mono: labels)
         state = Pill(.running, look: look, mono: labels)
         signInAgain = SailButton("Sign In Again", kind: .secondary, size: .small, look: look, target: nil, action: nil)
         signOut = SailButton("Sign Out", kind: .secondary, icon: .out, look: look, target: nil, action: nil)
@@ -128,6 +139,12 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     override public func viewDidUnhide() {
         super.viewDidUnhide()
         painter.shown()
+    }
+
+    /// Gone from view, the load under way is stopped: shown again, the groups are asked again.
+    override public func viewDidHide() {
+        super.viewDidHide()
+        loading?.cancel()
     }
 
     // MARK: What it says
@@ -163,11 +180,16 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         var lines = [content.name, [content.handle, content.role, (try? standing.whoami.get())?.email].compactMap { $0 }.joined(separator: " · ")]
         lines.append("\(content.address ?? "") · \(state.said)")
         lines += [ending?.said ?? ""] + planeLines
-        lines += passkeyRows.flatMap { row in [[row.label, row.thisMac ? AccountPage.thisMac : nil, row.detail].compactMap { $0 }.joined(separator: " · ")] + (refusals[row.id] ?? []) }
+        lines += passkeyRows.flatMap { row in [[row.label, row.thisMac ? AccountPage.thisMac : nil, rowDetail(row.id, row.detail)].compactMap { $0 }.joined(separator: " · ")] + (refusals[row.id] ?? []) }
         lines += passkeys.failure ?? []
-        lines += keyRows.flatMap { row in ["\(row.display) · \(row.detail)"] + (refusals[row.id] ?? []) }
+        lines += keyRows.flatMap { row in ["\(row.display) · \(rowDetail(row.id, row.detail))"] + (refusals[row.id] ?? []) }
         lines += (keys.failure ?? []) + [storedLine].compactMap { $0 }
         return (lines + [outWords.stringValue] + signOutLines).filter { !$0.isEmpty }.joined(separator: "\n")
+    }
+
+    /// A row's detail: what it says, or that its removal is under way.
+    private func rowDetail(_ id: String, _ said: String) -> String {
+        removing.contains(id) ? AccountPage.removing : said
     }
 
     // MARK: Asking
@@ -177,25 +199,64 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         load()
     }
 
-    /// Asks the server for the groups' answers while someone is signed in: their own passkeys, the
-    /// harnesses it knows and their keys. An answer for another sign-in is dropped; a group keeps
-    /// its last answer until a call answers again.
+    /// Asks the server for the groups' answers while someone is signed in, all at once: their own
+    /// passkeys, the harnesses it knows and their keys, each group drawn as its own answer lands. The
+    /// load before is stopped, and only the latest one's answers are taken, for this sign-in; a group
+    /// keeps its last answer until a call answers again. A call that finds the session ended hands
+    /// over to the check, which says so where every check does.
     func load() {
-        guard let client = flow.client(), !place.isEmpty else { return }
-        let era = self.era, place = self.place
+        guard let client = flow.client(), let plane = flow.standing?.controlPlane else { return }
+        loading?.cancel()
+        loads += 1
+        let load = (number: loads, era: era)
         loading = Task { [weak self] in
-            let passkeys = await Self.result { () async throws(SailError) in try await client.send(.passkeys).passkeys }
-            let agents = await Self.result { () async throws(SailError) in try await client.send(.knownAgents).agents }
-            let logins = await Self.result { () async throws(SailError) in try await client.send(.logins).logins }
-            guard let self, era == self.era else { return }
-            self.passkeys.take(passkeys, at: place)
-            keys.take(agents.flatMap { agents in logins.map { KeyLists(agents: agents, logins: $0) } }, at: place)
-            show()
-            if toKeys {
-                toKeys = false
-                scrollNowToKeys()
+            let failures = await withTaskGroup(of: SailError?.self) { group in
+                group.addTask { [weak self] in await self?.takePasskeys(from: client, in: load) ?? nil }
+                group.addTask { [weak self] in await self?.takeKeys(from: client, in: load) ?? nil }
+                var failures: [SailError] = []
+                for await case let failure? in group {
+                    failures.append(failure)
+                }
+                return failures
             }
+            guard let self, isLatest(load) else { return }
+            if failures.contains(where: { AccountRefusal($0, at: plane, step: .asking).reason == .ended }) { await flow.refresh() }
+            guard keysAfter == load.number else { return }
+            keysAfter = nil
+            scrollNowToKeys()
         }
+    }
+
+    private func isLatest(_ load: (number: Int, era: Int)) -> Bool {
+        !Task.isCancelled && load.number == loads && load.era == era
+    }
+
+    /// The passkeys' answer, drawn when it is the latest load's; why it failed.
+    private func takePasskeys(from client: SailClient, in load: (number: Int, era: Int)) async -> SailError? {
+        let answer = await Self.result { () async throws(SailError) in try await client.send(.passkeys).passkeys }
+        guard isLatest(load) else { return nil }
+        passkeys.take(answer, at: place)
+        show()
+        onDrawn()
+        return Self.failure(answer)
+    }
+
+    /// The harnesses' and the keys' answers, drawn together when they are the latest load's; why
+    /// either failed.
+    private func takeKeys(from client: SailClient, in load: (number: Int, era: Int)) async -> SailError? {
+        let agents = await Self.result { () async throws(SailError) in try await client.send(.knownAgents).agents }
+        let logins = await Self.result { () async throws(SailError) in try await client.send(.logins).logins }
+        guard isLatest(load) else { return nil }
+        let answer = agents.flatMap { agents in logins.map { KeyLists(agents: agents, logins: $0) } }
+        keys.take(answer, at: place)
+        show()
+        onDrawn()
+        return Self.failure(answer)
+    }
+
+    private static func failure<Value>(_ answer: Result<Value, SailError>) -> SailError? {
+        guard case let .failure(error) = answer else { return nil }
+        return error
     }
 
     private static func result<Value>(_ work: () async throws(SailError) -> Value) async -> Result<Value, SailError> {
@@ -236,14 +297,20 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     }
 
     /// Sign In Again: the sign-in ceremony at this control plane, the view kept; a refusal said in
-    /// the control plane's group.
+    /// the control plane's group, else the groups asked again, as the passkey signed in with is now
+    /// This Mac's.
     @objc func signInAgainNow(_: Any?) {
         signInLines = []
         guard flow.signInAgain(refused: { [weak self] refusal in
             self?.signInLines = refusal.lines
             self?.show()
         }) else { return }
-        acting = flow.underWay
+        let underWay = flow.underWay
+        acting = Task { [weak self] in
+            await underWay?.value
+            guard let self, signInLines.isEmpty else { return }
+            load()
+        }
         show()
     }
 
@@ -253,10 +320,11 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         case login(harness: String, name: String)
     }
 
-    /// Remove on a row asks first, Cancel the default; confirmed, `remove` is sent and its refusal
-    /// said under the row, the row kept. Either way the groups are asked again.
+    /// Remove on a row asks first, Cancel the default; confirmed, `remove` is sent, the row said as
+    /// being removed and taking no second Remove until it answers, and its refusal said under the
+    /// row, the row kept. Either way the groups are asked again.
     private func ask(_ asked: AccountPage.Question, row id: String, remove: Removal) {
-        guard let window, question == nil, loginSheet == nil, flow.client() != nil else { return }
+        guard let window, question == nil, loginSheet == nil, !removing.contains(id), flow.client() != nil else { return }
         let sheet = Sheet(title: asked.title, body: asked.body, confirm: "Remove", kind: .destructive, look: look, titleFont: titleFont)
         question = sheet
         sheet.ask(on: window) { [weak self] confirmed in
@@ -264,6 +332,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
             question = nil
             guard confirmed, let client = flow.client() else { return }
             refusals[id] = nil
+            removing.insert(id)
             show()
             let era = self.era
             acting = Task { [weak self] in
@@ -274,6 +343,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
                     }
                 }
                 guard let self, era == self.era else { return }
+                removing.remove(id)
                 if case let .failure(error) = answer { refusals[id] = lines(error) }
                 show()
                 load()
@@ -283,7 +353,8 @@ public final class AccountPane: NSView, NSMenuItemValidation {
 
     /// Add Key and Replace: the Store a Key sheet for the row's harness, storing under the key it
     /// replaces. Once stored, the clipboard is cleared where it still holds the key, the key is made
-    /// the one new sessions take where the server did not make it so, and the keys asked again.
+    /// the one new sessions take where the server did not make it so, as the New Session panel makes
+    /// it, and the keys asked again.
     private func storeKey(_ row: AccountPage.KeyRow) {
         guard let window, question == nil, loginSheet == nil, let client = flow.client(), let lists = keys.value,
               let asked = StoreLogin(row.agent, logins: lists.logins, address: place, naming: row.login)
@@ -300,14 +371,15 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         window.beginSheet(sheet)
     }
 
-    private func stored(_ stored: StoreLogin, by client: SailClient) {
+    /// A key the sheet stored, by `client`.
+    package func stored(_ stored: StoreLogin, by client: SailClient) {
         if case .stored(_, clearsClipboard: true) = stored.stage { pasteboard.clearContents() }
         storedLine = stored.stored
         let era = self.era
         acting = Task { [weak self] in
-            let used = await Self.result { () async throws(SailError) in if let use = stored.use { _ = try await client.send(use) } }
+            let inUse = await self?.useStored(stored, client)
             guard let self, era == self.era else { return }
-            if case .failure = used { storedLine = stored.notUsed }
+            if inUse == false { storedLine = stored.notUsed }
             show()
             load()
         }
@@ -316,7 +388,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     /// Keys, from the user menu: the view at its keys, as far as the page scrolls, and again once
     /// the groups asked as it was shown have answered.
     func scrollToKeys() {
-        toKeys = true
+        keysAfter = loads
         scrollNowToKeys()
     }
 
@@ -348,6 +420,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
             passkeys = .init()
             keys = .init()
             refusals = [:]
+            removing = []
             signInLines = []
             storedLine = nil
             if who != nil { signOutLines = [] }
@@ -357,7 +430,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         heading.attributedStringValue = words(content.name, titleFont.font(.title1) as NSFont, look.text, cut: true)
         disc.name = content.name
         handle.attributedStringValue = words(content.handle ?? "", labels.font(Look.Step.footnote.points) as NSFont, look.textSecondary, cut: true)
-        role.saying = content.role
+        role.words = content.role
         role.isHidden = content.role == nil
         email.attributedStringValue = words((try? standing?.whoami.get())?.email ?? "", .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary, cut: true)
         showPlane(content.plane)
@@ -376,41 +449,62 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         Double(window?.backingScaleFactor ?? 2)
     }
 
+    /// What the control plane's row and its banner say, in the look they are drawn in.
+    private struct PlaneSaid: Equatable {
+        let look: Look
+        let row: [String]
+        let warns: Bool
+        let banner: [String]
+        let unreachable: Bool
+    }
+
+    /// The control plane's row, its pill and Sign In Again, and its banner: the row and the banner
+    /// made again only when what they say changes, so a check keeps Try Again, and its focus.
     private func showPlane(_ plane: UserMenuContent.Plane?) {
-        let ending = self.ending
-        planeRow.removeFromSuperview()
-        planeRow = AccountRowView(.icon(.cloud), title: place, mono: true, detail: ending?.said ?? "", warns: ending?.soon == true, look: look, labels: labels)
-        planeFrame.addSubview(planeRow)
-        let (paint, said): (PillState, String) = switch plane {
+        let ending = self.ending, lines = planeLines
+        let unreachable: Bool = if case let .failure(refusal)? = flow.standing?.whoami { refusal.reason == .unreachable } else { false }
+        let said = PlaneSaid(look: look, row: [place, ending?.said ?? ""], warns: ending?.soon == true, banner: lines, unreachable: unreachable)
+        if said.look != planeSaid?.look || said.row != planeSaid?.row || said.warns != planeSaid?.warns {
+            planeRow.removeFromSuperview()
+            planeRow = AccountRowView(.icon(.cloud), title: place, mono: true, detail: said.row[1], warns: said.warns, look: look, labels: labels)
+            planeFrame.addSubview(planeRow)
+        }
+        if said.look != planeSaid?.look || said.banner != planeSaid?.banner || said.unreachable != planeSaid?.unreachable {
+            banner?.removeFromSuperview()
+            banner = lines.first.map { first in
+                let again = unreachable ? SailButton("Try Again", kind: .secondary, size: .small, look: look, target: self, action: #selector(tryAgain(_:))) : nil
+                let rest = lines.dropFirst().joined(separator: " ")
+                let made = Banner(.error, title: first, line: rest.isEmpty ? nil : rest, action: again, look: look)
+                planeFrame.addSubview(made)
+                return made
+            }
+        }
+        planeSaid = said
+        banner?.action?.isEnabled = !flow.busy
+        let (paint, words): (PillState, String) = switch plane {
         case .reconnecting?: (.starting, UserMenuContent.Plane.reconnecting.said)
         case .unreachable?: (.error, UserMenuContent.Plane.unreachable.said)
         case .connected?, nil: (.running, UserMenuContent.Plane.connected.said)
         }
         state.state = paint
-        state.saying = said
+        state.words = words
         signInAgain.isHidden = ending?.soon != true
         signInAgain.isEnabled = !flow.isActing
-        banner?.removeFromSuperview()
-        banner = nil
-        let lines = planeLines
-        guard let first = lines.first else { return }
-        let unreachable: Bool = if case let .failure(refusal)? = flow.standing?.whoami { refusal.reason == .unreachable } else { false }
-        let again = unreachable ? SailButton("Try Again", kind: .secondary, size: .small, look: look, target: self, action: #selector(tryAgain(_:))) : nil
-        again?.isEnabled = !flow.busy
-        let made = Banner(.error, title: first, line: lines.dropFirst().joined(separator: " ").nilIfEmpty, action: again, look: look)
-        planeFrame.addSubview(made)
-        banner = made
+    }
+
+    /// Remove in a row's ⋯ and on ⌘⌫: off while that row's removal is under way.
+    private func removal(of id: String, asking ask: @escaping @MainActor () -> Void) -> SailList.Action {
+        SailList.Action("Remove", key: "\u{8}", modifiers: .command, onRow: false, destructive: true, enabled: { [weak self] in self?.removing.contains(id) == false }, run: ask)
     }
 
     private func showPasskeys() {
         let rows = passkeyRows
         passkeyList.entries = rows.flatMap { row -> [SailList.Entry] in
-            let remove = SailList.Action("Remove", key: "\u{8}", modifiers: .command, onRow: false, destructive: true) { [weak self] in
-                self?.ask(row.removing, row: row.id, remove: .passkey(row.id))
-            }
-            let voice = [row.label, row.thisMac ? AccountPage.thisMac : nil, row.detail].compactMap { $0 }.joined(separator: ", ")
+            let remove = removal(of: row.id) { [weak self] in self?.ask(row.removing, row: row.id, remove: .passkey(row.id)) }
+            let detail = rowDetail(row.id, row.detail)
+            let voice = [row.label, row.thisMac ? AccountPage.thisMac : nil, detail].compactMap { $0 }.joined(separator: ", ")
             let item = SailList.Item(
-                id: row.id, name: row.label, voice: voice, content: self.rowView(.icon(.fingerprint), title: row.label, tag: row.thisMac ? AccountPage.thisMac : nil, detail: row.detail),
+                id: row.id, name: row.label, voice: voice, content: self.rowView(.icon(.fingerprint), title: row.label, tag: row.thisMac ? AccountPage.thisMac : nil, detail: detail),
                 actions: [remove], height: Self.row
             )
             return [.item(item)] + refused(row.id)
@@ -420,17 +514,15 @@ public final class AccountPane: NSView, NSMenuItemValidation {
 
     private func showKeys() {
         keyList.entries = keyRows.flatMap { row -> [SailList.Entry] in
-            let add = SailList.Action(row.login == nil ? "Add Key" : "Replace") { [weak self] in self?.storeKey(row) }
-            var actions = [add]
-            if let removing = row.removing, let login = row.login {
-                actions.append(SailList.Action("Remove", key: "\u{8}", modifiers: .command, onRow: false, destructive: true) { [weak self] in
-                    self?.ask(removing, row: row.id, remove: .login(harness: row.agent.harness, name: login))
-                })
+            let store = row.stores ? SailList.Action(row.login == nil ? "Add Key" : "Replace", run: { [weak self] in self?.storeKey(row) }) : nil
+            var actions = [store].compactMap(\.self)
+            if let asked = row.removing, let login = row.login {
+                actions.append(removal(of: row.id) { [weak self] in self?.ask(asked, row: row.id, remove: .login(harness: row.agent.harness, name: login)) })
             }
-            let offered = row.login == nil ? add : nil
+            let offered = row.login == nil ? store : nil, detail = rowDetail(row.id, row.detail)
             let item = SailList.Item(
-                id: row.id, name: row.display, voice: "\(row.display), \(row.detail)",
-                content: self.rowView(.letters(row.monogram), title: row.display, detail: row.detail, offer: offered),
+                id: row.id, name: row.display, voice: "\(row.display), \(detail)",
+                content: self.rowView(.letters(row.monogram), title: row.display, detail: detail, offer: offered),
                 actions: actions, height: Self.row, full: offered != nil
             )
             return [.item(item)] + refused(row.id)
@@ -442,8 +534,8 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     private func rowView(_ mark: AccountRowView.Mark, title: String, tag: String? = nil, detail: String, offer: SailList.Action? = nil) -> AccountRowView {
         let row = AccountRowView(mark, title: title, tag: tag, detail: detail, look: look, labels: labels)
         if let offer {
-            let run = RowRun(offer)
-            let button = SailButton(offer.title, kind: .secondary, size: .small, icon: .plus, look: look, target: run, action: #selector(RowRun.go(_:)))
+            let run = Run(offer)
+            let button = SailButton(offer.title, kind: .secondary, size: .small, icon: .plus, look: look, target: run, action: #selector(Run.go(_:)))
             button.setAccessibilityLabel("\(offer.title), \(title)")
             row.offer(button, keeping: run)
         }
@@ -454,7 +546,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     private func refused(_ id: String) -> [SailList.Entry] {
         guard let lines = refusals[id] else { return [] }
         let width = max(listWidth - RowStyle.list.leading - RowStyle.list.trailing, 1), look = look, scale = scale
-        let height = RefusalLines.height(lines, width: width, look: look, scale: scale) + 2 * Self.padding.vertical
+        let height = RefusalLines.height(lines, width: width, look: look, scale: scale) + 2 * Self.refusalPadding
         let item = SailList.Item(
             id: id + "\u{1F}refused", name: "", voice: lines.joined(separator: " "), content: RefusalLines(lines, width: width, look: look, scale: scale), height: height, inert: true
         )
@@ -625,7 +717,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         func at(_ rect: NSRect) -> NSRect {
             rightToLeft ? NSRect(x: width + 2 - Double(rect.maxX), y: Double(rect.minY), width: Double(rect.width), height: Double(rect.height)) : rect
         }
-        var trailing = 1 + width - Self.padding.trailing
+        var trailing = 1 + width - RowStyle.list.trailing
         let pill = state.intrinsicContentSize
         state.frame = at(NSRect(x: trailing - Double(pill.width), y: 1 + (Self.row - Double(pill.height)) / 2, width: Double(pill.width), height: Double(pill.height)))
         trailing -= Double(pill.width) + Look.Space.s
@@ -634,14 +726,14 @@ public final class AccountPane: NSView, NSMenuItemValidation {
             signInAgain.frame = at(signInAgain.frame(forAlignmentRect: NSRect(x: trailing - Double(size.width), y: 1 + (Self.row - Double(size.height)) / 2, width: Double(size.width), height: Double(size.height))))
             trailing -= Double(size.width) + Look.Space.s
         }
-        let rowHeight = Double(planeRow.intrinsicContentSize.height), lead = 1 + Self.padding.leading
+        let rowHeight = Double(planeRow.intrinsicContentSize.height), lead = 1 + RowStyle.list.leading
         planeRow.frame = at(NSRect(x: lead, y: 1 + (Self.row - rowHeight) / 2, width: max(trailing - lead, 1), height: rowHeight))
         guard let banner else { return Self.row }
-        let start = Self.padding.leading + AccountRowView.tile + AccountRowView.gap, bannerWidth = max(width - start - Self.padding.trailing, 1)
+        let start = RowStyle.list.leading + AccountRowView.tile + AccountRowView.gap, bannerWidth = max(width - start - RowStyle.list.trailing, 1)
         banner.frame = NSRect(x: 0, y: 0, width: bannerWidth, height: 10)
         let height = Double(banner.intrinsicContentSize.height)
         banner.frame = at(NSRect(x: 1 + start, y: 1 + Self.row, width: bannerWidth, height: height))
-        return Self.row + height + Self.padding.trailing
+        return Self.row + height + Self.bannerFoot
     }
 
     /// A list's rows in its frame, which holds them at their height, or the drawing mark while its
@@ -837,27 +929,6 @@ final class RefusalLines: NSTextField {
 
     override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: height)
-    }
-}
-
-/// What a row's own button runs: its list's action.
-@MainActor
-final class RowRun: NSObject {
-    let action: SailList.Action
-
-    init(_ action: SailList.Action) {
-        self.action = action
-    }
-
-    @objc func go(_: Any?) {
-        guard action.enabled() else { return }
-        action.run()
-    }
-}
-
-extension String {
-    var nilIfEmpty: String? {
-        isEmpty ? nil : self
     }
 }
 

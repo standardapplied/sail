@@ -60,16 +60,17 @@ import Testing
     }
 
     /// Paper and ink in the tokens, on a warm chrome: the chrome's text reads at 15:1 and more; the
-    /// only neutral fills are the pressed one and the loading placeholders; the wells and a person's
-    /// initial are outlines and ink, never filled, and the rail's chosen item stands on the chrome's
-    /// wash alone; the card has an outline only in dark; the accent's only tints are the focus halo
-    /// and selected text; errors are crimson, at least 20 degrees of hue from the accent.
+    /// only neutral fills are the pressed one, the loading placeholders and the Account view's header
+    /// disc; the wells and a person's initial beside a handle are outlines and ink, never filled, and
+    /// the rail's chosen item stands on the chrome's wash alone; the card has an outline only in
+    /// dark; the accent's only tints are the focus halo and selected text; errors are crimson, at
+    /// least 20 degrees of hue from the accent.
     @Test(arguments: [("light", Look.light), ("dark", Look.dark), ("light contrasted", Look.light.contrasted()), ("dark contrasted", Look.dark.contrasted())])
     func paperAndInkFillNothingAtRest(_ name: String, _ look: Look) {
         #expect(Self.contrast(look.text.rgb, look.chrome) >= 15, "\(name): text on the chrome is \(Self.contrast(look.text.rgb, look.chrome)):1")
         #expect(look.railChosen.fill == Tint(look.chromeWash) && look.chrome != look.canvas, "\(name): the rail's chosen item is not on the chrome's wash")
         #expect(look.cardEdge == (look.palette.isDark ? look.separator : nil), "\(name): the card's outline is \(String(describing: look.cardEdge))")
-        for (token, tint) in [("fillPressed", look.fillPressed), ("skeleton", look.skeleton)] {
+        for (token, tint) in [("fillPressed", look.fillPressed), ("skeleton", look.skeleton), ("headerAvatar", look.headerAvatar.fill ?? Tint(look.ink))] {
             #expect(tint.rgb == look.ink && tint.alpha < 0.12, "\(name) \(token) is \(Self.said(tint))")
         }
         for (role, mark) in [("railChosen", look.railChosen), ("well", look.well), ("wellChosen", look.wellChosen), ("avatar", look.avatar)] {
@@ -93,6 +94,14 @@ import Testing
         #expect(selection.background == Self.over(look.textSelection, look.palette.background) && selection.foreground == look.palette.foreground)
         #expect(Self.contrast(selection.foreground, selection.background) >= 4.5, "\(name) selected text is \(Self.contrast(selection.foreground, selection.background)):1")
         #expect(look.palette.idleCursor == Self.over(look.textTertiary, look.palette.background))
+    }
+
+    /// The Account view's header disc, as the page's `.av` draws it: the one initial on a fill, ink
+    /// at the page's hover strength (`--hover`) under a hairline ring (`--sep`), the initial in ink.
+    @Test(arguments: [("light", Look.light), ("dark", Look.dark)])
+    func theAccountsHeaderDiscIsTheHoverFillUnderAHairline(_ name: String, _ look: Look) {
+        let page = InkMark(fill: Tint(look.ink, alpha: look.palette.isDark ? 0.06 : 0.05), ink: look.text, edge: look.separator)
+        #expect(look.headerAvatar == page, "\(name): \(look.headerAvatar)")
     }
 
     /// The user menu's turned-over marks (its highlight, its avatar, the chosen Appearance): ink on

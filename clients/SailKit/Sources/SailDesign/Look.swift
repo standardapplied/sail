@@ -168,6 +168,12 @@ public struct Look: Equatable, Sendable {
         InkMark(fill: nil, ink: text, edge: separatorStrong)
     }
 
+    /// The Account view's header disc (the page's `.av`): the one initial on a fill, ink at the
+    /// page's hover strength under a hairline ring.
+    public var headerAvatar: InkMark {
+        InkMark(fill: Tint(ink, alpha: palette.isDark ? 0.06 : 0.05), ink: text, edge: separator)
+    }
+
     /// This look with its terminal's selection, `textSelection` over the terminal's background under
     /// its own foreground, and its idle cursor, `textTertiary` over that background: both opaque,
     /// fixed colours, so a change of those tokens reaches the terminal too.

@@ -462,6 +462,19 @@ import Testing
         }
     }
 
+    /// A pill says words of its own in its state's paint, changed as they change; a plain pill says
+    /// its words with no dot, in the secondary ink, as the page's `.pill.plain` does.
+    @Test(arguments: [Look.light, .dark])
+    func aPillSaysItsOwnWordsAndAPlainOneInTheSecondaryInk(_ look: Look) throws {
+        let state = Pill(.running, look: look, mono: try Self.mono())
+        state.words = "Connected"
+        #expect(state.said == "Connected" && state.accessibilityLabel() == "Connected" && state.paint.text == PillPaint(.running, look: look).text && !state.dot.isHidden)
+        let role = Pill(plain: "", size: .small, look: look, mono: try Self.mono())
+        let narrow = Double(role.intrinsicContentSize.width)
+        role.words = "Admin"
+        #expect(role.plain && role.said == "Admin" && role.paint.text == look.textSecondary && role.dot.isHidden && Double(role.intrinsicContentSize.width) > narrow)
+    }
+
     /// The keycap: a 1 pt edge on top, a 2 pt foot.
     @Test func theKeycapHasAFoot() throws {
         let look = Look.light, canvas = NSColor(Tint(look.canvas))

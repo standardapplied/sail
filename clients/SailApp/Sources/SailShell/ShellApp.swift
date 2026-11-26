@@ -562,6 +562,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         workspaces.remembered = { [defaults] person in ModeMemory.stored(in: defaults, for: person) }
         workspaces.memory = workspaces.remembered(workspaces.person)
         workspaces.keep = { [defaults] memory, person in memory.store(in: defaults, for: person) }
+        account.useStored = { [weak self] stored, client in await self?.workspaces.useStored(stored, by: client) ?? false }
         workspaces.lastChosen = { [defaults] person in defaults.string(forKey: Self.chosenKey(person)) }
         workspaces.keepChosen = { [defaults] name, person in defaults.set(name, forKey: Self.chosenKey(person)) }
         workspaces.onStart = { [weak self] start, project, name in

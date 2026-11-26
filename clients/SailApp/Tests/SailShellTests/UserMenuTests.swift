@@ -218,9 +218,9 @@ import Testing
         NotificationCenter.default.post(name: shell.userMenu.popover.keysLeft, object: shell.window)
         #expect(!shell.userMenu.isOpen, "the window giving up the keys left it open")
         try Self.open(shell)
-        let logins = try #require(view.items.first { $0.item == .keys })
-        #expect(logins.drawn.ink == shell.look.text, "Keys is drawn as one that cannot be chosen")
-        logins.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: logins.bounds.midX, y: logins.bounds.midY), in: logins))
+        let keys = try #require(view.items.first { $0.item == .keys })
+        #expect(keys.drawn.ink == shell.look.text, "Keys is drawn dimmed, as one that cannot be chosen")
+        keys.mouseUp(with: try Self.mouse(.leftMouseUp, at: NSPoint(x: keys.bounds.midX, y: keys.bounds.midY), in: keys))
         #expect(!shell.userMenu.isOpen && shell.rail.selected == .account, "Keys showed \(shell.rail.selected?.rawValue ?? "nothing")")
         try Self.open(shell)
         let account = try #require(view.items.first { $0.item == .account })
@@ -283,8 +283,9 @@ import Testing
         #expect(taken == .some(nil) && Self.appearance(of: shell) == nil && Appearance.stored(in: shell.defaults) == .auto, "Auto set an appearance of the app's own")
     }
 
-    /// VoiceOver hears a menu named Account, its items as menu items by their titles, and Appearance as a group of three choices, the chosen one on; pressing
-    /// Account by VoiceOver chooses it.
+    /// VoiceOver hears a menu named Account, its items as menu items by their titles, and
+    /// Appearance as a group of three choices, the chosen one on; pressing Account by VoiceOver
+    /// chooses it.
     /// The window giving up the keys closes the menu, by the window's own notice: the one test whose
     /// shell keeps the real name (no other test's window can close a menu it does not hold open).
     @Test func theWindowGivingUpTheKeysClosesTheMenu() throws {

@@ -496,18 +496,27 @@ public final class WorkspacesView: NSView {
         newSession.say(.stored(line))
         byAPerson { [weak self] in
             guard let self else { return }
-            let inUse = await Self.inUse(stored, client)
+            let inUse = await useStored(stored, by: client)
             guard era == self.era else { return }
-            if inUse { memory.choose(.key, for: stored.harness) }
             let answer = await Self.result { () async throws(SailError) in try await client.send(.agents(workspace: place.name, project: place.project)) }
             guard era == self.era, newSession.isOpen, startingIn.map({ $0 == place }) == true else { return }
             newSession.show(said(answer), memory: memory, stored: inUse ? line : notUsed, harness: stored.harness, inUse: inUse)
         }
     }
 
+    /// Makes the key just stored the one Start takes where the server did not make it the default
+    /// as it stored it; once it is, and the same person is still signed in, their starts take it as
+    /// the harness's way in. Whether it is. A key stored from the Account view is made so here too.
+    func useStored(_ stored: StoreLogin, by client: SailClient) async -> Bool {
+        let era = self.era
+        let inUse = await Self.inUse(stored, client)
+        if inUse, era == self.era { memory.choose(.key, for: stored.harness) }
+        return inUse
+    }
+
     /// Whether the key just stored is the one Start takes: the server made it the default as it
     /// stored it, or made it so when asked now.
-    private static func inUse(_ stored: StoreLogin, _ client: SailClient) async -> Bool {
+    static func inUse(_ stored: StoreLogin, _ client: SailClient) async -> Bool {
         guard let use = stored.use else { return true }
         return (try? await client.send(use)) != nil
     }

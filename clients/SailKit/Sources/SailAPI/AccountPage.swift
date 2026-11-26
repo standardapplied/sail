@@ -27,6 +27,8 @@ public enum AccountPage {
     }
 
     public static let thisMac = "This Mac"
+    /// A row's detail while its removal is under way.
+    public static let removing = "Removing"
     public static let passkeysNote =
         "Passkeys sign you in. They live in your iCloud Keychain or on a security key; Sail holds none of them. A new one needs a ticket from your admin."
     public static let keysNote =
@@ -43,7 +45,7 @@ public enum AccountPage {
     }
 
     /// When the session ends: its day and time, and how long is left; under three days left it is
-    /// `soon`, said as when it ends.
+    /// `soon`, said as when it ends; past its end, said as ended, and `soon`, so Sign In Again shows.
     public struct Ending: Equatable, Sendable {
         public let said: String
         public let soon: Bool
@@ -55,6 +57,7 @@ public enum AccountPage {
     }
 
     public static func ending(_ until: Date, now: Date, clock: Clock = Clock()) -> Ending {
+        guard until > now else { return Ending(said: "Your sign-in ended on \(clock.day(until)), \(clock.time(until)).", soon: true) }
         let days = Int((until.timeIntervalSince(now) / 86_400).rounded(.down))
         let left = switch days {
         case 3...: "\(days) days left"
@@ -128,6 +131,12 @@ public enum AccountPage {
             String(agent.display.prefix(2))
         }
 
+        /// It offers Add Key (no key in use) or Replace (the key in use); a key not in use offers
+        /// Remove alone, so replacing a key never changes which one new sessions take.
+        public var stores: Bool {
+            login == nil || isDefault
+        }
+
         /// What removing its key asks; nil for a row with no key.
         public var removing: Question? {
             guard let login else { return nil }
@@ -141,8 +150,9 @@ public enum AccountPage {
     }
 
     /// A row per harness the server lists, in its order: its default key ("API key “default” · new
-    /// sessions and spec runs use it"), or "No key." and how its sessions sign in without one; then a
-    /// row for each further key of it. A key of a harness the server does not list has no row.
+    /// sessions and spec runs use it"), or "No key." ("No key in use." when it has keys) and how its
+    /// sessions sign in without one; then a row for each further key of it, not in use. A key of a
+    /// harness the server does not list has no row.
     public static func keyRows(_ agents: [KnownAgent], logins: [StoredLogin]) -> [KeyRow] {
         agents.flatMap { agent -> [KeyRow] in
             let declared = agent.declaration, signIn = agent.signIn?.name
@@ -150,9 +160,9 @@ public enum AccountPage {
             let own = logins.filter { $0.harness == agent.name }
             let first = own.first(where: \.isDefault).map { login in
                 KeyRow(agent: declared, signIn: signIn, login: login.name, isDefault: true, detail: "\(kind(login)) “\(login.name)” · new sessions and spec runs use it")
-            } ?? KeyRow(agent: declared, signIn: signIn, login: nil, isDefault: false, detail: "No key." + (signIn.map { " Sessions sign in with \(lowered($0))." } ?? ""))
+            } ?? KeyRow(agent: declared, signIn: signIn, login: nil, isDefault: false, detail: (own.isEmpty ? "No key." : "No key in use.") + (signIn.map { " Sessions sign in with \(lowered($0))." } ?? ""))
             return [first] + own.filter { !$0.isDefault }.map { login in
-                KeyRow(agent: declared, signIn: signIn, login: login.name, isDefault: false, detail: "\(kind(login)) “\(login.name)”")
+                KeyRow(agent: declared, signIn: signIn, login: login.name, isDefault: false, detail: "\(kind(login)) “\(login.name)” · not in use")
             }
         }
     }

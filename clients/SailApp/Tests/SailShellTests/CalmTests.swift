@@ -44,7 +44,8 @@ import Testing
 
     /// The welcome and the Account pane, in either look: every button is the library's (a system
     /// button's dark bezel is a grey slab the count cannot see), no grey is filled, and the one
-    /// accent fill is the welcome's primary, refused too; signed in, Sign Out is outlined and none is.
+    /// accent fill is the welcome's primary, refused too; signed in, Sign Out is outlined and none is,
+    /// and the one grey is the header's disc, filled as the page draws it.
     @Test(arguments: [Look.light, .dark])
     func theWelcomeAndTheAccountPaneAreCalm(_ look: Look) async throws {
         let (welcome, window) = try WelcomeViewTests.shown(RecordedServer([]), look: look)
@@ -66,7 +67,7 @@ import Testing
         pane.layoutSubtreeIfNeeded()
         #expect(pane.flow.standing != nil && !pane.signOut.isHiddenOrHasHiddenAncestor && pane.signOut.kind == .secondary, "not signed in, or Sign Out is not the outlined secondary")
         let signedIn = Count(marks(in: pane))
-        #expect(signedIn.neutral == 0 && signedIn.fill == 0 && signedIn.tint == 0, "signed in: \(signedIn)")
+        #expect(signedIn.neutral == AccountPane.disc * AccountPane.disc && signedIn.fill == 0 && signedIn.tint == 0, "signed in: \(signedIn)")
     }
 
     /// The rail's chosen item: one accent bar on an ink fill.

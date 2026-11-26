@@ -1188,18 +1188,18 @@ final class RowMenu: NSMenu, NSMenuDelegate {
 /// An action as a target: buttons and menu items send `go(_:)`, and a menu item is on only while
 /// its action can be done.
 @MainActor
-final class Run: NSObject, NSMenuItemValidation {
-    let action: SailList.Action
+package final class Run: NSObject, NSMenuItemValidation {
+    package let action: SailList.Action
 
-    init(_ action: SailList.Action) {
+    package init(_ action: SailList.Action) {
         self.action = action
     }
 
-    func validateMenuItem(_: NSMenuItem) -> Bool {
+    package func validateMenuItem(_: NSMenuItem) -> Bool {
         action.enabled()
     }
 
-    @objc func go(_: Any?) {
+    @objc package func go(_: Any?) {
         if action.enabled() { action.run() }
     }
 }

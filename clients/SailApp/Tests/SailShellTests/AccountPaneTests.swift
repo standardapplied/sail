@@ -4,6 +4,7 @@ import SailAPI
 import SailControls
 import SailKitTestSupport
 import SailLook
+import SailWorkbench
 @testable import SailShell
 import Synchronization
 import Testing
@@ -378,7 +379,11 @@ actor Desk: Transport {
 
     /// From now on the route `name` recorded is answered as it was.
     func answer(_ name: String) throws {
-        let exchange = try Exchange(name)
+        answer(try Exchange(name))
+    }
+
+    /// From now on `exchange`'s route is answered as it says.
+    func answer(_ exchange: Exchange) {
         answers["\(exchange.method) \(exchange.path)"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: exchange.body)
     }
 
@@ -461,7 +466,7 @@ actor Desk: Transport {
     }
 
     /// Signed in as uday at `desk` for a month, the groups' first answers taken.
-    static func signedIn(_ desk: Desk, width: Double = 900, look: Look = .light, lasts: TimeInterval = month) async throws -> (AccountPane, NSWindow) {
+    static func signedIn(_ desk: any Transport, width: Double = 900, look: Look = .light, lasts: TimeInterval = month) async throws -> (AccountPane, NSWindow) {
         let pane = try pane(remembering: "uday", desk, lasts: lasts)
         let window = shown(pane, width: width, look: look)
         await pane.flow.refresh()
@@ -486,8 +491,12 @@ actor Desk: Transport {
         try #require(list.entries.lazy.compactMap { entry -> SailList.Item? in if case let .item(item) = entry, item.name == name { item } else { nil } }.first, "no row \(name)")
     }
 
+    static func items(_ list: SailList) -> [SailList.Item] {
+        list.entries.compactMap { entry in if case let .item(item) = entry, !item.inert { item } else { nil } }
+    }
+
     static func names(_ list: SailList) -> [String] {
-        list.entries.compactMap { entry in if case let .item(item) = entry, !item.inert { item.name } else { nil } }
+        items(list).map(\.name)
     }
 
     /// The header says what the user menu says: its name (the disc's initial), handle and role, then
@@ -500,6 +509,7 @@ actor Desk: Transport {
         #expect(pane.handle.stringValue == content.handle && content.handle == "@uday")
         #expect(pane.role.said == content.role && content.role == "Admin" && pane.role.plain && !pane.role.isHidden)
         #expect(pane.email.stringValue == "uday@example.com")
+        #expect(pane.disc.drawn == pane.look.headerAvatar && pane.disc.drawn.fill != nil, "the disc is not the page's filled one: \(pane.disc.drawn)")
         #expect(pane.text.hasPrefix("Uday\n@uday · Admin · uday@example.com\n127.0.0.1:7979 · Connected\nSigned in until "), "\(pane.text)")
     }
 
@@ -531,7 +541,10 @@ actor Desk: Transport {
         let (pane, window) = try await Self.signedIn(desk)
         defer { window.orderOut(nil) }
         #expect(Self.names(pane.passkeyList) == ["Sail for Mac", "Sail for iPhone"] && Self.names(pane.keyList) == ["Claude Code", "Claude Code", "Codex CLI"])
-        #expect(pane.text.contains("Sail for Mac · This Mac · Added 11 November 2026") && pane.text.contains("Claude Code · No key. Sessions sign in with your Claude account."))
+        #expect(pane.text.contains("Sail for Mac · This Mac · Added 11 November 2026"))
+        #expect(pane.text.contains("Claude Code · No key in use. Sessions sign in with your Claude account.\nClaude Code · API key “home” · not in use"), "\(pane.text)")
+        let actions = Self.items(pane.keyList).map { $0.actions.map(\.title) }
+        #expect(actions == [["Add Key"], ["Remove"], ["Replace", "Remove"]], "a key not in use offers more than Remove: \(actions)")
         let first = try #require(pane.keyList.rowView(atRow: 0, makeIfNecessary: true)?.view(atColumn: 0) as? NSView)
         let offered = WorkspacesViewTests.found(SailButton.self, in: first).filter { !$0.isHiddenOrHasHiddenAncestor }.map(\.title)
         #expect(offered == ["Add Key"], "the row with no key offers \(offered)")
@@ -544,17 +557,19 @@ actor Desk: Transport {
 
     /// Until its first answer each list's frame holds the drawing mark; a later call keeps the last
     /// answer on screen while it goes.
-    @Test func untilItsFirstAnswerAGroupDrawsTheMark() async throws {
+    @Test(arguments: ["GET /v1/passkeys", "GET /v1/logins"])
+    func untilItsFirstAnswerAGroupDrawsTheMark(_ held: String) async throws {
         let desk = try Desk(Self.goldens)
-        await desk.hold("GET /v1/passkeys")
+        await desk.hold(held)
         let pane = try Self.pane(remembering: "uday", desk, lasts: Self.month)
         let window = Self.shown(pane)
         defer { window.orderOut(nil) }
         await pane.flow.refresh()
         await desk.arrived(during: pane.loading)
         pane.layoutSubtreeIfNeeded()
-        #expect(!pane.passkeyMark.isHidden && !pane.keyMark.isHidden && pane.passkeyList.isHidden && pane.keyList.isHidden, "no mark while the first answer is awaited")
-        #expect(pane.passkeyMark.presentation == .drawing(label: nil) && pane.passkeyMark.markSide == 28 && pane.passkeyMark.superview === pane.passkeyFrame)
+        let (mark, list, frame) = held.hasSuffix("passkeys") ? (pane.passkeyMark, pane.passkeyList, pane.passkeyFrame) : (pane.keyMark, pane.keyList, pane.keyFrame)
+        #expect(!mark.isHidden && list.isHidden, "no mark while the first answer is awaited")
+        #expect(mark.presentation == .drawing(label: nil) && mark.markSide == 28 && mark.superview === frame)
         await desk.release()
         await pane.loading?.value
         #expect(pane.passkeyMark.isHidden && pane.keyMark.isHidden && Self.names(pane.passkeyList).count == 2)
@@ -582,6 +597,78 @@ actor Desk: Transport {
         #expect(pane.passkeyFrame.alphaValue == 1 && pane.passkeySaid.isHidden)
     }
 
+    /// The groups are asked at once and each is drawn as its own answer lands: the keys are drawn
+    /// while the passkeys' call is still held, its mark still in its frame.
+    @Test func eachGroupIsDrawnAsItsOwnAnswerLands() async throws {
+        let transport = Held(RecordedServer(try Self.goldens.map { try Exchange($0) }), holding: "/v1/passkeys")
+        let pane = try Self.pane(remembering: "uday", transport, lasts: Self.month)
+        let window = Self.shown(pane)
+        defer { window.orderOut(nil) }
+        let keysDrawn = Gate()
+        pane.onDrawn = { [weak pane] in if pane?.keys.value != nil { keysDrawn.open() } }
+        await pane.flow.refresh()
+        await keysDrawn.wait()
+        pane.layoutSubtreeIfNeeded()
+        #expect(transport.routes.contains("GET /v1/passkeys") && pane.passkeys.waiting && !pane.passkeyMark.isHidden, "the passkeys answered before the keys were drawn")
+        #expect(pane.keyMark.isHidden && Self.names(pane.keyList) == ["Claude Code", "Claude Code", "Codex CLI"])
+        transport.release()
+        await pane.loading?.value
+        #expect(Self.names(pane.passkeyList).count == 2)
+    }
+
+    /// Only the latest load's answers are kept: a load asked again stops the one before, whose
+    /// answer, held and coming last, changes nothing.
+    @Test func anOlderLoadAnsweringLateChangesNothing() async throws {
+        let exchanges = try ["whoami", "passkeys", "agents", "logins-with-a-default"].map { try Exchange($0) }
+        let transport = Held(RecordedServer(exchanges), holding: "/v1/logins", after: 1, then: try Exchange("logins-no-default"))
+        let (pane, window) = try await Self.signedIn(transport)
+        defer { window.orderOut(nil) }
+        #expect(Self.names(pane.keyList) == ["Claude Code", "Codex CLI"])
+        pane.load()
+        let older = pane.loading
+        await transport.arrived(during: older)
+        pane.load()
+        await pane.loading?.value
+        transport.release()
+        await older?.value
+        #expect(Self.names(pane.keyList) == ["Claude Code", "Codex CLI"], "the older load's late answer was drawn: \(Self.names(pane.keyList))")
+    }
+
+    /// Gone from view, the load under way is stopped and its answer dropped; shown again, the groups
+    /// are asked again.
+    @Test func aLoadIsStoppedWhenTheViewGoesAway() async throws {
+        let transport = Held(RecordedServer(try Self.goldens.map { try Exchange($0) }), holding: "/v1/passkeys")
+        let pane = try Self.pane(remembering: "uday", transport, lasts: Self.month)
+        let window = Self.shown(pane)
+        defer { window.orderOut(nil) }
+        await pane.flow.refresh()
+        await transport.arrived(during: pane.loading)
+        pane.isHidden = true
+        transport.release()
+        await pane.loading?.value
+        #expect(pane.passkeys.waiting, "a load the hidden view stopped drew its answer")
+        pane.isHidden = false
+        pane.shown()
+        await pane.loading?.value
+        #expect(Self.names(pane.passkeyList).count == 2)
+    }
+
+    /// A group's call that finds the session ended hands over to the check, as everywhere: no one is
+    /// signed in, and the ended session is told where every check tells it.
+    @Test func aGroupsCallFindingTheSessionEndedSignsOut() async throws {
+        let desk = try Desk(Self.goldens)
+        let (pane, window) = try await Self.signedIn(desk)
+        defer { window.orderOut(nil) }
+        let ended = try Exchange("refusal-invalid-bearer-token")
+        await desk.answer(ended)
+        await desk.answer(Exchange(method: "GET", path: "/v1/passkeys", status: ended.status, body: ended.body))
+        var told: Date?
+        pane.flow.onChecked = { _, endedOn in told = endedOn }
+        pane.load()
+        await pane.loading?.value
+        #expect(pane.flow.standing == nil && told != nil, "the ended session was said in the group: \(pane.text)")
+    }
+
     /// ⋯ ▸ Remove asks first in the library's sheet, Remove destructive and Cancel the default;
     /// cancelled, nothing is sent.
     @Test func removingAPasskeyAsksWithCancelTheDefault() async throws {
@@ -601,17 +688,25 @@ actor Desk: Transport {
         #expect(pane.question == nil && !asked.contains { $0.hasPrefix("DELETE") })
     }
 
+    /// ⋯ ▸ Remove on the row titled `title`, confirmed, its answer and the groups asked after it
+    /// taken; the row's id.
+    static func removed(_ title: String, in pane: AccountPane) async throws -> String {
+        let row = try item(title, in: pane.passkeyList)
+        try #require(row.actions.first { $0.title == "Remove" }).run()
+        let sheet = try #require(pane.question)
+        _ = sheet.confirm.sendAction(sheet.confirm.action, to: sheet.confirm.target)
+        await pane.acting?.value
+        await pane.loading?.value
+        return row.id
+    }
+
     /// The server's refusal of a removal is said under its row in its words, the row kept.
     @Test func aRefusedRemovalIsSaidUnderItsRow() async throws {
         let desk = try Desk(Self.goldens + ["refusal-conflict-passkey-current"])
         let (pane, window) = try await Self.signedIn(desk)
         defer { window.orderOut(nil) }
         let mine = try Self.item("Sail for Mac", in: pane.passkeyList)
-        try #require(mine.actions.first { $0.title == "Remove" }).run()
-        let sheet = try #require(pane.question)
-        _ = sheet.confirm.sendAction(sheet.confirm.action, to: sheet.confirm.target)
-        await pane.acting?.value
-        await pane.loading?.value
+        _ = try await Self.removed("Sail for Mac", in: pane)
         let said = ["You are signed in with this passkey.", "Sign in with another passkey to remove this one."]
         #expect(pane.refusals[mine.id] == said && Self.names(pane.passkeyList) == ["Sail for Mac", "Sail for iPhone"])
         guard pane.passkeyList.entries.count == 3, case let .item(under) = pane.passkeyList.entries[1] else {
@@ -621,6 +716,29 @@ actor Desk: Transport {
         #expect(under.inert && under.voice == said.joined(separator: " ") && pane.text.contains(said.joined(separator: "\n")))
         let asked = await desk.asked
         #expect(asked.contains("DELETE /v1/passkeys/\(mine.id)"))
+    }
+
+    /// A removal under way is said on its row, which takes no second Remove meanwhile, by ⋯ or by
+    /// ⌘⌫; once it answers, the row is drawn from the groups asked again.
+    @Test func oneRemovalAtATimeShownUnderWay() async throws {
+        let desk = try Desk(Self.goldens + ["passkey-removed"])
+        let (pane, window) = try await Self.signedIn(desk)
+        defer { window.orderOut(nil) }
+        let phone = try Self.item("Sail for iPhone", in: pane.passkeyList)
+        await desk.hold("DELETE /v1/passkeys/\(phone.id)")
+        try #require(phone.actions.first { $0.title == "Remove" }).run()
+        let sheet = try #require(pane.question)
+        _ = sheet.confirm.sendAction(sheet.confirm.action, to: sheet.confirm.target)
+        await desk.arrived(during: pane.acting)
+        let again = try #require(try Self.item("Sail for iPhone", in: pane.passkeyList).actions.first { $0.title == "Remove" })
+        #expect(pane.removing == [phone.id] && pane.text.contains("Sail for iPhone · Removing") && !again.enabled(), "\(pane.text)")
+        again.run()
+        #expect(pane.question == nil, "a second Remove asked again while the first was under way")
+        await desk.release()
+        await pane.acting?.value
+        await pane.loading?.value
+        let asked = await desk.asked
+        #expect(pane.removing.isEmpty && asked.filter { $0.hasPrefix("DELETE") }.count == 1, "asked \(asked)")
     }
 
     /// Removing a key asks in the route's words, and is sent to its harness and name.
@@ -667,6 +785,8 @@ actor Desk: Transport {
         pane.layoutSubtreeIfNeeded()
         let banner = try #require(pane.banner)
         #expect(banner.tone == .error && banner.action?.title == "Try Again" && banner.superview === pane.planeFrame)
+        await pane.flow.refresh()
+        #expect(pane.banner === banner, "a check out of reach again made the banner, and its Try Again, again")
         #expect(pane.planeLines == ["Sail cannot reach 127.0.0.1:7979.", "Check that this Mac is on its network."] && pane.state.said == "Can’t reach" && pane.state.state == .error)
         #expect(pane.passkeyFrame.alphaValue == 1 && pane.keyFrame.alphaValue == 1 && Self.names(pane.passkeyList).count == 2)
         try await desk.answer("whoami")
@@ -676,8 +796,29 @@ actor Desk: Transport {
         #expect(pane.banner == nil && pane.state.said == "Connected")
     }
 
+    /// Every group's tile, and the words after it, stand on one line: the control plane's row and
+    /// its banner start where the list rows of the Passkeys and the Keys do.
+    @Test func theGroupsTilesAndWordsStandInOneColumn() async throws {
+        let desk = try Desk(Self.goldens)
+        let (pane, window) = try await Self.signedIn(desk)
+        defer { window.orderOut(nil) }
+        await desk.forget("GET /v1/whoami")
+        await pane.flow.refresh()
+        pane.layoutSubtreeIfNeeded()
+        let listed = try [pane.passkeyList, pane.keyList].map { list -> AccountRowView in
+            let cell = try #require(list.rowView(atRow: 0, makeIfNecessary: true))
+            cell.layoutSubtreeIfNeeded()
+            return try #require(WorkspacesViewTests.found(AccountRowView.self, in: cell).first)
+        }
+        let tiles = ([pane.planeRow] + listed).map { Double($0.convert($0.tileBox, to: pane).minX) }
+        #expect(Set(tiles).count == 1, "the tiles stand at \(tiles)")
+        let banner = try #require(pane.banner)
+        let words = Double(banner.convert(banner.bounds, to: pane).minX), after = (tiles.first ?? 0) + AccountRowView.tile + AccountRowView.gap
+        #expect(abs(words - after) < 0.5, "the banner starts at \(words), the rows' words at \(after)")
+    }
+
     /// Under three days left the end is drawn in the warning ink and Sign In Again shows; it runs
-    /// the sign-in ceremony and the view stays; with more left, neither.
+    /// the sign-in ceremony, the view stays and the groups are asked again; with more left, neither.
     @Test func underThreeDaysLeftSignInAgainShows() async throws {
         let desk = try Desk(Self.goldens + ["passkey-login-start", "passkey-login-finish"])
         let (soon, window) = try await Self.signedIn(desk, lasts: 2 * 86_400 + 600)
@@ -685,11 +826,16 @@ actor Desk: Transport {
         #expect(soon.ending?.soon == true && soon.ending?.said.hasSuffix(" · ends in 2 days") == true && !soon.signInAgain.isHidden)
         let ink = soon.planeRow.detail.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
         #expect(ink == NSColor(Tint(soon.look.warning)) && soon.signInAgain.kind == .secondary)
-        let before = soon.flow.standing?.until
+        let before = soon.flow.standing?.until, listed = await desk.asked.filter { $0 == "GET /v1/passkeys" }.count
+        var landing: [Bool] = []
+        soon.flow.onStanding = { _, byAPerson in landing.append(byAPerson) }
         soon.signInAgainNow(nil)
         await soon.acting?.value
+        await soon.loading?.value
         let asked = await desk.asked
         #expect(soon.flow.standing?.until != before && soon.flow.standing != nil && asked.contains("POST /v1/auth/login/finish"))
+        #expect(landing == [false], "Sign In Again was shown as a person's sign-in, which leaves for Workspaces: \(landing)")
+        #expect(asked.filter { $0 == "GET /v1/passkeys" }.count == listed + 1, "the groups were not asked again after Sign In Again")
         let (later, other) = try await Self.signedIn(try Desk(Self.goldens))
         defer { other.orderOut(nil) }
         #expect(later.ending?.soon == false && later.signInAgain.isHidden)
@@ -719,6 +865,42 @@ actor Desk: Transport {
         #expect(abs(pane.scrolledTo - target) < 1, "scrolled to \(pane.scrolledTo), the keys at \(target)")
     }
 
+    /// Keys chosen while nothing could be asked (no one signed in yet) leaves no jump behind: the
+    /// next load, asked for itself, leaves the view where it is.
+    @Test func keysChosenWhenNothingIsAskedLeavesTheNextLoadWhereItIs() async throws {
+        let pane = try Self.pane(remembering: "uday", try Desk(Self.goldens), lasts: Self.month)
+        let window = Self.shown(pane, height: 400)
+        defer { window.orderOut(nil) }
+        pane.scrollToKeys()
+        pane.scroll.contentView.scroll(to: .zero)
+        await pane.flow.refresh()
+        await pane.loading?.value
+        pane.layoutSubtreeIfNeeded()
+        let most = Double(pane.scroll.documentView?.frame.height ?? 0) - Double(pane.scroll.contentSize.height)
+        #expect(most > 0 && pane.scrolledTo == 0, "the load after went to the keys: scrolled to \(pane.scrolledTo) of \(most)")
+    }
+
+    /// A key stored from the Account view is the one New Session starts with, as one stored from
+    /// the New Session panel is: the person's starts take it as the harness's way in.
+    @Test func aKeyStoredHereIsTheOneNewSessionStartsWith() async throws {
+        let desk = try Desk(Self.goldens)
+        let shell = try ShellApp(
+            fonts: LookTests.fonts, helper: nil, look: .light, passkeys: { _ in Signs() }, connect: { _ in desk }, vault: OneSession(fde: "uday", lasts: Self.month),
+            defaults: ReattachTests.defaults()
+        )
+        defer { shell.window.orderOut(nil) }
+        shell.flow.show(Self.someone)
+        let client = try #require(shell.flow.client())
+        var model = try LoginSheetTests.model()
+        model.typed(holdsSomething: true)
+        _ = model.store(LoginSheetTests.pasted, clipboard: StoreLogin.Clipboard(count: 1, text: nil))
+        model.answered(try LoginSheetTests.answer("login-stored"), clipboard: 1)
+        #expect(shell.workspaces.memory.ways.isEmpty)
+        shell.account.stored(model, by: client)
+        await shell.account.acting?.value
+        #expect(shell.workspaces.memory.ways == ["claude-code": .key], "New Session does not start with the key stored here: \(shell.workspaces.memory)")
+    }
+
     /// Sign Out signs out at once and asks nothing, as one action of the flow's; the menu item
     /// after it does nothing more.
     @Test func signOutSignsOutAtOnceAskingNothing() async throws {
@@ -738,7 +920,10 @@ actor Desk: Transport {
         var faults: [String] = []
         for size in UserMenuTests.sizes {
             let width = Double(size.width) - Rail.width - 4
-            let (pane, window) = try await Self.signedIn(try Desk(Self.goldens), width: width)
+            let (pane, window) = try await Self.signedIn(try Desk(Self.goldens + ["refusal-conflict-passkey-current"]), width: width)
+            _ = try await Self.removed("Sail for Mac", in: pane)
+            pane.layoutSubtreeIfNeeded()
+            #expect(pane.refusals.count == 1, "\(width) pt: no refusal under a row")
             faults += WorkspacesReachTests.outOfReach(in: pane).map { "\(width) pt: \($0)" }
             window.orderOut(nil)
             let desk = try Desk(Self.goldens.filter { $0 != "whoami" })

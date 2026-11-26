@@ -3,10 +3,14 @@ import SailLook
 
 /// A workspace's or a template's state (`PillPaint`): a hairline frame in inner corners, a square
 /// dot carrying the colour, and the state in mono capitals. Starting, creating and building pulse
-/// their dot every 1.2 s, held still while motion is reduced. A pill may say its own words in a
-/// state's paint (the control plane's "Connected"), or, plain, words alone with no dot (a role).
+/// their dot every 1.2 s, held still while motion is reduced. A pill may say words of its own in a
+/// state's paint (the control plane's "Connected"); a plain pill says words of its own in the same
+/// frame, with no dot, after an icon when it has one (This Mac's "Local", a role).
 @MainActor
 public final class Pill: NSView {
+    /// A plain pill's icon, at the size of the type beside it.
+    static let iconSide = Look.Step.micro.points
+
     public var look: Look {
         didSet { repaint() }
     }
@@ -15,20 +19,31 @@ public final class Pill: NSView {
         didSet { repaint() }
     }
 
-    public let size: PillSize
-    private let mono: LabelFont
-    let dot = PillDot()
-    /// What it says in place of its state's label.
-    public var saying: String? {
+    /// The words said in place of the state's label: a plain pill's own, given as it is made.
+    public var words: String? {
         didSet { repaint() }
     }
 
+    public let size: PillSize
     public let plain: Bool
+    public let icon: LineIcon?
+    private let mono: LabelFont
+    let dot = PillDot()
 
-    public init(_ state: PillState, saying: String? = nil, plain: Bool = false, size: PillSize = .regular, look: Look, mono: LabelFont) {
+    public convenience init(_ state: PillState, size: PillSize = .regular, look: Look, mono: LabelFont) {
+        self.init(state, words: nil, plain: false, icon: nil, size: size, look: look, mono: mono)
+    }
+
+    /// A plain pill saying `words`, `icon` before them.
+    public convenience init(plain words: String, icon: LineIcon? = nil, size: PillSize = .regular, look: Look, mono: LabelFont) {
+        self.init(.unknown, words: words, plain: true, icon: icon, size: size, look: look, mono: mono)
+    }
+
+    private init(_ state: PillState, words: String?, plain: Bool, icon: LineIcon?, size: PillSize, look: Look, mono: LabelFont) {
         self.state = state
-        self.saying = saying
+        self.words = words
         self.plain = plain
+        self.icon = icon
         self.size = size
         self.look = look
         self.mono = mono
@@ -60,12 +75,17 @@ public final class Pill: NSView {
     }
 
     public var said: String {
-        saying ?? state.label
+        words ?? state.label
+    }
+
+    /// The room a plain pill's icon takes before its words.
+    private var iconRoom: Double {
+        icon == nil ? 0 : Self.iconSide + size.gap
     }
 
     override public var intrinsicContentSize: NSSize {
         let words = Double(ceil(label.size().width))
-        return NSSize(width: plain ? size.leading + words + size.trailing : size.width(label: words), height: size.height)
+        return NSSize(width: plain ? size.leading + iconRoom + words + size.trailing : size.width(label: words), height: size.height)
     }
 
     override public func setFrameSize(_ newSize: NSSize) {
@@ -82,9 +102,12 @@ public final class Pill: NSView {
 
     override public func draw(_: NSRect) {
         Draw.box(bounds, radius: Look.innerRadius, fill: nil, edge: paint.edge, dash: paint.dashed ? PillSize.dash.map { CGFloat($0) } : [])
-        let label = self.label
-        let x = userInterfaceLayoutDirection == .rightToLeft ? size.trailing : size.leading + (plain ? 0 : size.dot + size.gap)
+        let label = self.label, leftToRight = userInterfaceLayoutDirection != .rightToLeft
+        let x = leftToRight ? size.leading + (plain ? iconRoom : size.dot + size.gap) : size.trailing
         Draw.line(label, x: x, baseline: TextLine.baseline(top: (Double(bounds.height) - size.text) / 2, points: size.text, lineHeight: size.text))
+        guard let icon else { return }
+        let side = Self.iconSide, width = Double(bounds.width)
+        Draw.icon(icon, in: NSRect(x: leftToRight ? size.leading : width - size.leading - side, y: (Double(bounds.height) - side) / 2, width: side, height: side), ink: paint.text)
     }
 
     private func repaint() {
@@ -180,8 +203,8 @@ public final class Keycap: NSView {
     }
 }
 
-/// A person's initial in a circle on the hover fill, ringed by a hairline: 20 pt in a caption, or
-/// as large as a header asks in its own face.
+/// A person's initial in a circle drawn as `mark` (`Look.avatar`, a hairline ring, unless given):
+/// 20 pt in a caption, or as large as a header asks in its own face and mark.
 @MainActor
 public final class Initial: NSView {
     public var look: Look {
@@ -197,12 +220,16 @@ public final class Initial: NSView {
 
     private let side: Double
     private let font: NSFont
+    private let mark: KeyPath<Look, InkMark>
 
-    public init(_ name: String, side: Double = 20, font: NSFont = .systemFont(ofSize: Look.Step.caption.points, weight: .semibold), look: Look) {
+    public init(
+        _ name: String, side: Double = 20, font: NSFont = .systemFont(ofSize: Look.Step.caption.points, weight: .semibold), mark: KeyPath<Look, InkMark> = \.avatar, look: Look
+    ) {
         self.name = name
         self.look = look
         self.side = side
         self.font = font
+        self.mark = mark
         super.init(frame: NSRect(x: 0, y: 0, width: side, height: side))
         setAccessibilityElement(true)
         setAccessibilityRole(.staticText)
@@ -222,8 +249,13 @@ public final class Initial: NSView {
         NSSize(width: side, height: side)
     }
 
+    /// The mark as it is drawn in its look.
+    package var drawn: InkMark {
+        look[keyPath: mark]
+    }
+
     override public func draw(_: NSRect) {
-        let mark = look.avatar
+        let mark = drawn
         if let fill = mark.fill {
             NSColor(fill).setFill()
             NSBezierPath(ovalIn: bounds).fill()
@@ -241,6 +273,6 @@ public final class Initial: NSView {
 
 extension Initial: Marked {
     package var drawnMarks: [Mark] {
-        look.marks(fill: look.avatar.fill, area: Double(bounds.width * bounds.height))
+        look.marks(fill: drawn.fill, area: Double(bounds.width * bounds.height))
     }
 }
