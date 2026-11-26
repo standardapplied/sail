@@ -22,7 +22,7 @@ import Testing
         let naps = Naps()
         let hands = Hands()
         let (host, session, peer, watch) = try await attachedLocally(
-            stableAfter: TerminalSession.stableAttachment, sleep: naps.sleep, clock: SessionClock { hands.now }
+            stableAfter: TerminalSession.stableAttachment, sleep: naps.sleep, now: { hands.now }
         )
         peer.close()
         try await watch.until("lost the connection") { session.state.phase != .attached }
@@ -52,7 +52,7 @@ import Testing
     /// session still blocked in its read with the end of the stream waiting; a close always wakes it.
     @Test func aPeerTheFakeHostClosesIsClosedNotOnlyShutDown() async throws {
         let host = try FakeHost()
-        let client = try Connection.connect(to: host.address, timeout: 5)
+        let client = try Connection.connect(to: host.address, timeout: Patience.answer)
         let peer = try await host.accept()
         let accepted = peer.descriptor
         let before = Self.inode(accepted)
@@ -98,7 +98,7 @@ import Testing
         let desk = TicketDesk(address: host.address)
         let hands = Hands()
         let session = TerminalSession(
-            open: create, door: .runner(desk), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep, clock: SessionClock { hands.now }
+            open: create, door: .runner(desk), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep, now: { hands.now }
         )
         let watch = Watch(session)
         session.start()
@@ -116,15 +116,27 @@ import Testing
         session.close()
     }
 
+    /// A connection attached for ``TerminalSession/stableAttachment`` on the session's clock, which
+    /// only the test moves, was a success: each drop after one is the first failure again, waited
+    /// for with the first wait, however long the runner took over it.
     @Test func aConnectionThatStayedAttachedLongEnoughStartsTheCountAgain() async throws {
         let naps = Naps()
-        let (host, session, peer, watch) = try await attachedLocally(stableAfter: .zero, sleep: naps.sleep)
-        peer.close()
-        let again = try await host.accept()
-        try await again.welcome()
-        _ = try await again.acceptAttach()
-        try await watch.attached()
-        #expect(naps.durations == [TerminalSession.retryWaits[0]])
+        let hands = Hands()
+        let (host, session, first, watch) = try await attachedLocally(
+            stableAfter: TerminalSession.stableAttachment, sleep: naps.sleep, now: { hands.now }
+        )
+        var peer = first
+        for drops in 1 ... 3 {
+            hands.advance(TerminalSession.stableAttachment)
+            peer.close()
+            peer = try await host.accept()
+            try await peer.welcome()
+            _ = try await peer.acceptAttach()
+            try await watch.until("took the attach's prologue again") {
+                watch.seen.filter { if case .writerChanged("ada", _) = $0 { true } else { false } }.count == drops + 1
+            }
+        }
+        #expect(naps.durations == Array(repeating: TerminalSession.retryWaits[0], count: 3))
         session.close()
     }
 
@@ -162,7 +174,7 @@ import Testing
 
     @Test func aTCPConnectionIsGivenUpWhenItsDataStaysUnacknowledged() async throws {
         let host = try FakeHost(tcp: ())
-        let socket = try Socket.connect(to: host.address, timeout: 5)
+        let socket = try Socket.connect(to: host.address, timeout: Patience.answer)
         #if os(Linux)
         #expect(socket.retransmitDrop == Int32(Socket.deadAfter * 1000))
         #else
@@ -237,12 +249,12 @@ import Testing
     }
 
     /// MINOR 3: a close during the handshake (here, waiting for the host's welcome) shuts the
-    /// connection at once, not after the handshake's timeout: the host reads the client closing it,
-    /// never its own read running out (30 s), and the handshake's own timeout (120 s) is past both,
-    /// so only the close can end the read whatever the runner's speed.
-    @Test func aCloseDuringTheHandshakeShutsTheConnectionAtOnce() async throws {
+    /// connection, not leaving it to the handshake's timeout: that is `Patience.answer`, past the
+    /// suite's minute, and the fake reads until the connection ends, so the read ends by the
+    /// client's close or the test fails at its limit.
+    @Test func aCloseDuringTheHandshakeShutsTheConnection() async throws {
         let host = try FakeHost()
-        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen(), timeout: 120, sleep: Naps().sleep)
+        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep)
         session.start()
         let peer = try await host.accept()
         _ = try await peer.hello()
@@ -348,7 +360,7 @@ import Testing
         let (host, session, attached, _) = try await attachedLocally()
         defer { withExtendedLifetime(attached) {} }
         host.stop()
-        let outcome = await session.end(within: .seconds(5))
+        let outcome = await session.end(within: .seconds(Patience.answer))
         guard case let .unconfirmed(why) = outcome, why.count == 1 else {
             Issue.record("the end was \(outcome)")
             return

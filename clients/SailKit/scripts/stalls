@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 # Runs COMMAND and watches the test event stream it writes to EVENTS, so a stall names itself.
 # Every second it appends to DIR/ticks the time, the stream's size and the machine's load: a gap
-# between two ticks is the whole machine stopped, not only the tests. When the stream has not grown
-# for 10 s while COMMAND runs, it keeps in DIR/stall-N what the machine and the tests were doing:
-# the load and the processes using the CPU, and a sample of every process under COMMAND; the first
-# time, a spindump of every process on the machine too, through sudo, which a CI runner grants. At
-# most 4 captures, each after another 10 s of silence; a capture that fails says so in its files and
-# never fails the run. Exits with COMMAND's status. bash 3.2 and BSD tools, as macOS ships them.
+# between two ticks is the whole machine stopped, not only the tests. A stall is 10 s in which no
+# test reported while two or more had started and not ended: one long test running alone (the frame
+# reader's at the end of the run) is no stall. Only then does it keep, in DIR/stall-N, what the
+# machine and the tests were doing: the load, the processes using the CPU and the memory, and a
+# sample of every process under COMMAND, which needs no privilege; at most 4 captures, each after
+# another 10 s of silence. When nothing stalls it captures nothing. A capture that fails says so in
+# its files and never fails the run, and one still going 60 s after COMMAND ended is stopped. Exits
+# with COMMAND's status. bash 3.2 and BSD tools, as macOS ships them.
 set -uo pipefail
 
 [[ $# -ge 3 ]] || { echo "usage: scripts/stalls EVENTS DIR COMMAND..." >&2; exit 2; }
 events=$1
 dir=$2
 shift 2
-readonly quiet=10 limit=4
+readonly quiet=10 limit=4 grace=60
 mkdir -p "$dir"
 : > "$dir/ticks"
 
@@ -23,6 +25,15 @@ size() {
 
 load() {
   uptime | sed 's/.*load average[s]*: //'
+}
+
+# Tests that started and have not ended, by their ids, which name a test function after the suite's
+# own (Suite/test()/File.swift:line); suites, which start and end around their tests, are not counted.
+running() {
+  local started ended
+  started=$(grep -cE '"kind":"testStarted".*"testID":"[^"]*\\/' "$events" 2> /dev/null)
+  ended=$(grep -cE '"kind":"testEnded".*"testID":"[^"]*\\/' "$events" 2> /dev/null)
+  echo $((${started:-0} - ${ended:-0}))
 }
 
 under() {
@@ -42,28 +53,25 @@ capture() {
   mkdir -p "$into"
   {
     date -u +%Y-%m-%dT%H:%M:%SZ
-    echo "no test reported for $2 s; the event stream holds $(size) bytes"
+    echo "no test reported for $2 s while $3 ran; the event stream holds $(size) bytes"
     uptime
     top -l 2 -s 1 -n 20 -o cpu -stats pid,command,cpu,state,time,threads
     vm_stat
   } > "$into/machine.txt" 2>&1
   for pid in $(under "$watched"); do
     ps -o pid= -o pcpu= -o state= -o time= -o command= -p "$pid" >> "$into/processes.txt" 2>&1
-    sample "$pid" 2 -mayDie -file "$into/sample-$pid.txt" > /dev/null 2>&1 \
-      || sudo -n sample "$pid" 2 -mayDie -file "$into/sample-$pid.txt" > /dev/null 2>&1 \
-      || echo "no sample of $pid" >> "$into/processes.txt"
+    sample "$pid" 2 -mayDie -file "$into/sample-$pid.txt" > /dev/null 2>&1 || echo "no sample of $pid" >> "$into/processes.txt"
   done
-  if [[ $1 -eq 1 ]]; then
-    { sudo -n spindump -notarget 2 10 -o "$into/spindump.txt" -noProcessingWhileSampling -timelimit 60 || echo "no spindump: $?"; } \
-      > "$into/spindump.log" 2>&1
-  fi
 }
 
 "$@" &
 watched=$!
 captures=0
+capturing=""
 last=$(size)
 changed=$(date +%s)
+counted=""
+inflight=0
 silence_captures=0
 while kill -0 "$watched" 2> /dev/null; do
   now=$(date +%s)
@@ -74,15 +82,34 @@ while kill -0 "$watched" 2> /dev/null; do
     changed=$now
     silence_captures=0
   elif ((captures < limit && now - changed >= quiet * (silence_captures + 1))); then
-    captures=$((captures + 1))
-    silence_captures=$((silence_captures + 1))
-    capture "$captures" "$((now - changed))" &
+    if [[ $counted != "$bytes" ]]; then
+      inflight=$(running)
+      counted=$bytes
+    fi
+    if ((inflight >= 2)); then
+      captures=$((captures + 1))
+      silence_captures=$((silence_captures + 1))
+      capture "$captures" "$((now - changed))" "$inflight tests" &
+      capturing="$capturing $!"
+    fi
   fi
   sleep 1
 done
 wait "$watched"
 status=$?
-wait
+waited=0
+for pid in $capturing; do
+  while kill -0 "$pid" 2> /dev/null && ((waited < grace)); do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  if kill -0 "$pid" 2> /dev/null; then
+    echo "scripts/stalls: capture $pid still ran $grace s after the tests ended; stopped"
+    for child in $(under "$pid") "$pid"; do
+      kill "$child" 2> /dev/null
+    done
+  fi
+done
 gap=$(awk 'NR > 1 && $1 - previous > widest { widest = $1 - previous } { previous = $1 } END { print widest + 0 }' "$dir/ticks")
-echo "scripts/stalls: $captures captures of a silent event stream in $dir; the widest gap between this watch's one-second ticks was $gap s"
+echo "scripts/stalls: $captures captures of a stall in $dir; the widest gap between this watch's one-second ticks was $gap s"
 exit "$status"

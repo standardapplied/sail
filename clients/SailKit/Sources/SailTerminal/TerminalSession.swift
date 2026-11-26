@@ -67,7 +67,7 @@ public final class TerminalSession: Sendable {
     private let eventSink: AsyncStream<SessionEvent>.Continuation
     private let screenListener = Relay<ContinuousClock.Instant>()
     private let reader = Mutex<QualityOfService?>(nil)
-    private let clock: SessionClock
+    private let now: @Sendable () -> ContinuousClock.Instant
 
     private struct Core {
         var state: SessionState
@@ -148,16 +148,18 @@ public final class TerminalSession: Sendable {
     /// As the public ones, waiting with `sleep`, giving each connect and answer `timeout` seconds,
     /// counting a connection a success once attached for `stableAfter`, timing a render hold's
     /// end with `after`, a runner's door parking once its waits and attempts add up to
-    /// `patience` (``runnerPatience`` by default), and reading how long things took from `clock`.
+    /// `patience` (``runnerPatience`` by default), and reading the time from `now`: how long an
+    /// attempt, an attachment, an unpresented ticket or an end took, and when a key and a screen
+    /// change happened.
     package convenience init(
         open create: SessionCreate, door: Door, screen: Screen, timeout: Int,
         stableAfter: Duration = TerminalSession.stableAttachment, sleep: @escaping @Sendable (Duration) async throws -> Void,
         after: @escaping HoldTick.After = HoldTick.dispatch, patience: Duration = TerminalSession.runnerPatience,
-        clock: SessionClock = .continuous
+        now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now }
     ) {
         self.init(
             intent: .open(create), door: door, screen: screen, timeout: timeout, stableAfter: stableAfter, sleep: sleep, after: after,
-            patience: patience, clock: clock
+            patience: patience, now: now
         )
     }
 
@@ -177,7 +179,7 @@ public final class TerminalSession: Sendable {
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         after: @escaping HoldTick.After = HoldTick.dispatch,
         patience: Duration = TerminalSession.runnerPatience,
-        clock: SessionClock = .continuous
+        now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now }
     ) {
         self.door = door
         let runner = if case .runner = door { true } else { false }
@@ -187,7 +189,7 @@ public final class TerminalSession: Sendable {
         self.stableAfter = stableAfter
         self.sleep = sleep
         self.after = after
-        self.clock = clock
+        self.now = now
         alarm = Alarm(sleep: sleep)
         var initial = Core(state: SessionState(phase: .connecting, session: intent.session), intent: intent)
         if case .attach = intent { initial.atHost = .maybe }
@@ -290,7 +292,7 @@ public final class TerminalSession: Sendable {
     /// the host is still making is ended, never left behind unseen; a session never made is gone
     /// already. This client detaches either way.
     public func end(within limit: Duration = Door.endLimit) async -> EndOutcome {
-        let began = clock.now
+        let began = now()
         let coming = core.withLock { core -> Bool in
             core.detaching = true
             return core.atHost == .coming
@@ -299,7 +301,7 @@ public final class TerminalSession: Sendable {
         let held = self.atHost
         detach()
         guard held != .none else { return .gone }
-        return await door.end(state.session, within: limit - (clock.now - began), of: limit)
+        return await door.end(state.session, within: limit - (now() - began), of: limit)
     }
 
     /// Ends this client's part: the connection, or the one being admitted, closes and nothing
@@ -324,7 +326,7 @@ public final class TerminalSession: Sendable {
     /// Sends what `key` encodes to; dropped and counted when not attached. Blocks while the host is
     /// slow to read (see the type's notes).
     public func send(_ key: KeyInput) {
-        let handedIn = clock.now
+        let handedIn = now()
         sendInput(screen.encode(key), handedIn: handedIn)
     }
 
@@ -332,7 +334,7 @@ public final class TerminalSession: Sendable {
     /// person's confirmation first. Blocks until the host has read all of it (see the type's notes).
     @discardableResult
     public func paste(_ text: String, confirmed: Bool = false) -> PasteOutcome {
-        let handedIn = clock.now
+        let handedIn = now()
         let outcome = screen.paste(text, confirmed: confirmed)
         if case let .send(bytes) = outcome {
             sendInput(bytes, handedIn: handedIn)
@@ -341,12 +343,12 @@ public final class TerminalSession: Sendable {
     }
 
     public func send(_ mouse: MouseInput) {
-        let handedIn = clock.now
+        let handedIn = now()
         sendInput(screen.encode(mouse), handedIn: handedIn)
     }
 
     public func scroll(lines: Int, x: Double, y: Double) {
-        let handedIn = clock.now
+        let handedIn = now()
         sendInput(screen.scroll(lines: lines, x: x, y: y), handedIn: handedIn)
     }
 
@@ -355,7 +357,7 @@ public final class TerminalSession: Sendable {
     /// observer's look never reaches it.
     public func setPalette(_ palette: Palette) throws(ScreenError) {
         let effects = try screen.setPalette(palette)
-        screenChanged(at: clock.now)
+        screenChanged(at: now())
         sendInput(effects.reply, handedIn: nil)
     }
 
@@ -520,10 +522,10 @@ public final class TerminalSession: Sendable {
             }
             retrying = !first
             first = false
-            let began = clock.now
+            let began = now()
             let outcome = await attempt(generation)
             guard core.withLock({ $0.generation == generation }) else { return }
-            if retrying { waited += clock.now - began }
+            if retrying { waited += now() - began }
             switch outcome {
             case let .failed(error):
                 failures += 1
@@ -576,13 +578,13 @@ public final class TerminalSession: Sendable {
     /// person's tickets, which the host bounds.
     private func ticket(for request: TicketRequest) async throws(TerminalError) -> (address: HostAddress, token: String) {
         let kept = core.withLock { core -> (address: HostAddress, token: String)? in
-            guard let held = core.unpresented, held.request == request, clock.now - held.asked < Self.unpresentedReuse else { return nil }
+            guard let held = core.unpresented, held.request == request, now() - held.asked < Self.unpresentedReuse else { return nil }
             return held.entry
         }
         if let kept { return kept }
         let entry = try await door.entry(for: request)
         if case .runner = door {
-            let asked = clock.now
+            let asked = now()
             core.withLock { $0.unpresented = (request, entry, asked) }
         }
         return entry
@@ -671,7 +673,7 @@ public final class TerminalSession: Sendable {
         }
         alarm.clear()
         setPhase(.attached)
-        let attached = clock.now
+        let attached = now()
         var outcome = read(connection, since: attached)
         connection.close()
         if case .finished(.ended) = outcome { uploads.over(sessionEnded: true) }
@@ -748,11 +750,11 @@ public final class TerminalSession: Sendable {
             while let frame = try connection.next() {
                 if let outcome = take(frame, from: connection) { return outcome }
             }
-            return .dropped(.closed, attachedFor: clock.now - attached)
+            return .dropped(.closed, attachedFor: now() - attached)
         } catch let .protocolViolation(what) {
             return .finished(.protocolViolation(what))
         } catch {
-            return .dropped(error, attachedFor: clock.now - attached)
+            return .dropped(error, attachedFor: now() - attached)
         }
     }
 
@@ -766,7 +768,7 @@ public final class TerminalSession: Sendable {
             account(applied)
             tap(bytes)
             let effects = Signposts.outputToScreen { screen.feed(bytes) }
-            let updated = clock.now
+            let updated = now()
             latency.withLock { $0.screenUpdated(at: updated) }
             sendInput(effects.reply, handedIn: nil)
             let writing = core.withLock { $0.writing }
@@ -798,7 +800,7 @@ public final class TerminalSession: Sendable {
             if let refit {
                 send(.resize(refit), on: connection)
             }
-            screenChanged(at: clock.now)
+            screenChanged(at: now())
         case let .resized(size):
             let grid = GridSize(columns: Int(size.columns), rows: Int(size.rows))
             guard Self.fits(grid), let effects = try? screen.resize(grid) else {
@@ -807,7 +809,7 @@ public final class TerminalSession: Sendable {
             core.withLock { $0.ptySize = size }
             sendInput(effects.reply, handedIn: nil)
             emit(.resized(size))
-            screenChanged(at: clock.now)
+            screenChanged(at: now())
         case let .writerChanged(fde, yours):
             let (granted, fit) = core.withLock { core -> (Bool, TerminalSize?) in
                 core.state.writer = fde
@@ -869,7 +871,7 @@ public final class TerminalSession: Sendable {
             return core.replaying
         }
         if !replaying {
-            latency.withLock { $0.echoed(through: applied, at: clock.now) }
+            latency.withLock { $0.echoed(through: applied, at: now()) }
         }
     }
 
@@ -889,7 +891,7 @@ public final class TerminalSession: Sendable {
         do throws(TerminalError) {
             let last = try connection.sendInput(bytes) { sequence.withLock { $0 &+= 1; return $0 } }
             guard let handedIn else { return }
-            let written = clock.now
+            let written = now()
             latency.withLock { $0.sent(last, handedIn: handedIn, written: written) }
             core.withLock { core in
                 guard last > core.appliedThrough else { return }
@@ -925,7 +927,7 @@ public final class TerminalSession: Sendable {
         guard let remaining = screen.holdRemaining else { return }
         let next = after(remaining) { [weak self] in
             guard let self else { return }
-            screenChanged(at: clock.now)
+            screenChanged(at: now())
         }
         let previous = core.withLock { core in
             defer { core.holdTimer = next }

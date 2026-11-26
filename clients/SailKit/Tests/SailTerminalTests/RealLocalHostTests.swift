@@ -1,5 +1,6 @@
 import Foundation
 import SailAPI
+import SailKitTestSupport
 @testable import SailTerminal
 import SailTerminalWire
 import SailVT
@@ -20,7 +21,7 @@ struct RealLocalHostTests {
             try await watch.attached()
             "pwd\r".forEach { session.send(.typing($0)) }
             try await watch.until("showed its folder") { try session.screen.text().contains("\n\(host.folder)") }
-            #expect(try await SessionListing.sessions(at: host.address).contains { $0.name == session.state.session && $0.live })
+            #expect(try await SessionListing.sessions(at: host.address, timeout: Patience.answer).contains { $0.name == session.state.session && $0.live })
             session.close()
         }
     }
@@ -131,7 +132,7 @@ struct RealLocalHost {
             room: "", size: TerminalSize(columns: 100, rows: 30)
         )
         let session = TerminalSession(
-            open: create, door: .local(address), screen: try screen(columns: 100, rows: 30), timeout: 10, stableAfter: .zero,
+            open: create, door: .local(address), screen: try screen(columns: 100, rows: 30), timeout: Patience.answer, stableAfter: .zero,
             sleep: sleep
         )
         let watch = Watch(session)

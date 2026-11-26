@@ -233,14 +233,15 @@ func residentBytes() -> Int? {
 /// `stableAfter` says otherwise.
 func attachedLocally(
     columns: Int = 80, rows: Int = 24, stableAfter: Duration = .zero,
-    sleep: @escaping @Sendable (Duration) async throws -> Void = Naps().sleep, clock: SessionClock = .continuous
+    sleep: @escaping @Sendable (Duration) async throws -> Void = Naps().sleep,
+    now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now }
 ) async throws -> (FakeHost, TerminalSession, FakeHost.Peer, Watch) {
     let host = try FakeHost()
     let size = TerminalSize(columns: Int32(columns), rows: Int32(rows))
     let create = SessionCreate(session: "work", command: [], workingDirectory: "/tmp", project: "", room: "", size: size)
     let session = TerminalSession(
         open: create, door: .local(host.address), screen: try screen(columns: columns, rows: rows), timeout: Patience.answer,
-        stableAfter: stableAfter, sleep: sleep, clock: clock
+        stableAfter: stableAfter, sleep: sleep, now: now
     )
     let watch = Watch(session)
     session.start()

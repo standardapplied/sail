@@ -129,8 +129,7 @@ jobs:
       - name: Xcode
         run: sudo xcode-select --switch /Applications/Xcode_26.3.app
 
-      # The image beside the toolchain: a lane that changes behaviour with the runner's image says
-      # which one in its own output.
+      # The runner's image, cores and memory beside the toolchain, so the log says what it ran on.
       - name: Swift
         run: |
           echo "Runner image: $ImageOS $ImageVersion, $(sysctl -n hw.ncpu) cores, $(sysctl -n hw.memsize) bytes"
@@ -156,11 +155,11 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
-      # The suites' event stream and, when no test reports for 10 s, what the machine and the test
-      # process were doing (scripts/stalls), both kept in the reports artifact. Job 139714853398
-      # (image 20261123.0558.1) ended nothing for 20 s mid-run and the socket suites' 5 s waits ran
-      # out; its console, which the test process buffers, could not say why. That image changed no
-      # OS or Xcode and has passed without a gap since, as has the image before it.
+      # The suites run under scripts/stalls, which keeps their event stream in the reports artifact
+      # and, only when no test has reported for 10 s while two or more run, what the machine and the
+      # test process were doing. Job 139714853398 ended no test for 20 s mid-run, and every wait of
+      # 5 s or 10 s that straddled it failed; what held it is not known, and its console, which the
+      # test process buffers, could not say. These captures are what will name the next one.
       - name: Test
         run: |
           mkdir -p "$RUNNER_TEMP/reports"

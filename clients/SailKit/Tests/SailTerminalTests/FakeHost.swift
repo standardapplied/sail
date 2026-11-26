@@ -11,8 +11,8 @@ import Synchronization
 /// A terminal host played by a test: it listens on a unix socket of its own, or on a loopback TCP
 /// port, and each connection it accepts is a ``Peer`` the test reads and answers frame by frame.
 /// A wait for a client is a wait for what the client does, ended only by the test's cancellation,
-/// which its suite's time limit brings: a test that is not scheduled for a while (a runner whose
-/// cooperative pool is held, a machine that stalls) waits on, rather than failing on the clock.
+/// which its suite's time limit brings: a test that is not scheduled for a while, whatever holds
+/// it, waits on, rather than failing on the clock.
 final class FakeHost: Sendable {
     let address: HostAddress
     private let listener: Mutex<Int32>
@@ -83,7 +83,8 @@ final class FakeHost: Sendable {
         }
 
         deinit {
-            inbox.stop("the peer was dropped")
+            let socket = open.withLock { $0 }
+            inbox.stop("the peer was dropped") { socket?.shutdown() }
         }
 
         private var socket: Socket {
@@ -158,8 +159,7 @@ final class FakeHost: Sendable {
                 defer { open = nil }
                 return open
             }
-            inbox.stop("the peer was closed")
-            socket?.shutdown()
+            inbox.stop("the peer was closed") { socket?.shutdown() }
         }
     }
 
@@ -206,24 +206,26 @@ final class FakeHost: Sendable {
             }
         }
 
-        /// Stops the reader, which lets go of the socket within a glance; the end is `reason`
-        /// unless the connection had ended already.
-        func stop(_ reason: String) {
+        /// Stops the reader and returns once it has let go of the descriptor: `wake` (the socket's
+        /// own shutdown) ends its wait at once, so the caller, often a task on the shared pool, is
+        /// not held for a glance. The end is `reason` unless the connection had ended already.
+        func stop(_ reason: String, wake: () -> Void) {
             let first = state.withLock { state in
                 defer { state.stopped = true }
                 if state.end == nil { state.end = HostError(reason) }
                 return !state.stopped
             }
             arrived.ring()
+            wake()
             if first { drained.wait() }
         }
 
         func magic() async throws -> [UInt8] {
-            try await next { state in state.magic.count == Handshake.magic.count ? state.magic : nil }
+            try await next("magic") { state in state.magic.count == Handshake.magic.count ? state.magic : nil }
         }
 
         func frame() async throws -> Frame {
-            try await next { state in state.frames.isEmpty ? nil : state.frames.removeFirst() }
+            try await next("frame") { state in state.frames.isEmpty ? nil : state.frames.removeFirst() }
         }
 
         private func end(_ end: any Error & Sendable) {
@@ -231,12 +233,12 @@ final class FakeHost: Sendable {
             arrived.ring()
         }
 
-        private func next<Value: Sendable>(_ take: (inout State) -> Value?) async throws -> Value {
+        private func next<Value: Sendable>(_ what: String, _ take: (inout State) -> Value?) async throws -> Value {
             while true {
                 let (value, end) = state.withLock { state in (take(&state), state.end) }
                 if let value { return value }
                 if let end { throw end }
-                guard !Task.isCancelled else { throw HostError("the client sent nothing more before the test was cancelled") }
+                guard !Task.isCancelled else { throw HostError("no \(what) came from the client before the test was cancelled") }
                 await arrived.wait(nil)
             }
         }

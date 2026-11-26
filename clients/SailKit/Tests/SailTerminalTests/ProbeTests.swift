@@ -39,23 +39,23 @@ import Testing
 
     /// A `same` after a reconnect is proved by the replay, not by the screen before the replay
     /// arrives: the e2e lane once passed a drop's check on the old screen while the replay that
-    /// followed changed it.
+    /// followed changed it. No replay comes, and the `same` fails once its limit is let pass.
     @Test func aSameAfterAReconnectWaitsForTheReplay() async throws {
-        let steps = try await reconnected(patience: Self.probesOwn) { peer in try peer.send(.accepted) }
+        let steps = try await reconnected(sameRunsOut: true) { peer in try peer.send(.accepted) }
         #expect(steps.map(\.ok) == [true, true, true, true, true, false])
     }
 
     /// Fix 3: a replay is compared once it has ended, never partway through, where a screen can
     /// match the kept one for a moment.
     @Test func aSameWaitsForTheReplayToEnd() async throws {
-        let steps = try await reconnected(patience: Self.probesOwn) { peer in
+        let steps = try await reconnected(sameRunsOut: true) { peer in
             try peer.send([.accepted, .resized(TerminalSize(columns: 20, rows: 3)), .replayBegin(safe: true), output("kept")])
         }
         #expect(steps.map(\.ok) == [true, true, true, true, true, false])
     }
 
     @Test func aSameAfterAReconnectPassesOnAReplayOfTheKeptScreen() async throws {
-        let steps = try await reconnected(patience: nil) { peer in
+        let steps = try await reconnected(sameRunsOut: false) { peer in
             try peer.send([
                 .accepted, .resized(TerminalSize(columns: 20, rows: 3)), .replayBegin(safe: true), output("kept"), .replayEnd,
                 .writerChanged(fde: "ada", yours: true),
@@ -100,16 +100,16 @@ import Testing
         _ = first
     }
 
-    /// The probe's own patience, which fails a `same` whose replay never comes or never ends: the
-    /// limit those tests are about.
+    /// The probe's own patience: the limit a `same` whose replay never comes, or never ends, fails
+    /// at, and the one limit these tests let pass.
     static let probesOwn = 5
 
-    /// Runs snapshot, drop, attached, same against a fake host whose reattach `answer` gives, the
-    /// steps that name no limit waiting `patience` (nil: for what they need alone). The session
-    /// waits for each answer past the test's time limit: the host's side is a task on the
-    /// cooperative pool, which the suite's CPU-heavy tests can hold past 5 s on a 3-core runner, and
-    /// a session that waits 5 s for the welcome closes the connection.
-    private func reconnected(patience: Int?, answer: (FakeHost.Peer) async throws -> Void) async throws -> [StepResult] {
+    /// Runs snapshot, drop, attached, same against a fake host whose reattach `answer` gives. Every
+    /// limit of the run's is held until the test lets it pass: the steps that name one wait
+    /// `Patience.answer`, the others the probe's own 5 s. Once the drop is seen (the attached step
+    /// holds the only limit) the host answers, and when `sameRunsOut` the `same`'s limit, then the
+    /// only one held, passes; no limit runs out by the runner's speed.
+    private func reconnected(sameRunsOut: Bool, answer: (FakeHost.Peer) async throws -> Void) async throws -> [StepResult] {
         let host = try FakeHost()
         let create = SessionCreate(
             session: "work", command: [], workingDirectory: "/tmp", project: "", room: "", size: TerminalSize(columns: 20, rows: 3)
@@ -118,7 +118,8 @@ import Testing
             open: create, door: .local(host.address), screen: try screen(columns: 20, rows: 3), timeout: Patience.answer, stableAfter: .zero,
             sleep: Naps().sleep
         )
-        let runner = Runner(session: session, host: nil, echoBudget: 10, patience: patience) { _ in }
+        let limits = Timeline()
+        let runner = Runner(session: session, host: nil, echoBudget: 10, patience: Self.probesOwn, sleep: limits.sleep) { _ in }
         let script = try JSONDecoder().decode(Script.self, from: Data("""
             {"size": [20, 3], "steps": [{"wait": "kept", "within": \(Patience.answer)}, {"snapshot": "before"}, {"drop": true},
               {"phase": "attached", "within": \(Patience.answer)}, {"same": "before"}]}
@@ -132,7 +133,12 @@ import Testing
         let again = try await host.accept()
         try await again.welcome()
         guard case .attach = try await again.read() else { throw HostError("the reconnect did not attach") }
+        try await limits.until(held: [.seconds(Patience.answer)])
         try await answer(again)
+        if sameRunsOut {
+            try await limits.until(held: [.seconds(Self.probesOwn)])
+            limits.passAll()
+        }
         let steps = await report.steps
         session.close()
         _ = first

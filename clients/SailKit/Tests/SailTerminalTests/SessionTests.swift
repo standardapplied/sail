@@ -242,17 +242,23 @@ import Testing
     /// A runner's door keeps trying for a minute before it parks: past the five waits its waits go
     /// on at their 8 s cap until 60 s or more of them are spent, so a cut of 20 s is ridden out and
     /// one of 70 s parks, after which Reconnect Now tries at once. A ticket asked while the door
-    /// cannot be reached is never presented, so the next attempts use it again (m8): the person's
-    /// tickets, which the host bounds, are not spent on a dead door. The session's clock is the
-    /// test's and stands still, so its attempts take no time and the ticket never ages, however long
-    /// the runner takes over them.
+    /// cannot be reached is never presented, so the next attempts use it again while it is under
+    /// 20 s old (m8): the person's tickets, which the host bounds, are not spent on a dead door. The
+    /// session's clock is the test's and moves by the session's own waits alone, so its attempts
+    /// take no time however long the runner takes over them, and the ticket asked after the first
+    /// wait (0.5 s) is asked again after the sixth (23.5 s) and the ninth (47.5 s).
     @Test func aRunnerKeepsTryingForAMinuteAtTheCapThenParksUntilReconnectNow() async throws {
         let host = try FakeHost(tcp: ())
         let desk = TicketDesk(address: host.address)
         let naps = Naps()
         let hands = Hands()
         let session = TerminalSession(
-            open: create, door: .runner(desk), screen: try screen(), timeout: Patience.answer, sleep: naps.sleep, clock: SessionClock { hands.now }
+            open: create, door: .runner(desk), screen: try screen(), timeout: Patience.answer,
+            sleep: { wait in
+                hands.advance(wait)
+                try await naps.sleep(wait)
+            },
+            now: { hands.now }
         )
         let watch = Watch(session)
         session.start()
@@ -271,29 +277,40 @@ import Testing
         #expect(naps.durations.dropLast().reduce(.zero, +) < TerminalSession.runnerPatience)
         #expect(naps.durations.reduce(.zero, +) >= TerminalSession.runnerPatience)
         #expect(watch.seen.contains(.phase(.reconnecting(attempt: 11))))
-        #expect(desk.requests == [.open(project: "", workspace: ""), .attach(session: "work")], "one ticket never presented serves every attempt")
+        let attach = TicketRequest.attach(session: "work")
+        #expect(desk.requests == [.open(project: "", workspace: ""), attach, attach, attach], "a ticket never presented serves the attempts of its 20 s")
         let attempts = naps.durations.count
         session.reconnectNow()
         try await watch.until("tried again at once") { naps.durations.count > attempts }
         session.close()
     }
 
-    /// n6: a runner's patience counts the time its attempts took, not its waits alone. Against a
-    /// host that accepts no connection, each attempt takes its second to time out, and its waits
-    /// begin at 1 s; with patience half a second past those four waits, the attempts' seconds park
-    /// it after the fourth, where the waits alone would take a fifth.
+    /// n6: a runner's patience counts the time its attempts took, not its waits alone. The host
+    /// takes each attempt's connection and, a second later on the session's clock, which only the
+    /// test moves, closes it unanswered; the waits begin at 1 s, and with patience half a second
+    /// past those four waits, the attempts' seconds park it after the fourth, where the waits alone
+    /// would take a fifth.
     @Test func aRunnersPatienceCountsTheTimeItsAttemptsTook() async throws {
         let host = try FakeHost(tcp: ())
         let desk = TicketDesk(address: host.address)
         let naps = Naps()
+        let hands = Hands()
         let waits = Array(TerminalSession.retryWaits.dropFirst())
         let patience = waits.reduce(.zero, +) + .milliseconds(500)
-        let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: 1, sleep: naps.sleep, patience: patience)
+        let session = TerminalSession(
+            open: create, door: .runner(desk), screen: try screen(), timeout: Patience.answer, sleep: naps.sleep, patience: patience,
+            now: { hands.now }
+        )
         let watch = Watch(session)
         session.start()
-        try await watch.until("parked") {
+        for _ in 0 ... waits.count {
+            let attempt = try await host.accept()
+            hands.advance(.seconds(1))
+            attempt.close()
+        }
+        try await watch.until("parked, or waited a fifth time") {
             if case .parked = session.state.phase { return true }
-            return false
+            return naps.durations.count > waits.count
         }
         #expect(naps.durations == waits, "\(naps.durations)")
         session.close()
