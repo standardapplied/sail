@@ -368,7 +368,7 @@
   {"name": "the-rail-signed-out", "rail": "workspaces"},
   {"name": "accent-is-terracotta-under-graphite", "accent": true},
   {"name": "a-bare-host-is-tried-over-https", "address": "127.0.0.1:7979"},
-  {"name": "continue-to-the-bare-host", "proceed": true},
+  {"name": "continue-to-the-bare-host-said-when-the-request-times-out", "proceed": true, "seconds": 90},
   {"name": "never-sent-as-plain-http", "exactly": ["Welcome to Sail", "Sail cannot reach https://127.0.0.1:7979.", "Check that this Mac is on its network and the address is right."]},
   {"name": "unreachable-address", "address": "http://127.0.0.1:1"},
   {"name": "continue-to-a-closed-port", "proceed": true},
