@@ -405,6 +405,7 @@ final class MemoryVaultOf: TokenVault, Sendable {
         await pane.flow.refresh()
         pane.layoutSubtreeIfNeeded()
         let said = pane.said.attributedStringValue
+        try #require(said.length > 0, "nothing is said under the line: \(pane.text)")
         #expect(said.containsAttachments && !pane.said.isHidden && pane.until.stringValue.hasPrefix("Not yet confirmed"), "\(pane.text)")
         #expect((said.attribute(.foregroundColor, at: said.length - 1, effectiveRange: nil) as? NSColor) != nil)
         let line = pane.convert(pane.planeRow.bounds, from: pane.planeRow), under = pane.convert(pane.said.bounds, from: pane.said)
