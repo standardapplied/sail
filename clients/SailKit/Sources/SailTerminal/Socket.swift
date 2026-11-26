@@ -24,7 +24,7 @@ final class Socket: Sendable {
     /// The bound on finding a quiet connection dead: keepalive's idle time and its probes.
     static let quietDeadAfter = Int(keepalive.idle + keepalive.interval * keepalive.count)
 
-    private let descriptor: Int32
+    let descriptor: Int32
 
     /// Takes `descriptor` over; on Darwin a write to a closed peer then fails rather than raising
     /// SIGPIPE (Linux asks the same of every send with `MSG_NOSIGNAL`).
@@ -161,7 +161,7 @@ final class Socket: Sendable {
     }
 
     private static func open(family: Int32) throws(TerminalError) -> Socket {
-        let descriptor = socket(family, streamType, 0)
+        let descriptor = Descriptors.socket(family)
         guard descriptor >= 0 else { throw .unreachable("no socket: \(reason(errno))") }
         return Socket(descriptor: descriptor)
     }

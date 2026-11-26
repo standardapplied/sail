@@ -2,6 +2,7 @@
 import Darwin
 #endif
 import Foundation
+import SailKitTestSupport
 @testable import SailMeasures
 import SailSurface
 import Synchronization
@@ -383,12 +384,12 @@ import Testing
 
     /// A host's children are listed, and their CPU is added to ours.
     @Test func aChildIsListedAndItsCPUIsOurs() throws {
-        let child = Process()
-        child.executableURL = URL(fileURLWithPath: "/bin/sleep")
-        child.arguments = ["5"]
-        try child.run()
-        defer { child.terminate() }
-        let pid = child.processIdentifier
+        let pid = try TestSpawn.process("/bin/sleep", ["5"])
+        defer {
+            kill(pid, SIGKILL)
+            var status: Int32 = 0
+            while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+        }
         let children = Mach.children(of: getpid())
         #expect(children.contains(pid), "the child \(pid) is not among \(children)")
         #expect(Mach.cpu(ofProcess: -1) == nil, "a pid that cannot be read adds nothing")

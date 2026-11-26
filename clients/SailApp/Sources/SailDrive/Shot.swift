@@ -62,7 +62,7 @@ struct Shot {
     /// Writes `line` to the FIFO without waiting for a reader: a shell that is not reading is said,
     /// not waited on for ever.
     private static func ask(_ fifo: String, _ line: String) -> Bool {
-        let descriptor = open(fifo, O_WRONLY | O_NONBLOCK)
+        let descriptor = open(fifo, O_WRONLY | O_NONBLOCK | O_CLOEXEC)
         guard descriptor >= 0 else {
             print("screencapture: the launching shell is not reading \(fifo) (errno \(errno))")
             return false
