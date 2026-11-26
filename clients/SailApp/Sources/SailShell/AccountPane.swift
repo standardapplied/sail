@@ -142,10 +142,12 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         painter.shown()
     }
 
-    /// Gone from view, the load under way is stopped: shown again, the groups are asked again.
+    /// Gone from view, the load under way is stopped and the refusals said are done with: shown
+    /// again, the groups are asked again, and a refusal that came while it was hidden is said.
     override public func viewDidHide() {
         super.viewDidHide()
         loading?.cancel()
+        refusals = [:]
     }
 
     // MARK: What it says
@@ -197,19 +199,19 @@ public final class AccountPane: NSView, NSMenuItemValidation {
 
     /// Shown (the rail's Account, the menu's Account or Keys): the groups asked again.
     func shown() {
-        load()
+        load(keepingRefusals: true)
     }
 
     /// Asks the server for the groups' answers while someone is signed in and the view is shown,
     /// all at once: their own passkeys, the harnesses it knows and their keys, each group drawn as
     /// its own answer lands. The load before is stopped, and only the latest one's answers are
     /// taken, for this sign-in; a group keeps its last answer until a call answers again. A refusal
-    /// under a row is said until the next load.
-    func load() {
+    /// under a row is said until the next load but the one the view's showing asks.
+    func load(keepingRefusals: Bool = false) {
         guard !isHiddenOrHasHiddenAncestor, let client = flow.client() else { return }
         loading?.cancel()
         loads += 1
-        refusals = [:]
+        if !keepingRefusals { refusals = [:] }
         let load = (number: loads, era: era)
         loading = Task { [weak self] in
             await withTaskGroup(of: Void.self) { group in
@@ -237,21 +239,25 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         }
     }
 
-    /// A group's answer, drawn when it is the latest load's. A call that finds the session ended is
-    /// not drawn: it hands over to the check at once, which says so where every check does, in a
-    /// task of its own that neither a hide nor a new load stops.
+    /// A group's answer, drawn when it is the latest load's, unless it ``ends(_:)`` the session.
     private func take<Value>(
         _ group: ReferenceWritableKeyPath<AccountPane, AccountPage.Answered<Value>>, in load: (number: Int, era: Int), _ work: @Sendable () async throws(SailError) -> Value
     ) async {
         let answer = await Self.result(work)
-        guard isLatest(load), let plane = flow.standing?.controlPlane else { return }
-        if case let .failure(error) = answer, AccountRefusal(error, at: plane, step: .asking).reason == .ended {
-            acting = Task { [flow] in await flow.refresh() }
-            return
-        }
+        guard isLatest(load) else { return }
+        if case let .failure(error) = answer, ends(error) { return }
         self[keyPath: group].take(answer, at: place)
         show()
         onDrawn()
+    }
+
+    /// Whether `error` finds the session ended. Then nothing of it is said where it happened: the
+    /// check is asked at once, in a task of its own that neither a hide nor a new load stops, and
+    /// says so where every check does.
+    private func ends(_ error: SailError) -> Bool {
+        guard let plane = flow.standing?.controlPlane, AccountRefusal(error, at: plane, step: .asking).reason == .ended else { return false }
+        acting = Task { [flow] in await flow.refresh() }
+        return true
     }
 
     private static func result<Value>(_ work: () async throws(SailError) -> Value) async -> Result<Value, SailError> {
@@ -291,9 +297,9 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         }
     }
 
-    /// Sign In Again: the sign-in ceremony at this control plane, the view kept; a refusal said in
-    /// the control plane's group, else the groups asked again, as the passkey signed in with is now
-    /// This Mac's.
+    /// Sign In Again: the sign-in ceremony at this control plane, the view kept, a refusal said in
+    /// the control plane's group; then the groups asked again, as the passkey signed in with is now
+    /// This Mac's, and as an ask that ended during the ceremony was not handed over.
     @objc func signInAgainNow(_: Any?) {
         signInLines = []
         guard flow.signInAgain(refused: { [weak self] refusal in
@@ -303,15 +309,14 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         let underWay = flow.underWay
         acting = Task { [weak self] in
             await underWay?.value
-            guard let self, signInLines.isEmpty else { return }
-            load()
+            self?.load()
         }
         show()
     }
 
     /// Remove on a row asks first, Cancel the default; confirmed, `remove` is sent, the row said as
     /// being removed and taking no second Remove until it answers, and its refusal said under the
-    /// row, the row kept. Either way the groups are asked again.
+    /// row, the row kept, unless it ``ends(_:)`` the session. Either way the groups are asked again.
     private func ask(_ asked: AccountPage.Question, row id: String, remove: @escaping @Sendable (SailClient) async throws(SailError) -> Void) {
         guard let window, question == nil, loginSheet == nil, !removing.contains(id), flow.client() != nil else { return }
         let sheet = Sheet(title: asked.title, body: asked.body, confirm: "Remove", kind: .destructive, look: look, titleFont: titleFont)
@@ -329,7 +334,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
                 guard let self, era == self.era else { return }
                 removing.remove(id)
                 load()
-                if case let .failure(error) = answer { refusals[id] = lines(error) }
+                if case let .failure(error) = answer, !ends(error) { refusals[id] = lines(error) }
                 show()
             }
         }

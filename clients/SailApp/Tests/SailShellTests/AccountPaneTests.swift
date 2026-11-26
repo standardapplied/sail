@@ -366,11 +366,11 @@ final class MemoryVaultOf: TokenVault, Sendable {
 
 /// A control plane answering each route as the server recorded it, the answers changed as a test
 /// goes; a route held answers once released, or fails as out of reach once the task waiting on it
-/// is cancelled, as URLSession's does.
+/// is cancelled, as URLSession's does. Each hold is a hold of its own.
 actor Desk: Transport {
     private var answers: [String: HTTPResponse] = [:]
     private var holding: String?
-    private let gate = Gate(), arrival = Gate()
+    private var gate = Gate(), arrival = Gate()
     private(set) var asked: [String] = []
 
     init(_ names: [String]) throws {
@@ -403,6 +403,8 @@ actor Desk: Transport {
     /// The next request of `route` is held until ``release()``.
     func hold(_ route: String) {
         holding = route
+        gate = Gate()
+        arrival = Gate()
     }
 
     func release() {
@@ -410,7 +412,7 @@ actor Desk: Transport {
     }
 
     /// Returns once the held request came, or once `action`, which should send it, ended without.
-    nonisolated func arrived(during action: Task<Void, Never>?) async {
+    func arrived(during action: Task<Void, Never>?) async {
         await arrival.wait(during: action)
     }
 
@@ -418,6 +420,7 @@ actor Desk: Transport {
         asked.append(request.route)
         if request.route == holding {
             holding = nil
+            let gate = gate
             arrival.open()
             await gate.wait()
             if Task.isCancelled { throw .unreachable("cancelled") }
@@ -580,6 +583,7 @@ actor Desk: Transport {
         await desk.hold("GET /v1/passkeys")
         pane.load()
         await desk.arrived(during: pane.loading)
+        pane.show()
         #expect(pane.passkeyMark.isHidden && Self.names(pane.passkeyList).count == 2, "a later call took the last answer off the screen")
         await desk.release()
         await pane.loading?.value
@@ -739,6 +743,45 @@ actor Desk: Transport {
         #expect(pane.refusals.isEmpty && pane.passkeyList.entries.count == 2, "the refusal outlived the groups asked again: \(pane.text)")
     }
 
+    /// A refusal that comes while the view is hidden is said when it is shown again.
+    @Test func aRefusalThatComesWhileHiddenIsSaidOnceShown() async throws {
+        let desk = try Desk(Self.goldens + ["refusal-conflict-passkey-current"])
+        let (pane, window) = try await Self.signedIn(desk)
+        defer { window.orderOut(nil) }
+        let mine = try Self.item("Sail for Mac", in: pane.passkeyList)
+        await desk.hold("DELETE /v1/passkeys/\(mine.id)")
+        try #require(mine.actions.first { $0.title == "Remove" }).run()
+        let sheet = try #require(pane.question)
+        _ = sheet.confirm.sendAction(sheet.confirm.action, to: sheet.confirm.target)
+        await desk.arrived(during: pane.acting)
+        pane.isHidden = true
+        await desk.release()
+        await pane.acting?.value
+        pane.isHidden = false
+        pane.shown()
+        await pane.loading?.value
+        #expect(pane.refusals[mine.id] == ["You are signed in with this passkey.", "Sign in with another passkey to remove this one."], "\(pane.refusals)")
+    }
+
+    /// A removal whose call finds the session ended says nothing under its row: it hands over to
+    /// the check at once, which says so where every check does.
+    @Test func aRemovalFindingTheSessionEndedHandsOverAtOnce() async throws {
+        let desk = try Desk(Self.goldens)
+        let (pane, window) = try await Self.signedIn(desk)
+        defer { window.orderOut(nil) }
+        let phone = try Self.item("Sail for iPhone", in: pane.passkeyList)
+        let ended = try Exchange("refusal-invalid-bearer-token")
+        await desk.answer(Exchange(method: "DELETE", path: "/v1/passkeys/\(phone.id)", status: ended.status, body: ended.body))
+        await desk.answer(ended)
+        await desk.hold("GET /v1/whoami")
+        _ = try await Self.removed("Sail for iPhone", in: pane)
+        await desk.arrived(during: pane.acting)
+        #expect(pane.refusals.isEmpty && pane.flow.standing != nil, "the ended session was said under the row: \(pane.refusals)")
+        await desk.release()
+        await pane.acting?.value
+        #expect(pane.flow.standing == nil, "the check was not asked")
+    }
+
     /// A removal under way is said on its row, which takes no second Remove meanwhile, by ⋯ or by
     /// ⌘⌫; once it answers, the row is drawn from the groups asked again.
     @Test func oneRemovalAtATimeShownUnderWay() async throws {
@@ -827,6 +870,7 @@ actor Desk: Transport {
         await pane.flow.refresh()
         pane.layoutSubtreeIfNeeded()
         let listed = try [pane.passkeyList, pane.keyList].map { list -> AccountRowView in
+            try #require(list.numberOfRows > 0, "\(pane.text)")
             let cell = try #require(list.rowView(atRow: 0, makeIfNecessary: true))
             cell.layoutSubtreeIfNeeded()
             return try #require(WorkspacesViewTests.found(AccountRowView.self, in: cell).first)
@@ -860,6 +904,21 @@ actor Desk: Transport {
         let (later, other) = try await Self.signedIn(try Desk(Self.goldens))
         defer { other.orderOut(nil) }
         #expect(later.ending?.soon == false && later.signInAgain.isHidden)
+    }
+
+    /// Sign In Again refused (the control plane not answering its ceremony) still asks for the
+    /// groups again, its refusal said: an ask that found the session ended meanwhile is handed over
+    /// once no one acts.
+    @Test func aRefusedSignInAgainAsksForTheGroupsAgain() async throws {
+        let desk = try Desk(Self.goldens)
+        let (pane, window) = try await Self.signedIn(desk, lasts: 2 * 86_400)
+        defer { window.orderOut(nil) }
+        let listed = await desk.asked.filter { $0 == "GET /v1/passkeys" }.count
+        pane.signInAgainNow(nil)
+        await pane.acting?.value
+        await pane.loading?.value
+        let asked = await desk.asked
+        #expect(asked.filter { $0 == "GET /v1/passkeys" }.count == listed + 1 && !pane.planeLines.isEmpty, "asked \(asked), said \(pane.planeLines)")
     }
 
     /// The user menu's Keys shows the Account view scrolled to its keys, also once the keys come.

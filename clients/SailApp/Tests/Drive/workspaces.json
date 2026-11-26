@@ -884,6 +884,7 @@
   {"name": "acc-add-key-pasted", "pasteLogin": "sk-ant-api03-drive-pasted-fake-key-account"},
   {"name": "acc-the-keys-after-the-store", "golden": ["GET /v1/logins", "logins-with-a-default"]},
   {"name": "acc-add-key-store", "press": "enter"},
+  {"name": "acc-add-key-sheet-goes", "loginSheetIs": ["closed"]},
   {"name": "acc-the-key-stored", "pane": "Claude Code · API key “default” · new sessions and spec runs use it"},
   {"name": "acc-remove-a-key-answered", "golden": ["DELETE /v1/logins/claude-code/default", "login-removed"]},
   {"name": "acc-the-keys-after-the-removal", "golden": ["GET /v1/logins", "logins"]},

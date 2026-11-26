@@ -331,6 +331,7 @@ import Testing
         let account = try #require(view.items.first { $0.item == .account })
         #expect(account.isAccessibilitySelected() && keys.accessibilityFocusedUIElement as? MenuRow === account, "the highlight is not the selected, focused element")
         try Self.press(Self.down, in: shell)
+        try Self.press(Self.down, in: shell)
         #expect(!account.isAccessibilitySelected() && segments.isAccessibilitySelected() && keys.accessibilityFocusedUIElement as? MenuSegments === segments)
         #expect(account.accessibilityPerformPress() && !shell.userMenu.isOpen && shell.rail.selected == .account)
     }
@@ -534,6 +535,7 @@ import Testing
         let rects = view.segments.rects
         try #require(rects.count == 3, "the segments are \(rects)")
         #expect(rects[0].minX > rects[1].minX && rects[1].minX > rects[2].minX, "the segments run \(rects)")
+        try Self.press(Self.down, in: shell)
         try Self.press(Self.down, in: shell)
         try Self.press(Self.left, in: shell)
         #expect(view.chosenLook == .auto, "← at Auto, the last, moved to \(view.chosenLook)")

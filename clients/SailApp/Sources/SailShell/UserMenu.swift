@@ -530,6 +530,7 @@ package final class MenuRow: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.menuItem)
         setAccessibilityLabel(item.rawValue)
+        setAccessibilityEnabled(true)
     }
 
     @available(*, unavailable)
