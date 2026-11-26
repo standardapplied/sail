@@ -54,7 +54,7 @@ extension Driver {
     /// move over its tracking area.
     private static func hover(_ view: NSView, at point: NSPoint, modifiers: NSEvent.ModifierFlags) {
         guard let window = view.window, let moved = NSEvent.mouseEvent(
-            with: .mouseMoved, location: view.convert(point, to: nil), modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime,
+            with: .mouseMoved, location: clickPoint(point, in: view), modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime,
             windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0
         ) else { return }
         view.mouseMoved(with: moved)
@@ -225,7 +225,7 @@ extension Driver {
     /// queued behind it, numbered as a person's double-click numbers them.
     private func clicks(_ count: Int, on view: NSView, at point: NSPoint) async -> Bool {
         guard let window = view.window else { return false }
-        let location = view.convert(point, to: nil)
+        let location = clickPoint(point, in: view)
         for number in 1 ... count {
             func event(_ type: NSEvent.EventType) -> NSEvent? {
                 NSEvent.mouseEvent(
