@@ -200,9 +200,18 @@ public enum NewSessionWords {
     }
 
     public static let shell = (name: "Shell", line: "a terminal, no agent")
-    /// The keys the foot names: ⌘M only while the chosen harness has a mode menu for it to open.
-    public static func hint(modes: Bool) -> String {
-        modes ? "↑↓ choose · ⌘M mode" : "↑↓ choose"
+    /// What holds the panel's keys: its rows, its Sign in pop-up (after ⇥), or the sheet over it.
+    public enum Holder: Equatable, Sendable {
+        case rows, signIn, sheet
+    }
+
+    /// The keys the foot names while `holder` holds them, each only while it does what it says:
+    /// ↑↓ choose while the rows hold them (Sign in holding them, ↑↓ open its menu); ⌘M while the
+    /// chosen harness has a mode menu for it to open (`modes`), whichever of the panel's holds them;
+    /// none under the sheet, which takes every key.
+    public static func hint(_ holder: Holder, modes: Bool) -> String {
+        let said = (holder == .rows ? ["↑↓ choose"] : []) + (modes && holder != .sheet ? ["⌘M mode"] : [])
+        return said.joined(separator: " · ")
     }
     public static let mode = "Mode"
     public static let signIn = "Sign in"

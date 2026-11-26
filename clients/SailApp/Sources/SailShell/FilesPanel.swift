@@ -128,7 +128,10 @@ final class FilesPanel: NSView {
         addSubview(line)
         list.returnKeyShown = false
         list.onKey = { [weak self] event in self?.key(event) ?? false }
-        list.onFocus = { [weak self] in self?.filePane?.keysTakenElsewhere() }
+        list.onKeys = { [weak self] in
+            guard let self, list.holdsKeys else { return }
+            filePane?.keysTakenElsewhere()
+        }
         list.onChoose = { [weak self] key in
             guard let self, !rebuilding else { return }
             chosenPath = key.flatMap { key in shownRows.first { $0.path.key == key }?.path }

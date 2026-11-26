@@ -90,16 +90,20 @@ public struct WorkspacesModel: Sendable {
         public let stale: Bool
         public let listedAt: Date?
 
-        /// The keys its foot names with row `chosen` chosen, each only while it does what it says:
-        /// none with no workspace row chosen; Return where the row opens (its Open or Start and Open,
-        /// which Return presses); ⌥⌘T, which opens any row's New Session; ⌘N while a workspace can be
-        /// made.
-        public func keys(chosen: String?) -> [Key] {
-            guard case let .list(table) = body, let line = (table.yours + table.others).first(where: { $0.name == chosen }) else { return [] }
-            var keys: [Key] = line.primary == nil ? [] : [.open]
-            keys.append(.newSession)
-            if canCreate { keys.append(.newWorkspace) }
-            return keys
+        /// Workspace row `name`'s line, nil while it is not listed.
+        public func line(_ name: String?) -> Line? {
+            guard case let .list(table) = body else { return nil }
+            return (table.yours + table.others).first { $0.name == name }
+        }
+
+        /// The keys its foot names with row `chosen` chosen, each only while it does what it says
+        /// for what holds the keys: none with no workspace row chosen; Return and ⌥⌘T, the list's
+        /// own keys, only while `listHoldsKeys`, Return only where the row opens (its Open or Start
+        /// and Open, which Return presses); ⌘N, New Workspace's own, while a workspace can be made.
+        public func keys(chosen: String?, listHoldsKeys: Bool) -> [Key] {
+            guard let line = line(chosen) else { return [] }
+            let listed: [Key] = listHoldsKeys ? (line.primary == nil ? [] : [.open]) + [.newSession] : []
+            return listed + (canCreate ? [.newWorkspace] : [])
         }
     }
 

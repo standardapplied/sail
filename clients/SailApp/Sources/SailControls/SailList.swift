@@ -207,13 +207,26 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     public var onChoose: @MainActor (String?) -> Void = { _ in }
     /// A key the list's owner takes before the list does (a tree's → and ←): true, taken.
     package var onKey: (@MainActor (NSEvent) -> Bool)?
-    /// The list took the keys.
-    package var onFocus: @MainActor () -> Void = {}
+    /// The list took the keys or gave them up, ``holdsKeys`` saying which.
+    package var onKeys: @MainActor () -> Void = {}
+    /// It holds its window's keys: it is the window's first responder.
+    package private(set) var holdsKeys = false
 
     override public func becomeFirstResponder() -> Bool {
         let taken = super.becomeFirstResponder()
-        if taken { onFocus() }
+        if taken { keys(held: true) }
         return taken
+    }
+
+    override public func resignFirstResponder() -> Bool {
+        let given = super.resignFirstResponder()
+        if given { keys(held: false) }
+        return given
+    }
+
+    private func keys(held: Bool) {
+        holdsKeys = held
+        onKeys()
     }
     private let mono: LabelFont
 

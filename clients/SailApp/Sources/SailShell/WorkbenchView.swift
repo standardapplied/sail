@@ -58,7 +58,7 @@ public final class WorkbenchView: NSView {
     private(set) var restored = false
     /// Workspaces asked to open, and sessions asked to start, before the first restore, done in turn
     /// once it has replaced the model; a session only for the person who asked for it there.
-    private var pendingWorkspaces: [@MainActor () -> Void] = []
+    private var pending: [@MainActor () -> Void] = []
     /// The control plane signed in to, which with the handle says who asked for a queued start.
     var controlPlane: @MainActor () -> String = { "" }
 
@@ -149,8 +149,8 @@ public final class WorkbenchView: NSView {
             if makeView(pane, start: .resume, points: FontLadder.standard) == nil { model.close(pane.id) }
         }
         model.fit(in: room, minimum: minimum(of: Array(panes.values)), scale: scale)
-        let waiting = pendingWorkspaces
-        pendingWorkspaces = []
+        let waiting = pending
+        pending = []
         if model.tabs.isEmpty, waiting.isEmpty, held.isEmpty { openTab() } else { apply() }
         waiting.forEach { $0() }
     }
@@ -497,7 +497,7 @@ public final class WorkbenchView: NSView {
     /// there are none (or they cannot be listed); before the first restore, once it is done.
     func openWorkspace(project: String, name: String) {
         let place = Place.workspace(project: project, name: name)
-        guard restored else { return pendingWorkspaces.append({ [weak self] in self?.openWorkspace(project: project, name: name) }) }
+        guard restored else { return pending.append({ [weak self] in self?.openWorkspace(project: project, name: name) }) }
         guard let reached = signedIn() else { return openTab(in: place) }
         Task { [weak self] in
             let listed = try? await reached.tickets.sessions(in: project, workspace: name)
@@ -535,7 +535,7 @@ public final class WorkbenchView: NSView {
     func startSession(_ agent: AgentStart?, project: String, name: String) {
         guard restored else {
             let askedBy = asker
-            return pendingWorkspaces.append({ [weak self] in
+            return pending.append({ [weak self] in
                 guard let self, askedBy == asker else { return }
                 startSession(agent, project: project, name: name)
             })

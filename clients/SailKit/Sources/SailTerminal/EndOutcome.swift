@@ -48,7 +48,8 @@ extension Door {
     /// How long an end waits in all, the ticket included, before it is unconfirmed.
     public static let endLimit = Duration.seconds(10)
 
-    /// How an end waits out its limit: the wall clock's.
+    /// The wall clock's sleep: how an end waits out its limit, and a session every pause of its own
+    /// (a reconnect's, a resize's hold), unless a test hands one of its own.
     public static let wallClock: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
 
     /// Ends `session` at the host this door reaches, on a connection of its own, waiting

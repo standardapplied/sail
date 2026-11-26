@@ -354,7 +354,7 @@ import Testing
         #expect(shown.modes?.title == "Claude Code's own" && shown.signIn?.title == "Your Claude account")
         #expect(shown.words.contains("Starts as Claude Code starts by itself: the project's default mode, else Auto where it is available, else Manual."))
         #expect(!shown.words.contains { $0.contains("asks you to sign in") }, "a workspace holding the sign-in was told to sign in")
-        #expect(shown.primary?.title == "Start" && shown.primary?.isEnabled == true && shown.words.contains("↑↓ choose · ⌘M mode"))
+        #expect(shown.primary?.title == "Start" && shown.primary?.isEnabled == true && shown.words.contains(NewSessionWords.hint(.rows, modes: true)))
         #expect(!shown.words.contains { $0.contains("stopped") }, "a running workspace said it is stopped")
         let row = try #require(view.project.rowFrame("dock").map { window.convertToScreen($0) }), box = panel.popover.frame
         #expect(near(box.width, NewSessionPanel.width) && near(box.maxY, row.minY - NewSessionPanel.gap), "the panel is at \(box), the row at \(row)")
@@ -378,10 +378,10 @@ import Testing
         #expect(panel.view.words.contains("Full access") && panel.view.words.contains { $0.hasPrefix("Sail starts Codex CLI in a workspace with full access") })
         try Self.press(try Self.key(46, "m", .command), in: window)
         #expect(popped.isEmpty, "⌘M opened a menu for a harness of one mode")
-        #expect(panel.view.words.contains("↑↓ choose") && !panel.view.words.contains { $0.contains("⌘M") }, "⌘M is named where it opens nothing")
+        #expect(panel.view.words.contains(NewSessionWords.hint(.rows, modes: false)) && !panel.view.words.contains(NewSessionWords.hint(.rows, modes: true)), "⌘M is named where it opens nothing")
         for _ in 0 ..< 3 { try Self.press(try Self.down(), in: window) }
         #expect(panel.view.rows.map(\.chosen) == [false, false, true], "↓ went past the Shell")
-        #expect(panel.view.words.contains("↑↓ choose") && !panel.view.words.contains { $0.contains("⌘M") }, "⌘M is named on the Shell")
+        #expect(panel.view.words.contains(NewSessionWords.hint(.rows, modes: false)) && !panel.view.words.contains(NewSessionWords.hint(.rows, modes: true)), "⌘M is named on the Shell")
         for _ in 0 ..< 4 { try Self.press(try Self.up(), in: window) }
         #expect(panel.view.rows.map(\.chosen) == [true, false, false], "↑ went past the first")
         try Self.press(try Self.key(46, "m", .command), in: window)
@@ -414,7 +414,9 @@ import Testing
             if start == nil { shells.append("\(project) \(name)") } else { started += 1 }
         }
         _ = try await Self.open("dock", in: view)
-        #expect(WorkspacesViewTests.footSays(view.project) == ["New Session", "New"], "the foot names Return's Open while Return starts")
+        #expect(WorkspacesViewTests.footSays(view.project) == ["New"], "the foot names the list's keys while the panel holds them: \(WorkspacesViewTests.footSays(view.project))")
+        try Self.press(try Self.optionCommandT(), in: window)
+        #expect(view.newSession.isOpen && shells.isEmpty && started == 0 && opened.isEmpty, "⌥⌘T, not named while the panel is open, did something")
         try Self.press(try Self.escape(), in: window)
         #expect(!view.newSession.isOpen && started == 0 && opened.isEmpty, "Escape left it open or started something")
         #expect(WorkspacesViewTests.footSays(view.project) == ["Open", "New Session", "New"])
@@ -436,6 +438,8 @@ import Testing
         #expect(await RunnerTabTests.until { view.newSession.isOpen })
         view.project.on(.newSession("dock"))
         #expect(!view.newSession.isOpen, "the + again did not close it")
+        _ = try await Self.open("dock", in: view)
+        #expect(try WorkspacesViewTests.commandNReachesNewWorkspace(from: window.firstResponder, in: view.project), "⌘N, named while the panel is open, does not reach New Workspace")
     }
 
     /// A stopped workspace is a fact under the title; it is not read for its sign-in, so Start signs

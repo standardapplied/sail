@@ -227,14 +227,26 @@ import Testing
         #expect(notes == ["Only uday or an admin opens it"], "\(notes)")
     }
 
+    /// ⌘N reaches New Workspace from `holder`, what holds the keys: the holder passes it on, and an
+    /// enabled New Workspace in view holds it as its key equivalent, which AppKit's walk of the
+    /// window's views presses. Pressing it here would run AppKit's own click, which no unit test runs.
+    static func commandNReachesNewWorkspace(from holder: NSResponder?, in project: ProjectView) throws -> Bool {
+        let passed = try !(holder?.performKeyEquivalent(with: NewSessionPanelTests.key(45, "n", .command)) ?? true)
+        let held = [project.newWorkspace, project.newWorkspaceIcon].contains {
+            !$0.isHiddenOrHasHiddenAncestor && $0.isEnabled && $0.keyEquivalent == "n" && $0.keyEquivalentModifierMask == .command
+        }
+        return passed && held
+    }
+
     /// What the foot's keys say, the count aside.
     static func footSays(_ project: ProjectView) -> [String] {
         Self.found(NSTextField.self, in: project.foot).filter { $0 !== project.count }.map(\.stringValue)
     }
 
-    /// The foot names a key only while it works: none with no row chosen; on a chosen row of the
-    /// person's own Return (which opens it, starting it first when stopped), ⌥⌘T and ⌘N; on someone
-    /// else's no Return, which presses nothing there; ⌘N only while a workspace can be made; none again once no row is.
+    /// The foot names a key only while it works, the list holding the keys: none with no row
+    /// chosen; on a chosen row of the person's own Return (which opens it, starting it first when
+    /// stopped), ⌥⌘T and ⌘N; on someone else's no Return, which presses nothing there; ⌘N only while
+    /// a workspace can be made; none again once no row is.
     @Test func theFootNamesAKeyOnlyWhileItWorks() throws {
         let rows = [
             WorkspaceRow(name: "dock", instance: "harbor-dock", state: .known(.running), owner: "uday"),
@@ -243,6 +255,7 @@ import Testing
         let (project, window) = try Self.project(width: 1000)
         defer { window.orderOut(nil) }
         project.render(try #require(Self.page(rows)))
+        try #require(window.makeFirstResponder(project.list) && project.list.holdsKeys)
         #expect(project.list.chosen == nil && Self.footSays(project).isEmpty, "with no row chosen the foot says \(Self.footSays(project))")
         let tall = project.foot.fittingSize.height
         project.list.choose("dock")
@@ -261,6 +274,25 @@ import Testing
         project.render(try #require(Self.page(rows, for: Self.ana)))
         project.list.choose("dock")
         #expect(Self.footSays(project) == ["New Session", "New"], "Return is named on a row it presses nothing on")
+        let heights = project.foot.constraints.filter { $0.firstItem === project.foot && $0.firstAttribute == .height }
+        #expect(heights.count == 1, "the foot drawn again holds \(heights.count) heights")
+    }
+
+    /// The list's own keys, ⏎ and ⌥⌘T, are named only while it holds the keys: with the projects
+    /// list holding them (a click on the project already chosen keeps the row chosen) the foot names
+    /// ⌘N alone, which reaches New Workspace from there; given back, all three again.
+    @Test func theFootNamesTheListsKeysOnlyWhileItHoldsThem() async throws {
+        let (view, window, _) = try await Self.listed()
+        defer { window.orderOut(nil) }
+        view.project.list.choose("dock")
+        try #require(window.makeFirstResponder(view.project.list))
+        #expect(Self.footSays(view.project) == ["Open", "New Session", "New"])
+        try #require(window.makeFirstResponder(view.panel.list))
+        #expect(view.project.list.chosen == "dock" && Self.footSays(view.project) == ["New"], "with the projects list holding the keys the foot says \(Self.footSays(view.project))")
+        try #require(window.makeFirstResponder(view.project.list))
+        #expect(Self.footSays(view.project) == ["Open", "New Session", "New"], "the keys given back, the foot says \(Self.footSays(view.project))")
+        try #require(window.makeFirstResponder(view.panel.list))
+        #expect(try Self.commandNReachesNewWorkspace(from: window.firstResponder, in: view.project), "⌘N, named, does not reach New Workspace")
     }
 
     private struct Shadowed {

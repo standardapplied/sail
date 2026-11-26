@@ -145,7 +145,6 @@ public final class WorkspacesView: NSView {
         newSession.onClose = { [weak self] in
             self?.panelRow = nil
             self?.project.list.primaryElsewhere = false
-            self?.project.showKeys()
         }
         if let clip = project.listScroll?.contentView {
             clip.postsBoundsChangedNotifications = true
@@ -439,7 +438,6 @@ public final class WorkspacesView: NSView {
             guard newSession.isOpen else { return }
             panelRow = (row, line)
             project.list.primaryElsewhere = true
-            project.showKeys()
         }
     }
 
@@ -799,8 +797,8 @@ public final class WorkspacesView: NSView {
 extension WorkspacesModel.Screen {
     /// The listed row of workspace `name` in the project shown.
     func line(_ name: String) -> WorkspacesModel.Line? {
-        guard case let .shown(_, .project(page)) = self, case let .list(table) = page.body else { return nil }
-        return (table.yours + table.others).first { $0.name == name }
+        guard case let .shown(_, .project(page)) = self else { return nil }
+        return page.line(name)
     }
 
     /// A create was refused and its refusal is shown.

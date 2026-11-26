@@ -172,7 +172,7 @@ public final class TerminalSession: Sendable {
 
     private init(
         intent: Intent, door: Door, screen: Screen, timeout: Int = 10, stableAfter: Duration = TerminalSession.stableAttachment,
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        sleep: @escaping @Sendable (Duration) async throws -> Void = Door.wallClock,
         after: @escaping HoldTick.After = HoldTick.dispatch,
         patience: Duration = TerminalSession.runnerPatience
     ) {

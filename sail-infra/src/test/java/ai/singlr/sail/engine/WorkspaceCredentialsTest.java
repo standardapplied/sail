@@ -37,6 +37,7 @@ import org.junit.jupiter.api.io.TempDir;
 class WorkspaceCredentialsTest {
 
   private static final String TOKEN = "ghp_builderSecret123";
+  private static final String CLAUDE_BACKUPS = "/home/dev/.claude/backups";
 
   @TempDir Path root;
   private Path bin;
@@ -226,12 +227,16 @@ class WorkspaceCredentialsTest {
     assertFalse(Files.readString(root.resolve("home/dev/.gitconfig")).contains("user"));
   }
 
-  /** What a person signed in to each harness with, and an agent session's login file. */
+  /**
+   * What a person signed in to each harness with, Claude Code's backups as the folder of copies it
+   * is, and an agent session's login file.
+   */
   private void harnessesSignedIn() throws Exception {
     for (var file : WorkspaceCredentials.HARNESS_LOGINS) {
       var at = root.resolve(file.substring(1));
-      Files.createDirectories(at.getParent());
-      Files.writeString(at, "{\"approved\": [\"" + TOKEN + "\"]}\n");
+      var held = file.equals(CLAUDE_BACKUPS) ? at.resolve(".claude.json.backup.1795580418419") : at;
+      Files.createDirectories(held.getParent());
+      Files.writeString(held, "{\"approved\": [\"" + TOKEN + "\"]}\n");
     }
     var login =
         root.resolve(SessionLogin.file("0f0e0d0c-0000-7000-8000-000000000000").substring(1));
@@ -315,8 +320,12 @@ class WorkspaceCredentialsTest {
     Files.writeString(held, TOKEN);
     Files.setPosixFilePermissions(held.getParent(), PosixFilePermissions.fromString("r-xr-xr-x"));
 
-    var stripped = script(WorkspaceCredentials.STRIP, "");
-    Files.setPosixFilePermissions(held.getParent(), PosixFilePermissions.fromString("rwxr-xr-x"));
+    Ran stripped;
+    try {
+      stripped = script(WorkspaceCredentials.STRIP, "");
+    } finally {
+      Files.setPosixFilePermissions(held.getParent(), PosixFilePermissions.fromString("rwxr-xr-x"));
+    }
 
     assertEquals(1, stripped.exit(), stripped.said());
     assertTrue(stripped.said().contains(".codex/auth.json"), stripped.said());

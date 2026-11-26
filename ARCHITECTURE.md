@@ -4312,9 +4312,10 @@ of it (`Harness.storedLogins`: `~/.claude/.credentials.json`, `~/.claude.json` w
 it Claude Code keeps in `~/.claude/backups`, `~/.codex/auth.json`) stays across the person's own
 starts and goes with every strip, so a re-own (which strips before it gives), a disown and a
 template build take it. A home holds `~/.claude.json` and its backups both or neither: Claude Code
-started with a backup and no `~/.claude.json` says the file is missing before its welcome. The listing, the sidecar and
-every event carry the harness's own command (`["claude", "--permission-mode", "plan"]`) and
-`agent`, never the line that started it; no argv on the runner or in the workspace holds a login.
+started with a backup and no `~/.claude.json` says the file is missing before its welcome. The
+listing, the sidecar and every event carry the harness's own command
+(`["claude", "--permission-mode", "plan"]`) and `agent`, never the line that started it; no argv on
+the runner or in the workspace holds a login.
 A pty host that dies between the hand-over and the read leaves the file until the next agent start
 there (the hand-over's one-minute sweep) or the next give (every start and re-own); removing it at
 host start would take an exec into every workspace. An admin who enters a workspace watches an

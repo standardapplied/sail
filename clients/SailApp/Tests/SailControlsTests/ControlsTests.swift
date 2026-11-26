@@ -218,6 +218,23 @@ import Testing
         #expect((rtlMark?.minX ?? 0) > rtlLabel.maxX && (rtlHint?.maxX ?? .infinity) < rtlLabel.minX)
     }
 
+    /// A disabled button names no key, not even dimmed: its key does nothing. Enabled again, it
+    /// names it again, as wide as it was.
+    @Test func aDisabledButtonNamesNoKey() throws {
+        let start = SailButton("Start", kind: .primary, size: .small, look: .light, target: nil, action: nil)
+        start.hint("\r", mono: try Self.mono())
+        let named = start.intrinsicContentSize.width
+        #expect(start.arrangement().hint != nil)
+        start.isEnabled = false
+        #expect(start.arrangement().hint == nil && start.intrinsicContentSize.width < named, "a disabled Start names ⏎")
+        start.isEnabled = true
+        #expect(start.arrangement().hint != nil && start.intrinsicContentSize.width == named)
+        let create = SailButton("New Workspace", kind: .secondary, icon: .plus, look: .light, target: nil, action: nil)
+        create.shortcut("n", modifiers: .command, mono: try Self.mono())
+        create.isEnabled = false
+        #expect(create.arrangement().hint == nil, "a disabled New Workspace names ⌘N")
+    }
+
     /// The label is drawn, centred in the box within a point.
     @Test func theLabelsInkIsCentredInTheBox() {
         let button = Self.sized(SailButton("Start and Open", kind: .secondary, look: .light, target: nil, action: nil))

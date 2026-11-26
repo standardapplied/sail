@@ -464,13 +464,14 @@ package final class NewSessionView: NSView {
             said(line, y: &y, width: width)
             hairlines.append(y)
             let (title, enabled) = NewSessionWords.primary(panel.readiness, signsIn: panel.signsIn)
+            let holder: NewSessionWords.Holder = veiled ? .sheet : focused ? .signIn : .rows
             let start = SailButton(title, kind: veiled ? .secondary : .primary, size: .small, look: look, target: self, action: #selector(pressedStart(_:)))
-            start.hint("\r", mono: mono)
+            if holder != .sheet { start.hint("\r", mono: mono) }
             start.isEnabled = enabled
             start.holdsKeys = line.map { if case .stored = $0 { true } else { false } } == true && enabled && !focused
             start.why = enabled ? nil : Self.refusal(panel.readiness)?.message
             primary = start
-            let hint = Self.label(Self.text(NewSessionWords.hint(modes: modes != nil), mono.font(Look.Step.micro.points, .regular) as NSFont, look.textTertiary, direction: direction).cut(.byTruncatingTail))
+            let hint = Self.label(Self.text(NewSessionWords.hint(holder, modes: modes != nil), mono.font(Look.Step.micro.points, .regular) as NSFont, look.textTertiary, direction: direction).cut(.byTruncatingTail))
             y = foot(start, hint: hint, y: y, width: width)
         case let .refused(sentence, remedy, shell):
             hairlines.append(y)

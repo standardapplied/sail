@@ -139,6 +139,28 @@ import Testing
         #expect(admin.primary != nil && admin.why == nil, "an admin opens anyone's")
     }
 
+    /// The foot's keys, each only while it does what it says: none with no row chosen, a row not
+    /// listed or the row a create under way draws; Return on a row it opens, never one under way or
+    /// someone else's a member cannot open; Return and ⌥⌘T only while the list holds the keys; ⌘N,
+    /// New Workspace's, wherever they are, only while a workspace can be made.
+    @Test func theFootNamesAKeyOnlyWhileItWorks() throws {
+        var model = Self.listed(Self.uday)
+        let page = try #require(Self.page(model))
+        #expect(page.keys(chosen: nil, listHoldsKeys: true) == [] && page.keys(chosen: "gone", listHoldsKeys: true) == [])
+        #expect(page.keys(chosen: "dock", listHoldsKeys: true) == [.open, .newSession, .newWorkspace])
+        #expect(page.keys(chosen: "pier", listHoldsKeys: true) == [.open, .newSession, .newWorkspace], "Return starts and opens pier")
+        #expect(page.keys(chosen: "dock", listHoldsKeys: false) == [.newWorkspace], "the list's keys are named while another holds them")
+        let member = Self.listed(Self.ana)
+        let theirs = try #require(Self.table(member)?.others.first?.name)
+        #expect(Self.page(member)?.keys(chosen: theirs, listHoldsKeys: true) == [.newSession, .newWorkspace], "Return is named on a row it presses nothing on")
+        _ = model.ask(.stop, "dock", terminals: 0)
+        #expect(Self.page(model)?.keys(chosen: "dock", listHoldsKeys: true) == [.newSession, .newWorkspace], "Return is named on a row under way")
+        Self.send("new", &model)
+        let creating = try #require(Self.page(model))
+        #expect(creating.keys(chosen: "new", listHoldsKeys: true) == [], "the row a create under way draws names keys")
+        #expect(creating.keys(chosen: "pier", listHoldsKeys: true) == [.open, .newSession], "⌘N is named while no workspace can be made")
+    }
+
     /// The panel lists every project with its mark: no template, building, build failed, or none.
     /// Only `ready` names a current version, so a project whose template the server does not say,
     /// or says in a word this app does not know, is marked as having none, as its page says.

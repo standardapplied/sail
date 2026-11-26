@@ -206,8 +206,10 @@ public final class SailButton: NSButton {
         Draw.text(busyWord ?? title, labelFont, paint.label)
     }
 
+    /// The key that presses it, said after the label only while it is enabled: a disabled button's
+    /// key does nothing, so it names none, not even dimmed.
     private var hintText: NSAttributedString? {
-        guard busyWord == nil, !iconOnly, let words = shortcutWords, let mono else { return nil }
+        guard isEnabled, busyWord == nil, !iconOnly, let words = shortcutWords, let mono else { return nil }
         return Draw.text(words, mono.font(Look.Step.caption.points) as NSFont, Tint(paint.label.rgb, alpha: paint.label.alpha * ButtonSize.hintOpacity))
     }
 
@@ -221,7 +223,7 @@ public final class SailButton: NSButton {
     /// Where the leading mark (icon or spinner), the label and the hint sit in the box, centred
     /// together, in reading order: mirrored right to left. An icon-only button's icon is centred on
     /// the box exactly, as the design's grid centres it.
-    func arrangement() -> (mark: NSRect?, label: NSRect, hint: NSRect?) {
+    package func arrangement() -> (mark: NSRect?, label: NSRect, hint: NSRect?) {
         let box = self.box, labelSize = label.size()
         guard !iconOnly else { return (box.insetBy(dx: (box.width - ButtonSize.icon) / 2, dy: (box.height - ButtonSize.icon) / 2), .zero, nil) }
         let marked = busyWord != nil || icon != nil, hintSize = hintText?.size() ?? (popUp ? NSSize(width: ButtonSize.chevron, height: ButtonSize.chevron) : nil)
@@ -292,7 +294,10 @@ public final class SailButton: NSButton {
     }
 
     override public var isEnabled: Bool {
-        didSet { repaint() }
+        didSet {
+            if isEnabled != oldValue { invalidateIntrinsicContentSize() }
+            repaint()
+        }
     }
 
     override public var isHighlighted: Bool {

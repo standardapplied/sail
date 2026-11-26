@@ -73,7 +73,11 @@ Usage:
                                 build asks a question and waits, eng answers, and it goes on to
                                 awaiting_merge, beside a second spec of the same repo dispatched while it
                                 builds (eng is given a ZFS pool in a file, its git token through
-                                sail git login and acme's template first, and the two builds overlap,
+                                sail git login and acme's template first, whose snapshot holds no
+                                token, git identity, key, gh login or harness state, Claude's
+                                ~/.claude.json and its ~/.claude/backups among it, and in a new
+                                workspace of which Claude Code's first start says nothing of a
+                                missing configuration file; the two builds overlap,
                                 each in its own workspace of acme, committing as eng);
                                 the pull request, the room and every box's status are checked,
                                 main's measures of the spec count the reviews and the build runs listed for it,
@@ -95,8 +99,7 @@ Usage:
                                 acme's template is built on tank with the forge token client's person
                                 stored with sail git login (none in the environment), and a copy of
                                 its snapshot holds no token (searched for by content), git
-                                identity, key, gh login or harness state (Claude's
-                                ~/.claude.json and its ~/.claude/backups, neither), a
+                                identity, key or gh login, a
                                 workspace of it is a clone of its snapshot with a machine-id of its
                                 own (create time in the report) that commits as client's person;
                                 on client's node eng is refused one of her own, told hers live on
@@ -2005,7 +2008,9 @@ workspace_on() {
 
 # What a copy of acme's current template snapshot holds, run in the copy as root: the fleet's
 # forge token arrives on stdin as grep's pattern list, never on a command line, and only grep's exit
-# status is read. Prints each thing it finds; exits 0 only when it finds none of the four.
+# status is read. Prints each thing it finds; exits 0 only when it finds none of them: the token, a
+# git identity, a key, a gh login, or a harness's state (Claude's sign-in, its ~/.claude.json and
+# that file's backups, Codex's sign-in).
 HELD_PROBE='set -u
 held=""
 set --
@@ -2037,6 +2042,20 @@ template_holds_nothing() {
   b64=$(base64 -w0 <<< "$HELD_PROBE")
   on "$run" "$box" "sudo sh -c 'incus exec acme-held-probe -- bash -c \"\$(echo $b64 | base64 -d)\" < /root/.fleet/gh'" || status=1
   on "$run" "$box" "sudo incus delete --force acme-held-probe" || status=1
+  return $status
+}
+
+# Claude Code's first start in a new workspace of acme on BOX says nothing of a missing
+# configuration file, as the workspace's person. claude auth status reads ~/.claude.json at start-up
+# as a session does and needs no sign-in or network; claude --version and --help leave before that
+# read, so they could never fail. Its answer ("loggedIn") proves Claude ran; its exit is not read.
+claude_starts_clean() {
+  local run=$1 box=$2 said status=0
+  on "$run" "$box" "sudo sail project workspace create acme fleet-first > /dev/null" || return 1
+  said=$(on "$run" "$box" "sudo incus exec acme-fleet-first --user 1000 --group 1000 --cwd /home/dev --env HOME=/home/dev -- bash -lc '~/.local/bin/claude auth status' < /dev/null 2>&1 || true")
+  echo "$said"
+  [[ $said == *'"loggedIn"'* && $said != *"configuration file not found"* ]] || status=1
+  on "$run" "$box" "sudo sail project workspace delete acme fleet-first --force --yes > /dev/null" || status=1
   return $status
 }
 
@@ -2192,7 +2211,7 @@ storage() {
     on "$run" client "sudo sh -c 'sail git login github.com < /root/.fleet/gh'"
   check "$run" "acme's template is built on tank with client's stored forge token" \
     on "$run" client "sudo sail project template build acme"
-  check "$run" "acme's template snapshot holds no token, git identity, key, gh login or harness state (Claude's with its backups)" \
+  check "$run" "acme's template snapshot holds no token, git identity, key or gh login" \
     template_holds_nothing "$run" client
   check "$run" "a workspace of acme is a clone of its template's snapshot on tank, with its own machine-id" \
     workspace_on "$run" client
@@ -2753,8 +2772,12 @@ loop() {
     on "$run" eng "sudo sail host init --storage zfs --pool-file-size 20GiB --pool tank --yes"
   check "$run" "eng builds acme's template with its stored forge token" \
     on "$run" eng "sudo sail project template build acme"
-  check "$run" "acme's template snapshot on eng holds no token, git identity, key or gh login" \
+  check "$run" "acme's template snapshot on eng, which installs $LOOP_AGENTS, holds no token, git identity, key, gh login or harness state (Claude's ~/.claude.json with its backups)" \
     template_holds_nothing "$run" eng
+  if [[ " $LOOP_AGENTS " == *" claude-code "* ]]; then
+    check "$run" "Claude Code's first start in a new workspace of acme on eng says nothing of a missing configuration file" \
+      claude_starts_clean "$run" eng
+  fi
   check "$run" "eng stores each agent's key as its harness login, nothing in the container" gives_agents_their_keys "$run" eng
   check "$run" "eng's logins list each agent's default by fingerprint, no value" each_agent_has_its_login "$run" eng
   check "$run" "no secret appears in the run's logs" no_secret_in_logs "$run"
