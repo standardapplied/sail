@@ -79,6 +79,11 @@ public record ApiResponse(
     return new ApiResponse(200, ApiJson.withSchema(body));
   }
 
+  /** A change that has nothing to answer: {@code 204}, with no body. */
+  public static ApiResponse noContent() {
+    return new ApiResponse(204, Map.of());
+  }
+
   public static ApiResponse created(Object body) {
     return new ApiResponse(201, ApiJson.withSchema(body));
   }

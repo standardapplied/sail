@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
@@ -32,6 +33,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -254,8 +256,23 @@ class WorkspaceAgentsTest {
             "label",
             "Plan",
             "about",
-            "Researches and proposes changes, and edits nothing until you approve the plan."),
+            "Researches and proposes changes, and edits nothing until you approve the plan.",
+            "risky",
+            false),
         ((List<?>) claude.get("modes")).get(3));
+    assertEquals(
+        List.of("bypassPermissions"),
+        ((List<?>) claude.get("modes"))
+            .stream()
+                .map(Map.class::cast)
+                .filter(mode -> Boolean.TRUE.equals(mode.get("risky")))
+                .map(mode -> mode.get("mode"))
+                .toList(),
+        "only the mode that skips every check is risky, said on every mode");
+    assertEquals(
+        List.of(),
+        ((List<?>) claude.get("modes"))
+            .stream().map(Map.class::cast).filter(mode -> !mode.containsKey("risky")).toList());
     assertFalse(claude.containsKey("refusal"));
     assertFalse(claude.containsKey("note"));
     assertEquals(
@@ -291,12 +308,69 @@ class WorkspaceAgentsTest {
                 + " Code.",
             "An admin adds codex to acme's agent install list and builds its template again."),
         codex.get("refusal"));
+    assertEquals("Not installed in acme", codex.get("unavailable"), "the row's few words");
+    assertFalse(claude.containsKey("unavailable"), "beside a refusal only");
     assertEquals(false, codex.get("inside"));
     assertFalse(codex.containsKey("sign_in"), "a harness that does not start says no sign-in");
     assertFalse(codex.containsKey("login"));
     assertEquals("full-access", codex.get("mode_default"));
+    assertEquals(
+        List.of(true),
+        ((List<?>) codex.get("modes"))
+            .stream().map(mode -> ((Map<?, ?>) mode).get("risky")).toList(),
+        "Codex's one mode skips its own checks");
     assertEquals(Harnesses.of("codex").modesNote().orElseThrow(), codex.get("note"));
     assertFalse(answer.toString().contains("sk-"), "no login's value is answered");
+  }
+
+  /**
+   * The agents route says each harness's two ways in as the workspace route says them, from the
+   * same declarations: its sign-in without whether a workspace holds it, and its kinds.
+   */
+  @Test
+  void theAgentsRouteSaysEachHarnessesWaysInAsTheWorkspaceRouteDoes() throws Exception {
+    var offered = ask(sam, "beta-dock");
+    var request =
+        HttpRequest.newBuilder(
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/v1/agents"))
+            .header("Authorization", "Bearer " + sam)
+            .GET();
+    var agents =
+        (List<?>)
+            YamlUtil.parseMap(
+                    CLIENT.send(request.build(), HttpResponse.BodyHandlers.ofString()).body())
+                .get("agents");
+
+    for (var harness : List.of("claude-code", "codex")) {
+      var agent =
+          agents.stream()
+              .map(Map.class::cast)
+              .filter(each -> each.get("name").equals(harness))
+              .findFirst()
+              .orElseThrow();
+      var offer = offered.offer(harness);
+      var signIn = new LinkedHashMap<Object, Object>((Map<?, ?>) offer.get("sign_in"));
+      signIn.remove("signed_in");
+      assertEquals(
+          List.of(signIn, offer.get("kinds")),
+          List.of(agent.get("sign_in"), agent.get("kinds")),
+          harness);
+    }
+  }
+
+  /** A refusal an offer never carries has no short form, and saying one fails loudly. */
+  @Test
+  void aRefusalNoOfferCarriesHasNoShortForm() {
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                AgentStarts.unavailable(
+                    new ApiError("not_your_workspace", "Not yours.", (String) null), "acme"));
+
+    assertEquals(
+        "An offer refused with not_your_workspace has no short form to show.",
+        refused.getMessage());
   }
 
   /**

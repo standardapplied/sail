@@ -16,7 +16,6 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.EngagementMode;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.RetentionConfig;
@@ -51,8 +50,6 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.engine.WorkspaceOwner;
 import ai.singlr.sail.engine.WorkspaceTemplate;
 import ai.singlr.sail.engine.Workspaces;
-import ai.singlr.sail.harness.Harness;
-import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AttentionStore;
@@ -868,6 +865,11 @@ public final class SailOperations implements HostOperations {
     return loginOps;
   }
 
+  @Override
+  public PasskeyOperations passkeys() {
+    return new PasskeyOperations(controlPlane);
+  }
+
   /** The review and fix lanes the review pipeline launches through — see {@code reviewLanes}. */
   public ReviewLanes reviewLanes() {
     return dispatchOps.reviewLanes();
@@ -929,30 +931,9 @@ public final class SailOperations implements HostOperations {
     return new FdesResponse(roster);
   }
 
-  /**
-   * The known agent CLIs and their member-mode support, declared at the {@link Harness} seam: read
-   * only is offered only where the harness enforces it, and the refusal reason travels so clients
-   * grey the option out with the same words the launch gate refuses with.
-   */
   @Override
   public Result<AgentsResponse> agents() {
-    var agents =
-        Harnesses.all().stream()
-            .map(
-                harness -> {
-                  var refusal = harness.readOnlyRefusal();
-                  return new AgentView(
-                      harness.yamlName(),
-                      harness.displayName(),
-                      List.of(
-                          new AgentModeView(
-                              EngagementMode.READ_ONLY.wire(),
-                              refusal.isEmpty(),
-                              refusal.orElse(null)),
-                          new AgentModeView(EngagementMode.FULL.wire(), true, null)));
-                })
-            .toList();
-    return Result.success(new AgentsResponse(agents));
+    return Result.success(AgentsResponse.known());
   }
 
   @Override

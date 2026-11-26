@@ -99,6 +99,20 @@ final class AgentStarts {
   }
 
   /**
+   * The few words a list row says of an offer {@code refusal} refuses in a workspace of {@code
+   * project}: each refusal {@link #notInstalled} makes, the one an offer carries, has one.
+   *
+   * @throws IllegalStateException for a refusal an offer never carries, which has none
+   */
+  static String unavailable(ApiError refusal, String project) {
+    if (ErrorCode.HARNESS_NOT_INSTALLED.code().equals(refusal.code())) {
+      return "Not installed in " + project;
+    }
+    throw new IllegalStateException(
+        "An offer refused with " + refusal.code() + " has no short form to show.");
+  }
+
+  /**
    * The default login of {@code person}, of FDE id {@code fdeId}, for {@code harness}, which an
    * agent session of it in workspace {@code workspace} starts signed in with.
    *

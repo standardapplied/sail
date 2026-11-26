@@ -54,6 +54,8 @@ class RefusalsNameNoCommandTest {
           "GET, PROJECT + \"/template\"",
           "POST, PROJECT + \"/template:build\"",
           "POST, \"/v1/terminal/tickets\"",
+          "GET, \"/v1/passkeys\"",
+          "DELETE, \"/v1/passkeys/{id}\"",
           "POST, \"/v1/auth/login/start\"",
           "POST, \"/v1/auth/login/finish\"");
 

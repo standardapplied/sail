@@ -1,0 +1,81 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/agents"
+  },
+  "response": {
+    "body": {
+      "agents": [
+        {
+          "display_name": "Claude Code",
+          "kinds": [
+            {
+              "how": [
+                {
+                  "text": "Create an API key in the Claude Console"
+                }
+              ],
+              "kind": "api-key",
+              "label": "API key"
+            }
+          ],
+          "modes": [
+            {
+              "mode": "read_only",
+              "supported": true
+            },
+            {
+              "mode": "full",
+              "supported": true
+            }
+          ],
+          "name": "claude-code",
+          "sign_in": {
+            "how": [
+              {
+                "text": "Claude Code asks you to sign in with your Claude account when it starts, once in each workspace."
+              }
+            ],
+            "name": "Your Claude account"
+          }
+        },
+        {
+          "display_name": "Codex CLI",
+          "kinds": [
+            {
+              "how": [
+                {
+                  "text": "Create an API key at platform.openai.com/api-keys"
+                }
+              ],
+              "kind": "api-key",
+              "label": "API key"
+            }
+          ],
+          "modes": [
+            {
+              "mode": "read_only",
+              "reason": "Codex CLI has no harness-enforced read-only session inside a sail container: its bubblewrap sandbox needs user namespaces, which incus containers block, so its only working mode bypasses all restrictions. Add it with full access instead — the per-turn repo reservation guards that lane.",
+              "supported": false
+            },
+            {
+              "mode": "full",
+              "supported": true
+            }
+          ],
+          "name": "codex",
+          "sign_in": {
+            "how": [
+              {
+                "text": "Codex CLI asks you to sign in with your ChatGPT account when it starts, once in each workspace. Choose “Sign in with Device Code” there, after turning it on in your ChatGPT security settings."
+              }
+            ],
+            "name": "Your ChatGPT account"
+          }
+        }
+      ],
+      "schema_version": 1
+    },
+    "status": 200
+  }
+}

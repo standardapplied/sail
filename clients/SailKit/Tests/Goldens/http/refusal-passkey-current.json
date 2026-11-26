@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/v1/passkeys/Z29sZGVuIGNyZWRlbnRpYWxfaWQgNg"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Sign in with another passkey to remove this one.",
+        "code": "conflict",
+        "field_errors": [],
+        "message": "You are signed in with this passkey."
+      },
+      "schema_version": 1
+    },
+    "status": 409
+  }
+}

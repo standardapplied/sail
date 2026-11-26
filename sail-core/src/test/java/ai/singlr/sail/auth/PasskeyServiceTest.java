@@ -105,6 +105,10 @@ class PasskeyServiceTest {
     assertEquals("uday", result.fdeHandle());
     assertTrue(result.sessionToken().startsWith("sess_"));
     assertTrue(sessions.validate(result.sessionToken()).isPresent());
+    assertArrayEquals(
+        authenticator.credentialId(),
+        sessions.passkeyOf(result.sessionToken()).orElseThrow(),
+        "the session names the passkey it was signed in with");
     var remaining = Duration.between(Instant.now(), result.expiresAt());
     assertTrue(
         remaining.toHours() >= 29 * 24 && remaining.toHours() <= 30 * 24, remaining::toString);

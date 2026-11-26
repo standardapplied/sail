@@ -14,6 +14,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.BoxInstances;
 import ai.singlr.sail.store.ProjectStore;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -44,23 +45,30 @@ final class ProjectDefinitionOperations {
   /**
    * Creates the project {@code document}, a definition document, names; refused when it exists, and
    * when this box holds an instance of that name that is a workspace, a template or a copy, which
-   * the project could never take (W10). A box whose Incus does not answer, or that holds no such
-   * instance, creates it; a box the project later reaches with such an instance says so once.
+   * the project could never take (W10), each refusal naming the field {@code name} so a client says
+   * it under the name. A box whose Incus does not answer, or that holds no such instance, creates
+   * it; a box the project later reaches with such an instance says so once.
    */
   ProjectDefinitionResponse create(Map<String, Object> document) {
     var definition = ProjectDefinitionJson.read(YamlUtil.dumpJson(document));
-    var instance = BoxInstances.taken(definition.name(), box.namedIfReadable(definition.name()));
+    var name = definition.name();
+    var instance = BoxInstances.taken(name, box.namedIfReadable(name));
     if (instance.isPresent()) {
-      throw ApiException.of(ErrorCode.CONFLICT, instance.get());
+      throw nameRefused(instance.get().reason(), instance.get().remedy());
     }
     try {
       return response(projects.create(definition));
     } catch (ProjectStore.NameTaken taken) {
-      throw new ApiException(
-          ErrorCode.CONFLICT,
-          taken.getMessage(),
-          Remedy.of("Choose another name, or edit that project's definition."));
+      throw nameRefused(
+          "A project named " + name + " already exists.",
+          Remedy.of("Choose another name, or open " + name + "."));
     }
+  }
+
+  private static ApiException nameRefused(String message, Remedy remedy) {
+    return ApiException.of(
+        new Result.Failure<>(
+            ErrorCode.CONFLICT, message, remedy, List.of(FieldError.of("name", message)), null));
   }
 
   /**

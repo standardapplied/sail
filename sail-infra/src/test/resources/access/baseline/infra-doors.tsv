@@ -4192,6 +4192,64 @@ list my logins as room viewer ada-room beta	denied AGENT_LANE_FORBIDDEN 403 Agen
 list my logins as room viewer bob-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep harness logins and git tokens. | Only an operator lane (CLI or API token) may do this.
 list my logins as room viewer bob-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep harness logins and git tokens. | Only an operator lane (CLI or API token) may do this.
 list my logins as room viewer bob-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep harness logins and git tokens. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as agent member ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as agent member bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as agent viewer ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as agent viewer ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as agent viewer ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as agent viewer bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as agent viewer bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as agent viewer bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as api admin root all	ok PasskeysResponse
+list my passkeys as api member ada acme	ok PasskeysResponse
+list my passkeys as api member ada all	ok PasskeysResponse
+list my passkeys as api member ada beta	ok PasskeysResponse
+list my passkeys as api member bob acme	ok PasskeysResponse
+list my passkeys as api member bob all	ok PasskeysResponse
+list my passkeys as api member bob beta	ok PasskeysResponse
+list my passkeys as api member machine all	ok PasskeysResponse
+list my passkeys as api viewer ada acme	ok PasskeysResponse
+list my passkeys as api viewer ada all	ok PasskeysResponse
+list my passkeys as api viewer ada beta	ok PasskeysResponse
+list my passkeys as api viewer bob acme	ok PasskeysResponse
+list my passkeys as api viewer bob all	ok PasskeysResponse
+list my passkeys as api viewer bob beta	ok PasskeysResponse
+list my passkeys as cli admin root all	ok PasskeysResponse
+list my passkeys as cli member ada acme	ok PasskeysResponse
+list my passkeys as cli member ada all	ok PasskeysResponse
+list my passkeys as cli member ada beta	ok PasskeysResponse
+list my passkeys as cli member bob acme	ok PasskeysResponse
+list my passkeys as cli member bob all	ok PasskeysResponse
+list my passkeys as cli member bob beta	ok PasskeysResponse
+list my passkeys as cli viewer ada acme	ok PasskeysResponse
+list my passkeys as cli viewer ada all	ok PasskeysResponse
+list my passkeys as cli viewer ada beta	ok PasskeysResponse
+list my passkeys as cli viewer bob acme	ok PasskeysResponse
+list my passkeys as cli viewer bob all	ok PasskeysResponse
+list my passkeys as cli viewer bob beta	ok PasskeysResponse
+list my passkeys as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+list my passkeys as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+list my passkeys as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+list my passkeys as container member ada beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+list my passkeys as container member bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+list my passkeys as container member bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+list my passkeys as container member bob beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+list my passkeys as container viewer ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+list my passkeys as container viewer ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+list my passkeys as container viewer ada beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+list my passkeys as container viewer bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+list my passkeys as container viewer bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+list my passkeys as container viewer bob beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+list my passkeys as room viewer ada-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as room viewer ada-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as room viewer ada-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as room viewer bob-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as room viewer bob-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+list my passkeys as room viewer bob-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
 list projects as agent member ada-agent acme	ok ProjectListResponse acme
 list projects as agent member ada-agent all	ok ProjectListResponse acme, beta, delta, proj
 list projects as agent member ada-agent beta	ok ProjectListResponse beta
@@ -16140,6 +16198,64 @@ read the ports of omega as room viewer ada-room beta	denied PROJECT_NOT_IN_CATAL
 read the ports of omega as room viewer bob-room acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 read the ports of omega as room viewer bob-room all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 read the ports of omega as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+remove a passkey as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as agent member ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as agent member bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as agent viewer ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as agent viewer ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as agent viewer ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as agent viewer bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as agent viewer bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as agent viewer bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as api admin root all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as api member ada acme	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as api member ada all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as api member ada beta	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as api member bob acme	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as api member bob all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as api member bob beta	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as api member machine all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as api viewer ada acme	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as api viewer ada all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as api viewer ada beta	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as api viewer bob acme	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as api viewer bob all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as api viewer bob beta	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as cli admin root all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as cli member ada acme	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as cli member ada all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as cli member ada beta	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as cli member bob acme	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as cli member bob all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as cli member bob beta	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as cli viewer ada acme	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as cli viewer ada all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as cli viewer ada beta	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as cli viewer bob acme	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as cli viewer bob all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as cli viewer bob beta	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+remove a passkey as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+remove a passkey as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+remove a passkey as container member ada beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+remove a passkey as container member bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+remove a passkey as container member bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+remove a passkey as container member bob beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+remove a passkey as container viewer ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+remove a passkey as container viewer ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+remove a passkey as container viewer ada beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+remove a passkey as container viewer bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+remove a passkey as container viewer bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+remove a passkey as container viewer bob beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
+remove a passkey as room viewer ada-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as room viewer ada-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as room viewer ada-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as room viewer bob-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as room viewer bob-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
+remove a passkey as room viewer bob-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
 remove bob's claude-code login as agent member ada-agent acme	denied FORBIDDEN_ADMIN_ONLY 403 Only an admin may manage people. | Ask an admin to do it.
 remove bob's claude-code login as agent member ada-agent all	denied FORBIDDEN_ADMIN_ONLY 403 Only an admin may manage people. | Ask an admin to do it.
 remove bob's claude-code login as agent member ada-agent beta	denied FORBIDDEN_ADMIN_ONLY 403 Only an admin may manage people. | Ask an admin to do it.

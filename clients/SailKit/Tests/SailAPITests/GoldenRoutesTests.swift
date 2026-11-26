@@ -567,7 +567,8 @@ let refusalsOfRoutesNotYetCalled: Set<String> = [
     "refusal-out-of-scope", "refusal-project-not-created", "refusal-run-on-other-node",
     "refusal-template-admin-only", "refusal-template-read-only", "refusal-template-node",
     "refusal-template-2d-login-not-stored", "refusal-template-2d-no-resources",
-    "refusal-template-2d-runner-not-ready",
+    "refusal-template-2d-runner-not-ready", "refusal-passkey-not-yours", "refusal-passkey-last",
+    "refusal-passkey-current", "refusal-project-name-taken",
 ]
 
 /// The answers of routes this client does not call yet, recorded for the apps that will.
@@ -576,6 +577,7 @@ let answersOfRoutesNotYetCalled: Set<String> = [
     "template-2c-missing", "template-2d-missing", "template-2e-building", "template-2f-building",
     "template-2f-joined", "template-2g-built", "template-2g-current", "template-2h-failed",
     "template-2h-interrupted", "template-2h-cut-pending",
+    "health", "agents", "passkeys", "passkey-removed", "project-created", "projects-none",
 ]
 
 /// The member the golden writer seats in the room.

@@ -321,7 +321,24 @@ class AccessDoorsBaselineTest {
     nodeWorkspaceDoors(world, doors, Cast.ADMIN);
     events(world, doors);
     logins(doors);
+    passkeys(doors);
     return doors;
+  }
+
+  /**
+   * The passkey doors: one's own, which every person keeps and no agent or container credential
+   * does. No passkey is enrolled on this box, so a door that passes Access lists none and finds
+   * none to remove.
+   */
+  private static void passkeys(List<Door> doors) {
+    doors.add(new Door("list my passkeys", ops -> ops.passkeys().list("sess_unknown")));
+    doors.add(
+        new Door(
+            "remove a passkey",
+            ops -> {
+              ops.passkeys().remove("bm90LWVucm9sbGVk", "sess_unknown");
+              return "removed";
+            }));
   }
 
   /**

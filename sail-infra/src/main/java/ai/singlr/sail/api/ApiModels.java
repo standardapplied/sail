@@ -5,9 +5,11 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Engagement;
+import ai.singlr.sail.config.EngagementMode;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.Spec;
@@ -32,6 +34,7 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.WebauthnCredentialStore;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.EnumSet;
@@ -1052,24 +1055,72 @@ record AgentModeView(String mode, boolean supported, String reason) implements M
   }
 }
 
-/** One installable agent CLI and its member-mode support, for {@code GET /v1/agents}. */
-record AgentView(String name, String displayName, List<AgentModeView> modes) implements Mappable {
+/**
+ * One installable agent CLI, for {@code GET /v1/agents}: its member-mode support, declared at the
+ * {@link Harness} seam (read only is offered only where the harness enforces it, its refusal
+ * travelling so a client greys the option out in the launch gate's words), and its two ways in, as
+ * {@link HarnessWaysIn} says them.
+ */
+record AgentView(Harness harness) implements Mappable {
+  List<AgentModeView> modes() {
+    var refusal = harness.readOnlyRefusal();
+    return List.of(
+        new AgentModeView(EngagementMode.READ_ONLY.wire(), refusal.isEmpty(), refusal.orElse(null)),
+        new AgentModeView(EngagementMode.FULL.wire(), true, null));
+  }
+
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
-    m.put("name", name);
-    m.put("display_name", displayName);
-    m.put("modes", modes);
+    m.put("name", harness.yamlName());
+    m.put("display_name", harness.displayName());
+    m.put("modes", modes());
+    var ways = new HarnessWaysIn(harness);
+    m.put("sign_in", ways.signIn());
+    m.put("kinds", ways.kinds());
     return m;
   }
 }
 
+/** Every agent CLI Sail knows, for {@code GET /v1/agents}. */
 record AgentsResponse(List<AgentView> agents) implements Mappable {
+  static AgentsResponse known() {
+    return new AgentsResponse(Harnesses.all().stream().map(AgentView::new).toList());
+  }
+
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
     m.put("agents", agents);
     return m;
+  }
+}
+
+/**
+ * A harness's two ways in, as every route that names a harness says them: its own sign-in, which a
+ * person makes inside a session of it ({@code sign_in}: its name and how it goes), and the kinds of
+ * key it takes ({@code kinds}: each one's name, label and how to make one).
+ */
+record HarnessWaysIn(Harness harness) {
+  Map<String, Object> signIn() {
+    var signIn = harness.signIn();
+    var said = new LinkedHashMap<String, Object>();
+    said.put("name", signIn.name());
+    said.put("how", signIn.how().toMaps());
+    return said;
+  }
+
+  List<Map<String, Object>> kinds() {
+    return harness.loginKinds().stream()
+        .map(
+            kind -> {
+              Map<String, Object> shown = new LinkedHashMap<>();
+              shown.put("kind", kind.kind());
+              shown.put("label", kind.noun());
+              shown.put("how", kind.howToMake().toMaps());
+              return shown;
+            })
+        .toList();
   }
 }
 
@@ -2076,8 +2127,9 @@ record WorkspaceCreateResponse(Workspaces.Created created, String owner, boolean
 
 /**
  * A project's template: its state, the version workspaces are created from when one is current and
- * whether the definition changed since it was built, the number of steps a build takes, and its
- * last build, running or ended, whether a request to build found it under way ({@code joined}), and
+ * whether the definition changed since it was built, the number of steps a build takes and each
+ * one's name ({@code step_names}, step n the n-th, as {@code build.step} counts), and its last
+ * build, running or ended, whether a request to build found it under way ({@code joined}), and
  * {@code outcome: current} when a request to build found the version built from the definition as
  * it is and built nothing.
  */
@@ -2090,6 +2142,7 @@ record TemplateResponse(TemplateBuildService.Status status) implements Mappable 
     status.current().ifPresent(current -> m.put("version", current.version()));
     m.put("stale", status.stale());
     m.put("steps", TemplateBuild.STEPS);
+    m.put("step_names", TemplateBuild.STEP_NAMES);
     if (status.builtNothing()) {
       m.put("outcome", "current");
     }
@@ -2131,24 +2184,26 @@ record AgentOffersResponse(
     if (refusal != null) {
       m.put("refusal", refusal.toMap());
     }
-    m.put("offered", offered.stream().map(AgentOffer::toMap).toList());
+    m.put("offered", offered.stream().map(offer -> offer.toMap(project)).toList());
     return m;
   }
 }
 
 /**
  * One harness as a workspace offers it: its modes, the first the one it starts in until a person
- * chooses, and why there are no others ({@code note}); its two ways in, the default key its person
- * stored ({@code login}, none when they have none), of the kinds it takes, and, where it starts
- * with the person signing in inside it ({@code inside}), its own sign-in ({@code sign_in}): its
- * name, how it goes, and whether the workspace holds it ({@code signed_in}), said only when that
- * was read ({@code signedIn} null when not); and why it does not start at all ({@code refusal}).
+ * chooses, each saying whether it skips the harness's own checks ({@code risky}), and why there are
+ * no others ({@code note}); its two ways in, the default key its person stored ({@code login}, none
+ * when they have none), of the kinds it takes, and, where it starts with the person signing in
+ * inside it ({@code inside}), its own sign-in ({@code sign_in}) and whether the workspace holds it
+ * ({@code signed_in}), said only when that was read ({@code signedIn} null when not); and why it
+ * does not start at all ({@code refusal}), with the few words a list row says of it ({@code
+ * unavailable}).
  */
 record AgentOffer(
-    Harness harness, LoginStore.Row login, boolean inside, Boolean signedIn, ApiError refusal)
-    implements Mappable {
-  @Override
-  public Map<String, Object> toMap() {
+    Harness harness, LoginStore.Row login, boolean inside, Boolean signedIn, ApiError refusal) {
+
+  /** The offer as a workspace of {@code project} sends it. */
+  Map<String, Object> toMap(String project) {
     var m = new LinkedHashMap<String, Object>();
     m.put("harness", harness.yamlName());
     m.put("display", harness.displayName());
@@ -2161,6 +2216,7 @@ record AgentOffer(
                   shown.put("mode", mode.name());
                   shown.put("label", mode.label());
                   shown.put("about", mode.about());
+                  shown.put("risky", mode.risky());
                   return shown;
                 })
             .toList());
@@ -2169,24 +2225,11 @@ record AgentOffer(
     if (login != null) {
       m.put("login", Map.of("name", login.name(), "kind", login.kind()));
     }
-    m.put(
-        "kinds",
-        harness.loginKinds().stream()
-            .map(
-                kind -> {
-                  var shown = new LinkedHashMap<String, Object>();
-                  shown.put("kind", kind.kind());
-                  shown.put("label", kind.noun());
-                  shown.put("how", kind.howToMake().toMaps());
-                  return shown;
-                })
-            .toList());
+    var ways = new HarnessWaysIn(harness);
+    m.put("kinds", ways.kinds());
     m.put("inside", inside);
     if (inside) {
-      var signIn = harness.signIn();
-      var said = new LinkedHashMap<String, Object>();
-      said.put("name", signIn.name());
-      said.put("how", signIn.how().toMaps());
+      var said = ways.signIn();
       if (signedIn != null) {
         said.put("signed_in", signedIn);
       }
@@ -2194,7 +2237,40 @@ record AgentOffer(
     }
     if (refusal != null) {
       m.put("refusal", refusal.toMap());
+      m.put("unavailable", AgentStarts.unavailable(refusal, project));
     }
+    return m;
+  }
+}
+
+/**
+ * A person's own passkeys ({@code GET /v1/passkeys}), oldest first: each one's id as {@link
+ * Passkeys#encodeId} writes it, its label, when it was added and last signed in with (absent until
+ * then), and whether the calling session was signed in with it ({@code current}).
+ */
+record PasskeysResponse(List<PasskeyView> passkeys) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("passkeys", passkeys);
+    m.put("total", passkeys.size());
+    return m;
+  }
+}
+
+/** One passkey as its person sees it. */
+record PasskeyView(WebauthnCredentialStore.Credential passkey, boolean current)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("id", Passkeys.encodeId(passkey.credentialId()));
+    m.put("label", Passkeys.displayLabel(passkey));
+    m.put("created_at", DateTimeUtils.format(passkey.createdAt()));
+    if (passkey.lastUsedAt() != null) {
+      m.put("last_used_at", DateTimeUtils.format(passkey.lastUsedAt()));
+    }
+    m.put("current", current);
     return m;
   }
 }

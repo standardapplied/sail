@@ -348,6 +348,15 @@ class AccessTest {
               "Do it from outside the container: 'sail agent login <harness>' or 'sail git login"
                   + " <host>' on the host, or Mast."),
           new Expected(
+              Action.KEEP_PASSKEYS,
+              PEOPLE,
+              PEOPLE,
+              "keep passkeys",
+              List.of(ALLOWED, ALLOWED, ALLOWED, LANE, LANE, LANE, LANE, LANE),
+              null,
+              null,
+              "Do it from outside the container: with sail on the host, or in Mast."),
+          new Expected(
               Action.OPERATE_BOX,
               BOX_ADA,
               BOX_BOB,
@@ -1031,6 +1040,32 @@ class AccessTest {
                     "Do it from outside the container: 'sail agent login <harness>' or 'sail git"
                         + " login <host>' on the host, or Mast."))),
         Access.atAll(Actors.ADMIN_IN_CONTAINER, Action.KEEP_LOGINS, Resource.Kind.PEOPLE));
+  }
+
+  /**
+   * Every person keeps their own passkeys, a viewer too, and doing so writes no synced row, so a
+   * viewer stays read-only; no agent and no credential in a container keeps any.
+   */
+  @Test
+  void everyPersonKeepsTheirOwnPasskeysAndNoAgentOrContainerCredentialDoes() {
+    for (var person : List.of(Actors.VIEWER, Actors.OWNER_API, Actors.OWNER_CLI, Actors.ADMIN)) {
+      assertEquals(
+          Optional.empty(), Access.atAll(person, Action.KEEP_PASSKEYS, Resource.Kind.PEOPLE));
+    }
+    assertFalse(Access.mayWrite(Actors.VIEWER), "keeping passkeys writes no synced row");
+    for (var agent : List.of(Actors.AGENT, Actors.ROOM)) {
+      assertEquals(
+          refusedAtAll(
+              Refusal.Kind.LANE_FORBIDDEN, "Agent principals cannot keep passkeys.", LANE_FIX),
+          Access.atAll(agent, Action.KEEP_PASSKEYS, Resource.Kind.PEOPLE));
+    }
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.LANE_FORBIDDEN,
+                "The credential in a project container cannot keep passkeys.",
+                Remedy.of("Do it from outside the container: with sail on the host, or in Mast."))),
+        Access.atAll(Actors.ADMIN_IN_CONTAINER, Action.KEEP_PASSKEYS, Resource.Kind.PEOPLE));
   }
 
   private static Decision refused(Refusal.Kind kind, String message, Remedy fix) {

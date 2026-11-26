@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -76,5 +77,27 @@ class AuthSessionStoreTest {
     assertEquals(2, store.revokeForFde(fdeId));
     assertTrue(store.validate(a.token()).isEmpty());
     assertTrue(store.validate(b.token()).isEmpty());
+  }
+
+  /**
+   * A session signed in with a passkey names it, one minted by no passkey names none, and ending
+   * the sessions a passkey minted ends those alone.
+   */
+  @Test
+  void aSessionSignedInWithAPasskeyNamesItAndEndsWithIt() {
+    var passkey = new byte[] {1, 2, 3};
+    var other = new byte[] {4, 5, 6};
+    var signedIn = store.createSignedInWith(fdeId, passkey, Duration.ofMinutes(30));
+    var elsewhere = store.createSignedInWith(fdeId, other, Duration.ofMinutes(30));
+    var plain = store.create(fdeId, Duration.ofMinutes(30));
+
+    assertArrayEquals(passkey, store.passkeyOf(signedIn.token()).orElseThrow());
+    assertTrue(store.passkeyOf(plain.token()).isEmpty(), "a session no passkey minted");
+    assertTrue(store.passkeyOf("sess_unknown").isEmpty(), "no session");
+
+    assertEquals(1, store.revokeMintedBy(passkey));
+    assertTrue(store.validate(signedIn.token()).isEmpty());
+    assertTrue(store.validate(elsewhere.token()).isPresent());
+    assertTrue(store.validate(plain.token()).isPresent());
   }
 }

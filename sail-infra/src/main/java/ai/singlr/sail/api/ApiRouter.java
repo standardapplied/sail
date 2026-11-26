@@ -137,6 +137,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     var unserved = Gate.UNSERVED;
     var box = Gate.box(operations::boxFde);
     var keepLogins = Gate.decides(Action.KEEP_LOGINS);
+    var keepPasskeys = Gate.decides(Action.KEEP_PASSKEYS);
     var enterWorkspace = Gate.decides(Action.ENTER_WORKSPACE);
     return List.of(
         route(GET, "/v1/health", Gate.unauthenticated("the liveness probe"), this::health),
@@ -213,6 +214,23 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(PUT, "/v1/logins/{harness}/{name}", keepLogins, this::storeLogin),
         route(DELETE, "/v1/logins/{harness}/{name}", keepLogins, this::removeLogin),
         route(Route.ANY, "/v1/logins/{rest...}", unserved, ApiRouter::absent),
+        route(
+            GET,
+            "/v1/passkeys",
+            keepPasskeys,
+            call ->
+                ApiResponse.ok(operations.passkeys().list(ApiAuth.credentialOf(call.exchange())))),
+        route(Route.ANY, "/v1/passkeys", unserved, ApiRouter::absent),
+        route(
+            DELETE,
+            "/v1/passkeys/{id}",
+            keepPasskeys,
+            call -> {
+              operations.passkeys().remove(call.param("id"), ApiAuth.credentialOf(call.exchange()));
+              return ApiResponse.noContent();
+            }),
+        route(Route.ANY, "/v1/passkeys/{id}", unserved, ApiRouter::absent),
+        route(Route.ANY, "/v1/passkeys/{rest...}", unserved, ApiRouter::absent),
         route(POST, "/v1/attention", Gate.ATTENDS, this::attend),
         route(Route.ANY, "/v1/attention", unserved, ApiRouter::absent),
         route(GET, "/v1/reviews/{review}", reads, this::reviewDetail),
@@ -1200,8 +1218,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     for (var entry : response.headers().entrySet()) {
       headers.set(entry.getKey(), entry.getValue());
     }
-    if (response.status() == 304) {
-      exchange.sendResponseHeaders(304, -1);
+    if (response.status() == 304 || response.status() == 204) {
+      exchange.sendResponseHeaders(response.status(), -1);
       return;
     }
     if (response.content() != null) {

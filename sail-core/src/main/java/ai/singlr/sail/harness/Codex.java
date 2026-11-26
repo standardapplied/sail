@@ -139,7 +139,8 @@ final class Codex implements Harness {
             "full-access",
             "Full access",
             "Runs every command without asking and outside Codex's sandbox.",
-            " --dangerously-bypass-approvals-and-sandbox"));
+            " --dangerously-bypass-approvals-and-sandbox",
+            true));
   }
 
   @Override

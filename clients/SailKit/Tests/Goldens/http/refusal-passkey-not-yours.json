@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/v1/passkeys/Z29sZGVuIGNyZWRlbnRpYWxfaWQgMTU"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "List your passkeys again.",
+        "code": "not_found",
+        "field_errors": [],
+        "message": "No passkey of yours has that id."
+      },
+      "schema_version": 1
+    },
+    "status": 404
+  }
+}
