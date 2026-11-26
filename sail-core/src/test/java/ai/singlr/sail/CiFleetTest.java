@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.engine.Child;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -21,6 +22,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
@@ -29,6 +31,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * {@code ci/fleet} against stand-ins for its cloud: {@code gcloud} answers only the dry run that
@@ -43,6 +47,12 @@ class CiFleetTest {
   private static final Path SCRIPT = Path.of("..", "ci", "fleet").toAbsolutePath();
   private static final String READS_ITS_INPUT = "cat > \"$3.in\"\n";
   private static final String TIMERS = "apt-daily.timer apt-daily-upgrade.timer";
+
+  /**
+   * A check limit whose timer, the stand-in {@code sleep}, runs out only once the check's remote
+   * command writes to the FIFO {@code go}; a minute's grace after it runs out at once.
+   */
+  private static final String LIMIT = "1000";
 
   @TempDir Path dir;
   private Path runs;
@@ -69,6 +79,16 @@ class CiFleetTest {
         printf '%s' "${*: -1}" > "$call.command"
         exec "$FLEET_TEST/remote" "${destination##*-}" "${*: -1}" "$call"
         """);
+    executable(
+        bin.resolve("sleep"),
+        """
+        case $1 in
+          %s) exec cat "$FLEET_TEST/go" ;;
+          60) exit 0 ;;
+        esac
+        PATH=${PATH#*:} exec sleep "$@"
+        """
+            .formatted(LIMIT));
     remote(READS_ITS_INPUT);
   }
 
@@ -134,7 +154,7 @@ class CiFleetTest {
 
   @Test
   void aSpecWrittenFromItsBodyHoldsIt() throws Exception {
-    remote(storesTheSpecsBody());
+    remote(storesTheSpecsBody("cat"));
 
     var ended =
         Child.run(
@@ -152,22 +172,35 @@ class CiFleetTest {
 
   @Test
   void aSpecStoredWithAnEmptyBodyFailsTheRowThatWroteIt() throws Exception {
-    remote(storesTheSpecsBody());
+    assertTheRowFails("cat", "", "loop-1 holds a body of 0 characters, of the 0 sent");
+  }
+
+  @Test
+  void aSpecStoredCutShortFailsTheRowThatWroteIt() throws Exception {
+    assertTheRowFails(
+        "head -c 20", " <<< \"$LOOP_BODY\"", "loop-1 holds a body of 20 characters, of the ");
+  }
+
+  /**
+   * The loop's spec row, given {@code fed}, on a box that keeps what {@code keeps} passes on of the
+   * body it is sent: the row FAILs, its log saying {@code says}.
+   */
+  private void assertTheRowFails(String keeps, String fed, String says) throws Exception {
+    remote(storesTheSpecsBody(keeps));
 
     var ended =
         Child.run(
             shell(
                 "source <(sed '/^case ${1:-} in$/,$d' \"$0\") && check sourced 'eng writes a spec"
-                    + " for the loop' eng_writes_spec sourced loop-1 'The build passes'",
+                    + " for the loop' eng_writes_spec sourced loop-1 'The build passes'"
+                    + fed,
                 SCRIPT.toString()));
 
     assertEquals(1, ended.exit(), ended.stdout() + ended.stderr());
     var log = runs.resolve("sourced").resolve(logOf("eng writes a spec for the loop"));
     assertEquals(
         List.of("FAIL eng writes a spec for the loop (see " + log + ")"), report("sourced"));
-    assertTrue(
-        Files.readString(log).contains("loop-1 holds a body of 0 characters"),
-        Files.readString(log));
+    assertTrue(Files.readString(log).contains(says), Files.readString(log));
   }
 
   @Test
@@ -184,12 +217,13 @@ class CiFleetTest {
   void aRemoteCommandThatNeverEndsFailsItsCheckAtTheLimitNamingItAndTheNextCheckRuns()
       throws Exception {
     var never = dir.resolve("never");
-    run("mkfifo", never.toString());
+    run("mkfifo", never.toString(), dir.resolve("go").toString());
     remote(
         """
         if [[ $1 == client ]]; then
           echo $$ > "$3.pid"
           echo "launching"
+          echo > "$FLEET_TEST/go"
           exec cat "$FLEET_TEST/never"
         fi
         """
@@ -198,24 +232,128 @@ class CiFleetTest {
     try (var held = new RandomAccessFile(never.toFile(), "rw")) {
       var ended =
           Child.run(
-              fleet(Map.of("FLEET_CHECK_LIMIT", "3"), "containers", "never")
+              fleet(Map.of("FLEET_CHECK_LIMIT", LIMIT), "containers", "never")
                   .redirectInput(Child.NO_INPUT));
 
       assertEquals(1, ended.exit(), ended.stdout() + ended.stderr());
       var log = runs.resolve("never").resolve(logOf("client applies acme"));
       assertEquals(
           List.of(
-              "FAIL client applies acme (did not end within 3 s; see " + log + ")",
+              "FAIL client applies acme (did not end within 1000 s; see " + log + ")",
               "PASS observer applies acme"),
           report("never"));
       var said = Files.readString(log);
-      assertTrue(said.startsWith("launching\n") && said.endsWith("did not end within 3 s\n"), said);
+      assertTrue(
+          said.startsWith("launching\n") && said.endsWith("did not end within 1000 s\n"), said);
       var hung = calls().stream().filter(call -> call.box().equals("client")).findFirst();
       var pid = Long.parseLong(Files.readString(hung.orElseThrow().pid()).strip());
       assertFalse(
           ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false),
           "the remote command outlived its check");
     }
+  }
+
+  @Test
+  void aCheckThatIgnoresTermIsKilledAfterItsGraceAndTheRunGoesOn() throws Exception {
+    var never = dir.resolve("never");
+    run("mkfifo", never.toString(), dir.resolve("go").toString());
+
+    try (var held = new RandomAccessFile(never.toFile(), "rw")) {
+      var ended =
+          Child.run(
+              shell(
+                  "source <(sed '/^case ${1:-} in$/,$d' \"$0\") && { check_within %s stubborn"
+                          .formatted(LIMIT)
+                      + " 'ignores TERM' bash -c 'trap \"\" TERM; echo $$ > \"$FLEET_TEST/pid\";"
+                      + " echo > \"$FLEET_TEST/go\"; exec cat \"$FLEET_TEST/never\"' || true; }"
+                      + " && check stubborn after true",
+                  SCRIPT.toString()));
+
+      assertEquals(0, ended.exit(), ended.stdout() + ended.stderr());
+      var log = runs.resolve("stubborn").resolve(logOf("ignores TERM"));
+      assertEquals(
+          List.of("FAIL ignores TERM (did not end within 1000 s; see " + log + ")", "PASS after"),
+          report("stubborn"));
+      var pid = Long.parseLong(Files.readString(dir.resolve("pid")).strip());
+      assertFalse(
+          ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false),
+          "the check that ignored TERM outlived its grace");
+    }
+  }
+
+  @ParameterizedTest
+  @CsvSource({"HUP, 129", "INT, 130", "TERM, 143"})
+  void aRunStoppedWhileACheckRunsEndsTheChecksRemoteCommandAndExitsByTheSignal(
+      String signal, int exit) throws Exception {
+    var never = dir.resolve("never");
+    var ready = dir.resolve("ready");
+    run("mkfifo", never.toString(), ready.toString());
+    remote(
+        """
+        if [[ $1 == client ]]; then
+          echo $$ > "$FLEET_TEST/ready"
+          exec cat "$FLEET_TEST/never"
+        fi
+        """
+            + READS_ITS_INPUT);
+
+    try (var held = new RandomAccessFile(never.toFile(), "rw")) {
+      var script =
+          fleet(Map.of(), "containers", "stopped")
+              .redirectInput(Child.NO_INPUT)
+              .redirectErrorStream(true)
+              .redirectOutput(dir.resolve("said").toFile())
+              .start();
+      try {
+        var hung =
+            ProcessHandle.of(
+                    Long.parseLong(
+                        CompletableFuture.supplyAsync(() -> readFifo(ready))
+                            .get(Child.PATIENCE.toMillis(), TimeUnit.MILLISECONDS)
+                            .strip()))
+                .orElseThrow();
+        run("kill", "-" + signal, Long.toString(script.pid()));
+
+        assertTrue(script.waitFor(Child.PATIENCE.toMillis(), TimeUnit.MILLISECONDS));
+        assertEquals(exit, script.exitValue(), Files.readString(dir.resolve("said")));
+        hung.onExit().get(Child.PATIENCE.toMillis(), TimeUnit.MILLISECONDS);
+      } finally {
+        Child.end(script);
+      }
+    }
+  }
+
+  @Test
+  void aJoinWaitsForItsNodesInitStatusAndSaysWhenItNeverCame() throws Exception {
+    for (var run : List.of("never-ended", "failed", "inited")) {
+      var at = Files.createDirectories(runs.resolve(run));
+      Files.writeString(at.resolve("init-eng.out"), "sudo sail fde add eng --role viewer\n");
+    }
+    Files.writeString(runs.resolve("failed").resolve("init-eng.status"), "1\n");
+    Files.writeString(runs.resolve("inited").resolve("init-eng.status"), "0\n");
+
+    var ended =
+        Child.run(
+            shell(
+                "source <(sed '/^case ${1:-} in$/,$d' \"$0\") && until_true() { shift 2; \"$@\";"
+                    + " } && for run in never-ended failed inited; do check \"$run\" 'join eng'"
+                    + " join_node \"$run\" eng member all || true; done",
+                SCRIPT.toString()));
+
+    assertEquals(0, ended.exit(), ended.stdout() + ended.stderr());
+    var never = runs.resolve("never-ended").resolve(logOf("join eng"));
+    assertEquals(List.of("FAIL join eng (see " + never + ")"), report("never-ended"));
+    assertTrue(
+        Files.readString(never).endsWith("init on eng did not end within 3300 s\n"),
+        Files.readString(never));
+    assertTrue(report("failed").getFirst().startsWith("FAIL join eng"));
+    assertEquals(List.of("PASS join eng"), report("inited"));
+    assertEquals(
+        List.of("main: sudo sail fde add eng --role member"),
+        calls().stream()
+            .filter(call -> call.command().contains("fde add"))
+            .map(call -> call.box() + ": " + call.command())
+            .toList());
   }
 
   @Test
@@ -232,22 +370,46 @@ class CiFleetTest {
   }
 
   @Test
-  void provisioningTurnsOffUbuntusDailyUpgradeOnEveryBoxBeforeSailIsInstalled() throws Exception {
-    remote(READS_ITS_INPUT + answersTimers());
+  void provisioningTurnsOffUbuntusDailyUpgradeAndLetsARunningOneFinishBeforeSailIsInstalled()
+      throws Exception {
+    var box = Files.createDirectories(dir.resolve("box"));
+    executable(box.resolve("sudo"), "exec \"$@\"\n");
+    executable(box.resolve("sleep"), "exit 0\n");
+    executable(
+        box.resolve("systemctl"),
+        """
+        case $1 in
+          disable) echo "systemctl $*" >> "$FLEET_TEST/events-$BOX" ;;
+          is-active)
+            state=inactive
+            [[ -e $FLEET_TEST/upgraded-$BOX ]] || { state=activating; : > "$FLEET_TEST/upgraded-$BOX"; }
+            echo "upgrade $state" >> "$FLEET_TEST/events-$BOX"
+            [[ $2 == --quiet ]] || printf 'inactive\\n%s\\n' "$state"
+            exit 3 ;;
+        esac
+        """);
+    remote(
+        READS_ITS_INPUT
+            + """
+            case $2 in
+              *"disable --now"*) PATH=$FLEET_TEST/box:$PATH BOX=$1 exec bash -c "$2" ;;
+              *"install.sh | bash -s"*) echo install >> "$FLEET_TEST/events-$1" ;;
+            esac
+            """
+            + answersTimers());
 
     var ended = Child.run(fleet(Map.of(), "install", "quiet", "0.76.0"));
 
     assertEquals(0, ended.exit(), ended.stdout() + ended.stderr());
-    for (var box : List.of("main", "eng", "client", "observer")) {
-      var sent = calls().stream().filter(call -> call.box().equals(box)).toList();
-      var quieted = indexOf(sent, "sudo systemctl disable --now " + TIMERS);
-      var installed = indexOf(sent, "install.sh | bash -s 0.76.0");
-      assertTrue(quieted >= 0 && quieted < installed, box + " was sent " + commands(sent));
-      assertTrue(
-          sent.get(quieted)
-              .command()
-              .contains("systemctl is-active --quiet apt-daily.service apt-daily-upgrade.service"),
-          "an upgrade already running is not waited for: " + sent.get(quieted).command());
+    for (var name : List.of("main", "eng", "client", "observer")) {
+      assertEquals(
+          List.of(
+              "systemctl disable --now " + TIMERS,
+              "upgrade activating",
+              "upgrade inactive",
+              "install"),
+          Files.readAllLines(dir.resolve("events-" + name)),
+          name);
     }
     assertTrue(
         report("quiet").contains("PASS no box runs Ubuntu's daily package timers"),
@@ -297,7 +459,7 @@ class CiFleetTest {
   }
 
   /**
-   * {@code workspace_stops} on eng for a spec whose last run ended 539 s before eng is asked, its
+   * {@code workspace_stops} on eng for a spec whose last run ended 500 s before eng is asked, its
    * workspace running at the first look and stopped after, and sail-api started {@code restarted}
    * seconds after that run ended: the script's functions sourced, without its dispatch, as the
    * loop's background poll calls it.
@@ -309,7 +471,7 @@ class CiFleetTest {
             + """
             case $2 in
               *"agent sessions acme --json"*)
-                ended=$(($(date +%s) - 539))
+                ended=$(($(date +%s) - 500))
                 echo "$ended" > "$FLEET_TEST/ended"
                 at=$(date -u -d "@$ended" +%Y-%m-%dT%H:%M:%SZ)
                 printf '{"runs": [{"spec_id": "beside-1", "completed_at": "%s"}]}' "$at" ;;
@@ -323,7 +485,8 @@ class CiFleetTest {
             """);
     return Child.run(
         shell(
-            "source <(sed '/^case ${1:-} in$/,$d' \"$0\") && { workspace_stops sourced eng"
+            "source <(sed '/^case ${1:-} in$/,$d' \"$0\") && sleep() { :; } && { workspace_stops"
+                + " sourced eng"
                 + " beside-1 || exit; }",
             SCRIPT.toString()));
   }
@@ -363,17 +526,27 @@ class CiFleetTest {
   }
 
   /**
-   * A box's {@code sail spec} as far as the loop's spec rows go: a create keeps the body it reads
-   * from its input, and a show prints it back as {@code spec show --json} does.
+   * A box's {@code sail spec} as far as the loop's spec rows go: a create keeps what {@code keeps}
+   * passes on of the body it reads from its input, and a show prints it back as {@code spec show
+   * --json} does.
    */
-  private static String storesTheSpecsBody() {
+  private static String storesTheSpecsBody(String keeps) {
     return """
         case $2 in
-          *"sail spec create"*) cat > "$FLEET_TEST/stored" ;;
+          *"sail spec create"*) %s > "$FLEET_TEST/stored" ;;
           *"sail spec show"*)
             python3 -I -c 'import json,sys; print(json.dumps({"spec": {}, "body": open(sys.argv[1]).read()}))' "$FLEET_TEST/stored" ;;
         esac
-        """;
+        """
+        .formatted(keeps);
+  }
+
+  private static String readFifo(Path fifo) {
+    try {
+      return Files.readString(fifo);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 
   private Call callEndingWith(String command) throws IOException {
@@ -400,19 +573,6 @@ class CiFleetTest {
       }
       return made;
     }
-  }
-
-  private static int indexOf(List<Call> sent, String part) {
-    for (var i = 0; i < sent.size(); i++) {
-      if (sent.get(i).command().contains(part)) {
-        return i;
-      }
-    }
-    return -1;
-  }
-
-  private static List<String> commands(List<Call> sent) {
-    return sent.stream().map(Call::command).toList();
   }
 
   private List<String> report(String run) throws IOException {

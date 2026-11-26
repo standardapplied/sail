@@ -164,7 +164,9 @@ passes only on a run whose report has 0 FAIL. A kept fleet names its run id, whe
 themselves, and the commands that go on from what failed. FLEET_KEEP=always leaves every fleet up;
 FLEET_KEEP=0 takes down even a failed one.
 A check still running at its limit (FLEET_CHECK_LIMIT, default 1200 s; a check that waits longer by
-design names its own) is ended with everything it started, FAILs naming the limit, and the run goes on.
+design names its own) has every local process it started ended (its remote command loses its ssh but
+may run on), FAILs naming the limit, and the run goes on. A run stopped at the terminal (Ctrl-C, a
+closed terminal) ends its running check the same way and leaves its VMs up: ci/fleet down RUN.
 FLEET_LOOP=0 skips the agent loop, which needs the fleet-* secrets and spends model tokens;
 FLEET_LOOP_AGENTS names the agents it installs, builder first (default: claude-code; add codex to have it review).
 EOF
@@ -279,38 +281,47 @@ log_name() {
 
 check() { check_within "$CHECK_LIMIT" "$@"; }
 
-# A check runs in a process group of its own beside a timer, so that one still running at its limit
-# ends whole, ssh and all it started; its body ignores errexit, as it would in an if. It is given
-# its caller's input by name: in a subshell, as in a parallel group, bash hands a background job
-# /dev/null instead, and a body fed at the check's call would read nothing.
+# A check runs in a process group of its own beside a timer, so that one still running at its limit,
+# or when the script is stopped, has every local process it started ended: TERM, then KILL after a
+# minute's grace for a cleanup trap; its remote command loses its ssh. Its body ignores errexit, as
+# it would in an if. It is given its caller's input by name: in a subshell, as in a parallel group,
+# bash hands a background job /dev/null instead, and a body fed at the check's call would read nothing.
 check_within() {
   local limit=$1 run=$2 name=$3
   shift 3
-  local dir log job timer ended verdict=0
+  local dir log job="" timer="" ended verdict=0
   dir=$(log_dir "$run")
   log="$dir/$(log_name "$name")"
   if ! { : > "$log"; } 2> /dev/null; then
     echo "FAIL $name (its log $log could not be opened, so it did not run)" | tee -a "$dir/report.txt"
     return 1
   fi
+  trap 'kill -TERM -- "-$job" "-$timer" 2> /dev/null; exit 129' HUP
+  trap 'kill -TERM -- "-$job" "-$timer" 2> /dev/null; exit 130' INT
+  trap 'kill -TERM -- "-$job" "-$timer" 2> /dev/null; exit 143' TERM
   set -m
   { "$@" || exit; } <&0 > "$log" 2>&1 &
   job=$!
   sleep "$limit" > /dev/null 2>&1 &
   timer=$!
   set +m
-  trap 'kill -TERM -- "-$job" "-$timer" 2> /dev/null; exit 130' INT TERM
   wait -n -p ended "$job" "$timer" || verdict=$?
-  trap - INT TERM
   if [[ $ended != "$job" ]]; then
     kill -TERM -- "-$job" 2> /dev/null || true
+    sleep 60 > /dev/null 2>&1 &
+    timer=$!
+    wait -n "$job" "$timer" || true
+    kill -KILL -- "-$job" 2> /dev/null || true
     wait "$job" || true
+  fi
+  kill "$timer" 2> /dev/null || true
+  wait "$timer" || true
+  trap - HUP INT TERM
+  if [[ $ended != "$job" ]]; then
     echo "ci/fleet: did not end within $limit s" >> "$log"
     echo "FAIL $name (did not end within $limit s; see $log)" | tee -a "$dir/report.txt"
     return 1
   fi
-  kill "$timer" 2> /dev/null || true
-  wait "$timer" || true
   if [[ $verdict == 0 ]]; then
     echo "PASS $name" | tee -a "$dir/report.txt"
   else
@@ -369,9 +380,9 @@ up() {
 # Ubuntu's daily upgrade installs packages at a random time between 06:00 and 07:00 UTC, and
 # needrestart then restarts sail-api, which starts every workspace's idle clock again: a fleet box
 # changes only by the fleet's steps, so its timers go off before Sail is installed, and an upgrade
-# already running is let finish.
+# already running is let finish (a oneshot unit at work is activating, which is-active does not call active).
 quiets_apt() {
-  on "$1" "$2" "sudo systemctl disable --now $APT_TIMERS && while systemctl is-active --quiet apt-daily.service apt-daily-upgrade.service; do sleep 5; done"
+  on "$1" "$2" "sudo systemctl disable --now $APT_TIMERS && while systemctl is-active apt-daily.service apt-daily-upgrade.service | grep -qvxE 'inactive|failed'; do sleep 5; done"
 }
 
 apt_held_off() {
@@ -439,9 +450,13 @@ init_node() {
 join_node() {
   local run=$1 box=$2 role=$3 scoped=$4 dir
   dir=$(log_dir "$run")
-  until_true $((INCUS_LIMIT - 300)) 5 test -s "$dir/init-$box.status"
+  if ! until_true $((INCUS_LIMIT - 300)) 5 test -s "$dir/init-$box.status"; then
+    cat "$dir/init-$box.out"
+    echo "init on $box did not end within $((INCUS_LIMIT - 300)) s"
+    return 1
+  fi
   cat "$dir/init-$box.out"
-  [[ $(cat "$dir/init-$box.status" 2> /dev/null) == 0 ]] || return 1
+  [[ $(cat "$dir/init-$box.status") == 0 ]] || return 1
   local line
   line=$(grep -m1 -oE "sudo sail fde add .*" "$dir/init-$box.out" | sed -E "s/--role [a-z]+/--role $role/")
   if [[ -z $line ]]; then
@@ -2850,16 +2865,16 @@ loop_config() {
     on "$1" main "echo '{\"type\":\"${LOOP_AGENTS%% *}\",\"install\":[$(install_list)]}' | sudo sail project config set acme agent -"
 }
 
-# Spec $2 titled $3 on eng, from the body on this function's input. A body that never reached eng
-# is stored empty and its agent builds from the title alone, so the row that writes it fails here.
+# Spec $2 titled $3 on eng, from the body on this function's input. A body that never reached eng,
+# or reached it cut short, leaves its agent building from less than was written, so the row that
+# writes it fails here unless eng holds the whole body.
 eng_writes_spec() {
-  local run=$1 spec=$2 title=$3
-  on "$run" eng "cat > /tmp/$spec.md && sudo sail spec create -p acme --id $spec --title '$title' --body-file /tmp/$spec.md --assignee eng" || return 1
-  on "$run" eng "sudo sail spec show $spec --no-sync --json" | python3 -I -c '
-import json, sys
-body = json.load(sys.stdin)["body"]
-print("%s holds a body of %d characters" % (sys.argv[1], len(body)))
-sys.exit(0 if body.strip() else 1)' "$spec"
+  local run=$1 spec=$2 title=$3 sent stored
+  sent=$(cat)
+  on "$run" eng "cat > /tmp/$spec.md && sudo sail spec create -p acme --id $spec --title '$title' --body-file /tmp/$spec.md --assignee eng" <<< "$sent" || return 1
+  stored=$(on "$run" eng "sudo sail spec show $spec --no-sync --json" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["body"])') || return 1
+  echo "$spec holds a body of ${#stored} characters, of the ${#sent} sent"
+  [[ -n $stored && $stored == "$sent" ]]
 }
 
 loop() {
