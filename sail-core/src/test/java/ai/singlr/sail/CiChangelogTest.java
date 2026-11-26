@@ -32,6 +32,9 @@ class CiChangelogTest {
   private static final Path CI = Path.of("..", "ci").toAbsolutePath();
   private static final String RELEASED = "# Changelog\n\n## 0.74.0\n\n- **Old.** Released.\n";
   private static final String README = "One file per change.\n";
+  private static final String NO_HEADLINE =
+      "ci/changelog: changes/mine.md:%d is a bullet that does not open with its bold headline"
+          + " closed on the same line: write it as '- **…** …'.\n";
   private static final String SHELL =
       "- **Shell opens a new shell.** A new tab runs the login shell.";
   private static final String EDITS_CHANGELOG =
@@ -447,6 +450,7 @@ class CiChangelogTest {
   @ValueSource(
       strings = {
         "- fixed a thing",
+        "- fixed a thing - **bold only later.**",
         "- ** Spaced.** Before its headline.",
         "- **Unclosed headline.",
         "- ****",
@@ -456,11 +460,9 @@ class CiChangelogTest {
       })
   void aBulletWithoutItsBoldHeadlineIsRefusedNamingItsLineAtThePullRequestAndAtTheFold(
       String bullet) throws Exception {
-    write("changes/mine.md", SHELL + "\n" + bullet + "\n");
+    write("changes/mine.md", SHELL + "\n" + bullet);
     commit("2026-11-02T00:00:00Z");
-    var refusal =
-        "ci/changelog: changes/mine.md:2 is a bullet without its bold headline: write it as"
-            + " '- **…** …'.\n";
+    var refusal = NO_HEADLINE.formatted(2);
 
     var checked = sh("ci/changelog", "check", base);
     var folded = sh("ci/changelog", "0.75.0");
@@ -475,9 +477,11 @@ class CiChangelogTest {
       strings = {
         SHELL,
         "- **The cursor blinks**, as the program asks.",
+        "- **A** headline of one character.",
         "- **`ci/changelog` reads `changes/*.md`.**",
         "  - fixed a thing, nested under the bullet above",
-        "and a line that goes on with the bullet above"
+        "and a line that goes on with the bullet above",
+        "**Note:** a line that goes on with the bullet above"
       })
   void aBulletThatOpensWithItsBoldHeadlinePassesAndFolds(String line) throws Exception {
     write("changes/mine.md", SHELL + "\n" + line + "\n");
@@ -493,13 +497,10 @@ class CiChangelogTest {
 
     var asked = sh("ci/changelog", "check", base).err();
 
-    assertEquals(
-        "ci/changelog: changes/mine.md:1 is a bullet without its bold headline: write it as"
-            + " '- **…** …'.\n",
-        asked);
+    assertEquals(NO_HEADLINE.formatted(1), asked);
     assertTrue(
         Files.readString(CI.resolveSibling("changes").resolve("README.md"))
-            .contains("`- **…** …`"));
+            .contains("its bold headline closed on the same line, `- **…** …`"));
   }
 
   @Test
