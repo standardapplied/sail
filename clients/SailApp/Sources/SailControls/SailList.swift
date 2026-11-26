@@ -1055,12 +1055,17 @@ final class RowCell: NSView {
     /// The actions shown (over 120 ms, at once while motion is reduced) or gone; the primary loud
     /// while the row is chosen and the one primary is not elsewhere (`quiet`), and Return its key
     /// only while the list is its window's first responder (`keys`), named (⏎) only while that
-    /// window is key too.
+    /// window is key too; laid out again as the key comes or goes, since the key's room comes and
+    /// goes with it.
     func show(_ shown: Bool, chosen: Bool, keys: Bool, quiet: Bool = false) {
         if let first {
             let kind: ButtonKind = chosen && !quiet ? .primary : .secondary, key = chosen && keys && returnKey ? "\r" : ""
             if first.kind != kind { first.kind = kind }
-            if first.keyEquivalent != key { first.keyEquivalent = key }
+            if first.keyEquivalent != key {
+                first.keyEquivalent = key
+                actions.needsLayout = true
+                needsLayout = true
+            }
         }
         if shown, let owed = moreOwed {
             moreOwed = nil
