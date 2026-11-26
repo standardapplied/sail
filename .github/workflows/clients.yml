@@ -205,17 +205,24 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Where a pull request left main, the first parent of the merge checked out (ci/check base):
+      # every check of what the change touched measures from it, never from the event's base sha,
+      # which can be older and would count what main gained since as the branch's own.
+      - id: base
+        if: github.event_name == 'pull_request'
+        run: ci/check base >> "$GITHUB_OUTPUT"
+
       # The rules a script decides (ci/rules), as CI's first job runs them: every job here needs
       # this one, so no macOS lane starts on a change that breaks a rule.
       - name: The rules a script decides
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
+          BASE: ${{ steps.base.outputs.base }}
         run: ci/check rules ${BASE:+"$BASE"}
 
       - id: diff
         env:
           EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE: ${{ steps.base.outputs.base || github.event.before }}
         run: ci/changes "$EVENT" "$BASE" >> "$GITHUB_OUTPUT"
 
   # The macOS app: the Metal device first; the renderer's goldens, the view's input tests and the
