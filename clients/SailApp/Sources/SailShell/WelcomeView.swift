@@ -58,9 +58,17 @@ public final class AccountFlow {
     }
 
     /// Whether this Mac holds a session for the control plane it last reached: a launch then waits
-    /// for the check, else it shows the welcome at once.
-    var holdsASession: Bool {
-        memory.plane.map { account.heldUntil(at: $0) != nil } ?? false
+    /// for the check, else it shows the welcome at once. One the vault could not read is gone once
+    /// read, so it is told as a check's answer.
+    func holdsASession() -> Bool {
+        guard let plane = memory.plane else { return false }
+        do throws(AccountRefusal) {
+            return try account.heldUntil(at: plane) != nil
+        } catch {
+            forgetIfGone(error)
+            onChecked(.failure(error), nil)
+            return false
+        }
     }
 
     /// What the user menu says: who is signed in at which control plane and whether it answers;
@@ -86,7 +94,7 @@ public final class AccountFlow {
     /// action waits for it to end, so nothing changes under a passkey sheet.
     public func refresh() async {
         guard !busy, let plane = memory.plane else { return }
-        let seen = shown, until = account.heldUntil(at: plane)
+        let seen = shown
         checks += 1
         onChange()
         defer {
@@ -94,13 +102,14 @@ public final class AccountFlow {
             onChange()
         }
         _ = await run(byAPerson: false) { () async throws(AccountRefusal) in
-            let answer: Result<SignedIn?, AccountRefusal>
+            let checked: (answer: Result<SignedIn?, AccountRefusal>, until: Date?)
             do throws(AccountRefusal) {
-                answer = .success(try await self.account.current(at: plane))
+                let until = try self.account.heldUntil(at: plane)
+                checked = (.success(try await self.account.current(at: plane)), until)
             } catch {
-                answer = .failure(error)
+                checked = (.failure(error), nil)
             }
-            self.whenNoOneActs { self.take(answer, seen: seen, until: until) }
+            self.whenNoOneActs { self.take(checked.answer, seen: seen, until: checked.until) }
         }
     }
 

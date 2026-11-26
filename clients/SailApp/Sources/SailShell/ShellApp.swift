@@ -129,7 +129,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Where the window opens at every launch: Workspaces, Sail's mark drawing itself while the
     /// session this Mac holds is checked, else the welcome.
     func land() {
-        if flow.holdsASession, let host = flow.memory.plane?.named { workspaces.waitForSignIn(at: host) }
+        if flow.holdsASession(), let host = flow.memory.plane?.named { workspaces.waitForSignIn(at: host) }
         select(.workspaces)
     }
 

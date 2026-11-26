@@ -260,6 +260,24 @@ func signInExchanges() throws -> [Exchange] {
         #expect(refused.memory.plane == nil, "an address that did not answer was remembered")
     }
 
+    /// A sign-in kept in a shape the vault cannot read is gone once read: the check says so, and a
+    /// launch that finds it says so too, rather than reading it away unsaid.
+    @Test func aSignInTheVaultCannotReadIsSaidByTheReadThatFindsIt() async throws {
+        let defaults = ReattachTests.defaults()
+        SignInMemory(defaults).reached(Self.plane)
+        for launch in [false, true] {
+            let flow = AccountFlow(account: Account(authenticator: Signs(), vault: UnreadableOnce()) { _ in RecordedServer([]) }, memory: SignInMemory(defaults))
+            var told: AccountRefusal.Reason?
+            flow.onChecked = { answer, _ in if case let .failure(refusal) = answer { told = refusal.reason } }
+            if launch {
+                #expect(!flow.holdsASession())
+            } else {
+                await flow.refresh()
+            }
+            #expect(told == .unreadableSignIn, "\(launch ? "the launch" : "the check") said \(String(describing: told))")
+        }
+    }
+
     /// A check that finds the session ended says so with the day it ended: the session's own end
     /// when that had passed, else the day the app was told; no one is signed in after it.
     @Test(arguments: [-86_400.0, 86_400.0])
@@ -275,6 +293,22 @@ func signInExchanges() throws -> [Exchange] {
         await flow.refresh()
         #expect(flow.standing == nil && told?.1 == min(now, now.addingTimeInterval(offset)), "told \(String(describing: told))")
     }
+}
+
+/// A vault whose one item it cannot read: the first read removes it and says so, as the Keychain's
+/// vault does an item of an older shape; later reads find none.
+final class UnreadableOnce: TokenVault, Sendable {
+    private let read = Mutex(false)
+
+    func session(for _: ControlPlane) throws(VaultFailure) -> PasskeySession? {
+        guard !read.withLock({ $0 }) else { return nil }
+        read.withLock { $0 = true }
+        throw VaultFailure(status: "the item is not a sign-in Sail kept", unreadable: true)
+    }
+
+    func keep(_: PasskeySession, for _: ControlPlane) throws(VaultFailure) {}
+
+    func forget(_: ControlPlane) throws(VaultFailure) {}
 }
 
 /// A vault holding one session for any control plane, until it is forgotten; none at first unless given.

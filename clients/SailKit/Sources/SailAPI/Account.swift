@@ -99,9 +99,10 @@ public struct Account: Sendable {
         return plane
     }
 
-    /// Until when the session held for `plane` lasts, nil with none held or none readable.
-    public func heldUntil(at plane: ControlPlane) -> Date? {
-        (try? vault.session(for: plane))?.expiresAt
+    /// Until when the session held for `plane` lasts, nil with none held. A session the vault could
+    /// not read is gone once read, so it is said here, as ``current(at:)`` says it.
+    public func heldUntil(at plane: ControlPlane) throws(AccountRefusal) -> Date? {
+        try held(at: plane)?.expiresAt
     }
 
     /// Enrolls a passkey with the ticket in `text`. It signs no one in: that is a second ceremony.
