@@ -29,7 +29,7 @@ public struct AccountRefusal: Error, Equatable, Sendable {
 
     /// Which call a server's answer came to: the same code means a different thing at each.
     public enum Step: Sendable {
-        case enrolling, signingIn, asking
+        case reaching, enrolling, signingIn, asking
     }
 
     public let reason: Reason
@@ -38,15 +38,15 @@ public struct AccountRefusal: Error, Equatable, Sendable {
     public let server: Refusal?
     public let system: String?
 
-    /// Every line to show, in order, each once.
+    /// Every line to show, in order, each once: the server's action only where it names no command.
     public var lines: [String] {
         var seen: Set<String> = []
-        return [sentence, remedy, server?.message, server?.action, system].compactMap { $0 }
+        return [sentence, remedy, server?.message, server.flatMap { Said.fix($0.remedy, otherwise: $0.action) }, system].compactMap { $0 }
             .filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 
-    init(_ reason: Reason, at plane: ControlPlane? = nil, server: Refusal? = nil, system: String? = nil, remedy: String? = nil) {
-        let (sentence, said) = Self.words(reason, address: plane?.description ?? "The control plane", server: server)
+    package init(_ reason: Reason, at plane: ControlPlane? = nil, server: Refusal? = nil, system: String? = nil, remedy: String? = nil) {
+        let (sentence, said) = Self.words(reason, address: plane?.description ?? "The control plane", host: plane?.named ?? "this control plane", server: server)
         self.reason = reason
         self.sentence = sentence
         self.remedy = remedy ?? said
@@ -61,14 +61,14 @@ public struct AccountRefusal: Error, Equatable, Sendable {
             } else if case let .unexpected(_, status) = error, (300 ..< 400).contains(status) {
                 self.init(.redirected, at: plane, system: error.description)
             } else {
-                self.init(.unreadable, at: plane, system: error.description)
+                self.init(.unreadable, at: plane, system: error.description, remedy: step == .reaching ? Self.notSails : nil)
             }
             return
         }
         self.init(Self.reason(refusal, step: step), at: plane, server: refusal)
     }
 
-    init(_ failure: PasskeyFailure, signingIn: Bool, at plane: ControlPlane) {
+    public init(_ failure: PasskeyFailure, signingIn: Bool, at plane: ControlPlane) {
         switch failure {
         case .cancelled: self.init(.cancelled(signingIn: signingIn), at: plane)
         case .alreadyHeld: self.init(.alreadyHeld, at: plane)
@@ -79,6 +79,9 @@ public struct AccountRefusal: Error, Equatable, Sendable {
     }
 
     static let originRefused = "Registration origin not allowed: "
+
+    /// What to check when an address answered, but not as Sail's control plane answers.
+    static let notSails = "Check that this is your team's control plane address."
 
     private static func reason(_ refusal: Refusal, step: Step) -> Reason {
         switch (refusal.code, step) {
@@ -92,16 +95,17 @@ public struct AccountRefusal: Error, Equatable, Sendable {
         }
     }
 
-    private static let configure = "On the control plane, run:"
-    private static let restart = "sudo systemctl restart sail-api"
+    /// What an admin does for a control plane that takes no passkeys from Sail: their steps are the
+    /// admin docs' and the server log's, never this screen's.
+    private static let askToSetUp = "Ask your admin to set up passkeys for Sail on this control plane."
 
-    private static func words(_ reason: Reason, address: String, server: Refusal?) -> (String, String?) {
+    private static func words(_ reason: Reason, address: String, host: String, server: Refusal?) -> (String, String?) {
         let sails = Account.relyingParty
         switch reason {
         case .notAnAddress:
-            return ("That is not a control plane address.", "Type it as https://<name>, or http://<private IP address>:<port> such as http://10.0.0.2:7443.")
+            return ("That is not a control plane address.", "Type the address your admin gave you, such as sail.example.com.")
         case .notATicket:
-            return ("That is not an enrollment ticket.", "Paste the ticket sail fde enroll printed, or the link it printed.")
+            return ("That is not an enrollment ticket.", "Paste the ticket or the link your admin sent.")
         case let .addressNotAllowed(host):
             return (
                 "Sail sends plain HTTP only to a private-network address. Use https:// for \(host).",
@@ -110,22 +114,13 @@ public struct AccountRefusal: Error, Equatable, Sendable {
         case .unreachable:
             return ("Sail cannot reach \(address).", "Check that this Mac is on its network and the address is right.")
         case .passkeysNotConfigured:
-            return ("\(address) does not take passkeys yet.", [
-                configure, "sail host config set webauthn-rp-id \(sails)", "sail host config set webauthn-rp-name Sail",
-                "sail host config set webauthn-origin https://\(sails)", restart,
-            ].joined(separator: "\n"))
+            return ("\(address) does not take passkeys yet.", askToSetUp)
         case let .foreignRelyingParty(party):
-            return (
-                "\(address) uses passkeys for \(party); Sail can use them only for \(sails).",
-                [configure, "sail host config set webauthn-rp-id \(sails)", restart].joined(separator: "\n")
-            )
+            return ("\(address) uses passkeys for \(party); Sail can use them only for \(sails).", askToSetUp)
         case .ticketRefused:
-            return (
-                "This enrollment ticket is used, expired or not from \(address).",
-                "A ticket lasts 15 minutes and enrolls one passkey. Ask an admin: sail fde enroll <handle>."
-            )
-        case let .originNotAllowed(origin):
-            return ("\(address) does not accept passkeys from this app.", [configure, "sail host config set webauthn-origin \(origin)", restart].joined(separator: "\n"))
+            return ("This ticket is used, expired or not from \(host).", "A ticket lasts 15 minutes and enrolls one passkey. Ask your admin for a new one.")
+        case .originNotAllowed:
+            return ("\(address) does not accept passkeys from this app.", askToSetUp)
         case .notAccepted:
             return ("\(address) did not accept that passkey.", "Pick the passkey you enrolled there, or enroll one.")
         case .alreadyHeld:
@@ -135,7 +130,7 @@ public struct AccountRefusal: Error, Equatable, Sendable {
         case .cannotCreate:
             return ("This Mac cannot make passkeys right now.", "Turn on iCloud Keychain in System Settings.")
         case let .cancelled(signingIn):
-            return ("Cancelled.", signingIn ? "If this Mac holds no passkey for \(address), enroll one with a ticket from an admin." : nil)
+            return ("Cancelled.", signingIn ? "If this Mac holds no passkey for \(host), enroll with a ticket from your admin." : nil)
         case let .keychain(verb, status):
             return ("Sail could not \(verb) your sign-in in the Keychain: \(status).", nil)
         case .ended:
@@ -143,7 +138,7 @@ public struct AccountRefusal: Error, Equatable, Sendable {
         case .unreadableSignIn:
             return ("Your sign-in to \(address) could not be read from the Keychain.", "Sign in again with your passkey.")
         case .refused:
-            return (server?.message ?? "\(address) refused.", server?.action)
+            return (server?.message ?? "\(address) refused.", server.flatMap { Said.fix($0.remedy, otherwise: $0.action) })
         case .unreadable:
             return ("\(address) answered in a way Sail cannot read.", nil)
         case .redirected:

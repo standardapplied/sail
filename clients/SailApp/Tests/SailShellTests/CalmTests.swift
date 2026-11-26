@@ -42,30 +42,29 @@ import Testing
         }
     }
 
-    /// The Account pane, signed out and signed in, in either look: every button is the library's
-    /// (a system button's dark bezel is a grey slab the count cannot see), no grey is filled, and
-    /// the one accent fill is Sign In with Passkey; signed in, Sign Out is outlined and none is.
+    /// The welcome and the Account pane, in either look: every button is the library's (a system
+    /// button's dark bezel is a grey slab the count cannot see), no grey is filled, and the one
+    /// accent fill is the welcome's primary, refused too; signed in, Sign Out is outlined and none is.
     @Test(arguments: [Look.light, .dark])
-    func theAccountPaneIsCalm(_ look: Look) async throws {
-        let transport = Held(RecordedServer([try Exchange("whoami")]), holding: "nothing is held")
-        let pane = try AccountPaneTests.pane(remembering: "uday", transport)
-        pane.look = look
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 700), styleMask: [.titled], backing: .buffered, defer: false)
+    func theWelcomeAndTheAccountPaneAreCalm(_ look: Look) async throws {
+        let (welcome, window) = try WelcomeViewTests.shown(RecordedServer([]), look: look)
         defer { window.orderOut(nil) }
-        window.contentView = pane
-        pane.layoutSubtreeIfNeeded()
-        let system = WorkspacesViewTests.found(NSButton.self, in: pane).filter { !($0 is SailButton) && !($0 is LinkButton) }.map(\.title)
-        #expect(system.isEmpty, "the pane holds system buttons: \(system)")
-        let out = Count(marks(in: pane))
+        let system = WorkspacesViewTests.found(NSButton.self, in: welcome).filter { !($0 is SailButton) && !($0 is LinkButton) }.map(\.title)
+        #expect(system.isEmpty, "the welcome holds system buttons: \(system)")
+        let out = Count(marks(in: welcome))
         #expect(out.neutral == 0 && out.fill == 1 && out.tint == 0, "signed out: \(out)")
-        pane.signIn.performClick(nil)
-        #expect(await RunnerTabTests.until { !pane.isActing && !pane.lines.isEmpty }, "the sign-in's refusal was never said")
+        welcome.addressField.field.stringValue = "sail.example.com"
+        welcome.reach(nil)
+        await welcome.flow.underWay?.value
+        welcome.layoutSubtreeIfNeeded()
+        let refused = Count(marks(in: welcome))
+        #expect(!welcome.welcome.said.isEmpty && refused.neutral == 0 && refused.fill == 1 && refused.tint == 0, "refused, a row is tinted or filled: \(refused)")
+        let pane = try AccountPaneTests.pane(remembering: "uday", Held(RecordedServer([try Exchange("whoami")]), holding: "nothing is held"))
+        let paneWindow = AccountPaneTests.shown(pane, look: look)
+        defer { paneWindow.orderOut(nil) }
+        await pane.flow.refresh()
         pane.layoutSubtreeIfNeeded()
-        let refused = Count(marks(in: pane))
-        #expect(refused.neutral == 0 && refused.fill == 1 && refused.tint == 0, "refused, a row is tinted or filled: \(refused)")
-        await pane.refresh()
-        pane.layoutSubtreeIfNeeded()
-        #expect(pane.standing != nil && !pane.signOut.isHiddenOrHasHiddenAncestor && pane.signOut.kind == .secondary, "not signed in, or Sign Out is not the outlined secondary")
+        #expect(pane.flow.standing != nil && !pane.signOut.isHiddenOrHasHiddenAncestor && pane.signOut.kind == .secondary, "not signed in, or Sign Out is not the outlined secondary")
         let signedIn = Count(marks(in: pane))
         #expect(signedIn.neutral == 0 && signedIn.fill == 0 && signedIn.tint == 0, "signed in: \(signedIn)")
     }
@@ -156,7 +155,7 @@ import Testing
         let focused = try #require(bench.model.focusedPane.flatMap { bench.panes[$0.id] })
         #expect(window.makeFirstResponder(focused.terminal) && focused.terminal.holdsTheKeys, "the focused pane holds no keys")
         let rail = Rail(look: look)
-        rail.show(.thisMac)
+        rail.show(.terminals)
         let page = Count(marks(in: window)) + Count(marks(in: bench.strip)) + Count(rail.drawnMarks)
         #expect(page == Count([.accentLine, .accentLine, .accentLine]), "the terminal page draws \(page)")
         let chosen = try #require(bench.strip.tabs.first { !$0.bar.isHidden })

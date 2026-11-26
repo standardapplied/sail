@@ -4,6 +4,7 @@ import AppKit
 import SailControls
 import CoreText
 import SailControls
+import SailAPI
 import SailKitTestSupport
 import SailLook
 @testable import SailShell
@@ -178,15 +179,15 @@ import Testing
         let content = try #require(window.contentView)
         #expect(window.contentLayoutRect.height < content.bounds.height, "\(name): the content view does not reach under the title bar")
         #expect(shell.rail.layer?.backgroundColor == NSColor.clear.cgColor, "\(name): the rail hides the chrome")
-        shell.select(.thisMac)
-        let chosen = try #require(shell.rail.bar(.thisMac))
+        shell.select(.terminals)
+        let chosen = try #require(shell.rail.bar(.terminals))
         #expect(!chosen.isHidden && chosen.layer?.backgroundColor == NSColor(look.accent).cgColor, "\(name): the rail's chosen item has no accent bar, as a tab's")
         #expect(shell.rail.drawnMarks == [.accentLine], "\(name): the rail's chosen item draws \(shell.rail.drawnMarks), not one accent bar on ink")
         shell.window.contentView?.layoutSubtreeIfNeeded()
         let wash = try #require(shell.rail.chosenWash)
         #expect(near(wash.size.width, Rail.item) && near(wash.size.height, Rail.item) && wash.colour == NSColor(Tint(look.chromeWash)).cgColor, "\(name): the rail's chosen wash is \(wash)")
         #expect(near(wash.button.height - (wash.insets.top + wash.insets.bottom), Rail.item), "\(name): the button's frame \(wash.button) is not its 42 pt alignment rect and insets \(wash.insets)")
-        for item in [Rail.Item.account, .thisMac] {
+        for item in [Rail.Item.account, .terminals] {
             shell.select(item)
             #expect(content.layer?.backgroundColor == NSColor(look.chrome).cgColor, "\(name) \(item): the band under the title bar is not the chrome")
         }
@@ -195,10 +196,11 @@ import Testing
     static let fonts = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appending(path: "Fonts")
 
-    /// Focus and selection are the look's accent, never the system's: a field being edited is
-    /// ringed in the accent (the system's ring is off), text selected in it is on the selection fill,
-    /// and its caret is the accent; Return in the ticket field enrolls and in the address field signs
-    /// in, through the field's own action, with no button answering Return.
+    /// Focus and selection are the look's accent, never the system's: the welcome's field being
+    /// edited has the system's ring off, text selected in it is on the selection fill, and its caret
+    /// is the accent; Return in the address field sends Continue and in
+    /// the ticket field Create Passkey, through the field's own action, with no button answering
+    /// Return.
     @MainActor @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
     func focusSelectionAndReturnAreTheLooks(_ name: String, _ look: Look) throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: "sail-focus-\(UUID().uuidString.prefix(8))")
@@ -206,28 +208,22 @@ import Testing
         defer { try? FileManager.default.removeItem(at: folder) }
         let passkey = SoftwarePasskey(file: folder.appending(path: "passkey.json"))
         let shell = try ShellApp(fonts: Self.fonts, helper: nil, look: look, passkeys: { _ in passkey }, defaults: ReattachTests.defaults())
-        shell.select(.account)
+        shell.select(.workspaces)
         shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }
-        let pane = shell.account
-        let cases: [(NSTextField, Selector)] = [
-            (pane.ticket, #selector(AccountPane.enrollWithTicket(_:))), (pane.address, #selector(AccountPane.signInWithPasskey(_:))),
-        ]
-        for (field, action) in cases {
-            #expect(shell.window.makeFirstResponder(field), "\(name): the field took no focus")
-            let editor = try #require(field.currentEditor() as? NSTextView)
-            #expect(field.focusRingType == .none)
-            let frame = try #require(field.superview as? FieldFrame, "\(name): the field is not in the shared field style")
-            #expect(frame.ring.width == 2, "\(name): the field is not ringed")
-            #expect(frame.ring.colour == NSColor(look.accent), "\(name): the ring is not the accent")
+        let welcome = shell.welcome
+        let address = welcome.addressField, ticket = welcome.ticketField
+        let plane = try ControlPlane(address: "https://sail.example.com")
+        for (field, action, screen) in [(address, #selector(WelcomeView.reach(_:)), Welcome(plane: nil, person: nil)), (ticket, #selector(WelcomeView.createPasskey(_:)), Welcome(plane: plane, person: nil))] {
+            welcome.show(screen)
+            #expect(shell.window.makeFirstResponder(field.field), "\(name): the field took no focus")
+            let editor = try #require(field.field.currentEditor() as? NSTextView)
+            #expect(field.field.focusRingType == .none)
             #expect(editor.selectedTextAttributes[.backgroundColor] as? NSColor == NSColor(look.textSelection))
-            #expect(editor.insertionPointColor == NSColor(look.accent))
-            #expect(field.action == action, "\(name): Return in the field does not send \(action)")
-            #expect(field.target === pane)
-            #expect(pane.enroll.keyEquivalent.isEmpty, "\(name): Enroll answers Return")
-            #expect(pane.signIn.keyEquivalent.isEmpty, "\(name): Sign In answers Return")
+            #expect(editor.insertionPointColor == NSColor(Tint(look.accent)))
+            #expect(field.field.action == action && field.field.target === welcome, "\(name): Return in the field does not send \(action)")
+            #expect(welcome.primary.keyEquivalent.isEmpty, "\(name): \(welcome.primary.title) answers Return")
         }
-        #expect(pane.enroll.size == pane.signIn.size, "\(name): Enroll is not the size of the fields' buttons")
     }
 
     static func hex(_ rgb: RGB) -> UInt32 {

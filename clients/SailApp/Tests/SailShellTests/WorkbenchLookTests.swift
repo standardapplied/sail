@@ -124,7 +124,7 @@ import Testing
         let window = shell.window
         window.orderFront(nil)
         defer { window.orderOut(nil) }
-        for pane in [Rail.Item.thisMac, .account] {
+        for pane in [Rail.Item.terminals, .account] {
             shell.select(pane)
             for full in [false, true] {
                 shell.placeTheStrip(fullScreen: full)
@@ -151,7 +151,7 @@ import Testing
                     #expect(shell.thisMac.strip.leading == ShellApp.fullScreenInset)
                     continue
                 }
-                let views: [NSView] = [shell.rail, shell.thisMac, shell.account, shell.thisMac.strip]
+                let views: [NSView] = [shell.rail, shell.thisMac, shell.welcome, shell.account, shell.thisMac.strip]
                 var buttonsEnd = 0.0
                 for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
                     let button = try #require(window.standardWindowButton(kind))
@@ -165,7 +165,7 @@ import Testing
                 let strip = shell.thisMac.strip
                 strip.show(Self.items(), selected: TabID(1))
                 strip.layoutSubtreeIfNeeded()
-                if pane == .thisMac {
+                if pane == .terminals {
                     let firstTab = try #require(strip.tabs.first)
                     let tab = firstTab.convert(firstTab.bounds, to: nil), gap = Double(tab.minX) - buttonsEnd
                     #expect(abs(gap - 16) < 0.5, "\(name): the first tab starts \(gap) pt after the window buttons, which end at \(buttonsEnd)")
@@ -201,7 +201,7 @@ import Testing
     @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
     func theRenameFieldIsTheLooks(_ name: String, _ look: Look) throws {
         let shell = try Self.shell(look)
-        shell.select(.thisMac)
+        shell.select(.terminals)
         shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }
         let strip = shell.thisMac.strip
@@ -225,7 +225,7 @@ import Testing
     /// point in y, and both are centred in the tab.
     @Test func theRenameFieldsTextIsWhereTheTitleWas() throws {
         let shell = try Self.shell(.light)
-        shell.select(.thisMac)
+        shell.select(.terminals)
         shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }
         let strip = shell.thisMac.strip
@@ -248,7 +248,7 @@ import Testing
     /// restores the name; the keys taken by another view, the name typed is kept.
     @Test func aRenameOutlivesLosingTheKeysToNothingAndEscapeRestoresTheName() async throws {
         let shell = try Self.shell(.light)
-        shell.select(.thisMac)
+        shell.select(.terminals)
         shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }
         let strip = shell.thisMac.strip
@@ -291,7 +291,7 @@ import Testing
     /// and Escape then keeps nothing; another tab chosen ends it with the name typed.
     @Test func aBackgroundTabsRenameOutlivesRedrawsThatChooseNoTab() async throws {
         let shell = try Self.shell(.light)
-        shell.select(.thisMac)
+        shell.select(.terminals)
         shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }
         let bench = shell.thisMac
@@ -385,7 +385,9 @@ import Testing
         let shell = try Self.shell(.light)
         let window = shell.window
         let content = try #require(window.contentView)
-        let sections: [(String, NSView)] = [("the rail", shell.rail), ("This Mac", shell.thisMac), ("Workspaces", shell.workspaces), ("Account", shell.account)]
+        let sections: [(String, NSView)] = [
+            ("the rail", shell.rail), ("Terminals", shell.thisMac), ("Workspaces", shell.workspaces), ("the welcome", shell.welcome), ("Account", shell.account),
+        ]
         let least = Double(ShellApp.leastFrame.height)
         window.setFrame(NSRect(x: 0, y: 0, width: 1024, height: 100), display: false)
         #expect(Double(window.frame.height) == least,
@@ -595,7 +597,7 @@ import Testing
     @Test func aDisabledShortcutDoesNothingAndAnUnownedKeyPassesOn() throws {
         let shell = try Self.shell(.dark)
         NSApp.mainMenu = shell.menu()
-        shell.select(.thisMac)
+        shell.select(.terminals)
         func key(_ characters: String, _ flags: NSEvent.ModifierFlags) throws -> NSEvent {
             try #require(NSEvent.keyEvent(
                 with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil, characters: characters,

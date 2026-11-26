@@ -28,7 +28,7 @@ import Testing
     /// once more moves no view.
     @Test func aChangeOfLookLaysNothingOut() throws {
         let shell = try WorkbenchLookTests.shell(.light)
-        shell.select(.thisMac)
+        shell.select(.terminals)
         shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }
         let bench = shell.thisMac
@@ -91,15 +91,19 @@ import Testing
     /// again, it paints once, in the look now.
     @Test func aHiddenPanePaintsNothingAtASwitchAndOnceWhenShownInTheLookNow() throws {
         let shell = try WorkbenchLookTests.shell(.light)
-        shell.select(.thisMac)
-        #expect(shell.account.isHidden && shell.workspaces.isHidden)
-        let account = shell.account.lookPaints, workspaces = shell.workspaces.lookPaints
+        shell.select(.terminals)
+        #expect(shell.account.isHidden && shell.workspaces.isHidden && shell.welcome.isHidden)
+        let account = shell.account.lookPaints, workspaces = shell.workspaces.lookPaints, welcome = shell.welcome.lookPaints
         for look in [Look.dark, .light, .dark, .light, .dark] {
             shell.apply(look)
         }
         #expect(shell.account.lookPaints == account, "the hidden Account pane painted \(shell.account.lookPaints - account) times")
         #expect(shell.workspaces.lookPaints == workspaces, "the hidden Workspaces pane painted \(shell.workspaces.lookPaints - workspaces) times")
+        #expect(shell.welcome.lookPaints == welcome, "the hidden welcome painted \(shell.welcome.lookPaints - welcome) times")
         let canvas = NSColor(Look.dark.canvas).cgColor
+        shell.select(.workspaces)
+        #expect(shell.welcome.lookPaints == welcome + 1 && shell.welcome.layer?.backgroundColor == canvas, "shown, the welcome paints once, in the look now")
+        shell.flow.show(AccountPaneTests.someone)
         shell.select(.account)
         #expect(shell.account.lookPaints == account + 1 && shell.account.layer?.backgroundColor == canvas, "shown, it paints once, in the look now")
         shell.select(.workspaces)

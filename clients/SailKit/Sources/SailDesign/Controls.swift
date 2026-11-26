@@ -136,6 +136,8 @@ public struct FieldSize: Equatable, Sendable {
 
     public static let regular = FieldSize(height: 32, inset: 10, text: 13)
     public static let small = FieldSize(height: 28, inset: 8, text: 12)
+    /// The welcome's one field, as tall as a large button.
+    public static let large = FieldSize(height: 36, inset: 10, text: 14)
     /// A tree row's name field, in the row's own place: 22 pt in its 24 pt row, the name's 13 pt.
     public static let row = FieldSize(height: 22, inset: 6, text: 13)
 

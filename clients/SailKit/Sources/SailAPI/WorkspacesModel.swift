@@ -290,8 +290,10 @@ public struct WorkspacesModel: Sendable {
         set { if let chosen { creates[chosen] = newValue } }
     }
 
-    public init(person: Person) {
+    /// The model for `person`, the project they chose last (`chosen`) kept chosen while it is listed.
+    public init(person: Person, chosen: String? = nil) {
         self.person = person
+        self.chosen = chosen
     }
 
     // MARK: Projects and lists

@@ -9,6 +9,17 @@ import Testing
 @Suite struct WorkspacesModelTests {
     static let ana = WorkspacesModel.Person(handle: "ana", admin: false, confirmed: true, controlPlane: "main.acme.dev")
     static let uday = WorkspacesModel.Person(handle: "uday", admin: true, confirmed: true, controlPlane: "main.acme.dev")
+
+    /// The project a person chose last opens while it is listed; one no longer listed gives way to
+    /// the first.
+    @Test func theProjectChosenLastOpensWhileItIsListed() {
+        let list = ProjectList(projects: ["harbor", "lighthouse"].map { ProjectSummary(name: $0, containerStatus: .known(.running), template: .known(.ready)) }, total: 2)
+        var kept = WorkspacesModel(person: Self.uday, chosen: "lighthouse")
+        kept.projectsListed(.success(list))
+        var gone = WorkspacesModel(person: Self.uday, chosen: "wreck")
+        gone.projectsListed(.success(list))
+        #expect(kept.chosen == "lighthouse" && gone.chosen == "harbor")
+    }
     static let at = Date(timeIntervalSince1970: 1_800_000_000)
 
     static func answer<Response>(_ endpoint: Endpoint<Response>, _ golden: String) -> Result<Response, SailError> {
