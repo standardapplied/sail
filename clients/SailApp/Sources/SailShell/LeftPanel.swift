@@ -33,7 +33,7 @@ package final class LeftPanel: NSView {
     private let mono: LabelFont
     private(set) var widthConstraint: NSLayoutConstraint!
     private var projects: [WorkspacesModel.Project] = []
-    private var heading: String?
+    private var headed: String?
     /// The names are drawn in the secondary ink: what is shown failed to refresh.
     private var stale = false
     /// What it last showed, drawn again in a new look.
@@ -99,7 +99,7 @@ package final class LeftPanel: NSView {
             name.look = look
         }
         projects = []
-        heading = nil
+        headed = nil
         if let shown {
             scroll.keepingScroll { render(shown) }
         }
@@ -114,10 +114,10 @@ package final class LeftPanel: NSView {
         emptyLine.attributedStringValue = NSAttributedString(string: panel.emptyLine ?? "", attributes: [
             .font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .foregroundColor: NSColor(look.textTertiary),
         ])
-        if panel.projects != projects || panel.stale != stale || panel.controlPlane != heading {
+        if panel.projects != projects || panel.stale != stale || panel.controlPlane != headed {
             projects = panel.projects
             stale = panel.stale
-            heading = panel.controlPlane
+            headed = panel.controlPlane
             list.entries = thisMac + [.head(panel.controlPlane, count: panel.projects.count, icon: .cloud)] + panel.projects.map { project in
                 .item(row(project))
             }
@@ -131,7 +131,7 @@ package final class LeftPanel: NSView {
     func renderLoading(controlPlane: String) {
         shown = nil
         projects = []
-        heading = nil
+        headed = nil
         list.entries = thisMac + [.head(controlPlane, count: nil, icon: .cloud)]
         loading(true)
         emptyLine.isHidden = true
