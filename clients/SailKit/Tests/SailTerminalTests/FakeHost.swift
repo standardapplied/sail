@@ -4,6 +4,7 @@ import Glibc
 import Darwin
 #endif
 import Foundation
+import SailKitTestSupport
 @testable import SailTerminal
 import SailTerminalWire
 import Synchronization
@@ -15,7 +16,7 @@ import Synchronization
 /// it, waits on, rather than failing on the clock.
 final class FakeHost: Sendable {
     let address: HostAddress
-    private let listener: Mutex<Int32>
+    private let listener: Mutex<HeldListener>
     private let directory: String?
 
     /// A host on a unix socket in a new directory of its own.
@@ -24,15 +25,15 @@ final class FakeHost: Sendable {
         let path = directory + "/h.sock"
         self.directory = directory
         address = .unix(path: path)
-        listener = Mutex(try Self.listen(unix: path))
+        listener = Mutex(try HeldListener.unix(path))
     }
 
     /// A host on an ephemeral loopback TCP port.
     init(tcp: Void) throws {
         directory = nil
-        let (descriptor, port) = try Self.listenTCP()
-        address = .tcp(host: "127.0.0.1", port: port)
-        listener = Mutex(descriptor)
+        let held = try HeldListener.loopback()
+        address = .tcp(host: "127.0.0.1", port: held.port)
+        listener = Mutex(held)
     }
 
     deinit {
@@ -43,29 +44,26 @@ final class FakeHost: Sendable {
     /// The next connection a client makes.
     func accept() async throws -> Peer {
         try await untilCancelled("no client connected") { [self] in
-            let descriptor = listener.withLock { $0 }
-            guard descriptor >= 0 else { throw HostError("the host stopped listening") }
-            guard readable(descriptor) else { return nil }
-            let accepted = Descriptors.accept(descriptor)
-            guard accepted >= 0 else { throw HostError("accept failed: \(errno)") }
-            return Peer(socket: Socket(descriptor: accepted), descriptor: accepted)
+            switch listener.withLock({ $0 }).next() {
+            case let .connection(accepted): return Peer(socket: Socket(descriptor: accepted), descriptor: accepted)
+            case .nothing: return nil
+            case let .failed(code): throw HostError("accept failed: \(code)")
+            case .closed: throw HostError("the host stopped listening")
+            }
         }
     }
 
     /// Stops listening: a client's connect is refused from now on.
     func stop() {
-        listener.withLock { descriptor in
-            if descriptor >= 0 { close(descriptor) }
-            descriptor = -1
-        }
+        listener.withLock { $0 }.close()
         if case let .unix(path) = address { unlink(path) }
     }
 
     /// Listens again where it listened before.
     func restart() throws {
         guard case let .unix(path) = address else { throw HostError("only a unix host restarts") }
-        let descriptor = try Self.listen(unix: path)
-        listener.withLock { $0 = descriptor }
+        let fresh = try HeldListener.unix(path)
+        listener.withLock { $0 = fresh }
     }
 
     /// One accepted connection, which the test drives. What the client sends is read as it comes, on
@@ -249,43 +247,6 @@ final class FakeHost: Sendable {
         guard let made = mkdtemp(&template) else { throw HostError("no temporary directory: \(errno)") }
         return String(cString: made)
     }
-
-    private static func listen(unix path: String) throws -> Int32 {
-        let descriptor = Descriptors.socket(AF_UNIX)
-        guard descriptor >= 0 else { throw HostError("no socket: \(errno)") }
-        var address = sockaddr_un()
-        address.sun_family = sa_family_t(AF_UNIX)
-        withUnsafeMutableBytes(of: &address.sun_path) { raw in
-            raw.copyBytes(from: path.utf8)
-            raw[path.utf8.count] = 0
-        }
-        let bound = withUnsafePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
-        }
-        guard bound == 0, startListening(descriptor) == 0 else { throw HostError("cannot listen at \(path): \(errno)") }
-        return descriptor
-    }
-
-    private static func listenTCP() throws -> (Int32, UInt16) {
-        let descriptor = Descriptors.socket(AF_INET)
-        guard descriptor >= 0 else { throw HostError("no socket: \(errno)") }
-        var address = sockaddr_in()
-        address.sin_family = sa_family_t(AF_INET)
-        address.sin_addr.s_addr = inet_addr("127.0.0.1")
-        address.sin_port = 0
-        var size = socklen_t(MemoryLayout<sockaddr_in>.size)
-        let bound = withUnsafeMutablePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { pointer in
-                bind(descriptor, pointer, size) == 0 && getsockname(descriptor, pointer, &size) == 0
-            }
-        }
-        guard bound, startListening(descriptor) == 0 else { throw HostError("cannot listen on loopback: \(errno)") }
-        return (descriptor, UInt16(bigEndian: address.sin_port))
-    }
-}
-
-private func startListening(_ descriptor: Int32) -> Int32 {
-    listen(descriptor, 16)
 }
 
 struct HostError: Error, CustomStringConvertible {

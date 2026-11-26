@@ -37,7 +37,7 @@ final class Socket: Sendable {
     }
 
     deinit {
-        close(descriptor)
+        Descriptors.close(descriptor)
     }
 
     /// A socket connected to `address` within `timeout` seconds.

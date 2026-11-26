@@ -29,7 +29,7 @@ import Synchronization
 /// hold its Kills.
 public final class FakeRunnerDoor: Sendable {
     public let port: UInt16
-    private let listener: Int32
+    private let listener: HeldListener
     private let thisMac: Bool
     private let person: String?
     private let state = Mutex(State())
@@ -115,24 +115,12 @@ public final class FakeRunnerDoor: Sendable {
     public init(thisMac: Bool = false, person: String? = nil) throws {
         self.thisMac = thisMac
         self.person = person
-        let socket = Descriptors.socket(AF_INET)
-        guard socket >= 0 else { throw DoorError("no socket for the door") }
-        var address = sockaddr_in()
-        #if canImport(Darwin)
-        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        #endif
-        address.sin_family = sa_family_t(AF_INET)
-        address.sin_addr.s_addr = inet_addr("127.0.0.1")
-        let size = socklen_t(MemoryLayout<sockaddr_in>.size)
-        let bound = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(socket, $0, size) } }
-        guard bound == 0, listen(socket, 16) == 0 else {
-            close(socket)
-            throw DoorError("the door could not listen")
+        do {
+            listener = try HeldListener.loopback()
+        } catch {
+            throw DoorError("the door could not listen: \(error)")
         }
-        var named = size
-        _ = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(socket, $0, &named) } }
-        port = UInt16(bigEndian: address.sin_port)
-        listener = socket
+        port = listener.port
         Thread { [self] in serve() }.start()
     }
 
@@ -718,8 +706,7 @@ public final class FakeRunnerDoor: Sendable {
     }
 
     public func stop() {
-        shutdown(listener, Int32(SHUT_RDWR))
-        close(listener)
+        listener.close()
     }
 
     /// The real door's words for a Kill of its own session from a connection that does not hold
@@ -728,8 +715,12 @@ public final class FakeRunnerDoor: Sendable {
 
     private func serve() {
         while true {
-            let connection = Descriptors.accept(listener)
-            guard connection >= 0 else { return }
+            let connection: Int32
+            switch listener.next() {
+            case let .connection(accepted): connection = accepted
+            case .nothing: continue
+            case .failed, .closed: return
+            }
             #if canImport(Darwin)
             var one: Int32 = 1
             setsockopt(connection, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))

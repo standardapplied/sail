@@ -46,9 +46,9 @@ import Testing
         let host = try FakeHost(tcp: ())
         let child = try await Child()
         host.stop()
-        #expect(throws: TerminalError.self, "a child kept the stopped listener open") {
-            try Socket.connect(to: host.address, timeout: Patience.answer)
-        }
+        let answered = Result { try Socket.connect(to: host.address, timeout: Patience.answer) }
+        guard case let .tcp(_, port) = host.address else { return }
+        #expect(throws: TerminalError.self, "the stopped listener took a connection: \(PortHolders.of(port))") { try answered.get() }
         try await child.end()
     }
 
@@ -115,18 +115,12 @@ import Testing
 /// The two tests a child's copy of a listener once failed together, run together 20 times in one
 /// process, in every lane's own run: a child of `HostTakeoverTests` held the stopped listener of
 /// the session test, which took a reconnect the session test expected refused (main e15edf410).
-@Suite(.serialized, .timeLimit(.minutes(2))) struct TogetherTests {
+@Suite(.timeLimit(.minutes(2))) struct TogetherTests {
     @Test func aSpawningTestAndAReconnectingTestPassTogetherTwentyTimes() async throws {
-        for _ in 0 ..< 40 {
+        for _ in 0 ..< 20 {
             async let spawning: Void = HostTakeoverTests().anEndedProcessIsWaitedForUntilItIsGone()
             async let reconnecting: Void = SessionTests().aRunnerKeepsTryingForAMinuteAtTheCapThenParksUntilReconnectNow()
             _ = try await (spawning, reconnecting)
-        }
-    }
-
-    @Test func diagnosticTheReconnectingTestAlone() async throws {
-        for _ in 0 ..< 40 {
-            try await SessionTests().aRunnerKeepsTryingForAMinuteAtTheCapThenParksUntilReconnectNow()
         }
     }
 }

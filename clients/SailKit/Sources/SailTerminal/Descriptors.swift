@@ -3,6 +3,12 @@ import Glibc
 #elseif canImport(Darwin)
 import Darwin
 #endif
+import Synchronization
+
+/// Held while a process starts, and by a close: a process being started holds a copy of every
+/// descriptor of this one until its exec closes them, so a socket closed meanwhile would stay open,
+/// listening or connected, for as long as that takes.
+private let starting = Mutex(())
 
 /// The one place SailKit and the app make a descriptor, each close-on-exec from the moment it is
 /// returned, so no process this one starts holds a connection or a listener of it: a child's copy
@@ -45,6 +51,17 @@ public enum Descriptors {
             return nil
         }
         return (read, write)
+    }
+
+    /// Closes `descriptor` once no process is being started, so no copy of it outlives the close.
+    public static func close(_ descriptor: Int32) {
+        starting.withLock { _ in
+            #if canImport(Glibc)
+            _ = Glibc.close(descriptor)
+            #else
+            _ = Darwin.close(descriptor)
+            #endif
+        }
     }
 
     private static func closingOnExec(_ descriptor: Int32) -> Int32 {
@@ -116,7 +133,7 @@ public enum Spawn {
         let words: [UnsafeMutablePointer<CChar>?] = ([executable] + arguments).map { strdup($0) } + [nil]
         defer { words.forEach { free($0) } }
         var pid: pid_t = 0
-        let spawned = posix_spawn(&pid, executable, &actions, &attributes, words, environ)
+        let spawned = starting.withLock { _ in posix_spawn(&pid, executable, &actions, &attributes, words, environ) }
         guard spawned == 0 else { throw SpawnRefused(code: spawned) }
         return pid
     }
