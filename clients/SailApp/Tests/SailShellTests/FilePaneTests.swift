@@ -294,6 +294,57 @@ import Testing
         #expect(await RunnerTabTests.until(10) { pane.noteWords == "tide.ts was deleted on the workspace while you typed." }, "a refusal's words hid a newer word on the file: \(pane.noteWords ?? "nothing")")
     }
 
+    /// A save the connection lost before it reached the workspace says so, and names ⌘S to save
+    /// again only while the keys are in the pane (``KeyHolder``), the one place its Save reaches: not
+    /// while another view holds them, nor in a window that is not key; said again each time they
+    /// come and go, and laid out again only when the words change. The pane is driven frame by
+    /// frame, its window key.
+    @Test func aLostSaveNamesCommandSOnlyWhileThePaneHoldsTheKeys() throws {
+        let text = Array("one\n".utf8)
+        var hash = SHA256()
+        hash.update(text)
+        let digest = hash.finalize().map { String(format: "%02x", $0) }.joined()
+        let entry = FileEntry(name: "tide.ts", kind: .known(.file), target: .known(.none), size: Int64(text.count), mtimeNanos: 0, mode: 0o100644)
+        let pane = FilePane(path: FileName(Self.path), entry: entry, workspace: "dock", look: .light, mono: try LabelFont(directory: LookTests.fonts))
+        var sent: [Frame] = []
+        pane.send = { sent += $0 }
+        let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.orderOut(nil) }
+        let other = NSTextField(frame: NSRect(x: 620, y: 20, width: 160, height: 22))
+        pane.frame = NSRect(x: 0, y: 0, width: 600, height: 600)
+        window.contentView?.addSubview(pane)
+        window.contentView?.addSubview(other)
+        func answerRead() throws {
+            let id = try #require(sent.compactMap { if case let .filesRead(id, _, _, _) = $0 { id } else { nil } }.last, "no read was asked")
+            _ = pane.takes(.filesData(id: id, version: "v1", bytes: text, eof: true, whole: true, digest: digest))
+        }
+        pane.open()
+        try answerRead()
+        try #require(pane.editor.isEditable, "the file never became whole")
+        pane.editor.insertText("mine ", replacementRange: NSRange(location: 0, length: 0))
+        pane.saveDocument(nil)
+        try #require(Self.writes(sent).count == 1, "⌘S wrote \(Self.writes(sent).count) times")
+        pane.disconnected()
+        sent = []
+        pane.admitted()
+        try answerRead()
+        let lost = "Not saved: the connection to dock dropped before your save reached it.", again = lost + " ⌘S to save again."
+        #expect(pane.noteWords == lost && pane.unsaved, "the lost save with the keys nowhere says \(pane.noteWords ?? "nothing")")
+        try #require(window.makeFirstResponder(pane.editor))
+        #expect(pane.noteWords == again, "with the keys in the pane it says \(pane.noteWords ?? "nothing")")
+        try #require(window.makeFirstResponder(other))
+        #expect(pane.noteWords == lost, "with a field holding the keys it says \(pane.noteWords ?? "nothing")")
+        try #require(window.makeFirstResponder(pane.editor))
+        window.key = false
+        #expect(pane.noteWords == lost, "in a window that is not key it says \(pane.noteWords ?? "nothing")")
+        window.key = true
+        #expect(pane.noteWords == again, "the window key again, it says \(pane.noteWords ?? "nothing")")
+        try #require(window.makeFirstResponder(other))
+        pane.layoutSubtreeIfNeeded()
+        let settled = !pane.needsLayout
+        #expect(window.makeFirstResponder(nil) && settled && !pane.needsLayout && pane.noteWords == lost, "a key change that left its words as they were laid the pane out again")
+    }
+
     /// The newest word wins the line, whichever way: a save's refusal after the file's own note
     /// replaces the note, as a newer note replaces a refusal.
     @Test func aSavesRefusalAfterTheFilesNoteReplacesIt() async throws {

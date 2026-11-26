@@ -31,8 +31,8 @@ public final class SailButton: NSButton {
                 self.tooltip = tooltip
             }
             tooltip?.text = why ?? (iconOnly ? title : "")
-            tooltip?.chip.showsHint = why == nil
             tooltip?.isOn = iconOnly || why != nil
+            retell()
         }
     }
 
@@ -111,20 +111,60 @@ public final class SailButton: NSButton {
         self.mono = mono
         if let words = shortcutWords { tooltip?.chip.hint(words, mono: mono) }
         invalidateIntrinsicContentSize()
-        needsDisplay = true
+        retell()
     }
 
-    /// The key that presses it shown after the label, where the key reaches it another way than its
-    /// key equivalent (Create ⏎, pressed by Return in the name field it sits beside).
-    public func hint(_ key: String, mono: LabelFont) {
+    /// The key that presses it shown after the label, where the key reaches it through `holder`,
+    /// not its key equivalent (Create ⏎, pressed by Return in the name field it sits beside; Start ⏎,
+    /// by Return in the New Session panel's keys): named only while `holder` holds the keys, asked
+    /// again whenever what holds that view's window's keys changes.
+    public func hint(_ key: String, through holder: NSView, mono: LabelFont) {
         hintKey = key
+        keysThrough = holder
         self.mono = mono
+        watchKeys()
         invalidateIntrinsicContentSize()
-        needsDisplay = true
+        retell()
     }
 
-    /// The key shown by ``hint(_:mono:)``.
+    /// The one watch on what holds the keys that decide what it draws: those of its hint's holder's
+    /// window, else its own window's.
+    private lazy var keysWatch = HolderWatch { [weak self] in self?.keysChanged() }
+
+    /// How many times what holds those keys changed while it watched.
+    private(set) var keyChanges = 0
+
+    private func keysChanged() {
+        keyChanges += 1
+        retell()
+    }
+
+    /// Watches the window whose keys decide what it draws, only while it is in a window itself.
+    private func watchKeys() {
+        keysWatch.watch(window.flatMap { keysThrough?.window ?? $0 })
+    }
+
+    /// The key shown by ``hint(_:through:mono:)``, and what its key reaches it through.
     private var hintKey: String?
+    private weak var keysThrough: NSView?
+
+    /// Its key does what it says now, so it is named, after the label and in the tooltip: it is
+    /// enabled, not in flight, and what the key reaches it through holds the keys (``KeyHolder``):
+    /// `hint`'s holder, else its window, whose key equivalents reach it. Asked as it is drawn: a
+    /// field takes the keys through its window's field editor in steps, the last of them after
+    /// the window says its first responder changed.
+    package var namesKey: Bool {
+        guard isEnabled, busyWord == nil, shortcutWords != nil else { return false }
+        guard hintKey != nil else { return KeyHolder.isKey(window) }
+        return keysThrough.map { KeyHolder.holds($0) } ?? false
+    }
+
+    /// Anything its key working depends on changed: it is drawn again, and its tooltip's keycap
+    /// told whether it says the key.
+    private func retell() {
+        tooltip?.chip.showsHint = namesKey
+        needsDisplay = true
+    }
 
     /// The shortcut's words, from the key equivalent or the hint; nil when it shows none.
     var shortcutWords: String? {
@@ -148,7 +188,7 @@ public final class SailButton: NSButton {
         didSet {
             guard keyEquivalent != oldValue else { return }
             invalidateIntrinsicContentSize()
-            needsDisplay = true
+            retell()
         }
     }
 
@@ -171,7 +211,7 @@ public final class SailButton: NSButton {
         spinner.turn(word != nil)
         invalidateIntrinsicContentSize()
         needsLayout = true
-        needsDisplay = true
+        retell()
     }
 
     /// Drawn focused, its halo on, while Return reaches it through a view that holds the window's
@@ -206,6 +246,9 @@ public final class SailButton: NSButton {
         Draw.text(busyWord ?? title, labelFont, paint.label)
     }
 
+    /// The key that presses it, after the label: while it has one its room is kept whether or not it
+    /// is named now (``namesKey``), so the button keeps its width and its neighbours their place;
+    /// with none (its key equivalent taken away) it keeps no room and its label is centred.
     private var hintText: NSAttributedString? {
         guard busyWord == nil, !iconOnly, let words = shortcutWords, let mono else { return nil }
         return Draw.text(words, mono.font(Look.Step.caption.points) as NSFont, Tint(paint.label.rgb, alpha: paint.label.alpha * ButtonSize.hintOpacity))
@@ -221,7 +264,7 @@ public final class SailButton: NSButton {
     /// Where the leading mark (icon or spinner), the label and the hint sit in the box, centred
     /// together, in reading order: mirrored right to left. An icon-only button's icon is centred on
     /// the box exactly, as the design's grid centres it.
-    func arrangement() -> (mark: NSRect?, label: NSRect, hint: NSRect?) {
+    package func arrangement() -> (mark: NSRect?, label: NSRect, hint: NSRect?) {
         let box = self.box, labelSize = label.size()
         guard !iconOnly else { return (box.insetBy(dx: (box.width - ButtonSize.icon) / 2, dy: (box.height - ButtonSize.icon) / 2), .zero, nil) }
         let marked = busyWord != nil || icon != nil, hintSize = hintText?.size() ?? (popUp ? NSSize(width: ButtonSize.chevron, height: ButtonSize.chevron) : nil)
@@ -254,7 +297,7 @@ public final class SailButton: NSButton {
         if busyWord == nil, let mark, let icon { Draw.icon(icon, in: mark, ink: paint.label) }
         if !iconOnly { label.draw(in: labelRect) }
         if let hintRect, popUp, busyWord == nil { Draw.icon(.down, in: hintRect, ink: paint.label) }
-        if let hintRect, let hintText {
+        if let hintRect, let hintText, namesKey {
             let points = Look.Step.caption.points, top = Double(box.minY) + (Double(box.height) - TextLine.height(points: points)) / 2
             Draw.line(hintText, x: Double(hintRect.minX), baseline: TextLine.baseline(top: top, points: points))
         }
@@ -267,17 +310,10 @@ public final class SailButton: NSButton {
         needsLayout = true
     }
 
-    override public func viewWillMove(toWindow newWindow: NSWindow?) {
-        super.viewWillMove(toWindow: newWindow)
-        KeyWatch.move(self, from: window, to: newWindow, calling: #selector(keyChanged))
-    }
-
-    /// How many times its window became or ceased to be key while it was there.
-    private(set) var keyChanges = 0
-
-    @objc private func keyChanged() {
-        keyChanges += 1
-        needsDisplay = true
+    override public func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        watchKeys()
+        retell()
     }
 
     override public func layout() {
@@ -292,7 +328,10 @@ public final class SailButton: NSButton {
     }
 
     override public var isEnabled: Bool {
-        didSet { repaint() }
+        didSet {
+            repaint()
+            retell()
+        }
     }
 
     override public var isHighlighted: Bool {

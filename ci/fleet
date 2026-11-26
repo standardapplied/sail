@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ssh hands a remote command its own input, and incus launch, among others, reads its input to the
+# end when it is no terminal: so every step reads an input that has already ended, and only what a
+# check feeds a command on purpose reaches it. ci/fleet ssh, a person's own command, passes theirs on.
+[[ ${1:-} == ssh ]] || exec < /dev/null
+
 readonly CALLER_DIR=$PWD
 cd "$(dirname "$0")/.."
 
@@ -14,6 +19,12 @@ readonly SECRETS="fleet-anthropic-key fleet-openai-key fleet-github-token"
 readonly LOOP_REPO=standardapplied/nocaptcha
 readonly LOOP_AGENTS=${FLEET_LOOP_AGENTS:-claude-code}
 readonly SCHEMA_CHANGED_IN=0.77.0
+readonly CHECK_LIMIT=${FLEET_CHECK_LIMIT:-1200}
+# init downloads Incus from Zabbly, which once stalled 42 min in a run that passed.
+readonly INCUS_LIMIT=3600
+readonly APT_TIMERS="apt-daily.timer apt-daily-upgrade.timer"
+
+[[ $CHECK_LIMIT =~ ^[1-9][0-9]*$ ]] || { echo "ci/fleet: FLEET_CHECK_LIMIT is a number of seconds, not '$CHECK_LIMIT'." >&2; exit 2; }
 
 usage() {
   cat >&2 <<'EOF'
@@ -31,9 +42,10 @@ Usage:
                                 order, so each one meets everything the ones before it wrote; the parallel
                                 default is the fast check while working
   ci/fleet up RUN               create the run's four VMs and wait until each answers ssh
-  ci/fleet install RUN VERSION  install release VERSION on every box from the README's install line;
-                                VERSION may be a candidate binary, put in place by sail upgrade --binary
-                                over the release it names
+  ci/fleet install RUN VERSION  turn Ubuntu's daily package timers off on every box (an upgrade already
+                                running finishes first), then install release VERSION from the README's
+                                install line; VERSION may be a candidate binary, put in place by sail
+                                upgrade --binary over the release it names
   ci/fleet join RUN             init main, join the three nodes with their roles, sync
   ci/fleet projects RUN         create acme, beta, gamma on main, grant them, check each node holds its own
   ci/fleet doors RUN            each role's spec writes at the node CLI, and where each spec syncs to
@@ -79,7 +91,12 @@ Usage:
                                 build asks a question and waits, eng answers, and it goes on to
                                 awaiting_merge, beside a second spec of the same repo dispatched while it
                                 builds (eng is given a ZFS pool in a file, its git token through
-                                sail git login and acme's template first, and the two builds overlap,
+                                sail git login and acme's template first, whose snapshot holds no
+                                token, git identity, key, gh login or harness state, Claude's
+                                ~/.claude.json and its ~/.claude/backups among it, and, with
+                                claude-code among FLEET_LOOP_AGENTS, in a new workspace of which
+                                Claude Code's first start says nothing of a missing configuration
+                                file; the two builds overlap,
                                 each in its own workspace of acme, committing as eng);
                                 the pull request, the room and every box's status are checked,
                                 main's measures of the spec count the reviews and the build runs listed for it,
@@ -151,6 +168,10 @@ rerun is for diagnosis and for proving a fix: it does not clear the run's FAIL, 
 passes only on a run whose report has 0 FAIL. A kept fleet names its run id, when its VMs delete
 themselves, and the commands that go on from what failed. FLEET_KEEP=always leaves every fleet up;
 FLEET_KEEP=0 takes down even a failed one.
+A check still running at its limit (FLEET_CHECK_LIMIT, default 1200 s; a check that waits longer by
+design names its own) has every local process it started ended (its remote command loses its ssh but
+may run on), FAILs naming the limit, and the run goes on. A run stopped at the terminal (Ctrl-C, a
+closed terminal) ends its running check the same way and leaves its VMs up: ci/fleet down RUN.
 FLEET_LOOP=0 skips the agent loop, which needs the fleet-* secrets and spends model tokens;
 FLEET_LOOP_AGENTS names the agents it installs, builder first (default: claude-code; add codex to have it review).
 EOF
@@ -263,17 +284,50 @@ log_name() {
   printf '%s-%s.log' "${safe:0:160}" "$(printf '%s' "$1" | sha256sum | cut -c1-8)"
 }
 
-check() {
-  local run=$1 name=$2
-  shift 2
-  local dir log
+check() { check_within "$CHECK_LIMIT" "$@"; }
+
+# A check runs in a process group of its own beside a timer, so that one still running at its limit,
+# or when the script is stopped, has every local process it started ended: TERM, then KILL after a
+# minute's grace for a cleanup trap; its remote command loses its ssh. Its body ignores errexit, as
+# it would in an if. It is given its caller's input by name: in a subshell, as in a parallel group,
+# bash hands a background job /dev/null instead, and a body fed at the check's call would read nothing.
+check_within() {
+  local limit=$1 run=$2 name=$3
+  shift 3
+  local dir log job="" timer="" ended verdict=0
   dir=$(log_dir "$run")
   log="$dir/$(log_name "$name")"
   if ! { : > "$log"; } 2> /dev/null; then
     echo "FAIL $name (its log $log could not be opened, so it did not run)" | tee -a "$dir/report.txt"
     return 1
   fi
-  if "$@" > "$log" 2>&1; then
+  trap 'kill -TERM -- "-$job" "-$timer" 2> /dev/null; exit 129' HUP
+  trap 'kill -TERM -- "-$job" "-$timer" 2> /dev/null; exit 130' INT
+  trap 'kill -TERM -- "-$job" "-$timer" 2> /dev/null; exit 143' TERM
+  set -m
+  { "$@" || exit; } <&0 > "$log" 2>&1 &
+  job=$!
+  sleep "$limit" > /dev/null 2>&1 &
+  timer=$!
+  set +m
+  wait -n -p ended "$job" "$timer" || verdict=$?
+  if [[ $ended != "$job" ]]; then
+    kill -TERM -- "-$job" 2> /dev/null || true
+    sleep 60 > /dev/null 2>&1 &
+    timer=$!
+    wait -n "$job" "$timer" || true
+    kill -KILL -- "-$job" 2> /dev/null || true
+    wait "$job" || true
+  fi
+  kill "$timer" 2> /dev/null || true
+  wait "$timer" || true
+  trap - HUP INT TERM
+  if [[ $ended != "$job" ]]; then
+    echo "ci/fleet: did not end within $limit s" >> "$log"
+    echo "FAIL $name (did not end within $limit s; see $log)" | tee -a "$dir/report.txt"
+    return 1
+  fi
+  if [[ $verdict == 0 ]]; then
     echo "PASS $name" | tee -a "$dir/report.txt"
   else
     echo "FAIL $name (see $log)" | tee -a "$dir/report.txt"
@@ -328,8 +382,27 @@ up() {
   return $failed
 }
 
+# Ubuntu's daily upgrade installs packages at a random time between 06:00 and 07:00 UTC, and
+# needrestart then restarts sail-api, which starts every workspace's idle clock again: a fleet box
+# changes only by the fleet's steps, so its timers go off before Sail is installed, and an upgrade
+# already running is let finish (a oneshot unit at work is activating, which is-active does not call active).
+quiets_apt() {
+  on "$1" "$2" "sudo systemctl disable --now $APT_TIMERS && while systemctl is-active apt-daily.service apt-daily-upgrade.service | grep -qvxE 'inactive|failed'; do sleep 5; done"
+}
+
+apt_held_off() {
+  local run=$1 box said
+  shift
+  for box in "$@"; do
+    said=$(on "$run" "$box" "systemctl is-active $APT_TIMERS; systemctl is-enabled $APT_TIMERS" | paste -sd ' ' -)
+    echo "$box: $said"
+    [[ $said == "inactive inactive disabled disabled" ]] || return 1
+  done
+}
+
 install_box() {
   local run=$1 box=$2 version=$3 release
+  quiets_apt "$run" "$box" || return 1
   if [[ -f $version ]]; then
     release=$("$version" -V | awk '{print $2}')
     on "$run" "$box" "curl -fsSL https://raw.githubusercontent.com/standardapplied/sail/main/install.sh | bash -s $release"
@@ -351,6 +424,8 @@ install() {
   for pid in $pids; do
     wait "$pid" || failed=1
   done
+  # shellcheck disable=SC2086
+  check "$run" "no box runs Ubuntu's daily package timers" apt_held_off "$run" $BOXES || failed=1
   return $failed
 }
 
@@ -369,18 +444,24 @@ incus_took() {
 }
 
 init_node() {
-  local run=$1 box=$2 handle=$3 main_ip=$4
+  local run=$1 box=$2 handle=$3 main_ip=$4 out inited=0
+  out="$(log_dir "$run")/init-$box"
   on "$run" "$box" "sudo sail init --main $main_ip --handle $handle --name '${handle^} Fleet' --email $handle@fleet.example" \
-    > "$(log_dir "$run")/init-$box.out" 2>&1
+    > "$out.out" 2>&1 || inited=$?
+  echo "$inited" > "$out.status"
 }
 
-# The node's init ran in the background, beside the other nodes' inits: this waits for it.
+# The node's init runs in the background, beside the other nodes' inits: this waits for its status.
 join_node() {
-  local run=$1 box=$2 role=$3 scoped=$4 init=$5 dir inited=0
+  local run=$1 box=$2 role=$3 scoped=$4 dir
   dir=$(log_dir "$run")
-  wait "$init" || inited=1
+  if ! until_true $((INCUS_LIMIT - 300)) 5 test -s "$dir/init-$box.status"; then
+    cat "$dir/init-$box.out"
+    echo "init on $box did not end within $((INCUS_LIMIT - 300)) s"
+    return 1
+  fi
   cat "$dir/init-$box.out"
-  [[ $inited == 0 ]] || return 1
+  [[ $(cat "$dir/init-$box.status") == 0 ]] || return 1
   local line
   line=$(grep -m1 -oE "sudo sail fde add .*" "$dir/init-$box.out" | sed -E "s/--role [a-z]+/--role $role/")
   if [[ -z $line ]]; then
@@ -397,18 +478,16 @@ join_node() {
 join() {
   local run=${1:-}
   [[ -n $run ]] || usage
-  check "$run" "init main as uday (admin)" init_main "$run"
-  local main_ip eng client observer box
+  check_within "$INCUS_LIMIT" "$run" "init main as uday (admin)" init_main "$run"
+  local main_ip box
   main_ip=$(internal_ip "$run" main)
+  rm -f "$(log_dir "$run")"/init-*.status
   init_node "$run" eng eng "$main_ip" &
-  eng=$!
   init_node "$run" client client "$main_ip" &
-  client=$!
   init_node "$run" observer obs "$main_ip" &
-  observer=$!
-  check "$run" "join eng (member, every project)" join_node "$run" eng member all "$eng"
-  check "$run" "join client (member, scoped)" join_node "$run" client member scoped "$client"
-  check "$run" "join observer (viewer, scoped)" join_node "$run" observer viewer scoped "$observer"
+  check_within "$INCUS_LIMIT" "$run" "join eng (member, every project)" join_node "$run" eng member all
+  check_within "$INCUS_LIMIT" "$run" "join client (member, scoped)" join_node "$run" client member scoped
+  check_within "$INCUS_LIMIT" "$run" "join observer (viewer, scoped)" join_node "$run" observer viewer scoped
   for box in $BOXES; do
     incus_took "$run" "$box"
   done
@@ -2041,7 +2120,9 @@ workspace_on() {
 
 # What a copy of acme's current template snapshot holds, run in the copy as root: the fleet's
 # forge token arrives on stdin as grep's pattern list, never on a command line, and only grep's exit
-# status is read. Prints each thing it finds; exits 0 only when it finds none of the four.
+# status is read. Prints each thing it finds; exits 0 only when it finds none of them: the token, a
+# git identity, a key, a gh login, or a harness's state (Claude's sign-in, its ~/.claude.json and
+# that file's backups, Codex's sign-in).
 HELD_PROBE='set -u
 held=""
 set --
@@ -2060,6 +2141,9 @@ for f in /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys; do
   [ $s -le 1 ] || { echo "$f unreadable"; exit 2; }; [ $s -eq 1 ] || held="$held $f"
 done
 [ ! -e /home/dev/.config/gh/hosts.yml ] || held="$held a-gh-login"
+for f in /home/dev/.claude/.credentials.json /home/dev/.claude.json /home/dev/.claude/backups /home/dev/.codex/auth.json; do
+  [ ! -e "$f" ] || held="$held $f"
+done
 [ -z "$held" ] || { echo "the snapshot holds:$held"; exit 1; }'
 
 template_holds_nothing() {
@@ -2070,6 +2154,25 @@ template_holds_nothing() {
   b64=$(base64 -w0 <<< "$HELD_PROBE")
   on "$run" "$box" "sudo sh -c 'incus exec acme-held-probe -- bash -c \"\$(echo $b64 | base64 -d)\" < /root/.fleet/gh'" || status=1
   on "$run" "$box" "sudo incus delete --force acme-held-probe" || status=1
+  return $status
+}
+
+# Claude Code's first start in a new workspace of acme on BOX says nothing of a missing
+# configuration file, as the workspace's person. claude auth status reads ~/.claude.json at start-up
+# as a session does and needs no sign-in or network; claude --version and --help leave before that
+# read, so they could never fail. Its answer ("loggedIn") proves Claude ran; its exit is not read,
+# and a call that has not answered in 90 s, incus exec into the workspace included, fails it. The
+# workspace is deleted whatever happened, a create that failed part way included.
+claude_starts_clean() {
+  local run=$1 box=$2 said status=0
+  if on "$run" "$box" "sudo sail project workspace create acme fleet-first > /dev/null"; then
+    said=$(on "$run" "$box" "sudo timeout 90 incus exec acme-fleet-first --user 1000 --group 1000 --cwd /home/dev --env HOME=/home/dev -- bash -lc '~/.local/bin/claude auth status' < /dev/null 2>&1 || true")
+    echo "$said"
+    [[ $said == *'"loggedIn"'* && $said != *"configuration file not found"* ]] || status=1
+  else
+    status=1
+  fi
+  on "$run" "$box" "sudo sail project workspace delete acme fleet-first --force --yes > /dev/null" || status=1
   return $status
 }
 
@@ -2381,7 +2484,8 @@ rebuilt() {
     allowed "$run" client "sudo sail spec create -p acme --id while-main-gone$x --title 'client wrote this while main was gone'"
   check "$run" "a new main comes up in its place" brings_up_main "$run"
   check "$run" "install $version on the new main" install_box "$run" main "$version"
-  check "$run" "the new main inits empty, as uday" init_main "$run"
+  check "$run" "the new main runs no Ubuntu daily package timer either" apt_held_off "$run" main
+  check_within "$INCUS_LIMIT" "$run" "the new main inits empty, as uday" init_main "$run"
   incus_took "$run" main
   main_ip=$(internal_ip "$run" main)
   check "$run" "observer pins the empty main and checks its fingerprint" pins_main "$run" observer "$main_ip"
@@ -2712,10 +2816,10 @@ print(int(max(ends)) if ends else "")
 }
 
 # Spec $3's workspace is still running a minute before its 10-minute idle period ends, and
-# stopped within 3 minutes after it: a stop at minute 1 fails this, and it waits no longer than the
-# period itself and the sweep's minutes after it.
+# stopped within 3 minutes after it, with box $2's sail-api running throughout: a stop at minute 1
+# fails this, and it waits no longer than the period itself and the sweep's minutes after it.
 workspace_stops() {
-  local run=$1 box=$2 spec=$3 ended before
+  local run=$1 box=$2 spec=$3 ended before verdict=0
   ended=$(last_run_ended "$run" "$box" "$spec") || return 1
   [[ -n $ended ]] || { echo "no run of $spec ended"; return 1; }
   before=$((ended + 540 - $(date +%s)))
@@ -2724,10 +2828,29 @@ workspace_stops() {
     return 1
   fi
   sleep "$before"
-  workspace_state "$run" "$box" "$spec" | grep -qx running || { echo "stopped before its idle period ended"; return 1; }
-  until_true $((ended + 780 - $(date +%s))) 15 workspace_is_stopped "$run" "$box" "$spec" && return 0
-  echo "not stopped 3 min after its idle period ended"
-  return 1
+  if ! workspace_state "$run" "$box" "$spec" | grep -qx running; then
+    echo "stopped before its idle period ended"
+    verdict=1
+  elif ! until_true $((ended + 780 - $(date +%s))) 15 workspace_is_stopped "$run" "$box" "$spec"; then
+    echo "not stopped 3 min after its idle period ended"
+    verdict=1
+  fi
+  api_ran_since "$run" "$box" "$ended" || return 1
+  return $verdict
+}
+
+# sail-api on box $2 has run since $3 (epoch seconds): a sail-api that starts begins every
+# workspace's idle clock again, so a restart during a timed idle period names itself.
+api_ran_since() {
+  local started
+  started=$(on "$1" "$2" "systemctl show --timestamp=unix -p ActiveEnterTimestamp --value sail-api")
+  [[ $started =~ ^@[0-9]+$ ]] || { echo "sail-api's start on $2 reads '$started'"; return 1; }
+  started=${started#@}
+  if ((started > $3)); then
+    echo "sail-api on $2 started again at $(date -u -d "@$started" +%T), after the idle period began at $(date -u -d "@$3" +%T)"
+    return 1
+  fi
+  echo "sail-api on $2 has run since $(date -u -d "@$started" +%T), before the idle period began at $(date -u -d "@$3" +%T)"
 }
 
 # Run in the background from spec $3's dispatch: once its review takes it to awaiting_merge, its
@@ -2771,6 +2894,18 @@ loop_config() {
     on "$1" main "echo '{\"type\":\"${LOOP_AGENTS%% *}\",\"install\":[$(install_list)]}' | sudo sail project config set acme agent -"
 }
 
+# Spec $2 titled $3 on eng, from the body on this function's input. A body that never reached eng,
+# or reached it cut short, leaves its agent building from less than was written, so the row that
+# writes it fails here unless eng holds the whole body.
+eng_writes_spec() {
+  local run=$1 spec=$2 title=$3 sent stored
+  sent=$(cat)
+  on "$run" eng "cat > /tmp/$spec.md && sudo sail spec create -p acme --id $spec --title '$title' --body-file /tmp/$spec.md --assignee eng" <<< "$sent" || return 1
+  stored=$(on "$run" eng "sudo sail spec show $spec --no-sync --json" | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["body"])') || return 1
+  echo "$spec holds a body of ${#stored} characters, of the ${#sent} sent"
+  [[ -n $stored && $stored == "$sent" ]]
+}
+
 loop() {
   local run=${1:-} spec beside polls
   [[ -n $run ]] || usage
@@ -2788,17 +2923,21 @@ loop() {
     on "$run" eng "sudo sail host init --storage zfs --pool-file-size 20GiB --pool tank --yes"
   check "$run" "eng builds acme's template with its stored forge token" \
     on "$run" eng "sudo sail project template build acme"
-  check "$run" "acme's template snapshot on eng holds no token, git identity, key or gh login" \
+  check "$run" "acme's template snapshot on eng, which installs $LOOP_AGENTS, holds no token, git identity, key, gh login or harness state" \
     template_holds_nothing "$run" eng
+  if [[ " $LOOP_AGENTS " == *" claude-code "* ]]; then
+    check "$run" "with claude-code installed, Claude Code's first start in a new workspace of acme on eng says nothing of a missing configuration file" \
+      claude_starts_clean "$run" eng
+  fi
   check "$run" "eng stores each agent's key as its harness login, nothing in the container" gives_agents_their_keys "$run" eng
   check "$run" "eng's logins list each agent's default by fingerprint, no value" each_agent_has_its_login "$run" eng
   check "$run" "no secret appears in the run's logs" no_secret_in_logs "$run"
   check "$run" "eng writes a spec for the loop" \
-    on "$run" eng "cat > /tmp/loop.md && sudo sail spec create -p acme --id $spec --title 'The build passes on JDK 21 and the README says how to run it' --body-file /tmp/loop.md --assignee eng" <<< "$LOOP_BODY"
+    eng_writes_spec "$run" "$spec" 'The build passes on JDK 21 and the README says how to run it' <<< "$LOOP_BODY"
   check "$run" "eng makes it ready" on "$run" eng "sudo sail spec update $spec --status pending"
   check "$run" "eng dispatches it in the background" on "$run" eng "sudo sail spec dispatch -p acme --spec $spec --background"
   check "$run" "eng writes a second spec of the same repo" \
-    on "$run" eng "cat > /tmp/beside.md && sudo sail spec create -p acme --id $beside --title 'A note beside the build' --body-file /tmp/beside.md --assignee eng" <<< "$BESIDE_BODY"
+    eng_writes_spec "$run" "$beside" 'A note beside the build' <<< "$BESIDE_BODY"
   check "$run" "eng makes it ready" on "$run" eng "sudo sail spec update $beside --status pending"
   check "$run" "eng dispatches it while the first builds, in the background" on "$run" eng "sudo sail spec dispatch -p acme --spec $beside --background"
   polls="$(log_dir "$run")/beside-workspace"
@@ -2806,12 +2945,12 @@ loop() {
   rm -f "$polls"/*.verdict "$polls/listed"
   workspace_stops_then_goes "$run" eng "$beside" "$polls" &
   check "$run" "no agent key and no Sail credential is in any process's command line on eng while it builds and its hooks fire" no_key_in_any_command_line "$run" eng
-  check "$run" "the second spec's review takes it to awaiting_merge" reaches_status "$run" eng "$beside" awaiting_merge 30
-  check "$run" "the build asks its question and waits, unreviewed" waits_on_its_question "$run" eng "$spec" 20
+  check_within 2100 "$run" "the second spec's review takes it to awaiting_merge" reaches_status "$run" eng "$beside" awaiting_merge 30
+  check_within 1500 "$run" "the build asks its question and waits, unreviewed" waits_on_its_question "$run" eng "$spec" 20
   check "$run" "the two builds ran at once, each in its own workspace of acme" each_ran_in_its_own_workspace "$run" eng "$spec" "$beside"
   touch "$polls/listed"
   check "$run" "eng answers in the room" on "$run" eng "sudo sail spec comment $spec --body 'Call it Building.'"
-  check "$run" "the answer resumes the build, and the review takes it to awaiting_merge" reaches_status "$run" eng "$spec" awaiting_merge 45
+  check_within 3000 "$run" "the answer resumes the build, and the review takes it to awaiting_merge" reaches_status "$run" eng "$spec" awaiting_merge 45
   check "$run" "the agent opened a pull request on $LOOP_REPO" opened_a_pull_request "$spec"
   check "$run" "each workspace commits as eng: every commit of its pull request is authored so" \
     pull_request_commits_as "$spec" eng@fleet.example
@@ -2828,7 +2967,7 @@ loop() {
     measures_record_the_cost_and_the_times "$run" "$spec" eng
   check "$run" "the fleet closes its pull request and deletes the branch" closes_the_pull_request "$spec" "$run"
   check "$run" "the fleet closes the second spec's pull request and deletes its branch" closes_the_pull_request "$beside" "$run"
-  check "$run" "the second spec's workspace, left awaiting merge, was running until its idle period ended and stopped after it" \
+  check_within 2700 "$run" "the second spec's workspace, left awaiting merge, was running until its idle period ended and stopped after it" \
     polled "$polls/stops" 2400
   check "$run" "marked done once stopped, the second spec's workspace and its dataset went within the sweep's next passes" \
     polled "$polls/goes" 300

@@ -110,8 +110,12 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             button.target = self
             button.action = #selector(beginCreate(_:))
         }
-        list.onChoose = { [weak self] in self?.on(.chose($0)) }
+        list.onChoose = { [weak self] in
+            self?.on(.chose($0))
+            self?.showKeys()
+        }
         list.onKey = { [weak self] event in self?.newSession(event) ?? false }
+        list.onKeys = { [weak self] in self?.showKeys() }
         field.field.delegate = self
         field.boxWidth = CreateRow.box
         for label in [title, lede] {
@@ -120,6 +124,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         }
         buildHead()
         buildFoot()
+        foot.heightAnchor.constraint(equalToConstant: Keycap.height).isActive = true
         column.orientation = .vertical
         column.alignment = .width
         column.setClippingResistancePriority(.defaultLow, for: .horizontal)
@@ -190,6 +195,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
                 MainActor.assumeIsolated { self?.retellAge() }
             } : nil
             views += [frameView, spacer(Self.footGap), foot]
+            showKeys()
         }
         show(views)
     }
@@ -460,12 +466,42 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         ])
     }
 
-    /// The count (or when the list was last listed) at the left, the keys at the right: Open, New
-    /// Session and New, as the approved list's foot says them (⌘R says itself on List Again).
+    /// The keys the foot shows now.
+    private var footShows: [WorkspacesModel.Key] = []
+
+    /// The keys the foot names now, for the row chosen and what holds the keys
+    /// (``WorkspacesModel/Page/keys(chosen:held:)``, asked of ``KeyHolder``): the New Session panel
+    /// or another list holding them, the list's own keys do nothing; a sheet over the window, or
+    /// another window, holding them, none does.
+    private var footKeys: [WorkspacesModel.Key] {
+        page?.keys(chosen: list.chosen, held: list.holdsKeys ? .list : KeyHolder.isKey(window) ? .window : .none) ?? []
+    }
+
+    /// The foot drawn again when the keys it names changed: the row chosen, its state, the page, or
+    /// what holds the keys (``SailList/onKeys``).
+    func showKeys() {
+        guard footKeys != footShows else { return }
+        buildFoot()
+    }
+
+    /// A key as the foot names it.
+    private static func said(_ key: WorkspacesModel.Key) -> (key: String, words: String) {
+        switch key {
+        case .open: ("⏎", "Open")
+        case .newSession: ("⌥⌘T", NewSessionWords.newSession)
+        case .newWorkspace: ("⌘N", "New")
+        }
+    }
+
+    /// The count (or when the list was last listed) at the left, the keys at the right
+    /// (``showKeys()``), as the approved list's foot says them (⌘R says itself on List Again). It
+    /// is a keycap tall with or without keys (held once, from `init`), so keys coming and going never
+    /// move the list: a row that moved closes its New Session panel.
     private func buildFoot() {
         foot.subviews.forEach { $0.removeFromSuperview() }
+        footShows = footKeys
         var shown: [NSView] = []
-        for (key, words) in [("⏎", "Open"), ("⌥⌘T", NewSessionWords.newSession), ("⌘N", "New")] {
+        for (key, words) in footShows.map(Self.said) {
             shown.append(Keycap(key, look: look, mono: mono))
             shown.append(NSTextField(labelWithAttributedString: micro(words)))
         }
@@ -479,10 +515,9 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             foot.addSubview(view)
         }
         NSLayoutConstraint.activate([
-            count.leadingAnchor.constraint(equalTo: foot.leadingAnchor), count.centerYAnchor.constraint(equalTo: keys.centerYAnchor),
+            count.leadingAnchor.constraint(equalTo: foot.leadingAnchor), count.centerYAnchor.constraint(equalTo: foot.centerYAnchor),
             count.trailingAnchor.constraint(lessThanOrEqualTo: keys.leadingAnchor, constant: -12),
-            keys.trailingAnchor.constraint(equalTo: foot.trailingAnchor), keys.topAnchor.constraint(equalTo: foot.topAnchor),
-            keys.bottomAnchor.constraint(equalTo: foot.bottomAnchor),
+            keys.trailingAnchor.constraint(equalTo: foot.trailingAnchor), keys.centerYAnchor.constraint(equalTo: foot.centerYAnchor),
         ])
     }
 

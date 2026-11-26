@@ -127,6 +127,7 @@ import Testing
         #expect(harbor.paint.bar && Self.weight(project.label) == .semibold && project.tile.chosen, "harbor, chosen, has no bar, no weight or no ink well")
         dock.view.isEmphasized = true
         harbor.view.isEmphasized = false
+        #expect(window.makeFirstResponder(view.project.list))
         let open = try #require(Self.found(SailButton.self, in: dock.view).first { $0.title == "Open" })
         #expect(open.keyEquivalent == "\r", "the list holding the keys is not said by Open's ⏎")
     }

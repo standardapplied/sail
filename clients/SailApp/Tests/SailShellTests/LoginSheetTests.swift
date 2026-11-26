@@ -143,6 +143,18 @@ import Testing
         #expect(refused.field.field.accessibilityHelp() == "A key is one line: paste only the key.")
     }
 
+    /// Store keeps its key, so its key's room, while it is off (nothing pasted yet, or storing): it
+    /// keeps its width and Cancel its place whichever stage the sheet is in.
+    @Test func storeKeepsItsWidthWhileItIsOff() throws {
+        let stages = try Self.stages()
+        let sheets = try stages.prefix(3).map { try Self.sheet($0.model) }
+        defer { sheets.forEach { $0.orderOut(nil) } }
+        #expect(sheets.map { $0.store.isEnabled } == [false, true, false], "the stages are not empty, filled and storing")
+        #expect(sheets.allSatisfy { $0.store.keyEquivalent == "\r" && $0.store.arrangement().hint != nil }, "Store gave up its key or its room while off")
+        let first = (sheets[0].store.frame, sheets[0].cancel.frame)
+        #expect(sheets.allSatisfy { $0.store.frame == first.0 && $0.cancel.frame == first.1 }, "Store changed width or Cancel moved: \(sheets.map { ($0.store.frame, $0.cancel.frame) })")
+    }
+
     /// What the sheet shows takes a click in the turn it is made, before any display pass.
     @Test func whatTheSheetShowsTakesAClickAtOnce() throws {
         var faults: [String] = []
@@ -215,13 +227,15 @@ import Testing
     }
 
     /// The usual case: the panel stays open behind the sheet, which asks no name; Store is off
-    /// until the key is pasted. Stored, the field is empty at once, the one request held the key in
+    /// until the key is pasted; under it neither the panel nor the Workspaces foot names a key, all
+    /// of which the sheet takes. Stored, the field is empty at once, the one request held the key in
     /// its body; the sheet goes, the panel shows dock's agents asked again, Claude Code ready on the
     /// key just stored, which is chosen (Sign in reads it) and remembered, the store said in one line,
     /// Start (no longer Start and Sign In) holding the keys, and Return starts it on the key; the
-    /// server's note on the key it replaced is said. The key is in no default and no word the app
-    /// shows.
-    @Test func aKeyStoredLeavesThePanelReadyWithStartHoldingTheKeys() async throws {
+    /// server's note on the key it replaced is said. Store a Key chosen again from Sign in after ⇥:
+    /// under that sheet neither Start nor Sign in wears Return's ring, which the sheet's Store has.
+    /// The key is in no default and no word the app shows.
+    @Test(.timeLimit(.minutes(1))) func aKeyStoredLeavesThePanelReadyWithStartHoldingTheKeys() async throws {
         let (view, window, server, sheet) = try await Self.asked(stored: [try Exchange("login-replaced")])
         defer { window.orderOut(nil) }
         let panel = view.newSession
@@ -231,9 +245,11 @@ import Testing
         let underSheet = CalmTests.Count(marks(in: window))
         #expect(underSheet.fill == 1 && underSheet.tint == 0 && underSheet.neutral == 0, "the window with the sheet up draws \(underSheet): one primary on screen, the sheet's Store")
         #expect(panel.view.primary?.kind == .secondary && panel.view.veiled, "the panel behind the sheet keeps its primary or is not under the sheet's veil")
+        #expect(panel.view.primary?.namesKey == false && !panel.view.words.contains { $0.contains("↑↓") || $0.contains("⌘M") }, "the panel under the sheet names keys the sheet takes: \(panel.view.words)")
+        #expect(WorkspacesViewTests.footSays(view.project).isEmpty, "the Workspaces foot under the sheet names keys the sheet takes: \(WorkspacesViewTests.footSays(view.project))")
         Self.paste(into: sheet)
         #expect(sheet.store.isEnabled)
-        view.client = SailClient(transport: RecordedServer([try Exchange("workspace-agents-dock")]), token: "tok")
+        view.client = SailClient(transport: RecordedServer([try Exchange("workspace-agents-dock"), try Exchange("logins")]), token: "tok")
         try NewSessionPanelTests.press(sheet.store)
         #expect(Self.cleared(sheet), "the field kept the key while it was sent")
         try #require(await RunnerTabTests.until { window.attachedSheet == nil && panel.stored != nil && !view.busy }, "the panel never said the store: \(panel.view.words)")
@@ -247,12 +263,32 @@ import Testing
         #expect(panel.view.signIn?.title == "API key “default”" && view.memory.ways == ["claude-code": .key], "storing a key did not choose it")
         #expect(panel.view.words.contains("Stored Claude Code key “default”. An agent session already running keeps the key it started with until it ends; no workspace keeps any of it.") && !panel.view.words.contains { $0.contains("asks you to sign in") }, "the store, and the server's note on the key it replaced, are not said: \(panel.view.words)")
         let start = try #require(panel.view.primary)
-        #expect(start.title == "Start" && start.isEnabled && start.holdsKeys)
+        #expect(start.title == "Start" && start.isEnabled && start.holdsKeys && start.namesKey)
+        #expect(WorkspacesViewTests.footSays(view.project) == ["New"], "the sheet gone, the foot under the panel says \(WorkspacesViewTests.footSays(view.project))")
+        #expect(panel.view.words.contains("↑↓ choose · ⌘M mode"))
         try NewSessionPanelTests.press(try NewSessionPanelTests.key(48, "\t"), in: window)
         #expect(panel.view.signIn?.holdsKeys == true && panel.view.primary?.holdsKeys == false, "⇥ to Sign in left Start's ring on too")
+        #expect(panel.view.words.contains("⌘M mode") && !panel.view.words.contains("↑↓ choose · ⌘M mode"), "↑↓ choose is named while ↑↓ open Sign in's menu: \(panel.view.words)")
+        #expect(panel.view.primary?.namesKey == true, "Return, which still presses Start, is not named on it")
         try NewSessionPanelTests.press(try NewSessionPanelTests.key(48, "\t", .shift), in: window)
         #expect(panel.view.primary?.holdsKeys == true && panel.view.signIn?.holdsKeys == false, "⇧⇥ back did not give Start its ring again")
-        var started: [AgentStart] = []
+        #expect(panel.view.words.contains("↑↓ choose · ⌘M mode"), "the rows' keys are not named again: \(panel.view.words)")
+        try NewSessionPanelTests.press(try NewSessionPanelTests.key(48, "\t"), in: window)
+        let menu = try #require(panel.view.signIn?.menu), storeAgain = try #require(menu.items.firstIndex { $0.title == NewSessionWords.storeKey })
+        await withCheckedContinuation { (asked: CheckedContinuation<Void, Never>) in
+            window.onSheet = {
+                window.onSheet = {}
+                asked.resume()
+            }
+            menu.performActionForItem(at: storeAgain)
+        }
+        let again = try #require(window.attachedSheet as? LoginSheet, "Store a Key from Sign in opened no sheet")
+        #expect(panel.view.primary?.holdsKeys == false && panel.view.signIn?.holdsKeys == false, "under the sheet Start or Sign in wears the ring of Return, which presses the sheet's Store")
+        try NewSessionPanelTests.press(again.cancel)
+        #expect(window.attachedSheet == nil && panel.view.signIn?.holdsKeys == true && panel.view.primary?.holdsKeys == false, "the sheet cancelled, Sign in does not hold the keys again")
+        try NewSessionPanelTests.press(try NewSessionPanelTests.key(48, "\t", .shift), in: window)
+        #expect(panel.view.primary?.holdsKeys == true, "⇧⇥ back did not give Start its ring again")
+        var started: [AgentStart?] = []
         view.onStart = { start, _, _ in started.append(start) }
         try NewSessionPanelTests.press(try NewSessionPanelTests.returnKey(), in: window)
         #expect(started == [AgentStart(harness: "claude-code", display: "Claude Code", mode: "default")], "Return started \(started)")

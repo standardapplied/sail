@@ -41,7 +41,7 @@ package final class NewSessionPanel: NSObject {
 
     /// Told the start Start made, and what the person's starts now remember.
     var onStart: @MainActor (AgentStart, ModeMemory) -> Void = { _, _ in }
-    /// Told when Start opens the Shell, or Open a Shell is pressed: the row's Open.
+    /// Told when Start opens the Shell, or Open a Shell is pressed: a new shell in the workspace.
     var onShell: @MainActor () -> Void = {}
     /// Told when it closes, however it closes.
     var onClose: @MainActor () -> Void = {}
@@ -82,6 +82,7 @@ package final class NewSessionPanel: NSObject {
         popover = Popover(view, keys: keys, look: look, radius: NewSessionView.radius)
         super.init()
         keys.owner = self
+        keys.onKeys = { [weak self] in self?.redraw() }
         popover.onDismiss = { [weak self] in self?.close() }
         view.on = { [weak self] act in self?.act(act) }
     }
@@ -188,9 +189,15 @@ package final class NewSessionPanel: NSObject {
         }
     }
 
+    /// What of it holds the keys (``KeyHolder``): its rows, or Sign in after ⇥, while its keys view
+    /// holds the window's; nothing while it does not.
+    private var holder: NewSessionWords.Holder {
+        KeyHolder.holds(keys) ? (signInFocused ? .signIn : .rows) : .none
+    }
+
     private func draw(width: Double) {
         guard let content else { return }
-        view.show(content, workspace: workspace, line: line, veiled: loginSheet != nil, signInFocused: signInFocused, width: width)
+        view.show(content, workspace: workspace, line: line, veiled: loginSheet != nil, holder: holder, keys: keys, width: width)
     }
 
     /// Drawn again where it is, its top kept under its row (its foot over it) as its height changes.
@@ -301,6 +308,10 @@ package final class NewSessionPanel: NSObject {
 @MainActor
 final class NewSessionKeys: NSView {
     weak var owner: NewSessionPanel?
+    /// What holds the window's keys may have changed (a sheet over it, it taking them or giving them
+    /// up): the panel names its keys only while it holds them.
+    var onKeys: @MainActor () -> Void = {}
+    private lazy var keysWatch = HolderWatch { [weak self] in self?.onKeys() }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -320,6 +331,11 @@ final class NewSessionKeys: NSView {
 
     override var acceptsFirstResponder: Bool {
         true
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        keysWatch.watch(newWindow)
     }
 
     /// While its panel is closed it keeps any key it is still handed: passed on, a Return would
@@ -343,7 +359,7 @@ final class NewSessionKeys: NSView {
 /// The panel's box, on the popover's surface with a strong hairline edge and 8 pt corners: its
 /// title, the stopped workspace's line, the rows with the chosen one's detail under it, a key
 /// just stored said in one line, and the foot with the keys and Start; or, where nothing starts for
-/// the person, why, and one button. Built whole by ``show(_:workspace:line:veiled:width:)``, every frame
+/// the person, why, and one button. Built whole by ``show(_:workspace:line:veiled:holder:keys:width:)``, every frame
 /// set there, so no layout pass changes what it shows; mirrored right to left.
 @MainActor
 package final class NewSessionView: NSView {
@@ -381,8 +397,9 @@ package final class NewSessionView: NSView {
     package private(set) var signIn: SailButton?
     /// Under its sheet's veil, its primary elsewhere: the sheet's.
     package private(set) var veiled = false
-    /// Sign in holds the keys: drawn with the ring a control holding them has.
-    private var focused = false
+    /// What of the panel holds the keys (``KeyHolder``), as last shown: Sign in is drawn with the
+    /// ring a control holding them has; Start with Return's while the rows hold them.
+    private var holder = NewSessionWords.Holder.none
     /// The veil drawn over it while its sheet asks.
     private var veil: NSView?
     /// The hairlines across it, the chosen row's bar, the stopped line's square and the stored
@@ -430,9 +447,12 @@ package final class NewSessionView: NSView {
     /// Builds it for `content` in workspace `workspace`, `width` wide, saying `line` over the foot;
     /// `veiled` while its sheet asks: its Start outlined, as a row's Open is
     /// under the panel, the sheet's Store the one primary on screen, and the sheet's veil over it.
-    func show(_ content: Content, workspace: String, line: Line?, veiled: Bool, signInFocused: Bool, width: Double) {
+    /// The foot names the keys of `holder`, Start wears Return's ring once a key is stored only while
+    /// `holder` is the rows (nothing under a sheet), and names its ⏎ while `keys`, whose Return
+    /// presses it, holds the keys.
+    func show(_ content: Content, workspace: String, line: Line?, veiled: Bool, holder: NewSessionWords.Holder, keys: NSView, width: Double) {
         self.veiled = veiled
-        focused = signInFocused
+        self.holder = holder
         subviews.forEach { $0.removeFromSuperview() }
         rows = []
         primary = nil
@@ -465,12 +485,12 @@ package final class NewSessionView: NSView {
             hairlines.append(y)
             let (title, enabled) = NewSessionWords.primary(panel.readiness, signsIn: panel.signsIn)
             let start = SailButton(title, kind: veiled ? .secondary : .primary, size: .small, look: look, target: self, action: #selector(pressedStart(_:)))
-            start.hint("\r", mono: mono)
+            start.hint("\r", through: keys, mono: mono)
             start.isEnabled = enabled
-            start.holdsKeys = line.map { if case .stored = $0 { true } else { false } } == true && enabled && !focused
+            start.holdsKeys = line.map { if case .stored = $0 { true } else { false } } == true && enabled && holder == .rows
             start.why = enabled ? nil : Self.refusal(panel.readiness)?.message
             primary = start
-            let hint = Self.label(Self.text(NewSessionWords.hint, mono.font(Look.Step.micro.points, .regular) as NSFont, look.textTertiary, direction: direction).cut(.byTruncatingTail))
+            let hint = Self.label(Self.text(NewSessionWords.hint(holder, modes: modes != nil), mono.font(Look.Step.micro.points, .regular) as NSFont, look.textTertiary, direction: direction).cut(.byTruncatingTail))
             y = foot(start, hint: hint, y: y, width: width)
         case let .refused(sentence, remedy, shell):
             hairlines.append(y)
@@ -617,7 +637,7 @@ package final class NewSessionView: NSView {
         menu.addItem(store)
         let after = x + column + 10
         let button = popUp(way == .key ? key ?? account : account, menu: menu, name: NewSessionWords.signIn, x: after, y: y, room: x + width - after)
-        button.holdsKeys = focused
+        button.holdsKeys = holder == .signIn
         signIn = button
         return y + ButtonSize.small.height
     }

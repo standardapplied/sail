@@ -42,10 +42,10 @@ final class WorkspaceCredentials {
   static final String SESSIONS = SessionLogin.DIR;
 
   /**
-   * Every file a harness keeps a person's login in, or a part of one, signed in by hand in a
-   * session ({@link Harness#storedLogins}): a workspace keeps them across its own person's starts
-   * and loses them when it leaves that person, by a strip, which every re-own, disown and template
-   * build runs.
+   * Every file or folder a harness keeps a person's login in, or a part of one, signed in by hand
+   * in a session ({@link Harness#storedLogins}): a workspace keeps them across its own person's
+   * starts and loses them when it leaves that person, by a strip, which every re-own, disown and
+   * template build runs.
    */
   static final List<String> HARNESS_LOGINS =
       Harnesses.all().stream()
@@ -67,7 +67,7 @@ final class WorkspaceCredentials {
       as_dev() { runuser -u dev -- env HOME=/home/dev "$@"; }
       rm -f %1$s
       rm -rf %3$s
-      if [ "$#" -ne 2 ]; then rm -f %4$s; fi
+      if [ "$#" -ne 2 ]; then rm -rf %4$s; fi
       dev=$(id -u dev 2>/dev/null) || dev=""
       if [ -n "$dev" ]; then
         for key in user.name user.email; do
