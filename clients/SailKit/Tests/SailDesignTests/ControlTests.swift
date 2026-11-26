@@ -105,6 +105,7 @@ import Testing
         #expect(FieldPaint(.small, FieldState(), look: look).fill == Tint(look.canvas))
         #expect([FieldSize.regular.height, FieldSize.regular.inset, FieldSize.regular.text] == [32, 10, 13])
         #expect([FieldSize.small.height, FieldSize.small.inset, FieldSize.small.text] == [28, 8, 12])
+        #expect([FieldSize.large.height, FieldSize.large.inset, FieldSize.large.text] == [36, 10, 14] && Look.Step.display.points == 30)
     }
 
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])

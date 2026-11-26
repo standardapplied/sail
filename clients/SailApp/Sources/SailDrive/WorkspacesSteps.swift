@@ -41,7 +41,10 @@ actor GoldenDesk: Transport {
     }
 
     init() {
-        let first = ["passkey-login-start", "passkey-login-finish", "whoami", "projects", "workspaces", "workspace-create", "terminal-ticket-workspace"]
+        let first = [
+            "health", "passkey-register-start", "passkey-register-finish", "passkey-login-start", "passkey-login-finish", "whoami", "projects", "workspaces",
+            "workspace-create", "terminal-ticket-workspace",
+        ]
         for exchange in first.compactMap({ try? Exchange($0) }) {
             answers["\(exchange.method) \(exchange.path)"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: exchange.body)
         }
@@ -494,7 +497,10 @@ extension Driver {
             shell.window.setFrame(NSRect(x: frame.minX, y: frame.maxY - size[1], width: size[0], height: size[1]), display: true)
             pane.layoutSubtreeIfNeeded()
             let now = shell.window.frame.size, reached = abs(Double(now.width) - size[0]) < 0.5 && abs(Double(now.height) - size[1]) < 0.5
-            let sections: [(String, NSView)] = [("the rail", shell.rail as NSView), ("This Mac", shell.thisMac as NSView), ("Workspaces", pane as NSView), ("Account", shell.account as NSView)]
+            let sections: [(String, NSView)] = [
+                ("the rail", shell.rail as NSView), ("Terminals", shell.thisMac as NSView), ("Workspaces", pane as NSView), ("the welcome", shell.welcome as NSView),
+                ("Account", shell.account as NSView),
+            ]
             let least = sections.map { "\($0.0) \($0.1.fittingSize.width) × \($0.1.fittingSize.height)" }.joined(separator: ", ")
             let room = shell.window.screen?.visibleFrame.size ?? .zero
             return (reached, "the window is \(now.width) × \(now.height)"
@@ -505,7 +511,7 @@ extension Driver {
             return (went, "the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
         }
         if let title = step.clickButton {
-            return await clickButton(title, in: pane)
+            return await clickButton(title)
         }
         if let wanted = step.chooseProject {
             let listed = await waitUntil(step.seconds ?? 10) { Self.row(wanted, in: pane.panel.list) != nil }
@@ -524,7 +530,7 @@ extension Driver {
             guard pane.project.list.chosen == name, let enter = Keys.named("enter", modifiers: []) else { return (false, "no row \(name)") }
             shell.window.makeFirstResponder(pane.project.list)
             send(enter)
-            return (shell.rail.selected == .thisMac, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing"); \(arrangementSaid)")
+            return (shell.rail.selected == .terminals, "the rail shows \(shell.rail.selected?.rawValue ?? "nothing"); \(arrangementSaid)")
         }
         if let shown = step.skeletons {
             let visible = { Self.found(Skeleton.self, in: pane).filter { !$0.isHiddenOrHasHiddenAncestor } }
@@ -752,8 +758,8 @@ extension Driver {
         }
     }
 
-    /// The Workspaces card while the app asks who is signed in, on the pane already chosen
-    /// (`waitForSignIn()` is what a launch onto it calls; the launch's own order, the mark made under
+    /// The Workspaces card while the app checks the session it holds, on the pane already chosen
+    /// (`waitForSignIn(at:)` is what a launch calls; the launch's own order, the mark made under
     /// the hidden pane and then shown, is `ControlsTests.theMarkDrawsOnlyWhileItCanBeSeen`'s): Sail's
     /// mark alone in the card, the same mark in each look and in that look, and what it draws centred
     /// on the card's centre: the sigma's ink and the label's, each, as AppKit draws the window's
@@ -762,9 +768,12 @@ extension Driver {
     /// mark draws itself with motion on and holds still with it reduced, whatever the runner's
     /// setting (GitHub's macOS images turn Reduce Motion on), which is put back after.
     private func askingWhoIsSignedIn(_ name: String) async -> (Bool, String) {
-        let pane = shell.workspaces
-        pane.waitForSignIn()
-        guard pane.text == "Workspaces\n\(WorkspacesView.asking)", pane.card.subviews.count == 1, let mark = pane.card.subviews.first as? BrandMark else {
+        let pane = shell.workspaces, host = shell.flow.memory.plane?.named ?? ""
+        pane.waitForSignIn(at: host)
+        shell.select(.workspaces)
+        guard pane.text == "Workspaces\n\(WorkspacesView.connecting(to: host))", !pane.isHiddenOrHasHiddenAncestor, pane.card.subviews.count == 1,
+              let mark = pane.card.subviews.first as? BrandMark
+        else {
             return (false, "asking, the card holds \(pane.card.subviews) and says \(pane.text)")
         }
         var held = true, said: [String] = []
@@ -1072,9 +1081,11 @@ extension Driver {
     }
 
     /// Clicks the shown button titled `title` in `pane` as a person does.
-    private func clickButton(_ title: String, in pane: WorkspacesView) async -> (Bool, String) {
-        pane.layoutSubtreeIfNeeded()
-        guard let button = Self.views(in: pane).compactMap({ $0 as? NSButton }).first(where: { $0.title == title && !$0.isHiddenOrHasHiddenAncestor }),
+    /// Clicks, as a person does, the button titled `title` shown in the window's content.
+    private func clickButton(_ title: String) async -> (Bool, String) {
+        guard let content = shell.window.contentView else { return (false, "the window has no content") }
+        content.layoutSubtreeIfNeeded()
+        guard let button = Self.views(in: content).compactMap({ $0 as? NSButton }).first(where: { $0.title == title && !$0.isHiddenOrHasHiddenAncestor }),
               await click(button, at: NSPoint(x: button.bounds.midX, y: button.bounds.midY))
         else { return (false, "no \(title) shown") }
         return (true, "clicked \(title)")

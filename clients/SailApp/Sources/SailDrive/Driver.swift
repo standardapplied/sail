@@ -16,7 +16,7 @@ import SailWorkbench
 /// software passkey in the platform's place. Every key, click and drag is an `NSEvent` sent through
 /// the app's own `sendEvent`, so no Accessibility or Screen Recording permission is needed; the
 /// wheel goes to the view's `scrollWheel`, since a wheel event made by hand carries no window. After
-/// each step on "This Mac" the terminal's last frame is saved as an image, rendered in-process, with
+/// each step on Terminals the terminal's last frame is saved as an image, rendered in-process, with
 /// the screen's text, and after each step on the account the pane's text; at the end a JSON report.
 @MainActor
 final class Driver {
@@ -122,7 +122,7 @@ final class Driver {
         askedAtStart = passkey.asked
     }
 
-    /// The focused pane of "This Mac", which the terminal steps act on.
+    /// The focused pane of Terminals, which the terminal steps act on.
     var pane: TerminalPane? {
         shell.thisMac.focused
     }
@@ -133,9 +133,9 @@ final class Driver {
         pane?.terminal ?? standIn
     }
 
-    /// Whether the steps are on "This Mac" with a session drawn.
+    /// Whether the steps are on Terminals with a session drawn.
     var onTerminal: Bool {
-        shell.rail.selected == .thisMac && pane?.session != nil
+        shell.rail.selected == .terminals && pane?.session != nil
     }
 
     /// Runs the script once, holding no process activity: the app is measured as a person runs it,
@@ -938,7 +938,7 @@ final class Driver {
     private func save(index: Int, name: String) {
         let stem = String(format: "%02d-", index) + name
         guard onTerminal else {
-            try? shell.account.text.write(to: out.appending(path: stem + ".txt"), atomically: true, encoding: .utf8)
+            try? (shell.flow.standing == nil ? shell.welcome.text : shell.account.text).write(to: out.appending(path: stem + ".txt"), atomically: true, encoding: .utf8)
             try? windowImage()?.write(to: out.appending(path: stem + ".png"))
             return
         }

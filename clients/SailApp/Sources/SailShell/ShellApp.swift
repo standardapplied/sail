@@ -6,29 +6,32 @@ import SailTerminal
 import SailTerminalView
 import SailWorkbench
 
-/// "Sail": one window, 1180 by 800 and no smaller than `leastFrame`, laid out as Mast's shell: one band
-/// across the window's top in the chrome, the window buttons' home and its drag surface; under it
-/// the icon rail on the chrome at the left, and beside the rail the selected pane ("This Mac", the
-/// local terminals in tabs and splits, or the account) as a card with 6 pt corners and a 2 pt
-/// margin of chrome. The band is the title bar–toolbar area of a full-size-content window with an
-/// empty toolbar in the compact unified style, so AppKit gives it its height and centres the window
-/// buttons in it; its row after the buttons is a title bar accessory (`.left`) holding the tab strip, whose
-/// empty part is inside the title bar's own view: a drag there moves the window and a double-click
-/// does what System Settings says, as AppKit does it. The tabs start `buttonsGap` past where AppKit
-/// put the buttons. In full screen, where macOS hides the title bar and the buttons, the toolbar is hidden
-/// and the band is drawn in the window's top row, its inset 8 pt. The look follows the appearance
-/// while the app runs. It asks the control plane who it is signed in as at launch and each time
-/// the app is activated.
+/// "Sail": one window, 1180 by 800 and no smaller than `leastFrame`, laid out as Mast's shell: one
+/// band across the window's top in the chrome, the window buttons' home and its drag surface; under
+/// it the icon rail on the chrome at the left, and beside the rail the selected pane (Workspaces,
+/// or the welcome while no one is signed in; Terminals, the tabs and splits; or the account) as a
+/// card with 6 pt corners and a 2 pt margin of chrome. The band is the title bar–toolbar area of a
+/// full-size-content window with an empty toolbar in the compact unified style, so AppKit gives it
+/// its height and centres the window buttons in it; its row after the buttons is a title bar
+/// accessory (`.left`) holding the tab strip, whose empty part is inside the title bar's own view:
+/// a drag there moves the window and a double-click does what System Settings says, as AppKit does
+/// it. The tabs start `buttonsGap` past where AppKit put the buttons. In full screen, where macOS
+/// hides the title bar and the buttons, the toolbar is hidden and the band is drawn in the window's
+/// top row, its inset 8 pt. The look follows the appearance while the app runs. It opens on
+/// Workspaces at every launch and after every sign-in, and asks the control plane who it is signed
+/// in as at launch and each time the app is activated.
 @MainActor
 public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     public static let title = "Sail"
     /// Said once a launch when macOS runs the app from the temporary copy it makes of a download.
     static let translocated = "Sail is running from a copy macOS made of the download. Move Sail to Applications and open it from there."
-    static let paneKey = "shell.pane"
-
     public let window: NSWindow
     public let rail: Rail
+    /// Who is signed in, and every action that changes it.
+    public let flow: AccountFlow
     public let account: AccountPane
+    /// The signed-out Workspaces card: welcome, enroll, sign in.
+    public let welcome: WelcomeView
     /// The card's outline on the chrome, over its edge, taking no clicks; none in light.
     let cardEdge: CardEdge
     /// The menu behind the rail's user button: who is signed in and where, Account, Keys,
@@ -92,10 +95,9 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             throw .resources("the app's fonts cannot be read: \(error)")
         }
         thisMac = try WorkbenchView(fonts: fonts, helper: helper, look: look, defaults: defaults)
-        account = AccountPane(
-            account: Account(authenticator: passkeys { [weak window] in window }, vault: vault, connect: connect), look: look, title: title,
-            mono: mono, labels: labels, defaults: defaults
-        )
+        flow = AccountFlow(account: Account(authenticator: passkeys { [weak window] in window }, vault: vault, connect: connect), memory: SignInMemory(defaults))
+        account = AccountPane(flow: flow, look: look, title: title, mono: mono, labels: labels)
+        welcome = WelcomeView(flow: flow, look: look, title: title, mono: labels, version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
         workspaces = WorkspacesView(look: look, title: title, mono: labels)
         rail = Rail(look: look)
         cardEdge = CardEdge(look: look)
@@ -119,26 +121,33 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.center()
         window.makeKeyAndOrderFront(nil)
         placeTheStrip()
-        let remembered = UserDefaults.standard.string(forKey: Self.paneKey).flatMap { Rail.Item(rawValue: $0) } ?? .account
-        if remembered == .workspaces { workspaces.waitForSignIn() }
-        select(remembered)
+        land()
         if Bundle.main.bundlePath.contains("/AppTranslocation/") { thisMac.tell(Self.translocated) }
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Where the window opens at every launch: Workspaces, Sail's mark drawing itself while the
+    /// session this Mac holds is checked, else the welcome. The check starts here, not at the
+    /// app's activation, which a launch may never get.
+    func land() {
+        if flow.holdsASession(), let host = flow.memory.plane?.named {
+            workspaces.waitForSignIn(at: host)
+            askWhoIsSignedIn()
+        }
+        select(.workspaces)
     }
 
     public func applicationDidBecomeActive(_: Notification) {
         askWhoIsSignedIn()
     }
 
-    /// Asks the control plane who is signed in, then tells the Workspaces section what it learnt when
-    /// no one is: signed out, or the control plane could not be asked, in its words.
+    /// The check asked last of who is signed in: what a test awaits.
+    package private(set) var checking: Task<Void, Never>?
+
+    /// Asks the control plane who is signed in; the flow tells what it learnt, and asks nothing
+    /// while a check or a person's action is under way.
     private func askWhoIsSignedIn() {
-        Task {
-            await account.refresh()
-            guard account.standing == nil else { return }
-            let lines = account.lines
-            if lines.isEmpty { workspaces.signedOut() } else { workspaces.signInUnknown(lines) }
-        }
+        checking = Task { await flow.refresh() }
     }
 
     /// Closing the window keeps the app and every tab, this Mac's and the runner's, as a Mac app
@@ -197,27 +206,32 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         thisMac.detachAll()
     }
 
-    /// Shows `item`'s pane and remembers it for the next launch.
+    /// Whether Workspaces shows the welcome: no one is signed in and no held session is being
+    /// checked.
+    var welcoming: Bool {
+        flow.standing == nil && !workspaces.asking
+    }
+
+    /// Shows `item`'s pane; the account, with no one signed in, is the welcome on Workspaces.
     public func select(_ item: Rail.Item) {
-        rail.offer(.workspaces, account.standing != nil || item == .workspaces)
-        thisMac.isHidden = item != .thisMac
+        let item = item == .account && flow.standing == nil ? .workspaces : item
+        thisMac.isHidden = item != .terminals
         thisMac.strip.showsTabs = !thisMac.isHidden
-        workspaces.isHidden = item != .workspaces
+        workspaces.isHidden = item != .workspaces || welcoming
+        welcome.isHidden = item != .workspaces || !welcoming
         account.isHidden = item != .account
         rail.show(item)
         paintChrome()
         thisMac.connectFiles()
-        UserDefaults.standard.set(item.rawValue, forKey: Self.paneKey)
         switch item {
-        case .thisMac:
+        case .terminals:
             thisMac.shown()
             thisMac.apply()
         case .workspaces:
             window.title = Self.title
-            workspaces.shown()
+            if welcoming { welcome.claimKeys() } else { workspaces.shown() }
         case .account:
             window.title = Self.title
-            window.makeFirstResponder(account.address)
         }
     }
 
@@ -227,18 +241,18 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if userMenu.isOpen { return userMenu.close() }
         guard let button = rail.button(.account) else { return }
         rail.menuOpen = true
-        userMenu.open(from: button, saying: account.menuContent, appearance: Appearance.stored(in: defaults), withKeys: !rail.pressedByPointer)
+        userMenu.open(from: button, saying: flow.menuContent, appearance: Appearance.stored(in: defaults), withKeys: !rail.pressedByPointer)
     }
 
     private func updateMenu() {
-        userMenu.update(account.menuContent, appearance: Appearance.stored(in: defaults))
+        userMenu.update(flow.menuContent, appearance: Appearance.stored(in: defaults))
     }
 
-    /// Where the keys rest in the pane shown: This Mac's focused terminal, the Account pane's address.
+    /// Where the keys rest in the pane shown: the focused terminal, the welcome's field.
     private var restingResponder: NSResponder? {
         switch rail.selected {
-        case .thisMac?: thisMac.focused?.terminal
-        case .account?: account.address
+        case .terminals?: thisMac.focused?.terminal
+        case .workspaces? where welcoming: welcome.field?.field
         default: nil
         }
     }
@@ -269,29 +283,42 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func chose(_ item: UserMenuContent.Item) {
         switch item {
-        case .account, .signIn: select(.account)
+        case .account: select(.account)
+        case .signIn: select(.workspaces)
         case .signOut: account.signOutHere(nil)
         case .keys: break
         }
     }
 
-    /// Who is signed in, as the account learnt it: the Workspaces item and the runner's tickets
-    /// are theirs, and go with them.
-    private func standing(_ signedIn: SignedIn?) {
-        workspaces.client = account.client()
+    /// Who is signed in, as the flow learnt it: Workspaces and the runner's tickets are theirs, and
+    /// go with them. Signed out, the welcome shows this Mac's screen; a person's sign-in opens
+    /// Workspaces.
+    private func standing(_ signedIn: SignedIn?, byAPerson: Bool) {
+        workspaces.client = flow.client()
         workspaces.person = WorkspacesModel.Person(signedIn)
-        rail.offer(.workspaces, signedIn != nil || rail.selected == .workspaces)
         thisMac.standingChanged()
         if signedIn == nil {
             workspaces.signedOut()
-        } else if rail.selected == .workspaces {
-            workspaces.shown()
+            welcome.reset()
         }
+        if byAPerson {
+            select(.workspaces)
+        } else if let shown = rail.selected, shown != .terminals {
+            select(shown)
+        }
+    }
+
+    /// A check found no one, or could not say who: the wait at launch ends.
+    private func checked(_ answer: Result<SignedIn?, AccountRefusal>, endedOn: Date?) {
+        welcome.checked(answer, endedOn: endedOn)
+        guard flow.standing == nil, workspaces.asking else { return }
+        workspaces.signedOut()
+        if rail.selected == .workspaces { select(.workspaces) }
     }
 
     /// Who is signed in now and the API as them, which every runner tab asks at each ticket.
     private func signedIn() -> (handle: String, tickets: any TicketSource)? {
-        guard let standing = account.standing, let client = account.client() else { return nil }
+        guard let standing = flow.standing, let client = flow.client() else { return nil }
         return ((try? standing.whoami.get())?.fde ?? standing.fde, client)
     }
 
@@ -303,6 +330,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         userMenu.look = look
         rail.look = look
         account.look = look
+        welcome.look = look
         workspaces.look = look
         thisMac.look = look
         paintChrome()
@@ -472,7 +500,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
-        for side in [thisMac, workspaces, account] as [NSView] {
+        for side in [thisMac, workspaces, welcome, account] as [NSView] {
             side.frame = content.bounds
             side.autoresizingMask = [.width, .height]
             side.isHidden = true
@@ -500,17 +528,19 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         userMenu.onChoose = { [weak self] item in self?.chose(item) }
         userMenu.onAppearance = { [weak self] appearance in self?.choose(appearance) }
         userMenu.onClose = { [weak self] in self?.rail.menuOpen = false }
-        account.onStanding = { [weak self] signedIn in
-            self?.standing(signedIn)
+        flow.onStanding = { [weak self] signedIn, byAPerson in self?.standing(signedIn, byAPerson: byAPerson) }
+        flow.onChecked = { [weak self] answer, endedOn in self?.checked(answer, endedOn: endedOn) }
+        flow.onChange = { [weak self] in
+            self?.account.show()
             self?.updateMenu()
         }
-        account.onChecking = { [weak self] in self?.updateMenu() }
+        welcome.onTerminals = { [weak self] in self?.select(.terminals) }
         userMenu.popover.fallback = { [weak self] in self?.restingResponder }
         thisMac.signedIn = { [weak self] in self?.signedIn() }
         thisMac.controlPlane = { [weak self] in self?.workspaces.person.controlPlane ?? "" }
-        thisMac.onSignIn = { [weak self] in self?.select(.account) }
+        thisMac.onSignIn = { [weak self] in self?.select(.workspaces) }
         thisMac.startWorkspace = { [weak self] project, name in
-            guard let client = self?.account.client() else { return SignIn.signedOut.lines }
+            guard let client = self?.flow.client() else { return SignIn.signedOut.lines }
             do throws(SailError) {
                 _ = try await client.send(.startWorkspace(name, project: project))
                 return nil
@@ -521,28 +551,35 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
         workspaces.onSignIn = { [weak self] in self?.select(.account) }
-        workspaces.onAskWhoIsSignedIn = { [weak self] in self?.askWhoIsSignedIn() }
         thisMac.onRunnerTabs = { [weak self] project, name in self?.workspaces.recount(project: project, name: name) }
         workspaces.onOpen = { [weak self] project, name in
-            self?.select(.thisMac)
+            self?.select(.terminals)
             self?.thisMac.openWorkspace(project: project, name: name)
         }
         workspaces.remembered = { [defaults] person in ModeMemory.stored(in: defaults, for: person) }
         workspaces.memory = workspaces.remembered(workspaces.person)
         workspaces.keep = { [defaults] memory, person in memory.store(in: defaults, for: person) }
+        workspaces.lastChosen = { [defaults] person in defaults.string(forKey: Self.chosenKey(person)) }
+        workspaces.keepChosen = { [defaults] name, person in defaults.set(name, forKey: Self.chosenKey(person)) }
         workspaces.onStart = { [weak self] start, project, name in
             guard let self else { return }
-            select(.thisMac)
+            select(.terminals)
             thisMac.startSession(start, project: project, name: name)
         }
         thisMac.onShow = { [weak self] in
-            guard let self, rail.selected != .thisMac else { return }
-            select(.thisMac)
+            guard let self, rail.selected != .terminals else { return }
+            select(.terminals)
         }
         thisMac.onTitle = { [weak self] title in
-            guard let self, rail.selected == .thisMac else { return }
+            guard let self, rail.selected == .terminals else { return }
             window.title = title
         }
+    }
+
+    /// Where a person's last project is kept: one person on one control plane, the parts joined by
+    /// the unit separator, which neither an address nor a handle holds.
+    static func chosenKey(_ person: WorkspacesModel.Person) -> String {
+        ["sail.project", person.controlPlane, person.handle].joined(separator: "\u{1F}")
     }
 
     func menu() -> NSMenu {
@@ -641,7 +678,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Workspaces section, its projects sidebar.
     @objc func toggleSidebar(_ sender: Any?) {
         switch rail.selected {
-        case .thisMac: thisMac.toggleFiles(sender)
+        case .terminals: thisMac.toggleFiles(sender)
         case .workspaces: workspaces.toggleSidebar(sender)
         default: break
         }
@@ -651,8 +688,8 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var sidebarCommand: (title: String, enabled: Bool, reason: String?) {
         guard window.attachedSheet == nil else { return ("Show Sidebar", false, "A sheet is open.") }
         switch rail.selected {
-        case .thisMac: return thisMac.filesCommand
-        case .workspaces: return workspaces.sidebarCommand
+        case .terminals: return thisMac.filesCommand
+        case .workspaces: return welcoming ? ("Show Sidebar", false, "The sidebar lists projects once you sign in.") : workspaces.sidebarCommand
         default: return ("Show Sidebar", false, "The account has no sidebar.")
         }
     }

@@ -5,7 +5,8 @@ import SailLook
 import SailWorkbench
 
 /// The Workspaces section: the left panel with the projects and, beside it, the chosen project's
-/// Workspaces view; before anyone is signed in, or with nothing listed, one card saying why. It asks
+/// Workspaces view; while a session held at launch is checked, Sail's mark drawing itself; with
+/// nothing listed, one card saying why (signed out, the welcome stands in its place). It asks
 /// the control plane, hands the answers to ``WorkspacesModel`` and draws what the model says. Only
 /// a person's action holds a control (#462): a refresh never does. Under a 720 pt card the panel
 /// hides, and ⌃⌘S (View ▸ Show Sidebar) shows it over the content until a project is chosen or
@@ -27,7 +28,7 @@ public final class WorkspacesView: NSView {
             if person.handle == oldValue.handle, person.controlPlane == oldValue.controlPlane {
                 model.person = person
             } else {
-                model = WorkspacesModel(person: person)
+                model = WorkspacesModel(person: person, chosen: lastChosen(person))
                 memory = remembered(person)
                 model.lastStarted = memory.last?.display
                 era += 1
@@ -45,6 +46,10 @@ public final class WorkspacesView: NSView {
     var remembered: @MainActor (WorkspacesModel.Person) -> ModeMemory = { _ in ModeMemory() }
     /// Keeps the person's starts between launches, told each time they change.
     var keep: @MainActor (ModeMemory, WorkspacesModel.Person) -> Void = { _, _ in }
+    /// The project a person chose last on a control plane, which the section opens on.
+    var lastChosen: @MainActor (WorkspacesModel.Person) -> String? = { _ in nil }
+    /// Keeps the project a person chose, told each time they choose one.
+    var keepChosen: @MainActor (String, WorkspacesModel.Person) -> Void = { _, _ in }
     /// The person's starts: the mode and the way in chosen for each harness and the last start,
     /// which their own rows offer to start again.
     var memory = ModeMemory() {
@@ -55,10 +60,10 @@ public final class WorkspacesView: NSView {
             render()
         }
     }
+    /// Open Account, from the card that says the control plane is out of reach.
     var onSignIn: @MainActor () -> Void = {}
     /// The clipboard a login's sheet reads and clears: the person's; a test's own.
     var pasteboard = NSPasteboard.general
-    var onAskWhoIsSignedIn: @MainActor () -> Void = {}
     /// Its look, taken at once while shown and on being shown while hidden: a look switched under
     /// another section costs that section's redraw nothing (the drive's panes4 step waited 101 ms when it did).
     var look: Look {
@@ -97,7 +102,7 @@ public final class WorkspacesView: NSView {
     /// Which model an answer was asked by: one asked for someone signed in before is dropped, as its
     /// request numbers start again in the new model.
     private var era = 0
-    private var door = Door.asking
+    private var door = Door.signedOut
     private var overlaid = false
     /// A person's action is under way; the drive waits on it.
     package var busy: Bool {
@@ -107,7 +112,7 @@ public final class WorkspacesView: NSView {
     private var underWay = 0
 
     private enum Door: Equatable {
-        case asking, signedOut, unknown([String]), signedIn
+        case asking(String), signedOut, signedIn
     }
 
     init(look: Look, title: TitleFont, mono: LabelFont) {
@@ -198,7 +203,7 @@ public final class WorkspacesView: NSView {
     /// Everything the section says now, a line each, as the drive reads it.
     public var text: String {
         switch door {
-        case .asking, .signedOut, .unknown: return (["Workspaces"] + cardSaid).joined(separator: "\n")
+        case .asking, .signedOut: return (["Workspaces"] + cardSaid).joined(separator: "\n")
         case .signedIn: break
         }
         switch model.screen {
@@ -230,19 +235,19 @@ public final class WorkspacesView: NSView {
 
     // MARK: The door
 
-    /// Until the sign-in is known, at a launch onto this section.
-    package func waitForSignIn() {
-        door = .asking
+    /// Until the session held for `host` is checked, at a launch.
+    package func waitForSignIn(at host: String) {
+        door = .asking(host)
         render()
+    }
+
+    /// Whether the section waits for the session held at launch to be checked.
+    package var asking: Bool {
+        if case .asking = door { true } else { false }
     }
 
     func signedOut() {
         door = .signedOut
-        render()
-    }
-
-    func signInUnknown(_ lines: [String]) {
-        door = .unknown(lines)
         render()
     }
 
@@ -258,12 +263,8 @@ public final class WorkspacesView: NSView {
     }
 
     @objc func askAgain(_: Any?) {
-        switch door {
-        case .signedOut: onSignIn()
-        case .unknown: onAskWhoIsSignedIn()
-        case .asking: break
-        case .signedIn: askProjects()
-        }
+        guard door == .signedIn else { return }
+        askProjects()
     }
 
     // MARK: Asking the control plane
@@ -274,7 +275,7 @@ public final class WorkspacesView: NSView {
     private func askProjects() -> Task<Void, Never> {
         let asked = model.askingProjects(), era = self.era
         render()
-        return Task {
+        let asking = Task {
             guard let client else { return }
             let answer = await Self.result { () async throws(SailError) in try await client.send(.projects) }
             guard era == self.era else { return }
@@ -282,7 +283,12 @@ public final class WorkspacesView: NSView {
             if let request = model.projectsListed(answer, request: asked) { list(request) }
             render()
         }
+        projectsAsked = asking
+        return asking
     }
+
+    /// The projects asked for last: what a test awaits.
+    package private(set) var projectsAsked: Task<Void, Never>?
 
     private func list(_ request: Int) {
         guard let client, let name = model.chosen else { return }
@@ -336,6 +342,7 @@ public final class WorkspacesView: NSView {
             arrange()
         }
         let request = model.choose(name)
+        keepChosen(name, person)
         render()
         list(request)
         showQuestion()
@@ -704,27 +711,28 @@ public final class WorkspacesView: NSView {
         }
     }
 
-    /// The card while who is signed in is asked: that wait, Sail's mark drawing itself over its words.
-    package static let asking = "Asking who is signed in"
+    /// The card while a session held at launch is checked: that wait, Sail's mark drawing itself
+    /// over its words, the control plane named with no ellipsis.
+    package static func connecting(to host: String) -> String {
+        "Connecting to \(host)"
+    }
 
-    /// The card: who is signed in being asked, or an empty state saying the person is signed out,
-    /// not known, or the control plane out of reach with when it was last tried.
+    /// The card: the session held at launch being checked, or an empty state saying the control
+    /// plane is out of reach with when it was last tried; signed out, nothing.
     private func showCard(_ screen: WorkspacesModel.Screen?) {
-        guard door != .asking else { return showAsking() }
+        if case let .asking(host) = door { return showAsking(host) }
         card.subviews.forEach { $0.removeFromSuperview() }
-        let (icon, title, body, button, line): (LineIcon, String, String, String?, String?) = switch (door, screen) {
-        case (.signedOut, _): (.box, "Sign in to see your workspaces", "You are signed out of the control plane.", "Sign In", nil)
-        case let (.unknown(lines), _): (.cloudOff, lines.first ?? "", lines.dropFirst().joined(separator: " "), "Try Again", nil)
-        case let (_, .unreachable(empty)?): (.cloudOff, empty.title, empty.body, "Try Again", triedAt.map { "last tried " + Self.clock.string(from: $0) })
-        default: (.box, "", "", nil, nil)
+        guard case let .unreachable(said)? = screen else {
+            cardSaid = []
+            return
         }
-        cardSaid = [title, body].filter { !$0.isEmpty }
-        let first = SailButton(button ?? "Try Again", kind: .primary, look: look, target: self, action: #selector(askAgain(_:)))
-        if button == "Try Again" { first.shortcut("r", modifiers: .command, mono: mono) }
+        cardSaid = [said.title, said.body].filter { !$0.isEmpty }
+        let first = SailButton("Try Again", kind: .primary, look: look, target: self, action: #selector(askAgain(_:)))
+        first.shortcut("r", modifiers: .command, mono: mono)
         tryAgain = first
-        var actions = button == nil ? [] : [first]
-        if case .unreachable? = screen { actions.append(SailButton("Open Account", kind: .quiet, look: look, target: self, action: #selector(openAccount(_:)))) }
-        let empty = EmptyState(icon: icon, title: title, body: body, actions: actions, line: line, look: look, titleFont: titleFont, mono: mono)
+        let actions = [first, SailButton("Open Account", kind: .quiet, look: look, target: self, action: #selector(openAccount(_:)))]
+        let line = triedAt.map { "last tried " + Self.clock.string(from: $0) }
+        let empty = EmptyState(icon: .cloudOff, title: said.title, body: said.body, actions: actions, line: line, look: look, titleFont: titleFont, mono: mono)
         empty.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(empty)
         NSLayoutConstraint.activate([
@@ -736,14 +744,15 @@ public final class WorkspacesView: NSView {
     /// The mark already drawing stays, in this look, so a redraw while asking does not begin its
     /// cycle again. It spans the card, so its centre is the card's on any pixel grid: a view as wide
     /// as its label would stand half a point off on a 1x screen wherever the two widths' parities differ.
-    private func showAsking() {
-        cardSaid = [Self.asking]
-        if card.subviews.count == 1, let drawing = card.subviews.first as? BrandMark {
+    private func showAsking(_ host: String) {
+        let words = Self.connecting(to: host)
+        cardSaid = [words]
+        if card.subviews.count == 1, let drawing = card.subviews.first as? BrandMark, drawing.presentation == .drawing(label: words) {
             drawing.look = look
             return
         }
         card.subviews.forEach { $0.removeFromSuperview() }
-        let mark = BrandMark(.drawing(label: Self.asking), look: look, mono: mono)
+        let mark = BrandMark(.drawing(label: words), look: look, mono: mono)
         mark.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(mark)
         NSLayoutConstraint.activate([

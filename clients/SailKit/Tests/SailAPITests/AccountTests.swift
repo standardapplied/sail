@@ -150,7 +150,7 @@ let held = PasskeySession(sessionToken: "sess_golden14", fde: "uday", expiresAt:
         ("http://box.ts.net", "box.ts.net"), ("http://8.8.8.8", "8.8.8.8"), ("http://172.15.0.1", "172.15.0.1"),
         ("http://172.32.0.1", "172.32.0.1"), ("http://100.63.0.1", "100.63.0.1"), ("http://100.128.0.1", "100.128.0.1"),
         ("http://169.254.1.1", "169.254.1.1"), ("http://[fe80::1]", "fe80::1"), ("http://[2001:db8::1]", "2001:db8::1"),
-        ("http://010.0.0.1", "010.0.0.1"), ("http://10.1", "10.1"), ("http://localhost", "localhost"),
+        ("http://localhost", "localhost"),
         ("http://[::ffff:10.0.0.1]", "::ffff:10.0.0.1"),
     ])
     func plainHTTPToAnythingElseIsRefusedNamingTheHost(_ address: String, _ host: String) throws {
@@ -164,8 +164,10 @@ let held = PasskeySession(sessionToken: "sess_golden14", fde: "uday", expiresAt:
     }
 
     @Test(arguments: [
-        "100.84.93.13:7443", "ftp://10.0.0.2", "http://", "http://u:p@10.0.0.2", "http://10.0.0.2/v1", "http://10.0.0.2?x=1",
-        "http://10.0.0.2#top", "enr_0123456789abcdef", "", "http://10.0.0.2:0", "http://10.0.0.2:99999",
+        "ftp://10.0.0.2", "http://", "http://u:p@10.0.0.2", "http://10.0.0.2/v1", "http://10.0.0.2?x=1",
+        "http://10.0.0.2#top", "enr_0123456789abcdef", "", "http://10.0.0.2:0", "http://10.0.0.2:99999", "sail.example.com/v1",
+        "sail..example.com", "-sail.example.com", "sail example.com", "https://sail_x.example.com", "sail.example.com:0",
+        "999.1.1.1", "12345", "sail.example.123", "http://010.0.0.1", "http://10.1",
     ])
     func whatIsNotAnAddressIsSaidWithoutEchoingIt(_ text: String) {
         do {
@@ -175,9 +177,26 @@ let held = PasskeySession(sessionToken: "sess_golden14", fde: "uday", expiresAt:
             #expect(error.reason == .notAnAddress)
             #expect(error.lines == [
                 "That is not a control plane address.",
-                "Type it as https://<name>, or http://<private IP address>:<port> such as http://10.0.0.2:7443.",
+                "Type the address your admin gave you, such as sail.example.com.",
             ])
         }
+    }
+
+    /// A bare host, or a bare host and a port, is taken as `https://`: never sent as plain HTTP, a
+    /// private IP literal included.
+    @Test(arguments: [
+        ("sail.example.com", "https://sail.example.com"), ("Sail.Example.com:8443", "https://sail.example.com:8443"),
+        ("127.0.0.1:7979", "https://127.0.0.1:7979"), ("  box.ts.net  ", "https://box.ts.net"), ("100.84.93.13:7443", "https://100.84.93.13:7443"),
+    ])
+    func aBareHostIsTakenAsHTTPS(_ typed: String, _ kept: String) throws {
+        #expect(try ControlPlane(address: typed).description == kept)
+    }
+
+    @Test func theControlPlaneIsNamedByItsHostAndPort() throws {
+        #expect(try ControlPlane(address: "https://sail.example.com").named == "sail.example.com")
+        #expect(try ControlPlane(address: "http://127.0.0.1:7979").named == "127.0.0.1:7979")
+        #expect(try ControlPlane(address: "https://[FD00::1]:7443").named == "[fd00::1]:7443")
+        #expect(try ControlPlane(address: "http://[::1]").named == "[::1]")
     }
 
     @Test func aTicketIsTakenBareOrFromTheLinkSailFdeEnrollPrinted() throws {
@@ -289,7 +308,7 @@ let held = PasskeySession(sessionToken: "sess_golden14", fde: "uday", expiresAt:
         for refused in refusals {
             #expect(refused?.reason == .foreignRelyingParty(party))
             #expect(refused?.sentence == "\(preview) uses passkeys for \(party); Sail can use them only for sail.standardapplied.com.")
-            #expect(refused?.remedy == "On the control plane, run:\nsail host config set webauthn-rp-id sail.standardapplied.com\nsudo systemctl restart sail-api")
+            #expect(refused?.remedy == "Ask your admin to set up passkeys for Sail on this control plane.")
         }
         #expect(passkey.registrations.isEmpty && passkey.assertions.isEmpty)
     }
@@ -401,21 +420,16 @@ let held = PasskeySession(sessionToken: "sess_golden14", fde: "uday", expiresAt:
         ])
     }
 
-    @Test func row3PasskeysNotConfiguredSaysWhatToRunAndTheServersWords() async throws {
+    /// The server's action names a command (`server start`), so it is left out: the admin's
+    /// steps are the server log's and the admin docs', never this screen's.
+    @Test func row3PasskeysNotConfiguredSaysToAskAnAdminAndTheServersSentence() async throws {
         let notConfigured = try Exchange("refusal-passkey-not-configured")
         let start = Exchange(method: "POST", path: "/v1/auth/register/start", status: notConfigured.status, body: notConfigured.body)
         let refused = try await refused([start], signingIn: false)
         #expect(refused?.reason == .passkeysNotConfigured)
         #expect(refused?.lines == [
-            "\(preview) does not take passkeys yet.",
-            """
-            On the control plane, run:
-            sail host config set webauthn-rp-id sail.standardapplied.com
-            sail host config set webauthn-rp-name Sail
-            sail host config set webauthn-origin https://sail.standardapplied.com
-            sudo systemctl restart sail-api
-            """,
-            "Passkey login is not configured on this server.", "Set the webauthn block in host.yaml or pass --origin to 'server start'.",
+            "\(preview) does not take passkeys yet.", "Ask your admin to set up passkeys for Sail on this control plane.",
+            "Passkey login is not configured on this server.",
         ])
     }
 
@@ -423,17 +437,17 @@ let held = PasskeySession(sessionToken: "sess_golden14", fde: "uday", expiresAt:
         let refused = try await refused([Exchange("refusal-forbidden")], signingIn: false)
         #expect(refused?.reason == .ticketRefused)
         #expect(refused?.lines == [
-            "This enrollment ticket is used, expired or not from \(preview).",
-            "A ticket lasts 15 minutes and enrolls one passkey. Ask an admin: sail fde enroll <handle>.",
+            "This ticket is used, expired or not from 100.84.93.13:7443.",
+            "A ticket lasts 15 minutes and enrolls one passkey. Ask your admin for a new one.",
             "Enrollment ticket is invalid or expired.",
         ])
     }
 
-    @Test func row6AnOriginTheServerDoesNotAcceptIsNamedInTheCommandToFixIt() async throws {
+    @Test func row6AnOriginTheServerDoesNotAcceptSaysToAskAnAdmin() async throws {
         let refused = try await refused([Exchange("passkey-register-start"), Exchange("refusal-invalid-request")], signingIn: false)
         #expect(refused?.reason == .originNotAllowed("https://elsewhere.example"))
         #expect(refused?.sentence == "\(preview) does not accept passkeys from this app.")
-        #expect(refused?.remedy == "On the control plane, run:\nsail host config set webauthn-origin https://elsewhere.example\nsudo systemctl restart sail-api")
+        #expect(refused?.remedy == "Ask your admin to set up passkeys for Sail on this control plane.")
         #expect(refused?.server?.message == "Registration origin not allowed: https://elsewhere.example")
     }
 
@@ -453,7 +467,7 @@ let held = PasskeySession(sessionToken: "sess_golden14", fde: "uday", expiresAt:
         ]),
         (.cannotCreate("not set up"), false, ["This Mac cannot make passkeys right now.", "Turn on iCloud Keychain in System Settings.", "not set up"]),
         (.cancelled, false, ["Cancelled."]),
-        (.cancelled, true, ["Cancelled.", "If this Mac holds no passkey for \(preview), enroll one with a ticket from an admin."]),
+        (.cancelled, true, ["Cancelled.", "If this Mac holds no passkey for 100.84.93.13:7443, enroll with a ticket from your admin."]),
         (.failed("The operation couldn’t be completed. (1004)"), true, ["macOS did not finish the passkey request.", "The operation couldn’t be completed. (1004)"]),
     ])
     func rows9To12WhatThePasskeySaid(_ failure: PasskeyFailure, _ signingIn: Bool, _ lines: [String]) async throws {
@@ -470,12 +484,15 @@ let held = PasskeySession(sessionToken: "sess_golden14", fde: "uday", expiresAt:
         ])
     }
 
-    @Test func row15AnyOtherRefusalIsTheServersMessageAndAction() async throws {
+    /// Any other refusal is the server's sentence, and its action only when it names no command.
+    @Test func row15AnyOtherRefusalIsTheServersMessageAndActionInWords() async throws {
         let created = try Exchange("refusal-project-not-created")
         let start = Exchange(method: "POST", path: "/v1/auth/login/start", status: created.status, body: created.body)
         let refused = try await refused([start], signingIn: true)
         #expect(refused?.reason == .refused)
-        #expect(refused?.lines == ["Project 'harbor' has no container on this box.", "Create it: project apply harbor"])
+        #expect(refused?.lines == ["Project 'harbor' has no container on this box."])
+        let worded = Exchange(method: "POST", path: "/v1/auth/login/start", status: 409, body: Data(#"{"schema_version": 1, "error": {"code": "conflict", "message": "Busy.", "action": "Try again in a minute."}}"#.utf8))
+        #expect(try await self.refused([worded], signingIn: true)?.lines == ["Busy.", "Try again in a minute."])
     }
 
     @Test func noLineOfAnyRefusalHoldsTheTicketOrTheToken() async throws {

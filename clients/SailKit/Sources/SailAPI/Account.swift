@@ -76,18 +76,59 @@ public struct SignedIn: Equatable, Sendable {
 public struct Account: Sendable {
     public static let relyingParty = "sail.standardapplied.com"
     public static let passkeyLabel = "Sail for Mac"
+    /// How long Continue waits for a control plane's health before saying it cannot reach it. A
+    /// reachable one answers within a few seconds even far away or over a relayed overlay: a name
+    /// looked up, then TCP, TLS 1.3 and one small GET, four round trips of at most half a second
+    /// each, a relay's first packets a second or two more. Twice that is ten seconds, where
+    /// URLSession's own sixty kept a person a minute on an address that will not answer.
+    public static let reachLimit = Duration.seconds(10)
 
     private let authenticator: any PasskeyAuthenticator
     private let vault: any TokenVault
     private let connect: @Sendable (ControlPlane) -> any Transport
+    private let reachWithin: Duration
 
     public init(
-        authenticator: any PasskeyAuthenticator, vault: any TokenVault,
+        authenticator: any PasskeyAuthenticator, vault: any TokenVault, reachWithin: Duration = Account.reachLimit,
         connect: @escaping @Sendable (ControlPlane) -> any Transport = { URLSessionTransport(base: $0.url) }
     ) {
         self.authenticator = authenticator
         self.vault = vault
         self.connect = connect
+        self.reachWithin = reachWithin
+    }
+
+    /// The control plane `typed` names, once it answers Sail's health within `reachWithin`: one
+    /// unauthenticated `GET /v1/health`, and only `ok` moves on. A bare host is taken as `https://`.
+    /// No answer in time is said as out of reach, and so is a check cancelled, which stops at once
+    /// and is the canceller's to leave unsaid.
+    public func reach(_ typed: String) async throws(AccountRefusal) -> ControlPlane {
+        let plane = try ControlPlane(address: typed)
+        let transport = connect(plane), limit = reachWithin
+        let answered = await withTaskGroup(of: Result<Health, AccountRefusal>?.self) { group in
+            group.addTask {
+                do throws(AccountRefusal) {
+                    return .success(try await self.call(.health, on: transport, at: plane, step: .reaching))
+                } catch {
+                    return .failure(error)
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(for: limit)
+                return nil
+            }
+            defer { group.cancelAll() }
+            return await group.next() ?? nil
+        }
+        guard !Task.isCancelled, let answered else { throw AccountRefusal(.unreachable, at: plane) }
+        guard try answered.get().status == "ok" else { throw AccountRefusal(.unreadable, at: plane, remedy: AccountRefusal.notSails) }
+        return plane
+    }
+
+    /// Until when the session held for `plane` lasts, nil with none held. A session the vault could
+    /// not read is gone once read, so it is said here, as ``current(at:)`` says it.
+    public func heldUntil(at plane: ControlPlane) throws(AccountRefusal) -> Date? {
+        try held(at: plane)?.expiresAt
     }
 
     /// Enrolls a passkey with the ticket in `text`. It signs no one in: that is a second ceremony.

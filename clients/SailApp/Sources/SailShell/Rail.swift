@@ -2,10 +2,10 @@ import AppKit
 import SailLook
 import SailTerminalView
 
-/// The icon rail, 60 pt wide on the window's chrome under the band: "This Mac" on top, "Workspaces"
-/// under it while signed in, the account at the bottom, as Mast's `.rail` (8 pt in at the top under
-/// the compact band, 12 at the bottom, 42 pt items). The selected item takes the accent fill and a 2 pt bar at its
-/// leading edge.
+/// The icon rail, 60 pt wide on the window's chrome under the band: Workspaces on top, Terminals
+/// under it, the account at the bottom, as Mast's `.rail` (8 pt in at the top under the compact
+/// band, 12 at the bottom, 42 pt items). The selected item takes the accent fill and a 2 pt bar at
+/// its leading edge.
 @MainActor
 public final class Rail: NSView {
     public static let width = 60.0
@@ -13,20 +13,20 @@ public final class Rail: NSView {
     static let top = 8.0, bottom = 12.0, item = 42.0, bar = 2.0, barHeight = 24.0, gap = 4.0
 
     public enum Item: String, CaseIterable, Sendable {
-        case thisMac, workspaces, account
+        case workspaces, terminals, account
 
         var title: String {
             switch self {
-            case .thisMac: "This Mac"
             case .workspaces: "Workspaces"
+            case .terminals: "Terminals"
             case .account: "Account"
             }
         }
 
         var symbol: String {
             switch self {
-            case .thisMac: "terminal"
             case .workspaces: "shippingbox"
+            case .terminals: "terminal"
             case .account: "person.crop.circle"
             }
         }
@@ -75,8 +75,8 @@ public final class Rail: NSView {
             buttons[item] = button
             bars[item] = bar
             let placed: NSLayoutConstraint = switch item {
-            case .thisMac: button.topAnchor.constraint(equalTo: topAnchor, constant: Self.top)
-            case .workspaces: button.topAnchor.constraint(equalTo: buttons[.thisMac]?.bottomAnchor ?? topAnchor, constant: Self.gap)
+            case .workspaces: button.topAnchor.constraint(equalTo: topAnchor, constant: Self.top)
+            case .terminals: button.topAnchor.constraint(equalTo: buttons[.workspaces]?.bottomAnchor ?? topAnchor, constant: Self.gap)
             case .account: button.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottom)
             }
             NSLayoutConstraint.activate([
@@ -89,15 +89,7 @@ public final class Rail: NSView {
             ])
         }
         widthAnchor.constraint(equalToConstant: Self.width).isActive = true
-        offer(.workspaces, false)
         show(nil)
-    }
-
-    /// Shows `item` or takes it off the rail.
-    func offer(_ item: Item, _ shown: Bool) {
-        buttons[item]?.isHidden = !shown
-        washes[item]?.isHidden = !shown
-        if !shown { bars[item]?.isHidden = true }
     }
 
     @available(*, unavailable)

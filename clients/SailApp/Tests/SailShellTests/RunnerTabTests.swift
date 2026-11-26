@@ -191,14 +191,6 @@ actor Proxied: Transport {
         #expect(!tickets.requests.contains(.attach(session: runner.name)), "\(tickets.requests)")
     }
 
-    /// The Workspaces item is on the rail only while someone is signed in.
-    @Test func theWorkspacesItemIsOfferedOnlySignedIn() throws {
-        let shell = try WorkbenchLookTests.shell(.light)
-        #expect(shell.rail.button(.workspaces)?.isHidden == true)
-        shell.rail.offer(.workspaces, true)
-        #expect(shell.rail.button(.workspaces)?.isHidden == false)
-    }
-
     /// Look, the shared field: content corners (the canvas shows at the corner), the surface inside,
     /// a 1 pt ring in the strong separator, in both looks.
     @Test(arguments: [("light", Look.light), ("dark", Look.dark)])

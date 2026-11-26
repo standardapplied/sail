@@ -44,6 +44,12 @@ public final class LinkButton: NSButton {
         nil
     }
 
+    /// As wide as its words, up to the next half point: AppKit's cell asks room after the words it
+    /// never draws into, which stood as a wider gap after a link among words than before it.
+    override public var intrinsicContentSize: NSSize {
+        NSSize(width: (Double(attributedTitle.size().width) * 2).rounded(.up) / 2, height: super.intrinsicContentSize.height)
+    }
+
     /// Below a label's default, so a line that runs short cuts the link before its neighbours.
     public static let cutFirst = NSLayoutConstraint.Priority(NSLayoutConstraint.Priority.defaultLow.rawValue - 1)
 

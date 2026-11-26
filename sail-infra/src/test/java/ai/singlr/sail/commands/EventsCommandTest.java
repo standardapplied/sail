@@ -26,6 +26,12 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -194,5 +200,91 @@ class EventsCommandTest {
       }
     }
     ClosesWhatItOpens.assertClosed("sail events", before);
+  }
+
+  @Test
+  void theApiDroppingAStreamEndsSailEventsOnlyOnceEveryTaskOfItsClientHasEnded() throws Exception {
+    var before = ClosesWhatItOpens.baseline();
+    var token = System.getProperty("SAIL_TOKEN");
+    System.setProperty("SAIL_TOKEN", "tok");
+    try (var work = new HeldUntilShutdown();
+        var server = StreamServer.dropping(": subscribed\n\n")) {
+      var followed =
+          SailCli.run(new EventsCommand(() -> work), "--port", Integer.toString(server.port()));
+
+      assertEquals(1, followed.exit());
+      assertTrue(work.ran() > 0, "the client ran its work on the executor sail events gave it");
+      assertTrue(work.isTerminated(), "sail events returned while a task of its client ran");
+    } finally {
+      if (token == null) {
+        System.clearProperty("SAIL_TOKEN");
+      } else {
+        System.setProperty("SAIL_TOKEN", token);
+      }
+    }
+    ClosesWhatItOpens.assertClosed("sail events", before);
+  }
+
+  /**
+   * An executor each of whose tasks, once run, keeps its thread until the executor is shut down, as
+   * the task that closes a dropped stream's connection may still run once the client has closed.
+   */
+  private static final class HeldUntilShutdown extends AbstractExecutorService {
+
+    private final ExecutorService threads = Executors.newCachedThreadPool();
+    private final CountDownLatch shutDown = new CountDownLatch(1);
+    private final AtomicInteger ran = new AtomicInteger();
+
+    int ran() {
+      return ran.get();
+    }
+
+    @Override
+    public void execute(Runnable task) {
+      threads.execute(
+          () -> {
+            try {
+              task.run();
+            } finally {
+              ran.incrementAndGet();
+              holdUntilShutdown();
+            }
+          });
+    }
+
+    private void holdUntilShutdown() {
+      try {
+        shutDown.await();
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+      }
+    }
+
+    @Override
+    public void shutdown() {
+      shutDown.countDown();
+      threads.shutdown();
+    }
+
+    @Override
+    public List<Runnable> shutdownNow() {
+      shutDown.countDown();
+      return threads.shutdownNow();
+    }
+
+    @Override
+    public boolean isShutdown() {
+      return threads.isShutdown();
+    }
+
+    @Override
+    public boolean isTerminated() {
+      return threads.isTerminated();
+    }
+
+    @Override
+    public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+      return threads.awaitTermination(timeout, unit);
+    }
   }
 }

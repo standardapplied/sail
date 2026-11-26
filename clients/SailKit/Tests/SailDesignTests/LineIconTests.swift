@@ -72,10 +72,10 @@ import Testing
         #expect(LineIcon.error.strokes == [ring, Self.line((12, 7.5), (12, 13)), Self.line((12, 16.2), (12, 16.3))])
     }
 
-    /// New session's Shell tile and its chosen row's check, as `first-impressions-mockup.html`'s
-    /// `term` and `check` draw them: the terminal's rounded box (2.5 corners), clockwise from its top
-    /// edge, each stroke meeting the next, then its prompt and cursor.
-    @Test func theTerminalAndTheCheckAreTheFirstImpressionsMockups() {
+    /// New session's Shell tile, as `first-impressions-mockup.html`'s `term` draws it: the terminal's
+    /// rounded box (2.5 corners), clockwise from its top edge, each stroke meeting the next, then its
+    /// prompt and cursor.
+    @Test func theTerminalIsTheFirstImpressionsMockups() {
         #expect(LineIcon.terminal.strokes == [
             Self.line((5.5, 4.5), (18.5, 4.5)), .arc(.init(18.5, 7), radius: 2.5, from: 270, to: 360),
             Self.line((21, 7), (21, 17)), .arc(.init(18.5, 17), radius: 2.5, from: 0, to: 90),
@@ -83,7 +83,31 @@ import Testing
             Self.line((3, 17), (3, 7)), .arc(.init(5.5, 7), radius: 2.5, from: 180, to: 270),
             Self.line((7.5, 9.5), (10.5, 12), (7.5, 14.5)), Self.line((12.5, 15), (16.5, 15)),
         ])
+    }
+
+    /// The welcome's icons, as `first-impressions-mockup.html`'s `IC` writes them: the cloud's
+    /// outline (`M7 18.5h10.5a4 4 0 0 0 .6-7.95A6 6 0 0 0 6.6 9.6 4.5 4.5 0 0 0 7 18.5z`) as its
+    /// arcs, clockwise from the bottom left, each meeting the next where the path does; the check.
+    @Test func theWelcomesIconsAreTheFirstImpressionsPages() {
+        var ends: [(LineIcon.Point, LineIcon.Point)] = []
+        for stroke in LineIcon.cloud.strokes {
+            switch stroke {
+            case let .arc(centre, radius, from, to):
+                let at = { (angle: Double) in LineIcon.Point(centre.x + radius * cos(angle * .pi / 180), centre.y + radius * sin(angle * .pi / 180)) }
+                ends.append((at(from), at(to)))
+            case let .lines(points, _): ends.append((points[0], points[points.count - 1]))
+            default: Issue.record("the cloud draws \(stroke)")
+            }
+        }
+        let path = [(7.0, 18.5), (17.5, 18.5), (7.0, 18.5), (6.6, 9.6), (18.1, 10.55), (17.5, 18.5)]
+        let wanted = [(path[0], path[1]), (path[2], path[3]), (path[3], path[4]), (path[4], path[5])]
+        #expect(ends.count == wanted.count)
+        for (index, ((start, end), (from, to))) in zip(ends, wanted).enumerated() {
+            #expect(abs(start.x - from.0) < 0.05 && abs(start.y - from.1) < 0.05, "stroke \(index) starts at \(start)")
+            #expect(abs(end.x - to.0) < 0.05 && abs(end.y - to.1) < 0.05, "stroke \(index) ends at \(end)")
+        }
         #expect(LineIcon.check.strokes == [Self.line((5, 12.5), (9.5, 17), (19, 7.5))])
+        #expect(LineIcon.fingerprint.strokes.first == Self.line((12, 11.5), (12, 15.5)) && LineIcon.fingerprint.strokes.count == 8)
     }
 
     /// A folder's disclosure, as the files mockup's `right` and `down` draw it: shut, then open.

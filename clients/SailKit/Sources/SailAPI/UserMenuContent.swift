@@ -61,7 +61,7 @@ public struct UserMenuContent: Equatable, Sendable {
 
     /// Who is signed in at `address` not yet known: the app is asking.
     public static func checking(at address: String) -> Self {
-        Self(name: "Checking…", disc: nil, detail: address, address: nil, plane: nil, items: [.account])
+        Self(name: "Checking", disc: nil, detail: address, address: nil, plane: nil, items: [.account])
     }
 
     /// Signed in as `handle` at `address`; `whoami` as it last answered, `unreachable` when the

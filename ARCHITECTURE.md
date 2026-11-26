@@ -5139,7 +5139,7 @@ what each control is in each state, pure Swift tested on Linux), `SailControls` 
 pane is drawn from, each a thin AppKit view over `SailDesign`'s tables; the drive's `kit` run shoots
 each in every state and look), `SailRenderer` (Metal and Core Text,
 no AppKit), `SailTerminalView` (the `NSView`), `SailAccount` (the platform's passkeys and the
-Keychain), `SailShell` (the app: window, rail, the account and "This Mac"), `SailTestPasskey` (a
+Keychain), `SailShell` (the app: window, rail, Workspaces with the welcome, Terminals and the account), `SailTestPasskey` (a
 software passkey, never shipped), and two executables: `Sail`, shipped, and `SailDrive`, the drive
 harness, never shipped. `ci/bundle` assembles a `.app` from `swift build -c release` (the bundled
 `sail` in `Contents/Helpers`), `ci/sign` signs with the hardened runtime (Developer ID from a
@@ -5261,10 +5261,10 @@ Developer ID provisioning profile at `Contents/embedded.provisionprofile`; the d
 Apple platforms, so a cancelled sign-in says what to do if this Mac holds none. The window is the
 Sail look: terracotta for every accent, drawn by the app so the system accent never reaches it, its
 label dark ink in the dark appearance and white in the light (3.43:1, so a label on the accent is
-always bold, large text by the HIG's measure), content corners at 6 pt, a 60 pt icon rail with "This
-Mac" and the account. The title bar is transparent over a full-size content view: the rail's tint and
-the pane's surface run to the top edge under the platform's own window buttons. Focus rings,
-selection and the caret are the accent's, through the window's own field editor; the look follows a
+always bold, large text by the HIG's measure), content corners at 6 pt, a 60 pt icon rail with
+Workspaces, Terminals and the account. The title bar is transparent over a full-size content view:
+the rail's tint and the pane's surface run to the top edge under the platform's own window buttons.
+Focus rings, selection and the caret are the accent's, through the window's own field editor; the look follows a
 dark/light change while the app runs, every open terminal's palette with it: the screen is recoloured
 in place (`Screen.setPalette`), its content, scrollback, selection and cursor kept and colours a
 program set itself (OSC 4/10/11) kept; colour queries (OSC 10/11/4, `CSI ? 996 n`) are answered in

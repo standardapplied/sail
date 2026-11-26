@@ -49,7 +49,7 @@ import Testing
     /// and Account, which shows what the pane knows.
     @Test func whileCheckingItSaysSo() {
         let menu = UserMenuContent.checking(at: "sail.example.com")
-        #expect(menu.name == "Checking…" && menu.disc == nil && menu.detail == "sail.example.com" && menu.address == nil && menu.plane == nil)
+        #expect(menu.name == "Checking" && menu.disc == nil && menu.detail == "sail.example.com" && menu.address == nil && menu.plane == nil)
         #expect(menu.items == [.account])
     }
 
@@ -59,7 +59,9 @@ import Testing
         #expect(UserMenuContent.Item.account.enabled && UserMenuContent.Item.account.key == "," && UserMenuContent.Item.signOut.key == nil)
     }
 
-    @Test func appearanceIsAutoUntilChosenAndRemembered() throws {
+    /// On the main actor, as ``SignInMemoryTests`` are: Foundation's `UserDefaults` on Linux is not
+    /// safe to write from several threads at once.
+    @MainActor @Test func appearanceIsAutoUntilChosenAndRemembered() throws {
         let defaults = try #require(UserDefaults(suiteName: "appearance-\(UUID().uuidString)"))
         #expect(Appearance.stored(in: defaults) == .auto)
         Appearance.dark.store(in: defaults)
