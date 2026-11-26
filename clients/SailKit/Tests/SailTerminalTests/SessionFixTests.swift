@@ -301,7 +301,9 @@ import Testing
     /// the host's answer awaited, never a Kill written to the attached connection and forgotten.
     @Test func anAttachedSessionsEndIsAKillWhoseAnswerIsAwaited() async throws {
         let (host, session, attached, _) = try await attachedLocally()
-        let ended = Task { await session.end(within: .seconds(10)) }
+        let deadline = Timeline()
+        defer { deadline.passAll() }
+        let ended = Task { await session.end(within: Self.unhurried, sleep: deadline.sleep) }
         let killer = try await host.accept()
         try await killer.welcome()
         #expect(try await killer.read() == .kill(session: "work"))
@@ -309,6 +311,12 @@ import Testing
         #expect(await ended.value == .ended)
         #expect(try await attached.control() == .detach, "the attached connection only detaches")
     }
+
+    /// An end's limit when the test decides it: held until the test lets it pass, and so long that
+    /// no read of the end's times out first. What an end with it comes to is the host's answers and
+    /// the test's, never how fast the runner is (a limit of 1 s once ran out on a loaded runner
+    /// before the fake host had welcomed the Kill's connection).
+    static let unhurried = Duration.seconds(120)
 
     /// A Kill that cannot reach the host is no end: unconfirmed, saying why.
     @Test func anAttachedSessionWhoseKillCannotBeSentIsNotEnded() async throws {
@@ -329,7 +337,9 @@ import Testing
     @Test func anAttachedSessionWhoseKillIsRefusedIsNotEnded() async throws {
         let (host, session, attached, _) = try await attachedLocally()
         defer { withExtendedLifetime(attached) {} }
-        let ended = Task { await session.end(within: .seconds(10)) }
+        let deadline = Timeline()
+        defer { deadline.passAll() }
+        let ended = Task { await session.end(within: Self.unhurried, sleep: deadline.sleep) }
         let words = "Session 'work' is not yours."
         try await Self.refuseTheKill(at: host, saying: words, listing: [SessionListingTests.info("work")])
         #expect(await ended.value == .unconfirmed([words]))
@@ -340,35 +350,39 @@ import Testing
     @Test func anAttachedSessionTheHostNoLongerListsIsGone() async throws {
         let (host, session, attached, _) = try await attachedLocally()
         defer { withExtendedLifetime(attached) {} }
-        let ended = Task { await session.end(within: .seconds(10)) }
+        let deadline = Timeline()
+        defer { deadline.passAll() }
+        let ended = Task { await session.end(within: Self.unhurried, sleep: deadline.sleep) }
         try await Self.refuseTheKill(at: host, saying: "No session 'work'.", listing: [SessionListingTests.info("other")])
         #expect(await ended.value == .gone)
     }
 
     /// A Kill answered after the end's limit is no end: unconfirmed at the limit, in this Mac's
-    /// words.
-    @Test func anAttachedSessionWhoseKillIsAnsweredLateIsNotEnded() async throws {
+    /// words. The limit passes once the host has read the Kill, and the Kill is never answered: an
+    /// end that waited for its answer would wait out its reads' 120 s, past the test's minute.
+    @Test(.timeLimit(.minutes(1))) func anAttachedSessionWhoseKillIsAnsweredLateIsNotEnded() async throws {
         let (host, session, attached, _) = try await attachedLocally()
         defer { withExtendedLifetime(attached) {} }
-        let began = ContinuousClock.now
-        let ended = Task { await session.end(within: .seconds(1)) }
+        let deadline = Timeline()
+        let ended = Task { await session.end(within: Self.unhurried, sleep: deadline.sleep) }
         let killer = try await host.accept()
+        defer { withExtendedLifetime(killer) {} }
         try await killer.welcome()
         #expect(try await killer.read() == .kill(session: "work"))
-        #expect(await ended.value == .unconfirmed(["This Mac's terminal host did not answer within 1 s."]))
-        #expect(ContinuousClock.now - began < .seconds(5), "within the end's one limit")
+        try await deadline.until(holding: 1)
+        deadline.passAll()
+        #expect(await ended.value == .unconfirmed(["This Mac's terminal host did not answer within 120 s."]))
     }
 
     /// The end's own reads time out with the limit too, and may do so first, on a busy machine:
-    /// the host not answering is said the same either way. A limit of 1.5 s reads for 1 s, so here
-    /// the read times out first.
+    /// the host not answering is said the same either way. A limit of 1.5 s reads for 1 s; the limit
+    /// is held and the host never answers at all, so only that read's timing out ends it.
     @Test func aKillWhoseReadTimesOutIsSaidAsTheHostNotAnswering() async throws {
         let host = try FakeHost()
-        let ended = Task { await Door.local(host.address).end("work", within: .milliseconds(1500)) }
-        let killer = try await host.accept()
-        try await killer.welcome()
-        #expect(try await killer.read() == .kill(session: "work"))
-        #expect(await ended.value == .unconfirmed(["This Mac's terminal host did not answer within 1 s."]))
+        let deadline = Timeline()
+        defer { deadline.passAll() }
+        let ended = await Door.local(host.address).end("work", within: .milliseconds(1500), sleep: deadline.sleep)
+        #expect(ended == .unconfirmed(["This Mac's terminal host did not answer within 1 s."]))
     }
 
     static func refuseTheKill(at host: FakeHost, saying words: String, listing: [SessionInfo]) async throws {
@@ -650,25 +664,27 @@ import Testing
     }
 
     /// A host that streams the session forever and never answers the Kill is given up on at the
-    /// end's deadline, not read for ever.
+    /// end's deadline, not read for ever: the deadline passes once the host streams, and an end
+    /// that read on would read for its 120 s, past the test's minute.
     @Test(.timeLimit(.minutes(1))) func aRunnerThatNeverAnswersTheKillIsGivenUpOn() async throws {
         let host = try FakeHost(tcp: ())
         let desk = TicketDesk(address: host.address)
-        let ended = Task { await Door.runner(desk).end("app-a", within: .seconds(1)) }
+        let deadline = Timeline()
+        let ended = Task { await Door.runner(desk).end("app-a", within: Self.unhurried, sleep: deadline.sleep) }
         let peer = try await host.accept()
+        defer { withExtendedLifetime(peer) {} }
         try await peer.welcome()
         _ = try await peer.read()
         try peer.send(.accepted)
-        _ = try await peer.read()
+        #expect(try await peer.read() == .kill(session: "app-a"))
         let streaming = Task.detached {
             while !Task.isCancelled { try peer.send(output("x")) }
         }
+        try await deadline.until(held: [Self.unhurried])
+        deadline.passAll()
         let outcome = await ended.value
         streaming.cancel()
-        guard case .unconfirmed = outcome else {
-            Issue.record("the end was \(outcome)")
-            return
-        }
+        #expect(outcome == .unconfirmed(["The runner did not answer within 120 s."]))
     }
 
     /// M4: the ticket is inside the end's deadline: a control plane that never answers it leaves the

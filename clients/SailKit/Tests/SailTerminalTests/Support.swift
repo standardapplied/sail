@@ -65,10 +65,20 @@ final class Timeline: Sendable {
 
     /// Waits until the waits held are `durations`, failing after ``FakeHost/deadline`` seconds.
     func until(held durations: [Duration]) async throws {
+        try await until("\(durations)") { held == durations }
+    }
+
+    /// Waits until `count` waits are held, whatever they are, failing after ``FakeHost/deadline``
+    /// seconds: an end's limit less the time it took to begin is no duration a test can name.
+    func until(holding count: Int) async throws {
+        try await until("\(count) of them") { held.count == count }
+    }
+
+    private func until(_ wanted: String, _ done: () -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(FakeHost.deadline)
-        while held != durations {
+        while !done() {
             let left = deadline - ContinuousClock.now
-            guard left > .zero else { throw HostError("the waits held are \(held), never \(durations)") }
+            guard left > .zero else { throw HostError("the waits held are \(held), never \(wanted)") }
             await changed.wait(left)
         }
     }

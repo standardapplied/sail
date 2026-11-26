@@ -48,17 +48,23 @@ extension Door {
     /// How long an end waits in all, the ticket included, before it is unconfirmed.
     public static let endLimit = Duration.seconds(10)
 
+    /// How an end waits out its limit: the wall clock's.
+    public static let wallClock: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+
     /// Ends `session` at the host this door reaches, on a connection of its own, waiting
     /// `limit` in all, the ticket included: a call still under way then is left to finish on its
     /// own and the end is unconfirmed. A runner's door admits Kill only from a connection attached
     /// to the session as its writer, so there it is an attach ticket for the session, attached as
     /// the writer, then Kill; when someone else holds the token the door refuses, in its words.
-    /// `total` is the whole deadline this end is the rest of, which is what a person is told.
-    public func end(_ session: String, within limit: Duration = Door.endLimit, of total: Duration? = nil) async -> EndOutcome {
+    /// `total` is the whole deadline this end is the rest of, which is what a person is told;
+    /// `sleep` waits the limit out.
+    public func end(
+        _ session: String, within limit: Duration = Door.endLimit, of total: Duration? = nil, sleep: @escaping @Sendable (Duration) async throws -> Void = Door.wallClock
+    ) async -> EndOutcome {
         let said = "\(answerer) did not answer within \(max(1, Int((total ?? limit).components.seconds))) s."
         guard limit > .zero else { return .unconfirmed([said]) }
         let seconds = max(1, Int(limit.components.seconds))
-        let ended: EndOutcome? = await Self.within(limit) { () async -> EndOutcome in
+        let ended: EndOutcome? = await Self.within(limit, sleep: sleep) { () async -> EndOutcome in
             do throws(TerminalError) {
                 try await self.kill(session, timeout: seconds)
                 return .ended
@@ -104,9 +110,9 @@ extension Door {
         }
     }
 
-    /// What `work` answers within `limit`, or nil when it has not by then; the work is not waited
-    /// for past it.
-    static func within<T: Sendable>(_ limit: Duration, _ work: @escaping @Sendable () async -> T) async -> T? {
+    /// What `work` answers within `limit`, waited out by `sleep`, or nil when it has not by then;
+    /// the work is not waited for past it.
+    static func within<T: Sendable>(_ limit: Duration, sleep: @escaping @Sendable (Duration) async throws -> Void, _ work: @escaping @Sendable () async -> T) async -> T? {
         await withCheckedContinuation { (done: CheckedContinuation<T?, Never>) in
             let answered = Mutex(false)
             let answer = { @Sendable (value: T?) in
@@ -118,7 +124,7 @@ extension Door {
             }
             Task { answer(await work()) }
             Task {
-                try? await Task.sleep(for: limit)
+                try? await sleep(limit)
                 answer(nil)
             }
         }
