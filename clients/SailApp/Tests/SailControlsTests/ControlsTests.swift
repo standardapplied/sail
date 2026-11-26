@@ -563,7 +563,8 @@ import Testing
     }
 
     /// A pill says words of its own in its state's paint, changed as they change; a plain pill says
-    /// its words with no dot, in the secondary ink, as the page's `.pill.plain` does.
+    /// its words with no dot, in the secondary ink, as the page's `.pill.plain` does, after its icon
+    /// when it has one.
     @Test(arguments: [Look.light, .dark])
     func aPillSaysItsOwnWordsAndAPlainOneInTheSecondaryInk(_ look: Look) throws {
         let state = Pill(.running, look: look, mono: try Self.mono())
@@ -573,6 +574,12 @@ import Testing
         let narrow = Double(role.intrinsicContentSize.width)
         role.words = "Admin"
         #expect(role.plain && role.said == "Admin" && role.paint.text == look.textSecondary && role.dot.isHidden && Double(role.intrinsicContentSize.width) > narrow)
+        let iconed = Pill(plain: "Admin", icon: .cloud, size: .small, look: look, mono: try Self.mono())
+        #expect(Double(iconed.intrinsicContentSize.width) == Double(role.intrinsicContentSize.width) + Pill.iconSide + PillSize.small.gap, "a plain pill's icon takes no room")
+        iconed.frame = NSRect(origin: .zero, size: iconed.intrinsicContentSize)
+        let canvas = NSColor(Tint(look.canvas)), bare = Self.swatch(canvas, [], scale: 2), ink = Self.swatch(canvas, [NSColor(look.textSecondary)], scale: 2)
+        let across = Backdrop(canvas, holding: iconed).colours(along: Double(iconed.frame.height) / 2, from: PillSize.small.leading, to: PillSize.small.leading + Pill.iconSide, scale: 2)
+        #expect(across.contains { !Self.tells($0, bare, from: ink) }, "the icon is not drawn: \(across)")
     }
 
     /// The keycap: a 1 pt edge on top, a 2 pt foot.

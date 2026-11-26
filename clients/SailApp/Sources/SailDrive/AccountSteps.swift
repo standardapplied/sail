@@ -41,12 +41,7 @@ extension Driver {
             }
         }
         if let rightToLeft = step.accountRightToLeft {
-            let direction: NSUserInterfaceLayoutDirection = rightToLeft ? .rightToLeft : .leftToRight
-            for view in [shell.account] + Self.views(in: shell.account) {
-                view.userInterfaceLayoutDirection = direction
-                view.needsLayout = true
-                view.needsDisplay = true
-            }
+            Self.direct(shell.account, rightToLeft: rightToLeft)
             shell.account.show()
             shell.account.layoutSubtreeIfNeeded()
             return (true, "the account is laid out \(rightToLeft ? "right to left" : "left to right")")

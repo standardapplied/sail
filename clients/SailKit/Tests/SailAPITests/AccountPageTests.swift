@@ -46,12 +46,13 @@ import Testing
         #expect(almostThree.soon && almostThree.said.hasSuffix(" · ends in 2 days"), "2 days 23 hours left reads \(almostThree.said)")
     }
 
-    /// A session whose end has passed says it ended, in plain words, and offers Sign In Again.
+    /// A session whose end has passed says it ended, as the welcome says it (the day and the month),
+    /// and offers Sign In Again.
     @Test func aSessionPastItsEndSaysItEnded() throws {
         let now = try Self.instant("2026-11-26T16:47:00Z")
         let ended = AccountPage.ending(now.addingTimeInterval(-600), now: now, clock: Self.clock)
-        #expect(ended == AccountPage.Ending(said: "Your sign-in ended on 26 November 2026, 16:37.", soon: true))
-        #expect(AccountPage.ending(now, now: now, clock: Self.clock).said == "Your sign-in ended on 26 November 2026, 16:47.")
+        #expect(ended == AccountPage.Ending(said: "Your sign-in ended on 26 November.", soon: true))
+        #expect(AccountPage.ending(now, now: now, clock: Self.clock).said == "Your sign-in ended on 26 November.")
     }
 
     /// Dates are said in the clock's own time zone, not the machine's: the end in Auckland falls on

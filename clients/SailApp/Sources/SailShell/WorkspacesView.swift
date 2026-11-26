@@ -517,7 +517,7 @@ public final class WorkspacesView: NSView {
 
     /// Whether the key just stored is the one Start takes: the server made it the default as it
     /// stored it, or made it so when asked now.
-    static func inUse(_ stored: StoreLogin, _ client: SailClient) async -> Bool {
+    private static func inUse(_ stored: StoreLogin, _ client: SailClient) async -> Bool {
         guard let use = stored.use else { return true }
         return (try? await client.send(use)) != nil
     }

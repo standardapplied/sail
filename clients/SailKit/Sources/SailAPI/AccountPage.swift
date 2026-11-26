@@ -45,7 +45,8 @@ public enum AccountPage {
     }
 
     /// When the session ends: its day and time, and how long is left; under three days left it is
-    /// `soon`, said as when it ends; past its end, said as ended, and `soon`, so Sign In Again shows.
+    /// `soon`, said as when it ends; past its end, said as ended (the day, as the welcome says it),
+    /// and `soon`, so Sign In Again shows.
     public struct Ending: Equatable, Sendable {
         public let said: String
         public let soon: Bool
@@ -57,7 +58,7 @@ public enum AccountPage {
     }
 
     public static func ending(_ until: Date, now: Date, clock: Clock = Clock()) -> Ending {
-        guard until > now else { return Ending(said: "Your sign-in ended on \(clock.day(until)), \(clock.time(until)).", soon: true) }
+        guard until > now else { return Ending(said: "Your sign-in ended on \(clock.day(until, year: false)).", soon: true) }
         let days = Int((until.timeIntervalSince(now) / 86_400).rounded(.down))
         let left = switch days {
         case 3...: "\(days) days left"

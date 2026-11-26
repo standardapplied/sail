@@ -168,10 +168,10 @@ public struct Look: Equatable, Sendable {
         InkMark(fill: nil, ink: text, edge: separatorStrong)
     }
 
-    /// The Account view's header disc (the page's `.av`): the one initial on a fill, ink at the
-    /// page's hover strength under a hairline ring.
+    /// The Account view's header disc (the page's `.av`): the one initial on the hover fill, the
+    /// skeleton's, under a hairline ring.
     public var headerAvatar: InkMark {
-        InkMark(fill: Tint(ink, alpha: palette.isDark ? 0.06 : 0.05), ink: text, edge: separator)
+        InkMark(fill: skeleton, ink: text, edge: separator)
     }
 
     /// This look with its terminal's selection, `textSelection` over the terminal's background under

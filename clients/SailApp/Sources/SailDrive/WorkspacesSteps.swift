@@ -699,12 +699,7 @@ extension Driver {
             return (faults.isEmpty, faults.isEmpty ? "the shadow is whole in \(read.joined(separator: " and "))" : faults.joined(separator: "; "))
         }
         if let rightToLeft = step.workspacesRightToLeft {
-            let direction: NSUserInterfaceLayoutDirection = rightToLeft ? .rightToLeft : .leftToRight
-            for view in [pane] + Self.views(in: pane) {
-                view.userInterfaceLayoutDirection = direction
-                view.needsLayout = true
-                view.needsDisplay = true
-            }
+            Self.direct(pane, rightToLeft: rightToLeft)
             list.reloadData()
             pane.layoutSubtreeIfNeeded()
             return (true, "the section is laid out \(rightToLeft ? "right to left" : "left to right")")

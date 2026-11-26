@@ -96,19 +96,19 @@ struct Signs: PasskeyAuthenticator {
 }
 
 /// The recorded server, but the request whose route holds `holding`, after `skipped` such, is held
-/// until released, then answered by the server, or by `answer` when given; every route asked, in
-/// order. A row's sessions listing, asked beside each list of workspaces, is never the one held or
-/// counted: what a test holds is a person's action or a list, and a listing that matched took the
-/// place of the request a test meant, silently: one test held nothing it meant to and failed, and
-/// another passed while holding nothing at all. ``arrived(during:)`` returns once the held request came.
+/// until released, then answered by the server, or by `answer` when given, even if stopped after;
+/// stopped before, it fails as out of reach, as URLSession's does. Every route asked, in order. A
+/// row's sessions listing, asked beside each list of workspaces, is never the one held or counted:
+/// what a test holds is a person's action or a list, and a listing that matched took the place of
+/// the request a test meant, silently: one test held nothing it meant to and failed, and another
+/// passed while holding nothing at all. ``arrived(during:)`` returns once the held request came.
 final class Held: Transport {
     private let server: RecordedServer
     private let holding: String
     private let skipped: Int
     private let answer: Exchange?
-    private let gate = Gate()
-    private let arrival = Gate()
-    private let state = Mutex<(routes: [String], seen: Int)>(([], 0))
+    private let gate = Gate(), arrival = Gate()
+    private let state = Mutex<(routes: [String], seen: Int, released: Bool)>(([], 0, false))
 
     init(_ server: RecordedServer, holding: String, after skipped: Int = 0, then answer: Exchange? = nil) {
         self.server = server
@@ -131,6 +131,7 @@ final class Held: Transport {
         guard held else { return try await server.send(request) }
         arrival.open()
         await gate.wait()
+        guard state.withLock({ $0.released }) || !Task.isCancelled else { throw .unreachable("cancelled") }
         guard let answer else { return try await server.send(request) }
         return HTTPResponse(status: answer.status, headers: answer.headers, body: answer.body)
     }
@@ -145,6 +146,7 @@ final class Held: Transport {
     }
 
     func release() {
+        state.withLock { $0.released = true }
         gate.open()
     }
 }
@@ -363,7 +365,8 @@ final class MemoryVaultOf: TokenVault, Sendable {
 
 
 /// A control plane answering each route as the server recorded it, the answers changed as a test
-/// goes; a route held answers once released, or once the task waiting on it is cancelled.
+/// goes; a route held answers once released, or fails as out of reach once the task waiting on it
+/// is cancelled, as URLSession's does.
 actor Desk: Transport {
     private var answers: [String: HTTPResponse] = [:]
     private var holding: String?
@@ -417,6 +420,7 @@ actor Desk: Transport {
             holding = nil
             arrival.open()
             await gate.wait()
+            if Task.isCancelled { throw .unreachable("cancelled") }
         }
         guard let answer = answers[request.route] else { throw .unreachable("The network connection was lost.") }
         return answer
@@ -605,9 +609,10 @@ actor Desk: Transport {
         let window = Self.shown(pane)
         defer { window.orderOut(nil) }
         let keysDrawn = Gate()
-        pane.onDrawn = { [weak pane] in if pane?.keys.value != nil { keysDrawn.open() } }
+        pane.onDrawn = { [weak pane] in if pane?.keys.waiting == false { keysDrawn.open() } }
         await pane.flow.refresh()
         await keysDrawn.wait()
+        try #require(pane.keys.value != nil, "the keys failed: \(pane.keys.failure ?? [])")
         pane.layoutSubtreeIfNeeded()
         #expect(transport.routes.contains("GET /v1/passkeys") && pane.passkeys.waiting && !pane.passkeyMark.isHidden, "the passkeys answered before the keys were drawn")
         #expect(pane.keyMark.isHidden && Self.names(pane.keyList) == ["Claude Code", "Claude Code", "Codex CLI"])
@@ -616,26 +621,27 @@ actor Desk: Transport {
         #expect(Self.names(pane.passkeyList).count == 2)
     }
 
-    /// Only the latest load's answers are kept: a load asked again stops the one before, whose
-    /// answer, held and coming last, changes nothing.
+    /// Only the latest load's answers are kept: an older load's answer, sent before a new load is
+    /// asked and taken after it, is never drawn.
     @Test func anOlderLoadAnsweringLateChangesNothing() async throws {
         let exchanges = try ["whoami", "passkeys", "agents", "logins-with-a-default"].map { try Exchange($0) }
         let transport = Held(RecordedServer(exchanges), holding: "/v1/logins", after: 1, then: try Exchange("logins-no-default"))
         let (pane, window) = try await Self.signedIn(transport)
         defer { window.orderOut(nil) }
-        #expect(Self.names(pane.keyList) == ["Claude Code", "Codex CLI"])
+        var drawn: [[String]] = []
+        pane.onDrawn = { [weak pane] in if let pane { drawn.append(Self.names(pane.keyList)) } }
         pane.load()
         let older = pane.loading
         await transport.arrived(during: older)
+        transport.release()
         pane.load()
         await pane.loading?.value
-        transport.release()
         await older?.value
-        #expect(Self.names(pane.keyList) == ["Claude Code", "Codex CLI"], "the older load's late answer was drawn: \(Self.names(pane.keyList))")
+        #expect(!drawn.contains(["Claude Code", "Claude Code", "Codex CLI"]) && Self.names(pane.keyList) == ["Claude Code", "Codex CLI"], "the older load's late answer was drawn: \(drawn)")
     }
 
-    /// Gone from view, the load under way is stopped and its answer dropped; shown again, the groups
-    /// are asked again.
+    /// Gone from view, the load under way is stopped and its answer dropped, and nothing asks again
+    /// until it is shown; shown again, the groups are asked again.
     @Test func aLoadIsStoppedWhenTheViewGoesAway() async throws {
         let transport = Held(RecordedServer(try Self.goldens.map { try Exchange($0) }), holding: "/v1/passkeys")
         let pane = try Self.pane(remembering: "uday", transport, lasts: Self.month)
@@ -644,6 +650,9 @@ actor Desk: Transport {
         await pane.flow.refresh()
         await transport.arrived(during: pane.loading)
         pane.isHidden = true
+        let stopped = pane.loading
+        pane.load()
+        #expect(pane.loading == stopped, "a hidden view asked for its groups")
         transport.release()
         await pane.loading?.value
         #expect(pane.passkeys.waiting, "a load the hidden view stopped drew its answer")
@@ -653,8 +662,9 @@ actor Desk: Transport {
         #expect(Self.names(pane.passkeyList).count == 2)
     }
 
-    /// A group's call that finds the session ended hands over to the check, as everywhere: no one is
-    /// signed in, and the ended session is told where every check tells it.
+    /// A group's call that finds the session ended is not drawn: it hands over to the check at once,
+    /// which a hide meanwhile does not stop; no one is signed in, and the ended session is told
+    /// where every check tells it.
     @Test func aGroupsCallFindingTheSessionEndedSignsOut() async throws {
         let desk = try Desk(Self.goldens)
         let (pane, window) = try await Self.signedIn(desk)
@@ -662,11 +672,17 @@ actor Desk: Transport {
         let ended = try Exchange("refusal-invalid-bearer-token")
         await desk.answer(ended)
         await desk.answer(Exchange(method: "GET", path: "/v1/passkeys", status: ended.status, body: ended.body))
+        await desk.hold("GET /v1/whoami")
         var told: Date?
         pane.flow.onChecked = { _, endedOn in told = endedOn }
         pane.load()
+        await desk.arrived(during: Task { await pane.loading?.value; await pane.acting?.value })
+        #expect(pane.passkeys.failure == nil && pane.flow.standing != nil, "the ended session was said in the group: \(pane.text)")
+        pane.isHidden = true
+        await desk.release()
         await pane.loading?.value
-        #expect(pane.flow.standing == nil && told != nil, "the ended session was said in the group: \(pane.text)")
+        await pane.acting?.value
+        #expect(pane.flow.standing == nil && told != nil, "the check was stopped: \(String(describing: pane.flow.standing?.whoami))")
     }
 
     /// ⋯ ▸ Remove asks first in the library's sheet, Remove destructive and Cancel the default;
@@ -700,9 +716,10 @@ actor Desk: Transport {
         return row.id
     }
 
-    /// The server's refusal of a removal is said under its row in its words, the row kept.
+    /// The server's refusal of a removal is said under its row in its words, the row kept, until
+    /// the groups are asked again: after Sign In Again, This Mac's passkey may be another.
     @Test func aRefusedRemovalIsSaidUnderItsRow() async throws {
-        let desk = try Desk(Self.goldens + ["refusal-conflict-passkey-current"])
+        let desk = try Desk(Self.goldens + ["refusal-conflict-passkey-current", "passkey-login-start", "passkey-login-finish"])
         let (pane, window) = try await Self.signedIn(desk)
         defer { window.orderOut(nil) }
         let mine = try Self.item("Sail for Mac", in: pane.passkeyList)
@@ -716,6 +733,10 @@ actor Desk: Transport {
         #expect(under.inert && under.voice == said.joined(separator: " ") && pane.text.contains(said.joined(separator: "\n")))
         let asked = await desk.asked
         #expect(asked.contains("DELETE /v1/passkeys/\(mine.id)"))
+        pane.signInAgainNow(nil)
+        await pane.acting?.value
+        await pane.loading?.value
+        #expect(pane.refusals.isEmpty && pane.passkeyList.entries.count == 2, "the refusal outlived the groups asked again: \(pane.text)")
     }
 
     /// A removal under way is said on its row, which takes no second Remove meanwhile, by ⋯ or by
