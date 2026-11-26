@@ -40,7 +40,7 @@ public final class SchemaManager {
    * The version this release stamps and opens. It lies beyond every version a release before v1
    * stamped, so no older database is ever read as this one.
    */
-  public static final int CURRENT_VERSION = 1005;
+  public static final int CURRENT_VERSION = 1006;
 
   private static final String SCHEMA_VERSION_TABLE =
       """
@@ -298,6 +298,7 @@ public final class SchemaManager {
           CREATE TABLE sessions (
               token_hash TEXT PRIMARY KEY,
               fde_id TEXT NOT NULL REFERENCES fdes(id) ON DELETE CASCADE,
+              credential_id TEXT,
               created_at INTEGER NOT NULL,
               expires_at INTEGER NOT NULL,
               last_used_at INTEGER

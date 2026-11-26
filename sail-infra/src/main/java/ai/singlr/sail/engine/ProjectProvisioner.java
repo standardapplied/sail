@@ -375,16 +375,16 @@ public final class ProjectProvisioner {
       throws Exception {
     currentPhase = ProjectPhase.CONTAINER_LAUNCHED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(1, "container already running");
+      stepSkipped("container already running");
       return;
     }
     var name = into.name();
-    step(1, "Launching container " + name + "...");
+    step("Launching container " + name + "...");
 
     var check = shell.exec(List.of("incus", "info", name));
     if (check.ok()) {
       tracker.advance(currentPhase);
-      stepDone(1, "Container " + name + " (already exists)");
+      stepDone("Container " + name + " (already exists)");
       return;
     }
 
@@ -402,7 +402,7 @@ public final class ProjectProvisioner {
       throw new IOException("Failed to launch container: " + result.stderr());
     }
     tracker.advance(currentPhase);
-    stepDone(1, "Container " + name);
+    stepDone("Container " + name);
   }
 
   /**
@@ -431,28 +431,28 @@ public final class ProjectProvisioner {
   private void setDiskQuota(ProjectDefinition config, String name, HostYaml host) throws Exception {
     currentPhase = ProjectPhase.DISK_QUOTA_SET;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(2, "disk quota already set");
+      stepSkipped("disk quota already set");
       return;
     }
-    step(2, "Setting disk quota...");
+    step("Setting disk quota...");
 
     var disk = config.resources().disk();
     new ContainerManager(shell).setDiskQuota(name, disk);
     tracker.advance(currentPhase);
     if (host.isDir()) {
-      stepDone(2, "Disk quota " + disk + " (advisory)");
+      stepDone("Disk quota " + disk + " (advisory)");
     } else {
-      stepDone(2, "Disk quota " + disk);
+      stepDone("Disk quota " + disk);
     }
   }
 
   private void setResourceLimits(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.RESOURCE_LIMITS_SET;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(3, "resource limits already set");
+      stepSkipped("resource limits already set");
       return;
     }
-    step(3, "Setting resource limits...");
+    step("Setting resource limits...");
 
     var cpu = config.resources().cpu();
     var memory = config.resources().memory();
@@ -464,7 +464,7 @@ public final class ProjectProvisioner {
     var detail = "Resources " + cpu + " CPU, " + memory + " RAM";
     if (!isRestartPending(name) && isConfigured(name, limits)) {
       tracker.advance(currentPhase);
-      stepDone(3, detail + " (already set)");
+      stepDone(detail + " (already set)");
       return;
     }
     var assignments = new ArrayList<String>();
@@ -483,7 +483,7 @@ public final class ProjectProvisioner {
       throw new IOException("Failed to clear the pending restart: " + cleared.stderr());
     }
     tracker.advance(currentPhase);
-    stepDone(3, detail);
+    stepDone(detail);
   }
 
   /**
@@ -555,10 +555,10 @@ public final class ProjectProvisioner {
   private void waitForNetwork(String name) throws Exception {
     currentPhase = ProjectPhase.NETWORK_READY;
     if (tracker.isComplete()) {
-      stepSkipped(4, "network already ready");
+      stepSkipped("network already ready");
       return;
     }
-    step(4, "Waiting for container network...");
+    step("Waiting for container network...");
 
     var script =
         """
@@ -577,16 +577,16 @@ public final class ProjectProvisioner {
     if (!tracker.isCompleted(currentPhase)) {
       tracker.advance(currentPhase);
     }
-    stepDone(4, "Network connected" + (ipDetail.isEmpty() ? "" : " (" + ipDetail + ")"));
+    stepDone("Network connected" + (ipDetail.isEmpty() ? "" : " (" + ipDetail + ")"));
   }
 
   private void installPackages(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.PACKAGES_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(5, "packages already installed");
+      stepSkipped("packages already installed");
       return;
     }
-    step(5, "Installing packages...");
+    step("Installing packages...");
 
     var updateResult = execInContainer(name, List.of("apt-get", "update", "-qq"), INSTALL_TIMEOUT);
     if (!updateResult.ok()) {
@@ -605,16 +605,16 @@ public final class ProjectProvisioner {
       throw new IOException("Failed to install packages: " + result.stderr());
     }
     tracker.advance(currentPhase);
-    stepDone(5, "Installed " + packages.size() + " packages");
+    stepDone("Installed " + packages.size() + " packages");
   }
 
   private void configureSsh(ProjectDefinition config, String name, HostYaml host) throws Exception {
     currentPhase = ProjectPhase.SSH_CONFIGURED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(6, "SSH already configured");
+      stepSkipped("SSH already configured");
       return;
     }
-    step(6, "Configuring SSH access...");
+    step("Configuring SSH access...");
 
     var user = ProjectDefinition.USER;
 
@@ -649,7 +649,7 @@ public final class ProjectProvisioner {
     }
 
     tracker.advance(currentPhase);
-    stepDone(6, "Created user " + user + " (uid 1000)");
+    stepDone("Created user " + user + " (uid 1000)");
   }
 
   /** The keys a container trusts: the box's workstation key, its owner's laptop, alone. */
@@ -736,10 +736,10 @@ public final class ProjectProvisioner {
   private void installPodman(String name) throws Exception {
     currentPhase = ProjectPhase.PODMAN_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(7, "Podman already installed");
+      stepSkipped("Podman already installed");
       return;
     }
-    step(7, "Installing Podman...");
+    step("Installing Podman...");
 
     var check = execInContainer(name, List.of("which", "podman"));
     if (!check.ok()) {
@@ -786,7 +786,7 @@ public final class ProjectProvisioner {
     ensurePodmanRestartService(name, sshUser);
 
     tracker.advance(currentPhase);
-    stepDone(7, "Podman (rootless) + socket + auto-restart");
+    stepDone("Podman (rootless) + socket + auto-restart");
   }
 
   /**
@@ -800,17 +800,17 @@ public final class ProjectProvisioner {
   private void configureTestcontainers(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.TESTCONTAINERS_CONFIGURED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(8, "Testcontainers already configured");
+      stepSkipped("Testcontainers already configured");
       return;
     }
-    step(8, "Configuring Testcontainers environment...");
+    step("Configuring Testcontainers environment...");
 
     var profilePath = "/etc/profile.d/testcontainers.sh";
 
     var check = execInContainer(name, List.of("test", "-f", profilePath));
     if (check.ok()) {
       tracker.advance(currentPhase);
-      stepDone(8, "already configured");
+      stepDone("already configured");
       return;
     }
 
@@ -824,31 +824,31 @@ public final class ProjectProvisioner {
     pushFileToContainer(name, profilePath, envScript);
 
     tracker.advance(currentPhase);
-    stepDone(8, "Testcontainers configured");
+    stepDone("Testcontainers configured");
   }
 
   private void installJdk(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.JDK_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(9, "JDK already installed");
+      stepSkipped("JDK already installed");
       return;
     }
 
     if (config.runtimes() == null || config.runtimes().jdk() == 0) {
       tracker.advance(currentPhase);
-      stepSkipped(9, "no JDK requested");
+      stepSkipped("no JDK requested");
       return;
     }
 
     var version = config.runtimes().jdk();
-    step(9, "Installing JDK " + version + "...");
+    step("Installing JDK " + version + "...");
 
     var pkg = "temurin-" + version + "-jdk";
 
     var check = execInContainer(name, List.of("dpkg", "-s", pkg));
     if (check.ok()) {
       tracker.advance(currentPhase);
-      stepDone(9, "JDK " + version + " (Temurin, already installed)");
+      stepDone("JDK " + version + " (Temurin, already installed)");
       return;
     }
 
@@ -916,19 +916,19 @@ public final class ProjectProvisioner {
     pushFileToContainer(name, "/etc/profile.d/jdk-env.sh", profileScript);
 
     tracker.advance(currentPhase);
-    stepDone(9, "JDK " + version + " (Temurin)");
+    stepDone("JDK " + version + " (Temurin)");
   }
 
   private void installNode(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.NODE_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(10, "Node already installed");
+      stepSkipped("Node already installed");
       return;
     }
 
     if (config.runtimes() == null || config.runtimes().node() == null) {
       tracker.advance(currentPhase);
-      stepSkipped(10, "no Node requested");
+      stepSkipped("no Node requested");
       return;
     }
 
@@ -941,14 +941,14 @@ public final class ProjectProvisioner {
               + "\n  Example: runtimes.node: 22.4.0");
     }
     var majorVersion = version.contains(".") ? version.substring(0, version.indexOf('.')) : version;
-    step(10, "Installing Node.js " + version + "...");
+    step("Installing Node.js " + version + "...");
 
     var check = execInContainer(name, List.of("node", "--version"));
     if (check.ok()) {
       var installed = check.stdout().strip();
       if (installed.startsWith("v" + version)) {
         tracker.advance(currentPhase);
-        stepDone(10, "Node.js " + installed.substring(1) + " (already installed)");
+        stepDone("Node.js " + installed.substring(1) + " (already installed)");
         return;
       }
     }
@@ -991,17 +991,17 @@ public final class ProjectProvisioner {
     }
 
     tracker.advance(currentPhase);
-    stepDone(10, "Node.js " + version);
+    stepDone("Node.js " + version);
   }
 
   private void configureGit(String name, LocalIdentity.GitIdentity git) throws Exception {
     currentPhase = ProjectPhase.GIT_CONFIGURED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(11, "git already configured");
+      stepSkipped("git already configured");
       return;
     }
 
-    step(11, "Configuring git identity...");
+    step("Configuring git identity...");
 
     if (git != null) {
       var nameResult =
@@ -1017,20 +1017,19 @@ public final class ProjectProvisioner {
     }
 
     tracker.advance(currentPhase);
-    stepDone(
-        11, git == null ? "No git identity: the instance is no one's" : "Git identity configured");
+    stepDone(git == null ? "No git identity: the instance is no one's" : "Git identity configured");
   }
 
   private void installMaven(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.MAVEN_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(12, "Maven already installed");
+      stepSkipped("Maven already installed");
       return;
     }
 
     if (config.runtimes() == null || config.runtimes().maven() == null) {
       tracker.advance(currentPhase);
-      stepSkipped(12, "no Maven requested");
+      stepSkipped("no Maven requested");
       return;
     }
 
@@ -1042,12 +1041,12 @@ public final class ProjectProvisioner {
               + "': must contain only digits and dots."
               + "\n  Example: runtimes.maven: 3.9.9");
     }
-    step(12, "Installing Maven " + version + "...");
+    step("Installing Maven " + version + "...");
 
     var check = execInContainer(name, List.of("/opt/maven/bin/mvn", "--version"));
     if (check.ok() && check.stdout().contains(version)) {
       tracker.advance(currentPhase);
-      stepDone(12, "Maven " + version + " (already installed)");
+      stepDone("Maven " + version + " (already installed)");
       return;
     }
 
@@ -1094,7 +1093,7 @@ public final class ProjectProvisioner {
     pushFileToContainer(name, "/etc/profile.d/maven-env.sh", envScript);
 
     tracker.advance(currentPhase);
-    stepDone(12, "Maven " + version);
+    stepDone("Maven " + version);
   }
 
   private static String mavenBinaryUrl(String version, String baseUrl) {
@@ -1105,17 +1104,17 @@ public final class ProjectProvisioner {
       throws Exception {
     currentPhase = ProjectPhase.REPOS_CLONED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(13, "repos already cloned");
+      stepSkipped("repos already cloned");
       return;
     }
 
     if (config.repos() == null || config.repos().isEmpty()) {
       tracker.advance(currentPhase);
-      stepSkipped(13, "no repos configured");
+      stepSkipped("no repos configured");
       return;
     }
 
-    step(13, "Cloning " + config.repos().size() + " repositories...");
+    step("Cloning " + config.repos().size() + " repositories...");
 
     var user = ProjectDefinition.USER;
     var cloned = 0;
@@ -1141,7 +1140,6 @@ public final class ProjectProvisioner {
 
     tracker.advance(currentPhase);
     stepDone(
-        13,
         "Cloned "
             + cloned
             + "/"
@@ -1153,24 +1151,24 @@ public final class ProjectProvisioner {
   private void pushWorkspaceFiles(String name, Path filesDir) throws Exception {
     currentPhase = ProjectPhase.WORKSPACE_FILES_PUSHED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(14, "workspace files already pushed");
+      stepSkipped("workspace files already pushed");
       return;
     }
 
     if (filesDir == null || !Files.isDirectory(filesDir)) {
       tracker.advance(currentPhase);
-      stepSkipped(14, "no shared files");
+      stepSkipped("no shared files");
       return;
     }
 
     var entries = WorkspaceFiles.listFiles(filesDir);
     if (entries.isEmpty()) {
       tracker.advance(currentPhase);
-      stepSkipped(14, "no shared files");
+      stepSkipped("no shared files");
       return;
     }
 
-    step(14, "Pushing " + entries.size() + " workspace file(s)...");
+    step("Pushing " + entries.size() + " workspace file(s)...");
 
     var user = ProjectDefinition.USER;
     var workspace = "/home/" + user + "/workspace/";
@@ -1188,23 +1186,23 @@ public final class ProjectProvisioner {
     }
 
     tracker.advance(currentPhase);
-    stepDone(14, "Pushed " + entries.size() + " workspace file(s)");
+    stepDone("Pushed " + entries.size() + " workspace file(s)");
   }
 
   private void provisionServices(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.SERVICES_PROVISIONED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(15, "services already provisioned");
+      stepSkipped("services already provisioned");
       return;
     }
 
     if (config.services() == null || config.services().isEmpty()) {
       tracker.advance(currentPhase);
-      stepSkipped(15, "no services configured");
+      stepSkipped("no services configured");
       return;
     }
 
-    step(15, "Provisioning " + config.services().size() + " services...");
+    step("Provisioning " + config.services().size() + " services...");
 
     var started = 0;
 
@@ -1228,24 +1226,23 @@ public final class ProjectProvisioner {
     tracker.advance(currentPhase);
     var serviceNames = String.join(", ", config.services().keySet());
     stepDone(
-        15,
         "Started " + started + "/" + config.services().size() + " services (" + serviceNames + ")");
   }
 
   private void configurePruneCron(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.PRUNE_CRON_CONFIGURED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(16, "cleanup cron already configured");
+      stepSkipped("cleanup cron already configured");
       return;
     }
-    step(16, "Configuring stale container cleanup...");
+    step("Configuring stale container cleanup...");
 
     var user = ProjectDefinition.USER;
 
     var check = execAsDevUser(name, List.of("crontab", "-l"));
     if (check.ok() && check.stdout().contains(CleanupScripts.CONTAINER_CLEANUP_PATH)) {
       tracker.advance(currentPhase);
-      stepDone(16, "already configured");
+      stepDone("already configured");
       return;
     }
 
@@ -1268,26 +1265,26 @@ public final class ProjectProvisioner {
     }
 
     tracker.advance(currentPhase);
-    stepDone(16, "Container cleanup scheduled (hourly) + agent cleanup helper installed");
+    stepDone("Container cleanup scheduled (hourly) + agent cleanup helper installed");
   }
 
   private void installAgentTools(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.AGENT_TOOLS_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(17, "agent tools already installed");
+      stepSkipped("agent tools already installed");
       return;
     }
 
     var agentConfig = config.agent();
     if (agentConfig == null) {
       tracker.advance(currentPhase);
-      stepSkipped(17, "no agent configured");
+      stepSkipped("no agent configured");
       return;
     }
 
     var tools = agentConfig.installs().stream().map(Harnesses::of).toList();
 
-    step(17, "Installing " + tools.size() + " agent CLI(s)...");
+    step("Installing " + tools.size() + " agent CLI(s)...");
 
     var installed = 0;
 
@@ -1309,7 +1306,6 @@ public final class ProjectProvisioner {
     tracker.advance(currentPhase);
     var toolNames = tools.stream().map(Harness::yamlName).toList();
     stepDone(
-        17,
         "Installed "
             + installed
             + "/"
@@ -1327,7 +1323,7 @@ public final class ProjectProvisioner {
   private void installSkills(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.SKILLS_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(18, "skills already installed");
+      stepSkipped("skills already installed");
       return;
     }
 
@@ -1339,10 +1335,10 @@ public final class ProjectProvisioner {
     var harnesses = installedHarnesses(config);
     if (harnesses.isEmpty()) {
       tracker.advance(currentPhase);
-      stepSkipped(18, "no agent configured");
+      stepSkipped("no agent configured");
       return;
     }
-    step(18, "Installing skills...");
+    step("Installing skills...");
     var detail = "";
     for (var harness : harnesses) {
       var report =
@@ -1354,7 +1350,7 @@ public final class ProjectProvisioner {
               + (report.skipped().isEmpty() ? "" : "; " + String.join("; ", report.skipped()));
     }
     tracker.advance(currentPhase);
-    stepDone(18, detail);
+    stepDone(detail);
   }
 
   /** The harnesses the project installs: {@code agent.install}, else {@code agent.type}. */
@@ -1368,10 +1364,10 @@ public final class ProjectProvisioner {
   private void writeProjectState(ProjectDefinition config, String name) throws Exception {
     currentPhase = ProjectPhase.COMPLETE;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(19, "project state already written");
+      stepSkipped("project state already written");
       return;
     }
-    step(19, "Writing project state...");
+    step("Writing project state...");
 
     execInContainer(name, List.of("mkdir", "-p", "/etc/sail"));
 
@@ -1389,7 +1385,7 @@ public final class ProjectProvisioner {
     }
 
     tracker.advance(currentPhase);
-    stepDone(19, "Project config saved");
+    stepDone("Project config saved");
   }
 
   /**
@@ -1509,15 +1505,15 @@ public final class ProjectProvisioner {
     ContainerFilePush.push(shell, containerName, remotePath, content, List.of("--mode", mode));
   }
 
-  private void step(int step, String description) {
-    listener.onStep(step, TOTAL_STEPS, description);
+  private void step(String description) {
+    listener.onStep(currentPhase.step(), TOTAL_STEPS, description);
   }
 
-  private void stepDone(int step, String detail) {
-    listener.onStepDone(step, TOTAL_STEPS, detail);
+  private void stepDone(String detail) {
+    listener.onStepDone(currentPhase.step(), TOTAL_STEPS, detail);
   }
 
-  private void stepSkipped(int step, String detail) {
-    listener.onStepSkipped(step, TOTAL_STEPS, detail);
+  private void stepSkipped(String detail) {
+    listener.onStepSkipped(currentPhase.step(), TOTAL_STEPS, detail);
   }
 }

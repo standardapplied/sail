@@ -10,6 +10,7 @@
   {"name": "kit-fields", "kit": "field"},
   {"name": "kit-pills-keys-and-initial", "kit": "pill"},
   {"name": "kit-spinner-and-skeleton", "kit": "spinner"},
+  {"name": "kit-the-mark-still-and-drawing", "kit": "mark"},
   {"name": "kit-list-rows", "kit": "row"},
   {"name": "kit-the-more-click", "kit": "more-click"},
   {"name": "kit-sidebar-rows-and-tiles", "kit": "sidebar"},
@@ -17,5 +18,8 @@
   {"name": "kit-banners", "kit": "banner"},
   {"name": "kit-empty-states", "kit": "empty"},
   {"name": "kit-quiet-scroller", "kit": "scroller"},
-  {"name": "kit-sheets", "kit": "sheet"}
+  {"name": "kit-sheets", "kit": "sheet"},
+  {"name": "kit-this-mac", "select": "thisMac"},
+  {"name": "kit-this-mac-attached", "attached": true, "seconds": 30},
+  {"name": "kit-title-bar-over-this-mac", "titleBar": true}
 ]}

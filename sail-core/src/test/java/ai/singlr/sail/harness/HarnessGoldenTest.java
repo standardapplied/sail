@@ -402,10 +402,10 @@ class HarnessGoldenTest {
             "plan=Plan: claude --permission-mode plan",
             "auto=Auto: claude --permission-mode auto",
             "dontAsk=Don't ask: claude --permission-mode dontAsk",
-            "bypassPermissions=Bypass permissions: claude --permission-mode bypassPermissions"),
+            "bypassPermissions=Bypass permissions, risky: claude --permission-mode bypassPermissions"),
         shown(CLAUDE_CODE));
     assertEquals(
-        List.of("full-access=Full access: codex --dangerously-bypass-approvals-and-sandbox"),
+        List.of("full-access=Full access, risky: codex --dangerously-bypass-approvals-and-sandbox"),
         shown(CODEX));
     assertEquals(Optional.empty(), CLAUDE_CODE.modesNote());
     assertEquals(
@@ -432,7 +432,14 @@ class HarnessGoldenTest {
 
   private static List<String> shown(Harness harness) {
     return harness.modes().stream()
-        .map(mode -> mode.name() + "=" + mode.label() + ": " + harness.interactive(mode.name()))
+        .map(
+            mode ->
+                mode.name()
+                    + "="
+                    + mode.label()
+                    + (mode.risky() ? ", risky" : "")
+                    + ": "
+                    + harness.interactive(mode.name()))
         .toList();
   }
 

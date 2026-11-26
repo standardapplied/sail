@@ -189,6 +189,7 @@ public final class Policy {
           new Row(Action.PRUNE, NO, OWNER, YES, NO, NO, NO),
           new Row(Action.PURGE, NO, NO, YES, NO, NO, NO),
           new Row(Action.KEEP_LOGINS, YES, YES, YES, NO, NO, NO),
+          new Row(Action.KEEP_PASSKEYS, YES, YES, YES, NO, NO, NO),
           new Row(Action.MANAGE_PEOPLE, NO, NO, YES, NO, NO, NO),
           new Row(Action.OPERATE_BOX, OWNER, OWNER, YES, NO, NO, NO));
 

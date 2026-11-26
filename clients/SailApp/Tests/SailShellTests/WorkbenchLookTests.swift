@@ -113,9 +113,11 @@ import Testing
     }
 
     /// Mast's shell: one band across the window's top in the chrome (sampled under the buttons'
-    /// inset, in the middle and at the end), the rail's top edge at the band's bottom, the pane's
-    /// card beside it, and no view over a window button; in full screen the band is the window's
-    /// own top row, the tabs 8 pt in, the rail under it. Both panes, both looks.
+    /// inset, in the middle and at the end), AppKit's compact band as high as the one full screen
+    /// draws, the rail's top edge at the band's bottom, the pane's card beside it, and no view over a
+    /// window button; the window buttons and the tabs centred in the band, the first tab 16 pt past
+    /// the buttons' own frames; in full screen the band is the window's own top row, the tabs 8 pt
+    /// in, the rail under it. Both panes, both looks.
     @Test(arguments: [("dark", Look.dark), ("light", Look.light)])
     func theBandRunsAcrossTheTopAndTheRailStartsUnderIt(_ name: String, _ look: Look) throws {
         let shell = try Self.shell(look)
@@ -143,15 +145,18 @@ import Testing
                 #expect(isChrome(4, Double(root.bounds.height) - 4, look.chrome), "\(name) \(pane) full \(full): the chrome at the bottom is not the band's one fill")
                 let railTop = Double(root.bounds.height - shell.rail.frame.maxY)
                 #expect(abs(railTop - band) < 0.5, "\(name) \(pane) full \(full): the rail starts at \(railTop), the band ends at \(band)")
-                #expect(band >= 44, "\(name): the band is \(band) pt")
+                #expect(window.toolbarStyle == .unifiedCompact && abs(band - ShellApp.bandHeight) < 0.5,
+                        "\(name) full \(full): the band is \(band) pt, the one full screen draws \(ShellApp.bandHeight)")
                 guard !full else {
                     #expect(shell.thisMac.strip.leading == ShellApp.fullScreenInset)
                     continue
                 }
                 let views: [NSView] = [shell.rail, shell.thisMac, shell.account, shell.thisMac.strip]
+                var buttonsEnd = 0.0
                 for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
                     let button = try #require(window.standardWindowButton(kind))
                     let frame = button.convert(button.bounds, to: nil)
+                    buttonsEnd = max(buttonsEnd, Double(frame.maxX))
                     #expect(abs(Double(frame.midY) - (Double(root.bounds.height) - band / 2)) < 1.5, "\(name): \(kind) is not centred in the band")
                     for view in views where view.window != nil && !view.isHiddenOrHasHiddenAncestor {
                         #expect(!view.convert(view.bounds, to: nil).intersects(frame), "\(name) \(pane): \(type(of: view)) lies over \(kind)")
@@ -162,8 +167,10 @@ import Testing
                 strip.layoutSubtreeIfNeeded()
                 if pane == .thisMac {
                     let firstTab = try #require(strip.tabs.first)
-                    let tabStart = Double(firstTab.convert(firstTab.bounds, to: nil).minX)
-                    #expect(tabStart >= ShellApp.buttonsInset - 0.5 && tabStart <= ShellApp.buttonsInset + Look.Space.s, "\(name): the first tab starts at \(tabStart), not past the buttons' 96 pt inset")
+                    let tab = firstTab.convert(firstTab.bounds, to: nil), gap = Double(tab.minX) - buttonsEnd
+                    #expect(abs(gap - 16) < 0.5, "\(name): the first tab starts \(gap) pt after the window buttons, which end at \(buttonsEnd)")
+                    #expect(abs(Double(tab.midY) - (Double(root.bounds.height) - band / 2)) < 0.5 && abs(Double(tab.height) - 26) < 0.5,
+                            "\(name): the first tab \(tab) is not 26 pt and centred in the \(band) pt band")
                 }
                 let card = try #require(shell.thisMac.superview)
                 #expect(card.layer.map { Double($0.cornerRadius) } == Look.contentRadius && card.layer?.masksToBounds == true, "\(name): the pane is not a card with 6 pt corners")

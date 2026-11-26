@@ -75,7 +75,7 @@ public record StubHarness(String yamlName, HookFile hooks, OptionalInt loginTunn
 
   @Override
   public List<Mode> modes() {
-    return List.of(new Mode("default", "Its own", "Starts as it starts by itself.", ""));
+    return List.of(new Mode("default", "Its own", "Starts as it starts by itself.", "", false));
   }
 
   @Override

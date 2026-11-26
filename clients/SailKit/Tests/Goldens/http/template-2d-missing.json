@@ -9,6 +9,28 @@
       "schema_version": 1,
       "stale": false,
       "state": "missing",
+      "step_names": [
+        "container_launched",
+        "disk_quota_set",
+        "resource_limits_set",
+        "network_ready",
+        "packages_installed",
+        "ssh_configured",
+        "podman_installed",
+        "testcontainers_configured",
+        "jdk_installed",
+        "node_installed",
+        "git_configured",
+        "maven_installed",
+        "repos_cloned",
+        "workspace_files_pushed",
+        "services_provisioned",
+        "prune_cron_configured",
+        "agent_tools_installed",
+        "skills_installed",
+        "complete",
+        "template_finished"
+      ],
       "steps": 20
     },
     "status": 200

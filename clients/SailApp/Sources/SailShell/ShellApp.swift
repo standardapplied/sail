@@ -6,16 +6,16 @@ import SailTerminal
 import SailTerminalView
 import SailWorkbench
 
-/// "Sail": one window, 1180 by 800 and no smaller than `leastFrame` (480 by 624), laid out as Mast's shell: one band
+/// "Sail": one window, 1180 by 800 and no smaller than `leastFrame`, laid out as Mast's shell: one band
 /// across the window's top in the chrome, the window buttons' home and its drag surface; under it
 /// the icon rail on the chrome at the left, and beside the rail the selected pane ("This Mac", the
 /// local terminals in tabs and splits, or the account) as a card with 6 pt corners and a 2 pt
 /// margin of chrome. The band is the title bar–toolbar area of a full-size-content window with an
-/// empty toolbar in the unified style, so AppKit gives it its height and centres the window buttons
-/// in it; its row after the buttons is a title bar accessory (`.left`) holding the tab strip, whose
+/// empty toolbar in the compact unified style, so AppKit gives it its height and centres the window
+/// buttons in it; its row after the buttons is a title bar accessory (`.left`) holding the tab strip, whose
 /// empty part is inside the title bar's own view: a drag there moves the window and a double-click
-/// does what System Settings says, as AppKit does it. The tabs start past the buttons' 96 pt
-/// inset. In full screen, where macOS hides the title bar and the buttons, the toolbar is hidden
+/// does what System Settings says, as AppKit does it. The tabs start `buttonsGap` past where AppKit
+/// put the buttons. In full screen, where macOS hides the title bar and the buttons, the toolbar is hidden
 /// and the band is drawn in the window's top row, its inset 8 pt. The look follows the appearance
 /// while the app runs. It asks the control plane who it is signed in as at launch and each time
 /// the app is activated.
@@ -329,22 +329,31 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         fitTheStrip()
     }
 
-    /// The band's height in full screen, where the band is drawn by the window: the unified title
-    /// bar–toolbar area's in a window (Mast's band is 44 px; AppKit sets this one).
-    static let bandHeight = 52.0
-    /// The least frame the window takes. AppKit keeps the unified toolbar's row out of `minSize` and
-    /// adds it above: a frame asked for at 620 pt with `minSize` 600 was held at 624, the band's 52 pt
+    /// The band's height in full screen, where the band is drawn by the window: the compact unified
+    /// title bar–toolbar area's in a window (AppKit sets that one).
+    package static let bandHeight = 38.0
+    /// The least frame the window takes. AppKit keeps the compact toolbar's row out of `minSize` and
+    /// adds it above: with `minSize` 600 a frame asked for at 100 pt is held at 610, the 38 pt band
     /// less a 28 pt title bar. So `minSize` is this less that row, and the drive and the tests read
     /// this alone.
-    public static let leastFrame = NSSize(width: 480, height: 624)
+    public static let leastFrame = NSSize(width: 480, height: 610)
     /// The unified toolbar's row: the band less a plain title bar.
     static var toolbarRow: Double {
         bandHeight - Double(NSWindow.frameRect(forContentRect: .zero, styleMask: [.titled]).height)
     }
-    /// What the band keeps clear for the window buttons before the tabs (Mast's `.topbar__inset`),
-    /// and in full screen, where macOS hides them.
-    static let buttonsInset = 96.0
+    /// The band's room between the window buttons and the first tab, wherever AppKit put the buttons.
+    package static let buttonsGap = Look.Space.l
+    /// The strip's inset in full screen, where macOS hides the buttons.
     static let fullScreenInset = 8.0
+
+    /// Where AppKit put the window's buttons in the band, in window coordinates: the union of their
+    /// frames, nil when it shows none.
+    package static func buttons(of window: NSWindow) -> NSRect? {
+        let frames = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { kind in
+            window.standardWindowButton(kind).flatMap { button in button.isHidden ? nil : button.convert(button.bounds, to: nil) }
+        }
+        return frames.dropFirst().reduce(frames.first) { $0?.union($1) }
+    }
     /// The chrome around the pane's card (Mast's `.cockpit-main` margin).
     static let cardMargin = 2.0
 
@@ -356,13 +365,16 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// The strip in the title bar's accessory after the window's buttons; in full screen, where the
-    /// title bar and its toolbar hide, across the band the window draws at its top, 8 pt in.
+    /// title bar and its toolbar hide, across the band the window draws at its top, 8 pt in. Its
+    /// direction is AppKit's for the title bar (`windowTitlebarLayoutDirection`), the one answer
+    /// both where the strip is fitted and which way its tabs run read.
     func placeTheStrip(fullScreen: Bool? = nil) {
         let strip = thisMac.strip
         let full = fullScreen ?? window.styleMask.contains(.fullScreen)
         if let index = window.titlebarAccessoryViewControllers.firstIndex(of: titleBarRow) { window.removeTitlebarAccessoryViewController(at: index) }
         strip.removeFromSuperview()
         NSLayoutConstraint.deactivate(stripInTheWindow)
+        strip.userInterfaceLayoutDirection = window.windowTitlebarLayoutDirection
         band.isVisible = !full
         if full {
             strip.translatesAutoresizingMaskIntoConstraints = false
@@ -382,15 +394,28 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// The accessory reaches the window's trailing edge, so all the row after the buttons is the
-    /// title bar's (AppKit sets a `.left` accessory's height, its view's frame its width).
+    /// The accessory reaches the window's far edge, so all the row beside the buttons is the title
+    /// bar's (AppKit sets a `.left` accessory's height, its view's frame its width), its first tab
+    /// `buttonsGap` past the buttons, wherever AppKit starts the accessory (9 pt after them on one
+    /// Mac, 8 or less on CI's runner). Right to left (the strip's direction, the title bar's) AppKit
+    /// puts the buttons at the window's right and the accessory at its left: the strip, whose tabs
+    /// then run from its right edge, ends `buttonsGap` before the buttons. A window showing no buttons
+    /// leaves the strip as it is.
     private func fitTheStrip() {
         let strip = thisMac.strip
-        guard !window.styleMask.contains(.fullScreen), strip.superview != nil else { return }
+        guard !window.styleMask.contains(.fullScreen), strip.window != nil else { return }
         window.contentView?.superview?.layoutSubtreeIfNeeded()
-        let start = strip.window == nil ? Double(window.standardWindowButton(.zoomButton)?.frame.maxX ?? 0) : Double(strip.convert(NSPoint.zero, to: nil).x)
-        strip.leading = max(Look.Space.s, Self.buttonsInset - start)
-        strip.setFrameSize(NSSize(width: max(0, Double(window.frame.width) - start), height: strip.frame.height))
+        guard let buttons = Self.buttons(of: window) else { return }
+        let start = Double(strip.convert(NSPoint.zero, to: nil).x)
+        let end: Double
+        if strip.userInterfaceLayoutDirection == .rightToLeft {
+            strip.leading = 0
+            end = Double(buttons.minX) - Self.buttonsGap
+        } else {
+            strip.leading = max(0, Double(buttons.maxX) + Self.buttonsGap - start)
+            end = Double(window.frame.width)
+        }
+        strip.setFrameSize(NSSize(width: max(0, end - start), height: strip.frame.height))
     }
 
     /// The band, the rail and the card's margin are one chrome surface: the warm ground the paper card
@@ -435,7 +460,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         band.allowsUserCustomization = false
         band.allowsDisplayModeCustomization = false
         window.toolbar = band
-        window.toolbarStyle = .unified
+        window.toolbarStyle = .unifiedCompact
         window.titlebarSeparatorStyle = .none
         content.wantsLayer = true
         content.layer?.cornerRadius = Look.contentRadius

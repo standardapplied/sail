@@ -193,6 +193,9 @@ public interface Operations extends LocalLaneOperations {
    */
   LoginOperations logins();
 
+  /** The doors to a person's own passkeys. No agent or container lane reaches them. */
+  PasskeyOperations passkeys();
+
   /**
    * The measures of the specs {@code filter} lists, done between {@code doneSince} and {@code
    * doneUntil} (dates, either blank) by this box's record, with their medians and 90th percentiles.

@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "DELETE",
+    "path": "/v1/passkeys/Z29sZGVuIGNyZWRlbnRpYWxfaWQgNg"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Sign in with one of your passkeys, then try again.",
+        "code": "forbidden",
+        "field_errors": [],
+        "message": "Passkeys are removed only from a session signed in with a passkey."
+      },
+      "schema_version": 1
+    },
+    "status": 403
+  }
+}

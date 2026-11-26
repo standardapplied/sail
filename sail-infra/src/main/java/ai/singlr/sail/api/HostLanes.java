@@ -460,7 +460,10 @@ final class HostLanes {
                   WorkspaceDoors.AGENT,
                   roles.nodeFde().isPresent())
               .or(() -> AgentStarts.notTheirs(workspace, owner, who.actor().handle()))
-              .or(() -> AgentStarts.notInstalled(definitions.require(project), harness));
+              .or(
+                  () ->
+                      AgentStarts.notInstalled(definitions.require(project), harness)
+                          .map(AgentStarts.OfferRefusal::why));
       if (refused.isPresent()) {
         throw told(refused.get());
       }
