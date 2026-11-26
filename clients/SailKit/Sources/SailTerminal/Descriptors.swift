@@ -3,12 +3,6 @@ import Glibc
 #elseif canImport(Darwin)
 import Darwin
 #endif
-import Synchronization
-
-/// Held while a process starts, and by a close: a process being started holds a copy of every
-/// descriptor of this one until its exec closes them, so a socket closed meanwhile would stay open,
-/// listening or connected, for as long as that takes.
-private let starting = Mutex(())
 
 /// The one place SailKit and the app make a descriptor, each close-on-exec from the moment it is
 /// returned, so no process this one starts holds a connection or a listener of it: a child's copy
@@ -53,17 +47,6 @@ public enum Descriptors {
         return (read, write)
     }
 
-    /// Closes `descriptor` once no process is being started, so no copy of it outlives the close.
-    public static func close(_ descriptor: Int32) {
-        starting.withLock { _ in
-            #if canImport(Glibc)
-            _ = Glibc.close(descriptor)
-            #else
-            _ = Darwin.close(descriptor)
-            #endif
-        }
-    }
-
     private static func closingOnExec(_ descriptor: Int32) -> Int32 {
         guard descriptor >= 0 else { return descriptor }
         guard fcntl(descriptor, F_SETFD, FD_CLOEXEC) == 0 else {
@@ -87,8 +70,8 @@ public enum Spawn {
         case null
         /// A descriptor of this process, above the standard three.
         case descriptor(Int32)
-        /// A file, created for this account alone and emptied first.
-        case appending(String)
+        /// A file written from its start, emptied first, and created for this account alone.
+        case file(String)
     }
 
     /// Starts `executable` with `arguments` and this process's environment: its pid.
@@ -103,39 +86,38 @@ public enum Spawn {
         var actions = posix_spawn_file_actions_t()
         var attributes = posix_spawnattr_t()
         #endif
-        posix_spawn_file_actions_init(&actions)
-        posix_spawnattr_init(&attributes)
-        defer {
-            posix_spawn_file_actions_destroy(&actions)
-            posix_spawnattr_destroy(&attributes)
-        }
+        try made(posix_spawn_file_actions_init(&actions))
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        try made(posix_spawnattr_init(&attributes))
+        defer { posix_spawnattr_destroy(&attributes) }
         for (target, standard) in [(Int32(0), input), (1, output), (2, errors)] {
-            let added: Int32 = switch standard {
-            case .null: posix_spawn_file_actions_addopen(&actions, target, "/dev/null", O_RDWR, 0)
-            case let .descriptor(descriptor) where descriptor > 2: posix_spawn_file_actions_adddup2(&actions, descriptor, target)
+            switch standard {
+            case .null: try made(posix_spawn_file_actions_addopen(&actions, target, "/dev/null", O_RDWR, 0))
+            case let .descriptor(descriptor) where descriptor > 2: try made(posix_spawn_file_actions_adddup2(&actions, descriptor, target))
             case let .descriptor(descriptor): throw SpawnRefused("descriptor \(descriptor) is one of the child's own standard three")
-            case let .appending(path): posix_spawn_file_actions_addopen(&actions, target, path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0o600)
+            case let .file(path): try made(posix_spawn_file_actions_addopen(&actions, target, path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0o600))
             }
-            guard added == 0 else { throw SpawnRefused(code: added) }
         }
         var flags = POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF | (newSession ? setSession : 0)
         #if canImport(Darwin)
         flags |= POSIX_SPAWN_CLOEXEC_DEFAULT
         #else
-        posix_spawn_file_actions_addclosefrom_np(&actions, 3)
+        try made(posix_spawn_file_actions_addclosefrom_np(&actions, 3))
         #endif
         var none = sigset_t(), all = sigset_t()
-        sigemptyset(&none)
-        sigfillset(&all)
-        posix_spawnattr_setsigmask(&attributes, &none)
-        posix_spawnattr_setsigdefault(&attributes, &all)
-        posix_spawnattr_setflags(&attributes, Int16(flags))
+        guard sigemptyset(&none) == 0, sigfillset(&all) == 0 else { throw SpawnRefused(code: errno) }
+        try made(posix_spawnattr_setsigmask(&attributes, &none))
+        try made(posix_spawnattr_setsigdefault(&attributes, &all))
+        try made(posix_spawnattr_setflags(&attributes, Int16(flags)))
         let words: [UnsafeMutablePointer<CChar>?] = ([executable] + arguments).map { strdup($0) } + [nil]
         defer { words.forEach { free($0) } }
         var pid: pid_t = 0
-        let spawned = starting.withLock { _ in posix_spawn(&pid, executable, &actions, &attributes, words, environ) }
-        guard spawned == 0 else { throw SpawnRefused(code: spawned) }
+        try made(posix_spawn(&pid, executable, &actions, &attributes, words, environ))
         return pid
+    }
+
+    private static func made(_ code: Int32) throws(SpawnRefused) {
+        guard code == 0 else { throw SpawnRefused(code: code) }
     }
 
     #if canImport(Darwin)

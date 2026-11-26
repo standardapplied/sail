@@ -32,6 +32,16 @@ import Testing
         #expect(try String(contentsOfFile: path, encoding: .utf8) == "bytes")
     }
 
+    /// A host that ends before it says it serves is reported as it ends, never at the start's
+    /// deadline, which is held and never let pass.
+    @Test func aHostThatEndsBeforeItServesIsReportedAsItEnds() async throws {
+        let deadline = Timeline()
+        let host = LocalHostProcess(binary: "/usr/bin/true", sleep: deadline.sleep, spawn: RealLocalHost.spawn)
+        await #expect { try await host.start() } throws: { error in
+            "\(error)" == "/usr/bin/true _pty-host --local ended before it said it serves"
+        }
+    }
+
     /// MINOR 11: a report names what a step did, never what it typed.
     @Test func aReportNamesAStepsKindNotWhatItTyped() {
         #expect(Step.type("secret words\r").description == "type 13 characters")

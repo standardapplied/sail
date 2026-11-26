@@ -260,7 +260,7 @@ public final class LocalHost: Sendable {
     func start(_ binary: String) throws(ShellError) {
         let pid: pid_t
         do {
-            pid = try Spawn.process(binary, ["_pty-host", "--local"], errors: .appending(log), newSession: true)
+            pid = try Spawn.process(binary, ["_pty-host", "--local"], errors: .file(log), newSession: true)
         } catch {
             throw .host("\(binary) could not be started: \(error)")
         }

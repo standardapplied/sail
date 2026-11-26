@@ -249,7 +249,7 @@ import Testing
     /// wait (0.5 s) is asked again after the sixth (23.5 s) and the ninth (47.5 s).
     @Test func aRunnerKeepsTryingForAMinuteAtTheCapThenParksUntilReconnectNow() async throws {
         let host = try FakeHost(tcp: ())
-        let desk = TicketDesk(address: host.address, holdersAfter: 1)
+        let desk = TicketDesk(address: host.address)
         let naps = Naps()
         let hands = Hands()
         let session = TerminalSession(
@@ -267,7 +267,6 @@ import Testing
         _ = try await peer.acceptAttach()
         try await watch.attached()
         host.stop()
-        let stopped = ContinuousClock.now
         peer.close()
         try await watch.until("parked") {
             if case .parked = session.state.phase { return true }
@@ -279,7 +278,7 @@ import Testing
         #expect(naps.durations.reduce(.zero, +) >= TerminalSession.runnerPatience)
         try await watch.until("told its 11th attempt") { watch.seen.contains(.phase(.reconnecting(attempt: 11))) }
         let attach = TicketRequest.attach(session: "work")
-        #expect(desk.requests == [.open(project: "", workspace: ""), attach, attach, attach], "a ticket never presented serves the attempts of its 20 s; the host stopped at \(stopped); sockets on its port at each attach asked: \(desk.holders)")
+        #expect(desk.requests == [.open(project: "", workspace: ""), attach, attach, attach], "a ticket never presented serves the attempts of its 20 s")
         let attempts = naps.durations.count
         session.reconnectNow()
         try await watch.until("tried again at once") { naps.durations.count > attempts }

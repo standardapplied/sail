@@ -150,24 +150,13 @@ final class ManualTimers: Sendable {
 final class TicketDesk: TicketSource {
     private let state = Mutex<(issued: Int, requests: [TicketRequest], refusal: Refusal?)>((0, [], nil))
     private let address: HostAddress
-    private let holdersAfter: Int
-    private let seen = Mutex<[String]>([])
 
-    /// `holdersAfter`: from the ask that follows that many requests, each ask also records who
-    /// holds a TCP socket on the host's port, so a test that expects no more asks names what
-    /// answered when one comes (``holders``).
-    init(address: HostAddress, holdersAfter: Int = .max) {
+    init(address: HostAddress) {
         self.address = address
-        self.holdersAfter = holdersAfter
     }
 
     var requests: [TicketRequest] {
         state.withLock { $0.requests }
-    }
-
-    /// What each ask past `holdersAfter` found on the host's port.
-    var holders: [String] {
-        seen.withLock { $0 }
     }
 
     /// Every request from now on is refused so.
@@ -176,11 +165,6 @@ final class TicketDesk: TicketSource {
     }
 
     func ticket(for request: TicketRequest) async throws(SailError) -> TerminalTicket {
-        let asked = state.withLock { $0.requests.count }
-        if asked >= holdersAfter, case let .tcp(_, port) = address {
-            let found = PortHolders.of(port)
-            seen.withLock { $0.append("ask \(asked + 1) at \(ContinuousClock.now): \(found)") }
-        }
         let answer: Result<Int, SailError> = state.withLock { state in
             state.requests.append(request)
             if let refusal = state.refusal { return .failure(.refused(refusal)) }
@@ -279,73 +263,4 @@ final class Hands: Sendable {
     func advance(_ duration: Duration) {
         instant.withLock { $0 += duration }
     }
-}
-
-/// Who holds a TCP socket on a port: every socket of any process this account can read whose local
-/// or foreign port it is, with its state. A connect to a stopped fake host that was answered is
-/// named by it: a listener still there (which process), or a socket connected to itself.
-enum PortHolders {
-    static func of(_ port: UInt16) -> String {
-        let found = sockets(on: port)
-        return found.isEmpty ? "no socket on \(port)" : found.joined(separator: "; ")
-    }
-
-    #if canImport(Darwin)
-    private static func sockets(on port: UInt16) -> [String] {
-        var found: [String] = []
-        let count = proc_listallpids(nil, 0)
-        var pids = [pid_t](repeating: 0, count: Int(max(count, 0)) + 64)
-        let listed = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))
-        for pid in pids.prefix(Int(max(listed, 0))) where pid > 0 {
-            for descriptor in descriptors(of: pid) {
-                var info = socket_fdinfo()
-                let size = Int32(MemoryLayout<socket_fdinfo>.size)
-                guard proc_pidfdinfo(pid, descriptor, PROC_PIDFDSOCKETINFO, &info, size) == size, info.psi.soi_kind == Int32(SOCKINFO_TCP) else { continue }
-                let tcp = info.psi.soi_proto.pri_tcp
-                let local = UInt16(bigEndian: UInt16(truncatingIfNeeded: tcp.tcpsi_ini.insi_lport))
-                let foreign = UInt16(bigEndian: UInt16(truncatingIfNeeded: tcp.tcpsi_ini.insi_fport))
-                guard local == port || foreign == port else { continue }
-                var name = [CChar](repeating: 0, count: 256)
-                proc_name(pid, &name, UInt32(name.count))
-                found.append("pid \(pid) \(String(cString: name)) fd \(descriptor): \(local) to \(foreign), state \(tcp.tcpsi_state)")
-            }
-        }
-        return found
-    }
-
-    private static func descriptors(of pid: pid_t) -> [Int32] {
-        let stride = MemoryLayout<proc_fdinfo>.stride
-        let size = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
-        guard size > 0 else { return [] }
-        var listed = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(size) / stride + 8)
-        let filled = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, &listed, Int32(listed.count * stride))
-        return listed.prefix(Int(max(filled, 0)) / stride).filter { $0.proc_fdtype == UInt32(PROX_FDTYPE_SOCKET) }.map(\.proc_fd)
-    }
-    #else
-    private static func sockets(on port: UInt16) -> [String] {
-        let suffix = String(format: ":%04X", port)
-        var byInode: [String: String] = [:]
-        for table in ["/proc/net/tcp", "/proc/net/tcp6"] {
-            for line in ((try? String(contentsOfFile: table, encoding: .utf8)) ?? "").split(separator: "\n").dropFirst() {
-                let fields = line.split(separator: " ")
-                guard fields.count > 9, fields[1].hasSuffix(suffix) || fields[2].hasSuffix(suffix) else { continue }
-                byInode[String(fields[9])] = "\(fields[1]) to \(fields[2]), state \(fields[3])"
-            }
-        }
-        var found: [String] = []
-        var named: Set<String> = []
-        let files = FileManager.default
-        for pid in (try? files.contentsOfDirectory(atPath: "/proc")) ?? [] where Int(pid) != nil {
-            for descriptor in (try? files.contentsOfDirectory(atPath: "/proc/\(pid)/fd")) ?? [] {
-                guard let link = try? files.destinationOfSymbolicLink(atPath: "/proc/\(pid)/fd/\(descriptor)"), link.hasPrefix("socket:[") else { continue }
-                let inode = String(link.dropFirst(8).dropLast())
-                guard let socket = byInode[inode] else { continue }
-                let name = ((try? String(contentsOfFile: "/proc/\(pid)/comm", encoding: .utf8)) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                found.append("pid \(pid) \(name) fd \(descriptor): \(socket)")
-                named.insert(inode)
-            }
-        }
-        return found + byInode.filter { !named.contains($0.key) }.map { "no process: \($0.value)" }
-    }
-    #endif
 }

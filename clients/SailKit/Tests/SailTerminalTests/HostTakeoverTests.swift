@@ -1,4 +1,5 @@
 import Foundation
+import SailKitTestSupport
 import SailTerminal
 import SailTerminalWire
 import Testing
@@ -72,7 +73,7 @@ import Testing
     /// `/bin/sh -c script`, a child of this test, reaped the moment it exits by a thread that waits.
     /// It is waited for until it runs `tail`, for as long as the suite's time limit allows.
     static func spawn(_ script: String) throws -> Int32 {
-        let pid = try Spawn.process("/bin/sh", ["-c", script])
+        let pid = try TestSpawn.process("/bin/sh", ["-c", script])
         Thread {
             var status: Int32 = 0
             while waitpid(pid, &status, 0) < 0, errno == EINTR {}

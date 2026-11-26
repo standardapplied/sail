@@ -56,6 +56,10 @@ public final class HeldListener: Sendable {
         let descriptor = Descriptors.socket(AF_UNIX)
         guard descriptor >= 0 else { throw ListenerError("no socket: \(errno)") }
         var address = sockaddr_un()
+        guard path.utf8.count < MemoryLayout.size(ofValue: address.sun_path) else {
+            closeDescriptor(descriptor)
+            throw ListenerError("\(path) is longer than a unix socket's path can be")
+        }
         address.sun_family = sa_family_t(AF_UNIX)
         withUnsafeMutableBytes(of: &address.sun_path) { raw in
             raw.copyBytes(from: path.utf8)
@@ -70,7 +74,7 @@ public final class HeldListener: Sendable {
     private static func listening(_ descriptor: Int32, bound: Bool, port: UInt16, naming name: String) throws -> HeldListener {
         guard bound, listen(descriptor, 16) == 0 else {
             let reason = errno
-            Descriptors.close(descriptor)
+            closeDescriptor(descriptor)
             throw ListenerError("cannot listen at \(name): \(reason)")
         }
         return HeldListener(descriptor, port: port)
@@ -87,11 +91,12 @@ public final class HeldListener: Sendable {
         }
     }
 
-    /// Stops listening, once any look in progress has ended: a connect is refused from now on.
+    /// Stops listening, once any look in progress and any process a test is starting
+    /// (``TestSpawn``) have ended: a connect is refused from now on.
     public func close() {
         closing.store(true, ordering: .releasing)
         held.withLock { descriptor in
-            if descriptor >= 0 { Descriptors.close(descriptor) }
+            if descriptor >= 0 { TestSpawn.close(descriptor) }
             descriptor = -1
         }
     }
@@ -99,6 +104,43 @@ public final class HeldListener: Sendable {
     deinit {
         close()
     }
+}
+
+/// How a test starts a process: under the one lock a ``HeldListener`` closes under. A process being
+/// started holds a copy of every descriptor of this one, close-on-exec or not, until just before its
+/// exec (glibc's child copies the table; xnu copies it inside `posix_spawn`), so a listener another
+/// test closed meanwhile would go on listening and take the connection that test expects refused.
+/// The product owns no listener and takes no such lock.
+public enum TestSpawn {
+    fileprivate static let lock = Mutex(())
+    private static let waited = Atomic(0)
+
+    /// How many closes have found a start in progress and waited for it: the test of that wait
+    /// reads it to know its close is waiting.
+    public static var waits: Int {
+        waited.load(ordering: .acquiring)
+    }
+
+    /// ``Spawn/process(_:_:input:output:errors:newSession:)``, under the lock.
+    public static func process(
+        _ executable: String, _ arguments: [String], input: Spawn.Standard = .null, output: Spawn.Standard = .null, errors: Spawn.Standard = .null
+    ) throws(SpawnRefused) -> pid_t {
+        try lock.withLock { _ throws(SpawnRefused) in try Spawn.process(executable, arguments, input: input, output: output, errors: errors) }
+    }
+
+    fileprivate static func close(_ descriptor: Int32) {
+        guard lock.withLockIfAvailable({ _ in closeDescriptor(descriptor) }) == nil else { return }
+        waited.add(1, ordering: .releasing)
+        lock.withLock { _ in closeDescriptor(descriptor) }
+    }
+}
+
+private func closeDescriptor(_ descriptor: Int32) {
+    #if canImport(Glibc)
+    _ = Glibc.close(descriptor)
+    #else
+    _ = Darwin.close(descriptor)
+    #endif
 }
 
 public struct ListenerError: Error, CustomStringConvertible {

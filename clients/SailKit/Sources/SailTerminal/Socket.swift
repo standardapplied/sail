@@ -24,7 +24,7 @@ final class Socket: Sendable {
     /// The bound on finding a quiet connection dead: keepalive's idle time and its probes.
     static let quietDeadAfter = Int(keepalive.idle + keepalive.interval * keepalive.count)
 
-    private let descriptor: Int32
+    let descriptor: Int32
 
     /// Takes `descriptor` over; on Darwin a write to a closed peer then fails rather than raising
     /// SIGPIPE (Linux asks the same of every send with `MSG_NOSIGNAL`).
@@ -37,7 +37,7 @@ final class Socket: Sendable {
     }
 
     deinit {
-        Descriptors.close(descriptor)
+        close(descriptor)
     }
 
     /// A socket connected to `address` within `timeout` seconds.

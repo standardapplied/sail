@@ -104,7 +104,12 @@ import Testing
                 unlink(path)
             }
             while !stopped.raised.load(ordering: .relaxed) {
-                guard case let .connection(client) = listener.next() else { continue }
+                let client: Int32
+                switch listener.next() {
+                case let .connection(accepted): client = accepted
+                case .nothing: continue
+                case .failed, .closed: return
+                }
                 answer(client)
                 close(client)
             }
