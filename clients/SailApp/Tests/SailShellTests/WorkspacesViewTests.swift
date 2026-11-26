@@ -860,23 +860,29 @@ import Testing
     }
 
     /// Choosing This Mac shows its page with this Mac's terminals and asks the control plane
-    /// nothing: no request names This Mac or this Mac's host, then or at the next listing, which
-    /// leaves This Mac shown.
+    /// nothing: the next listing asks the projects and the project chosen there, and no request
+    /// names This Mac or this Mac's host; This Mac stays shown.
     @Test func thisMacsPageAsksTheControlPlaneNothing() async throws {
-        let (view, window, server) = try await Self.listed()
+        let server = RecordedServer([try Exchange("projects"), try Exchange("workspaces-three")])
+        let transport = Held(server, holding: "nothing is held")
+        let (view, window) = try Self.view(transport)
         defer { window.orderOut(nil) }
+        view.shown()
+        try #require(await RunnerTabTests.until { view.text.contains("dock") }, "nothing listed: \(view.text)")
         var shown = 0
         view.onThisMacShown = { shown += 1 }
         view.sessions = Self.shells
-        let before = await server.requests.count
+        let before = transport.routes.count
         view.panel.onChoose(WorkspacesModel.thisMac)
         let lines = [
             "Workspaces", "This Mac", "Shells on \(WorkbenchView.hostName). Only this Mac sees them; nothing here is sent to 127.0.0.1.",
             "This Mac · running · ~/workspace/sail · \(LocalProjectView.program)", "This Mac 2 · ended · ~/Downloads · exited 3 · 11:02",
         ]
         #expect(view.text == lines.joined(separator: "\n") && view.project.isHidden && !view.local.isHidden && shown > 0, "\(view.text)")
-        #expect(await server.requests.count == before, "choosing This Mac asked the control plane")
         await view.refresh()
+        let asked = { transport.routes.dropFirst(before).filter { !$0.hasSuffix("/sessions") } }
+        #expect(await RunnerTabTests.until { asked().last == "GET /v1/projects/harbor/workspaces" }, "harbor was not listed again: \(asked())")
+        #expect(asked() == ["GET /v1/projects", "GET /v1/projects/harbor/workspaces"], "choosing This Mac asked \(asked())")
         let requests = await server.requests, host = WorkbenchView.hostName
         let named = requests.filter { request in
             [request.path, String(decoding: request.body ?? Data(), as: UTF8.self)].contains { sent in
