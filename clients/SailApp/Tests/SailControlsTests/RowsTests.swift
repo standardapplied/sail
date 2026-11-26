@@ -1049,7 +1049,8 @@ import Testing
 
     /// A disabled button says why through the same tooltip, shown on hover and read by VoiceOver;
     /// an icon-only one says it in place of its label and drops its shortcut; with no reason, a
-    /// labelled button says nothing and an icon-only one its label again.
+    /// labelled button says nothing and an icon-only one its label again, its shortcut only once it
+    /// is enabled: the chip's key follows the button's key working, not a reason being said.
     @Test func aDisabledButtonSaysWhy() async throws {
         let mono = try ControlsTests.mono()
         let labelled = SailButton("New Workspace", kind: .secondary, look: .light, target: nil, action: nil)
@@ -1075,7 +1076,10 @@ import Testing
             tooltip.mouseExited(with: try ControlsTests.entered())
             button.why = nil
         }
-        #expect(labelled.tooltip?.isOn == false && icon.tooltip?.isOn == true && icon.tooltip?.text == "New Workspace" && icon.tooltip?.chip.showsHint == true)
+        #expect(labelled.tooltip?.isOn == false && icon.tooltip?.isOn == true && icon.tooltip?.text == "New Workspace")
+        #expect(icon.tooltip?.chip.showsHint == false, "a disabled button with no reason says its shortcut")
+        icon.isEnabled = true
+        #expect(icon.tooltip?.chip.showsHint == true, "enabled again, the chip does not say its shortcut")
     }
 
     /// The chip's keycap trails its words, and leads them right to left.

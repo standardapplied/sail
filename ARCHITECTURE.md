@@ -4330,11 +4330,14 @@ stands), whose snapshot Codex writes, `0644`, with every exported variable. The 
 and when an agent session ends whatever happened (`ended`, beside the uploads' cleanup); every give
 removes `~/.sail/sessions`. `inside` starts the harness with nothing handed over, for a person who
 signs in with the harness's own login there; Sail never holds that one, and what each harness keeps
-of it (`Harness.storedLogins`: `~/.claude/.credentials.json`, `~/.claude.json`,
-`~/.codex/auth.json`) stays across the person's own starts and goes with every strip, so a re-own
-(which strips before it gives), a disown and a template build take it. The listing, the sidecar and
-every event carry the harness's own command (`["claude", "--permission-mode", "plan"]`) and
-`agent`, never the line that started it; no argv on the runner or in the workspace holds a login.
+of it (`Harness.storedLogins`: `~/.claude/.credentials.json`, `~/.claude.json` with the copies of
+it Claude Code keeps in `~/.claude/backups`, `~/.codex/auth.json`) stays across the person's own
+starts and goes with every strip, so a re-own (which strips before it gives), a disown and a
+template build take it. A home holds `~/.claude.json` and its backups both or neither: Claude Code
+started with a backup and no `~/.claude.json` says the file is missing before its welcome. The
+listing, the sidecar and every event carry the harness's own command
+(`["claude", "--permission-mode", "plan"]`) and `agent`, never the line that started it; no argv on
+the runner or in the workspace holds a login.
 A pty host that dies between the hand-over and the read leaves the file until the next agent start
 there (the hand-over's one-minute sweep) or the next give (every start and re-own); removing it at
 host start would take an exec into every workspace. An admin who enters a workspace watches an
@@ -5313,8 +5316,8 @@ to end, which wait only for the one native build:
 
 | Check | What it runs | What it needs |
 |---|---|---|
-| `What the change touches` | `ci/check rules`, with a pull request's base (`ci/rules`: the rules a script decides, and the pull request's one entry), then `ci/changes`, which lanes the change can affect; Clients' job of the same name runs the same two | nothing else; every other job needs it |
-| `Unit tests (<module>, <os>)` | `ci/check unit <module>`: the module's unit tests, its JaCoCo gates, its PMD gate and spotless, on Linux, where `sail-infra`'s job also runs `ci/exclusions` (no Java line silences PMD or CPD, and the PMD exclusions only shrink, against the merge base), the `architecture` module's rules and the reactor's duplication report; the same tests without gates on macOS (`--tests-only`) | its upstream modules, installed first |
+| `What the change touches` | `ci/check base`, where a pull request left main (the first parent of the merge it checked out, never the event's base sha, which can be older), then from it `ci/check rules` (`ci/rules`: the rules a script decides, and the pull request's one entry) and `ci/changes`, which lanes the change can affect; Clients' job of the same name runs the same three | nothing else; every other job needs it |
+| `Unit tests (<module>, <os>)` | `ci/check unit <module>`: the module's unit tests, its JaCoCo gates, its PMD gate and spotless, on Linux, where `sail-infra`'s job also runs `ci/exclusions` (no Java line silences PMD or CPD, and the PMD exclusions only shrink, against where the pull request left main, from `ci/check base`), the `architecture` module's rules and the reactor's duplication report; the same tests without gates on macOS (`--tests-only`) | its upstream modules, installed first |
 | `Dependency scan` | OWASP dependency-check, offline against a cached NVD database refreshed best-effort | the NVD cache |
 | `Native binaries` | the candidate (`-Ob` quick build) and the release `.github/released-tag` pins, each smoke-tested, uploaded as `native-binaries` | nothing else |
 | `Native fleet sync tests (part i of 3)` | `ci/check methods NativeFleetIT i 3`: every third test of `NativeFleetIT`, sync end to end on native binaries in Podman boxes | `native-binaries` |

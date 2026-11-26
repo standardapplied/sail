@@ -15,8 +15,8 @@ import SailLook
 /// primary, and VoiceOver hears it): its sentence in crimson with the error's mark, its remedy in
 /// the secondary ink. A Touch ID cancelled on Enroll or after enrolling is said plainly in the
 /// refusal's place, in the help's and the remedy's ink. Return presses Welcome back's primary while
-/// the welcome is shown, and nothing while it is not. Each screen's own link leads to the other
-/// screen.
+/// the welcome is shown and nothing is under way, and nothing otherwise. Each screen's own link
+/// leads to the other screen.
 @MainActor
 public final class WelcomeView: NSView, NSTextFieldDelegate {
     static let columnWidth = 380.0
@@ -46,9 +46,10 @@ public final class WelcomeView: NSView, NSTextFieldDelegate {
         holdReturn()
     }
 
-    /// Return is Welcome back's primary's only while it is shown: a control not shown has no key.
+    /// Return is Welcome back's primary's only while it is shown and free: a control not shown, or
+    /// in flight, has no key.
     private func holdReturn() {
-        signIn.isDefault = welcome.screen == .back && !isHiddenOrHasHiddenAncestor
+        signIn.isDefault = welcome.screen == .back && welcome.stage == nil && !isHiddenOrHasHiddenAncestor
     }
 
     let mark: BrandMark

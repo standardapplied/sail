@@ -77,6 +77,34 @@ import Testing
 }
 
 extension WorkspacesSheetTests {
+    /// A sheet over a chosen row takes every key the page named: with dock chosen and the list
+    /// holding the keys, Delete's sheet and then Stop's each leave the foot naming nothing, dock's
+    /// Open no ⏎ and List Again no ⌘R, after its label or in its tooltip (Return presses the sheet's
+    /// Cancel, and nothing behind a sheet hears ⌥⌘T, ⌘N or ⌘R), though the list stays the window's
+    /// first responder; each sheet ended, every one of them is named again.
+    @Test func aSheetOverAChosenRowTakesEveryKeyThePageNamed() async throws {
+        let server = RecordedServer([try Exchange("projects"), try Exchange("workspaces-three"), try Exchange("workspace-sessions")])
+        let (view, window) = try WorkspacesViewTests.view(server)
+        defer { window.orderOut(nil) }
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("dock") }, "\(view.text)")
+        let project = view.project
+        project.list.choose("dock")
+        try #require(window.makeFirstResponder(project.list))
+        let named = { WorkspacesViewTests.footSays(project) == ["Open", "New Session", "New"] && WorkspacesViewTests.openNamesReturn(project, "dock") && project.listAgain.namesKey && project.listAgain.tooltip?.chip.showsHint == true }
+        #expect(named(), "with dock chosen the page names \(WorkspacesViewTests.footSays(project))")
+        for (act, title) in [(ProjectView.Act.delete("dock"), "Delete dock?"), (.stop("dock"), "Stop dock?")] {
+            project.on(act)
+            try #require(await RunnerTabTests.until { Driverless.words(window.attachedSheet?.contentView).contains(title) }, "\(title) was not asked")
+            #expect(window.firstResponder === project.list, "\(title) moved the window's first responder")
+            #expect(WorkspacesViewTests.footSays(project).isEmpty, "under \(title) the foot says \(WorkspacesViewTests.footSays(project))")
+            #expect(!WorkspacesViewTests.openNamesReturn(project, "dock") && !project.listAgain.namesKey && project.listAgain.tooltip?.chip.showsHint == false, "under \(title) a row or a button names its key")
+            window.attachedSheet?.cancelOperation(nil)
+            try #require(await RunnerTabTests.until { window.attachedSheet == nil && !view.busy }, "\(title) stayed up")
+            #expect(project.list.chosen == "dock" && named(), "\(title) ended, the page names \(WorkspacesViewTests.footSays(project))")
+        }
+    }
+
     /// R2-1: someone else signs in while a confirmed stop counts its terminals again: nothing is
     /// sent, and the next Delete still asks.
     @Test func aSignInDuringAStopsRecountLeavesNothingHeld() async throws {

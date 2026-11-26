@@ -82,8 +82,9 @@ public struct FilesLine: Equatable, Sendable {
     }
 
     /// The line for `tree` with its connection at `phase`, at `now` in the tree's seconds; nil when
-    /// nothing is to be said. `time` names an instant in those seconds as a time of day.
-    public init?(tree: FileTree, phase: FilesSession.Phase, workspace: String, at now: Double, time: (Double) -> String) {
+    /// nothing is to be said. `time` names an instant in those seconds as a time of day. ⌥⌘N is
+    /// named only while `treeHoldsKeys`, the one place New File reaches.
+    public init?(tree: FileTree, phase: FilesSession.Phase, workspace: String, at now: Double, treeHoldsKeys: Bool, time: (Double) -> String) {
         let shown = tree.rootKnown
         let state = Self.state(of: phase, workspace: workspace) ?? ""
         switch phase {
@@ -117,7 +118,7 @@ public struct FilesLine: Equatable, Sendable {
             let name = FileTree.shownName(of: unsettled.path)
             self.init(words: unsettled.shownAsOf.map { "\(name) keeps changing; shown as of \(time($0))." } ?? "\(name) keeps changing.", mark: .waiting)
         } else if tree.folders[FileTree.root]?.entries.isEmpty == true {
-            self.init(words: "\(FileTree.rootName) is empty. ⌥⌘N makes a file.", mark: .none)
+            self.init(words: "\(FileTree.rootName) is empty.\(treeHoldsKeys ? " ⌥⌘N makes a file." : "")", mark: .none)
         } else if !tree.followsAll {
             self.init(words: "Following the \(FileTree.watchCap.formatted()) most recent folders live.", mark: .quiet)
         } else {

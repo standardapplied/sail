@@ -25,7 +25,7 @@ struct OneSession: TokenVault {
 }
 
 /// Shut until opened: whatever waits on it meanwhile goes on once it is, or once the task waiting
-/// is cancelled, as a test's time limit cancels it.
+/// is cancelled, by a test's limit or by the code under test.
 final class Gate: Sendable {
     private let state = Mutex<(waiting: CheckedContinuation<Void, Never>?, opened: Bool)>((nil, false))
 

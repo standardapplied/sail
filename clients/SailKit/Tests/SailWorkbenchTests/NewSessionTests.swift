@@ -243,6 +243,16 @@ import Testing
         #expect(panel.readiness == .shell && NewSessionWords.primary(.shell, signsIn: panel.signsIn) == ("Start", true))
     }
 
+    /// The foot names a key only while it does what it says for what holds the panel's keys: ↑↓
+    /// while the rows do, ⌘M while a mode menu shows and the panel holds them, nothing while it does not.
+    @Test func theFootNamesTheKeysOfWhatHoldsThem() {
+        #expect(NewSessionWords.hint(.rows, modes: true) == "↑↓ choose · ⌘M mode")
+        #expect(NewSessionWords.hint(.rows, modes: false) == "↑↓ choose")
+        #expect(NewSessionWords.hint(.signIn, modes: true) == "⌘M mode", "↑↓ named while they open Sign in's menu")
+        #expect(NewSessionWords.hint(.signIn, modes: false) == "")
+        #expect(NewSessionWords.hint(.none, modes: true) == "", "keys named while nothing of the panel holds them")
+    }
+
     @Test func aStartTheHostRefusedIsSaidInItsSentenceAndNeverItsCommand() {
         let noLogin = HostRefusal(
             message: "No Codex CLI login stored for ana, so a Codex CLI session cannot start in dock.",

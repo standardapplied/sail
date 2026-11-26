@@ -185,8 +185,10 @@ public final class Keycap: NSView {
     }
 
     /// Mast's kbd: 3 by 5 pt padding around a 10 pt line, a 1 pt edge and a 2 pt foot.
+    public static let height = 19.0
+
     override public var intrinsicContentSize: NSSize {
-        NSSize(width: ceil(label.size().width) + 12, height: 19)
+        NSSize(width: ceil(label.size().width) + 12, height: Self.height)
     }
 
     override public func draw(_: NSRect) {
