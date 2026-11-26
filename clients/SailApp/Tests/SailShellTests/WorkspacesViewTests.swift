@@ -905,7 +905,8 @@ import Testing
         #expect(Self.said(view.local.list.entries) == ["head Sessions 1 -", row("1")])
     }
 
-    /// The keys under This Mac's rows show only while a row is chosen in the list holding the keys;
+    /// The keys under This Mac's rows show only while a row is chosen in the list holding the keys,
+    /// told again as the keys leave it and come back;
     /// New Shell holds ⌘T and opens a shell, nothing else: no chooser.
     @Test func thisMacsKeysShowOnlyWhileARowIsChosen() async throws {
         let (view, window, _) = try await Self.listed()
@@ -918,6 +919,10 @@ import Testing
         #expect(shown() == 3, "\(shown()) keys shown with a row chosen")
         let words = view.local.keys.arrangedSubviews.flatMap { Self.found(NSTextField.self, in: $0).map(\.stringValue) }
         #expect(words == ["open", "new shell", "end session"])
+        #expect(window.makeFirstResponder(nil))
+        #expect(await RunnerTabTests.until { shown() == 0 }, "\(shown()) keys shown with the keys out of the list")
+        #expect(window.makeFirstResponder(view.local.list))
+        #expect(await RunnerTabTests.until { shown() == 3 }, "the keys did not come back with the list holding them")
         var acts: [LocalProjectView.Act] = []
         view.local.on = { acts.append($0) }
         let button = view.local.newShell

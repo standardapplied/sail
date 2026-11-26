@@ -73,7 +73,7 @@ package final class LocalProjectView: NSView {
             button.action = #selector(openShell(_:))
         }
         list.onChoose = { [weak self] _ in self?.showKeys() }
-        list.onFocus = { [weak self] in self?.showKeys() }
+        list.onKeys = { [weak self] in self?.showKeys() }
         compose()
     }
 
@@ -151,9 +151,9 @@ package final class LocalProjectView: NSView {
     }
 
     /// The keys under the list, each named only while it acts on the chosen row: a row chosen and
-    /// the list holding the keys of the key window.
+    /// the list holding the keys (``SailList/holdsKeys``), asked again whenever either changes.
     private func showKeys() {
-        let working = list.chosen != nil && window?.isKeyWindow == true && window?.firstResponder === list
+        let working = list.chosen != nil && list.holdsKeys
         keys.arrangedSubviews.forEach { $0.isHidden = !working }
     }
 
@@ -224,7 +224,7 @@ package final class LocalProjectView: NSView {
             buttons.topAnchor.constraint(equalTo: head.topAnchor), buttons.leadingAnchor.constraint(equalTo: words.trailingAnchor, constant: ProjectView.headGap),
             head.bottomAnchor.constraint(greaterThanOrEqualTo: words.bottomAnchor), head.bottomAnchor.constraint(greaterThanOrEqualTo: buttons.bottomAnchor), hug,
             keys.leadingAnchor.constraint(equalTo: foot.leadingAnchor), keys.centerYAnchor.constraint(equalTo: foot.centerYAnchor),
-            foot.heightAnchor.constraint(equalToConstant: Double(Keycap("⏎", look: look, mono: mono).intrinsicContentSize.height)),
+            foot.heightAnchor.constraint(equalToConstant: Keycap.height),
             column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ProjectView.padding.sides),
             column.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ProjectView.padding.sides),
             column.topAnchor.constraint(equalTo: topAnchor, constant: ProjectView.padding.top), above,
