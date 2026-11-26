@@ -160,8 +160,7 @@ jobs:
       # process were doing (scripts/stalls), both kept in the reports artifact. Job 139714853398
       # (image 20261123.0558.1) ended nothing for 20 s mid-run and the socket suites' 5 s waits ran
       # out; its console, which the test process buffers, could not say why. That image changed no
-      # OS or Xcode and has passed without a gap since; a runner minutes after boot was measured
-      # here at load 12 to 26 on its 3 cores from system daemons (triald, trustd, mds).
+      # OS or Xcode and has passed without a gap since, as has the image before it.
       - name: Test
         run: |
           mkdir -p "$RUNNER_TEMP/reports"
