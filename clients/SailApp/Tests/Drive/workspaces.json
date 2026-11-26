@@ -620,6 +620,7 @@
   {"name": "fi-shell-workspaces", "select": "workspaces"},
   {"name": "fi-shell-dock-chosen", "chooseRow": "dock"},
   {"name": "fi-shell-option-command-t", "press": "t", "modifiers": ["option", "command"]},
+  {"name": "fi-shell-claude-remembered", "newSessionChosen": "Claude Code"},
   {"name": "fi-shell-down-to-codex", "press": "arrowDown"},
   {"name": "fi-shell-down-to-the-shell", "press": "arrowDown"},
   {"name": "fi-shell-open-shell", "newSessionPrimary": ["Open Shell", "on"]},
