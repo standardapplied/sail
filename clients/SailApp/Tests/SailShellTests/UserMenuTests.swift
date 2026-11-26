@@ -17,7 +17,7 @@ import Testing
 /// what is the whole process's, so it passes beside any other suite in one process: each shell's
 /// menu is told its window gave up the keys by a notification of the test's own, not the real key
 /// window, and its Appearance is set through a recorder, not `NSApp.appearance`.
-@MainActor @Suite struct UserMenuTests {
+@MainActor @Suite(.timeLimit(.minutes(1))) struct UserMenuTests {
     init() {
         ExitWatch.install()
     }

@@ -256,8 +256,8 @@ public final class AccountFlow {
         if [.ended, .unreadableSignIn].contains(refusal.reason) { learnt(nil) }
     }
 
-    /// Who a check found signed in, shown: signed in, the panes ask the control plane again. A check
-    /// that finds no one while no one is signed in changes nothing on screen.
+    /// Who a check found signed in, shown: signed in, Workspaces, when shown, asks for its projects
+    /// again. A check that finds no one while no one is signed in changes nothing on screen.
     private func learnt(_ signedIn: SignedIn?) {
         if signedIn != nil || standing != nil { show(signedIn) }
     }
