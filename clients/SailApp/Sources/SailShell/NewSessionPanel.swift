@@ -4,25 +4,27 @@ import SailControls
 import SailLook
 import SailWorkbench
 
-/// A workspace row's New Session panel (`agent-start-a1-mockup.html`): what its agents route
-/// answered, in a 372 pt box 4 pt under the row, its trailing edge on the row's ⋯, always within
-/// what shows of the page less 8 pt each side (spanning that where the page is drawn narrow, as at
-/// the least window), and over the row when the window has no room under it
-/// (`subscription-signin-mockup.html`). It lists each harness offered in the route's order with how
-/// it starts, then the Shell; the chosen one alone shows its mode and the mode's words, then Sign
-/// in, a pop-up of its own sign-in, the person's key and Store a Key, and the sign-in's sentence
-/// where the workspace does not hold it yet; or what stops it in the server's sentence. Start, its
-/// one primary, starts the chosen harness in its mode and way in (Start and Sign In where that makes
-/// the person sign in); for the Shell it is the row's Open. Store a Key opens its sheet over the
-/// panel (``LoginSheet``), which the panel stays open behind; once a key is stored the panel shows
-/// what the route answers then with the key chosen, says so in one quiet line, and draws Start
-/// holding the keys. Where no agent starts for the person it says why, with Open a Shell or Close.
-/// The window keeps the keys: ↑ ↓ choose, ⌘M opens the mode's menu, ⇥ reaches Sign in, whose menu
-/// Space or ↑ ↓ open, Return presses Start and Escape closes; so do a click outside it, the window
-/// giving up the keys or being resized, and the section going.
+/// A workspace row's New Session popover (`first-impressions-mockup.html`, 3A): what its agents
+/// route answered, in a 388 pt box 4 pt under the row, its trailing edge on the row's ⋯, always
+/// within what shows of the page less 8 pt each side (spanning that where the page is drawn narrow,
+/// as at the least window), and over the row when the window has no room under it. Every kind is
+/// an equal row, the route's harnesses in its order then the Shell: a tile, the name, and how it
+/// signs in, or the server's few words for why it does not start. The chosen harness's options
+/// stand under its own name: Mode, a pop-up of its modes (one mode shown off, with the server's
+/// note), its words under it, in the warning tone where the server says the mode is risky; Sign in,
+/// a pop-up of its own sign-in, the person's key and Store a Key, and whether the workspace holds
+/// the sign-in. A harness that does not start says why in place of its options. The one primary
+/// names the choice (Start Claude Code, Open Shell, which opens a new shell); there is none where
+/// the chosen harness does not start. Store a Key opens its sheet over the panel (``LoginSheet``),
+/// which the panel stays open behind; once a key is stored the panel shows what the route answers
+/// then with the key chosen, says so in one quiet line, and draws the primary holding the keys.
+/// Where no agent starts for the person it says why, with Open a Shell or Close. The window keeps
+/// the keys: ↑ ↓ choose, typing narrows the rows past seven, ⌘M opens the mode's menu, ⇥ reaches
+/// Sign in, whose menu Space or ↑ ↓ open, Return presses the primary and Escape closes; so do a
+/// click outside it, the window giving up the keys or being resized, and the section going.
 @MainActor
 package final class NewSessionPanel: NSObject {
-    static let width = 372.0, gap = 4.0, inset = 8.0
+    static let width = 388.0, gap = 4.0, inset = 8.0
 
     /// The agents route's answer as the panel takes it: what can start, or why nothing was listed.
     enum Answer: Equatable {
@@ -41,7 +43,7 @@ package final class NewSessionPanel: NSObject {
 
     /// Told the start Start made, and what the person's starts now remember.
     var onStart: @MainActor (AgentStart, ModeMemory) -> Void = { _, _ in }
-    /// Told when Start opens the Shell, or Open a Shell is pressed: a new shell in the workspace.
+    /// Told when Open Shell, or Open a Shell, is pressed: a new shell in the workspace.
     var onShell: @MainActor () -> Void = {}
     /// Told when it closes, however it closes.
     var onClose: @MainActor () -> Void = {}
@@ -147,7 +149,7 @@ package final class NewSessionPanel: NSObject {
     }
 
     /// What the route answers once a key of `harness` was stored, `harness` chosen with `memory`'s
-    /// way in for it, `line` said over the foot until the panel closes, Start holding the keys;
+    /// way in for it, `line` said over the foot until the panel closes, the primary holding the keys;
     /// VoiceOver hears it ready on the key where the key is its way in, and hears `line` where the
     /// key is not `inUse`, as a sighted person reads it.
     func show(_ answer: Answer, memory: ModeMemory, stored line: String, harness: String, inUse: Bool) {
@@ -243,7 +245,8 @@ package final class NewSessionPanel: NSObject {
         redraw()
     }
 
-    /// Start: the chosen harness started (the person's starts remember it), or the Shell opened.
+    /// The primary: the chosen harness started (the person's starts remember it), or the Shell
+    /// opened; nothing where the chosen harness does not start.
     private func start() {
         guard case var .offered(panel) = content else { return }
         if panel.readiness == .shell {
@@ -268,8 +271,28 @@ package final class NewSessionPanel: NSObject {
         redraw()
     }
 
+    /// Past seven rows, what is typed while the rows hold the keys narrows them, ⌫ widens them
+    /// again; nothing typed is passed on there. Whether `event` was such a key.
+    private func narrow(_ event: NSEvent, held: NSEvent.ModifierFlags) -> Bool {
+        guard !signInFocused, held.isEmpty || held == .shift, case var .offered(panel) = content, panel.filters else { return false }
+        let typed: String
+        if event.keyCode == 51 {
+            guard !panel.filter.isEmpty else { return true }
+            typed = String(panel.filter.dropLast())
+        } else {
+            guard let words = event.characters, !words.isEmpty, words.unicodeScalars.allSatisfy({ ![.control, .privateUse].contains($0.properties.generalCategory) }) else { return false }
+            typed = panel.filter + words
+        }
+        if panel.narrow(to: typed) {
+            content = .offered(panel)
+            redraw()
+        }
+        return true
+    }
+
     /// A key while open: ↑ ↓ choose, or open Sign in's menu while it holds the keys, as Space does;
-    /// ⇥ moves between them; ⌘M the modes, Return presses Start, Escape closes.
+    /// ⇥ moves between them; ⌘M the modes, Return presses the primary, Escape closes; past seven
+    /// rows, typing narrows them.
     fileprivate func key(_ event: NSEvent) -> Bool {
         guard isOpen else { return false }
         let held = event.modifierFlags.intersection([.command, .option, .control, .shift])
@@ -281,6 +304,7 @@ package final class NewSessionPanel: NSObject {
             tab()
             return true
         }
+        if narrow(event, held: held) { return true }
         guard held.isEmpty else { return false }
         if signInFocused, [49, 125, 126].contains(event.keyCode), let button = view.signIn {
             popUp(button)
@@ -357,13 +381,14 @@ final class NewSessionKeys: NSView {
 }
 
 /// The panel's box, on the popover's surface with a strong hairline edge and 8 pt corners: its
-/// title, the stopped workspace's line, the rows with the chosen one's detail under it, a key
-/// just stored said in one line, and the foot with the keys and Start; or, where nothing starts for
-/// the person, why, and one button. Built whole by ``show(_:workspace:line:veiled:holder:keys:width:)``, every frame
-/// set there, so no layout pass changes what it shows; mirrored right to left.
+/// title, the stopped workspace's line, the kinds as equal rows, the chosen harness's options under
+/// its name, a key just stored said in one line, and the foot with the keys and the primary; or,
+/// where nothing starts for the person, why, and one button. Built whole by
+/// ``show(_:workspace:line:veiled:holder:keys:width:)``, every frame set there, so no layout pass
+/// changes what it shows; mirrored right to left.
 @MainActor
 package final class NewSessionView: NSView {
-    static let radius = 8.0, padding = 14.0, row = 30.0, gap = 7.0, about = 17.0
+    static let radius = 8.0, padding = 14.0, row = 46.0, rowGap = 2.0, listInset = 6.0, gap = 10.0, about = 17.0, labelWidth = 62.0, mark = 13.0
 
     /// What it shows: the route's harnesses and the Shell, or why no agent starts and whether the
     /// workspace still opens as a shell for the person.
@@ -387,7 +412,8 @@ package final class NewSessionView: NSView {
     package private(set) var height = 0.0
     /// The rows, top to bottom, the chosen one marked.
     package private(set) var rows: [NewSessionRow] = []
-    /// Start, Start and Sign In, Open a Shell or Close.
+    /// The primary, which names the choice, nil where the chosen harness does not start; or Open a
+    /// Shell or Close where nothing starts for the person.
     package private(set) var primary: SailButton?
     package private(set) var secondary: SailButton?
     /// The chosen harness's mode pop-up, nil for a harness of one mode or none chosen.
@@ -395,19 +421,22 @@ package final class NewSessionView: NSView {
     /// The chosen harness's Sign in pop-up: its own sign-in, the person's key, Store a Key; nil
     /// where it does not start.
     package private(set) var signIn: SailButton?
+    /// The mode's words said in the warning tone, after the warning mark; nil where none warns.
+    package private(set) var warned: String?
     /// Under its sheet's veil, its primary elsewhere: the sheet's.
     package private(set) var veiled = false
     /// What of the panel holds the keys (``KeyHolder``), as last shown: Sign in is drawn with the
-    /// ring a control holding them has; Start with Return's while the rows hold them.
+    /// ring a control holding them has; the primary with Return's while the rows hold them.
     private var holder = NewSessionWords.Holder.none
     /// The veil drawn over it while its sheet asks.
     private var veil: NSView?
-    /// The hairlines across it, the chosen row's bar, the stopped line's square and the stored
-    /// line's, as last laid out.
+    /// The hairlines across it, the chosen row's bar, the stopped line's square, the stored line's
+    /// and the warning mark, as last laid out.
     private var hairlines: [Double] = []
     private var bar: NSRect?
     private var square: NSRect?
     private var lineSquare: NSRect?
+    private var warning: NSRect?
     private var lineFailed = false
 
     /// The quiet line over the foot: a key stored, or why none can be stored now.
@@ -445,11 +474,11 @@ package final class NewSessionView: NSView {
     }
 
     /// Builds it for `content` in workspace `workspace`, `width` wide, saying `line` over the foot;
-    /// `veiled` while its sheet asks: its Start outlined, as a row's Open is
-    /// under the panel, the sheet's Store the one primary on screen, and the sheet's veil over it.
-    /// The foot names the keys of `holder`, Start wears Return's ring once a key is stored only while
-    /// `holder` is the rows (nothing under a sheet), and names its ⏎ while `keys`, whose Return
-    /// presses it, holds the keys.
+    /// `veiled` while its sheet asks: its primary outlined, as a row's Open is under the panel, the
+    /// sheet's Store the one primary on screen, and the sheet's veil over it. The foot names the
+    /// keys of `holder`, the primary wears Return's ring once a key is stored only while `holder`
+    /// is the rows (nothing under a sheet), and names its ⏎ while `keys`, whose Return presses it,
+    /// holds the keys.
     func show(_ content: Content, workspace: String, line: Line?, veiled: Bool, holder: NewSessionWords.Holder, keys: NSView, width: Double) {
         self.veiled = veiled
         self.holder = holder
@@ -459,10 +488,12 @@ package final class NewSessionView: NSView {
         secondary = nil
         modes = nil
         signIn = nil
+        warned = nil
         hairlines = []
         bar = nil
         square = nil
         lineSquare = nil
+        warning = nil
         boxWidth = width
         let edge = Look.hairline, inner = width - 2 * (Self.padding + edge)
         let title = NSMutableAttributedString(attributedString: Self.text(NewSessionWords.title(workspace).lead, .systemFont(ofSize: Look.Step.callout.points, weight: .semibold), look.text, direction: direction))
@@ -476,19 +507,18 @@ package final class NewSessionView: NSView {
                 square = quietLine(NewSessionWords.stopped(workspace), y: &y, width: width)
             }
             hairlines.append(y)
-            y += 4
+            y += Self.listInset - Self.rowGap
             for choice in panel.choices {
-                y = list(choice, of: panel, workspace: workspace, y: y, width: width)
+                y = list(choice, of: panel, workspace: workspace, y: y + Self.rowGap, width: width)
             }
-            y += 4
+            y = options(panel, workspace: workspace, y: y + Self.listInset, width: width)
             said(line, y: &y, width: width)
             hairlines.append(y)
-            let (title, enabled) = NewSessionWords.primary(panel.readiness, signsIn: panel.signsIn)
-            let start = SailButton(title, kind: veiled ? .secondary : .primary, size: .small, look: look, target: self, action: #selector(pressedStart(_:)))
-            start.hint("\r", through: keys, mono: mono)
-            start.isEnabled = enabled
-            start.holdsKeys = line.map { if case .stored = $0 { true } else { false } } == true && enabled && holder == .rows
-            start.why = enabled ? nil : Self.refusal(panel.readiness)?.message
+            let start = NewSessionWords.primary(panel.readiness).map { title in
+                SailButton(title, kind: veiled ? .secondary : .primary, size: .small, look: look, target: self, action: #selector(pressedStart(_:)))
+            }
+            start?.hint("\r", through: keys, mono: mono)
+            start?.holdsKeys = line.map { if case .stored = $0 { true } else { false } } == true && holder == .rows
             primary = start
             let hint = Self.label(Self.text(NewSessionWords.hint(holder, modes: modes != nil), mono.font(Look.Step.micro.points, .regular) as NSFont, look.textTertiary, direction: direction).cut(.byTruncatingTail))
             y = foot(start, hint: hint, y: y, width: width)
@@ -528,43 +558,57 @@ package final class NewSessionView: NSView {
         look.palette.isDark ? Tint(0x000000, alpha: 0.4) : Tint(0x0A0E11, alpha: 0.18)
     }
 
-    /// The row of `choice` at `y` and, chosen, its detail under it; where the next row starts.
+    /// The row of `choice` at `y`, the chosen one's bar at the list's edge; where it ends.
     private func list(_ choice: NewSession.Choice, of panel: NewSession, workspace: String, y top: Double, width: Double) -> Double {
         let edge = Look.hairline, chosen = panel.chosen == choice
         let offer: AgentOffer? = if case let .harness(harness) = choice { panel.offer(harness) } else { nil }
-        let name = offer?.display ?? NewSessionWords.shell.name
-        let line = offer.map { NewSessionWords.line($0, way: panel.way(of: $0.harness)) } ?? NewSessionWords.shell.line
-        let off = offer?.refusal != nil
-        let row = NewSessionRow(choice, name: name, line: line, chosen: chosen, off: off, look: look, direction: direction)
+        let line = offer.map(NewSessionWords.line) ?? NewSessionWords.shellLine(workspace)
+        let tile: NewSessionRow.Tile = offer.map { .monogram(NewSessionWords.monogram($0.display)) } ?? .icon(.terminal)
+        let row = NewSessionRow(choice, name: panel.name(of: choice), line: line, tile: tile, chosen: chosen, off: offer?.refusal != nil, look: look, mono: mono, direction: direction)
         row.onChoose = { [weak self] in self?.on(.choose(choice)) }
-        row.frame = mirrored(NSRect(x: edge + 6, y: top, width: width - 2 * (edge + 6), height: Self.row))
+        row.frame = mirrored(NSRect(x: edge + Self.listInset, y: top, width: width - 2 * (edge + Self.listInset), height: Self.row))
         row.lay()
         addSubview(row)
         rows.append(row)
-        if chosen { bar = mirrored(NSRect(x: edge, y: top + 8, width: RowStyle.barWidth, height: 14)) }
-        guard chosen, let offer, case let .harness(harness) = choice else { return top + Self.row }
-        let x = edge + 6 + 10, inner = width - 2 * x
-        var y = top + Self.row + 2
-        switch panel.readiness {
-        case let .refused(refusal):
-            y = place(said(refusal.message, width: inner), x: x, y: y, width: inner)
-            if let remedy = NewSessionWords.remedy(refusal) { y = place(quiet(remedy, width: inner), x: x, y: y + Self.gap, width: inner) }
-        case .start, .shell:
-            let mode = panel.mode(of: harness) ?? offer.modeDefault, way = panel.way(of: harness) ?? .signIn
-            let column = labelColumn()
-            y = modeLine(offer, mode: mode, x: x, column: column, y: y, width: inner)
-            y = place(quiet(NewSessionWords.about(offer, mode: mode), width: inner), x: x, y: y + Self.gap, width: inner)
-            y = signInLine(offer, way: way, x: x, column: column, y: y + Self.gap, width: inner)
-            if panel.signsIn, let how = offer.signIn?.said {
-                y = place(said(how, width: inner), x: x, y: y + Self.gap, width: inner)
-            }
-        }
-        return y + 10
+        if chosen { bar = mirrored(NSRect(x: edge, y: top + (Self.row - RowStyle.list.bar) / 2, width: RowStyle.barWidth, height: RowStyle.list.bar)) }
+        return top + Self.row
     }
 
-    /// Where the pop-ups start: after the wider of "Mode" and "Sign in", so both stand on one column.
-    private func labelColumn() -> Double {
-        [NewSessionWords.mode, NewSessionWords.signIn].map { Double(lineLabel($0).fittingSize.width) }.max() ?? 0
+    /// The chosen harness's options under its name, from `y`: its Mode and Sign in with their
+    /// words, or why it does not start; none for the Shell. Where they end.
+    private func options(_ panel: NewSession, workspace: String, y top: Double, width: Double) -> Double {
+        guard case let .harness(harness) = panel.chosen, let offer = panel.offer(harness) else { return top }
+        hairlines.append(top)
+        let edge = Look.hairline, x = edge + Self.padding, inner = width - 2 * x
+        let eyebrow = Self.label(Draw.text(offer.display, mono.font(Look.Step.caption.points) as NSFont, look.textTertiary, tracking: Look.Tracking.eyebrow, upper: true).cut(.byTruncatingTail))
+        var y = place(eyebrow, x: x, y: top + 12, width: min(Double(eyebrow.fittingSize.width), inner)) + Self.gap
+        if case let .refused(refusal) = panel.readiness {
+            y = place(said(refusal.message, width: inner), x: x, y: y, width: inner)
+            if let remedy = NewSessionWords.remedy(refusal) { y = place(quiet(remedy, width: inner), x: x, y: y + 4, width: inner) }
+            return y + 14
+        }
+        let mode = panel.mode(of: harness) ?? offer.modeDefault, way = panel.way(of: harness) ?? .signIn
+        let after = x + Self.labelWidth + 10, room = x + inner - after
+        if !offer.modes.isEmpty {
+            y = modeLine(offer, mode: mode, x: x, after: after, y: y, room: room)
+            y = help(NewSessionWords.about(offer, mode: mode), warns: panel.risky, x: after, y: y + 4, width: room) + Self.gap
+        }
+        y = signInLine(offer, way: way, x: x, after: after, y: y, room: room)
+        if let words = NewSessionWords.signInHelp(offer, way: way, in: workspace) {
+            y = help(words, warns: false, x: after, y: y + 4, width: room)
+        }
+        return y + 14
+    }
+
+    /// `words` under a pop-up at `x`, `width` wide: quiet, or in the warning tone after its mark
+    /// where they warn; where they end.
+    private func help(_ words: String, warns: Bool, x: Double, y: Double, width: Double) -> Double {
+        guard warns else { return place(quiet(words, width: width), x: x, y: y, width: width) }
+        let after = Self.mark + 6
+        warned = words
+        warning = mirrored(NSRect(x: x, y: y + (Self.about - Self.mark) / 2, width: Self.mark, height: Self.mark))
+        let warn = Self.wrapping(words, .systemFont(ofSize: Look.Step.footnote.points), Tint(look.warning), width: width - after, direction: direction, lineHeight: Self.about)
+        return place(warn, x: x + after, y: y, width: width - after)
     }
 
     private func lineLabel(_ words: String) -> NSTextField {
@@ -574,15 +618,16 @@ package final class NewSessionView: NSView {
     /// `words` as a line's label at `x`, centred on a small button's height at `y`.
     private func placeLabel(_ words: String, x: Double, y: Double) {
         let label = lineLabel(words), size = label.fittingSize
-        label.frame = mirrored(NSRect(x: x, y: y + (ButtonSize.small.height - Double(size.height)) / 2, width: Double(size.width), height: Double(size.height)))
+        label.frame = mirrored(NSRect(x: x, y: y + (ButtonSize.small.height - Double(size.height)) / 2, width: min(Double(size.width), Self.labelWidth), height: Double(size.height)))
         addSubview(label)
     }
 
     /// A small pop-up titled `title`, of `menu`, at `x` and `y` within `room`, named `name` to
-    /// VoiceOver with its title as its value.
-    private func popUp(_ title: String, menu: NSMenu, name: String, x: Double, y: Double, room: Double) -> SailButton {
-        let button = SailButton(title, kind: .secondary, size: .small, popUp: true, look: look, target: MenuOpener.shared, action: #selector(MenuOpener.open(_:)))
+    /// VoiceOver with its title as its value; with no menu, shown off.
+    private func popUp(_ title: String, menu: NSMenu?, name: String, x: Double, y: Double, room: Double) -> SailButton {
+        let button = SailButton(title, kind: .secondary, size: .small, popUp: menu != nil, look: look, target: MenuOpener.shared, action: #selector(MenuOpener.open(_:)))
         button.menu = menu
+        button.isEnabled = menu != nil
         button.setAccessibilityLabel(name)
         button.setAccessibilityValue(title)
         button.userInterfaceLayoutDirection = direction
@@ -592,18 +637,14 @@ package final class NewSessionView: NSView {
         return button
     }
 
-    /// "Mode" and the pop-up of the server's labels, or, for a harness of one mode, its label as
-    /// words; where the line ends.
-    private func modeLine(_ offer: AgentOffer, mode: String, x: Double, column: Double, y: Double, width: Double) -> Double {
+    /// "Mode" and the pop-up of the server's labels, shown off for a harness of one mode; where the
+    /// line ends.
+    private func modeLine(_ offer: AgentOffer, mode: String, x: Double, after: Double, y: Double, room: Double) -> Double {
         placeLabel(NewSessionWords.mode, x: x, y: y)
         let title = offer.modes.first { $0.mode == mode }?.label ?? mode
-        let after = x + column + 10, room = x + width - after, high = ButtonSize.small.height
         guard offer.modes.count > 1 else {
-            let fixed = Self.label(Self.text(title, .systemFont(ofSize: Look.Step.footnote.points, weight: .medium), look.text, direction: direction).cut(.byTruncatingTail))
-            let size = fixed.fittingSize
-            fixed.frame = mirrored(NSRect(x: after, y: y + (high - Double(size.height)) / 2, width: min(Double(size.width), room), height: Double(size.height)))
-            addSubview(fixed)
-            return y + high
+            _ = popUp(title, menu: nil, name: NewSessionWords.mode, x: after, y: y, room: room)
+            return y + ButtonSize.small.height
         }
         let menu = NSMenu()
         for each in offer.modes {
@@ -614,12 +655,12 @@ package final class NewSessionView: NSView {
             menu.addItem(item)
         }
         modes = popUp(title, menu: menu, name: NewSessionWords.mode, x: after, y: y, room: room)
-        return y + high
+        return y + ButtonSize.small.height
     }
 
     /// "Sign in" and its pop-up, titled by how the harness starts now: its own sign-in, the person's
     /// key where they have one, a separator and Store a Key; where the line ends.
-    private func signInLine(_ offer: AgentOffer, way: Way, x: Double, column: Double, y: Double, width: Double) -> Double {
+    private func signInLine(_ offer: AgentOffer, way: Way, x: Double, after: Double, y: Double, room: Double) -> Double {
         placeLabel(NewSessionWords.signIn, x: x, y: y)
         let account = offer.signIn?.name ?? "", key = NewSessionWords.key(offer)
         let menu = NSMenu()
@@ -635,8 +676,7 @@ package final class NewSessionView: NSView {
         let store = NSMenuItem(title: NewSessionWords.storeKey, action: #selector(choseStoreKey(_:)), keyEquivalent: "")
         store.target = self
         menu.addItem(store)
-        let after = x + column + 10
-        let button = popUp(way == .key ? key ?? account : account, menu: menu, name: NewSessionWords.signIn, x: after, y: y, room: x + width - after)
+        let button = popUp(way == .key ? key ?? account : account, menu: menu, name: NewSessionWords.signIn, x: after, y: y, room: room)
         button.holdsKeys = holder == .signIn
         signIn = button
         return y + ButtonSize.small.height
@@ -664,13 +704,16 @@ package final class NewSessionView: NSView {
         return mirrored(NSRect(x: edge + Self.padding, y: top + (min(Double(words.frame.height), Self.about) - 6) / 2, width: 6, height: 6))
     }
 
-    /// The foot at `y`: the keys at its leading end, its button at the trailing; where it ends.
-    private func foot(_ button: SailButton, hint: NSTextField?, y: Double, width: Double) -> Double {
-        let edge = Look.hairline, size = button.intrinsicContentSize, room = Look.haloRoom
-        let box = NSRect(x: width - edge - 12 - Double(size.width), y: y + 10, width: Double(size.width), height: Double(size.height))
-        button.frame = mirrored(box.insetBy(dx: -room, dy: -room))
-        button.userInterfaceLayoutDirection = direction
-        addSubview(button)
+    /// The foot at `y`: the keys at its leading end, its button, if any, at the trailing; a small
+    /// button tall either way; where it ends.
+    private func foot(_ button: SailButton?, hint: NSTextField?, y: Double, width: Double) -> Double {
+        let edge = Look.hairline, size = button?.intrinsicContentSize ?? .zero, room = Look.haloRoom
+        let box = NSRect(x: width - edge - 12 - Double(size.width), y: y + 10, width: Double(size.width), height: ButtonSize.small.height)
+        if let button {
+            button.frame = mirrored(box.insetBy(dx: -room, dy: -room))
+            button.userInterfaceLayoutDirection = direction
+            addSubview(button)
+        }
         if let hint {
             let hintSize = hint.fittingSize
             let hintWidth = min(Double(hintSize.width), Double(box.minX) - edge - 12 - 12)
@@ -696,19 +739,15 @@ package final class NewSessionView: NSView {
         Self.wrapping(words, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary, width: width, direction: direction, lineHeight: Self.about)
     }
 
-    private static func refusal(_ readiness: NewSession.Readiness) -> Refusal? {
-        if case let .refused(refusal) = readiness { refusal } else { nil }
-    }
-
     /// `rect`, laid out left to right in the box, turned about its middle right to left.
     private func mirrored(_ rect: NSRect) -> NSRect {
         guard direction == .rightToLeft else { return rect }
         return NSRect(x: boxWidth - Double(rect.maxX), y: Double(rect.minY), width: Double(rect.width), height: Double(rect.height))
     }
 
-    static func text(_ words: String, _ font: NSFont, _ ink: Tint, direction: NSUserInterfaceLayoutDirection, trailing: Bool = false, lineHeight: Double? = nil) -> NSAttributedString {
+    static func text(_ words: String, _ font: NSFont, _ ink: Tint, direction: NSUserInterfaceLayoutDirection, lineHeight: Double? = nil) -> NSAttributedString {
         let style = NSMutableParagraphStyle()
-        style.alignment = (direction == .rightToLeft) != trailing ? .right : .left
+        style.alignment = direction == .rightToLeft ? .right : .left
         if let lineHeight {
             style.minimumLineHeight = lineHeight
             style.maximumLineHeight = lineHeight
@@ -781,6 +820,7 @@ package final class NewSessionView: NSView {
             NSColor(Tint(lineFailed ? look.error : look.success)).setFill()
             lineSquare.fill()
         }
+        if let warning { Draw.icon(.warning, in: warning, ink: Tint(look.warning)) }
         if let bar {
             NSColor(look.accent).setFill()
             let half = RowStyle.barWidth / 2, rightToLeft = direction == .rightToLeft
@@ -799,23 +839,43 @@ extension NewSessionView: Marked {
     }
 }
 
-/// One row of the panel: a harness by its name, its login or what stops it at the trailing end,
-/// cut there; the Shell; the chosen one's name at full weight. A click chooses it.
+/// One kind as a row of the panel, 46 pt: its tile (a monogram, or the Shell's terminal), its name
+/// and one line under it; the chosen one's name at full weight, its tile outlined in ink and the
+/// accent check at its end; a kind that does not start dimmed. The pointer over it sets its name at
+/// full weight, as a list row's is. A click chooses it.
 @MainActor
 package final class NewSessionRow: NSView {
+    /// What its tile shows.
+    package enum Tile: Equatable {
+        case monogram(String), icon(LineIcon)
+    }
+
+    static let tile = 28.0, check = 15.0, inset = 8.0, gap = 10.0
+
     package let choice: NewSession.Choice
     package let name: NSTextField
     package let line: NSTextField
     var onChoose: @MainActor () -> Void = {}
+    private let words: String
+    package let tile: Tile
+    private let off: Bool
+    private let look: Look
+    private let mono: LabelFont
     private let direction: NSUserInterfaceLayoutDirection
+    private var hoverArea: NSTrackingArea?
+    /// Under the pointer: its name at full weight.
+    package private(set) var hovered = false
 
-    init(_ choice: NewSession.Choice, name words: String, line said: String, chosen: Bool, off: Bool, look: Look, direction: NSUserInterfaceLayoutDirection) {
+    init(_ choice: NewSession.Choice, name words: String, line said: String, tile: Tile, chosen: Bool, off: Bool, look: Look, mono: LabelFont, direction: NSUserInterfaceLayoutDirection) {
         self.choice = choice
+        self.words = words
+        self.tile = tile
+        self.off = off
+        self.look = look
+        self.mono = mono
         self.direction = direction
-        let points = Look.Step.callout.points
-        name = NewSessionView.label(NewSessionView.text(words, .systemFont(ofSize: points, weight: chosen ? .semibold : .medium), off ? look.textTertiary : look.text, direction: direction).cut(.byTruncatingTail))
-        line = NewSessionView.label(NewSessionView.text(said, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary, direction: direction, trailing: true).cut(.byTruncatingTail))
-        line.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        name = NewSessionView.label(NSAttributedString())
+        line = NewSessionView.label(NewSessionView.text(said, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary, direction: direction).cut(.byTruncatingTail))
         super.init(frame: .zero)
         addSubview(name)
         addSubview(line)
@@ -823,6 +883,7 @@ package final class NewSessionRow: NSView {
         setAccessibilityRole(.radioButton)
         setAccessibilityLabel(said.isEmpty ? words : "\(words), \(said)")
         setAccessibilityValue(chosen ? 1 : 0)
+        named()
     }
 
     @available(*, unavailable)
@@ -838,16 +899,63 @@ package final class NewSessionRow: NSView {
         accessibilityValue() as? Int == 1
     }
 
-    /// The name 10 pt in at its own width, the line after it to 10 pt from the end, both centred.
+    private func named() {
+        let strong = RowPaint(RowState(chosen: chosen, hovered: hovered)).strong
+        name.attributedStringValue = NewSessionView.text(words, .systemFont(ofSize: Look.Step.callout.points, weight: strong ? .semibold : .medium), off ? look.textTertiary : look.text, direction: direction).cut(.byTruncatingTail)
+    }
+
+    /// The tile 8 pt in, the name over its line after it, the check's room at the end; mirrored
+    /// right to left.
     func lay() {
-        let width = Double(bounds.width), height = Double(bounds.height), inset = 10.0, gap = 10.0
-        let nameSize = name.fittingSize, lineSize = line.fittingSize
-        let nameWidth = min(Double(nameSize.width), width - 2 * inset)
-        let lineWidth = max(min(Double(lineSize.width), width - 2 * inset - nameWidth - gap), 0)
-        let rightToLeft = direction == .rightToLeft
-        name.frame = NSRect(x: rightToLeft ? width - inset - nameWidth : inset, y: (height - Double(nameSize.height)) / 2, width: nameWidth, height: Double(nameSize.height))
-        line.frame = NSRect(x: rightToLeft ? inset : width - inset - lineWidth, y: (height - Double(lineSize.height)) / 2, width: lineWidth, height: Double(lineSize.height))
-        line.isHidden = lineWidth < 1
+        let width = Double(bounds.width), height = Double(bounds.height)
+        let start = Self.inset + Self.tile + Self.gap, room = max(width - start - Self.gap - Self.check - Self.gap, 0)
+        let nameHeight = Double(name.fittingSize.height), lineHeight = Double(line.fittingSize.height), top = (height - nameHeight - 2 - lineHeight) / 2
+        name.frame = mirrored(NSRect(x: start, y: top, width: min(Double(name.fittingSize.width), room), height: nameHeight))
+        line.frame = mirrored(NSRect(x: start, y: top + nameHeight + 2, width: min(Double(line.fittingSize.width), room), height: lineHeight))
+    }
+
+    private func mirrored(_ rect: NSRect) -> NSRect {
+        guard direction == .rightToLeft else { return rect }
+        return NSRect(x: Double(bounds.width) - Double(rect.maxX), y: Double(rect.minY), width: Double(rect.width), height: Double(rect.height))
+    }
+
+    package override func draw(_: NSRect) {
+        let well = chosen ? look.wellChosen : look.well
+        let ink = off ? look.textTertiary : well.ink
+        let box = mirrored(NSRect(x: Self.inset, y: (Double(bounds.height) - Self.tile) / 2, width: Self.tile, height: Self.tile))
+        Draw.box(box, radius: Look.contentRadius, fill: well.fill, edge: well.edge)
+        switch tile {
+        case let .monogram(letters):
+            let text = Draw.text(letters, mono.font(Look.Step.micro.points, .semibold) as NSFont, ink), size = text.size()
+            text.draw(at: NSPoint(x: Double(box.midX) - Double(size.width) / 2, y: Double(box.midY) - Double(size.height) / 2))
+        case let .icon(icon):
+            Draw.icon(icon, in: box.insetBy(dx: (Self.tile - Self.check) / 2, dy: (Self.tile - Self.check) / 2), ink: ink)
+        }
+        guard chosen else { return }
+        Draw.icon(.check, in: mirrored(NSRect(x: Double(bounds.width) - Self.gap - Self.check, y: (Double(bounds.height) - Self.check) / 2, width: Self.check, height: Self.check)), ink: Tint(look.accent))
+    }
+
+    package override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    package override func mouseEntered(with _: NSEvent) {
+        hover(true)
+    }
+
+    package override func mouseExited(with _: NSEvent) {
+        hover(false)
+    }
+
+    private func hover(_ over: Bool) {
+        guard hovered != over else { return }
+        hovered = over
+        named()
+        lay()
     }
 
     package override func mouseDown(with _: NSEvent) {}
@@ -864,6 +972,12 @@ package final class NewSessionRow: NSView {
     package override func accessibilityPerformPress() -> Bool {
         onChoose()
         return true
+    }
+}
+
+extension NewSessionRow: Marked {
+    package var drawnMarks: [Mark] {
+        chosen ? look.marks(line: Tint(look.accent)) : []
     }
 }
 

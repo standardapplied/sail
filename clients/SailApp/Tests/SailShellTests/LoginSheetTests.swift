@@ -231,7 +231,7 @@ import Testing
     /// of which the sheet takes. Stored, the field is empty at once, the one request held the key in
     /// its body; the sheet goes, the panel shows dock's agents asked again, Claude Code ready on the
     /// key just stored, which is chosen (Sign in reads it) and remembered, the store said in one line,
-    /// Start (no longer Start and Sign In) holding the keys, and Return starts it on the key; the
+    /// Start Claude Code holding the keys, and Return starts it on the key; the
     /// server's note on the key it replaced is said. Store a Key chosen again from Sign in after ⇥:
     /// under that sheet neither Start nor Sign in wears Return's ring, which the sheet's Store has.
     /// The key is in no default and no word the app shows.
@@ -263,7 +263,7 @@ import Testing
         #expect(panel.view.signIn?.title == "API key “default”" && view.memory.ways == ["claude-code": .key], "storing a key did not choose it")
         #expect(panel.view.words.contains("Stored Claude Code key “default”. An agent session already running keeps the key it started with until it ends; no workspace keeps any of it.") && !panel.view.words.contains { $0.contains("asks you to sign in") }, "the store, and the server's note on the key it replaced, are not said: \(panel.view.words)")
         let start = try #require(panel.view.primary)
-        #expect(start.title == "Start" && start.isEnabled && start.holdsKeys && start.namesKey)
+        #expect(start.title == "Start Claude Code" && start.isEnabled && start.holdsKeys && start.namesKey)
         #expect(WorkspacesViewTests.footSays(view.project) == ["New"], "the sheet gone, the foot under the panel says \(WorkspacesViewTests.footSays(view.project))")
         #expect(panel.view.words.contains("↑↓ choose · ⌘M mode"))
         try NewSessionPanelTests.press(try NewSessionPanelTests.key(48, "\t"), in: window)
@@ -431,7 +431,7 @@ extension LoginSheetTests {
         #expect(window.attachedSheet == nil && Self.cleared(sheet))
         #expect(await server.requests.filter { $0.method == .put }.isEmpty, "a cancelled sheet sent the key")
         #expect(view.newSession.view.primary?.kind == .primary && !view.newSession.view.veiled, "the panel's primary did not come back with the sheet gone")
-        #expect(view.newSession.isOpen && !view.newSession.popover.stays && view.newSession.view.primary?.title == "Start and Sign In")
+        #expect(view.newSession.isOpen && !view.newSession.popover.stays && view.newSession.view.primary?.title == "Start Claude Code")
     }
 
     /// With a Claude Code login that is not the default, `work` is suggested as words beside the one

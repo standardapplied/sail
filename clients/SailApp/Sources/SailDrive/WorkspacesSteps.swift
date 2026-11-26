@@ -98,19 +98,12 @@ actor GoldenDesk: Transport {
     /// From now on dock's agents are the golden `workspace-agents-dock-no-login`'s with a third
     /// harness after them that no word of the app names: its own sign-in, words and key, as a
     /// server declaring it would.
-    func answerMadeUp() throws {
-        let exchange = try Exchange("workspace-agents-dock-no-login")
-        guard var body = try JSONSerialization.jsonObject(with: exchange.body) as? [String: Any], let offered = body["offered"] as? [[String: Any]] else { return }
-        let madeUp: [String: Any] = [
-            "harness": "tide", "display": "Tide", "mode_default": "default", "inside": true,
-            "modes": [["mode": "default", "label": "Tide's own", "about": "Starts as Tide starts by itself."]],
-            "kinds": [["kind": "token", "label": "Tide token", "how": [["text": "Create a token on the Tide dashboard"]]]],
-            "login": ["name": "default", "kind": "token"],
-            "sign_in": ["name": "Your Tide crew", "signed_in": false,
-                        "how": [["text": "Tide asks you to sign in with your Tide crew when it starts, once in each workspace. Pick “Join by code” there."]]],
-        ]
-        body["offered"] = offered + [madeUp]
-        answers["GET /v1/projects/harbor/workspaces/dock/agents"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: try JSONSerialization.data(withJSONObject: body))
+    func answerMadeUp(_ madeUp: Step.MadeUpAgents) throws {
+        let offers = madeUp.offers.map { name in
+            Exchange.madeUpOffer(name, risky: madeUp.risky?.contains(name) == true, unavailable: madeUp.unavailable?.contains(name) == true ? "Not installed in harbor" : nil)
+        }
+        let exchange = try Exchange("workspace-agents-dock-no-login").offering(offers)
+        answers["GET /v1/projects/harbor/workspaces/dock/agents"] = HTTPResponse(status: exchange.status, headers: exchange.headers, body: exchange.body)
         held["GET /v1/projects/harbor/workspaces/dock/agents"] = .zero
     }
 
@@ -227,9 +220,9 @@ extension Driver {
         if let started = await performNewSession(step) { return started }
         if let stored = await performLoginSheet(step) { return stored }
         let pane = shell.workspaces
-        if step.agentsMadeUp == true {
+        if let madeUp = step.agentsMadeUp {
             do {
-                try await GoldenDesk.shared.answerMadeUp()
+                try await GoldenDesk.shared.answerMadeUp(madeUp)
                 return (true, "")
             } catch {
                 return (false, "workspace-agents-dock-no-login: \(error)")
@@ -588,6 +581,26 @@ extension Driver {
             let chosen = { panel.view.rows.first(where: \.chosen)?.name.stringValue }
             let found = await waitUntil(step.seconds ?? 5) { panel.isOpen && chosen() == name }
             return (found, "chosen: \(chosen() ?? "none"); " + said())
+        }
+        if step.newSessionPrimary?.isEmpty == true {
+            let none = await waitUntil(step.seconds ?? 5) { panel.isOpen && panel.view.primary == nil }
+            return (none, "the primary: \(panel.view.primary?.title ?? "none"); " + said())
+        }
+        if let names = step.newSessionRows {
+            let rows = { panel.view.rows.map(\.name.stringValue) }
+            let found = await waitUntil(step.seconds ?? 5) { panel.isOpen && rows() == names }
+            return (found, "the rows: \(rows()); " + said())
+        }
+        if let words = step.newSessionWarns {
+            let found = await waitUntil(step.seconds ?? 5) { panel.isOpen && (panel.view.warned ?? "") == words }
+            return (found, "warned: \(panel.view.warned ?? "nothing"); " + said())
+        }
+        if let name = step.newSessionHover {
+            guard panel.isOpen, let row = panel.view.rows.first(where: { $0.name.stringValue == name }), let window = row.window,
+                  let entered = NSEvent.enterExitEvent(with: .mouseEntered, location: row.convert(NSPoint(x: row.bounds.midX, y: row.bounds.midY), to: nil), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil)
+            else { return (false, "no row \(name) to move onto; " + said()) }
+            row.mouseEntered(with: entered)
+            return (row.hovered, "\(name) \(row.hovered ? "is" : "is not") under the pointer")
         }
         if let primary = step.newSessionPrimary, primary.count == 2 || primary.count == 3 {
             let button = { panel.view.primary }

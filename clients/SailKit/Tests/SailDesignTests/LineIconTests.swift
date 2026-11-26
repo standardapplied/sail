@@ -72,6 +72,20 @@ import Testing
         #expect(LineIcon.error.strokes == [ring, Self.line((12, 7.5), (12, 13)), Self.line((12, 16.2), (12, 16.3))])
     }
 
+    /// New session's Shell tile and its chosen row's check, as `first-impressions-mockup.html`'s
+    /// `term` and `check` draw them: the terminal's rounded box (2.5 corners), clockwise from its top
+    /// edge, each stroke meeting the next, then its prompt and cursor.
+    @Test func theTerminalAndTheCheckAreTheFirstImpressionsMockups() {
+        #expect(LineIcon.terminal.strokes == [
+            Self.line((5.5, 4.5), (18.5, 4.5)), .arc(.init(18.5, 7), radius: 2.5, from: 270, to: 360),
+            Self.line((21, 7), (21, 17)), .arc(.init(18.5, 17), radius: 2.5, from: 0, to: 90),
+            Self.line((18.5, 19.5), (5.5, 19.5)), .arc(.init(5.5, 17), radius: 2.5, from: 90, to: 180),
+            Self.line((3, 17), (3, 7)), .arc(.init(5.5, 7), radius: 2.5, from: 180, to: 270),
+            Self.line((7.5, 9.5), (10.5, 12), (7.5, 14.5)), Self.line((12.5, 15), (16.5, 15)),
+        ])
+        #expect(LineIcon.check.strokes == [Self.line((5, 12.5), (9.5, 17), (19, 7.5))])
+    }
+
     /// A folder's disclosure, as the files mockup's `right` and `down` draw it: shut, then open.
     @Test func theDisclosureIsTheFilesMockups() {
         #expect(LineIcon.right.strokes == [Self.line((9, 6), (15, 12), (9, 18))])

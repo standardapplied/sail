@@ -63,10 +63,10 @@ public struct ModeMemory: Codable, Equatable, Sendable {
 }
 
 /// The New Session panel's model for one workspace, from what its agents route answered: the
-/// harnesses it offers in its order and a Shell after them, the one chosen, its mode and its way in
-/// (each the person's last for that harness while it is offered, else the harness's own default
-/// mode and its own sign-in), and what a start would do. Every sentence is the server's; no
-/// harness's, mode's or kind's name is branched on.
+/// harnesses it offers in its order and a Shell after them, narrowed past seven by what is typed,
+/// the one chosen, its mode and its way in (each the person's last for that harness while it is
+/// offered, else the harness's own default mode and its own sign-in), and what a start would do.
+/// Every sentence is the server's; no harness's, mode's or kind's name is branched on.
 public struct NewSession: Equatable, Sendable {
     public enum Choice: Hashable, Sendable {
         case harness(String)
@@ -80,9 +80,14 @@ public struct NewSession: Equatable, Sendable {
         case shell
     }
 
+    /// The most rows shown whole; past them typing narrows the rows.
+    public static let unnarrowed = 7
+
     public let agents: WorkspaceAgents
     public private(set) var chosen: Choice
     public private(set) var memory: ModeMemory
+    /// What typing narrowed the rows to: the start of their names; empty, every row.
+    public private(set) var filter = ""
     private var modes: [String: String]
     private var ways: [String: Way]
 
@@ -112,9 +117,38 @@ public struct NewSession: Equatable, Sendable {
         agents.refusal
     }
 
-    /// The panel's rows in order: each offered harness, then the Shell.
+    /// The panel's rows in order: each offered harness, then the Shell, those whose name starts
+    /// with the filter.
     public var choices: [Choice] {
+        every.filter { matches($0, filter) }
+    }
+
+    private var every: [Choice] {
         agents.offered.map { .harness($0.harness) } + [.shell]
+    }
+
+    /// Whether typing narrows the rows: there are more than ``unnarrowed``.
+    public var filters: Bool {
+        every.count > Self.unnarrowed
+    }
+
+    /// A row's name: its harness's display name, or the Shell's.
+    public func name(of choice: Choice) -> String {
+        guard case let .harness(harness) = choice else { return NewSessionWords.shell }
+        return offer(harness)?.display ?? harness
+    }
+
+    private func matches(_ choice: Choice, _ start: String) -> Bool {
+        name(of: choice).range(of: start, options: [.anchored, .caseInsensitive, .diacriticInsensitive]) != nil || start.isEmpty
+    }
+
+    /// The rows narrowed to those whose name starts with `typed`, the first chosen, where typing
+    /// narrows them and some row matches; whether it did.
+    public mutating func narrow(to typed: String) -> Bool {
+        guard filters, let first = every.first(where: { matches($0, typed) }) else { return false }
+        filter = typed
+        chosen = first
+        return true
     }
 
     public func offer(_ harness: String) -> AgentOffer? {
@@ -155,11 +189,10 @@ public struct NewSession: Equatable, Sendable {
         ways[harness] = way
     }
 
-    /// Whether Start makes the person sign in: the chosen harness starts with its own sign-in in a
-    /// workspace not known to hold it.
-    public var signsIn: Bool {
-        guard case let .start(start) = readiness, start.inside, let offer = offer(start.harness) else { return false }
-        return offer.signIn?.signedIn != true
+    /// Whether the chosen harness's chosen mode skips its own permission checks, as the server says.
+    public var risky: Bool {
+        guard case let .harness(harness) = chosen, let mode = modes[harness] else { return false }
+        return offer(harness)?.modes.first { $0.mode == mode }?.risky == true
     }
 
     /// Whether the row's quick item starts the last start's harness again at once, in the way in
@@ -199,7 +232,19 @@ public enum NewSessionWords {
         "\(workspace) is stopped. Starting a session starts it."
     }
 
-    public static let shell = (name: "Shell", line: "a terminal, no agent")
+    public static let shell = "Shell"
+
+    /// The Shell row's line.
+    public static func shellLine(_ workspace: String) -> String {
+        "A terminal in \(workspace), no agent"
+    }
+
+    /// A kind's tile: the first two letters or digits of its display name, the first upper case.
+    public static func monogram(_ display: String) -> String {
+        let letters = display.filter { $0.isLetter || $0.isNumber }.prefix(2)
+        return letters.prefix(1).uppercased() + letters.dropFirst().lowercased()
+    }
+
     /// What holds the panel's keys, as the app's one rule for it says (the first responder of a
     /// window that is key): its rows, its Sign in pop-up (after ⇥), or nothing of the panel, a sheet
     /// over the window or another window being key.
@@ -219,12 +264,21 @@ public enum NewSessionWords {
     public static let signIn = "Sign in"
     public static let storeKey = "Store a Key"
 
-    /// A harness row's trailing line: how it starts, its sign-in's name or its key, or what stops
-    /// it.
-    public static func line(_ offer: AgentOffer, way: Way?) -> String {
-        if offer.refusal?.code == .known(.harnessNotInstalled) { return "not installed here" }
-        if let refusal = offer.refusal { return refusal.message }
-        return way == .key ? key(offer) ?? "" : offer.signIn?.name ?? ""
+    /// A harness row's line: how it signs in, the stored default key, else its own sign-in's name,
+    /// whichever Sign in chooses; or, where it does not start, the server's few words for why.
+    public static func line(_ offer: AgentOffer) -> String {
+        if let refusal = offer.refusal { return offer.unavailable ?? refusal.message }
+        return key(offer) ?? offer.signIn?.name ?? ""
+    }
+
+    /// The line under Sign in: on the sign-in, that `workspace` holds it already, else its own
+    /// sentence of what happens; on the key, the sign-in offered by its name.
+    public static func signInHelp(_ offer: AgentOffer, way: Way, in workspace: String) -> String? {
+        guard let signIn = offer.signIn else { return nil }
+        switch way {
+        case .key: return "Or \(signIn.name.prefix(1).lowercased() + signIn.name.dropFirst()), chosen here."
+        case .signIn: return signIn.signedIn == true ? "Already signed in in \(workspace)." : signIn.said
+        }
     }
 
     /// The person's default key of `offer`: the kind's label and its name, nil with none.
@@ -270,13 +324,13 @@ public enum NewSessionWords {
         return offer.modes.count == 1 ? offer.note ?? about : about
     }
 
-    /// Start, its title and whether it is on: Start and Sign In where starting makes the person
-    /// sign in (``NewSession/signsIn``).
-    public static func primary(_ readiness: NewSession.Readiness, signsIn: Bool) -> (title: String, enabled: Bool) {
+    /// The primary, which names the choice: the harness started, the Shell opened; none where the
+    /// chosen harness does not start.
+    public static func primary(_ readiness: NewSession.Readiness) -> String? {
         switch readiness {
-        case .start: (signsIn ? "Start and Sign In" : "Start", true)
-        case .refused: ("Start", false)
-        case .shell: ("Start", true)
+        case let .start(start): "Start \(start.display)"
+        case .refused: nil
+        case .shell: "Open Shell"
         }
     }
 

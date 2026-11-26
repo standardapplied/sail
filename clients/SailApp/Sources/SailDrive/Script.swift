@@ -239,8 +239,15 @@ struct Step: Decodable {
     /// The panel's chosen row is the one of this name.
     var newSessionChosen: String?
     /// `[title, "on" | "off"]`: the panel's primary is titled so and offered or not; with a third,
-    /// "holds the keys", it is drawn holding them.
+    /// "holds the keys", it is drawn holding them; `[]`, the panel has none.
     var newSessionPrimary: [String]?
+    /// The panel's rows are exactly these, by name, in order.
+    var newSessionRows: [String]?
+    /// The panel says the chosen mode's words in the warning tone, after the warning mark; "" for
+    /// none said so.
+    var newSessionWarns: String?
+    /// The pointer moved onto the panel's row of this name, its name then at full weight.
+    var newSessionHover: String?
     /// A key put on the pasteboard, then ⌘V into the Store a Key sheet's field. The drive
     /// keeps it for the sweep to search for (a blank one is no key, and is found in any file), and
     /// says only its length.
@@ -277,9 +284,9 @@ struct Step: Decodable {
     var newSessionSignIn: String?
     /// The panel's Sign in menu shot open over it, the whole screen, in both looks.
     var newSessionSignInShot: String?
-    /// From now on dock's agents are the golden's with a third harness no Claude Code or Codex
-    /// word names, made up here: the app draws its sign-in and its key from the server alone.
-    var agentsMadeUp: Bool?
+    /// From now on dock's agents are the golden's with harnesses no Claude Code or Codex word names,
+    /// made up here: the app draws their rows, sign-ins, keys and warnings from the server alone.
+    var agentsMadeUp: MadeUpAgents?
     /// `[text, address]`: ⌘-click on this text where the workspace terminal focused shows it opens
     /// this web address in the browser, and nothing else.
     var urlCommandClick: [String]?
@@ -586,5 +593,13 @@ struct Step: Decodable {
         var empty: Bool?
         /// Which tabs the strip marks as holding a terminal that may still be running.
         var unended: [Bool]?
+    }
+
+    /// Harnesses no client knows, by display name, listed after the golden's own: those in `risky`
+    /// with a second mode that warns, those in `unavailable` not installed in harbor.
+    struct MadeUpAgents: Decodable {
+        var offers: [String]
+        var risky: [String]?
+        var unavailable: [String]?
     }
 }
