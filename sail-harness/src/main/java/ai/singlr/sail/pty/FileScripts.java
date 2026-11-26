@@ -222,7 +222,8 @@ final class FileScripts {
    * save's temporary left out, and any path that resolves outside the home ({@code $1}) left out
    * and printed after a {@code -}, NUL-terminated, so the client is told. Every 250 ms it stats the
    * set once and prints each path whose version is not the one last held, NUL-terminated, then a
-   * NUL; once a second it prints a NUL alone. It ends when its input closes.
+   * NUL; once a second it prints a NUL alone. It ends when its input closes. A check may run
+   * between a path and its version, so it sets nothing a set being read holds.
    */
   static final String WATCH =
       """
@@ -259,15 +260,15 @@ final class FileScripts {
         last=$now
         declare -A seen=()
         if [ ${#paths[@]} -gt 0 ]; then
-          while IFS= read -r -d '' name && IFS= read -r -d '' sig; do
-            seen[$name]=$sig
+          while IFS= read -r -d '' watched && IFS= read -r -d '' sig; do
+            seen[$watched]=$sig
           done < <(stat -L --printf '%%n\\0%s\\0' -- "${paths[@]}" 2>/dev/null)
         fi
         changed=''
-        for name in "${paths[@]}"; do
-          [ "${seen[$name]-}" = "${held[$name]-}" ] && continue
-          printf '%%s\\0' "$name"
-          held[$name]=${seen[$name]-}
+        for watched in "${paths[@]}"; do
+          [ "${seen[$watched]-}" = "${held[$watched]-}" ] && continue
+          printf '%%s\\0' "$watched"
+          held[$watched]=${seen[$watched]-}
           changed=1
         done
         [ -z "$changed" ] || printf '\\0'
