@@ -732,6 +732,20 @@ import Testing
         #expect(panel.view.words.first == "New session in dock")
     }
 
+    /// Six kinds under dock, near the top of the window, with room neither under the row nor over
+    /// it: the panel stays in the page, its foot 8 pt over the page's, also as Pi's options make it
+    /// taller.
+    @Test func aPanelWithRoomNeitherUnderNorOverItsRowStaysInThePage() async throws {
+        let (view, window, _) = try await Self.listed([], also: [try Self.sixKinds()])
+        defer { window.orderOut(nil) }
+        let panel = try await Self.open("dock", in: view)
+        for _ in 0 ..< 2 { try Self.press(try Self.down(), in: window) }
+        let page = window.convertToScreen(view.project.convert(view.project.visibleRect, to: nil)), box = panel.popover.frame
+        let row = try #require(view.project.rowFrame("dock").map { window.convertToScreen($0) })
+        try #require(row.minY - NewSessionPanel.gap - box.height < page.minY + NewSessionPanel.inset && row.maxY + NewSessionPanel.gap + box.height > page.maxY - NewSessionPanel.inset, "the panel \(box) has room by its row \(row) in \(page)")
+        #expect(box.minY >= page.minY + NewSessionPanel.inset - 0.5 && box.maxY <= page.maxY - NewSessionPanel.inset + 0.5, "the panel \(box) leaves the page \(page)")
+    }
+
     /// With no room under the row, the panel hangs over it.
     @Test func withNoRoomUnderItsRowThePanelHangsOverIt() async throws {
         let rows = try WorkspacesReachTests.list((1 ... 30).map { ["name": String(format: "ws-%02d", $0), "instance": String(format: "harbor-ws-%02d", $0), "state": "running", "owner": "uday"] })

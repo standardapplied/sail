@@ -73,9 +73,11 @@ package final class NewSessionPanel: NSObject {
     }
     /// The Store a Key sheet over it, while it asks.
     package private(set) var loginSheet: LoginSheet?
-    /// The box on screen, and whether it hangs under its row (its top kept as it grows) or over it.
+    /// The box on screen, and whether it hangs under its row (its top kept as it grows) or over it;
+    /// hanging, where its top would be and the lowest its foot may go, the page's less 8 pt.
     private var placed = NSRect.zero
     private var below = true
+    private var top = 0.0, lowest = 0.0
     private var resizeWatch: (any NSObjectProtocol)?
 
     init(look: Look, mono: LabelFont) {
@@ -111,8 +113,10 @@ package final class NewSessionPanel: NSObject {
         let x = min(max(wanted, Double(area.minX) + Self.inset), Double(area.maxX) - Self.inset - width)
         let under = Double(row.minY) - Self.gap - height
         below = under >= Double(area.minY) + Self.inset || Double(row.maxY) + Self.gap + height > Double(area.maxY) - Self.inset
-        let box = NSRect(x: x, y: below ? under : Double(row.maxY) + Self.gap, width: width, height: height)
-        placed = window.convertToScreen(box)
+        top = Double(window.convertToScreen(row).minY) - Self.gap
+        lowest = Double(window.convertToScreen(area).minY) + Self.inset
+        placed = window.convertToScreen(NSRect(x: x, y: below ? under : Double(row.maxY) + Self.gap, width: width, height: height))
+        placed.origin.y = standing(height)
         popover.open(over: window, anchor: anchor, at: placed, withKeys: false)
         keys.setAccessibilityElement(true)
         keys.setAccessibilityLabel(view.accessibilityLabel())
@@ -202,12 +206,18 @@ package final class NewSessionPanel: NSObject {
         view.show(content, workspace: workspace, line: line, veiled: loginSheet != nil, holder: holder, keys: keys, width: width)
     }
 
+    /// Where the box of `height` stands on screen: hanging under its row, its foot never under the
+    /// page's less 8 pt, where it rises over the row; over the row, where it stands.
+    private func standing(_ height: Double) -> Double {
+        below ? max(top - height, lowest) : Double(placed.minY)
+    }
+
     /// Drawn again where it is, its top kept under its row (its foot over it) as its height changes.
     private func redraw() {
         guard isOpen else { return }
         draw(width: Double(placed.width))
         let height = view.height
-        placed = NSRect(x: placed.minX, y: below ? placed.maxY - height : placed.minY, width: placed.width, height: height)
+        placed = NSRect(x: placed.minX, y: standing(height), width: placed.width, height: height)
         popover.place(placed)
     }
 
