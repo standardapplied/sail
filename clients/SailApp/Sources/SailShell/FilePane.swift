@@ -70,8 +70,11 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     /// When the workspace's bytes held for Compare were read: said on the sheet beside them.
     private(set) var theirsRead = Date()
     private var shownTheirs = ""
-    /// What a save said (a refusal, not connected): kept until a save or a newer word on the file.
-    private var said: String?
+    /// What a save said (a refusal, not connected): kept until a save or a newer word on the file;
+    /// `saveAgain` where ⌘S is what to do, named only while the keys are in the pane.
+    private var said: (words: String, saveAgain: Bool)?
+    /// What holds the window's keys, which decides whether the line names ⌘S.
+    private lazy var keysWatch = HolderWatch { [weak self] in self?.sayNote() }
     /// The UTF-16 units the view took of the text the model gave it, the keys apart: what every
     /// write is checked against.
     private var taken = 0
@@ -323,7 +326,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
     /// from a malformed paste) would be written as U+FFFD, other bytes than the person sees.
     private func textToWrite() -> String? {
         guard let held = editor.textStorage?.mutableString, let line = Self.loneSurrogateLine(held) else { return wholeText }
-        said = "Line \(line) holds half of a character, which can't be saved as text. Nothing was saved."
+        said = ("Line \(line) holds half of a character, which can't be saved as text. Nothing was saved.", false)
         abandonLeaving()
         show()
         return nil
@@ -579,14 +582,14 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
                 onCompare(nil, false)
             case let .saveRefused(words):
                 abandonLeaving()
-                said = words
+                said = (words, false)
             case .notConnected:
                 abandonLeaving()
-                said = "Not connected to \(workspace). Your changes are kept here."
+                said = ("Not connected to \(workspace). Your changes are kept here.", false)
             case let .lostSave(applied):
                 said = applied
-                    ? "Saved: your save reached \(workspace) before the connection dropped."
-                    : "Not saved: the connection to \(workspace) dropped before your save reached it. ⌘S to save again."
+                    ? ("Saved: your save reached \(workspace) before the connection dropped.", false)
+                    : ("Not saved: the connection to \(workspace) dropped before your save reached it.", true)
             }
         }
         show()
@@ -726,6 +729,30 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
         [.font: mono.font(Self.points, .regular) as NSFont, .foregroundColor: NSColor(look.text)]
     }
 
+    /// The one line: what a save said, ⌘S named in it only while the keys are in the pane
+    /// (``KeyHolder``), the one place its Save reaches; else the file's note.
+    private func sayNote() {
+        let words: String? = said.map { $0.saveAgain && KeyHolder.isIn(self) ? "\($0.words) ⌘S to save again." : $0.words } ?? {
+            switch file.note {
+            case .none: nil
+            case .changed: "Changed on the workspace while you typed."
+            case .deleted: "\(file.name) was deleted on the workspace."
+            case .deletedWhileTyped: "\(file.name) was deleted on the workspace while you typed."
+            case .tooLarge: OpenFile.tooLargeNow(file.name)
+            case .notShownWhole: OpenFile.notShownWhole(file.name)
+            }
+        }()
+        guard words != noteWords else { return }
+        note.stringValue = words ?? ""
+        note.isHidden = words == nil
+        needsLayout = true
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        keysWatch.watch(newWindow)
+    }
+
     /// The title's dot and status, the one line, and the text or the sentence, as the file says now.
     private func show() {
         if file.note != shownNote {
@@ -742,18 +769,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
         } else {
             status.stringValue = ""
         }
-        let words: String? = said ?? {
-            switch file.note {
-            case .none: nil
-            case .changed: "Changed on the workspace while you typed."
-            case .deleted: "\(file.name) was deleted on the workspace."
-            case .deletedWhileTyped: "\(file.name) was deleted on the workspace while you typed."
-            case .tooLarge: OpenFile.tooLargeNow(file.name)
-            case .notShownWhole: OpenFile.notShownWhole(file.name)
-            }
-        }()
-        note.stringValue = words ?? ""
-        note.isHidden = words == nil
+        sayNote()
         compare.isHidden = file.note != .changed || said != nil
         discard.isHidden = !(file.note == .changed || file.note == .deletedWhileTyped) || said != nil
         let sentenceWords: String? = switch file.state {

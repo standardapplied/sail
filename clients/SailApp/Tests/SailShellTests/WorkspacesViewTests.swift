@@ -42,10 +42,11 @@ import Testing
     /// The narrowest card: the window's least 480 pt, less the rail and the card's margins.
     static let narrowestCard = 480.0 - Rail.width - 4
 
-    /// A project view alone, `width` wide.
-    static func project(width: Double) throws -> (ProjectView, NSWindow) {
+    /// A project view alone, `width` wide, in a window that is key when `key` says.
+    static func project(width: Double, key: Bool = false) throws -> (ProjectView, NSWindow) {
         let project = ProjectView(look: .light, mono: try LabelFont(directory: LookTests.fonts), titleFont: try TitleFont(directory: LookTests.fonts))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 640), styleMask: [.titled], backing: .buffered, defer: false)
+        let frame = NSRect(x: 0, y: 0, width: width, height: 640)
+        let window = key ? KeyWindow(contentRect: frame, styleMask: [.titled], backing: .buffered, defer: false) : NSWindow(contentRect: frame, styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = project
         window.orderFront(nil)
         return (project, window)
@@ -227,6 +228,115 @@ import Testing
         #expect(notes == ["Only uday or an admin opens it"], "\(notes)")
     }
 
+    /// ⌘N reaches New Workspace from `holder`, what holds the keys: the holder passes it on, and an
+    /// enabled New Workspace in view holds it as its key equivalent, which AppKit's walk of the
+    /// window's views presses. Pressing it here would run AppKit's own click, which no unit test runs.
+    static func commandNReachesNewWorkspace(from holder: NSResponder?, in project: ProjectView) throws -> Bool {
+        let passed = try !(holder?.performKeyEquivalent(with: NewSessionPanelTests.key(45, "n", .command)) ?? true)
+        let held = [project.newWorkspace, project.newWorkspaceIcon].contains {
+            !$0.isHiddenOrHasHiddenAncestor && $0.isEnabled && $0.keyEquivalent == "n" && $0.keyEquivalentModifierMask == .command
+        }
+        return passed && held
+    }
+
+    /// What the foot's keys say, the count aside.
+    static func footSays(_ project: ProjectView) -> [String] {
+        Self.found(NSTextField.self, in: project.foot).filter { $0 !== project.count }.map(\.stringValue)
+    }
+
+    /// Row `name`'s first action, its Open.
+    static func firstAction(_ project: ProjectView, _ name: String) -> SailButton? {
+        project.list.layoutSubtreeIfNeeded()
+        guard let row = project.list.row(name)?.view else { return nil }
+        row.layoutSubtreeIfNeeded()
+        return Self.found(SailButton.self, in: row).first
+    }
+
+    /// `button` is laid out at its own size, its key's room included or not as it has a key.
+    static func laidOut(_ button: SailButton) -> Bool {
+        abs(Double(button.alignmentRect(forFrame: button.frame).width - button.intrinsicContentSize.width)) < 0.5
+    }
+
+    /// Row `name`'s Open names ⏎, its key, after its label.
+    static func openNamesReturn(_ project: ProjectView, _ name: String) -> Bool {
+        guard let row = project.list.row(name)?.view else { return false }
+        return Self.found(SailButton.self, in: row).contains { $0.title == "Open" && $0.namesKey && $0.keyEquivalent == "\r" }
+    }
+
+    /// The foot names a key only while it works, the list holding the keys: none with no row
+    /// chosen; on a chosen row of the person's own Return (which opens it, starting it first when
+    /// stopped), ⌥⌘T and ⌘N; on someone else's no Return, which presses nothing there; ⌘N only while
+    /// a workspace can be made; none again once no row is. Another window taking key status takes
+    /// every key: the foot, the row's Open and List Again (after its label and in its tooltip) name
+    /// none until the window is key again. The chosen row's Open keeps its key, and so its key's
+    /// room, while the list is the window's first responder; a row not chosen has no key on its
+    /// Open, which keeps no room and is centred.
+    @Test func theFootNamesAKeyOnlyWhileItWorks() throws {
+        let rows = [
+            WorkspaceRow(name: "dock", instance: "harbor-dock", state: .known(.running), owner: "uday"),
+            WorkspaceRow(name: "pier", instance: "harbor-pier", state: .known(.stopped), owner: "uday"),
+        ]
+        let (project, shown) = try Self.project(width: 1000, key: true)
+        let window = try #require(shown as? KeyWindow)
+        defer { window.orderOut(nil) }
+        project.render(try #require(Self.page(rows)))
+        try #require(window.makeFirstResponder(project.list) && project.list.holdsKeys)
+        #expect(project.list.chosen == nil && Self.footSays(project).isEmpty, "with no row chosen the foot says \(Self.footSays(project))")
+        let tall = project.foot.fittingSize.height
+        project.list.choose("dock")
+        #expect(Self.footSays(project) == ["Open", "New Session", "New"])
+        #expect(Self.openNamesReturn(project, "dock") && project.listAgain.namesKey && project.listAgain.tooltip?.chip.showsHint == true)
+        #expect(project.foot.fittingSize.height == tall, "the keys coming moved the list")
+        let dockOpen = try #require(Self.firstAction(project, "dock")), pierOpen = try #require(Self.firstAction(project, "pier"))
+        let (_, pierLabel, pierHint) = pierOpen.arrangement()
+        #expect(pierOpen.keyEquivalent.isEmpty && pierHint == nil, "\(pierOpen.title) on pier, not chosen, has a key or keeps its room")
+        #expect(abs(Double(pierLabel.midX - pierOpen.bounds.midX)) <= 1, "\(pierOpen.title) on pier is not centred: its label \(pierLabel) in \(pierOpen.bounds)")
+        #expect(Self.laidOut(dockOpen) && Self.laidOut(pierOpen), "a row's Open was not laid out again as its key came: dock \(dockOpen.frame), pier \(pierOpen.frame)")
+        let openWidth = dockOpen.frame.width
+        window.key = false
+        #expect(Self.footSays(project).isEmpty, "with another window key the foot says \(Self.footSays(project))")
+        #expect(Self.firstAction(project, "dock") === dockOpen && dockOpen.keyEquivalent == "\r" && dockOpen.arrangement().hint != nil && dockOpen.frame.width == openWidth,
+                "dock's Open gave up its key or its key's room in a window that is not key")
+        #expect(!Self.openNamesReturn(project, "dock") && !project.listAgain.namesKey && project.listAgain.tooltip?.chip.showsHint == false, "with another window key a row or a button names its key")
+        #expect(window.firstResponder === project.list && project.foot.fittingSize.height == tall)
+        window.key = true
+        #expect(Self.footSays(project) == ["Open", "New Session", "New"] && Self.openNamesReturn(project, "dock") && project.listAgain.tooltip?.chip.showsHint == true, "the window key again, the keys are not named: \(Self.footSays(project))")
+        project.list.choose("pier")
+        #expect(Self.footSays(project) == ["Open", "New Session", "New"], "Return starts and opens pier")
+        let left = try #require(Self.firstAction(project, "dock")), chosen = try #require(Self.firstAction(project, "pier"))
+        #expect(left.keyEquivalent.isEmpty && Self.laidOut(left) && chosen.keyEquivalent == "\r" && Self.laidOut(chosen), "an Open was not laid out again as its key went or came: dock \(left.frame), pier \(chosen.frame)")
+        project.list.deselectAll(nil)
+        #expect(Self.footSays(project).isEmpty, "with the row let go the foot says \(Self.footSays(project))")
+        #expect(project.foot.fittingSize.height == tall, "the keys going moved the list")
+
+        let building = try #require(Self.page(rows, template: .building))
+        project.render(building)
+        project.list.choose("dock")
+        #expect(Self.footSays(project) == ["Open", "New Session"], "⌘N is named while no workspace can be made")
+        project.render(try #require(Self.page(rows, for: Self.ana)))
+        project.list.choose("dock")
+        #expect(Self.footSays(project) == ["New Session", "New"], "Return is named on a row it presses nothing on")
+        let heights = project.foot.constraints.filter { $0.firstItem === project.foot && $0.firstAttribute == .height }
+        #expect(heights.count == 1, "the foot drawn again holds \(heights.count) heights")
+    }
+
+    /// The list's own keys, ⏎ and ⌥⌘T, are named only while it holds the keys: with the projects
+    /// list holding them (a click on the project already chosen keeps the row chosen) the foot names
+    /// ⌘N alone, which reaches New Workspace from there; given back, all three again.
+    @Test func theFootNamesTheListsKeysOnlyWhileItHoldsThem() async throws {
+        let (view, window, _) = try await Self.listed()
+        defer { window.orderOut(nil) }
+        view.project.list.choose("dock")
+        try #require(window.makeFirstResponder(view.project.list))
+        #expect(Self.footSays(view.project) == ["Open", "New Session", "New"])
+        try #require(window.makeFirstResponder(view.panel.list))
+        #expect(view.project.list.chosen == "dock" && Self.footSays(view.project) == ["New"], "with the projects list holding the keys the foot says \(Self.footSays(view.project))")
+        try #require(window.makeFirstResponder(view.project.list))
+        #expect(Self.footSays(view.project) == ["Open", "New Session", "New"], "the keys given back, the foot says \(Self.footSays(view.project))")
+        try #require(window.makeFirstResponder(view.panel.list))
+        #expect(try Self.commandNReachesNewWorkspace(from: window.firstResponder, in: view.project), "⌘N, named, does not reach New Workspace")
+    }
+
     private struct Shadowed {
         let y: Double, blur: Double, alpha: Double
     }
@@ -363,6 +473,10 @@ import Testing
         let open = try #require(view.project.list.rowView(atRow: 1, makeIfNecessary: true))
         open.layoutSubtreeIfNeeded()
         let openRow = try #require(Self.found(CreateRow.self, in: open).first)
+        #expect(openRow.create.namesKey, "Create does not name ⏎ while Return in its field creates")
+        #expect(view.window?.makeFirstResponder(view.project.list) == true && !openRow.create.namesKey, "Create names ⏎ while Return goes to the list")
+        view.project.focusField()
+        #expect(openRow.create.namesKey, "Create does not name ⏎ once its field has the keys again")
         let box = open.convert(openRow.field.alignmentRect(forFrame: openRow.field.frame), from: openRow)
         #expect(near(open.frame.height, 89) && near(box.minY, 1 + CreateRow.padding), "the open row is \(open.frame.height) pt, its field at \(box.minY)")
         view.project.on(.create)
@@ -720,10 +834,46 @@ func near(_ a: NSRect, _ b: NSRect) -> Bool {
     near(a.origin, b.origin) && near(a.width, b.width) && near(a.height, b.height)
 }
 
-/// A window that says it is key, as the person's front window is; a test process's own windows
-/// cannot be made key.
+/// A window that says it is key, as the person's front window is (a test process's own windows
+/// cannot be made key), until a sheet over it or another window (`key` false) takes key status, as
+/// AppKit hands it to a sheet; each change told as AppKit tells it.
 final class KeyWindow: NSWindow {
+    private var sheetsOver: Set<ObjectIdentifier> = []
+    /// A sheet began over it, once AppKit has it and the window has been told.
+    var onSheet: () -> Void = {}
+
+    var key = true {
+        didSet { told(wasKey: oldValue && sheetsOver.isEmpty) }
+    }
+
     override var isKeyWindow: Bool {
-        true
+        key && sheetsOver.isEmpty
+    }
+
+    override func beginSheet(_ sheet: NSWindow, completionHandler handler: ((NSApplication.ModalResponse) -> Void)? = nil) {
+        let was = isKeyWindow
+        sheetsOver.insert(ObjectIdentifier(sheet))
+        super.beginSheet(sheet, completionHandler: handler)
+        told(wasKey: was)
+        onSheet()
+    }
+
+    override func endSheet(_ sheet: NSWindow, returnCode: NSApplication.ModalResponse) {
+        let was = isKeyWindow
+        sheetsOver.remove(ObjectIdentifier(sheet))
+        super.endSheet(sheet, returnCode: returnCode)
+        told(wasKey: was)
+    }
+
+    override func endSheet(_ sheet: NSWindow) {
+        let was = isKeyWindow
+        sheetsOver.remove(ObjectIdentifier(sheet))
+        super.endSheet(sheet)
+        told(wasKey: was)
+    }
+
+    private func told(wasKey: Bool) {
+        guard isKeyWindow != wasKey else { return }
+        NotificationCenter.default.post(name: isKeyWindow ? NSWindow.didBecomeKeyNotification : NSWindow.didResignKeyNotification, object: self)
     }
 }

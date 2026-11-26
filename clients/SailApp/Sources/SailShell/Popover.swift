@@ -85,7 +85,7 @@ package final class Popover: NSObject {
         window.addChildWindow(panel, ordered: .above)
         panel.orderFront(nil)
         if keys.superview !== window.contentView { window.contentView?.addSubview(keys) }
-        restore = Self.holder(of: window.firstResponder)
+        restore = KeyHolder.of(window.firstResponder)
         selection = (window.firstResponder as? NSText).flatMap { $0.isFieldEditor ? $0.selectedRange : nil }
         window.makeFirstResponder(keys)
         mouseWatch = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
@@ -148,12 +148,5 @@ package final class Popover: NSObject {
         if responder === window { return responder }
         guard let view = responder as? NSView, view.window === window, !view.isHiddenOrHasHiddenAncestor else { return nil }
         return view
-    }
-
-    /// Who holds the keys through `responder`: a field being edited, not the window's field editor,
-    /// which forgets the field once its editing ends.
-    static func holder(of responder: NSResponder?) -> NSResponder? {
-        guard let editor = responder as? NSText, editor.isFieldEditor else { return responder }
-        return editor.delegate as? NSResponder
     }
 }

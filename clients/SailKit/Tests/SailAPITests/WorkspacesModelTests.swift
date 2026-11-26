@@ -150,6 +150,30 @@ import Testing
         #expect(admin.primary != nil && admin.why == nil, "an admin opens anyone's")
     }
 
+    /// The foot's keys, each only while it does what it says: none with no row chosen, a row not
+    /// listed or the row a create under way draws; Return on a row it opens, never one under way or
+    /// someone else's a member cannot open; Return and ⌥⌘T only while the list holds the keys; ⌘N,
+    /// New Workspace's, wherever in the window they are, only while a workspace can be made; none
+    /// while a sheet over the window, or another window, holds them.
+    @Test func theFootNamesAKeyOnlyWhileItWorks() throws {
+        var model = Self.listed(Self.uday)
+        let page = try #require(Self.page(model))
+        #expect(page.keys(chosen: nil, held: .list) == [] && page.keys(chosen: "gone", held: .list) == [])
+        #expect(page.keys(chosen: "dock", held: .list) == [.open, .newSession, .newWorkspace])
+        #expect(page.keys(chosen: "pier", held: .list) == [.open, .newSession, .newWorkspace], "Return starts and opens pier")
+        #expect(page.keys(chosen: "dock", held: .window) == [.newWorkspace], "the list's keys are named while another of the window holds them")
+        #expect(page.keys(chosen: "dock", held: .none) == [], "keys are named while a sheet or another window holds them")
+        let member = Self.listed(Self.ana)
+        let theirs = try #require(Self.table(member)?.others.first?.name)
+        #expect(Self.page(member)?.keys(chosen: theirs, held: .list) == [.newSession, .newWorkspace], "Return is named on a row it presses nothing on")
+        _ = model.ask(.stop, "dock", terminals: 0)
+        #expect(Self.page(model)?.keys(chosen: "dock", held: .list) == [.newSession, .newWorkspace], "Return is named on a row under way")
+        Self.send("new", &model)
+        let creating = try #require(Self.page(model))
+        #expect(creating.keys(chosen: "new", held: .list) == [], "the row a create under way draws names keys")
+        #expect(creating.keys(chosen: "pier", held: .list) == [.open, .newSession], "⌘N is named while no workspace can be made")
+    }
+
     /// The panel lists every project with its mark: no template, building, build failed, or none.
     /// Only `ready` names a current version, so a project whose template the server does not say,
     /// or says in a word this app does not know, is marked as having none, as its page says.

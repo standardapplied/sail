@@ -218,6 +218,106 @@ import Testing
         #expect((rtlMark?.minX ?? 0) > rtlLabel.maxX && (rtlHint?.maxX ?? .infinity) < rtlLabel.minX)
     }
 
+    /// A button names its key, after its label and in its tooltip, only while the key does what it
+    /// says (``KeyHolder``): enabled, not in flight, and, for a key equivalent, its window key; for a
+    /// key reached through another view (Create's ⏎, through its name field), that view holding the
+    /// keys. In no window it names none. While it has a key its room is kept, named or not (disabled,
+    /// the window not key), so the button keeps its width and its neighbours their place; with its
+    /// key equivalent taken away (a row's Open on a row not chosen) it keeps no room and its label is
+    /// centred. One watch tells it what holds its keys: each key change is told once, a hinted
+    /// button's too.
+    @Test func aButtonNamesItsKeyOnlyWhileItWorksAndKeepsItsWidth() throws {
+        let mono = try Self.mono()
+        let open = SailButton("Open", kind: .secondary, size: .small, look: .light, target: nil, action: nil)
+        open.shortcut("\r", mono: mono)
+        let field = NSTextField(string: "")
+        let create = SailButton("Create", kind: .secondary, size: .small, look: .light, target: nil, action: nil)
+        create.hint("\r", through: field, mono: mono)
+        let icon = SailButton(icon: .plus, label: "New Workspace", kind: .secondary, look: .light, target: nil, action: nil)
+        icon.shortcut("n", modifiers: .command, mono: mono)
+        #expect(!open.namesKey && !create.namesKey && icon.tooltip?.chip.showsHint == false, "a button in no window names its key")
+        let holder = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        for (view, x) in [(open, 20.0), (create, 140), (icon, 260), (field, 300)] as [(NSView, Double)] {
+            let size = view === field ? NSSize(width: 80, height: 22) : view.intrinsicContentSize
+            view.frame = NSRect(x: x, y: 80, width: Double(size.width) + 2 * Look.haloRoom, height: Double(size.height) + 2 * Look.haloRoom)
+            holder.addSubview(view)
+        }
+        let (window, backdrop) = Self.window(holding: holder, on: .white)
+        defer { window.orderOut(nil) }
+        let widths = [open, create].map(\.intrinsicContentSize.width)
+        func drawsItsKey(_ button: SailButton) -> Bool {
+            guard let hint = button.arrangement().hint else { return false }
+            let at = backdrop.convert(hint, from: button)
+            return Set(backdrop.colours(along: Double(at.midY), from: Double(at.minX), to: Double(at.maxX), scale: 2)).count > 1
+        }
+        func keptWidth() -> Bool {
+            [open, create].map(\.intrinsicContentSize.width) == widths && [open, create].allSatisfy { $0.arrangement().hint != nil }
+        }
+        #expect(open.namesKey && drawsItsKey(open) && icon.tooltip?.chip.showsHint == true, "Open in a key window does not name ⏎, or New Workspace's tooltip ⌘N")
+        #expect(window.makeFirstResponder(nil) && !create.namesKey && !drawsItsKey(create), "Create names ⏎ while its field does not hold the keys")
+        let told = create.keyChanges
+        #expect(window.makeFirstResponder(field) && create.keyChanges > told, "Create is not drawn again as its field takes the keys")
+        #expect(create.namesKey && drawsItsKey(create), "Create does not name ⏎ while its field holds the keys")
+        let before = [open.keyChanges, create.keyChanges]
+        window.key = false
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+        #expect([open.keyChanges, create.keyChanges] == before.map { $0 + 1 }, "a key change was told other than once: Open \(open.keyChanges - before[0]), Create \(create.keyChanges - before[1])")
+        #expect(!open.namesKey && !create.namesKey && !drawsItsKey(open) && icon.tooltip?.chip.showsHint == false, "a key is named in a window that is not key")
+        #expect(keptWidth(), "a button changed width as its key stopped being named")
+        window.key = true
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+        #expect(open.namesKey && create.namesKey && icon.tooltip?.chip.showsHint == true, "the window key again, a key is not named")
+        for button in [open, create, icon] {
+            button.isEnabled = false
+        }
+        #expect(!open.namesKey && !create.namesKey && !drawsItsKey(open) && icon.tooltip?.chip.showsHint == false, "a disabled button names its key")
+        #expect(keptWidth(), "a disabled button changed width")
+        for button in [open, create, icon] {
+            button.isEnabled = true
+        }
+        #expect(open.namesKey && keptWidth())
+        open.fly("Opening")
+        #expect(!open.namesKey, "a button in flight names its key")
+        open.fly(nil)
+        open.keyEquivalent = ""
+        let (_, label, hint) = open.arrangement()
+        #expect(!open.namesKey && hint == nil && open.intrinsicContentSize.width < widths[0], "Open with no key equivalent names one or keeps its room")
+        #expect(abs(Double(label.midX - open.box.midX)) <= 1, "Open with no key equivalent is not centred: its label \(label) in \(open.box)")
+        open.keyEquivalent = "\r"
+        #expect(keptWidth(), "Open given its key again has not its room again")
+        #expect(window.makeFirstResponder(nil) && !create.namesKey, "Create names ⏎ after its field gave up the keys")
+    }
+
+    /// A row's Open changes width as its key's room comes and goes and as it turns primary, its
+    /// label bold: the row, which lays out by hand, is laid out again each time, its Open where a
+    /// fresh row of that state puts it. A row on its own, in no table and no window, so nothing
+    /// else lays it out.
+    @Test func aRowIsLaidOutAgainAsItsOpenChangesWidth() throws {
+        let mono = try Self.mono()
+        func row() -> RowCell {
+            let item = SailList.Item(id: "dock", name: "dock", voice: "dock", content: NSView(), actions: [SailList.Action("Start and Open") {}])
+            let cell = RowCell(item, rowStyle: .list, actionsColumn: nil, look: .light, mono: mono)
+            cell.frame = NSRect(x: 0, y: 0, width: 440, height: 53)
+            return cell
+        }
+        func open(_ cell: RowCell) throws -> SailButton {
+            try #require(cell.actions.views.first as? SailButton)
+        }
+        let shown = row()
+        var widths: [CGFloat] = []
+        for (state, chosen, keys) in [("hovered", false, false), ("chosen with the keys", true, true), ("chosen without them", true, false), ("hovered again", false, false)] {
+            shown.show(true, chosen: chosen, keys: keys)
+            shown.layoutSubtreeIfNeeded()
+            let fresh = row()
+            fresh.show(true, chosen: chosen, keys: keys)
+            fresh.layoutSubtreeIfNeeded()
+            let laid = try open(shown).frame, wanted = try open(fresh).frame
+            widths.append(wanted.width)
+            #expect(near(laid, wanted), "\(state): the Open is laid out at \(laid), a fresh row's at \(wanted)")
+        }
+        #expect(Set(widths).count == 3, "the Open's width does not change with each state: \(widths)")
+    }
+
     /// The label is drawn, centred in the box within a point.
     @Test func theLabelsInkIsCentredInTheBox() {
         let button = Self.sized(SailButton("Start and Open", kind: .secondary, look: .light, target: nil, action: nil))
