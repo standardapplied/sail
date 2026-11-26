@@ -266,8 +266,9 @@ and is burned down in its own pull request.
 `ci/check rules [BASE]` (`ci/rules check`) decides these with no build, in about a second on the devbox; it
 reads a rule not yet on only to its first finding. CI runs it in the
 first job of both workflows (`What the change touches`), which every other job needs, so no lane,
-and no macOS lane, starts on a change that breaks one; a pull request's run gives it the pull
-request's base, which also holds the pull request to its entry. It fails on a finding of a rule
+and no macOS lane, starts on a change that breaks one; a pull request's run gives it where the pull
+request left main, the first parent of the merge it checked out (`ci/check base`), which also holds
+the pull request to its entry. It fails on a finding of a rule
 that is on, and on a rule not yet on that finds nothing, whose findings it only counts. A finding
 is one line, `file:line: rule: what it found: the rule's sentence`; `ci/rules list` prints each
 rule, whether it is on, and its sentence. One lexer reads the Swift under `clients/` and the Java

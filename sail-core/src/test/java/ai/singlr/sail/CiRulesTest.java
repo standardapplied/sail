@@ -39,7 +39,22 @@ class CiRulesTest {
   private static final String KIT = "clients/SailKit/Sources/SailAPI/Kit.swift";
   private static final String TEST = "clients/SailKit/Tests/SailAPITests/KitTests.swift";
   private static final String JAVA = "sail-core/src/main/java/ai/singlr/sail/A.java";
+  private static final String EXCLUSIONS = "config/quality/pmd-exclusions.properties";
   private static final String LOCAL = "ci/check rules \"$(git merge-base origin/main HEAD)\"";
+  private static final String DIFF_STEP =
+      """
+            - id: diff
+              env:
+                EVENT: ${{ github.event_name }}
+                BASE: ${{ steps.base.outputs.base || github.event.before }}
+              run: ci/changes "$EVENT" "$BASE" >> "$GITHUB_OUTPUT"
+      """;
+  private static final String BASE_STEP =
+      """
+            - id: base
+              if: github.event_name == 'pull_request'
+              run: ci/check base >> "$GITHUB_OUTPUT"
+      """;
   private static final Pattern CI_STEP =
       Pattern.compile(
           "- name: The rules a script decides\n\\s+env:\n\\s+BASE: (.+)\n\\s+run: (.+)\n");
@@ -106,7 +121,7 @@ class CiRulesTest {
   @BeforeEach
   void aRepositoryHoldingTheScripts() throws Exception {
     git("init", "-q");
-    for (var script : List.of("rules", "changelog", "check")) {
+    for (var script : List.of("rules", "changelog", "check", "changes", "exclusions")) {
       var copy = repo.resolve("ci").resolve(script);
       Files.createDirectories(copy.getParent());
       Files.copy(ROOT.resolve("ci").resolve(script), copy);
@@ -544,7 +559,7 @@ class CiRulesTest {
   void theStepBothWorkflowsRunHoldsAPullRequestToItsEntryAndAPushToTheRulesOn() throws Exception {
     var step = ciStep(".github/workflows/ci.yml");
     assertEquals(step, ciStep(".github/workflows/clients.yml"));
-    assertEquals("${{ github.event.pull_request.base.sha }}", step.get(0));
+    assertEquals("${{ steps.base.outputs.base }}", step.get(0));
     notYetRulesFindOneEach();
     var base = commit();
     git("checkout", "-q", "-b", "agent/the-spec");
@@ -566,6 +581,109 @@ class CiRulesTest {
 
     assertEquals(new Ran(0, "", HELD_WITH_ENTRY), bash(step.get(1), Map.of("BASE", base)));
     assertEquals(new Ran(0, "", HELD), bash(step.get(1), Map.of("BASE", "")));
+  }
+
+  @Test
+  void bothWorkflowsHandEveryCheckOfWhatAPullRequestChangedTheOneBaseTheirBaseStepComputes()
+      throws Exception {
+    var ci = Files.readString(ROOT.resolve(".github/workflows/ci.yml"));
+    var clients = Files.readString(ROOT.resolve(".github/workflows/clients.yml"));
+
+    for (var workflow : List.of(ci, clients)) {
+      assertTrue(workflow.contains(BASE_STEP), workflow);
+      assertTrue(workflow.contains(DIFF_STEP), workflow);
+    }
+    assertTrue(ci.contains("      base: ${{ steps.base.outputs.base }}\n"), ci);
+    assertTrue(ci.contains("'--tests-only' || needs.changes.outputs.base }}"), ci);
+  }
+
+  @Test
+  void aPullRequestMeasuredFromTheMergeItCheckedOutCountsOnlyTheBranchsChanges() throws Exception {
+    var rules = ciStep(".github/workflows/ci.yml").get(1);
+    notYetRulesFindOneEach();
+    write(EXCLUSIONS, "a.Old=GodClass\n");
+    var stale = commit();
+    git("checkout", "-q", "-b", "agent/the-spec");
+    write(PANE, "let pane = 1\n");
+    write("changes/the-spec.md", "- **Pane.** One.\n");
+    commit();
+    git("checkout", "-q", "--detach", stale);
+    write(JAVA, "class A {}\n");
+    write("changes/other.md", "- **Other.** Merged first.\n");
+    write(EXCLUSIONS, "a.Old=GodClass\na.New=GodClass\n");
+    var moved = commit();
+    git("merge", "-q", "--no-ff", "-m", "merge", "agent/the-spec");
+
+    assertEquals(new Ran(0, "base=" + moved + "\n", ""), sh("ci/check", "base"));
+    assertEquals(new Ran(0, "", HELD_WITH_ENTRY), bash(rules, pullRequest(moved)));
+    assertEquals(
+        new Ran(0, "clients=true\nci=false\nterminal=false\n", ""),
+        sh("ci/changes", "pull_request", moved));
+    assertEquals(
+        new Ran(
+            0,
+            "ci/exclusions: every class=rule pair of " + EXCLUSIONS + " is in " + moved + "'s.\n",
+            ""),
+        sh("ci/check", "exclusions", moved));
+
+    assertEquals(
+        new Ran(
+            1,
+            "",
+            "ci/changelog: this change adds changes/other.md, but its branch agent/the-spec names"
+                + " its entry changes/the-spec.md (a branch agent/<name> keeps its entry in"
+                + " changes/<name>.md): put its bullets there instead.\n"),
+        bash(rules, pullRequest(stale)));
+    assertEquals(
+        new Ran(0, "clients=true\nci=true\nterminal=true\n", ""),
+        sh("ci/changes", "pull_request", stale));
+    var exclusionsFromStale =
+        new Ran(
+            1,
+            "",
+            "ci/exclusions: "
+                + EXCLUSIONS
+                + " only shrinks, and these class=rule pairs are not in "
+                + stale
+                + "'s:\n  a.New=GodClass\nFix the class instead: no class is added to the list and"
+                + " no rule to an entry.\n");
+    assertEquals(exclusionsFromStale, sh("ci/check", "exclusions", stale));
+    assertEquals(exclusionsFromStale, sh("ci/check", "unit", "sail-infra", stale));
+  }
+
+  @Test
+  void aShallowCloneOfAMergeIsToldToFetchItsHistoryNotThatItIsNoMerge(@TempDir Path elsewhere)
+      throws Exception {
+    var stale = commit();
+    git("checkout", "-q", "-b", "agent/the-spec");
+    commit();
+    git("checkout", "-q", "-b", "merged", stale);
+    commit();
+    git("merge", "-q", "--no-ff", "-m", "merge", "agent/the-spec");
+    var shallow = elsewhere.resolve("shallow");
+    git("clone", "-q", "--depth", "1", "--branch", "merged", "file://" + repo, shallow.toString());
+
+    assertEquals(
+        new Ran(
+            1,
+            "",
+            "ci/check: this clone is shallow, so HEAD's parents are not here: check it out with"
+                + " fetch-depth: 0.\n"),
+        run(List.of("bash", "ci/check", "base"), shallow, Map.of()));
+  }
+
+  @Test
+  void aCommitThatIsNoMergeHoldsNoPullRequestsBase() throws Exception {
+    commit();
+    commit();
+
+    assertEquals(
+        new Ran(
+            1,
+            "",
+            "ci/check: HEAD is no merge, so it holds no pull request's base: run this on the merge"
+                + " a pull request's run checks out.\n"),
+        sh("ci/check", "base"));
   }
 
   @Test
@@ -685,6 +803,10 @@ class CiRulesTest {
             + DEEP
             + function("long", 79, "")
             + lets(801, ""));
+  }
+
+  private static Map<String, String> pullRequest(String base) {
+    return Map.of("BASE", base, "GITHUB_HEAD_REF", "agent/the-spec");
   }
 
   private static List<String> ciStep(String workflow) throws IOException {
