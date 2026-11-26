@@ -47,7 +47,7 @@
   {"name": "the-account-pane-signed-in", "shotScreen": "account-signed-in"},
   {"name": "sign-out", "signed": true, "signOut": true},
   {"name": "signed-out-again", "signed": true, "exactly": ["Welcome back, Uday", "127.0.0.1:7979"]},
-  {"name": "welcome-back-by-name", "signed": true, "shot": "welcome-back"},
+  {"name": "welcome-back-by-name", "signed": true, "shot": "welcome-back-after-sign-out"},
   {"name": "the-rail-signed-out", "signed": true, "rail": "workspaces"},
   {"name": "item-gone", "signed": true, "keychain": "gone"},
   {"name": "sign-in-again", "signed": true, "signIn": true},

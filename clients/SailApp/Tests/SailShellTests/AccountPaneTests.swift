@@ -61,11 +61,13 @@ final class Gate: Sendable {
 }
 
 /// A passkey that makes and signs whatever it is asked, its sheet up until `sheet` opens when one
-/// is given; `asked` opens as it is asked; `failing`, it ends so instead.
+/// is given; `asked` opens as it is asked; `failing`, it ends so instead; `failingSignIn`, only its
+/// sign-ins do.
 struct Signs: PasskeyAuthenticator {
     var sheet: Gate?
     var asked: Gate?
     var failing: PasskeyFailure?
+    var failingSignIn: PasskeyFailure?
 
     func register(_: PasskeyRegistrationRequest) async throws(PasskeyFailure) -> PasskeyRegistration {
         asked?.open()
@@ -77,7 +79,7 @@ struct Signs: PasskeyAuthenticator {
     func assert(_: PasskeyAssertionRequest) async throws(PasskeyFailure) -> PasskeyAssertion {
         asked?.open()
         await sheet?.wait()
-        if let failing { throw failing }
+        if let failing = failing ?? failingSignIn { throw failing }
         return PasskeyAssertion(
             credentialId: Data([1, 2, 3]), clientDataJSON: Data("{\"type\":\"webauthn.get\"}".utf8), authenticatorData: Data([5]),
             signature: Data([7]), userHandle: Data("uday".utf8)
@@ -246,7 +248,7 @@ func signInExchanges() throws -> [Exchange] {
     @Test func theAddressIsRememberedOnlyOnceItAnswered() async throws {
         let transport = Held(RecordedServer([try Exchange("health")]), holding: "health")
         let defaults = ReattachTests.defaults()
-        let flow = AccountFlow(account: Account(authenticator: Signs(), vault: OneSession(fde: "uday")) { _ in transport }, memory: SignInMemory(defaults))
+        let flow = AccountFlow(account: Account(authenticator: Signs(), vault: OneSession(fde: "uday"), reachWithin: .seconds(Patience.answer)) { _ in transport }, memory: SignInMemory(defaults))
         var reached: ControlPlane?
         flow.reach("sail.example.com") { reached = try? $0.get() }
         await transport.arrived(during: flow.underWay)
@@ -417,12 +419,12 @@ final class MemoryVaultOf: TokenVault, Sendable {
         let window = Self.shown(pane)
         defer { window.orderOut(nil) }
         let check = Task { await pane.flow.refresh() }
-        await transport.arrived(1)
+        await transport.arrived(1, during: check)
         transport.answer()
         await check.value
         #expect(pane.planeRow.plane == .unreachable && pane.planeRow.said == "127.0.0.1:7979", "after the check the line says \(String(describing: pane.planeRow.plane))")
         let again = Task { await pane.flow.refresh() }
-        await transport.arrived(2)
+        await transport.arrived(2, during: again)
         #expect(pane.planeRow.plane == .reconnecting, "asking again the line says \(String(describing: pane.planeRow.plane))")
         transport.answer()
         await again.value
@@ -453,12 +455,12 @@ final class MemoryVaultOf: TokenVault, Sendable {
         let transport = OutOfReach()
         let away = try Self.pane(remembering: "ana", transport)
         let check = Task { await away.flow.refresh() }
-        await transport.arrived(1)
+        await transport.arrived(1, during: check)
         transport.answer()
         await check.value
         agree(away, "out of reach")
         let again = Task { await away.flow.refresh() }
-        await transport.arrived(2)
+        await transport.arrived(2, during: again)
         agree(away, "asking again")
         transport.answer()
         await again.value

@@ -61,7 +61,7 @@ public struct AccountRefusal: Error, Equatable, Sendable {
             } else if case let .unexpected(_, status) = error, (300 ..< 400).contains(status) {
                 self.init(.redirected, at: plane, system: error.description)
             } else {
-                self.init(.unreadable, at: plane, system: error.description)
+                self.init(.unreadable, at: plane, system: error.description, remedy: step == .reaching ? Self.notSails : nil)
             }
             return
         }
@@ -79,6 +79,9 @@ public struct AccountRefusal: Error, Equatable, Sendable {
     }
 
     static let originRefused = "Registration origin not allowed: "
+
+    /// What to check when an address answered, but not as Sail's control plane answers.
+    static let notSails = "Check that this is your team's control plane address."
 
     private static func reason(_ refusal: Refusal, step: Step) -> Reason {
         switch (refusal.code, step) {
@@ -100,7 +103,7 @@ public struct AccountRefusal: Error, Equatable, Sendable {
         let sails = Account.relyingParty
         switch reason {
         case .notAnAddress:
-            return ("That is not a control plane address.", "Type it as https://<name>, or http://<private IP address>:<port> such as http://10.0.0.2:7443.")
+            return ("That is not a control plane address.", "Type the address your admin gave you, such as sail.example.com.")
         case .notATicket:
             return ("That is not an enrollment ticket.", "Paste the ticket or the link your admin sent.")
         case let .addressNotAllowed(host):

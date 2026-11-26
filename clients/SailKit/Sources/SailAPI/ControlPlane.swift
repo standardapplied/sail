@@ -27,8 +27,7 @@ public struct ControlPlane: Hashable, Sendable, CustomStringConvertible {
         if scheme == "http", !Self.isPrivateLiteral(host) {
             throw AccountRefusal(.addressNotAllowed(host))
         }
-        let shown = host.contains(":") ? "[\(host)]" : host
-        guard let url = URL(string: "\(scheme)://\(shown)\(parts.port.map { ":\($0)" } ?? "")") else {
+        guard let url = URL(string: "\(scheme)://\(Self.bracketed(host))\(parts.port.map { ":\($0)" } ?? "")") else {
             throw AccountRefusal(.notAnAddress)
         }
         self.url = url
@@ -38,17 +37,23 @@ public struct ControlPlane: Hashable, Sendable, CustomStringConvertible {
         url.absoluteString
     }
 
-    /// The control plane as a person reads it in a sentence or a line: its host, and its port when
-    /// it has one.
+    /// The control plane as a person reads it in a sentence or a line, and types it: its host, an
+    /// IPv6 literal in brackets, and its port when it has one.
     public var named: String {
-        url.host().map { host in url.port.map { "\(host):\($0)" } ?? host } ?? url.absoluteString
+        guard let host = url.host()?.trimmingCharacters(in: CharacterSet(charactersIn: "[]")) else { return url.absoluteString }
+        return url.port.map { "\(Self.bracketed(host)):\($0)" } ?? Self.bracketed(host)
+    }
+
+    /// An IPv6 literal in brackets, as an address spells it, so its colons are never read as a port's.
+    private static func bracketed(_ host: String) -> String {
+        host.contains(":") ? "[\(host)]" : host
     }
 
     /// Dot-separated labels of letters, digits and dashes, none empty, none starting or ending with
-    /// a dash, as a host name is spelled.
+    /// a dash, the last not all digits, as a host name is spelled.
     private static func isName(_ host: String) -> Bool {
         let labels = host.split(separator: ".", omittingEmptySubsequences: false)
-        return host.count <= 253 && labels.allSatisfy { label in
+        return host.count <= 253 && labels.last?.allSatisfy(\.isNumber) == false && labels.allSatisfy { label in
             (1 ... 63).contains(label.count) && label.first != "-" && label.last != "-"
                 && label.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }
         }

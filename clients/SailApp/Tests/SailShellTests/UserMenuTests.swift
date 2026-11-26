@@ -374,14 +374,14 @@ import Testing
         #expect(view.content.name == "Not signed in" && view.content.detail == "127.0.0.1:7979")
         let said = { "the menu \(shell.userMenu.isOpen ? "open" : "closed (its window gave up the keys)") says \(view.content.name), \(view.content.plane.map { "\($0)" } ?? "no state"); the account \(shell.flow.standing == nil ? "knows no one" : "knows uday"), \(shell.flow.checks) checks" }
         let check = Task { await shell.flow.refresh() }
-        await transport.arrived(1)
+        await transport.arrived(1, during: check)
         #expect(shell.userMenu.isOpen && view.content.name == "Checking" && view.content.items == [.account], "during the first check \(said())")
         transport.answer()
         await check.value
         #expect(shell.userMenu.isOpen && view.content.name == "uday" && view.content.plane == .unreachable, "the check ended: \(said())")
         #expect(view.content == shell.flow.menuContent, "the menu and the account disagree: \(view.content) against \(shell.flow.menuContent)")
         let again = Task { await shell.flow.refresh() }
-        await transport.arrived(2)
+        await transport.arrived(2, during: again)
         #expect(shell.userMenu.isOpen && view.content.plane == .reconnecting, "asking again: \(said())")
         #expect(view.content == shell.flow.menuContent, "the menu and the account disagree asking again")
         transport.answer()
@@ -565,15 +565,16 @@ final class OutOfReach: Transport, Sendable {
         throw .unreachable("The network connection was lost.")
     }
 
-    /// Returns once the `count`th check has asked.
-    func arrived(_ count: Int) async {
+    /// Returns once the `count`th check has asked, or once `check`, which should ask it, ended
+    /// without asking.
+    func arrived(_ count: Int, during check: Task<Void, Never>) async {
         let arrival = state.withLock { state -> Gate in
             let gate = state.arrivals[count] ?? Gate()
             state.arrivals[count] = gate
             if state.asked >= count { gate.open() }
             return gate
         }
-        await arrival.wait()
+        await arrival.wait(during: check)
     }
 
     func open(_: HTTPRequest) async throws(SailError) -> HTTPStream {

@@ -536,6 +536,9 @@ final class Kit {
             banner.widthAnchor.constraint(equalToConstant: 440).isActive = true
             row("\(tone)", [held("banner-\(tone)", banner)])
         }
+        let calm = Banner(.info, title: "Your sign-in ended on 25 November. Your sessions on the runner kept running.", bold: false, look: look)
+        calm.widthAnchor.constraint(equalToConstant: 380).isActive = true
+        row("info · one calm sentence, regular", [held("banner-calm", calm)])
     }
 
     private func empties() {

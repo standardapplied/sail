@@ -363,10 +363,13 @@ import Testing
         #expect(field.field.accessibilityHelp() == "Lowercase letters, digits and dashes." && near(field.intrinsicContentSize.height, helped))
     }
 
-    /// A refusal's remedy stands under its sentence in the secondary ink, a line of its own, and
-    /// VoiceOver hears both; with no error the remedy says nothing.
-    @Test func aRemedyStandsUnderTheErrorInTheSecondaryInk() throws {
+    /// A refusal's remedy stands under its sentence in the secondary ink, a line of its own from the
+    /// box's edge, not after the error's mark as the sentence is, either direction; VoiceOver hears
+    /// both; with no error the remedy says nothing.
+    @Test(arguments: [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft])
+    func aRemedyStandsUnderTheErrorFromTheBoxsEdge(_ direction: NSUserInterfaceLayoutDirection) throws {
         let field = try Self.field(.light)
+        field.userInterfaceLayoutDirection = direction
         field.remedy = "Check the address."
         let helped = field.intrinsicContentSize.height
         field.error = "Sail cannot reach it."
@@ -375,10 +378,36 @@ import Testing
         #expect(field.intrinsicContentSize.height < alone && alone > helped, "the remedy took no line of its own")
         field.remedy = "Check the address."
         #expect(field.field.accessibilityHelp() == "Sail cannot reach it. Check the address.")
-        let words = try #require(field.lineText)
-        let at = (words.string as NSString).range(of: "Check").location
-        #expect(words.attribute(.foregroundColor, at: at, effectiveRange: nil) as? NSColor == NSColor(Look.light.textSecondary))
-        #expect(words.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(Tint(Look.light.error)))
+        let remedy = try #require(field.remedyText), sentence = try #require(field.lineText)
+        #expect(remedy.string == "Check the address." && remedy.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(Look.light.textSecondary))
+        #expect(sentence.string == "Sail cannot reach it." && sentence.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(Tint(Look.light.error)))
+        let width = Double(field.bounds.width), box = field.box
+        let line = try #require(field.lineRect(width: width)), under = try #require(field.remedyRect(width: width))
+        let indent = FieldSize.mark + FieldSize.gap, rightToLeft = direction == .rightToLeft
+        #expect(under.minX == box.minX && under.maxX == box.maxX && under.minY >= line.maxY, "\(direction): the remedy stands at \(under) in the box \(box)")
+        #expect(abs(Double(rightToLeft ? box.maxX - line.maxX : line.minX - box.minX) - indent) < 0.5, "\(direction): the sentence stands at \(line), not after the mark")
+    }
+
+    /// Waiting on what it started, a field is drawn as a disabled one is, its box dimmed, yet it
+    /// still takes keys.
+    @Test func aWaitingFieldDimsAndStillTakesKeys() throws {
+        let field = try Self.field(.light)
+        field.waits = true
+        #expect(field.isEnabled && field.field.isEnabled && field.paint == FieldPaint(field.size, FieldState(enabled: false), look: .light))
+        field.waits = false
+        #expect(field.paint == FieldPaint(field.size, FieldState(), look: .light))
+    }
+
+    /// A banner of one calm sentence says it in regular weight, as the page draws the session's end;
+    /// a banner's title is otherwise semibold.
+    @Test func aCalmBannerIsRegular() {
+        func weight(_ banner: Banner) -> Double {
+            let font = banner.words.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+            return Double((font?.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any])?[.weight] as? CGFloat ?? -1)
+        }
+        let calm = Banner(.info, title: "Your sign-in ended on 25 November.", bold: false, look: .light)
+        let titled = Banner(.info, title: "Your sign-in ended on 25 November.", look: .light)
+        #expect(abs(weight(calm) - Double(NSFont.Weight.regular.rawValue)) < 0.01 && weight(titled) > weight(calm) + 0.1, "regular at \(weight(calm)), the title at \(weight(titled))")
     }
 
     /// Disabled: the box and its text at 45%, the eyebrow and the help as they were.

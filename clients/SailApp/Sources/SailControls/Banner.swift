@@ -2,9 +2,9 @@ import AppKit
 import SailLook
 
 /// A banner in the flow above what it is about (`BannerPaint`): the tone mixed into the surface in
-/// content corners, a 16 pt mark, a semibold title, an optional line under it, and at most one
-/// small secondary action at its trailing edge, padded 10, 10, 10 and 12 pt inside its 1 pt edge and
-/// mirrored right to left. VoiceOver reads it as a group with its words, the action inside it.
+/// content corners, a 16 pt mark, a semibold title (regular where the banner is one calm sentence,
+/// not `bold`), an optional line under it, and at most one small secondary action at its trailing
+/// edge, padded 10, 10, 10 and 12 pt inside its 1 pt edge and mirrored right to left. VoiceOver reads it as a group with its words, the action inside it.
 @MainActor
 public final class Banner: NSView {
     static let padding = (top: 10 + Look.hairline, trailing: 10 + Look.hairline, bottom: 10 + Look.hairline, leading: 12 + Look.hairline)
@@ -21,11 +21,13 @@ public final class Banner: NSView {
     public let action: SailButton?
     private let title: String
     private let line: String?
+    private let bold: Bool
 
-    public init(_ tone: BannerTone, title: String, line: String? = nil, action: SailButton? = nil, look: Look) {
+    public init(_ tone: BannerTone, title: String, line: String? = nil, bold: Bool = true, action: SailButton? = nil, look: Look) {
         self.tone = tone
         self.title = title
         self.line = line
+        self.bold = bold
         self.action = action
         self.look = look
         super.init(frame: .zero)
@@ -56,9 +58,9 @@ public final class Banner: NSView {
         return NSRect(x: Double(bounds.width) - Double(rect.maxX), y: Double(rect.minY), width: Double(rect.width), height: Double(rect.height))
     }
 
-    private var words: NSAttributedString {
+    var words: NSAttributedString {
         let words = NSMutableAttributedString(string: title, attributes: [
-            .font: NSFont.systemFont(ofSize: Look.Step.callout.points, weight: .semibold), .foregroundColor: NSColor(look.text),
+            .font: NSFont.systemFont(ofSize: Look.Step.callout.points, weight: bold ? .semibold : .regular), .foregroundColor: NSColor(look.text),
             .paragraphStyle: Self.lines(1.4, Look.Step.callout.points, rightToLeft: rightToLeft),
         ])
         if let line {

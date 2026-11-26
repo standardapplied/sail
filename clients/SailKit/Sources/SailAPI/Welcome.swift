@@ -226,13 +226,21 @@ public struct Welcome: Equatable, Sendable {
         }
     }
 
-    public var primary: String {
+    /// The primary's words on `screen`, as its button is made with them.
+    public static func primary(_ screen: Screen) -> String {
         switch screen {
         case .address: "Continue"
         case .ticket: "Create Passkey"
         case .back: "Sign In with Passkey"
         }
     }
+
+    public var primary: String {
+        Self.primary(screen)
+    }
+
+    /// The chip's link back to Welcome.
+    public static let changeLink = "Change"
 
     public var busyWord: String? {
         switch stage {
@@ -252,12 +260,17 @@ public struct Welcome: Equatable, Sendable {
         }
     }
 
-    public var other: Other {
+    /// The quiet line on `screen`, as its link is made with its words.
+    public static func other(_ screen: Screen) -> Other {
         switch screen {
         case .address: Other(before: "No control plane yet?", link: "Open Terminals", after: "for shells on this Mac.")
-        case .ticket: Other(before: "Already enrolled?", link: "Sign In with Passkey", after: nil)
+        case .ticket: Other(before: "Already enrolled?", link: primary(.back), after: nil)
         case .back: Other(before: "New on this Mac?", link: "Enroll with a Ticket", after: nil)
         }
+    }
+
+    public var other: Other {
+        Self.other(screen)
     }
 
     /// The refusal's sentence and the line under it, its remedy where it has one: what stands under

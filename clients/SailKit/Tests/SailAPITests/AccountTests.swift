@@ -150,7 +150,7 @@ let held = PasskeySession(sessionToken: "sess_golden14", fde: "uday", expiresAt:
         ("http://box.ts.net", "box.ts.net"), ("http://8.8.8.8", "8.8.8.8"), ("http://172.15.0.1", "172.15.0.1"),
         ("http://172.32.0.1", "172.32.0.1"), ("http://100.63.0.1", "100.63.0.1"), ("http://100.128.0.1", "100.128.0.1"),
         ("http://169.254.1.1", "169.254.1.1"), ("http://[fe80::1]", "fe80::1"), ("http://[2001:db8::1]", "2001:db8::1"),
-        ("http://010.0.0.1", "010.0.0.1"), ("http://10.1", "10.1"), ("http://localhost", "localhost"),
+        ("http://localhost", "localhost"),
         ("http://[::ffff:10.0.0.1]", "::ffff:10.0.0.1"),
     ])
     func plainHTTPToAnythingElseIsRefusedNamingTheHost(_ address: String, _ host: String) throws {
@@ -167,6 +167,7 @@ let held = PasskeySession(sessionToken: "sess_golden14", fde: "uday", expiresAt:
         "ftp://10.0.0.2", "http://", "http://u:p@10.0.0.2", "http://10.0.0.2/v1", "http://10.0.0.2?x=1",
         "http://10.0.0.2#top", "enr_0123456789abcdef", "", "http://10.0.0.2:0", "http://10.0.0.2:99999", "sail.example.com/v1",
         "sail..example.com", "-sail.example.com", "sail example.com", "https://sail_x.example.com", "sail.example.com:0",
+        "999.1.1.1", "12345", "sail.example.123", "http://010.0.0.1", "http://10.1",
     ])
     func whatIsNotAnAddressIsSaidWithoutEchoingIt(_ text: String) {
         do {
@@ -176,7 +177,7 @@ let held = PasskeySession(sessionToken: "sess_golden14", fde: "uday", expiresAt:
             #expect(error.reason == .notAnAddress)
             #expect(error.lines == [
                 "That is not a control plane address.",
-                "Type it as https://<name>, or http://<private IP address>:<port> such as http://10.0.0.2:7443.",
+                "Type the address your admin gave you, such as sail.example.com.",
             ])
         }
     }
@@ -194,6 +195,8 @@ let held = PasskeySession(sessionToken: "sess_golden14", fde: "uday", expiresAt:
     @Test func theControlPlaneIsNamedByItsHostAndPort() throws {
         #expect(try ControlPlane(address: "https://sail.example.com").named == "sail.example.com")
         #expect(try ControlPlane(address: "http://127.0.0.1:7979").named == "127.0.0.1:7979")
+        #expect(try ControlPlane(address: "https://[FD00::1]:7443").named == "[fd00::1]:7443")
+        #expect(try ControlPlane(address: "http://[::1]").named == "[::1]")
     }
 
     @Test func aTicketIsTakenBareOrFromTheLinkSailFdeEnrollPrinted() throws {

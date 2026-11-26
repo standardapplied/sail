@@ -5258,10 +5258,10 @@ Developer ID provisioning profile at `Contents/embedded.provisionprofile`; the d
 Apple platforms, so a cancelled sign-in says what to do if this Mac holds none. The window is the
 Sail look: terracotta for every accent, drawn by the app so the system accent never reaches it, its
 label dark ink in the dark appearance and white in the light (3.43:1, so a label on the accent is
-always bold, large text by the HIG's measure), content corners at 6 pt, a 60 pt icon rail with "This
-Mac" and the account. The title bar is transparent over a full-size content view: the rail's tint and
-the pane's surface run to the top edge under the platform's own window buttons. Focus rings,
-selection and the caret are the accent's, through the window's own field editor; the look follows a
+always bold, large text by the HIG's measure), content corners at 6 pt, a 60 pt icon rail with
+Workspaces, Terminals and the account. The title bar is transparent over a full-size content view:
+the rail's tint and the pane's surface run to the top edge under the platform's own window buttons.
+Focus rings, selection and the caret are the accent's, through the window's own field editor; the look follows a
 dark/light change while the app runs, every open terminal's palette with it: the screen is recoloured
 in place (`Screen.setPalette`), its content, scrollback, selection and cursor kept and colours a
 program set itself (OSC 4/10/11) kept; colour queries (OSC 10/11/4, `CSI ? 996 n`) are answered in

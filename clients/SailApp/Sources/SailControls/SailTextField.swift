@@ -2,12 +2,12 @@ import AppKit
 import SailLook
 
 /// A text field with an optional eyebrow label above it and one line under it, help or an error
-/// with its mark (`FieldPaint`), the error's remedy under it in the secondary ink. The field is a
-/// plain `NSTextField` (or `NSSecureTextField`) with its own box, bezel and ring off, inside a box
-/// this view draws, with the halo around the box; the frame keeps `Look.haloRoom` on every side
-/// (the alignment rect is the content), so nothing of its own clips the halo. The caret and the
-/// selection are the look's. VoiceOver reads the eyebrow as the field's label and the help or the
-/// error as its help, and hears a new error.
+/// with its mark (`FieldPaint`), the error's remedy under that, from the box's edge, in the
+/// secondary ink. The field is a plain `NSTextField` (or `NSSecureTextField`) with its own box,
+/// bezel and ring off, inside a box this view draws, with the halo around the box; the frame keeps
+/// `Look.haloRoom` on every side (the alignment rect is the content), so nothing of its own clips
+/// the halo. The caret and the selection are the look's. VoiceOver reads the eyebrow as the
+/// field's label and the help or the error as its help, and hears a new error.
 @MainActor
 public final class SailTextField: NSView {
     public let field: NSTextField
@@ -52,6 +52,12 @@ public final class SailTextField: NSView {
         }
     }
 
+    /// Drawn as disabled while what it started is under way, though it may still take keys: an
+    /// edit then stops what it started.
+    public var waits = false {
+        didSet { repaint() }
+    }
+
     private let label: String?
     private let placeholder: String
     private let mono: LabelFont
@@ -92,7 +98,7 @@ public final class SailTextField: NSView {
     }
 
     var state: FieldState {
-        FieldState(enabled: isEnabled, hovered: hovered, editing: field.currentEditor() != nil && window?.isKeyWindow == true, failed: error != nil)
+        FieldState(enabled: isEnabled && !waits, hovered: hovered, editing: field.currentEditor() != nil && window?.isKeyWindow == true, failed: error != nil)
     }
 
     var paint: FieldPaint {
@@ -117,21 +123,25 @@ public final class SailTextField: NSView {
         label.map { Draw.text($0, mono.font(Look.Step.caption.points) as NSFont, paint.eyebrow, tracking: Look.Tracking.eyebrow, upper: true) }
     }
 
+    /// The help, or the error after its mark.
     var lineText: NSAttributedString? {
-        guard let said = error ?? help else { return nil }
+        (error ?? help).map { words($0, error == nil ? look.textTertiary : Tint(look.error)) }
+    }
+
+    /// The error's remedy, under it from the box's edge.
+    var remedyText: NSAttributedString? {
+        error == nil ? nil : remedy.map { words($0, look.textSecondary) }
+    }
+
+    private func words(_ text: String, _ ink: Tint) -> NSAttributedString {
         let style = NSMutableParagraphStyle(), font = NSFont.systemFont(ofSize: Look.Step.footnote.points)
         style.alignment = rightToLeft ? .right : .left
         style.minimumLineHeight = Look.Step.footnote.points * 1.4
         style.maximumLineHeight = style.minimumLineHeight
-        func words(_ text: String, _ ink: Tint) -> NSAttributedString {
-            NSAttributedString(string: text, attributes: [
-                .font: font, .paragraphStyle: style, .foregroundColor: NSColor(ink),
-                .baselineOffset: TextLine.centring(lineHeight: Double(style.minimumLineHeight), ascent: Double(font.ascender), descent: -Double(font.descender)),
-            ])
-        }
-        let line = NSMutableAttributedString(attributedString: words(said, error == nil ? look.textTertiary : Tint(look.error)))
-        if error != nil, let remedy { line.append(words("\n" + remedy, look.textSecondary)) }
-        return line
+        return NSAttributedString(string: text, attributes: [
+            .font: font, .paragraphStyle: style, .foregroundColor: NSColor(ink),
+            .baselineOffset: TextLine.centring(lineHeight: Double(style.minimumLineHeight), ascent: Double(font.ascender), descent: -Double(font.descender)),
+        ])
     }
 
     private var rightToLeft: Bool {
@@ -143,14 +153,24 @@ public final class SailTextField: NSView {
     func lineRect(width: Double) -> NSRect? {
         guard let lineText else { return nil }
         let indent: Double = error == nil ? 0 : FieldSize.mark + FieldSize.gap
-        let room = max(width - 2 * Look.haloRoom - indent, 1)
-        let height = Double(ceil(lineText.boundingRect(with: NSSize(width: room, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin]).height))
-        return NSRect(x: Look.haloRoom + (rightToLeft ? 0 : indent), y: Double(box.maxY) + FieldSize.gap, width: room, height: height)
+        return Self.rect(lineText, x: Look.haloRoom + (rightToLeft ? 0 : indent), y: Double(box.maxY) + FieldSize.gap, room: width - 2 * Look.haloRoom - indent)
+    }
+
+    /// Where the remedy is drawn: under the error's line, from the box's edge, wrapped to the width.
+    func remedyRect(width: Double) -> NSRect? {
+        guard let remedyText, let line = lineRect(width: width) else { return nil }
+        return Self.rect(remedyText, x: Look.haloRoom, y: Double(line.maxY), room: width - 2 * Look.haloRoom)
+    }
+
+    private static func rect(_ text: NSAttributedString, x: Double, y: Double, room: Double) -> NSRect {
+        let room = max(room, 1)
+        let height = Double(ceil(text.boundingRect(with: NSSize(width: room, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin]).height))
+        return NSRect(x: x, y: y, width: room, height: height)
     }
 
     override public var intrinsicContentSize: NSSize {
         let width: Double = bounds.width > 0 ? Double(bounds.width) : 10000
-        let bottom = Double(lineRect(width: width)?.maxY ?? box.maxY)
+        let bottom = Double(remedyRect(width: width)?.maxY ?? lineRect(width: width)?.maxY ?? box.maxY)
         return NSSize(width: NSView.noIntrinsicMetric, height: bottom - Look.haloRoom)
     }
 
@@ -189,6 +209,7 @@ public final class SailTextField: NSView {
             Draw.icon(.error, in: NSRect(x: x, y: Double(line.minY) + 1, width: FieldSize.mark, height: FieldSize.mark), ink: Tint(look.error))
         }
         lineText.draw(with: line, options: [.usesLineFragmentOrigin])
+        if let remedyText, let under = remedyRect(width: Double(bounds.width)) { remedyText.draw(with: under, options: [.usesLineFragmentOrigin]) }
     }
 
     private func relaid() {

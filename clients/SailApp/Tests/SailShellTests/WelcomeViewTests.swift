@@ -36,7 +36,7 @@ final class Reached: Sendable {
     static func welcome(
         _ transport: any Transport, defaults: UserDefaults = ReattachTests.defaults(), passkey: Signs = Signs(), reached: Reached = Reached()
     ) throws -> WelcomeView {
-        let account = Account(authenticator: passkey, vault: MemoryVaultOf()) { plane in
+        let account = Account(authenticator: passkey, vault: MemoryVaultOf(), reachWithin: .seconds(Patience.answer)) { plane in
             reached.note(plane)
             return transport
         }
@@ -114,7 +114,7 @@ final class Reached: Sendable {
 
         await transport.arrived(during: welcome.flow.underWay)
         welcome.layoutSubtreeIfNeeded()
-        #expect(welcome.proceed.busyWord == "Connecting" && !welcome.addressField.isEnabled && !welcome.toTerminals.isEnabled)
+        #expect(welcome.proceed.busyWord == "Connecting" && welcome.addressField.waits && welcome.addressField.paint.boxOpacity < 1 && !welcome.toTerminals.isEnabled)
         #expect(welcome.proceed.frame.width >= width && SignInMemory(defaults).plane == nil, "Connecting narrowed Continue, or the address was remembered before it answered")
         transport.release()
         await welcome.flow.underWay?.value
@@ -187,6 +187,7 @@ final class Reached: Sendable {
         let chip = welcome.convert(welcome.chipUnder.bounds, from: welcome.chipUnder)
         #expect(Self.visible(welcome.said) && said.maxY <= primary.minY + 0.5 && chip.maxY <= said.minY + 0.5, "the refusal is not under the primary, over the chip")
         #expect(welcome.said.attributedStringValue.containsAttachments)
+        #expect(welcome.announced == "Cancelled. If this Mac holds no passkey for 127.0.0.1:7979, enroll with a ticket from your admin.", "VoiceOver heard \(welcome.announced ?? "nothing")")
     }
 
     /// Each screen leads to the other: Enroll's Sign In with Passkey signs in at once, on Welcome
@@ -224,6 +225,8 @@ final class Reached: Sendable {
         welcome.layoutSubtreeIfNeeded()
         let banner = try #require(welcome.banner)
         #expect(banner.tone == .info && Self.visible(banner) && welcome.text.contains("Your sign-in ended on 25 November. Your sessions on the runner kept running."))
+        let font = banner.words.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+        #expect((font?.fontDescriptor.object(forKey: .traits) as? [NSFontDescriptor.TraitKey: Any])?[.weight] as? CGFloat == NSFont.Weight.regular.rawValue, "the banner's sentence is not regular: \(String(describing: font))")
         let primary = welcome.convert(welcome.signIn.bounds, from: welcome.signIn), over = welcome.convert(banner.bounds, from: banner)
         #expect(over.minY >= primary.maxY - 0.5, "the banner stands at \(over), not over the primary \(primary)")
     }
@@ -303,6 +306,146 @@ final class Reached: Sendable {
             faults += WorkspacesReachTests.outOfReach(in: welcome).map { "\(name): \($0)" }
         }
         #expect(faults.isEmpty, "\(faults.prefix(20).joined(separator: "\n"))")
+    }
+
+    /// A shell over this Mac's `defaults` at a control plane answering from `server`, holding no
+    /// session unless `vault` does, landed as a launch lands it.
+    static func shell(
+        _ server: any Transport, defaults: UserDefaults, passkey: Signs = Signs(), vault: any TokenVault = MemoryVaultOf()
+    ) throws -> ShellApp {
+        let shell = try ShellApp(
+            fonts: LookTests.fonts, helper: nil, look: .light, passkeys: { _ in passkey }, connect: { _ in server }, vault: vault, defaults: defaults
+        )
+        shell.land()
+        return shell
+    }
+
+    /// A check that finds no one signed in, when no one was, changes nothing on screen: the app
+    /// becoming active after Change keeps the address being typed.
+    @Test func aCheckWhileSignedOutKeepsChange() async throws {
+        let shell = try Self.shell(RecordedServer([]), defaults: Self.reached())
+        let welcome = shell.welcome
+        try #require(welcome.welcome.screen == .ticket)
+        welcome.change(nil)
+        welcome.addressField.field.stringValue = "sail.example.org"
+        await shell.flow.refresh()
+        #expect(welcome.welcome.screen == .address && welcome.addressField.field.stringValue == "sail.example.org", "the check left \(welcome.text) holding \(welcome.addressField.field.stringValue)")
+    }
+
+    /// The app becoming active keeps a refusal the person went elsewhere to act on.
+    @Test func aCheckWhileSignedOutKeepsARefusal() async throws {
+        let shell = try Self.shell(RecordedServer([try Exchange("refusal-forbidden")]), defaults: Self.reached())
+        let welcome = shell.welcome
+        welcome.ticketField.field.stringValue = AccountPaneTests.ticket
+        welcome.createPasskey(nil)
+        await shell.flow.underWay?.value
+        let refused = "This ticket is used, expired or not from 127.0.0.1:7979."
+        try #require(welcome.ticketField.error == refused)
+        await shell.flow.refresh()
+        #expect(welcome.welcome.screen == .ticket && welcome.ticketField.error == refused, "the check left \(welcome.text)")
+    }
+
+    /// Enrolled, the second Touch ID cancelled: Welcome back, which a check leaves as it is, since
+    /// the ticket is spent and signing in is what is left.
+    @Test func aCheckAfterAnEnrollmentWhoseSignInWasCancelledStaysOnWelcomeBack() async throws {
+        let server = RecordedServer([try Exchange("passkey-register-start"), try Exchange("passkey-register-finish"), try Exchange("passkey-login-start")])
+        let shell = try Self.shell(server, defaults: Self.reached(), passkey: Signs(failingSignIn: .cancelled))
+        let welcome = shell.welcome
+        welcome.ticketField.field.stringValue = AccountPaneTests.ticket
+        welcome.createPasskey(nil)
+        await shell.flow.underWay?.value
+        let cancelled = "Welcome back\n127.0.0.1:7979\nCancelled.\nIf this Mac holds no passkey for 127.0.0.1:7979, enroll with a ticket from your admin."
+        try #require(welcome.text == cancelled, "after the cancel: \(welcome.text)")
+        await shell.flow.refresh()
+        #expect(welcome.welcome.screen == .back && welcome.text == cancelled, "the check left \(welcome.text)")
+    }
+
+    /// Enrolled, the sign-in after it refused: Sign In with Passkey signs in with no ticket.
+    @Test func aSignInRefusedAfterEnrollingIsSignedInAgainWithNoTicket() async throws {
+        let exchanges = [try Exchange("passkey-register-start"), try Exchange("passkey-register-finish")] + (try signInExchanges())
+        let transport = Held(RecordedServer(exchanges), holding: "login/finish", then: try Exchange("refusal-authentication-failed"))
+        let (welcome, window) = try Self.shown(transport, defaults: Self.reached())
+        defer { window.orderOut(nil) }
+        welcome.ticketField.field.stringValue = AccountPaneTests.ticket
+        welcome.createPasskey(nil)
+        await transport.arrived(during: welcome.flow.underWay)
+        transport.release()
+        await welcome.flow.underWay?.value
+        try #require(welcome.welcome.screen == .back && welcome.flow.standing == nil, "after the refusal: \(welcome.text)")
+        welcome.signInWithPasskey(nil)
+        await welcome.flow.underWay?.value
+        #expect(welcome.flow.standing?.fde == "uday" && transport.routes.filter { $0.contains("register") }.count == 2, "\(transport.routes)")
+    }
+
+    /// Connecting never traps a person: an edit of the address stops the check, and what it answers
+    /// after is neither said nor remembered; Return in the field meanwhile asks nothing again.
+    @Test func editingTheAddressStopsConnecting() async throws {
+        let transport = Held(RecordedServer([try Exchange("health")]), holding: "health")
+        let defaults = ReattachTests.defaults()
+        let (welcome, window) = try Self.shown(transport, defaults: defaults)
+        defer { window.orderOut(nil) }
+        let field = welcome.addressField.field
+        field.stringValue = "sail.example.com"
+        welcome.reach(nil)
+        await transport.arrived(during: welcome.flow.underWay)
+        welcome.reach(nil)
+        #expect(transport.routes == ["GET /v1/health"], "Return while connecting asked again: \(transport.routes)")
+        field.stringValue = "sail.example.org"
+        NotificationCenter.default.post(name: NSControl.textDidChangeNotification, object: field)
+        #expect(welcome.welcome.stage == nil && welcome.proceed.busyWord == nil, "the edit left it \(welcome.proceed.busyWord ?? "idle")")
+        transport.release()
+        await welcome.flow.underWay?.value
+        #expect(welcome.welcome.screen == .address && field.stringValue == "sail.example.org" && welcome.addressField.error == nil, "after the answer: \(welcome.text)")
+        #expect(SignInMemory(defaults).plane == nil && !welcome.flow.isActing, "a check stopped by an edit was remembered")
+    }
+
+    /// The label in the chip that names its host.
+    static func host(in chip: PlaneChip) -> NSTextField? {
+        chip.row.subviews.compactMap { $0 as? NSTextField }.first
+    }
+
+    /// The chip shows its host whole wherever it has the room (the drive's own hosts among others,
+    /// as Auto Layout sizes the chip); only a host too long for the column is cut, in its middle.
+    @Test func theChipShowsItsHostWholeWhereItHasRoom() throws {
+        let (welcome, window) = try Self.shown(RecordedServer([]))
+        defer { window.orderOut(nil) }
+        for address in ["http://127.0.0.1:7979", "http://127.0.0.1:7980", "http://10.0.0.2:7443", "sail.example.com", "sail.example.com:7443", "box.ts.net"] {
+            welcome.show(Welcome(plane: try ControlPlane(address: address), person: nil))
+            welcome.layoutSubtreeIfNeeded()
+            let host = try #require(Self.host(in: welcome.chip))
+            let words = Double(host.attributedStringValue.size().width), insets = host.alignmentRectInsets
+            let cut = host.cell?.expansionFrame(withFrame: host.bounds, in: host) ?? .zero
+            #expect(
+                cut == .zero && Double(host.frame.width) >= words + Double(insets.left + insets.right) - 0.001,
+                "\(address): the host is \(host.frame.width) wide for \(words) of words and \(insets.left + insets.right) of insets (its cell asks \(host.cell?.cellSize.width ?? 0), its intrinsic \(host.intrinsicContentSize.width)); the chip is \(welcome.chip.frame.width) for its intrinsic \(welcome.chip.intrinsicContentSize.width), its row \(welcome.chip.row.frame.width); cut \(cut); scale \(window.backingScaleFactor)"
+            )
+        }
+        welcome.show(Welcome(plane: try ControlPlane(address: "https://" + String(repeating: "h", count: 60) + ".example.com"), person: nil))
+        welcome.layoutSubtreeIfNeeded()
+        let long = try #require(Self.host(in: welcome.chip)), column = welcome.convert(welcome.column.bounds, from: welcome.column)
+        #expect(long.lineBreakMode == .byTruncatingMiddle && Double(long.frame.width) < Double(long.attributedStringValue.size().width), "a host longer than the column is not cut")
+        #expect(abs(Double(column.width) - WelcomeView.columnWidth) < 0.5, "a long host widened the column to \(column.width)")
+    }
+
+    /// Welcome back works from the keyboard: Return presses its primary, there alone; elsewhere the
+    /// field takes Return.
+    @Test func returnPressesWelcomeBacksPrimary() throws {
+        let (welcome, window) = try Self.shown(RecordedServer([]), defaults: Self.signedInBefore())
+        defer { window.orderOut(nil) }
+        #expect(welcome.signIn.keyEquivalent == "\r" && Self.sends(welcome.signIn, #selector(WelcomeView.signInWithPasskey(_:)), to: welcome))
+        welcome.enrollInstead(nil)
+        #expect([welcome.proceed, welcome.create, welcome.signIn].allSatisfy { $0.keyEquivalent.isEmpty }, "Return presses a button where a field takes it")
+    }
+
+    /// Every word on the controls is the one ``Welcome`` holds, so the words tests read the screen.
+    @Test func theControlsSayWhatWelcomeHolds() throws {
+        let (welcome, window) = try Self.shown(RecordedServer([]))
+        defer { window.orderOut(nil) }
+        let plane = try ControlPlane(address: "sail.example.com")
+        for screen in [Welcome(plane: nil, person: nil), Welcome(plane: plane, person: nil), Welcome(plane: plane, person: Self.uday)] {
+            welcome.show(screen)
+            #expect(welcome.primary.title == screen.primary && welcome.link.title == screen.other.link, "\(screen.title): \(welcome.primary.title), \(welcome.link.title)")
+        }
     }
 
     /// The states the page draws, as the drive's frames make them.
@@ -388,6 +531,37 @@ final class Reached: Sendable {
         let order = buttons.sorted { $0.convert($0.bounds, to: nil).maxY > $1.convert($1.bounds, to: nil).maxY }
         #expect(order.map { $0.toolTip ?? "" } == ["Workspaces", "Terminals", "Account"] && order.map { $0.accessibilityLabel() ?? "" } == ["Workspaces", "Terminals", "Account"])
         #expect(Rail.Item.terminals.rawValue == "terminals")
+    }
+
+    /// A relaunch holding no session, after a sign-in, is Welcome back by name: a second shell over
+    /// the first one's settings, the closest a unit test comes to the drive's relaunch.
+    @Test func aRelaunchIsWelcomeBackByName() async throws {
+        let defaults = WelcomeViewTests.reached()
+        let first = try WelcomeViewTests.shell(RecordedServer(try signInExchanges()), defaults: defaults)
+        _ = await AccountFlowTests.signIn(first.flow)
+        try #require(first.flow.standing?.fde == "uday")
+        let again = try WelcomeViewTests.shell(RecordedServer([]), defaults: defaults)
+        #expect(again.rail.selected == .workspaces && !again.welcome.isHidden && again.welcome.text == "Welcome back, Uday\n127.0.0.1:7979", "the relaunch shows \(again.welcome.text)")
+    }
+
+    /// A launch holding a session waits on the drawing mark, then opens Workspaces on the project the
+    /// person chose last there, not the first listed.
+    @Test func aLaunchHoldingASessionLandsOnTheProjectChosenLast() async throws {
+        let defaults = WelcomeViewTests.reached()
+        let listed = #"{"schema_version": 1, "total": 2, "projects": [{"name": "harbor", "container_status": "running", "template": "ready"}, {"name": "lighthouse", "container_status": "running", "template": "ready"}]}"#
+        let none = #"{"schema_version": 1, "project": "lighthouse", "workspaces": []}"#
+        let server = RecordedServer([
+            try Exchange("whoami"), Exchange(method: "GET", path: "/v1/projects", status: 200, body: Data(listed.utf8)),
+            Exchange(method: "GET", path: "/v1/projects/lighthouse/workspaces", status: 200, body: Data(none.utf8)),
+        ])
+        let uday = WorkspacesModel.Person(handle: "uday", admin: true, confirmed: true, controlPlane: AccountFlowTests.plane.description)
+        defaults.set("lighthouse", forKey: ShellApp.chosenKey(uday))
+        let shell = try WelcomeViewTests.shell(server, defaults: defaults, vault: OneSession(fde: "uday"))
+        #expect(shell.workspaces.text == "Workspaces\nConnecting to 127.0.0.1:7979" && shell.welcome.isHidden)
+        await shell.flow.refresh()
+        await shell.workspaces.refresh()
+        let lines = shell.workspaces.text.split(separator: "\n").map(String.init)
+        #expect(shell.rail.selected == .workspaces && lines.dropFirst().first == "lighthouse", "the launch landed on \(lines)")
     }
 
     /// The project chosen last is kept for one person on one control plane.

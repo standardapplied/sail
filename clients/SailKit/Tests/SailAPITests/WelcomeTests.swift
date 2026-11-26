@@ -1,6 +1,7 @@
 import Foundation
 import SailAPI
 import SailKitTestSupport
+import Synchronization
 import Testing
 
 /// Defaults of their own, empty: what this Mac remembers in one test, and nothing of another's.
@@ -13,12 +14,29 @@ let example = "https://sail.example.com"
 /// The exchange Continue makes, which `ReachTests` reads.
 let reachExchanges: Set<String> = ["health"]
 
+/// A control plane that never answers: a request waits until the task that sent it is cancelled,
+/// as a URLSession request does, and is then said lost.
+final class Silent: Transport, Sendable {
+    private let held = Mutex<[AsyncStream<Never>.Continuation]>([])
+
+    func send(_: HTTPRequest) async throws(SailError) -> HTTPResponse {
+        let (never, kept) = AsyncStream<Never>.makeStream()
+        held.withLock { $0.append(kept) }
+        for await _ in never {}
+        throw .unreachable("The request was cancelled.")
+    }
+
+    func open(_: HTTPRequest) async throws(SailError) -> HTTPStream {
+        throw .unreachable("The request was cancelled.")
+    }
+}
+
 /// Reaching a control plane: Continue's one unauthenticated `GET /v1/health`, and only Sail's answer
 /// moves on.
 @Suite struct ReachTests {
     func reached(_ typed: String, answering exchanges: [Exchange]) async throws -> (Result<ControlPlane, AccountRefusal>, [HTTPRequest]) {
         let server = RecordedServer(exchanges)
-        let account = Account(authenticator: ToldPasskey(), vault: MemoryVault()) { _ in server }
+        let account = Account(authenticator: ToldPasskey(), vault: MemoryVault(), reachWithin: .seconds(Patience.answer)) { _ in server }
         do throws(AccountRefusal) {
             return (.success(try await account.reach(typed)), await server.requests)
         } catch {
@@ -36,11 +54,12 @@ let reachExchanges: Set<String> = ["health"]
         let health = try Exchange("health")
         let notOK = Exchange(method: health.method, path: health.path, status: 200, body: Data(#"{"schema_version": 1, "status": "starting"}"#.utf8))
         let notSail = Exchange(method: health.method, path: health.path, status: 200, body: Data("<html>hello</html>".utf8))
-        for answer in [notOK, notSail] {
+        let missing = Exchange(method: health.method, path: health.path, status: 404, body: Data("not found".utf8))
+        for answer in [notOK, notSail, missing] {
             let (result, _) = try await reached(example, answering: [answer])
             #expect(throws: AccountRefusal.self) { try result.get() }
             guard case let .failure(refused) = result else { continue }
-            #expect(refused.reason == .unreadable && refused.sentence == "\(example) answered in a way Sail cannot read.")
+            #expect(refused.reason == .unreadable && Array(refused.lines.prefix(2)) == ["\(example) answered in a way Sail cannot read.", "Check that this is your team's control plane address."], "\(refused.lines)")
         }
     }
 
@@ -61,6 +80,19 @@ let reachExchanges: Set<String> = ["health"]
             return
         }
         #expect(Array(refused.lines.prefix(2)) == ["Sail cannot reach \(example).", "Check that this Mac is on its network and the address is right."])
+    }
+
+    /// A control plane that does not answer within the limit is said out of reach, as one that
+    /// refuses the connection is; the request is cancelled, not left waiting. The limit is the
+    /// test's, so no real second passes; its own bound is the time limit, should the limit not hold.
+    @Test(.timeLimit(.minutes(1))) func noAnswerWithinTheLimitIsSaidAsUnreachable() async {
+        let account = Account(authenticator: ToldPasskey(), vault: MemoryVault(), reachWithin: .zero) { _ in Silent() }
+        do throws(AccountRefusal) {
+            _ = try await account.reach("sail.example.com")
+            Issue.record("a control plane that never answered was reached")
+        } catch {
+            #expect(error.reason == .unreachable && Array(error.lines.prefix(2)) == ["Sail cannot reach \(example).", "Check that this Mac is on its network and the address is right."])
+        }
     }
 
     @Test func whatIsNotAnAddressIsRefusedBeforeAnythingIsSent() async throws {
@@ -170,6 +202,19 @@ let reachExchanges: Set<String> = ["health"]
         #expect(welcome.screen == .address && welcome.plane == plane && welcome.typed == "sail.example.com")
         let plain = Welcome(plane: try? ControlPlane(address: "http://127.0.0.1:7979"), person: nil)
         #expect(plain.typed == "http://127.0.0.1:7979" && plain.host == "127.0.0.1:7979")
+    }
+
+    /// Change puts the control plane back as a person types it, and what it puts back reaches the
+    /// same control plane: an IPv6 literal keeps its brackets over https as over http.
+    @Test(arguments: [
+        "sail.example.com", "sail.example.com:8443", "https://[fd00::1]:7443", "https://[fd00::1]", "http://[::1]:7979", "http://[fd12::7]:7443",
+        "http://10.0.0.2:7443", "127.0.0.1:7979",
+    ])
+    func whatChangePutsBackReachesTheSameControlPlane(_ address: String) throws {
+        let plane = try ControlPlane(address: address)
+        var welcome = Welcome(plane: plane, person: nil)
+        welcome.change()
+        #expect(try ControlPlane(address: welcome.typed) == plane, "\(address) came back as \(welcome.typed)")
     }
 
     @Test func aRefusalStandsUnderItsFieldAsItsSentenceAndRemedy() {

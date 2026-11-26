@@ -147,6 +147,7 @@ extension Driver {
         guard let plane = try? ControlPlane(address: "sail.example.com") else { return (false, "no control plane") }
         let mara = RememberedSignIn(handle: "mara", name: "Mara Quill")
         var welcome = Welcome(plane: nil, person: nil)
+        shell.welcome.addressField.field.stringValue = plane.named
         switch state {
         case "welcome": break
         case "connecting": welcome.began(.connecting)
@@ -154,7 +155,7 @@ extension Driver {
         case "enroll": welcome.reached(plane, person: nil)
         case "creating", "signing-after-enrolling", "ticket-refused":
             welcome.reached(plane, person: nil)
-            welcome.began(state == "creating" ? .creating : .signingAfterEnrolling(handle: "mara"))
+            welcome.began(state == "signing-after-enrolling" ? .signingAfterEnrolling(handle: "mara") : .creating)
             let forbidden = Refusal(code: .known(.forbidden), message: "Enrollment ticket is invalid or expired.")
             if state == "ticket-refused" { welcome.refused(AccountRefusal(.refused(forbidden), at: plane, step: .enrolling)) }
         case "back", "signing-in", "cancelled", "ended":
