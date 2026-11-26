@@ -35,8 +35,11 @@ import Testing
     }
 
     /// The deadline holds with the `Create` still unanswered: the end says it could not end what
-    /// may be made, and the runner, once it answers, holds the session, as was said.
-    @Test func aCreateUnansweredAtTheDeadlineIsSaidAndWhatItMakesIsWhatWasSaid() async throws {
+    /// may be made, and the runner, once it answers, holds the session, as was said. The `Create`
+    /// is held until after the end, so an end that waited on it past its deadline would hold the
+    /// test past its minute; the deadline is the wall clock's, which waits at least its second, so
+    /// nothing of it is left for the Kill whatever the runner's speed.
+    @Test(.timeLimit(.minutes(1))) func aCreateUnansweredAtTheDeadlineIsSaidAndWhatItMakesIsWhatWasSaid() async throws {
         let door = try FakeRunnerDoor()
         defer { door.stop() }
         door.holdCreates()
@@ -44,9 +47,7 @@ import Testing
         let watch = Watch(session)
         session.start()
         try await watch.until("the runner is making it") { door.createsReceived == 1 }
-        let began = ContinuousClock.now
         #expect(await session.end(within: .seconds(1)) == .unconfirmed(["The runner did not answer within 1 s."]))
-        #expect(ContinuousClock.now - began < .seconds(5), "within the one deadline")
         door.releaseCreates()
         try await watch.until("the runner made it") { door.sessions == ["app-slow"] }
     }

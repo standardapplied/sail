@@ -209,17 +209,16 @@ import Testing
     }
 
     /// MINOR 3: a close during the handshake (here, waiting for the host's welcome) shuts the
-    /// connection at once, not after the handshake's timeout.
-    @Test func aCloseDuringTheHandshakeShutsTheConnectionAtOnce() async throws {
+    /// connection at once, not after the handshake's timeout: that timeout is 120 s, past the
+    /// test's minute, so a close that waited for it fails the test whatever the runner's speed.
+    @Test(.timeLimit(.minutes(1))) func aCloseDuringTheHandshakeShutsTheConnectionAtOnce() async throws {
         let host = try FakeHost()
-        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen(), timeout: 30, sleep: Naps().sleep)
+        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen(), timeout: 120, sleep: Naps().sleep)
         session.start()
         let peer = try await host.accept()
         _ = try await peer.hello()
         session.close()
-        let started = ContinuousClock.now
         await #expect(throws: (any Error).self) { try await peer.read() }
-        #expect(ContinuousClock.now - started < .seconds(FakeHost.deadline - 1))
     }
 
     /// MINOR 4: a detach whose connection dies before the host's answer is still a detach.
