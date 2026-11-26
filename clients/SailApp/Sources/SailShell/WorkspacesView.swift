@@ -733,7 +733,8 @@ public final class WorkspacesView: NSView {
     }
 
     /// The mark already drawing stays, in this look, so a redraw while asking does not begin its
-    /// cycle again.
+    /// cycle again. It spans the card, so its centre is the card's on any pixel grid: a view as wide
+    /// as its label would stand half a point off on a 1x screen wherever the two widths' parities differ.
     private func showAsking() {
         cardSaid = [Self.asking]
         if card.subviews.count == 1, let drawing = card.subviews.first as? BrandMark {
@@ -745,7 +746,8 @@ public final class WorkspacesView: NSView {
         mark.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(mark)
         NSLayoutConstraint.activate([
-            mark.centerXAnchor.constraint(equalTo: card.centerXAnchor), mark.topAnchor.constraint(equalTo: card.topAnchor), mark.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+            mark.leadingAnchor.constraint(equalTo: card.leadingAnchor), mark.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            mark.topAnchor.constraint(equalTo: card.topAnchor), mark.bottomAnchor.constraint(equalTo: card.bottomAnchor),
         ])
     }
 

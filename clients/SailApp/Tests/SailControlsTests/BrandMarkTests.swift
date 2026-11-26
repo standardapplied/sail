@@ -126,7 +126,8 @@ extension ControlsTests {
     }
 
     /// The drawing mark moves only while it can be seen: hidden, under a hidden ancestor (a pane
-    /// not chosen) or out of its window it has no animation, and shown again it draws.
+    /// not chosen) or out of its window it has no animation, and shown again it draws; so does one
+    /// made under a hidden pane, as a launch onto Workspaces makes it, once the pane is shown.
     @Test func theMarkDrawsOnlyWhileItCanBeSeen() throws {
         let motion = Motion.shared, was = motion.reduced
         defer { motion.reduced = was }
@@ -147,8 +148,48 @@ extension ControlsTests {
         #expect(animated().isEmpty, "under a hidden pane, the mark keeps \(animated())")
         pane.isHidden = false
         #expect(mark.isDrawing, "its pane shown again, the mark does not draw")
+        pane.isHidden = true
+        let born = BrandMark(.drawing(label: nil), look: .light, mono: try Self.mono())
+        pane.addSubview(born)
+        #expect(born.sigma.animationKeys() == nil && born.line.animationKeys() == nil, "made under a hidden pane, the mark draws")
+        pane.isHidden = false
+        #expect(born.isDrawing, "made under a hidden pane, as a launch makes it, and then shown, the mark does not draw")
         mark.removeFromSuperview()
         #expect(animated().isEmpty, "out of its window, the mark keeps \(animated())")
+    }
+
+    /// The mark is centred by what it draws, wherever its view stands and however wide: the sigma on
+    /// whole backing pixels, 44 pt, its centre the view's within half a backing pixel; and the sigma's
+    /// ink and the label's (its capitals, not the letter-spacing after the last) each about the view's
+    /// centre, as AppKit draws them at 1x and 2x, within half a backing pixel, or half a drawn pixel
+    /// where that is coarser.
+    @Test(arguments: [(0.0, 203.0), (0.5, 203.0), (0.0, 440.0), (0.5, 441.0)])
+    func theMarkIsCentredByWhatItDraws(_ x: Double, _ width: Double) throws {
+        let mark = BrandMark(.drawing(label: "Asking who is signed in"), look: .light, mono: try Self.mono())
+        let height = Double(mark.intrinsicContentSize.height)
+        mark.setFrameSize(NSSize(width: x + width, height: height))
+        let backdrop = Backdrop(.white, holding: mark)
+        mark.frame = NSRect(x: x, y: 0, width: width, height: height)
+        let window = NSWindow(contentRect: backdrop.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = backdrop
+        window.orderFront(nil)
+        defer { window.orderOut(nil) }
+        backdrop.layoutSubtreeIfNeeded()
+        let pixels = Double(window.backingScaleFactor), centre = x + width / 2
+        let sigma = window.convertToBacking(mark.convert(mark.glyph.frame, to: nil)), whole = window.convertToBacking(mark.convert(mark.bounds, to: nil))
+        let edges = [sigma.minX, sigma.maxX, sigma.minY, sigma.maxY].map { Double($0) }
+        #expect(
+            edges.allSatisfy { $0 == $0.rounded() } && Double(sigma.width) == 44 * pixels && abs(Double(sigma.midX - whole.midX)) <= 0.5,
+            "at \(x) and \(width) pt wide the sigma's backing pixels are \(sigma), the view's \(whole)"
+        )
+        let bands = [("sigma", NSRect(x: 0, y: 0, width: x + width, height: 44)), ("label", NSRect(x: 0, y: 44, width: x + width, height: height - 44))]
+        for scale in [1.0, 2.0] {
+            for (name, band) in bands {
+                let ink = try #require(backdrop.ink(in: band, darkerThan: 3 * (255 - 16), scale: scale), "at \(scale)x the \(name) drew nothing")
+                #expect(abs(Double(ink.midX) - centre) <= 0.5 / min(pixels, scale), "at \(x) and \(width) pt wide, drawn at \(scale)x, the \(name)'s ink \(ink) is centred \(Double(ink.midX) - centre) from the view's")
+            }
+        }
     }
 
     /// The design's mark at 44 pt: the 34/150 tile in `inverse` under the sigma in `onInverse`, or no

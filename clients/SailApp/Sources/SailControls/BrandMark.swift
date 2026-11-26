@@ -112,7 +112,7 @@ public final class BrandMark: NSView {
 
     override public func layout() {
         super.layout()
-        glyph.frame = NSRect(x: ((Double(bounds.width) - markSide) / 2).rounded(), y: 0, width: markSide, height: markSide)
+        glyph.frame = backingAlignedRect(NSRect(x: (Double(bounds.width) - markSide) / 2, y: 0, width: markSide, height: markSide), options: .alignAllEdgesNearest)
         still {
             stage.frame = glyph.bounds
             stage.isGeometryFlipped = false
@@ -120,10 +120,12 @@ public final class BrandMark: NSView {
         }
     }
 
+    /// The label is centred by its glyphs' outlines, not its advance, which ends in the letter-spacing
+    /// after the last capital.
     override public func draw(_: NSRect) {
         guard let labelText else { return }
-        let width = Double(labelText.size().width)
-        Draw.line(labelText, x: (Double(bounds.width) - width) / 2, baseline: TextLine.baseline(top: markSide + Look.Space.l, points: Look.Step.micro.points))
+        let ink = CTLineGetBoundsWithOptions(CTLineCreateWithAttributedString(labelText), .useGlyphPathBounds)
+        Draw.line(labelText, x: (Double(bounds.width) - Double(ink.width)) / 2 - Double(ink.minX), baseline: TextLine.baseline(top: markSide + Look.Space.l, points: Look.Step.micro.points))
     }
 
     override public func viewDidMoveToWindow() {

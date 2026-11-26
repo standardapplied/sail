@@ -25,6 +25,20 @@ import Testing
         #expect(view.card.subviews.count == 1 && view.card.subviews.first is EmptyState, "signed out, the card holds \(view.card.subviews)")
     }
 
+    /// The asking mark's centre is the card's, exactly, in a window of either parity: the mark then
+    /// centres what it draws on it.
+    @Test(arguments: [720.0, 721.0])
+    func theAskingMarkStandsOnTheCardsCentre(_ width: Double) throws {
+        let view = WorkspacesView(look: .light, title: try TitleFont(directory: LookTests.fonts), mono: try LabelFont(directory: LookTests.fonts))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 480), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        view.waitForSignIn()
+        view.layoutSubtreeIfNeeded()
+        let mark = try #require(view.card.subviews.first as? BrandMark, "the card holds \(view.card.subviews)")
+        #expect(mark.frame.midX == view.card.bounds.midX, "in a window \(width) pt wide the mark \(mark.frame) stands off the card's centre \(view.card.bounds.midX)")
+    }
+
     /// A redraw while asking, for a change of look or the same wait told again, keeps the mark that
     /// is drawing and its cycle: only its look changes.
     @Test func aRedrawWhileAskingKeepsTheMarkDrawingOn() throws {

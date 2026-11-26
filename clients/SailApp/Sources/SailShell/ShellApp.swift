@@ -399,12 +399,14 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// `buttonsGap` past the buttons, wherever AppKit starts the accessory (9 pt after them on one
     /// Mac, 8 or less on CI's runner). Right to left (the strip's direction, the title bar's) AppKit
     /// puts the buttons at the window's right and the accessory at its left: the strip, whose tabs
-    /// then run from its right edge, ends `buttonsGap` before the buttons.
+    /// then run from its right edge, ends `buttonsGap` before the buttons. A window showing no buttons
+    /// leaves the strip as it is.
     private func fitTheStrip() {
         let strip = thisMac.strip
         guard !window.styleMask.contains(.fullScreen), strip.window != nil else { return }
         window.contentView?.superview?.layoutSubtreeIfNeeded()
-        let buttons = Self.buttons(of: window) ?? .zero, start = Double(strip.convert(NSPoint.zero, to: nil).x)
+        guard let buttons = Self.buttons(of: window) else { return }
+        let start = Double(strip.convert(NSPoint.zero, to: nil).x)
         let end: Double
         if strip.userInterfaceLayoutDirection == .rightToLeft {
             strip.leading = 0

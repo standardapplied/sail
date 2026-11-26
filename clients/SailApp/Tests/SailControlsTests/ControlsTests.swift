@@ -551,13 +551,14 @@ final class Backdrop: NSView {
         }
     }
 
-    /// The rectangle, in points from the top left, of the pixels darker than mid grey: the ink.
-    func ink(in region: NSRect? = nil, darkerThan limit: Double = 300) -> NSRect? {
-        guard let image = drawn(scale: 2) else { return nil }
+    /// The rectangle, in points from the top left, of the pixels darker than mid grey drawn at
+    /// `scale`: the ink.
+    func ink(in region: NSRect? = nil, darkerThan limit: Double = 300, scale: Double = 2) -> NSRect? {
+        guard let image = drawn(scale: scale) else { return nil }
         var found: NSRect?
         for y in 0 ..< image.pixelsHigh {
             for x in 0 ..< image.pixelsWide {
-                let pixel = NSRect(x: Double(x) / 2, y: Double(y) / 2, width: 0.5, height: 0.5)
+                let pixel = NSRect(x: Double(x) / scale, y: Double(y) / scale, width: 1 / scale, height: 1 / scale)
                 guard region.map({ $0.contains(NSPoint(x: pixel.midX, y: pixel.midY)) }) ?? true,
                       let colour = image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
                       Double(colour.redComponent + colour.greenComponent + colour.blueComponent) * 255 < limit
