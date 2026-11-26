@@ -67,22 +67,22 @@ import Testing
         panel.choose(.harness(codex.harness))
         guard case let .refused(refusal) = panel.readiness else { Issue.record("not refused: \(panel.readiness)"); return }
         #expect(refusal.message.hasPrefix("Codex CLI is not installed in harbor's workspaces"))
-        #expect(NewSessionWords.line(codex) == "Not installed in harbor")
+        #expect(NewSessionWords.line(codex, way: .signIn) == "Not installed in harbor" && NewSessionWords.line(codex, way: .key) == "Not installed in harbor")
         #expect(NewSessionWords.remedy(refusal) == "An admin adds codex to harbor's agent install list and builds its template again.")
         #expect(NewSessionWords.primary(panel.readiness) == nil, "a harness that does not start offers a Start")
         let made = panel.start()
         #expect(made == nil && panel.memory == ModeMemory())
     }
 
-    /// With a key stored and nothing chosen, the harness's own sign-in is chosen: the row says the
-    /// key, not what Sign in shows, the help says the agent will ask where the workspace does not
+    /// With a key stored and nothing chosen, the harness's own sign-in is chosen: the row says it,
+    /// as Sign in does, the help says the agent will ask where the workspace does not
     /// hold the sign-in, Start names the harness, and the start is `inside`.
     @Test func withNothingChosenTheSignInIsChosenEvenWithAKeyStored() throws {
         let agents = try Self.agents("workspace-agents-dock")
         let claude = agents.offered[0]
         var panel = NewSession(agents, memory: ModeMemory())
         #expect(claude.login?.name == "default" && panel.way(of: claude.harness) == .signIn)
-        #expect(NewSessionWords.line(claude) == "API key “default”", "the row repeats Sign in's choice")
+        #expect(NewSessionWords.line(claude, way: .signIn) == "Your Claude account", "the row says other than Sign in")
         #expect(NewSessionWords.signInHelp(claude, way: .signIn, in: "dock") == "Claude Code asks you to sign in with your Claude account when it starts, once in each workspace.")
         #expect(NewSessionWords.primary(panel.readiness) == "Start Claude Code")
         let made = panel.start()
@@ -90,16 +90,17 @@ import Testing
         #expect(panel.memory.ways == [claude.harness: .signIn])
     }
 
-    /// The key chosen: the help offers the sign-in by its name, Start names the harness, the start
+    /// The key chosen: the row says it, the help offers the sign-in by its name as the server writes
+    /// it, Start names the harness, the start
     /// passes the key (`inside` false), and the choice is remembered for that harness alone.
     @Test func theKeyChosenStartsWithItAndIsRememberedPerHarness() throws {
         let agents = try Self.agents("workspace-agents-dock")
         let claude = agents.offered[0], codex = agents.offered[1]
         var panel = NewSession(agents, memory: ModeMemory())
         panel.choose(way: .key)
-        #expect(panel.way(of: claude.harness) == .key && NewSessionWords.line(claude) == "API key “default”")
-        #expect(NewSessionWords.signInHelp(claude, way: .key, in: "dock") == "Or your Claude account, chosen here.")
-        #expect(NewSessionWords.signInHelp(codex, way: .key, in: "dock") == "Or your ChatGPT account, chosen here.")
+        #expect(panel.way(of: claude.harness) == .key && NewSessionWords.line(claude, way: .key) == "API key “default”")
+        #expect(NewSessionWords.signInHelp(claude, way: .key, in: "dock") == "Your Claude account can be chosen here instead.")
+        #expect(NewSessionWords.signInHelp(codex, way: .key, in: "dock") == "Your ChatGPT account can be chosen here instead.")
         #expect(NewSessionWords.primary(panel.readiness) == "Start Claude Code")
         let made = panel.start()
         #expect(made?.wire == SessionAgent(harness: claude.harness, mode: claude.modeDefault, inside: false))
@@ -153,15 +154,16 @@ import Testing
         let made = try Exchange("workspace-agents-dock")
             .altered(at: ["offered", 0, "harness"], to: "made-up")
             .altered(at: ["offered", 0, "display"], to: "Made Up")
-            .altered(at: ["offered", 0, "sign_in", "name"], to: "Your Made-up account")
+            .altered(at: ["offered", 0, "sign_in", "name"], to: "GitHub account")
             .altered(at: ["offered", 0, "sign_in", "how"], to: [["text": "Made Up asks you once"]])
             .altered(at: ["offered", 0, "kinds", 0, "label"], to: "Made-up token")
         let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: made.body))
         let offer = agents.offered[0]
         var panel = NewSession(agents, memory: ModeMemory())
-        #expect(NewSessionWords.line(offer) == "Made-up token “default”" && offer.signIn?.said == "Made Up asks you once.")
+        #expect(NewSessionWords.line(offer, way: .key) == "Made-up token “default”" && offer.signIn?.said == "Made Up asks you once.")
+        #expect(NewSessionWords.line(offer, way: .signIn) == "GitHub account" && NewSessionWords.way(offer, .signIn) == "GitHub account")
         #expect(NewSessionWords.signInHelp(offer, way: .signIn, in: "dock") == "Made Up asks you once.")
-        #expect(NewSessionWords.signInHelp(offer, way: .key, in: "dock") == "Or your Made-up account, chosen here.")
+        #expect(NewSessionWords.signInHelp(offer, way: .key, in: "dock") == "GitHub account can be chosen here instead.", "the server's name was cased again")
         #expect(NewSessionWords.primary(panel.readiness) == "Start Made Up" && NewSessionWords.monogram(offer.display) == "Ma")
         #expect(panel.start()?.wire == SessionAgent(harness: "made-up", mode: offer.modeDefault, inside: true))
     }
@@ -193,7 +195,7 @@ import Testing
     @Test func aHarnessWithAKeyIsHeardReady() throws {
         let dock = try Self.agents("workspace-agents-dock"), noLogin = try Self.agents("workspace-agents-dock-no-login")
         #expect(NewSessionWords.ready(dock.offered[0]) == "Claude Code ready, API key default.")
-        #expect(NewSessionWords.line(dock.offered[0]) == "API key “default”")
+        #expect(NewSessionWords.line(dock.offered[0], way: .key) == "API key “default”")
         #expect(NewSessionWords.ready(noLogin.offered[0]) == nil)
     }
 
@@ -263,6 +265,38 @@ import Testing
         #expect(NewSessionWords.hint(.none, modes: true) == "", "keys named while nothing of the panel holds them")
     }
 
+    /// While typing narrows the rows the foot says what was typed and, while the rows hold the keys
+    /// and so ⌫ widens them, how to widen them; nothing typed, nothing said of it.
+    @Test func theFootSaysWhatWasTypedAndHowToWiden() {
+        #expect(NewSessionWords.hint(.rows, modes: true, typed: "op") == "“op” · ⌫ widen · ↑↓ choose · ⌘M mode")
+        #expect(NewSessionWords.hint(.signIn, modes: false, typed: "op") == "“op”", "⌫ named while it widens nothing")
+        #expect(NewSessionWords.hint(.none, modes: false, typed: "op") == "")
+        #expect(NewSessionWords.hint(.rows, modes: false, typed: "") == NewSessionWords.hint(.rows, modes: false))
+    }
+
+    /// The Shell is a kind like any other: opened last, it is what the panel opens on; a harness
+    /// started after it takes that back. The row's quick item, which names the last harness, opens
+    /// at that harness all the same.
+    @Test func theShellOpenedLastIsChosenFirst() throws {
+        let agents = try Self.agents("workspace-agents-dock")
+        var first = NewSession(agents, memory: ModeMemory())
+        let started = first.start()
+        let claude = try #require(started)
+        var panel = NewSession(agents, memory: first.memory)
+        panel.move(by: 2)
+        let shell = panel.start()
+        #expect(panel.readiness == .shell && shell == nil && panel.memory.shellLast && panel.memory.last == claude)
+        let reopened = NewSession(agents, memory: panel.memory)
+        #expect(reopened.chosen == .shell, "the Shell opened last is not chosen first")
+        let quick = NewSession(agents, memory: panel.memory.atLastHarness)
+        #expect(quick.chosen == .harness("claude-code") && quick.startsAgain, "the quick item does not start its harness again")
+        var after = reopened
+        after.choose(.harness("codex"))
+        let codex = after.start()
+        #expect(codex != nil && !after.memory.shellLast && NewSession(agents, memory: after.memory).chosen == .harness("codex"))
+        #expect(NewSessionWords.openShell == "Open Shell" && NewSessionWords.primary(.shell) == NewSessionWords.openShell)
+    }
+
     @Test func aStartTheHostRefusedIsSaidInItsSentenceAndNeverItsCommand() {
         let noLogin = HostRefusal(
             message: "No Codex CLI login stored for ana, so a Codex CLI session cannot start in dock.",
@@ -285,15 +319,20 @@ import Testing
 
     @Test func aRowOnItsKeyNamesTheKindsLabelAndTheKey() throws {
         let claude = try Self.agents("workspace-agents").offered[0]
-        #expect(NewSessionWords.line(claude) == "API key “work”")
+        #expect(NewSessionWords.line(claude, way: .key) == "API key “work”")
     }
 
-    /// A row says how its kind signs in: the stored default key, else the sign-in's name, whichever
-    /// way Sign in is set; the Shell that it is a terminal in the workspace.
-    @Test func aRowSaysTheKeyElseTheSignInAndNeverFollowsTheChoice() throws {
+    /// A row says how its kind signs in as its Sign in is set, in Sign in's own words: the sign-in's
+    /// name, the stored default key once that is chosen; with no key, the sign-in; the Shell that it
+    /// is a terminal in the workspace.
+    @Test func aRowSaysHowItsSignInIsSet() throws {
         let dock = try Self.agents("workspace-agents-dock"), noLogin = try Self.agents("workspace-agents-dock-no-login")
-        #expect(NewSessionWords.line(dock.offered[0]) == "API key “default”" && NewSessionWords.line(dock.offered[1]) == "API key “work”")
-        #expect(NewSessionWords.line(noLogin.offered[0]) == "Your Claude account")
+        #expect(NewSessionWords.line(dock.offered[0], way: .signIn) == "Your Claude account" && NewSessionWords.line(dock.offered[1], way: .signIn) == "Your ChatGPT account")
+        #expect(NewSessionWords.line(dock.offered[0], way: .key) == "API key “default”" && NewSessionWords.line(dock.offered[1], way: .key) == "API key “work”")
+        #expect(NewSessionWords.line(noLogin.offered[0], way: .key) == "Your Claude account")
+        for offer in dock.offered + noLogin.offered where offer.refusal == nil {
+            for way in [Way.signIn, .key] { #expect(NewSessionWords.line(offer, way: way) == NewSessionWords.way(offer, way), "\(offer.display)'s row is not what Sign in says") }
+        }
         #expect(NewSessionWords.shell == "Shell" && NewSessionWords.shellLine("dock") == "A terminal in dock, no agent")
     }
 
@@ -310,7 +349,7 @@ import Testing
 
     /// A tile's monogram: the first two letters of the display name, the first upper case.
     @Test func aMonogramIsTheFirstTwoLettersOfTheName() {
-        #expect(["Claude Code", "Codex CLI", "Pi", "OpenCode", "gemini", "X", "  4o mini", ""].map(NewSessionWords.monogram) == ["Cl", "Co", "Pi", "Op", "Ge", "X", "4o", ""])
+        #expect(["Claude Code", "Codex CLI", "Pi", "OpenCode", "gemini", "OPENAI", "X", "  4o mini", ""].map(NewSessionWords.monogram) == ["Cl", "Co", "Pi", "Op", "Ge", "Op", "X", "4o", ""])
     }
 
     /// A mode warns by the server's flag alone: Claude Code's Bypass permissions while the server
@@ -334,13 +373,15 @@ import Testing
         #expect(made.risky)
         made.choose(.shell)
         #expect(!made.risky)
+        #expect(NewSessionWords.modeWarning("Runs anything without asking.") == "Mode, warning: Runs anything without asking.")
     }
 
     /// Eight offers and the Shell are past seven rows: typing narrows them to those whose name
-    /// starts with what was typed, whatever its case, and chooses the first; what no row matches is
-    /// not taken; erasing widens them again. Seven rows are never narrowed.
+    /// starts with what was typed, whatever its case or accents, and chooses the first; what no row
+    /// matches is not taken; erasing widens them again, back to the row chosen before typing. Seven
+    /// rows are never narrowed.
     @Test func pastSevenRowsTypingNarrowsThemAndChoosesTheFirst() throws {
-        let names = ["Pi", "OpenCode", "Gemini CLI", "Aider", "Goose", "Opal"]
+        let names = ["Pi", "OpenCode", "Gemini CLI", "Aider", "Écho", "Opal"]
         let eight = try Exchange("workspace-agents-dock").offering(names.map { Exchange.madeUpOffer($0) })
         var panel = NewSession(try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: eight.body)), memory: ModeMemory())
         #expect(panel.filters && panel.choices.count == 9)
@@ -353,7 +394,12 @@ import Testing
         let shell = panel.narrow(to: "s")
         #expect(shell && panel.choices == [.shell] && panel.readiness == .shell)
         let erased = panel.narrow(to: "")
-        #expect(erased && panel.choices.count == 9 && panel.chosen == .harness("claude-code"))
+        #expect(erased && panel.choices.count == 9 && panel.chosen == .harness("claude-code") && panel.filter.isEmpty)
+        panel.move(by: 2)
+        let echo = panel.narrow(to: "ec")
+        #expect(echo && panel.choices == [.harness("écho")], "an unaccented letter did not match an accented name")
+        let back = panel.narrow(to: "")
+        #expect(back && panel.chosen == .harness("pi"), "erasing chose \(panel.chosen), not the row chosen before typing")
         let five = try Exchange("workspace-agents-dock").offering(names.prefix(4).map { Exchange.madeUpOffer($0) })
         var seven = NewSession(try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: five.body)), memory: ModeMemory())
         let typed = seven.narrow(to: "o")

@@ -41,6 +41,7 @@ import Testing
         view.person = person
         view.look = look
         view.project.list.pointer = { nil }
+        view.newSession.view.pointer = { nil }
         view.newSession.popover.keysLeft = Notification.Name("sail.tests.keys-left.\(UUID().uuidString)")
         view.shown()
         try #require(await RunnerTabTests.until { !view.busy && view.text.contains(words) }, "nothing listed: \(view.text)")
@@ -156,10 +157,11 @@ import Testing
     /// The row's quick item, "New Claude Code Session", asks what starts in the workspace first:
     /// the last start starts at once while it still can (a stored login; signing in there when
     /// that is how it last started), else the panel opens at that harness saying why, nothing started.
-    static func quickItem(_ golden: String, last: AgentStart, row: String = "dock") async throws -> (view: WorkspacesView, window: KeyWindow, started: [AgentStart?], asked: Int) {
+    static func quickItem(_ golden: String, last: AgentStart, shellLast: Bool = false, row: String = "dock") async throws -> (view: WorkspacesView, window: KeyWindow, started: [AgentStart?], asked: Int) {
         let (view, window, server) = try await Self.listed([golden])
         var memory = ModeMemory()
         memory.remember(last)
+        if shellLast { memory.rememberShell() }
         view.memory = memory
         var started: [AgentStart?] = []
         view.onStart = { start, _, _ in started.append(start) }
@@ -171,9 +173,11 @@ import Testing
         return (view, window, started, asked)
     }
 
-    @Test func theQuickItemStartsAStoredLoginsLastStartAtOnce() async throws {
+    /// The Shell opened since makes no difference: the quick item names the harness and starts it.
+    @Test(arguments: [false, true])
+    func theQuickItemStartsAStoredLoginsLastStartAtOnce(_ shellLast: Bool) async throws {
         let plan = AgentStart(harness: "claude-code", display: "Claude Code", mode: "plan")
-        let quick = try await Self.quickItem("workspace-agents-dock", last: plan)
+        let quick = try await Self.quickItem("workspace-agents-dock", last: plan, shellLast: shellLast)
         defer { quick.window.orderOut(nil) }
         #expect(quick.started == [plan] && quick.asked == 1 && !quick.view.newSession.isOpen, "started \(quick.started), asked \(quick.asked)")
     }
@@ -197,9 +201,10 @@ import Testing
         #expect(panel.view.primary?.title == "Start Claude Code")
     }
 
-    @Test func theQuickItemOpensThePanelAtAHarnessNoLongerInstalled() async throws {
+    @Test(arguments: [false, true])
+    func theQuickItemOpensThePanelAtAHarnessNoLongerInstalled(_ shellLast: Bool) async throws {
         let codex = AgentStart(harness: "codex", display: "Codex CLI", mode: "full-access")
-        let quick = try await Self.quickItem("workspace-agents-dock-not-installed", last: codex)
+        let quick = try await Self.quickItem("workspace-agents-dock-not-installed", last: codex, shellLast: shellLast)
         defer { quick.window.orderOut(nil) }
         let panel = quick.view.newSession
         #expect(quick.started.isEmpty && panel.isOpen && panel.view.rows.first(where: \.chosen)?.name.stringValue == "Codex CLI")
@@ -220,6 +225,7 @@ import Testing
         let (view, window) = try WorkspacesViewTests.view(transport)
         defer { window.orderOut(nil) }
         view.project.list.pointer = { nil }
+        view.newSession.view.pointer = { nil }
         view.newSession.popover.keysLeft = Notification.Name("sail.tests.keys-left.\(UUID().uuidString)")
         view.shown()
         #expect(await RunnerTabTests.until { view.text.contains("quay") })
@@ -264,6 +270,7 @@ import Testing
         let (view, window) = try WorkspacesViewTests.view(transport)
         defer { window.orderOut(nil) }
         view.project.list.pointer = { nil }
+        view.newSession.view.pointer = { nil }
         view.newSession.popover.keysLeft = Notification.Name("sail.tests.keys-left.\(UUID().uuidString)")
         view.shown()
         #expect(await RunnerTabTests.until { view.text.contains("quay") })
@@ -339,23 +346,26 @@ import Testing
 
     /// The usual case (dock, holding both sign-ins): the title names the workspace; every kind an
     /// equal row in the route's order, then the Shell, each a tile (its monogram, the Shell's
-    /// terminal), its name and how it signs in (the stored key, not what Sign in shows); the first
-    /// chosen, with its options under its name: Mode at the harness's own default and that mode's
-    /// words, then Sign in on its account and that dock holds it; the one primary names it. It
-    /// hangs 4 pt under the row, its trailing edge on ⋯'s, 388 pt wide.
+    /// terminal), its name and how it signs in as its Sign in is set (its account, a key stored
+    /// notwithstanding); the first chosen, with its options under its name: Mode at the harness's
+    /// own default and that mode's words, then Sign in on its account and that dock holds it; the
+    /// one primary names it. With room under the row it hangs 4 pt under it, its trailing edge on
+    /// ⋯'s, 388 pt wide.
     @Test func thePanelListsWhatTheRouteOffersInItsWords() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-dock-signed-in"])
         defer { window.orderOut(nil) }
+        window.setContentSize(NSSize(width: 1000, height: 700))
+        view.layoutSubtreeIfNeeded()
         let panel = try await Self.open("dock", in: view)
         let shown = panel.view
         #expect(shown.rows.map(\.name.stringValue) == ["Claude Code", "Codex CLI", "Shell"])
-        #expect(shown.rows.map(\.line.stringValue) == ["API key “default”", "API key “work”", "A terminal in dock, no agent"])
+        #expect(shown.rows.map(\.line.stringValue) == ["Your Claude account", "Your ChatGPT account", "A terminal in dock, no agent"])
         #expect(shown.rows.map(\.tile) == [.monogram("Cl"), .monogram("Co"), .icon(.terminal)])
         #expect(shown.rows.allSatisfy { near($0.frame.height, NewSessionView.row) && near($0.frame.width, shown.rows[0].frame.width) }, "the rows are not equal")
         #expect(shown.rows.map(\.chosen) == [true, false, false])
         #expect(shown.words.first == "New session in dock")
         #expect(shown.modes?.title == "Claude Code's own" && shown.signIn?.title == "Your Claude account")
-        let order = try ["Shell", "CLAUDE CODE", "Mode", "Claude Code's own", "Starts as Claude Code starts by itself: the project's default mode, else Auto where it is available, else Manual.", "Sign in", "Your Claude account", "Already signed in in dock.", "Start Claude Code"].map { said in
+        let order = try ["Shell", "CLAUDE CODE", "Mode", "Claude Code's own", "Starts as Claude Code starts by itself: the project's default mode, else Auto where it is available, else Manual.", "Sign in", "Already signed in in dock.", "Start Claude Code"].map { said in
             try #require(shown.words.firstIndex(of: said), "\(said) is not said: \(shown.words)")
         }
         #expect(order == order.sorted(), "the options do not stand under the rows in order: \(shown.words)")
@@ -443,6 +453,10 @@ import Testing
         #expect(!panel.view.words.contains { $0 == "Mode" || $0 == "Sign in" }, "the Shell shows options: \(panel.view.words)")
         try Self.press(try Self.returnKey(), in: window)
         #expect(shells == ["harbor dock"] && opened.isEmpty && started == 0, "the Shell started \(shells) and opened \(opened)")
+        #expect(view.memory.shellLast, "the Shell opened is not remembered")
+        let again = try await Self.open("dock", in: view)
+        #expect(again.view.rows.map(\.chosen) == [false, false, true], "the Shell opened last is not chosen first")
+        try Self.press(try Self.escape(), in: window)
         view.project.on(.newSession("dock"))
         #expect(await RunnerTabTests.until { view.newSession.isOpen })
         view.project.on(.newSession("dock"))
@@ -489,8 +503,9 @@ import Testing
     }
 
     /// With a key stored, Sign in lists the account first, then the key, a separator and Store a
-    /// Key; the account is chosen until the key is. The key chosen: the row says it, the sentence
-    /// goes, Start is plain and starts on the key, and the choice is remembered for that harness.
+    /// Key; the account is chosen until the key is, and the row says what Sign in says. The key
+    /// chosen: the row says it, the sentence goes, Start is plain and starts on the key, and the
+    /// choice is remembered for that harness.
     @Test func theSignInPopUpOffersTheAccountThenTheKeyAndTheChoiceIsRemembered() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-dock"])
         defer { window.orderOut(nil) }
@@ -498,13 +513,13 @@ import Testing
         let menu = try #require(panel.view.signIn?.menu)
         #expect(menu.items.map { $0.isSeparatorItem ? "-" : $0.title } == ["Your Claude account", "API key “default”", "-", "Store a Key"])
         #expect(panel.view.signIn?.title == "Your Claude account" && panel.view.primary?.title == "Start Claude Code")
-        #expect(panel.view.rows.first?.line.stringValue == "API key “default”", "the row repeats Sign in's choice")
+        #expect(panel.view.rows.first?.line.stringValue == "Your Claude account", "the row says other than Sign in")
         #expect(panel.view.words.contains("Claude Code asks you to sign in with your Claude account when it starts, once in each workspace."))
         #expect(panel.view.signIn?.accessibilityLabel() == "Sign in" && panel.view.signIn?.accessibilityValue() as? String == "Your Claude account")
         menu.performActionForItem(at: 1)
         #expect(panel.view.signIn?.title == "API key “default”" && panel.view.rows.first?.line.stringValue == "API key “default”")
         #expect(panel.view.primary?.title == "Start Claude Code" && !panel.view.words.contains { $0.contains("asks you to sign in") })
-        #expect(panel.view.words.contains("Or your Claude account, chosen here."))
+        #expect(panel.view.words.contains("Your Claude account can be chosen here instead."))
         var started: [AgentStart?] = []
         view.onStart = { start, _, _ in started.append(start) }
         try Self.press(try Self.returnKey(), in: window)
@@ -513,6 +528,7 @@ import Testing
         #expect(reopened.view.signIn?.title == "API key “default”", "the key chosen was not remembered")
         try Self.press(try Self.down(), in: window)
         #expect(reopened.view.signIn?.title == "Your ChatGPT account", "Codex took Claude Code's choice")
+        #expect(reopened.view.rows.map(\.line.stringValue).prefix(2) == ["API key “default”", "Your ChatGPT account"], "a row says other than its Sign in")
     }
 
     /// ⇥ reaches Sign in, drawn holding the keys; Space and ↑ ↓ open its menu there; ⇥ again gives
@@ -583,14 +599,18 @@ import Testing
         defer { window.orderOut(nil) }
         let panel = try await Self.open("dock", in: view)
         #expect(panel.view.warned == nil)
+        #expect(panel.view.modes?.accessibilityLabel() == "Mode")
         try Self.mode("Bypass permissions", in: panel)
         #expect(panel.view.warned == "Skips every permission prompt and safety check.")
+        #expect(panel.view.modes?.accessibilityLabel() == NewSessionWords.modeWarning("Skips every permission prompt and safety check."), "VoiceOver hears no warning")
         let label = try #require(WorkspacesViewTests.found(NSTextField.self, in: panel.view).first { $0.stringValue == "Skips every permission prompt and safety check." })
         #expect(label.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(Tint(view.look.warning)), "the warning is not in the warning tone")
         try Self.mode("Plan", in: panel)
         #expect(panel.view.warned == nil, "a mode not flagged warns")
         try Self.press(try Self.down(), in: window)
         #expect(panel.view.warned?.hasPrefix("Sail starts Codex CLI in a workspace with full access") == true, "Codex's one risky mode says its note quietly")
+        let one = try #require(WorkspacesViewTests.found(SailButton.self, in: panel.view).first { $0.title == "Full access" })
+        #expect(one.accessibilityLabel() == NewSessionWords.modeWarning(try #require(panel.view.warned)), "VoiceOver hears no warning on Codex's one mode")
         try Self.press(try Self.down(), in: window)
         #expect(panel.view.rows.first(where: \.chosen)?.name.stringValue == "Tide" && panel.view.warned == nil)
         try Self.mode("Reckless", in: panel)
@@ -610,8 +630,9 @@ import Testing
     }
 
     /// Past seven rows typing narrows them: "op" leaves the rows whose names start with it, the
-    /// first chosen with its options; ⌫ widens them again; what matches no row is not taken, and
-    /// nothing typed reaches the list beneath. Seven rows are never narrowed.
+    /// first chosen with its options, and the foot says what was typed and that ⌫ widens; ⌫ widens
+    /// them again, all of it back to the row chosen before typing; what matches no row is not
+    /// taken, and nothing typed reaches the list beneath. Seven rows are never narrowed.
     @Test func pastSevenRowsTypingNarrowsThem() async throws {
         let names = ["Pi", "OpenCode", "Gemini CLI", "Aider", "Goose", "Opal"]
         let eight = try Exchange("workspace-agents-dock").offering(names.map { Exchange.madeUpOffer($0) })
@@ -619,10 +640,13 @@ import Testing
         defer { window.orderOut(nil) }
         let panel = try await Self.open("dock", in: view)
         #expect(panel.view.rows.count == 9)
+        for _ in 0 ..< 2 { try Self.press(try Self.down(), in: window) }
+        #expect(panel.view.rows.firstIndex(where: \.chosen) == 2 && !panel.view.words.contains { $0.contains("widen") })
         let tall = panel.view.height
         try Self.press(try Self.key(31, "o"), in: window)
         try Self.press(try Self.key(35, "p"), in: window)
         #expect(panel.view.rows.map(\.name.stringValue) == ["OpenCode", "Opal"] && panel.view.rows.map(\.chosen) == [true, false])
+        #expect(panel.view.words.contains("“op” · ⌫ widen · ↑↓ choose"), "the foot does not say what was typed: \(panel.view.words)")
         #expect(panel.view.words.contains("OPENCODE") && panel.view.primary?.title == "Start OpenCode" && panel.view.height < tall)
         try Self.press(try Self.key(7, "x"), in: window)
         #expect(panel.view.rows.map(\.name.stringValue) == ["OpenCode", "Opal"], "what matches no row was taken")
@@ -631,7 +655,8 @@ import Testing
         try Self.press(try Self.down(), in: window)
         #expect(panel.view.rows.map(\.chosen) == [true], "↓ left the narrowed rows")
         for _ in 0 ..< 4 { try Self.press(try Self.key(51, "\u{7f}"), in: window) }
-        #expect(panel.view.rows.count == 9 && panel.view.rows.first?.chosen == true)
+        #expect(panel.view.rows.count == 9 && panel.view.rows.firstIndex(where: \.chosen) == 2, "erasing did not choose Pi again, chosen before typing")
+        #expect(panel.view.words.contains(NewSessionWords.hint(.rows, modes: false)), "the foot still says something typed")
         #expect(panel.isOpen && WorkspacesViewTests.footSays(view.project) == ["New"], "typing reached the list or closed the panel")
         let five = try Exchange("workspace-agents-dock").offering(names.prefix(4).map { Exchange.madeUpOffer($0) })
         let (seven, sevenWindow, _) = try await Self.listed([], also: [five])
@@ -642,27 +667,48 @@ import Testing
     }
 
     /// The page's six kinds: equal rows, OpenCode dimmed with the server's few words, its tile in
-    /// the quiet ink; the pointer over a row sets its name at full weight, as over the chosen one's,
-    /// and leaving it sets it back.
-    @Test func sixKindsAreEqualRowsAndThePointerStrengthensOne() async throws {
+    /// the quiet ink. Each row tracks the pointer over what shows of it. The pointer over a row,
+    /// where the window says it is, sets its name at full weight and outlines its tile in ink, as
+    /// the chosen one's, with no fill, bar or check; drawn again under the pointer (↓) the row under
+    /// it stays hovered, and so does one the pointer entered while where it is is not known; away
+    /// from the rows, none is.
+    @Test func sixKindsAreEqualRowsAndThePointerOutlinesOne() async throws {
         let (view, window, _) = try await Self.listed([], also: [try Self.sixKinds()])
         defer { window.orderOut(nil) }
         let panel = try await Self.open("dock", in: view)
-        let rows = panel.view.rows
+        let rows = panel.view.rows, look = view.look
         #expect(rows.map(\.name.stringValue) == ["Claude Code", "Codex CLI", "Pi", "OpenCode", "Gemini CLI", "Shell"])
-        #expect(rows.map(\.line.stringValue) == ["API key “default”", "API key “work”", "Pi token “default”", "Not installed in harbor", "Gemini CLI token “default”", "A terminal in dock, no agent"])
+        #expect(rows.map(\.line.stringValue) == ["Your Claude account", "Your ChatGPT account", "Your Pi account", "Not installed in harbor", "Your Gemini CLI account", "A terminal in dock, no agent"])
         #expect(rows.map(\.tile) == [.monogram("Cl"), .monogram("Co"), .monogram("Pi"), .monogram("Op"), .monogram("Ge"), .icon(.terminal)])
+        for row in rows {
+            let areas = row.trackingAreas.filter { $0.owner === row }
+            #expect(areas.count == 1 && areas.allSatisfy { $0.options.isSuperset(of: [.mouseEnteredAndExited, .inVisibleRect]) }, "\(row.name.stringValue) does not track the pointer over it: \(areas.map(\.options))")
+        }
         let font = { (row: NewSessionRow) in row.name.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont }
-        let pi = rows[2], event = try #require(NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil))
-        #expect(font(pi) != font(rows[0]) && font(rows[0]) == .systemFont(ofSize: Look.Step.callout.points, weight: .semibold), "a row not chosen is at full weight")
-        pi.mouseEntered(with: event)
-        #expect(pi.hovered && font(pi) == font(rows[0]), "the pointer over Pi left its name at \(String(describing: font(pi)))")
-        pi.mouseExited(with: event)
-        #expect(!pi.hovered && font(pi) != font(rows[0]))
+        let named = { (name: String) in panel.view.rows.first { $0.name.stringValue == name } }
+        #expect(font(rows[2]) != font(rows[0]) && font(rows[0]) == .systemFont(ofSize: Look.Step.callout.points, weight: .semibold), "a row not chosen is at full weight")
+        #expect(rows[0].well == look.wellChosen && rows[2].well == look.well && rows[2].well.fill == nil && look.wellChosen.fill == nil)
+        let over = try #require(rows[2].window).convertPoint(toScreen: rows[2].convert(NSPoint(x: rows[2].bounds.midX, y: rows[2].bounds.midY), to: nil))
+        panel.view.pointer = { panel.popover.panel.convertPoint(fromScreen: over) }
+        panel.view.pointed()
+        let pi = try #require(named("Pi"))
+        #expect(pi.hovered && font(pi) == font(rows[0]) && pi.well == look.wellChosen, "the pointer over Pi left its name at \(String(describing: font(pi))) and its tile \(pi.well)")
+        #expect(panel.view.rows.filter(\.hovered).count == 1 && !pi.chosen)
+        try Self.press(try Self.down(), in: window)
+        #expect(named("Pi")?.hovered == true && named("Pi") !== pi, "the row under the pointer lost its hover when drawn again")
+        panel.view.pointer = { nil }
+        let event = try #require(NSEvent.enterExitEvent(with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil))
+        try #require(named("Pi")).mouseExited(with: event)
+        try #require(named("Gemini CLI")).mouseEntered(with: event)
+        try Self.press(try Self.down(), in: window)
+        #expect(panel.view.rows.filter(\.hovered).map(\.name.stringValue) == ["Gemini CLI"], "the row hovered was not hovered again when drawn again")
+        panel.view.pointer = { NSPoint(x: -100, y: -100) }
+        panel.view.pointed()
+        #expect(!panel.view.rows.contains(where: \.hovered) && named("Gemini CLI")?.well == look.well)
     }
 
     /// Someone else's workspace, by ⌥⌘T on its row: no list, the server's sentence and remedy, and
-    /// Open a Shell, which starts a new shell there. An owner gone: the sentence, no remedy (it
+    /// Open Shell, which starts a new shell there. An owner gone: the sentence, no remedy (it
     /// names a command), and Close.
     @Test func whereNoAgentStartsForThePersonItSaysWhy() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-quay"])
@@ -672,7 +718,7 @@ import Testing
         view.onStart = { start, project, name in if start == nil { shells.append("\(project) \(name)") } }
         let panel = try await Self.open("quay", in: view)
         #expect(panel.view.rows.isEmpty && panel.view.primary == nil)
-        #expect(panel.view.words == ["New session in quay", "quay is ana's workspace, so an agent starts in it only as ana, with ana's login.", "Open a shell in it, or start the agent in a workspace of your own.", "Open a Shell"])
+        #expect(panel.view.words == ["New session in quay", "quay is ana's workspace, so an agent starts in it only as ana, with ana's login.", "Open a shell in it, or start the agent in a workspace of your own.", "Open Shell"])
         try Self.press(panel.view.secondary)
         #expect(shells == ["harbor quay"] && opened.isEmpty && !panel.isOpen)
         let (gone, goneWindow, _) = try await Self.listed(["workspace-agents-pier-owner-gone"])
@@ -693,10 +739,12 @@ import Testing
     }
 
     /// At the least window the panel spans what shows of the page less 8 pt on each side, under
-    /// the row: never past the card, even where the section is laid out wider than the card shows.
+    /// the row where its tallest choice fits there: never past the card, even where the section is
+    /// laid out wider than the card shows.
     @Test func atTheLeastWindowThePanelSpansThePage() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-dock"], width: WorkspacesViewTests.narrowestCard)
         defer { window.orderOut(nil) }
+        window.setContentSize(NSSize(width: WorkspacesViewTests.narrowestCard, height: 700))
         let card = NSView(frame: try #require(window.contentView).frame)
         window.contentView = card
         view.frame = NSRect(x: 0, y: 0, width: WorkspacesViewTests.narrowestCard + 27, height: card.frame.height)
@@ -732,29 +780,54 @@ import Testing
         #expect(panel.view.words.first == "New session in dock")
     }
 
-    /// Six kinds under dock, near the top of the window, with room neither under the row nor over
-    /// it: the panel stays in the page, its foot 8 pt over the page's, also as Pi's options make it
-    /// taller.
-    @Test func aPanelWithRoomNeitherUnderNorOverItsRowStaysInThePage() async throws {
-        let (view, window, _) = try await Self.listed([], also: [try Self.sixKinds()])
-        defer { window.orderOut(nil) }
-        let panel = try await Self.open("dock", in: view)
-        for _ in 0 ..< 2 { try Self.press(try Self.down(), in: window) }
-        let page = window.convertToScreen(view.project.convert(view.project.visibleRect, to: nil)), box = panel.popover.frame
-        let row = try #require(view.project.rowFrame("dock").map { window.convertToScreen($0) })
-        try #require(row.minY - NewSessionPanel.gap - box.height < page.minY + NewSessionPanel.inset && row.maxY + NewSessionPanel.gap + box.height > page.maxY - NewSessionPanel.inset, "the panel \(box) has room by its row \(row) in \(page)")
-        #expect(box.minY >= page.minY + NewSessionPanel.inset - 0.5 && box.maxY <= page.maxY - NewSessionPanel.inset + 0.5, "the panel \(box) leaves the page \(page)")
+    /// Three, seven and nine kinds (the most shown before typing narrows them, and past it), at the
+    /// design's window and the least, the window at the top of the screen under the menu bar: the
+    /// box, where the window server put it, stands in what shows of the page less 8 pt whichever
+    /// row is chosen, its rows scrolling in what the title, the options and the foot leave, the
+    /// chosen row whole in view; and its top stays where it opened as ↓ moves through every kind.
+    @Test(arguments: [3, 7, 9])
+    func thePanelStaysInThePageAndStillWhateverIsChosen(_ kinds: Int) async throws {
+        let made = ["Pi", "OpenCode", "Gemini CLI", "Aider", "Goose", "Opal"].prefix(kinds - 3).map { Exchange.madeUpOffer($0) }
+        let answer = try Exchange("workspace-agents-dock").offering(Array(made))
+        let windows = [(1024 - Rail.width - 4, 684 - ShellApp.bandHeight), (WorkspacesViewTests.narrowestCard, Double(ShellApp.leastFrame.height) - ShellApp.bandHeight)]
+        for (width, height) in windows {
+            let (view, window, _) = try await Self.listed([], also: [answer], width: width)
+            defer { window.orderOut(nil) }
+            let screen = try #require(window.screen ?? NSScreen.main, "no screen to put the window on")
+            window.setContentSize(NSSize(width: width, height: height))
+            window.setFrameTopLeftPoint(NSPoint(x: screen.visibleFrame.minX, y: screen.visibleFrame.maxY))
+            view.layoutSubtreeIfNeeded()
+            let panel = try await Self.open("dock", in: view)
+            let page = window.convertToScreen(view.project.convert(view.project.visibleRect, to: nil)).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5)
+            let top = panel.popover.frame.maxY
+            var faults: [String] = []
+            for at in 1 ... kinds {
+                if at > 1 { try Self.press(try Self.down(), in: window) }
+                let box = panel.popover.frame
+                let chosen = try #require(panel.view.rows.first { $0.chosen }, "row \(at) is not chosen")
+                if !page.contains(box) { faults.append("row \(at) chosen: the box \(box) leaves the page \(page)") }
+                if abs(box.maxY - top) > 0.5 { faults.append("row \(at) chosen: its top moved from \(top) to \(box.maxY)") }
+                if abs(box.height - panel.view.height) > 0.5 { faults.append("row \(at) chosen: the box is \(box.height) pt for \(panel.view.height) pt drawn") }
+                let shown = panel.view.list.contentView.documentVisibleRect
+                if !shown.insetBy(dx: -0.5, dy: -0.5).contains(chosen.frame) { faults.append("row \(at) chosen at \(chosen.frame), the rows show \(shown)") }
+            }
+            #expect(faults.isEmpty, "\(kinds) kinds at \(width) × \(height): \(faults.joined(separator: "\n"))")
+        }
     }
 
-    /// With no room under the row, the panel hangs over it.
+    /// With no room under the row, the panel hangs over it: its top placed by its tallest choice,
+    /// Codex CLI's, whose foot stands 4 pt over the row, and kept there for a shorter one.
     @Test func withNoRoomUnderItsRowThePanelHangsOverIt() async throws {
         let rows = try WorkspacesReachTests.list((1 ... 30).map { ["name": String(format: "ws-%02d", $0), "instance": String(format: "harbor-ws-%02d", $0), "state": "running", "owner": "uday"] })
         let agents = Exchange(method: "GET", path: "/v1/projects/harbor/workspaces/ws-30/agents", status: 200, body: try Exchange("workspace-agents-dock").body)
         let (view, window, _) = try await Self.listed([], rows: rows, also: [agents], saying: "ws-30")
         defer { window.orderOut(nil) }
         let panel = try await Self.open("ws-30", in: view)
-        let row = try #require(view.project.rowFrame("ws-30").map { window.convertToScreen($0) }), box = panel.popover.frame
-        #expect(near(box.minY, row.maxY + NewSessionPanel.gap), "the panel is \(box), the row \(row)")
+        let row = try #require(view.project.rowFrame("ws-30").map { window.convertToScreen($0) }), claude = panel.popover.frame
+        #expect(claude.minY >= row.maxY + NewSessionPanel.gap - 0.5, "the panel is \(claude), the row \(row)")
+        try Self.press(try Self.down(), in: window)
+        let codex = panel.popover.frame
+        #expect(near(codex.minY, row.maxY + NewSessionPanel.gap) && near(codex.maxY, claude.maxY), "the panel is \(codex) with Codex CLI chosen, \(claude) with Claude Code, the row \(row)")
     }
 
     /// The panel follows its row or closes: the list scrolled, or drawn again with its row gone or

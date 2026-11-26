@@ -588,7 +588,7 @@ extension Driver {
             let found = await waitUntil(step.seconds ?? 5) { panel.isOpen && chosen() == name }
             return (found, "chosen: \(chosen() ?? "none"); " + said())
         }
-        if step.newSessionPrimary?.isEmpty == true {
+        if step.newSessionNoPrimary == true {
             let none = await waitUntil(step.seconds ?? 5) { panel.isOpen && panel.view.primary == nil }
             return (none, "the primary: \(panel.view.primary?.title ?? "none"); " + said())
         }
@@ -602,11 +602,28 @@ extension Driver {
             return (found, "warned: \(panel.view.warned ?? "nothing"); " + said())
         }
         if let name = step.newSessionHover {
-            guard panel.isOpen, let row = panel.view.rows.first(where: { $0.name.stringValue == name }), let window = row.window,
-                  let entered = NSEvent.enterExitEvent(with: .mouseEntered, location: row.convert(NSPoint(x: row.bounds.midX, y: row.bounds.midY), to: nil), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil)
-            else { return (false, "no row \(name) to move onto; " + said()) }
-            row.mouseEntered(with: entered)
-            return (row.hovered, "\(name) \(row.hovered ? "is" : "is not") under the pointer")
+            let view = panel.view, row = { view.rows.first { $0.name.stringValue == name } }
+            guard !name.isEmpty else {
+                view.pointer = nil
+                return (true, "the pointer given back")
+            }
+            guard panel.isOpen, row() != nil else { return (false, "no row \(name) to hold the pointer over; " + said()) }
+            view.pointer = { row().map { $0.convert(NSPoint(x: $0.bounds.midX, y: $0.bounds.midY), to: nil) } }
+            view.pointed()
+            let hovered = await waitUntil(step.seconds ?? 5) { row()?.hovered == true }
+            return (hovered, "\(name) \(hovered ? "is" : "is not") under the pointer; hovered: \(view.rows.filter(\.hovered).map(\.name.stringValue))")
+        }
+        if step.newSessionInPage == true {
+            let project = pane.project
+            let inPage = { () -> String? in
+                guard panel.isOpen, let window = project.window else { return "the panel is closed" }
+                let page = window.convertToScreen(project.convert(project.visibleRect, to: nil)).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5), box = panel.popover.frame
+                guard page.contains(box) else { return "the box \(box) leaves the page less 8 pt \(page)" }
+                guard let chosen = panel.view.rows.first(where: \.chosen), panel.view.list.contentView.documentVisibleRect.insetBy(dx: -0.5, dy: -0.5).contains(chosen.frame) else { return "the chosen row is not whole in view" }
+                return nil
+            }
+            let stands = await waitUntil(step.seconds ?? 5) { inPage() == nil }
+            return (stands, inPage() ?? "the box \(panel.popover.frame) stands in the page")
         }
         if let primary = step.newSessionPrimary, primary.count == 2 || primary.count == 3 {
             let button = { panel.view.primary }

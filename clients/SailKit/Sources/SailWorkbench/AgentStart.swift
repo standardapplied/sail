@@ -37,23 +37,37 @@ public enum Way: String, Codable, Hashable, Sendable {
     case signIn, key
 }
 
-/// What a person last started, per harness the mode and the way in, and the last start whole,
-/// which the row's menu names and starts again. Kept by the app between launches.
+/// What a person last started, per harness the mode and the way in, the last start whole, which
+/// the row's menu names and starts again, and whether the kind opened last was the Shell. Kept by
+/// the app between launches.
 public struct ModeMemory: Codable, Equatable, Sendable {
     public private(set) var modes: [String: String]
     public private(set) var ways: [String: Way]
     public private(set) var last: AgentStart?
+    public private(set) var shellLast: Bool
 
-    public init(modes: [String: String] = [:], ways: [String: Way] = [:], last: AgentStart? = nil) {
+    public init(modes: [String: String] = [:], ways: [String: Way] = [:], last: AgentStart? = nil, shellLast: Bool = false) {
         self.modes = modes
         self.ways = ways
         self.last = last
+        self.shellLast = shellLast
     }
 
     public mutating func remember(_ start: AgentStart) {
         modes[start.harness] = start.mode
         ways[start.harness] = start.inside ? .signIn : .key
         last = start
+        shellLast = false
+    }
+
+    public mutating func rememberShell() {
+        shellLast = true
+    }
+
+    /// These starts with the last harness as the kind last opened: what the row's quick item, which
+    /// names that harness, opens at.
+    public var atLastHarness: ModeMemory {
+        ModeMemory(modes: modes, ways: ways, last: last)
     }
 
     /// `way` chosen for `harness` without a start: storing a key chooses it.
@@ -64,8 +78,9 @@ public struct ModeMemory: Codable, Equatable, Sendable {
 
 /// The New Session panel's model for one workspace, from what its agents route answered: the
 /// harnesses it offers in its order and a Shell after them, narrowed past seven by what is typed,
-/// the one chosen, its mode and its way in (each the person's last for that harness while it is
-/// offered, else the harness's own default mode and its own sign-in), and what a start would do.
+/// the one chosen (the kind opened last while it is offered), its mode and its way in (each the
+/// person's last for that harness while it is offered, else the harness's own default mode and its
+/// own sign-in), and what a start would do.
 /// Every sentence is the server's; no harness's, mode's or kind's name is branched on.
 public struct NewSession: Equatable, Sendable {
     public enum Choice: Hashable, Sendable {
@@ -88,6 +103,8 @@ public struct NewSession: Equatable, Sendable {
     public private(set) var memory: ModeMemory
     /// What typing narrowed the rows to: the start of their names; empty, every row.
     public private(set) var filter = ""
+    /// The row chosen before typing narrowed the rows, chosen again once it is erased.
+    private var unfiltered: Choice?
     private var modes: [String: String]
     private var ways: [String: Way]
 
@@ -97,7 +114,7 @@ public struct NewSession: Equatable, Sendable {
         modes = [:]
         ways = [:]
         let lastOffered = memory.last.flatMap { last in agents.offered.first { $0.harness == last.harness } }
-        chosen = (lastOffered ?? agents.offered.first).map { .harness($0.harness) } ?? .shell
+        chosen = memory.shellLast ? .shell : (lastOffered ?? agents.offered.first).map { .harness($0.harness) } ?? .shell
         for offer in agents.offered {
             let remembered = memory.modes[offer.harness]
             modes[offer.harness] = offer.modes.contains { $0.mode == remembered } ? remembered : offer.modeDefault
@@ -143,11 +160,13 @@ public struct NewSession: Equatable, Sendable {
     }
 
     /// The rows narrowed to those whose name starts with `typed`, the first chosen, where typing
-    /// narrows them and some row matches; whether it did.
+    /// narrows them and some row matches; whether it did. Erased, every row is back and the row
+    /// chosen before typing is chosen again.
     public mutating func narrow(to typed: String) -> Bool {
         guard filters, let first = every.first(where: { matches($0, typed) }) else { return false }
+        if filter.isEmpty { unfiltered = chosen }
         filter = typed
-        chosen = first
+        chosen = typed.isEmpty ? unfiltered ?? first : first
         return true
     }
 
@@ -213,11 +232,19 @@ public struct NewSession: Equatable, Sendable {
     }
 
     /// The start Start makes now, nil when it makes none or opens a shell; the memory then holds
-    /// its mode and way for its harness and it as the last start.
+    /// its mode and way for its harness and it as the last start, or the Shell as the kind opened
+    /// last.
     public mutating func start() -> AgentStart? {
-        guard case let .start(start) = readiness else { return nil }
-        memory.remember(start)
-        return start
+        switch readiness {
+        case let .start(start):
+            memory.remember(start)
+            return start
+        case .shell:
+            memory.rememberShell()
+            return nil
+        case .refused:
+            return nil
+        }
     }
 }
 
@@ -253,30 +280,45 @@ public enum NewSessionWords {
     }
 
     /// The keys the foot names while `holder` holds them, each only while it does what it says:
-    /// ↑↓ choose while the rows hold them (Sign in holding them, ↑↓ open its menu); ⌘M while the
-    /// chosen harness has a mode menu for it to open (`modes`), whichever of the panel's holds them;
-    /// none while nothing of the panel holds them.
-    public static func hint(_ holder: Holder, modes: Bool) -> String {
-        let said = (holder == .rows ? ["↑↓ choose"] : []) + (modes && holder != .none ? ["⌘M mode"] : [])
+    /// what was `typed` to narrow the rows, and ⌫ to widen them while the rows hold the keys; ↑↓
+    /// choose while the rows hold them (Sign in holding them, ↑↓ open its menu); ⌘M while the chosen
+    /// harness has a mode menu for it to open (`modes`), whichever of the panel's holds them; none
+    /// while nothing of the panel holds them.
+    public static func hint(_ holder: Holder, modes: Bool, typed: String = "") -> String {
+        guard holder != .none else { return "" }
+        let filter = typed.isEmpty ? [] : ["“\(typed)”"] + (holder == .rows ? ["⌫ widen"] : [])
+        let said = filter + (holder == .rows ? ["↑↓ choose"] : []) + (modes ? ["⌘M mode"] : [])
         return said.joined(separator: " · ")
     }
     public static let mode = "Mode"
+    /// What VoiceOver hears as the Mode pop-up's name where the chosen mode is risky: its words
+    /// under it, said as the warning their mark shows.
+    public static func modeWarning(_ about: String) -> String {
+        "Mode, warning: \(about)"
+    }
     public static let signIn = "Sign in"
     public static let storeKey = "Store a Key"
 
-    /// A harness row's line: how it signs in, the stored default key, else its own sign-in's name,
-    /// whichever Sign in chooses; or, where it does not start, the server's few words for why.
-    public static func line(_ offer: AgentOffer) -> String {
+    /// A harness row's line: how it signs in as its Sign in is set, in Sign in's words; or, where it
+    /// does not start, the server's few words for why.
+    public static func line(_ offer: AgentOffer, way: Way) -> String {
         if let refusal = offer.refusal { return offer.unavailable ?? refusal.message }
-        return key(offer) ?? offer.signIn?.name ?? ""
+        return self.way(offer, way)
+    }
+
+    /// How `offer` signs in in `way`, as Sign in names it: the stored default key where that is
+    /// chosen and stored, else its own sign-in's name.
+    public static func way(_ offer: AgentOffer, _ way: Way) -> String {
+        let account = offer.signIn?.name
+        return (way == .key ? key(offer) ?? account : account ?? key(offer)) ?? ""
     }
 
     /// The line under Sign in: on the sign-in, that `workspace` holds it already, else its own
-    /// sentence of what happens; on the key, the sign-in offered by its name.
+    /// sentence of what happens; on the key, the sign-in offered by its name, as the server writes it.
     public static func signInHelp(_ offer: AgentOffer, way: Way, in workspace: String) -> String? {
         guard let signIn = offer.signIn else { return nil }
         switch way {
-        case .key: return "Or \(signIn.name.prefix(1).lowercased() + signIn.name.dropFirst()), chosen here."
+        case .key: return "\(signIn.name) can be chosen here instead."
         case .signIn: return signIn.signedIn == true ? "Already signed in in \(workspace)." : signIn.said
         }
     }
@@ -330,7 +372,7 @@ public enum NewSessionWords {
         switch readiness {
         case let .start(start): "Start \(start.display)"
         case .refused: nil
-        case .shell: "Open Shell"
+        case .shell: openShell
         }
     }
 
@@ -342,7 +384,7 @@ public enum NewSessionWords {
     public static let newSession = "New Session"
     /// What the row's + says while what can start is asked.
     public static let asking = "Asking"
-    public static let openAShell = "Open a Shell"
+    public static let openShell = "Open Shell"
 
     /// What an agent tab says while its host composes it and hands its key over.
     public static func starting(_ start: AgentStart, in place: String) -> String {

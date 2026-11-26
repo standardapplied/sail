@@ -258,14 +258,20 @@ struct Step: Decodable {
     /// The panel's chosen row is the one of this name.
     var newSessionChosen: String?
     /// `[title, "on" | "off"]`: the panel's primary is titled so and offered or not; with a third,
-    /// "holds the keys", it is drawn holding them; `[]`, the panel has none.
+    /// "holds the keys", it is drawn holding them.
     var newSessionPrimary: [String]?
+    /// The panel shows no primary.
+    var newSessionNoPrimary: Bool?
+    /// The panel's box, as the window server placed it, stands in what shows of the page less 8 pt,
+    /// its chosen row whole in view.
+    var newSessionInPage: Bool?
     /// The panel's rows are exactly these, by name, in order.
     var newSessionRows: [String]?
     /// The panel says the chosen mode's words in the warning tone, after the warning mark; "" for
     /// none said so.
     var newSessionWarns: String?
-    /// The pointer moved onto the panel's row of this name, its name then at full weight.
+    /// The pointer held over the panel's row of this name, through redraws and changes of look,
+    /// until the row is hovered within `seconds`; "" gives the pointer back.
     var newSessionHover: String?
     /// A key put on the pasteboard, then ⌘V into the Store a Key sheet's field. The drive
     /// keeps it for the sweep to search for (a blank one is no key, and is found in any file), and
