@@ -56,7 +56,7 @@ final class Reached: Sendable {
         welcome.look = look
         let window = KeyWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = welcome
-        window.makeKeyAndOrderFront(nil)
+        window.orderFront(nil)
         welcome.layoutSubtreeIfNeeded()
         return (welcome, window)
     }
@@ -69,6 +69,11 @@ final class Reached: Sendable {
     static func signedInBefore(_ defaults: UserDefaults = ReattachTests.defaults()) -> UserDefaults {
         SignInMemory(defaults).signedIn(uday, at: plane)
         return defaults
+    }
+
+    /// Whether `control` sends `action` to `target`.
+    static func sends(_ control: NSControl, _ action: Selector, to target: AnyObject) -> Bool {
+        control.action == action && control.target === target
     }
 
     static func visible(_ view: NSView) -> Bool {
@@ -186,24 +191,27 @@ final class Reached: Sendable {
 
     /// Each screen leads to the other: Enroll's Sign In with Passkey signs in at once, on Welcome
     /// back; Welcome back's Enroll with a Ticket shows Enroll; Change shows the welcome with the
-    /// control plane in the field, selected; Open Terminals opens Terminals.
+    /// control plane in the field, selected; Open Terminals opens Terminals. Each link is wired to
+    /// its action, which the test sends itself: no AppKit click runs in a unit test.
     @Test func aWrongGuessCostsOneClick() async throws {
         let transport = Held(RecordedServer([]), holding: "login/start")
         let (welcome, window) = try Self.shown(transport, defaults: Self.signedInBefore())
         defer { window.orderOut(nil) }
-        welcome.toEnroll.performClick(nil)
+        #expect(Self.sends(welcome.toEnroll, #selector(WelcomeView.enrollInstead(_:)), to: welcome) && Self.sends(welcome.toSignIn, #selector(WelcomeView.signInWithPasskey(_:)), to: welcome))
+        #expect(Self.sends(welcome.chipUnder.change, #selector(WelcomeView.change(_:)), to: welcome) && Self.sends(welcome.toTerminals, #selector(WelcomeView.openTerminals(_:)), to: welcome))
+        welcome.enrollInstead(nil)
         #expect(welcome.welcome.screen == .ticket && Self.visible(welcome.ticketField))
-        welcome.toSignIn.performClick(nil)
+        welcome.signInWithPasskey(nil)
         #expect(welcome.welcome.screen == .back && welcome.flow.isActing && welcome.signIn.busyWord == "Signing In", "the sign-in did not run at once")
         transport.release()
         await welcome.flow.underWay?.value
-        welcome.chipUnder.change.performClick(nil)
+        welcome.change(nil)
         let field = welcome.addressField.field, editor = field.currentEditor() as? NSTextView
         #expect(welcome.welcome.screen == .address && field.stringValue == "http://127.0.0.1:7979")
         #expect(editor?.selectedRange() == NSRange(location: 0, length: 21), "the address is not selected: \(String(describing: editor?.selectedRange()))")
         var opened = false
         welcome.onTerminals = { opened = true }
-        welcome.toTerminals.performClick(nil)
+        welcome.openTerminals(nil)
         #expect(opened)
     }
 
@@ -225,10 +233,10 @@ final class Reached: Sendable {
     @Test func theColumnIsCentredAndTheVersionAtTheFoot() throws {
         let (welcome, window) = try Self.shown(RecordedServer([]))
         defer { window.orderOut(nil) }
-        let column = welcome.convert(welcome.heading.bounds, from: welcome.heading), version = welcome.convert(welcome.version.bounds, from: welcome.version)
+        let column = welcome.convert(welcome.column.bounds, from: welcome.column), version = welcome.convert(welcome.version.bounds, from: welcome.version)
         let half = 0.5 / Double(window.backingScaleFactor)
-        #expect(abs(column.width - WelcomeView.column) < half && abs(column.midX - welcome.bounds.midX) <= half, "the column \(column) in \(welcome.bounds)")
-        #expect(welcome.version.stringValue == "Sail 0.76.0" && abs(version.midX - welcome.bounds.midX) <= half && version.minY < column.minY)
+        #expect(abs(column.width - WelcomeView.columnWidth) < half && abs(column.midX - welcome.bounds.midX) <= half, "the column \(column) in \(welcome.bounds)")
+        #expect(welcome.version.stringValue == "Sail 0.76.0" && abs(version.midX - welcome.bounds.midX) <= half && version.maxY < column.minY, "the version \(version)")
     }
 
     /// Every state, at the least window's card: nothing out of reach.

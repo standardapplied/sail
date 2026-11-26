@@ -175,7 +175,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         column.spacing = Look.Space.l
         column.translatesAutoresizingMaskIntoConstraints = false
         addSubview(column)
-        let wide = planeRow.widthAnchor.constraint(equalToConstant: WelcomeView.column)
+        let wide = planeRow.widthAnchor.constraint(equalToConstant: WelcomeView.columnWidth)
         wide.priority = .defaultHigh
         NSLayoutConstraint.activate([
             column.topAnchor.constraint(equalTo: topAnchor, constant: Look.Space.x3l + Look.Space.l),

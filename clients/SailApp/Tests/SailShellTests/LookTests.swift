@@ -209,7 +209,7 @@ import Testing
         let passkey = SoftwarePasskey(file: folder.appending(path: "passkey.json"))
         let shell = try ShellApp(fonts: Self.fonts, helper: nil, look: look, passkeys: { _ in passkey }, defaults: ReattachTests.defaults())
         shell.select(.workspaces)
-        shell.window.makeKeyAndOrderFront(nil)
+        shell.window.orderFront(nil)
         defer { shell.window.orderOut(nil) }
         let welcome = shell.welcome
         let address = welcome.addressField, ticket = welcome.ticketField

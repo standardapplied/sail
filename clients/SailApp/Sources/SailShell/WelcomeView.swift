@@ -252,7 +252,7 @@ public final class AccountFlow {
 /// the secondary ink. Each screen's own link leads to the other screen.
 @MainActor
 public final class WelcomeView: NSView {
-    static let column = 380.0
+    static let columnWidth = 380.0
 
     public private(set) var welcome: Welcome
     public let flow: AccountFlow
@@ -294,7 +294,8 @@ public final class WelcomeView: NSView {
 
     private let titleFont: TitleFont
     private let mono: LabelFont
-    private let column = NSStackView()
+    /// The centred column every screen stands in.
+    let column = NSStackView()
     private let other = NSStackView()
     private let before = NSTextField(labelWithString: "")
     private let after = NSTextField(labelWithString: "")
@@ -498,8 +499,8 @@ public final class WelcomeView: NSView {
             link.isHidden = link !== self.link
             link.isEnabled = !busy
         }
-        before.stringValue = welcome.other.before + " "
-        after.stringValue = welcome.other.after.map { " " + $0 } ?? ""
+        before.stringValue = welcome.other.before
+        after.stringValue = welcome.other.after ?? ""
         after.isHidden = welcome.other.after == nil
         guard claim, let field, window?.isKeyWindow == true else { return }
         window?.makeFirstResponder(field.field)
@@ -551,10 +552,12 @@ public final class WelcomeView: NSView {
         for link in [toTerminals, toSignIn, toEnroll] {
             link.look = look
         }
+        let words = NSFont.systemFont(ofSize: Look.Step.footnote.points)
         for label in [before, after] {
-            label.font = .systemFont(ofSize: Look.Step.footnote.points)
+            label.font = words
             label.textColor = NSColor(look.textTertiary)
         }
+        other.spacing = (" " as NSString).size(withAttributes: [.font: words]).width
         version.font = mono.font(Look.Step.micro.points, .regular) as NSFont
         version.textColor = NSColor(look.textTertiary)
         render()
@@ -600,7 +603,6 @@ public final class WelcomeView: NSView {
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
         other.orientation = .horizontal
-        other.spacing = 0
         other.setViews([before, toTerminals, toSignIn, toEnroll, after], in: .center)
         column.orientation = .vertical
         column.alignment = .leading
@@ -614,7 +616,7 @@ public final class WelcomeView: NSView {
         for view in [chipRow, heading, lede, addressField, ticketField, note, proceed, create, signIn, said, chipUnderRow, other] as [NSView] {
             fill(view)
         }
-        let wide = column.widthAnchor.constraint(equalToConstant: Self.column)
+        let wide = column.widthAnchor.constraint(equalToConstant: Self.columnWidth)
         wide.priority = .defaultHigh
         let centred = column.centerYAnchor.constraint(equalTo: centerYAnchor)
         centred.priority = .defaultHigh
