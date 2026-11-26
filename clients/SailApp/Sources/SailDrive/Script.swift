@@ -487,6 +487,9 @@ struct Step: Decodable {
     var fileBudgets: Bool?
     /// Sign Out pressed on the account, answered no further: what follows it asks.
     var signOutNow: Bool?
+    /// The Workspaces card while the app asks who is signed in, as a launch onto the section shows
+    /// it, drawn at 2x in both looks as `<name>-<look>.png`; the answer is a later step's.
+    var askingWhoIsSignedIn: String?
     /// A ticket was asked with these fields (`{"action": "open", "workspace": "dock"}`), within
     /// `seconds` (15 by default).
     var ticketAsked: [String: String]?

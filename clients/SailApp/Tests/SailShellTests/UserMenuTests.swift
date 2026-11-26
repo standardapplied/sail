@@ -30,7 +30,7 @@ import Testing
         handle: String(repeating: "k", count: 63), address: String(repeating: "h", count: 52) + ".acme.dev", whoami: nil, unreachable: true, refreshing: false
     )
     /// The window's sizes: the least, and widths and heights from narrow to wide.
-    static let sizes: [NSSize] = [ShellApp.leastFrame, NSSize(width: 720, height: 624), NSSize(width: 1024, height: 768), NSSize(width: 1180, height: 800), NSSize(width: 1440, height: 900)]
+    static let sizes: [NSSize] = [ShellApp.leastFrame, NSSize(width: 720, height: ShellApp.leastFrame.height), NSSize(width: 1024, height: 768), NSSize(width: 1180, height: 800), NSSize(width: 1440, height: 900)]
 
     static func shell(_ look: Look = .light) throws -> ShellApp {
         let shell = try WorkbenchLookTests.shell(look)

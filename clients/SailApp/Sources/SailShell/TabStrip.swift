@@ -47,7 +47,7 @@ public final class TabStrip: NSView {
     init(look: Look) {
         self.look = look
         add = RingedButton(symbol: "plus", tip: "New Tab", look: look)
-        super.init(frame: NSRect(x: 0, y: 0, width: 600, height: 28))
+        super.init(frame: NSRect(x: 0, y: 0, width: 600, height: Self.tabHeight))
         wantsLayer = true
         add.target = self
         add.action = #selector(addTab)
@@ -65,6 +65,16 @@ public final class TabStrip: NSView {
 
     override public var isFlipped: Bool {
         true
+    }
+
+    override public var userInterfaceLayoutDirection: NSUserInterfaceLayoutDirection {
+        didSet { if userInterfaceLayoutDirection != oldValue { needsLayout = true } }
+    }
+
+    /// The left edge of a frame `width` wide whose leading edge is `x` from the strip's: right to
+    /// left the tabs run from the strip's right edge, next to the window buttons AppKit put there.
+    private func placed(_ x: Double, width: Double) -> Double {
+        userInterfaceLayoutDirection == .rightToLeft ? Double(bounds.width) - x - width : x
     }
 
     func show(_ items: [Item], selected: TabID?) {
@@ -85,13 +95,14 @@ public final class TabStrip: NSView {
     private var selectedIndex: Int?
 
     /// The strip's own empty space before the first tab, the title bar's to drag and double-click:
-    /// what the window buttons' inset leaves of it.
+    /// what the room after the window buttons leaves of it; none right to left, where the strip
+    /// ends that room before the buttons.
     var leading = Look.Space.s {
         didSet { needsLayout = true }
     }
 
     /// A tab's height, centred in the band.
-    static let tabHeight = 28.0
+    static let tabHeight = 26.0
 
     private var row: TabRow {
         TabRow(tabs: tabs.count, selected: selectedIndex, width: Double(bounds.width) - leading)
@@ -105,10 +116,10 @@ public final class TabStrip: NSView {
             tab.isHidden = !showsTabs || !row.shows(index)
             guard !tab.isHidden else { continue }
             let height = min(Self.tabHeight, max(0, Double(bounds.height) - 8))
-            if !tab.dragging { tab.frame = CGRect(x: x, y: (Double(bounds.height) - height) / 2, width: row.width, height: height) }
+            if !tab.dragging { tab.frame = CGRect(x: placed(x, width: row.width), y: (Double(bounds.height) - height) / 2, width: row.width, height: height) }
             x += row.width + TabRow.gap
         }
-        add.frame = CGRect(x: x, y: (Double(bounds.height) - TabRow.addSide) / 2, width: TabRow.addSide, height: TabRow.addSide)
+        add.frame = CGRect(x: placed(x, width: TabRow.addSide), y: (Double(bounds.height) - TabRow.addSide) / 2, width: TabRow.addSide, height: TabRow.addSide)
         add.isHidden = !showsTabs
     }
 
@@ -123,10 +134,11 @@ public final class TabStrip: NSView {
         return tab
     }
 
-    /// A dragged tab let go: its place is where its middle is.
+    /// A dragged tab let go: its place is where its middle is, from the strip's leading edge.
     private func drop(_ tab: TabButton) {
         let row = self.row
-        let place = Int(((Double(tab.frame.midX) - leading) / (row.width + TabRow.gap)).rounded(.down))
+        let middle = placed(Double(tab.frame.midX), width: 0)
+        let place = Int(((middle - leading) / (row.width + TabRow.gap)).rounded(.down))
         tab.dragging = false
         onMove(tab.id, row.first + min(max(0, place), row.shown - 1))
         needsLayout = true
