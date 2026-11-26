@@ -27,6 +27,9 @@ readonly CHANGELOG=CHANGELOG.md
 readonly CHANGES=changes
 readonly README=$CHANGES/README.md
 readonly NOT_YET_COMMITTED=99999999999
+readonly SHAPE="'- **…** …'"
+readonly BULLET='^[-*+][[:space:]]'
+readonly HEADLINE='^- \*\*[^[:space:]*].*\*\*'
 section=""
 folded=""
 
@@ -67,9 +70,11 @@ entries() {
 }
 
 # Every entry is a file directly in changes/, named *.md, whose first line that is not blank starts
-# a bullet, with Unix line ends.
+# a bullet, with Unix line ends, and each of whose bullets opens with its bold headline, closed on
+# the bullet's own line: SHAPE, which README.md quotes. A line that is no bullet goes on with the
+# bullet above it.
 require_entries() {
-  local stray file
+  local stray file text line
   [[ -d $CHANGES ]] || return 0
   stray=$(find "$CHANGES" -mindepth 1 -maxdepth 1 \( ! -type f -o ! -name '*.md' \) -print -quit)
   [[ -z $stray ]] || refuse "$stray is not an entry file: $CHANGES/ holds only <spec-id>.md files, directly in it."
@@ -79,7 +84,14 @@ require_entries() {
       refuse "$file has Windows line ends (CRLF): save it with LF only."
     fi
     [[ $(grep -m1 . "$file" || true) == "- "* ]] ||
-      refuse "$file is no entry: its first line must start a bullet, '- **…** …'."
+      refuse "$file is no entry: its first line must start a bullet, $SHAPE."
+    line=0
+    while IFS= read -r text || [[ -n $text ]]; do
+      line=$((line + 1))
+      if [[ $text =~ $BULLET && ! $text =~ $HEADLINE ]]; then
+        refuse "$file:$line is a bullet without its bold headline: write it as $SHAPE."
+      fi
+    done < "$file"
   done
 }
 
