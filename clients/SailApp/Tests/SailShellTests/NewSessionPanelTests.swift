@@ -98,6 +98,14 @@ import Testing
         try key(126, String(Character(try #require(UnicodeScalar(UInt16(NSUpArrowFunctionKey))))), [.function, .numericPad])
     }
 
+    static func home() throws -> NSEvent {
+        try key(115, String(Character(try #require(UnicodeScalar(UInt16(NSHomeFunctionKey))))), [.function])
+    }
+
+    static func end() throws -> NSEvent {
+        try key(119, String(Character(try #require(UnicodeScalar(UInt16(NSEndFunctionKey))))), [.function])
+    }
+
     static func returnKey() throws -> NSEvent {
         try key(36, "\r")
     }
@@ -349,8 +357,8 @@ import Testing
     /// terminal), its name and how it signs in as its Sign in is set (its account, a key stored
     /// notwithstanding); the first chosen, with its options under its name: Mode at the harness's
     /// own default and that mode's words, then Sign in on its account and that dock holds it; the
-    /// one primary names it. With room under the row it hangs 4 pt under it, its trailing edge on
-    /// ⋯'s, 388 pt wide.
+    /// one primary names it. Its trailing edge is on ⋯'s, 388 pt wide; in this 700 pt window the room
+    /// under the row is short of a stored key's line, so it stands over the row, in the page.
     @Test func thePanelListsWhatTheRouteOffersInItsWords() async throws {
         let (view, window, _) = try await Self.listed(["workspace-agents-dock-signed-in"])
         defer { window.orderOut(nil) }
@@ -373,7 +381,8 @@ import Testing
         #expect(shown.primary?.isEnabled == true && shown.words.contains(NewSessionWords.hint(.rows, modes: true)) && shown.warned == nil)
         #expect(!shown.words.contains { $0.contains("stopped") }, "a running workspace said it is stopped")
         let row = try #require(view.project.rowFrame("dock").map { window.convertToScreen($0) }), box = panel.popover.frame
-        #expect(near(box.width, NewSessionPanel.width) && near(box.maxY, row.minY - NewSessionPanel.gap), "the panel is at \(box), the row at \(row)")
+        let page = window.convertToScreen(view.project.convert(view.project.visibleRect, to: nil)).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5)
+        #expect(near(box.width, NewSessionPanel.width) && page.contains(box), "the panel is at \(box), the row at \(row), the page \(page)")
         #expect(near(box.maxX, row.maxX - RowStyle.list.trailing), "its trailing edge \(box.maxX) is not ⋯'s \(row.maxX - RowStyle.list.trailing)")
         #expect(near(box.height, shown.height) && window.childWindows?.contains(panel.popover.panel) == true)
     }
@@ -602,7 +611,7 @@ import Testing
         #expect(panel.view.modes?.accessibilityLabel() == "Mode")
         try Self.mode("Bypass permissions", in: panel)
         #expect(panel.view.warned == "Skips every permission prompt and safety check.")
-        #expect(panel.view.modes?.accessibilityLabel() == NewSessionWords.modeWarning("Skips every permission prompt and safety check."), "VoiceOver hears no warning")
+        #expect(panel.view.modes?.accessibilityLabel() == NewSessionWords.modeWarning, "VoiceOver hears no warning, or hears its words twice")
         let label = try #require(WorkspacesViewTests.found(NSTextField.self, in: panel.view).first { $0.stringValue == "Skips every permission prompt and safety check." })
         #expect(label.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(Tint(view.look.warning)), "the warning is not in the warning tone")
         try Self.mode("Plan", in: panel)
@@ -610,7 +619,7 @@ import Testing
         try Self.press(try Self.down(), in: window)
         #expect(panel.view.warned?.hasPrefix("Sail starts Codex CLI in a workspace with full access") == true, "Codex's one risky mode says its note quietly")
         let one = try #require(WorkspacesViewTests.found(SailButton.self, in: panel.view).first { $0.title == "Full access" })
-        #expect(one.accessibilityLabel() == NewSessionWords.modeWarning(try #require(panel.view.warned)), "VoiceOver hears no warning on Codex's one mode")
+        #expect(one.accessibilityLabel() == NewSessionWords.modeWarning, "VoiceOver hears no warning on Codex's one mode")
         try Self.press(try Self.down(), in: window)
         #expect(panel.view.rows.first(where: \.chosen)?.name.stringValue == "Tide" && panel.view.warned == nil)
         try Self.mode("Reckless", in: panel)
@@ -646,7 +655,7 @@ import Testing
         try Self.press(try Self.key(31, "o"), in: window)
         try Self.press(try Self.key(35, "p"), in: window)
         #expect(panel.view.rows.map(\.name.stringValue) == ["OpenCode", "Opal"] && panel.view.rows.map(\.chosen) == [true, false])
-        #expect(panel.view.words.contains("“op” · ⌫ widen · ↑↓ choose"), "the foot does not say what was typed: \(panel.view.words)")
+        #expect(panel.view.words.contains(NewSessionWords.hint(.rows, modes: false, typed: "op")), "the foot does not say what was typed: \(panel.view.words)")
         #expect(panel.view.words.contains("OPENCODE") && panel.view.primary?.title == "Start OpenCode" && panel.view.height < tall)
         try Self.press(try Self.key(7, "x"), in: window)
         #expect(panel.view.rows.map(\.name.stringValue) == ["OpenCode", "Opal"], "what matches no row was taken")
@@ -664,6 +673,25 @@ import Testing
         let few = try await Self.open("dock", in: seven)
         try Self.press(try Self.key(31, "o"), in: sevenWindow)
         #expect(few.view.rows.count == 7 && few.view.rows.first?.chosen == true, "seven rows took typing")
+    }
+
+    /// The foot never cuts a key's hint: nine kinds and "c" typed, which leaves Claude Code chosen
+    /// with its modes, at the design's window and the least. Every key is named whole and the hint
+    /// shows all it says, what was typed cut first; its order is the box's whatever was typed.
+    @Test func theFootCutsWhatWasTypedNeverAKey() async throws {
+        let nine = try Exchange("workspace-agents-dock").offering(["Pi", "OpenCode", "Gemini CLI", "Aider", "Goose", "Opal"].map { Exchange.madeUpOffer($0) })
+        for (width, height) in Self.windows {
+            let (view, window) = try await Self.atTheTop(nine, width: width, height: height)
+            defer { window.orderOut(nil) }
+            let panel = try await Self.open("dock", in: view)
+            try Self.press(try Self.key(8, "c"), in: window)
+            #expect(panel.view.rows.map(\.name.stringValue) == ["Claude Code", "Codex CLI"] && panel.view.modes != nil, "\(panel.view.words)")
+            let hint = try #require(WorkspacesViewTests.found(NSTextField.self, in: panel.view).first { $0.stringValue.contains("↑↓ choose") }, "no keys in the foot: \(panel.view.words)")
+            #expect(Double(hint.fittingSize.width) <= Double(hint.frame.width) + 0.5, "at \(width) the foot's hint \(hint.stringValue) is \(hint.fittingSize.width) pt in \(hint.frame.width)")
+            #expect(["⌫ widen", "↑↓ choose", "⌘M mode"].allSatisfy(hint.stringValue.contains), "a key is not named whole: \(hint.stringValue)")
+            let style = hint.attributedStringValue.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+            #expect(style?.baseWritingDirection == .leftToRight, "the foot's order follows what was typed")
+        }
     }
 
     /// The page's six kinds: equal rows, OpenCode dimmed with the server's few words, its tile in
@@ -785,38 +813,93 @@ import Testing
     /// box, where the window server put it, stands in what shows of the page less 8 pt whichever
     /// row is chosen, its rows scrolling in what the title, the options and the foot leave, the
     /// chosen row whole in view; and its top stays where it opened as ↓ moves through every kind.
+    /// The design's window and the least, each as wide and tall as its page draws.
+    static let windows = [(1024 - Rail.width - 4, 684 - ShellApp.bandHeight), (WorkspacesViewTests.narrowestCard, Double(ShellApp.leastFrame.height) - ShellApp.bandHeight)]
+
+    /// harbor listed with dock's harnesses answered as `answer`, `width` × `height`, the window at
+    /// the top of the screen under the menu bar.
+    static func atTheTop(_ answer: Exchange, width: Double, height: Double) async throws -> (WorkspacesView, KeyWindow) {
+        let (view, window, _) = try await listed([], also: [answer], width: width)
+        let screen = try #require(window.screen ?? NSScreen.main, "no screen to put the window on")
+        window.setContentSize(NSSize(width: width, height: height))
+        window.setFrameTopLeftPoint(NSPoint(x: screen.visibleFrame.minX, y: screen.visibleFrame.maxY))
+        view.layoutSubtreeIfNeeded()
+        return (view, window)
+    }
+
+    /// What is wrong with `panel` as it stands, `said`: its box out of the page less 8 pt, its top
+    /// not `top`, drawn other than it stands, or its chosen row not whole in view.
+    static func misplaced(_ panel: NewSessionPanel, in view: WorkspacesView, top: Double, _ said: String) -> [String] {
+        guard let window = view.window else { return ["\(said): no window"] }
+        let page = window.convertToScreen(view.project.convert(view.project.visibleRect, to: nil)).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5)
+        let box = panel.popover.frame, shown = panel.view.list.contentView.documentVisibleRect
+        var faults: [String] = []
+        if !page.contains(box) { faults.append("\(said): the box \(box) leaves the page \(page)") }
+        if abs(box.maxY - top) > 0.5 { faults.append("\(said): its top moved from \(top) to \(box.maxY)") }
+        if abs(box.height - panel.view.height) > 0.5 { faults.append("\(said): the box is \(box.height) pt for \(panel.view.height) pt drawn") }
+        guard let chosen = panel.view.rows.first(where: \.chosen) else { return faults + ["\(said): no row chosen"] }
+        if !shown.insetBy(dx: -0.5, dy: -0.5).contains(chosen.frame) { faults.append("\(said): the chosen row at \(chosen.frame), the rows show \(shown)") }
+        return faults
+    }
+
     @Test(arguments: [3, 7, 9])
     func thePanelStaysInThePageAndStillWhateverIsChosen(_ kinds: Int) async throws {
         let made = ["Pi", "OpenCode", "Gemini CLI", "Aider", "Goose", "Opal"].prefix(kinds - 3).map { Exchange.madeUpOffer($0) }
         let answer = try Exchange("workspace-agents-dock").offering(Array(made))
-        let windows = [(1024 - Rail.width - 4, 684 - ShellApp.bandHeight), (WorkspacesViewTests.narrowestCard, Double(ShellApp.leastFrame.height) - ShellApp.bandHeight)]
-        for (width, height) in windows {
-            let (view, window, _) = try await Self.listed([], also: [answer], width: width)
+        for (width, height) in Self.windows {
+            let (view, window) = try await Self.atTheTop(answer, width: width, height: height)
             defer { window.orderOut(nil) }
-            let screen = try #require(window.screen ?? NSScreen.main, "no screen to put the window on")
-            window.setContentSize(NSSize(width: width, height: height))
-            window.setFrameTopLeftPoint(NSPoint(x: screen.visibleFrame.minX, y: screen.visibleFrame.maxY))
-            view.layoutSubtreeIfNeeded()
             let panel = try await Self.open("dock", in: view)
-            let page = window.convertToScreen(view.project.convert(view.project.visibleRect, to: nil)).insetBy(dx: NewSessionPanel.inset - 0.5, dy: NewSessionPanel.inset - 0.5)
             let top = panel.popover.frame.maxY
             var faults: [String] = []
             for at in 1 ... kinds {
                 if at > 1 { try Self.press(try Self.down(), in: window) }
-                let box = panel.popover.frame
-                let chosen = try #require(panel.view.rows.first { $0.chosen }, "row \(at) is not chosen")
-                if !page.contains(box) { faults.append("row \(at) chosen: the box \(box) leaves the page \(page)") }
-                if abs(box.maxY - top) > 0.5 { faults.append("row \(at) chosen: its top moved from \(top) to \(box.maxY)") }
-                if abs(box.height - panel.view.height) > 0.5 { faults.append("row \(at) chosen: the box is \(box.height) pt for \(panel.view.height) pt drawn") }
-                let shown = panel.view.list.contentView.documentVisibleRect
-                if !shown.insetBy(dx: -0.5, dy: -0.5).contains(chosen.frame) { faults.append("row \(at) chosen at \(chosen.frame), the rows show \(shown)") }
+                faults += Self.misplaced(panel, in: view, top: top, "row \(at) chosen")
+            }
+            for (key, at, name) in [(try Self.home(), 0, "Home"), (try Self.end(), kinds - 1, "End")] {
+                try Self.press(key, in: window)
+                if panel.view.rows.firstIndex(where: \.chosen) != at { faults.append("\(name) did not choose row \(at + 1)") }
+                faults += Self.misplaced(panel, in: view, top: top, "after \(name)")
             }
             #expect(faults.isEmpty, "\(kinds) kinds at \(width) × \(height): \(faults.joined(separator: "\n"))")
         }
     }
 
+    /// Everything that can show while the panel is open was measured as it opened, so its rows show
+    /// as many as they did: a harness's help chosen by its mode that wraps past every other, and a
+    /// key stored there, its line said over the foot, then every kind chosen under that line; at
+    /// the design's window and the least, the window at the top of the screen. Its top stays and the
+    /// box stays in the page.
+    @Test func whatShowsWhileOpenShortensNoRows() async throws {
+        let wordy = String(repeating: "Runs everything, with a classifier reviewing each action first, and asks where it is unsure. ", count: 2)
+        let answer = try Exchange("workspace-agents-dock").altered(at: ["offered", 0, "modes", 4, "about"], to: wordy)
+        let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: answer.body))
+        for (width, height) in Self.windows {
+            let (view, window) = try await Self.atTheTop(answer, width: width, height: height)
+            defer { window.orderOut(nil) }
+            let panel = try await Self.open("dock", in: view)
+            let top = panel.popover.frame.maxY, rows = panel.view.list.frame.height
+            var faults: [String] = []
+            let check = { (said: String) in
+                faults += Self.misplaced(panel, in: view, top: top, said)
+                if abs(panel.view.list.frame.height - rows) > 0.5 { faults.append("\(said): the rows show \(panel.view.list.frame.height) pt of the \(rows) they opened with") }
+            }
+            try Self.mode("Auto", in: panel)
+            check("Auto chosen")
+            panel.show(.agents(agents), memory: ModeMemory(modes: ["claude-code": "auto"], ways: ["claude-code": .key]), stored: LoginSheetTests.notUsed + " Removed the key from the clipboard.", harness: "claude-code", inUse: false)
+            #expect(panel.view.words.contains { $0.hasPrefix("Runs everything") } && panel.stored != nil, "\(panel.view.words)")
+            check("a key stored")
+            for at in 2 ... 3 {
+                try Self.press(try Self.down(), in: window)
+                check("row \(at) chosen under the stored line")
+            }
+            #expect(faults.isEmpty, "at \(width) × \(height): \(faults.joined(separator: "\n"))")
+        }
+    }
+
     /// With no room under the row, the panel hangs over it: its top placed by its tallest choice,
-    /// Codex CLI's, whose foot stands 4 pt over the row, and kept there for a shorter one.
+    /// whose foot stands at least 4 pt over the row, and at least a stored key's line over the page's
+    /// foot, and kept there for a shorter one; a key stored then moves nothing and cuts no row.
     @Test func withNoRoomUnderItsRowThePanelHangsOverIt() async throws {
         let rows = try WorkspacesReachTests.list((1 ... 30).map { ["name": String(format: "ws-%02d", $0), "instance": String(format: "harbor-ws-%02d", $0), "state": "running", "owner": "uday"] })
         let agents = Exchange(method: "GET", path: "/v1/projects/harbor/workspaces/ws-30/agents", status: 200, body: try Exchange("workspace-agents-dock").body)
@@ -827,7 +910,14 @@ import Testing
         #expect(claude.minY >= row.maxY + NewSessionPanel.gap - 0.5, "the panel is \(claude), the row \(row)")
         try Self.press(try Self.down(), in: window)
         let codex = panel.popover.frame
-        #expect(near(codex.minY, row.maxY + NewSessionPanel.gap) && near(codex.maxY, claude.maxY), "the panel is \(codex) with Codex CLI chosen, \(claude) with Claude Code, the row \(row)")
+        try Self.press(try Self.up(), in: window)
+        let bare = panel.view.height, decoded = try Endpoint.agents(workspace: "ws-30", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: agents.body))
+        let longest = try #require(decoded.offered.first.flatMap(StoreLogin.longestLine))
+        panel.show(.agents(decoded), memory: view.memory, stored: longest, harness: "claude-code", inUse: false)
+        let line = panel.view.height - bare, page = window.convertToScreen(view.project.convert(view.project.visibleRect, to: nil))
+        #expect(codex.minY >= max(row.maxY + NewSessionPanel.gap, page.minY + NewSessionPanel.inset + line) - 0.5 && near(codex.maxY, claude.maxY), "the panel is \(codex) with Codex CLI chosen, \(claude) with Claude Code, the row \(row), a stored line \(line) pt")
+        let faults = Self.misplaced(panel, in: view, top: claude.maxY, "a key stored")
+        #expect(faults.isEmpty, "\(faults.joined(separator: "\n"))")
     }
 
     /// The panel follows its row or closes: the list scrolled, or drawn again with its row gone or

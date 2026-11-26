@@ -283,19 +283,20 @@ public enum NewSessionWords {
     /// what was `typed` to narrow the rows, and ⌫ to widen them while the rows hold the keys; ↑↓
     /// choose while the rows hold them (Sign in holding them, ↑↓ open its menu); ⌘M while the chosen
     /// harness has a mode menu for it to open (`modes`), whichever of the panel's holds them; none
-    /// while nothing of the panel holds them.
-    public static func hint(_ holder: Holder, modes: Bool, typed: String = "") -> String {
+    /// while nothing of the panel holds them. What was typed is isolated, so right-to-left letters
+    /// never reorder the keys, and it alone is cut, at its end, to the first words that `fits`; where
+    /// not one letter of it fits, it is left out and every key is still named whole.
+    public static func hint(_ holder: Holder, modes: Bool, typed: String = "", fits: (String) -> Bool = { _ in true }) -> String {
         guard holder != .none else { return "" }
-        let filter = typed.isEmpty ? [] : ["“\(typed)”"] + (holder == .rows ? ["⌫ widen"] : [])
-        let said = filter + (holder == .rows ? ["↑↓ choose"] : []) + (modes ? ["⌘M mode"] : [])
-        return said.joined(separator: " · ")
+        let keys = (typed.isEmpty || holder != .rows ? [] : ["⌫ widen"]) + (holder == .rows ? ["↑↓ choose"] : []) + (modes ? ["⌘M mode"] : [])
+        let cuts = typed.isEmpty ? [] : [typed] + (1 ..< typed.count).reversed().map { String(typed.prefix($0)) + "…" }
+        let said = cuts.map { (["“\u{2068}\($0)\u{2069}”"] + keys).joined(separator: " · ") }
+        return said.first(where: fits) ?? keys.joined(separator: " · ")
     }
     public static let mode = "Mode"
-    /// What VoiceOver hears as the Mode pop-up's name where the chosen mode is risky: its words
-    /// under it, said as the warning their mark shows.
-    public static func modeWarning(_ about: String) -> String {
-        "Mode, warning: \(about)"
-    }
+    /// What VoiceOver hears as the Mode pop-up's name where the chosen mode is risky; the words under
+    /// it, after the warning mark, say why.
+    public static let modeWarning = "Mode, warning"
     public static let signIn = "Sign in"
     public static let storeKey = "Store a Key"
 

@@ -8,10 +8,11 @@ import SailWorkbench
 /// route answered, in a 388 pt box 4 pt under the row, its trailing edge on the row's ⋯, always
 /// within what shows of the page less 8 pt each side (spanning that where the page is drawn narrow,
 /// as at the least window), and over the row when the window has no room under it. It is placed
-/// once, by the tallest of its choices, and its top stays there while it is open; its rows scroll
-/// in what that leaves. Every kind is an equal row, the route's harnesses in its order then the
-/// Shell: a tile, the name, and how it signs in as its Sign in is set, or the server's few words
-/// for why it does not start. The chosen harness's options stand under its own name: Mode, a
+/// once, by the tallest of everything it can show while open (each kind in each of its modes and
+/// ways in, and the line a key stored says), and its top stays there while it is open; its rows
+/// scroll in what that leaves. Every kind is an equal row, the route's harnesses in its order then
+/// the Shell: a tile, the name, and how it signs in as its Sign in is set, or the server's few
+/// words for why it does not start. The chosen harness's options stand under its own name: Mode, a
 /// pop-up of its modes (one mode shown off, with the server's note), its words under it, in the
 /// warning tone where the server says the mode is risky; Sign in, a pop-up of its own sign-in, the
 /// person's key and Store a Key, and whether the workspace holds the sign-in. A harness that does
@@ -22,9 +23,10 @@ import SailWorkbench
 /// the route answers then with the key chosen, says so in one quiet line, and draws the primary
 /// holding the keys.
 /// Where no agent starts for the person it says why, with Open Shell or Close. The window keeps
-/// the keys: ↑ ↓ choose, typing narrows the rows past seven, ⌘M opens the mode's menu, ⇥ reaches
-/// Sign in, whose menu Space or ↑ ↓ open, Return presses the primary and Escape closes; so do a
-/// click outside it, the window giving up the keys or being resized, and the section going.
+/// the keys: ↑ ↓ choose, Home and End the first and the last, typing narrows the rows past seven,
+/// ⌘M opens the mode's menu, ⇥ reaches Sign in, whose menu Space or ↑ ↓ open, Return presses the
+/// primary and Escape closes; so do a click outside it, the window giving up the keys or being
+/// resized, and the section going.
 @MainActor
 package final class NewSessionPanel: NSObject {
     static let width = 388.0, gap = 4.0
@@ -101,9 +103,10 @@ package final class NewSessionPanel: NSObject {
 
     /// Opens for `workspace` saying `answer`, under `row` (in `page`'s window, its frame there),
     /// its modes as `memory` remembers them; `anchor`, the row's +, toggles it. Its top is placed by
-    /// the tallest of its choices: hanging under the row where that fits, else over the row where
-    /// that fits, else as high as it needs within the page; never so high that the room its shadow
-    /// keeps reaches over the screen's menu bar, where AppKit would push the box down.
+    /// the tallest of everything it can show while open: hanging under the row where that fits,
+    /// else over the row where its tallest choice fits there, raised where the page under it leaves
+    /// no room for the rest, else as high as it needs within the page; never so high that the room
+    /// its shadow keeps reaches over the screen's menu bar, where AppKit would push the box down.
     func open(_ answer: Answer, workspace: String, memory: ModeMemory, under row: NSRect, page: NSView, narrow: Bool, anchor: NSView?) {
         guard let window = page.window, !isOpen else { return }
         self.workspace = workspace
@@ -120,7 +123,8 @@ package final class NewSessionPanel: NSObject {
         let ceiling = min(Double(area.maxY) - Self.inset, window.screen.map { Double($0.visibleFrame.maxY) - Popover.room } ?? .infinity)
         let under = Double(row.minY) - Self.gap, over = Double(row.maxY) + Self.gap
         lowest = Double(area.minY) + Self.inset
-        top = min(under - tallest >= lowest ? under : over + tallest <= ceiling ? over + tallest : lowest + tallest, ceiling)
+        let overRow = over + tallest.shown <= ceiling ? max(over + tallest.shown, lowest + tallest.open) : lowest + tallest.open
+        top = min(under - tallest.open >= lowest ? under : overRow, ceiling)
         draw(width: width)
         placed = NSRect(x: x, y: top - view.height, width: width, height: view.height)
         popover.open(over: window, anchor: anchor, at: placed, withKeys: false)
@@ -208,24 +212,47 @@ package final class NewSessionPanel: NSObject {
         KeyHolder.holds(keys) ? (signInFocused ? .signIn : .rows) : .none
     }
 
-    /// Built `width` wide showing `shown`, what it shows by default, no taller than its top leaves.
-    private func draw(width: Double, showing shown: NewSessionView.Content? = nil, cap: Double? = nil) {
+    /// Built `width` wide showing `shown`, what it shows by default, saying `said` over the foot, or
+    /// its own line, no taller than its top leaves.
+    private func draw(width: Double, showing shown: NewSessionView.Content? = nil, saying said: NewSessionView.Line? = nil, cap: Double? = nil) {
         guard let content = shown ?? content else { return }
-        view.show(content, workspace: workspace, line: line, veiled: loginSheet != nil, holder: holder, keys: keys, width: width, cap: cap ?? top - lowest)
+        view.show(content, workspace: workspace, line: said ?? line, veiled: loginSheet != nil, holder: holder, keys: keys, width: width, cap: cap ?? top - lowest)
     }
 
-    /// The height of the tallest of its choices whole, `width` wide.
-    private func tallest(width: Double) -> Double {
+    /// The height of `shown` whole, `width` wide, saying `said` over the foot.
+    private func height(_ shown: NewSessionView.Content, saying said: NewSessionView.Line? = nil, width: Double) -> Double {
+        draw(width: width, showing: shown, saying: said, cap: .infinity)
+        return view.height
+    }
+
+    /// The tallest of its choices whole, `width` wide, each harness in each of its modes and ways
+    /// in: as shown, and open, with room for the longest line a key stored on any of them says.
+    private func tallest(width: Double) -> (shown: Double, open: Double) {
         guard case let .offered(panel) = content else {
-            draw(width: width, cap: .infinity)
-            return view.height
+            let shown = content.map { height($0, width: width) } ?? 0
+            return (shown, shown)
         }
-        return panel.choices.map { choice in
-            var each = panel
-            each.choose(choice)
-            draw(width: width, showing: .offered(each), cap: .infinity)
-            return view.height
-        }.max() ?? 0
+        let shown = Self.everyLook(panel).map { height(.offered($0), width: width) }.max() ?? 0
+        let bare = height(.offered(panel), width: width)
+        let said = panel.agents.offered.filter { $0.refusal == nil }.compactMap(StoreLogin.longestLine).map { height(.offered(panel), saying: .stored($0), width: width) - bare }
+        return (shown, shown + (said.max() ?? 0))
+    }
+
+    /// `panel` with each of its kinds chosen, a harness in each of its modes and ways in.
+    private static func everyLook(_ panel: NewSession) -> [NewSession] {
+        panel.choices.flatMap { choice -> [NewSession] in
+            var chosen = panel
+            chosen.choose(choice)
+            guard case let .harness(harness) = choice, let offer = panel.offer(harness) else { return [chosen] }
+            return (offer.modes.isEmpty ? [offer.modeDefault] : offer.modes.map(\.mode)).flatMap { mode in
+                [Way.signIn, .key].map { way in
+                    var each = chosen
+                    each.choose(mode: mode)
+                    each.choose(way: way)
+                    return each
+                }
+            }
+        }
     }
 
     /// Drawn again where it is, its top where it was placed, its foot following what it shows.
@@ -312,9 +339,9 @@ package final class NewSessionPanel: NSObject {
         return true
     }
 
-    /// A key while open: ↑ ↓ choose, or open Sign in's menu while it holds the keys, as Space does;
-    /// ⇥ moves between them; ⌘M the modes, Return presses the primary, Escape closes; past seven
-    /// rows, typing narrows them.
+    /// A key while open: ↑ ↓ choose, Home and End the first and the last, or ↑ ↓ open Sign in's
+    /// menu while it holds the keys, as Space does; ⇥ moves between them; ⌘M the modes, Return
+    /// presses the primary, Escape closes; past seven rows, typing narrows them.
     fileprivate func key(_ event: NSEvent) -> Bool {
         guard isOpen else { return false }
         let held = event.modifierFlags.intersection([.command, .option, .control, .shift])
@@ -333,9 +360,10 @@ package final class NewSessionPanel: NSObject {
             return true
         }
         switch event.keyCode {
-        case 125, 126:
+        case 115, 119, 125, 126:
             guard case var .offered(panel) = content else { return true }
-            panel.move(by: event.keyCode == 125 ? 1 : -1)
+            let rows = panel.choices.count
+            panel.move(by: [115: -rows, 119: rows, 125: 1, 126: -1][event.keyCode] ?? 0)
             content = .offered(panel)
             signInFocused = false
             redraw()
@@ -513,7 +541,7 @@ package final class NewSessionView: NSView {
         let hovered = rows.first(where: \.hovered)?.choice, scrolled = Double(list.contentView.bounds.minY)
         build(content, workspace: workspace, line: line, veiled: veiled, holder: holder, keys: keys, width: width, rows: .infinity)
         if height > cap, list.superview === self {
-            build(content, workspace: workspace, line: line, veiled: veiled, holder: holder, keys: keys, width: width, rows: max(Double(list.frame.height) - (height - cap), Self.row))
+            build(content, workspace: workspace, line: line, veiled: veiled, holder: holder, keys: keys, width: width, rows: max(Double(list.frame.height) - (height - cap), Self.row + 2 * Self.listInset))
         }
         reveal(scrolled: scrolled, hovered: hovered)
     }
@@ -555,7 +583,9 @@ package final class NewSessionView: NSView {
             start?.hint("\r", through: keys, mono: mono)
             start?.holdsKeys = line.map { if case .stored = $0 { true } else { false } } == true && holder == .rows
             primary = start
-            let hint = Self.label(Self.text(NewSessionWords.hint(holder, modes: modes != nil, typed: panel.filter), mono.font(Look.Step.micro.points, .regular) as NSFont, look.textTertiary, direction: direction).cut(.byTruncatingTail))
+            let hint = { (room: Double) in
+                self.hint(NewSessionWords.hint(holder, modes: self.modes != nil, typed: panel.filter) { Double(self.hint($0).fittingSize.width) <= room })
+            }
             y = foot(start, hint: hint, y: y, width: width)
         case let .refused(sentence, remedy, shell):
             hairlines.append(y)
@@ -667,7 +697,7 @@ package final class NewSessionView: NSView {
         let after = x + Self.labelWidth + 10, room = x + inner - after
         if !offer.modes.isEmpty {
             let about = NewSessionWords.about(offer, mode: mode)
-            y = modeLine(offer, mode: mode, name: panel.risky ? NewSessionWords.modeWarning(about) : NewSessionWords.mode, x: x, after: after, y: y, room: room)
+            y = modeLine(offer, mode: mode, name: panel.risky ? NewSessionWords.modeWarning : NewSessionWords.mode, x: x, after: after, y: y, room: room)
             y = help(about, warns: panel.risky, x: after, y: y + 4, width: room) + Self.gap
         }
         y = signInLine(offer, way: way, x: x, after: after, y: y, room: room)
@@ -781,9 +811,14 @@ package final class NewSessionView: NSView {
         return mirrored(NSRect(x: edge + Self.padding, y: top + (min(Double(words.frame.height), Self.about) - 6) / 2, width: 6, height: 6))
     }
 
-    /// The foot at `y`: the keys at its leading end, its button, if any, at the trailing; a small
-    /// button tall either way; where it ends.
-    private func foot(_ button: SailButton?, hint: NSTextField?, y: Double, width: Double) -> Double {
+    /// The foot's keys, quiet mono, ordered in the box's own direction whatever was typed.
+    private func hint(_ words: String) -> NSTextField {
+        Self.label(Self.text(words, mono.font(Look.Step.micro.points, .regular) as NSFont, look.textTertiary, direction: direction, writing: direction == .rightToLeft ? .rightToLeft : .leftToRight).cut(.byTruncatingTail))
+    }
+
+    /// The foot at `y`: the keys, as `hint` words them for the room the button leaves, at its leading
+    /// end, its button, if any, at the trailing; a small button tall either way; where it ends.
+    private func foot(_ button: SailButton?, hint: ((Double) -> NSTextField)?, y: Double, width: Double) -> Double {
         let edge = Look.hairline, size = button?.intrinsicContentSize ?? .zero, room = Look.haloRoom
         let box = NSRect(x: width - edge - 12 - Double(size.width), y: y + 10, width: Double(size.width), height: ButtonSize.small.height)
         if let button {
@@ -791,9 +826,9 @@ package final class NewSessionView: NSView {
             button.userInterfaceLayoutDirection = direction
             addSubview(button)
         }
-        if let hint {
-            let hintSize = hint.fittingSize
-            let hintWidth = min(Double(hintSize.width), Double(box.minX) - edge - 12 - 12)
+        if let worded = hint {
+            let room = Double(box.minX) - edge - 12 - 12, hint = worded(room), hintSize = hint.fittingSize
+            let hintWidth = min(Double(hintSize.width), room)
             hint.frame = mirrored(NSRect(x: edge + 12, y: Double(box.midY) - Double(hintSize.height) / 2, width: max(hintWidth, 0), height: Double(hintSize.height)))
             addSubview(hint)
         }
@@ -822,9 +857,10 @@ package final class NewSessionView: NSView {
         return NSRect(x: boxWidth - Double(rect.maxX), y: Double(rect.minY), width: Double(rect.width), height: Double(rect.height))
     }
 
-    static func text(_ words: String, _ font: NSFont, _ ink: Tint, direction: NSUserInterfaceLayoutDirection, lineHeight: Double? = nil) -> NSAttributedString {
+    static func text(_ words: String, _ font: NSFont, _ ink: Tint, direction: NSUserInterfaceLayoutDirection, lineHeight: Double? = nil, writing: NSWritingDirection = .natural) -> NSAttributedString {
         let style = NSMutableParagraphStyle()
         style.alignment = direction == .rightToLeft ? .right : .left
+        style.baseWritingDirection = writing
         if let lineHeight {
             style.minimumLineHeight = lineHeight
             style.maximumLineHeight = lineHeight

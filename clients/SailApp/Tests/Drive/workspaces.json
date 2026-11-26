@@ -436,7 +436,7 @@
   {"name": "fi-eight-type-op", "type": "op"},
   {"name": "fi-eight-narrowed", "newSessionRows": ["OpenCode", "Opal"]},
   {"name": "fi-eight-first-chosen", "newSessionChosen": "OpenCode"},
-  {"name": "fi-eight-typed-said", "newSessionSays": ["“op” · ⌫ widen · ↑↓ choose"]},
+  {"name": "fi-eight-typed-said", "newSessionSays": ["“\u2068op\u2069” · ⌫ widen · ↑↓ choose"]},
   {"name": "fi-eight-narrowed-shown", "shotScreen": "fi-narrowed"},
   {"name": "fi-eight-backspace", "press": "backspace"},
   {"name": "fi-eight-widened", "newSessionRows": ["OpenCode", "Opal"]},
