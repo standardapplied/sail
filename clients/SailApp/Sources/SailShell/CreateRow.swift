@@ -45,7 +45,7 @@ final class CreateRow: NSView {
         let runs = Runs(on)
         let cancel = SailButton("Cancel", kind: .quiet, size: .small, look: look, target: runs, action: #selector(Runs.cancel(_:)))
         let create = SailButton("Create", kind: .primary, size: .small, look: look, target: runs, action: #selector(Runs.create(_:)))
-        create.hint("\r", mono: mono)
+        create.hint("\r", through: field.field, mono: mono)
         let buttons = NSStackView(views: [cancel, create])
         buttons.spacing = ProjectView.buttonGap
         self.field = field

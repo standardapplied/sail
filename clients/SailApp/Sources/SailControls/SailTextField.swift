@@ -63,7 +63,7 @@ public final class SailTextField: NSView {
     private let mono: LabelFont
     private(set) var hovered = false
     private var hoverArea: NSTrackingArea?
-    private var focusWatch: NSKeyValueObservation?
+    private lazy var keysWatch = HolderWatch { [weak self] in self?.keysChanged() }
 
     public init(label: String?, placeholder: String, help: String? = nil, size: FieldSize = .regular, secure: Bool = false, look: Look, mono: LabelFont) {
         field = secure ? NSSecureTextField() : NSTextField()
@@ -235,24 +235,17 @@ public final class SailTextField: NSView {
         needsDisplay = true
     }
 
-    override public func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        focusWatch = window?.observe(\.firstResponder) { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.repaint() }
-        }
-    }
-
     override public func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
-        KeyWatch.move(self, from: window, to: newWindow, calling: #selector(keyChanged))
+        keysWatch.watch(newWindow)
     }
 
-    /// How many times its window became or ceased to be key while it was there.
+    /// How many times what holds its window's keys changed while it was there.
     private(set) var keyChanges = 0
 
-    @objc private func keyChanged() {
+    private func keysChanged() {
         keyChanges += 1
-        needsDisplay = true
+        repaint()
     }
 
     override public func updateTrackingAreas() {

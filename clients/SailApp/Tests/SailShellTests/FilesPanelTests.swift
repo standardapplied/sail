@@ -412,7 +412,31 @@ import Testing
         panel.layoutSubtreeIfNeeded()
         #expect(panel.line.frame.minY >= FilesLineView.top && panel.scroll.frame.minY >= panel.line.frame.maxY, "\(name): the tree is under the line")
         let empty = try Self.played([], look: look)
-        #expect(empty.shownLine?.words == "~/workspace is empty. ⌥⌘N makes a file.")
+        #expect(empty.shownLine?.words == "~/workspace is empty.", "\(name): an empty tree in no window names ⌥⌘N")
+    }
+
+    /// An empty workspace's line names ⌥⌘N only while the tree holds the keys (``KeyHolder``), the
+    /// one place New File reaches: not while another view holds them, nor in a window that is not
+    /// key; said again each time they come and go.
+    @Test func theEmptyLineNamesNewFileOnlyWhileTheTreeHoldsTheKeys() throws {
+        let panel = try Self.played([])
+        let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: FilesPanel.width + 200, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.orderOut(nil) }
+        let other = NSTextField(frame: NSRect(x: FilesPanel.width + 20, y: 20, width: 160, height: 22))
+        window.contentView?.addSubview(panel)
+        window.contentView?.addSubview(other)
+        let named = "~/workspace is empty. ⌥⌘N makes a file.", plain = "~/workspace is empty."
+        let newFile = NSMenuItem(title: "New File", action: #selector(FilesPanel.newFile(_:)), keyEquivalent: "n")
+        #expect(panel.shownLine?.words == plain, "⌥⌘N is named before the tree holds the keys")
+        try #require(window.makeFirstResponder(panel.list))
+        #expect(panel.shownLine?.words == named && panel.validateMenuItem(newFile), "with the tree holding the keys the line says \(panel.shownLine?.words ?? "nothing")")
+        try #require(window.makeFirstResponder(other))
+        #expect(panel.shownLine?.words == plain && !panel.validateMenuItem(newFile), "with a field holding the keys the line says \(panel.shownLine?.words ?? "nothing")")
+        try #require(window.makeFirstResponder(panel.list))
+        window.key = false
+        #expect(panel.shownLine?.words == plain, "in a window that is not key the line says \(panel.shownLine?.words ?? "nothing")")
+        window.key = true
+        #expect(panel.shownLine?.words == named, "the window key again, the line says \(panel.shownLine?.words ?? "nothing")")
     }
 
     /// The rows as the third pass draws them: 24 pt, 12 pt further in each level, the disclosure on

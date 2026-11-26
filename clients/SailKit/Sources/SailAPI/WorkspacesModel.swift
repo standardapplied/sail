@@ -112,6 +112,35 @@ public struct WorkspacesModel: Sendable {
         /// The list is the last one taken, its refresh having failed: drawn dimmed.
         public let stale: Bool
         public let listedAt: Date?
+
+        /// Workspace row `name`'s line, nil while it is not listed.
+        public func line(_ name: String?) -> Line? {
+            guard case let .list(table) = body else { return nil }
+            return (table.yours + table.others).first { $0.name == name }
+        }
+
+        /// The keys its foot names with row `chosen` chosen and the keys `held` so, each only while it
+        /// does what it says: none with no workspace row chosen, nor while nothing of the window holds
+        /// them; Return and ⌥⌘T, the list's own keys, only while the list holds them, Return only where
+        /// the row opens (its Open or Start and Open, which Return presses); ⌘N, New Workspace's key
+        /// equivalent, which reaches it from anywhere in the window, while a workspace can be made.
+        public func keys(chosen: String?, held: Held) -> [Key] {
+            guard let line = line(chosen), held != .none else { return [] }
+            let listed: [Key] = held == .list ? (line.primary == nil ? [] : [.open]) + [.newSession] : []
+            return listed + (canCreate ? [.newWorkspace] : [])
+        }
+    }
+
+    /// A key a page's foot names.
+    public enum Key: Equatable, Sendable {
+        case open, newSession, newWorkspace
+    }
+
+    /// What holds the keys, as the app's one rule for it says (the first responder of a window that
+    /// is key): the list; another view of the page's window, which is key; or nothing of that
+    /// window, a sheet over it or another window being key.
+    public enum Held: Equatable, Sendable {
+        case list, window, none
     }
 
     public enum Body: Equatable, Sendable {
