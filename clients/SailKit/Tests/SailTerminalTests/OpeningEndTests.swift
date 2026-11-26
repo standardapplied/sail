@@ -12,14 +12,14 @@ import Testing
 /// end's one deadline, then ends what was made, or says it could not. Against ``FakeRunnerDoor``
 /// holding its `Create`s, as the real host does while it starts a workspace.
 @Suite(.timeLimit(.minutes(1))) struct OpeningEndTests {
+    /// A session opening at `door`, each of its connects and answers given `Patience.answer`: past
+    /// the suite's minute, so an end that waited on an unanswered `Create` past its own deadline
+    /// fails the test rather than being saved by the `Create`'s timing out.
     static func opening(_ door: FakeRunnerDoor, _ name: String) throws -> TerminalSession {
         let create = SessionCreate(
             session: name, command: [], workingDirectory: "/tmp", project: "acme", room: "", size: TerminalSize(columns: 80, rows: 24), workspace: "try"
         )
-        return TerminalSession(
-            open: create, door: .runner(FakeRunnerDoorTests.Tickets(door)), screen: try screen(), timeout: Patience.answer,
-            sleep: { try await Task.sleep(for: $0) }
-        )
+        return TerminalSession(open: create, door: .runner(FakeRunnerDoorTests.Tickets(door)), screen: try screen(), timeout: Patience.answer, sleep: Door.wallClock)
     }
 
     @Test func anEndWhileTheCreateIsUnansweredWaitsForItAndEndsWhatWasMade() async throws {
@@ -38,7 +38,11 @@ import Testing
     }
 
     /// The deadline holds with the `Create` still unanswered: the end says it could not end what
-    /// may be made, and the runner, once it answers, holds the session, as was said.
+    /// may be made, and the runner, once it answers, holds the session, as was said. The `Create`
+    /// is held until after the end and times out only after `Patience.answer`, so an end that
+    /// waited on it past its deadline would hold the test past the suite's minute; the deadline is
+    /// the wall clock's, which waits at least its second, so nothing of it is left for the Kill
+    /// whatever the runner's speed.
     @Test func aCreateUnansweredAtTheDeadlineIsSaidAndWhatItMakesIsWhatWasSaid() async throws {
         let door = try FakeRunnerDoor()
         defer { door.stop() }
@@ -47,9 +51,7 @@ import Testing
         let watch = Watch(session)
         session.start()
         try await watch.until("the runner is making it") { door.createsReceived == 1 }
-        let began = ContinuousClock.now
         #expect(await session.end(within: .seconds(1)) == .unconfirmed(["The runner did not answer within 1 s."]))
-        #expect(ContinuousClock.now - began < .seconds(5), "within the one deadline")
         door.releaseCreates()
         try await watch.until("the runner made it") { door.sessions == ["app-slow"] }
     }

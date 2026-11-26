@@ -15,8 +15,8 @@ import Testing
         return tree
     }
 
-    static func line(_ tree: FileTree, _ phase: FilesSession.Phase, at now: Double) -> FilesLine? {
-        FilesLine(tree: tree, phase: phase, workspace: "dock", at: now) { "\(Int($0))s" }
+    static func line(_ tree: FileTree, _ phase: FilesSession.Phase, at now: Double, treeHoldsKeys: Bool = false) -> FilesLine? {
+        FilesLine(tree: tree, phase: phase, workspace: "dock", at: now, treeHoldsKeys: treeHoldsKeys) { "\(Int($0))s" }
     }
 
     /// R3-1: the connection's state in words a person reads, one source for the panel's line and a
@@ -124,8 +124,12 @@ import Testing
             == FilesLine(words: "You have 16 files connections open; close one to open another.", mark: .bad, action: .tryAgain, dims: true))
     }
 
+    /// An empty workspace says so, and names ⌥⌘N only while the tree holds the keys, the one place
+    /// its New File reaches.
     @Test func anEmptyWorkspaceSaysSo() throws {
-        #expect(Self.line(try Self.listed([]), .connected, at: 0) == FilesLine(words: "~/workspace is empty. ⌥⌘N makes a file.", mark: .none))
+        let empty = try Self.listed([])
+        #expect(Self.line(empty, .connected, at: 0, treeHoldsKeys: true) == FilesLine(words: "~/workspace is empty. ⌥⌘N makes a file.", mark: .none))
+        #expect(Self.line(empty, .connected, at: 0) == FilesLine(words: "~/workspace is empty.", mark: .none), "⌥⌘N is named while the tree does not hold the keys")
     }
 
     /// A folder that never settles says so, with when what is shown of it was listed, rather than

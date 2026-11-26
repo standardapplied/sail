@@ -74,9 +74,10 @@ final class UploadCopy {
    * ({@code shift 9; "$@"}), counts what the directory holds against {@code $5} files and {@code
    * $6} bytes, creates the temporary for the first number no name, link or temporary takes, with
    * {@code set -C} ({@code O_EXCL}) behind those checks, prints that number, and copies its input
-   * into it through the descriptor it opened. A measurement that fails is {@code failed}, never
-   * read as a full disk or a full directory; a copy that fails is {@code no_space} when it left the
-   * disk under 64 KiB free; the host removes its temporary.
+   * into it through the descriptor it opened. A file that goes while the directory is counted, as
+   * another upload's temporary goes at its abort or commit, counts as not there. A measurement that
+   * fails is {@code failed}, never read as a full disk or a full directory; a copy that fails is
+   * {@code no_space} when it left the disk under 64 KiB free; the host removes its temporary.
    */
   static final String OPEN =
       OURS
@@ -100,7 +101,7 @@ final class UploadCopy {
       cd "$1" || exit 1
       names=$(find . -mindepth 1 -maxdepth 1 ! -name ".*.part" -printf x) || exit 1
       [ "${#names}" -lt "$4" ] || exit 11
-      sizes=$(find . -mindepth 1 -maxdepth 1 -type f -printf "%s\\n") || exit 1
+      sizes=$(find . -mindepth 1 -maxdepth 1 -ignore_readdir_race -type f -printf "%s\\n") || exit 1
       used=$(printf "%s\\n" "$sizes" | awk "{ s += \\$1 } END { print s + 0 }")
       [ $((used + $3)) -le "$5" ] || exit 12
       n=1

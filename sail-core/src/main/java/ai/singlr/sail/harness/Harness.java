@@ -235,7 +235,7 @@ public interface Harness {
 
   /**
    * Where, under the dev user's home, this harness keeps a login, or a part of one, that a person
-   * made in its session: the files a workspace loses when it leaves its person.
+   * made in its session: the files and folders a workspace loses when it leaves its person.
    */
   default List<String> storedLogins() {
     return List.of();
