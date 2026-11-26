@@ -10,7 +10,7 @@ runs:
   using: composite
   steps:
     # Kept per week, so nothing cached is staler than a week; the runner's packages also per runner
-    # image, whose preinstalled packages their files were resolved against.
+    # image, so their files are never older than what the image holds.
     - name: Name this week and this runner image
       id: week
       shell: bash
@@ -22,11 +22,11 @@ runs:
     # unpinned, so CI tests Zabbly's stable release of the week, not the release a box that
     # installed it earlier holds. Ubuntu 24.04's own incus 6.0.0, which a box keeps when it came
     # with it and which cannot make a mirrored ZFS pool, is covered only by the unit tests of
-    # Sail's refusal of it (IncusStorageTest, HostProvisionerTest). Its files and the ZFS tools'
-    # are fetched once a week per runner image (`ci/images runner-packages fetch`, from Ubuntu's own
-    # sources and Zabbly's only, as the runner image's third-party sources fail on their own
-    # schedule) and installed from those files with no network, the same way after a fetch as
-    # after a restore.
+    # Sail's refusal of it (IncusStorageTest, HostProvisionerTest). Its files and the ZFS tools',
+    # with every package they need whatever the fetching runner holds, are fetched once a week per
+    # runner image (`ci/images runner-packages fetch`, from Ubuntu's own sources and Zabbly's only,
+    # as the runner image's third-party sources fail on their own schedule) and installed by apt
+    # from those files alone, the same way after a fetch as after a restore.
     - name: Restore the runner's packages
       id: packages
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -37,7 +37,9 @@ runs:
     - name: Fetch the runner's packages
       if: steps.packages.outputs.cache-hit != 'true'
       shell: bash
-      run: ci/images runner-packages fetch "$RUNNER_TEMP/runner-packages"
+      run: |
+        sudo ci/images runner-packages sources
+        ci/images runner-packages fetch "$RUNNER_TEMP/runner-packages"
 
     # The runner's sudo keeps the runner's environment, HOME and XDG_CONFIG_HOME/XDG_CACHE_HOME
     # among it, and the incus client makes its config and cache directories there on its first
@@ -47,7 +49,7 @@ runs:
     - name: Install and initialize incus
       shell: bash
       run: |
-        ci/images runner-packages install "$RUNNER_TEMP/runner-packages" incus
+        sudo ci/images runner-packages install "$RUNNER_TEMP/runner-packages" incus
         sudo -H env -u XDG_CONFIG_HOME -u XDG_CACHE_HOME incus admin init --minimal
         sudo chmod o+rw /var/lib/incus/unix.socket
         if [ -e "$HOME/.config/incus" ] || [ -e "$HOME/.cache/incus" ]; then
@@ -76,7 +78,7 @@ runs:
     # the tools without a restart.
     - name: Install the ZFS tools
       shell: bash
-      run: ci/images runner-packages install "$RUNNER_TEMP/runner-packages" zfsutils-linux
+      run: sudo ci/images runner-packages install "$RUNNER_TEMP/runner-packages" zfsutils-linux
 
     # Every suite launches this image; fetched once here, its download is no test class's time.
     - name: Fetch the base image
