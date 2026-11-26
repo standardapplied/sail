@@ -67,7 +67,7 @@ public final class TerminalSession: Sendable {
     private let eventSink: AsyncStream<SessionEvent>.Continuation
     private let screenListener = Relay<ContinuousClock.Instant>()
     private let reader = Mutex<QualityOfService?>(nil)
-    private let clock = ContinuousClock()
+    private let clock: SessionClock
 
     private struct Core {
         var state: SessionState
@@ -147,34 +147,37 @@ public final class TerminalSession: Sendable {
 
     /// As the public ones, waiting with `sleep`, giving each connect and answer `timeout` seconds,
     /// counting a connection a success once attached for `stableAfter`, timing a render hold's
-    /// end with `after`, and a runner's door parking once its waits and attempts add up to
-    /// `patience` (``runnerPatience`` by default).
+    /// end with `after`, a runner's door parking once its waits and attempts add up to
+    /// `patience` (``runnerPatience`` by default), and reading how long things took from `clock`.
     package convenience init(
         open create: SessionCreate, door: Door, screen: Screen, timeout: Int,
         stableAfter: Duration = TerminalSession.stableAttachment, sleep: @escaping @Sendable (Duration) async throws -> Void,
-        after: @escaping HoldTick.After = HoldTick.dispatch, patience: Duration = TerminalSession.runnerPatience
+        after: @escaping HoldTick.After = HoldTick.dispatch, patience: Duration = TerminalSession.runnerPatience,
+        clock: SessionClock = .continuous
     ) {
         self.init(
             intent: .open(create), door: door, screen: screen, timeout: timeout, stableAfter: stableAfter, sleep: sleep, after: after,
-            patience: patience
+            patience: patience, clock: clock
         )
     }
 
     package convenience init(
-        attach session: String, write: Bool, door: Door, screen: Screen, timeout: Int,
+        attach session: String, write: Bool, takes: Bool = true, door: Door, screen: Screen, timeout: Int,
         stableAfter: Duration = TerminalSession.stableAttachment, sleep: @escaping @Sendable (Duration) async throws -> Void
     ) {
         self.init(
             intent: .attach(session: session, write: write), door: door, screen: screen, timeout: timeout,
             stableAfter: stableAfter, sleep: sleep
         )
+        core.withLock { $0.takes = takes }
     }
 
     private init(
         intent: Intent, door: Door, screen: Screen, timeout: Int = 10, stableAfter: Duration = TerminalSession.stableAttachment,
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         after: @escaping HoldTick.After = HoldTick.dispatch,
-        patience: Duration = TerminalSession.runnerPatience
+        patience: Duration = TerminalSession.runnerPatience,
+        clock: SessionClock = .continuous
     ) {
         self.door = door
         let runner = if case .runner = door { true } else { false }
@@ -184,6 +187,7 @@ public final class TerminalSession: Sendable {
         self.stableAfter = stableAfter
         self.sleep = sleep
         self.after = after
+        self.clock = clock
         alarm = Alarm(sleep: sleep)
         var initial = Core(state: SessionState(phase: .connecting, session: intent.session), intent: intent)
         if case .attach = intent { initial.atHost = .maybe }

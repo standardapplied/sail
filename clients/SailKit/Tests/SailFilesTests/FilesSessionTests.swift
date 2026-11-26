@@ -39,7 +39,7 @@ import Testing
     /// The events of `session` read into a list a test waits on.
     final class Heard: Sendable {
         private let events = Mutex<[FilesSession.Event]>([])
-        private let changed = Alarm { try await Task.sleep(for: $0) }
+        private let changed = Alarm { _ in }
 
         init(_ session: FilesSession) {
             Task { for await event in session.events { self.heard(event) } }
@@ -62,13 +62,11 @@ import Testing
             events.withLock { $0.compactMap { if case let .frame(frame) = $0 { frame } else { nil } } }
         }
 
-        /// Whether `condition` holds within 10 s, checked at each event.
+        /// Whether `condition` came to hold before the test was cancelled, checked at each event.
         func until(_ condition: @Sendable () -> Bool) async -> Bool {
-            let end = ContinuousClock.now + .seconds(10)
             while !condition() {
-                let left = end - ContinuousClock.now
-                guard left > .zero else { return false }
-                await changed.wait(left)
+                guard !Task.isCancelled else { return false }
+                await changed.wait(nil)
             }
             return true
         }
@@ -78,7 +76,7 @@ import Testing
 
     /// A session on `desk` whose waits pass at once.
     static func session(_ desk: Desk) -> FilesSession {
-        FilesSession(project: "harbor", workspace: "dock", door: .runner(desk), waits: waits, timeout: 5) { _ in try Task.checkCancellation() }
+        FilesSession(project: "harbor", workspace: "dock", door: .runner(desk), waits: waits, timeout: Patience.answer) { _ in try Task.checkCancellation() }
     }
 
     static func refusal(_ code: ErrorCode, _ message: String) -> Refusal {
@@ -141,7 +139,7 @@ import Testing
     @Test func aSilentConnectionIsClosedAndReconnects() async throws {
         let door = try FakeRunnerDoor()
         let desk = Desk(door)
-        let session = FilesSession(project: "harbor", workspace: "dock", door: .runner(desk), waits: Self.waits, timeout: 5, quiet: .milliseconds(1500)) { _ in try Task.checkCancellation() }
+        let session = FilesSession(project: "harbor", workspace: "dock", door: .runner(desk), waits: Self.waits, timeout: Patience.answer, quiet: .milliseconds(1500)) { _ in try Task.checkCancellation() }
         let heard = Heard(session)
         session.start()
         defer { session.close() }

@@ -9,16 +9,27 @@ struct Runner {
     let follower: Follower
     let host: LocalHostProcess?
     let echoBudget: Double
+    /// How long a step waits, in seconds, when its script names no limit.
+    let patience: Int?
+    /// How long a close waits for the host to end the session.
+    let ending: Duration
     /// Told each step's result as it finishes.
     let progress: @Sendable (StepResult) -> Void
     private let clock = ContinuousClock()
 
-    init(session: TerminalSession, host: LocalHostProcess?, echoBudget: Double, progress: @escaping @Sendable (StepResult) -> Void) {
+    /// A probe's run waits 5 s for what a step needs and ``Door/endLimit`` for a close; a test's
+    /// run waits for what it needs alone (nil) and gives a close past its time limit.
+    init(
+        session: TerminalSession, host: LocalHostProcess?, echoBudget: Double, patience: Int? = 5, ending: Duration = Door.endLimit,
+        progress: @escaping @Sendable (StepResult) -> Void
+    ) {
         self.session = session
         self.host = host
         self.echoBudget = echoBudget
+        self.patience = patience
+        self.ending = ending
         self.progress = progress
-        follower = Follower(session)
+        follower = Follower(session, patience: patience)
     }
 
     func run(_ script: Script) async -> Report {
@@ -101,7 +112,7 @@ struct Runner {
         case let .hold(seconds):
             try await Task.sleep(for: .seconds(seconds))
         case .close:
-            let outcome = await session.end()
+            let outcome = await session.end(within: ending)
             session.close()
             if case let .unconfirmed(said) = outcome {
                 throw ProbeError("not ended: " + said.joined(separator: " "))

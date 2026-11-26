@@ -17,9 +17,9 @@ struct RealLocalHostTests {
     @Test func aSessionOpensInItsFolderWithTheLoginShell() async throws {
         try await RealLocalHost.with { host in
             let (session, watch) = try host.open()
-            try await watch.attached(within: 30)
+            try await watch.attached()
             "pwd\r".forEach { session.send(.typing($0)) }
-            try await watch.until(within: 20, "showed its folder") { try session.screen.text().contains("\n\(host.folder)") }
+            try await watch.until("showed its folder") { try session.screen.text().contains("\n\(host.folder)") }
             #expect(try await SessionListing.sessions(at: host.address).contains { $0.name == session.state.session && $0.live })
             session.close()
         }
@@ -29,10 +29,10 @@ struct RealLocalHostTests {
     @Test func aHostThatCrashedAndStartedAgainEndsTheSessionAsTheHostRestarted() async throws {
         try await RealLocalHost.with { host in
             let (session, watch) = try host.open()
-            try await watch.attached(within: 30)
+            try await watch.attached()
             host.process.crash()
             try await host.process.start()
-            try await watch.phase(.ended(.hostRestarted), within: 30)
+            try await watch.phase(.ended(.hostRestarted))
         }
     }
 
@@ -42,16 +42,16 @@ struct RealLocalHostTests {
         try await RealLocalHost.with { host in
             let naps = Naps()
             let (session, watch) = try host.open(sleep: naps.sleep)
-            try await watch.attached(within: 30)
+            try await watch.attached()
             host.process.crash()
-            try await watch.until(within: 30, "parked") {
+            try await watch.until("parked") {
                 if case .parked = session.state.phase { return true }
                 return false
             }
             #expect(naps.durations == TerminalSession.retryWaits)
             try await host.process.start()
             session.reconnectNow()
-            try await watch.phase(.ended(.hostRestarted), within: 30)
+            try await watch.phase(.ended(.hostRestarted))
             #expect(naps.durations == TerminalSession.retryWaits)
         }
     }
@@ -61,16 +61,16 @@ struct RealLocalHostTests {
         try await RealLocalHost.with { host in
             let timeline = Timeline()
             let (session, watch) = try host.open(command: ["cat"], sleep: timeline.sleep)
-            try await watch.attached(within: 30)
+            try await watch.attached()
             session.dropConnection()
             try await watch.phase(.reconnecting(attempt: 1))
             "abc".forEach { session.send(.typing($0)) }
             #expect(session.state.droppedInputs == 3)
             try await timeline.until(held: [TerminalSession.retryWaits[0]])
             timeline.passAll()
-            try await watch.attached(within: 30)
+            try await watch.attached()
             "z\r".forEach { session.send(.typing($0)) }
-            try await watch.until(within: 20, "echoed z") { try session.screen.text().contains("z") }
+            try await watch.until("echoed z") { try session.screen.text().contains("z") }
             #expect(try !session.screen.text().contains("abc"))
             #expect(session.state.droppedInputs == 3)
             session.close()
@@ -82,14 +82,14 @@ struct RealLocalHostTests {
     @Test func aDropReattachesToTheSameScreenAndReportsFocusLost() async throws {
         try await RealLocalHost.with { host in
             let (session, watch) = try host.open(command: ["sh", "-c", "printf 'focus\\033[?1004h\\n'; exec cat -v"])
-            try await watch.attached(within: 30)
-            try await watch.until(within: 20, "started cat") { try session.screen.text().contains("focus") }
+            try await watch.attached()
+            try await watch.until("started cat") { try session.screen.text().contains("focus") }
             let before = try session.screen.text()
             session.setFocused(false)
             session.dropConnection()
             try await watch.phase(.reconnecting(attempt: 1))
-            try await watch.attached(within: 30)
-            try await watch.until(within: 20, "showed the focus-lost report") { try session.screen.text().contains("^[[O") }
+            try await watch.attached()
+            try await watch.until("showed the focus-lost report") { try session.screen.text().contains("^[[O") }
             #expect(try session.screen.text().hasPrefix(before))
             session.close()
         }

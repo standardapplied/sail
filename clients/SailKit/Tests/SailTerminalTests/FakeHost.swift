@@ -10,14 +10,10 @@ import Synchronization
 
 /// A terminal host played by a test: it listens on a unix socket of its own, or on a loopback TCP
 /// port, and each connection it accepts is a ``Peer`` the test reads and answers frame by frame.
-/// Every wait is bounded by ``deadline`` seconds.
+/// A wait for a client is a wait for what the client does, ended only by the test's cancellation,
+/// which its suite's time limit brings: a test that is not scheduled for a while (a runner whose
+/// cooperative pool is held, a machine that stalls) waits on, rather than failing on the clock.
 final class FakeHost: Sendable {
-    /// How long a test waits for the client to connect or send. The client's session is a task
-    /// on the cooperative pool, and on a 3-core macOS runner the suite's synchronous, CPU-heavy
-    /// tests (fixtures fed in 500 chunkings, streams cut at every byte) hold all 3 of its threads
-    /// for the first 20 s or so of a run: a 5 s bound expired there before the client could run.
-    static let deadline = 30
-
     let address: HostAddress
     private let listener: Mutex<Int32>
     private let directory: String?
@@ -46,15 +42,13 @@ final class FakeHost: Sendable {
 
     /// The next connection a client makes.
     func accept() async throws -> Peer {
-        let descriptor = listener.withLock { $0 }
-        return try await onThread {
-            var ready = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
-            guard poll(&ready, 1, Int32(Self.deadline * 1000)) == 1 else { throw HostError("no client connected within \(Self.deadline) s") }
+        try await untilCancelled("no client connected") { [self] in
+            let descriptor = listener.withLock { $0 }
+            guard descriptor >= 0 else { throw HostError("the host stopped listening") }
+            guard readable(descriptor) else { return nil }
             let accepted = acceptClient(descriptor)
             guard accepted >= 0 else { throw HostError("accept failed: \(errno)") }
-            let socket = Socket(descriptor: accepted)
-            socket.setReadTimeout(seconds: Self.deadline)
-            return Peer(socket: socket, descriptor: accepted)
+            return Peer(socket: Socket(descriptor: accepted), descriptor: accepted)
         }
     }
 
@@ -74,17 +68,22 @@ final class FakeHost: Sendable {
         listener.withLock { $0 = descriptor }
     }
 
-    /// One accepted connection, which the test drives.
+    /// One accepted connection, which the test drives. What the client sends is read as it comes, on
+    /// a thread of the peer's own, so a client's write never waits for the test to be scheduled.
     final class Peer: Sendable {
         /// The accepted descriptor's number, for a test of the close.
         let descriptor: Int32
         private let open: Mutex<Socket?>
-        private let frames = Mutex(FrameReader())
-        private let unread = Mutex<[Frame]>([])
+        private let inbox = Inbox()
 
         init(socket: Socket, descriptor: Int32) {
             open = Mutex(socket)
             self.descriptor = descriptor
+            Thread { [inbox] in inbox.drain(descriptor) }.start()
+        }
+
+        deinit {
+            inbox.stop("the peer was dropped")
         }
 
         private var socket: Socket {
@@ -105,37 +104,16 @@ final class FakeHost: Sendable {
 
         /// Answers the magic and reads the client's `Hello`: its token.
         func hello(magic: [UInt8] = Handshake.magic) async throws -> String {
-            let socket = try socket
             try socket.send(magic)
-            let theirs = try await onThread { [socket] in
-                var buffer = [UInt8](repeating: 0, count: 8)
-                var got: [UInt8] = []
-                while got.count < 8 {
-                    let count = try socket.receive(into: &buffer)
-                    guard count > 0 else { throw HostError("the client closed during the magic") }
-                    got += buffer[..<count]
-                }
-                return got
-            }
-            guard theirs.prefix(8) == ArraySlice(Handshake.magic) else { throw HostError("the client sent \(theirs) for the magic") }
+            let theirs = try await inbox.magic()
+            guard theirs == Handshake.magic else { throw HostError("the client sent \(theirs) for the magic") }
             guard case let .hello(token) = try await read() else { throw HostError("the client did not say hello") }
             return token
         }
 
         /// The next frame the client sent.
         func read() async throws -> Frame {
-            if let frame = unread.withLock({ $0.isEmpty ? nil : $0.removeFirst() }) { return frame }
-            let socket = try socket
-            return try await onThread { [self] in
-                var buffer = [UInt8](repeating: 0, count: 64 * 1024)
-                while true {
-                    if let frame = self.unread.withLock({ $0.isEmpty ? nil : $0.removeFirst() }) { return frame }
-                    let count = try socket.receive(into: &buffer)
-                    guard count > 0 else { throw HostError("the client closed the connection") }
-                    let read = try self.frames.withLock { try $0.read(buffer[..<count]) }
-                    self.unread.withLock { $0 += read }
-                }
-            }
+            try await inbox.frame()
         }
 
         /// Reads until the client closes the connection, the frames it sent meanwhile.
@@ -171,15 +149,96 @@ final class FakeHost: Sendable {
             try socket.send(bytes)
         }
 
-        /// Ends the connection as the host does: shut down, then closed with the last reference to its
-        /// socket, which a read under way holds until it ends. A shutdown alone would leave the socket
-        /// open, and on macOS it does not always wake a client blocked reading a unix socket.
+        /// Ends the connection as the host does: shut down, then closed with the last reference to
+        /// its socket, which the peer's reader gives up before this returns. A shutdown alone would
+        /// leave the socket open, and on macOS it does not always wake a client blocked reading a
+        /// unix socket.
         func close() {
             let socket = open.withLock { open in
                 defer { open = nil }
                 return open
             }
+            inbox.stop("the peer was closed")
             socket?.shutdown()
+        }
+    }
+
+    /// What a client sent: its magic, then its frames, then how its connection ended. Read by one
+    /// thread, which a glance at a time looks whether it is still wanted, straight from the
+    /// descriptor, so the peer's socket, and with it the descriptor, is the peer's alone to close;
+    /// waited on by the test.
+    private final class Inbox: Sendable {
+        private struct State {
+            var magic: [UInt8] = []
+            var frames: [Frame] = []
+            var end: (any Error & Sendable)?
+            var stopped = false
+        }
+
+        private let state = Mutex(State())
+        private let arrived = Alarm { _ in }
+        private let drained = DispatchSemaphore(value: 0)
+
+        func drain(_ descriptor: Int32) {
+            defer { drained.signal() }
+            var reader = FrameReader()
+            var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+            while !state.withLock({ $0.stopped }) {
+                guard readable(descriptor) else { continue }
+                let count = buffer.withUnsafeMutableBytes { recv(descriptor, $0.baseAddress, $0.count, 0) }
+                if count < 0, errno == EINTR { continue }
+                guard count >= 0 else { return end(HostError("a read failed: \(String(cString: strerror(errno)))")) }
+                guard count > 0 else { return end(HostError("the client closed the connection")) }
+                let bytes = buffer[..<count]
+                let wanted = state.withLock { state in
+                    let wanted = min(Handshake.magic.count - state.magic.count, bytes.count)
+                    state.magic += bytes.prefix(wanted)
+                    return wanted
+                }
+                let frames: [Frame]
+                do throws(TerminalWireError) {
+                    frames = try reader.read(bytes.dropFirst(wanted))
+                } catch {
+                    return end(error)
+                }
+                state.withLock { $0.frames += frames }
+                arrived.ring()
+            }
+        }
+
+        /// Stops the reader, which lets go of the socket within a glance; the end is `reason`
+        /// unless the connection had ended already.
+        func stop(_ reason: String) {
+            let first = state.withLock { state in
+                defer { state.stopped = true }
+                if state.end == nil { state.end = HostError(reason) }
+                return !state.stopped
+            }
+            arrived.ring()
+            if first { drained.wait() }
+        }
+
+        func magic() async throws -> [UInt8] {
+            try await next { state in state.magic.count == Handshake.magic.count ? state.magic : nil }
+        }
+
+        func frame() async throws -> Frame {
+            try await next { state in state.frames.isEmpty ? nil : state.frames.removeFirst() }
+        }
+
+        private func end(_ end: any Error & Sendable) {
+            state.withLock { if $0.end == nil { $0.end = end } }
+            arrived.ring()
+        }
+
+        private func next<Value: Sendable>(_ take: (inout State) -> Value?) async throws -> Value {
+            while true {
+                let (value, end) = state.withLock { state in (take(&state), state.end) }
+                if let value { return value }
+                if let end { throw end }
+                guard !Task.isCancelled else { throw HostError("the client sent nothing more before the test was cancelled") }
+                await arrived.wait(nil)
+            }
         }
     }
 
@@ -249,9 +308,49 @@ struct HostError: Error, CustomStringConvertible {
     }
 }
 
+/// How long a reader of a fake looks at once before it looks whether it is still wanted, in
+/// milliseconds: a cadence, never a limit on what it waits for.
+private let glance: Int32 = 100
+
+/// Whether `descriptor` has something to read, or has ended, within a glance.
+private func readable(_ descriptor: Int32) -> Bool {
+    var ready = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+    return poll(&ready, 1, glance) == 1
+}
+
 /// `work`, blocking, on a thread of its own.
 func onThread<Value: Sendable>(_ work: @escaping @Sendable () throws -> Value) async throws -> Value {
     try await withCheckedThrowingContinuation { result in
         Thread { result.resume(with: Result { try work() }) }.start()
+    }
+}
+
+/// `attempt`, on a thread of its own, again and again until it answers; each attempt waits at most a
+/// glance and answers nil when what it waits for has not come. Only the calling task's cancellation,
+/// which its suite's time limit brings, ends the wait unanswered, said as `unanswered`.
+func untilCancelled<Value: Sendable>(_ unanswered: String, _ attempt: @escaping @Sendable () throws -> Value?) async throws -> Value {
+    let cancelled = Cancelled()
+    return try await withTaskCancellationHandler {
+        try await onThread {
+            while !cancelled.now {
+                if let value = try attempt() { return value }
+            }
+            throw HostError("\(unanswered) before the test was cancelled")
+        }
+    } onCancel: {
+        cancelled.set()
+    }
+}
+
+/// Whether a task waiting on a thread was cancelled, read from that thread.
+private final class Cancelled: Sendable {
+    private let flag = Mutex(false)
+
+    var now: Bool {
+        flag.withLock { $0 }
+    }
+
+    func set() {
+        flag.withLock { $0 = true }
     }
 }

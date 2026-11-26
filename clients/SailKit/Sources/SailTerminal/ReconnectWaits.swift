@@ -27,3 +27,19 @@ public struct ReconnectWaits: Equatable, Sendable {
         failures >= waits.count && waited >= patience
     }
 }
+
+/// Where a session reads how long things took (an attempt, an attachment, a ticket's age): the
+/// continuous clock, or a test's, which moves only when the test moves it, so what a session decides
+/// from elapsed time is the test's to set and never the runner's speed.
+package struct SessionClock: Sendable {
+    package static let continuous = SessionClock { ContinuousClock.now }
+    private let read: @Sendable () -> ContinuousClock.Instant
+
+    package init(_ read: @escaping @Sendable () -> ContinuousClock.Instant) {
+        self.read = read
+    }
+
+    package var now: ContinuousClock.Instant {
+        read()
+    }
+}

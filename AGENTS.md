@@ -188,6 +188,12 @@ tests bite, and the deletion count in the body.
 - A fake ends a connection as the real host does: it closes it, never shuts it down alone. On
   macOS a unix socket's `shutdown()` may not wake the other end's reader blocked in `recv()`; a
   close always does.
+- A socket test waits for what it needs (a frame, a session's event, a held wait), never for a
+  time: its suite's `.timeLimit` is its only bound. A client limit the test is not about is
+  `Patience.answer`, past every suite's limit; elapsed time a session decides on (an attachment's,
+  a runner's patience, a ticket's age) comes from a clock the test holds (`SessionClock`); a fake
+  reads what the client sends on a thread of its own. A 3-core macOS runner once held the tests'
+  tasks for 20 s, and every 5 s wait that straddled it failed (#551).
 - A test that runs a container script for real (`flock`, `mv -T`, `/proc`) is
   `@EnabledOnOs(OS.LINUX)`: the release workflow runs the suite on macOS too.
 - An Incus IT's Sail home logs (`target/it-home-*/.sail/logs`) ship whole in a failed lane's

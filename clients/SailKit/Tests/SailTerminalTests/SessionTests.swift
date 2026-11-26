@@ -1,5 +1,6 @@
 import Foundation
 import SailAPI
+import SailKitTestSupport
 @testable import SailTerminal
 import SailTerminalWire
 import SailVT
@@ -13,7 +14,7 @@ import Testing
 
     @Test func aLocalSessionSaysHelloBlankCreatesThenAttachesForWriting() async throws {
         let host = try FakeHost()
-        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen())
+        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep)
         let watch = Watch(session)
         session.start()
         let peer = try await host.accept()
@@ -32,7 +33,9 @@ import Testing
     /// gives it back from its own lost connection.
     @Test func aResumedSessionNeverTakesTheKeyboardAndNamesItselfTheSameEachTime() async throws {
         let host = try FakeHost()
-        let session = TerminalSession(attach: "work", write: true, takes: false, door: .local(host.address), screen: try screen())
+        let session = TerminalSession(
+            attach: "work", write: true, takes: false, door: .local(host.address), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep
+        )
         let watch = Watch(session)
         session.start()
         let peer = try await host.accept()
@@ -56,7 +59,7 @@ import Testing
         let host = try FakeHost(tcp: ())
         let desk = TicketDesk(address: host.address)
         let naps = Naps()
-        let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: 5, sleep: naps.sleep)
+        let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: Patience.answer, sleep: naps.sleep)
         let watch = Watch(session)
         session.start()
         let first = try await host.accept()
@@ -79,7 +82,7 @@ import Testing
         var inTry = create
         inTry.project = "acme"
         inTry.workspace = "try"
-        let session = TerminalSession(open: inTry, door: .runner(desk), screen: try screen(), timeout: 5, sleep: Naps().sleep)
+        let session = TerminalSession(open: inTry, door: .runner(desk), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep)
         let watch = Watch(session)
         session.start()
         let first = try await host.accept()
@@ -106,7 +109,7 @@ import Testing
             action: "Ask uday to enter it, or have an admin do it."
         )
         desk.refuse(refusal)
-        let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: 5, sleep: Naps().sleep)
+        let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep)
         let watch = Watch(session)
         session.start()
         try await watch.until("ended") { session.state.phase == .ended(.ticketRefused(refusal)) }
@@ -162,7 +165,9 @@ import Testing
 
     @Test func aRefusedAttachEndsTheSessionWithTheHostsWords() async throws {
         let host = try FakeHost()
-        let session = TerminalSession(attach: "theirs", write: true, door: .local(host.address), screen: try screen())
+        let session = TerminalSession(
+            attach: "theirs", write: true, door: .local(host.address), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep
+        )
         let watch = Watch(session)
         session.start()
         let peer = try await host.accept()
@@ -177,7 +182,7 @@ import Testing
     /// reads its sentence and, for a fix the app knows, what they can do: never a command.
     @Test func aRefusedOpenIsKeptWholeAndSaidWithoutACommand() async throws {
         let host = try FakeHost()
-        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen())
+        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep)
         let watch = Watch(session)
         session.start()
         let peer = try await host.accept()
@@ -238,12 +243,17 @@ import Testing
     /// on at their 8 s cap until 60 s or more of them are spent, so a cut of 20 s is ridden out and
     /// one of 70 s parks, after which Reconnect Now tries at once. A ticket asked while the door
     /// cannot be reached is never presented, so the next attempts use it again (m8): the person's
-    /// tickets, which the host bounds, are not spent on a dead door.
+    /// tickets, which the host bounds, are not spent on a dead door. The session's clock is the
+    /// test's and stands still, so its attempts take no time and the ticket never ages, however long
+    /// the runner takes over them.
     @Test func aRunnerKeepsTryingForAMinuteAtTheCapThenParksUntilReconnectNow() async throws {
         let host = try FakeHost(tcp: ())
         let desk = TicketDesk(address: host.address)
         let naps = Naps()
-        let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: 5, sleep: naps.sleep)
+        let hands = Hands()
+        let session = TerminalSession(
+            open: create, door: .runner(desk), screen: try screen(), timeout: Patience.answer, sleep: naps.sleep, clock: SessionClock { hands.now }
+        )
         let watch = Watch(session)
         session.start()
         let peer = try await host.accept()
@@ -261,8 +271,7 @@ import Testing
         #expect(naps.durations.dropLast().reduce(.zero, +) < TerminalSession.runnerPatience)
         #expect(naps.durations.reduce(.zero, +) >= TerminalSession.runnerPatience)
         #expect(watch.seen.contains(.phase(.reconnecting(attempt: 11))))
-        #expect(desk.requests.first == .open(project: "", workspace: ""))
-        #expect(desk.requests.count <= 3, "\(desk.requests.count) tickets for \(waits.count) attempts: one never presented serves the next")
+        #expect(desk.requests == [.open(project: "", workspace: ""), .attach(session: "work")], "one ticket never presented serves every attempt")
         let attempts = naps.durations.count
         session.reconnectNow()
         try await watch.until("tried again at once") { naps.durations.count > attempts }
@@ -282,7 +291,7 @@ import Testing
         let session = TerminalSession(open: create, door: .runner(desk), screen: try screen(), timeout: 1, sleep: naps.sleep, patience: patience)
         let watch = Watch(session)
         session.start()
-        try await watch.until(within: 30, "parked") {
+        try await watch.until("parked") {
             if case .parked = session.state.phase { return true }
             return false
         }
@@ -328,30 +337,26 @@ import Testing
     }
 
     /// Scenario 15: a bracketed paste larger than an input frame goes as frames of 64 KiB, numbered
-    /// in order.
+    /// in order. The paste is written on the test's thread, and the fake host takes it as it comes.
     @Test func aLargePasteIsSplitAtSixtyFourKiB() async throws {
         let (host, session, peer, watch) = try await attachedLocally()
         try peer.send(output("\u{1b}[?2004hready"))
         try await watch.text("ready")
         let text = String(repeating: "line of text\n", count: 12000)
         let expected = Array("\u{1b}[200~\(text)\u{1b}[201~".utf8)
-        let reading = Task {
-            var received: [UInt8] = []
-            var sequences: [Int64] = []
-            var largest = 0
-            while received.count < expected.count {
-                guard case let .input(sequence, bytes) = try await peer.read() else { continue }
-                largest = max(largest, bytes.count)
-                sequences.append(sequence)
-                received += bytes
-            }
-            return (received, sequences, largest)
-        }
         guard case .send = session.paste(text) else {
             Issue.record("a paste into a program that asked was not sent")
             return
         }
-        let (received, sequences, largest) = try await reading.value
+        var received: [UInt8] = []
+        var sequences: [Int64] = []
+        var largest = 0
+        while received.count < expected.count {
+            guard case let .input(sequence, bytes) = try await peer.read() else { continue }
+            largest = max(largest, bytes.count)
+            sequences.append(sequence)
+            received += bytes
+        }
         #expect(largest <= 64 * 1024)
         #expect(received == expected)
         #expect(sequences == Array(1 ... Int64(sequences.count)))
@@ -416,7 +421,7 @@ import Testing
             try peer.send(.output(lastInputSequence: 0, bytes: frame))
         }
         try peer.send(output("end-of-burst"))
-        try await watch.text("end-of-burst", within: 30)
+        try await watch.text("end-of-burst")
         #expect(counted.total == (20 << 20) / frame.count * frame.count + "end-of-burst".utf8.count)
         try await watch.until("told the pause and its end") { watch.seen.contains(.paused) && watch.seen.contains(.continued) }
         #expect(!session.state.paused)
@@ -501,7 +506,7 @@ import Testing
     /// of Sail's, never which side is older; nothing is tried again.
     @Test func aHostOfAnotherProtocolEndsTheSessionAsAnotherVersion() async throws {
         let host = try FakeHost()
-        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen())
+        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep)
         let watch = Watch(session)
         session.start()
         let peer = try await host.accept()
@@ -533,7 +538,10 @@ import Testing
     /// Sail, at once: no wait, no retry.
     @Test func aRunnerOfAnotherProtocolEndsTheSessionAsAnotherVersion() async throws {
         let host = try FakeHost(tcp: ())
-        let session = TerminalSession(attach: "app-a", write: true, door: .runner(TicketDesk(address: host.address)), screen: try screen())
+        let session = TerminalSession(
+            attach: "app-a", write: true, door: .runner(TicketDesk(address: host.address)), screen: try screen(), timeout: Patience.answer,
+            sleep: Naps().sleep
+        )
         let watch = Watch(session)
         session.start()
         let peer = try await host.accept()
@@ -545,7 +553,7 @@ import Testing
 
     @Test func aHostThatRefusesTheHelloEndsTheSessionInItsWords() async throws {
         let host = try FakeHost()
-        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen())
+        let session = TerminalSession(open: create, door: .local(host.address), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep)
         let watch = Watch(session)
         session.start()
         let peer = try await host.accept()
