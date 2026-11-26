@@ -274,7 +274,7 @@ public final class WorkspacesView: NSView {
     private func askProjects() -> Task<Void, Never> {
         let asked = model.askingProjects(), era = self.era
         render()
-        return Task {
+        let asking = Task {
             guard let client else { return }
             let answer = await Self.result { () async throws(SailError) in try await client.send(.projects) }
             guard era == self.era else { return }
@@ -282,7 +282,12 @@ public final class WorkspacesView: NSView {
             if let request = model.projectsListed(answer, request: asked) { list(request) }
             render()
         }
+        projectsAsked = asking
+        return asking
     }
+
+    /// The projects asked for last: what a test awaits.
+    package private(set) var projectsAsked: Task<Void, Never>?
 
     private func list(_ request: Int) {
         guard let client, let name = model.chosen else { return }

@@ -224,13 +224,35 @@ final class Silent: Transport, Sendable {
         #expect(welcome.stage == nil && welcome.said == ["This ticket is used, expired or not from sail.example.com.", "A ticket lasts 15 minutes and enrolls one passkey. Ask your admin for a new one."])
     }
 
-    /// A sign-in after enrolling that does not finish leaves Welcome back: the passkey is made.
+    /// A sign-in after enrolling that does not finish leaves Welcome back: the passkey is made, so a
+    /// cancel there says so plainly and points at no new ticket; a refusal is said as it is.
     @Test func aSignInAfterEnrollingThatFailsIsWelcomeBack() {
         var welcome = Welcome(plane: plane, person: nil)
         welcome.began(.signingAfterEnrolling(handle: "mara"))
         welcome.refused(AccountRefusal(.cancelled(signingIn: true), at: plane))
-        #expect(welcome.screen == .back && welcome.title == "Welcome back")
-        #expect(welcome.said == ["Cancelled.", "If this Mac holds no passkey for sail.example.com, enroll with a ticket from your admin."])
+        #expect(welcome.screen == .back && welcome.title == "Welcome back" && welcome.stage == nil)
+        #expect(welcome.cancelled == "Passkey created for @mara. Sign in with it." && welcome.said.isEmpty && welcome.refusal == nil)
+        welcome.began(.signingIn)
+        #expect(welcome.cancelled == nil)
+        var refused = Welcome(plane: plane, person: nil)
+        refused.began(.signingAfterEnrolling(handle: "mara"))
+        refused.refused(AccountRefusal(.notAccepted, at: plane))
+        #expect(refused.screen == .back && refused.cancelled == nil && refused.said.first == "https://sail.example.com did not accept that passkey.")
+    }
+
+    /// Touch ID cancelled as the passkey is made leaves Enroll as it was, its primary free: nothing
+    /// changed, said plainly, no refusal. Cancelled on Welcome back, it is the page's refusal.
+    @Test func aCancelledFirstTouchIDChangesNothing() {
+        var welcome = Welcome(plane: plane, person: nil)
+        welcome.began(.creating)
+        welcome.refused(AccountRefusal(.cancelled(signingIn: false), at: plane))
+        #expect(welcome.screen == .ticket && welcome.stage == nil && welcome.busyWord == nil && welcome.refusal == nil && welcome.said.isEmpty)
+        #expect(welcome.cancelled == "Nothing changed. Paste the ticket again to create your passkey.")
+        welcome.signInInstead()
+        #expect(welcome.cancelled == nil)
+        welcome.began(.signingIn)
+        welcome.refused(AccountRefusal(.cancelled(signingIn: true), at: plane))
+        #expect(welcome.cancelled == nil && welcome.said == ["Cancelled.", "If this Mac holds no passkey for sail.example.com, enroll with a ticket from your admin."])
     }
 
     @Test func aSessionThatEndedIsABannerOnWelcomeBack() throws {

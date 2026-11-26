@@ -119,6 +119,9 @@ public struct Welcome: Equatable, Sendable {
     public private(set) var person: RememberedSignIn?
     public private(set) var stage: Stage?
     public private(set) var refusal: AccountRefusal?
+    /// What a cancelled Touch ID left, said plainly where a refusal would stand, since nothing was
+    /// refused: on Enroll that nothing changed, after enrolling that the passkey is made.
+    public private(set) var cancelled: String?
     /// Whether the control plane answered: true once it did in this run, false when it was said
     /// unreachable, nil when not yet asked.
     public private(set) var answers: Bool?
@@ -146,6 +149,7 @@ public struct Welcome: Equatable, Sendable {
     public mutating func began(_ stage: Stage) {
         self.stage = stage
         refusal = nil
+        cancelled = nil
         endedOn = nil
     }
 
@@ -158,12 +162,18 @@ public struct Welcome: Equatable, Sendable {
     }
 
     /// The stage under way ended in `refusal`. A sign-in after enrolling that did not finish leaves
-    /// Welcome back: the passkey is made, and signing in is what is left.
+    /// Welcome back: the passkey is made, and signing in is what is left. A Touch ID cancelled on
+    /// Enroll, or after enrolling, is no refusal: it is said plainly as ``cancelled``.
     public mutating func refused(_ refusal: AccountRefusal) {
-        if case .signingAfterEnrolling? = stage { screen = .back }
+        let was = stage
+        if case .signingAfterEnrolling? = was { screen = .back }
         if refusal.reason == .unreachable { answers = false }
         stage = nil
-        self.refusal = refusal
+        switch (refusal.reason, was) {
+        case (.cancelled, .creating?): cancelled = "Nothing changed. Paste the ticket again to create your passkey."
+        case let (.cancelled, .signingAfterEnrolling(handle)?): cancelled = "Passkey created for @\(handle). Sign in with it."
+        default: self.refusal = refusal
+        }
     }
 
     /// The session ended on `day`: Welcome back says so over its primary.
@@ -176,6 +186,7 @@ public struct Welcome: Equatable, Sendable {
         self.screen = screen
         stage = nil
         refusal = nil
+        cancelled = nil
         endedOn = nil
     }
 

@@ -24,7 +24,7 @@ final class Reached: Sendable {
 /// The signed-out Workspaces card (section 1 of the first impressions page): one question a
 /// screen, chosen from what this Mac remembers; Continue, Create Passkey and Sign In with Passkey
 /// through the flow; busy, refused and ended as drawn.
-@MainActor @Suite struct WelcomeViewTests {
+@MainActor @Suite(.timeLimit(.minutes(1))) struct WelcomeViewTests {
     init() {
         ExitWatch.install()
     }
@@ -345,8 +345,9 @@ final class Reached: Sendable {
         #expect(welcome.welcome.screen == .ticket && welcome.ticketField.error == refused, "the check left \(welcome.text)")
     }
 
-    /// Enrolled, the second Touch ID cancelled: Welcome back, which a check leaves as it is, since
-    /// the ticket is spent and signing in is what is left.
+    /// Enrolled, the second Touch ID cancelled: Welcome back for that control plane, saying plainly
+    /// that the passkey is made, with no error's mark and no word of a new ticket, since the ticket is
+    /// spent and signing in is what is left; a check leaves it as it is.
     @Test func aCheckAfterAnEnrollmentWhoseSignInWasCancelledStaysOnWelcomeBack() async throws {
         let server = RecordedServer([try Exchange("passkey-register-start"), try Exchange("passkey-register-finish"), try Exchange("passkey-login-start")])
         let shell = try Self.shell(server, defaults: Self.reached(), passkey: Signs(failingSignIn: .cancelled))
@@ -354,10 +355,27 @@ final class Reached: Sendable {
         welcome.ticketField.field.stringValue = AccountPaneTests.ticket
         welcome.createPasskey(nil)
         await shell.flow.underWay?.value
-        let cancelled = "Welcome back\n127.0.0.1:7979\nCancelled.\nIf this Mac holds no passkey for 127.0.0.1:7979, enroll with a ticket from your admin."
+        let cancelled = "Welcome back\n127.0.0.1:7979\nPasskey created for @uday. Sign in with it."
         try #require(welcome.text == cancelled, "after the cancel: \(welcome.text)")
+        #expect(Self.visible(welcome.said) && !welcome.said.attributedStringValue.containsAttachments && welcome.signIn.isEnabled && welcome.signIn.busyWord == nil)
+        #expect(welcome.announced == "Passkey created for @uday. Sign in with it.", "VoiceOver heard \(welcome.announced ?? "nothing")")
         await shell.flow.refresh()
         #expect(welcome.welcome.screen == .back && welcome.text == cancelled, "the check left \(welcome.text)")
+    }
+
+    /// Touch ID cancelled as the passkey is made: Enroll as it was, Create Passkey free to try again,
+    /// and under the field, in the help's ink and with no error's mark, that nothing changed.
+    @Test func aCancelledFirstTouchIDLeavesEnrollAsItWas() async throws {
+        let (welcome, window) = try Self.shown(RecordedServer([try Exchange("passkey-register-start")]), defaults: Self.reached(), passkey: Signs(failing: .cancelled))
+        defer { window.orderOut(nil) }
+        welcome.ticketField.field.stringValue = AccountPaneTests.ticket
+        welcome.createPasskey(nil)
+        await welcome.flow.underWay?.value
+        let line = "Nothing changed. Paste the ticket again to create your passkey."
+        #expect(welcome.welcome.screen == .ticket && welcome.text == "Enroll this Mac\n127.0.0.1:7979\n" + line, "after the cancel: \(welcome.text)")
+        #expect(welcome.create.isEnabled && welcome.create.busyWord == nil && Self.visible(welcome.create) && welcome.ticketField.isEnabled)
+        #expect(welcome.ticketField.help == line && welcome.ticketField.error == nil && !welcome.ticketField.drawnMarks.contains(.errorInk))
+        #expect(welcome.announced == line, "VoiceOver heard \(welcome.announced ?? "nothing")")
     }
 
     /// Enrolled, the sign-in after it refused: Sign In with Passkey signs in with no ticket.
@@ -470,6 +488,12 @@ final class Reached: Sendable {
         state("back") { $0.reached(plane, person: mara) }
         state("signing in") { $0.reached(plane, person: mara); $0.began(.signingIn) }
         state("cancelled") { $0.reached(plane, person: mara); $0.refused(AccountRefusal(.cancelled, signingIn: true, at: plane)) }
+        state("cancelled creating") { $0.reached(plane, person: nil); $0.began(.creating); $0.refused(AccountRefusal(.cancelled, signingIn: false, at: plane)) }
+        state("cancelled after enrolling") {
+            $0.reached(plane, person: nil)
+            $0.began(.signingAfterEnrolling(handle: "mara"))
+            $0.refused(AccountRefusal(.cancelled, signingIn: true, at: plane))
+        }
         state("ended") { $0.reached(plane, person: mara); $0.ended(on: Date(timeIntervalSince1970: 1_795_608_000)) }
         return all
     }
@@ -477,7 +501,7 @@ final class Reached: Sendable {
 
 /// The shell lands on Workspaces at every launch and after every sign-in; the rail reads
 /// Workspaces, Terminals, Account; the project chosen last is kept per person and control plane.
-@MainActor @Suite struct LandingTests {
+@MainActor @Suite(.timeLimit(.minutes(1))) struct LandingTests {
     init() {
         ExitWatch.install()
     }
@@ -489,16 +513,23 @@ final class Reached: Sendable {
     }
 
     /// With a session held for the control plane last reached, Sail's mark draws itself in
-    /// Workspaces, "Connecting to" it, until the check answers.
-    @Test func aLaunchHoldingASessionWaitsOnTheMarkInWorkspaces() throws {
+    /// Workspaces, "Connecting to" it, until the check answers. The launch asks it itself, so the
+    /// words never stand while nothing is asked, though the app is never activated.
+    @Test func aLaunchHoldingASessionWaitsOnTheMarkInWorkspaces() async throws {
         let defaults = ReattachTests.defaults()
         SignInMemory(defaults).reached(AccountFlowTests.plane)
+        let transport = Held(RecordedServer([try Exchange("whoami")]), holding: "whoami")
         let shell = try ShellApp(
-            fonts: LookTests.fonts, helper: nil, look: .light, passkeys: { _ in Signs() }, connect: { _ in OutOfReach() }, vault: OneSession(fde: "uday"), defaults: defaults
+            fonts: LookTests.fonts, helper: nil, look: .light, passkeys: { _ in Signs() }, connect: { _ in transport }, vault: OneSession(fde: "uday"), defaults: defaults
         )
         shell.land()
         #expect(shell.rail.selected == .workspaces && shell.welcome.isHidden && !shell.workspaces.isHidden)
         #expect(shell.workspaces.text == "Workspaces\nConnecting to 127.0.0.1:7979" && shell.workspaces.card.subviews.first is BrandMark)
+        await transport.arrived(during: shell.checking)
+        #expect(transport.routes == ["GET /v1/whoami"], "Connecting to 127.0.0.1:7979 stands while nothing is asked: \(transport.routes)")
+        transport.release()
+        await shell.checking?.value
+        #expect(shell.flow.standing?.fde == "uday" && !shell.workspaces.asking, "the check's answer left \(shell.workspaces.text)")
     }
 
     /// A sign-in made by a person opens Workspaces, wherever the window was.
@@ -558,10 +589,47 @@ final class Reached: Sendable {
         defaults.set("lighthouse", forKey: ShellApp.chosenKey(uday))
         let shell = try WelcomeViewTests.shell(server, defaults: defaults, vault: OneSession(fde: "uday"))
         #expect(shell.workspaces.text == "Workspaces\nConnecting to 127.0.0.1:7979" && shell.welcome.isHidden)
-        await shell.flow.refresh()
+        await shell.checking?.value
         await shell.workspaces.refresh()
         let lines = shell.workspaces.text.split(separator: "\n").map(String.init)
         #expect(shell.rail.selected == .workspaces && lines.dropFirst().first == "lighthouse", "the launch landed on \(lines)")
+    }
+
+    /// Signed in on Workspaces, a check that finds the same person, the same session and the same
+    /// answer (the app activated again, after the person was elsewhere) asks for the projects again,
+    /// so what others added meanwhile shows.
+    @Test func aCheckWhileSignedInAsksForTheProjectsAgain() async throws {
+        let server = RecordedServer([try Exchange("whoami"), try Exchange("projects"), try Exchange("workspaces-three")])
+        let held = MemoryVaultOf(PasskeySession(sessionToken: "tok-uday", fde: "uday", expiresAt: Date(timeIntervalSinceNow: 3600)))
+        let shell = try ShellApp(
+            fonts: LookTests.fonts, helper: nil, look: .light, passkeys: { _ in Signs() }, connect: { _ in server }, vault: held, defaults: WelcomeViewTests.reached()
+        )
+        shell.select(.workspaces)
+        await shell.flow.refresh()
+        await shell.workspaces.projectsAsked?.value
+        let before = await server.requests.filter { $0.route == "GET /v1/projects" }.count
+        try #require(shell.flow.standing?.fde == "uday" && shell.rail.selected == .workspaces && before >= 1)
+        await shell.flow.refresh()
+        await shell.workspaces.projectsAsked?.value
+        let after = await server.requests.filter { $0.route == "GET /v1/projects" }.count
+        #expect(after == before + 1, "the check asked for the projects \(after - before) times")
+    }
+
+    /// Signed out on Terminals, Return in a terminal starts no sign-in: Welcome back's primary holds
+    /// Return only while the welcome is shown, as a key works only while its control is.
+    @Test func returnStartsNoSignInWhileTheWelcomeIsNotShown() throws {
+        let shell = try WelcomeViewTests.shell(RecordedServer([]), defaults: WelcomeViewTests.signedInBefore())
+        try #require(shell.welcome.welcome.screen == .back && shell.welcome.signIn.keyEquivalent == "\r")
+        shell.select(.terminals)
+        #expect(shell.welcome.signIn.keyEquivalent.isEmpty, "Sign In with Passkey holds Return on Terminals")
+        let returnKey = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, characters: "\r", charactersIgnoringModifiers: "\r",
+            isARepeat: false, keyCode: 36
+        ))
+        _ = shell.window.contentView?.performKeyEquivalent(with: returnKey)
+        #expect(shell.flow.actions == 0, "Return on Terminals started a sign-in")
+        shell.select(.workspaces)
+        #expect(shell.welcome.signIn.keyEquivalent == "\r", "shown again, Welcome back's primary does not take Return")
     }
 
     /// The project chosen last is kept for one person on one control plane.

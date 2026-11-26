@@ -11,11 +11,12 @@ import SailAPI
 @MainActor
 public final class AccountFlow {
     public private(set) var standing: SignedIn?
-    /// Whether a ceremony or a call is under way, and how many have ended.
+    /// Whether a ceremony or a call is under way.
     public var busy: Bool {
         running > 0 || acting > 0
     }
 
+    /// How many ceremonies and calls have ended.
     public private(set) var ended = 0
     /// How many checks of who is signed in are under way: a menu saying the control plane is
     /// reconnecting says so only while one is.
@@ -143,10 +144,16 @@ public final class AccountFlow {
     @discardableResult
     func reach(_ typed: String, then done: @escaping @MainActor (Result<ControlPlane, AccountRefusal>) -> Void) -> Bool {
         act { () async throws(AccountRefusal) in
-            let plane = try await self.account.reach(typed)
-            self.memory.reached(plane)
-            done(.success(plane))
+            self.reached(try await self.account.reach(typed), then: done)
         } refused: { done(.failure($0)) }
+    }
+
+    /// Continue's answer, `plane`, remembered and said unless the check was stopped before it was
+    /// taken: an edit handled while the answer came back to the main actor stops it too.
+    func reached(_ plane: ControlPlane, then done: @MainActor (Result<ControlPlane, AccountRefusal>) -> Void) {
+        guard !Task.isCancelled else { return }
+        memory.reached(plane)
+        done(.success(plane))
     }
 
     /// The person changed the address while Continue's check was under way: it stops at once.
@@ -249,10 +256,10 @@ public final class AccountFlow {
         if [.ended, .unreadableSignIn].contains(refusal.reason) { learnt(nil) }
     }
 
-    /// Who a check found signed in: shown only when it is not who was, so a check that finds what
-    /// was known (no one, while no one is) changes nothing on screen.
+    /// Who a check found signed in, shown: signed in, the panes ask the control plane again. A check
+    /// that finds no one while no one is signed in changes nothing on screen.
     private func learnt(_ signedIn: SignedIn?) {
-        if signedIn != standing { show(signedIn) }
+        if signedIn != nil || standing != nil { show(signedIn) }
     }
 
     /// Shows who is signed in. The drive shows one of its own for the frames of long words.

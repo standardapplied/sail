@@ -153,11 +153,13 @@ extension Driver {
         case "connecting": welcome.began(.connecting)
         case "unreachable": welcome.refused(AccountRefusal(.unreachable("Could not connect to the server."), at: plane, step: .reaching))
         case "enroll": welcome.reached(plane, person: nil)
-        case "creating", "signing-after-enrolling", "ticket-refused":
+        case "creating", "signing-after-enrolling", "ticket-refused", "cancelled-creating", "cancelled-after-enrolling":
             welcome.reached(plane, person: nil)
-            welcome.began(state == "signing-after-enrolling" ? .signingAfterEnrolling(handle: "mara") : .creating)
+            let afterEnrolling = ["signing-after-enrolling", "cancelled-after-enrolling"].contains(state)
+            welcome.began(afterEnrolling ? .signingAfterEnrolling(handle: "mara") : .creating)
             let forbidden = Refusal(code: .known(.forbidden), message: "Enrollment ticket is invalid or expired.")
             if state == "ticket-refused" { welcome.refused(AccountRefusal(.refused(forbidden), at: plane, step: .enrolling)) }
+            if state.hasPrefix("cancelled-") { welcome.refused(AccountRefusal(.cancelled, signingIn: afterEnrolling, at: plane)) }
         case "back", "signing-in", "cancelled", "ended":
             welcome.reached(plane, person: mara)
             if state == "signing-in" { welcome.began(.signingIn) }

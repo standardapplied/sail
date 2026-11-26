@@ -13,8 +13,10 @@ import SailLook
 /// still takes keys, and an edit stops the check), and a note over the primary says why the
 /// system's sheet is up. A refusal stands under the field it is about (on Welcome back, under the
 /// primary, and VoiceOver hears it): its sentence in crimson with the error's mark, its remedy in
-/// the secondary ink. Return presses Welcome back's primary. Each screen's own link leads to the
-/// other screen.
+/// the secondary ink. A Touch ID cancelled on Enroll or after enrolling is said plainly in the
+/// refusal's place, in the help's and the remedy's ink. Return presses Welcome back's primary while
+/// the welcome is shown, and nothing while it is not. Each screen's own link leads to the other
+/// screen.
 @MainActor
 public final class WelcomeView: NSView, NSTextFieldDelegate {
     static let columnWidth = 380.0
@@ -36,6 +38,17 @@ public final class WelcomeView: NSView, NSTextFieldDelegate {
     override public func viewDidUnhide() {
         super.viewDidUnhide()
         painter.shown()
+        holdReturn()
+    }
+
+    override public func viewDidHide() {
+        super.viewDidHide()
+        holdReturn()
+    }
+
+    /// Return is Welcome back's primary's only while it is shown: a control not shown has no key.
+    private func holdReturn() {
+        signIn.isDefault = welcome.screen == .back && !isHiddenOrHasHiddenAncestor
     }
 
     let mark: BrandMark
@@ -101,10 +114,11 @@ public final class WelcomeView: NSView, NSTextFieldDelegate {
     }
 
     /// Everything the welcome says now, a line each, as the drive reads it: the title, the
-    /// control plane when its chip shows, the banner, the note and the refusal.
+    /// control plane when its chip shows, the banner, the note, what a cancelled Touch ID left and
+    /// the refusal.
     public var text: String {
         let host = welcome.screen == .address ? nil : welcome.host
-        return ([welcome.title, host, welcome.banner, welcome.note?.words] + welcome.said.map(Optional.some)).compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+        return ([welcome.title, host, welcome.banner, welcome.note?.words, welcome.cancelled] + welcome.said.map(Optional.some)).compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
     /// The primary shown now.
@@ -258,7 +272,7 @@ public final class WelcomeView: NSView, NSTextFieldDelegate {
         for (field, shown) in [(addressField, screen == .address), (ticketField, screen == .ticket)] {
             field.isHidden = !shown
             guard shown, let words = welcome.field else { continue }
-            field.help = words.help
+            field.help = welcome.cancelled ?? words.help
             field.error = welcome.said.first
             field.remedy = welcome.said.dropFirst().first
             field.isEnabled = !busy || welcome.stage == .connecting
@@ -268,13 +282,14 @@ public final class WelcomeView: NSView, NSTextFieldDelegate {
             button.isHidden = button !== primary
             button.fly(button === primary ? welcome.busyWord : nil)
         }
-        signIn.isDefault = screen == .back
+        holdReturn()
         note.isHidden = welcome.note == nil
         note.show(welcome.note)
         showBanner(welcome.banner)
-        said.isHidden = screen != .back || welcome.said.isEmpty
-        said.attributedStringValue = refusalWords(welcome.said, look: look, scale: Double(window?.backingScaleFactor ?? 2))
-        announce(said.isHidden ? [] : welcome.said)
+        said.isHidden = screen != .back || (welcome.said.isEmpty && welcome.cancelled == nil)
+        said.attributedStringValue = welcome.cancelled.map { NSAttributedString(string: $0, attributes: [.font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .foregroundColor: NSColor(look.textSecondary)]) }
+            ?? refusalWords(welcome.said, look: look, scale: Double(window?.backingScaleFactor ?? 2))
+        announce(welcome.cancelled.map { [$0] } ?? (said.isHidden ? [] : welcome.said))
         for link in [toTerminals, toSignIn, toEnroll] {
             link.isHidden = link !== self.link
             link.isEnabled = !busy
@@ -287,12 +302,13 @@ public final class WelcomeView: NSView, NSTextFieldDelegate {
         window?.makeFirstResponder(field.field)
     }
 
-    /// Tells VoiceOver a refusal that came to stand under Welcome back's primary, once.
+    /// Tells VoiceOver, once, a refusal that came to stand under Welcome back's primary, or what a
+    /// cancelled Touch ID left on either screen.
     private func announce(_ lines: [String]) {
         let words = lines.joined(separator: " ")
         defer { announced = words.isEmpty ? nil : words }
         guard !words.isEmpty, words != announced else { return }
-        NSAccessibility.post(element: said, notification: .announcementRequested, userInfo: [.announcement: words, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+        NSAccessibility.post(element: self, notification: .announcementRequested, userInfo: [.announcement: words, .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 
     /// Takes the keys into the field shown, as the welcome opens.

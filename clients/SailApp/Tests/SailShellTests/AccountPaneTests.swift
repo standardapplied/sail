@@ -21,7 +21,8 @@ struct OneSession: TokenVault {
     func forget(_: ControlPlane) throws(VaultFailure) {}
 }
 
-/// Shut until opened: whatever waits on it meanwhile goes on once it is.
+/// Shut until opened: whatever waits on it meanwhile goes on once it is, or once the task waiting
+/// is cancelled, as a test's time limit cancels it.
 final class Gate: Sendable {
     private let state = Mutex<(waiting: CheckedContinuation<Void, Never>?, opened: Bool)>((nil, false))
 
@@ -30,13 +31,17 @@ final class Gate: Sendable {
     }
 
     func wait() async {
-        await withCheckedContinuation { (wait: CheckedContinuation<Void, Never>) in
-            let go = state.withLock { state -> Bool in
-                if state.opened { return true }
-                state.waiting = wait
-                return false
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (wait: CheckedContinuation<Void, Never>) in
+                let go = state.withLock { state -> Bool in
+                    if state.opened { return true }
+                    state.waiting = wait
+                    return false
+                }
+                if go { wait.resume() }
             }
-            if go { wait.resume() }
+        } onCancel: {
+            open()
         }
     }
 
@@ -149,7 +154,7 @@ func signInExchanges() throws -> [Exchange] {
 /// The flow of who is signed in (#462): a check (the app becoming active) holds no button, so a
 /// person's action is never swallowed by it; an answer that comes during a person's action waits
 /// for it to end, and is then shown unless who is signed in was set since the check began.
-@MainActor @Suite struct AccountFlowTests {
+@MainActor @Suite(.timeLimit(.minutes(1))) struct AccountFlowTests {
     init() {
         ExitWatch.install()
     }
@@ -262,6 +267,25 @@ func signInExchanges() throws -> [Exchange] {
         #expect(refused.memory.plane == nil, "an address that did not answer was remembered")
     }
 
+    /// Continue's answer in hand as the address is edited (the edit handled while the answer comes
+    /// back to the main actor, after the health call's own check of the stop) is neither remembered
+    /// nor said: the action taking it is already stopped when it is taken.
+    @Test func anAnswerTakenAfterTheStopIsNeitherRememberedNorSaid() async throws {
+        let defaults = ReattachTests.defaults()
+        let flow = AccountFlow(account: Account(authenticator: Signs(), vault: OneSession(fde: "uday")) { _ in RecordedServer([]) }, memory: SignInMemory(defaults))
+        let late = Task { () -> Bool in
+            var said = false
+            flow.reached(Self.plane) { _ in said = true }
+            return said
+        }
+        late.cancel()
+        let said = await late.value
+        #expect(SignInMemory(defaults).plane == nil && !said, "an answer taken after the stop was \(said ? "said" : "remembered")")
+        var taken: ControlPlane?
+        flow.reached(Self.plane) { taken = try? $0.get() }
+        #expect(SignInMemory(defaults).plane == Self.plane && taken == Self.plane, "an answer taken with no stop was dropped")
+    }
+
     /// A sign-in kept in a shape the vault cannot read is gone once read: the check says so, and a
     /// launch that finds it says so too, rather than reading it away unsaid.
     @Test func aSignInTheVaultCannotReadIsSaidByTheReadThatFindsIt() async throws {
@@ -335,7 +359,7 @@ final class MemoryVaultOf: TokenVault, Sendable {
 }
 
 /// The Account pane, signed in: the menu's language, live as checks start and end.
-@MainActor @Suite struct AccountPaneTests {
+@MainActor @Suite(.timeLimit(.minutes(1))) struct AccountPaneTests {
     init() {
         ExitWatch.install()
     }

@@ -4,7 +4,8 @@ import SailLook
 /// A banner in the flow above what it is about (`BannerPaint`): the tone mixed into the surface in
 /// content corners, a 16 pt mark, a semibold title (regular where the banner is one calm sentence,
 /// not `bold`), an optional line under it, and at most one small secondary action at its trailing
-/// edge, padded 10, 10, 10 and 12 pt inside its 1 pt edge and mirrored right to left. VoiceOver reads it as a group with its words, the action inside it.
+/// edge, padded 10, 10, 10 and 12 pt inside its 1 pt edge and mirrored right to left. VoiceOver
+/// reads it as a group with its words, the action inside it.
 @MainActor
 public final class Banner: NSView {
     static let padding = (top: 10 + Look.hairline, trailing: 10 + Look.hairline, bottom: 10 + Look.hairline, leading: 12 + Look.hairline)

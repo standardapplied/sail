@@ -388,7 +388,7 @@
   {"name": "typed-with-http-it-answers-and-the-chip-shows-it", "exactly": ["Enroll this Mac", "127.0.0.1:7979"]},
   {"name": "passkey-cancels", "passkey": "cancel"},
   {"name": "enroll-cancelled", "enroll": "SAIL_DRIVE_TICKET"},
-  {"name": "row-12-enrolling", "exactly": ["Enroll this Mac", "127.0.0.1:7979", "Cancelled."]},
+  {"name": "row-12-enrolling", "exactly": ["Enroll this Mac", "127.0.0.1:7979", "Nothing changed. Paste the ticket again to create your passkey."]},
   {"name": "sign-in-cancelled", "signIn": true},
   {"name": "row-12", "exactly": ["Welcome back", "127.0.0.1:7979", "Cancelled.", "If this Mac holds no passkey for 127.0.0.1:7979, enroll with a ticket from your admin."]},
   {"name": "the-welcome-cancelled", "shot": "welcome-cancelled-at-the-real-server"},

@@ -127,9 +127,13 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// Where the window opens at every launch: Workspaces, Sail's mark drawing itself while the
-    /// session this Mac holds is checked, else the welcome.
+    /// session this Mac holds is checked, else the welcome. The check starts here, not at the
+    /// app's activation, which a launch may never get.
     func land() {
-        if flow.holdsASession(), let host = flow.memory.plane?.named { workspaces.waitForSignIn(at: host) }
+        if flow.holdsASession(), let host = flow.memory.plane?.named {
+            workspaces.waitForSignIn(at: host)
+            askWhoIsSignedIn()
+        }
         select(.workspaces)
     }
 
@@ -137,9 +141,13 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         askWhoIsSignedIn()
     }
 
-    /// Asks the control plane who is signed in; the flow tells what it learnt.
+    /// The check asked last of who is signed in: what a test awaits.
+    package private(set) var checking: Task<Void, Never>?
+
+    /// Asks the control plane who is signed in; the flow tells what it learnt, and asks nothing
+    /// while a check or a person's action is under way.
     private func askWhoIsSignedIn() {
-        Task { await flow.refresh() }
+        checking = Task { await flow.refresh() }
     }
 
     /// Closing the window keeps the app and every tab, this Mac's and the runner's, as a Mac app

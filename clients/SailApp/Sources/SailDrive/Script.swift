@@ -106,7 +106,9 @@ struct Step: Decodable {
     var rail: String?
     /// The welcome in a state as the page draws it, for its frames: "welcome", "connecting",
     /// "unreachable", "enroll", "creating", "signing-after-enrolling", "ticket-refused", "back",
-    /// "signing-in", "cancelled", "ended"; "none" puts back what this Mac's memory chooses.
+    /// "signing-in", "cancelled", "ended"; and two the page does not draw, Touch ID cancelled on
+    /// Enroll and after enrolling, "cancelled-creating" and "cancelled-after-enrolling"; "none" puts
+    /// back what this Mac's memory chooses.
     var welcomeShows: String?
     /// What the software passkey answers from now on: "credential", "none" or "cancel".
     var passkey: String?
