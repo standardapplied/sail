@@ -266,7 +266,9 @@ import Testing
         try await peer.welcome()
         _ = try await peer.acceptAttach()
         try await watch.attached()
+        let attachedAt = ContinuousClock.now
         host.stop()
+        let stoppedAt = ContinuousClock.now
         peer.close()
         try await watch.until("parked") {
             if case .parked = session.state.phase { return true }
@@ -276,9 +278,9 @@ import Testing
         #expect(naps.durations == waits)
         #expect(naps.durations.dropLast().reduce(.zero, +) < TerminalSession.runnerPatience)
         #expect(naps.durations.reduce(.zero, +) >= TerminalSession.runnerPatience)
-        #expect(watch.seen.contains(.phase(.reconnecting(attempt: 11))))
+        try await watch.until("told its 11th attempt") { watch.seen.contains(.phase(.reconnecting(attempt: 11))) }
         let attach = TicketRequest.attach(session: "work")
-        #expect(desk.requests == [.open(project: "", workspace: ""), attach, attach, attach], "a ticket never presented serves the attempts of its 20 s")
+        #expect(desk.requests == [.open(project: "", workspace: ""), attach, attach, attach], "a ticket never presented serves the attempts of its 20 s; DIAG attached \(attachedAt) stopped \(stoppedAt) \(desk.notes.withLock { $0 })")
         let attempts = naps.durations.count
         session.reconnectNow()
         try await watch.until("tried again at once") { naps.durations.count > attempts }

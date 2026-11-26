@@ -159,12 +159,18 @@ final class TicketDesk: TicketSource {
         state.withLock { $0.requests }
     }
 
+    let notes = Mutex<[String]>([])
+
     /// Every request from now on is refused so.
     func refuse(_ refusal: Refusal) {
         state.withLock { $0.refusal = refusal }
     }
 
     func ticket(for request: TicketRequest) async throws(SailError) -> TerminalTicket {
+        if case let .tcp(_, port) = address, state.withLock({ $0.requests.count }) >= 2 {
+            let found = diagnosticSockets(port)
+            notes.withLock { $0.append("ask \(state.withLock { $0.requests.count }) at \(ContinuousClock.now): \(found)") }
+        }
         let answer: Result<Int, SailError> = state.withLock { state in
             state.requests.append(request)
             if let refusal = state.refusal { return .failure(.refused(refusal)) }
@@ -263,4 +269,39 @@ final class Hands: Sendable {
     func advance(_ duration: Duration) {
         instant.withLock { $0 += duration }
     }
+}
+
+/// Temporary diagnosis: every TCP socket of any process this account can read whose local or
+/// foreign port is `port`, and whether the system randomizes TCP ports.
+func diagnosticSockets(_ port: UInt16) -> String {
+    #if canImport(Darwin)
+    var random: Int32 = -1
+    var size = MemoryLayout<Int32>.size
+    sysctlbyname("net.inet.tcp.randomize_ports", &random, &size, nil, 0)
+    var found: [String] = ["randomize_ports=\(random)"]
+    let count = proc_listallpids(nil, 0)
+    var pids = [pid_t](repeating: 0, count: Int(count) + 64)
+    let listed = proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size))
+    for pid in pids.prefix(Int(max(listed, 0))) where pid > 0 {
+        let bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
+        guard bytes > 0 else { continue }
+        var fds = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(bytes) / MemoryLayout<proc_fdinfo>.stride + 8)
+        let filled = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, &fds, Int32(fds.count * MemoryLayout<proc_fdinfo>.stride))
+        for fd in fds.prefix(Int(max(filled, 0)) / MemoryLayout<proc_fdinfo>.stride) where fd.proc_fdtype == UInt32(PROX_FDTYPE_SOCKET) {
+            var info = socket_fdinfo()
+            let got = proc_pidfdinfo(pid, fd.proc_fd, PROC_PIDFDSOCKETINFO, &info, Int32(MemoryLayout<socket_fdinfo>.size))
+            guard got == Int32(MemoryLayout<socket_fdinfo>.size), info.psi.soi_kind == Int32(SOCKINFO_TCP) else { continue }
+            let tcp = info.psi.soi_proto.pri_tcp
+            let local = UInt16(bigEndian: UInt16(truncatingIfNeeded: tcp.tcpsi_ini.insi_lport))
+            let foreign = UInt16(bigEndian: UInt16(truncatingIfNeeded: tcp.tcpsi_ini.insi_fport))
+            guard local == port || foreign == port else { continue }
+            var name = [CChar](repeating: 0, count: 256)
+            proc_name(pid, &name, UInt32(name.count))
+            found.append("pid \(pid) \(String(cString: name)) fd \(fd.proc_fd) local \(local) foreign \(foreign) state \(tcp.tcpsi_state)")
+        }
+    }
+    return found.joined(separator: "; ")
+    #else
+    return "not scanned"
+    #endif
 }

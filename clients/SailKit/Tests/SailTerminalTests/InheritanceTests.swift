@@ -115,12 +115,18 @@ import Testing
 /// The two tests a child's copy of a listener once failed together, run together 20 times in one
 /// process, in every lane's own run: a child of `HostTakeoverTests` held the stopped listener of
 /// the session test, which took a reconnect the session test expected refused (main e15edf410).
-@Suite(.timeLimit(.minutes(2))) struct TogetherTests {
+@Suite(.serialized, .timeLimit(.minutes(2))) struct TogetherTests {
     @Test func aSpawningTestAndAReconnectingTestPassTogetherTwentyTimes() async throws {
-        for _ in 0 ..< 20 {
+        for _ in 0 ..< 40 {
             async let spawning: Void = HostTakeoverTests().anEndedProcessIsWaitedForUntilItIsGone()
             async let reconnecting: Void = SessionTests().aRunnerKeepsTryingForAMinuteAtTheCapThenParksUntilReconnectNow()
             _ = try await (spawning, reconnecting)
+        }
+    }
+
+    @Test func diagnosticTheReconnectingTestAlone() async throws {
+        for _ in 0 ..< 40 {
+            try await SessionTests().aRunnerKeepsTryingForAMinuteAtTheCapThenParksUntilReconnectNow()
         }
     }
 }
