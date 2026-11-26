@@ -62,22 +62,7 @@ import Testing
         let listener = try HeldListener.loopback()
         let start = try HeldStart()
         defer { start.release() }
-        try await start.holding()
-        let waits = TestSpawn.waits
-        let closing = Closing(listener)
-        _ = try await untilCancelled("the close neither ended nor waited for the start") { () -> Bool? in
-            guard closing.answer == nil, TestSpawn.waits == waits else { return true }
-            sched_yield()
-            return nil
-        }
-        start.release()
-        let answer = try await untilCancelled("the close never ended") { () -> Result<Socket, TerminalError>? in
-            guard let answer = closing.answer else {
-                sched_yield()
-                return nil
-            }
-            return answer
-        }
+        let answer = try await start.closing(listener)
         #expect(throws: TerminalError.self, "the listener took a connection after its close") { try answer.get() }
     }
 
@@ -110,6 +95,15 @@ import Testing
         private let started = DispatchSemaphore(value: 0)
         private let spawned = Mutex<Result<pid_t, SpawnRefused>?>(nil)
         private let released = Mutex(false)
+        private let step = Mutex(Step.holding)
+
+        /// Until it has opened its standard output; then while `listener` is closed and connected
+        /// to, as long as the close has not ended or waited; then after `held` was opened.
+        private enum Step {
+            case holding
+            case closing(Closing, waits: Int)
+            case released(Closing)
+        }
 
         init() throws {
             var template = Array("/tmp/sailkit-XXXXXX".utf8CString)
@@ -127,17 +121,33 @@ import Testing
             }.start()
         }
 
-        /// Waits until the start has opened its standard output: from then until ``release()`` it
-        /// holds a copy of every descriptor of this process.
-        func holding() async throws {
-            let opened = try await untilCancelled("the start never opened its output") { [self] () -> Bool? in
-                var byte: UInt8 = 0
-                if read(through, &byte, 1) < 0, errno == EAGAIN { return true }
-                if spawned.withLock({ $0 != nil }) { return false }
-                sched_yield()
+        /// `listener` closed while the start holds this process's descriptors, then connected to:
+        /// the connect's answer. `held` is opened once the close has ended or waits for the start.
+        /// Every step runs on one thread of its own, never on the shared pool: tests there that
+        /// close a listener or start a process wait for the start meanwhile, and a step that waited
+        /// for a pool thread could wait for them for ever.
+        func closing(_ listener: HeldListener) async throws -> Result<Socket, TerminalError> {
+            try await untilCancelled("the start, its close or the connect after never ended") { [self] () -> Result<Socket, TerminalError>? in
+                defer { sched_yield() }
+                switch step.withLock({ $0 }) {
+                case .holding:
+                    var byte: UInt8 = 0
+                    if read(through, &byte, 1) < 0, errno == EAGAIN {
+                        let waits = TestSpawn.waits
+                        let closing = Closing(listener)
+                        step.withLock { $0 = .closing(closing, waits: waits) }
+                    } else if let ended = spawned.withLock({ $0 }) {
+                        throw HostError("the start ended before it opened its output: \(ended)")
+                    }
+                case let .closing(closing, waits):
+                    guard closing.answer != nil || TestSpawn.waits != waits else { return nil }
+                    release()
+                    step.withLock { $0 = .released(closing) }
+                case let .released(closing):
+                    return closing.answer
+                }
                 return nil
             }
-            try #require(opened, "the start ended before it opened its output: \(String(describing: spawned.withLock { $0 }))")
         }
 
         /// Lets the start open `held`, waits for it to end and reaps what it started; once.
