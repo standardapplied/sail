@@ -742,6 +742,7 @@ final class FilePane: NSView, NSTextViewDelegate, NSTextStorageDelegate {
             case .notShownWhole: OpenFile.notShownWhole(file.name)
             }
         }()
+        guard words != noteWords else { return }
         note.stringValue = words ?? ""
         note.isHidden = words == nil
         needsLayout = true

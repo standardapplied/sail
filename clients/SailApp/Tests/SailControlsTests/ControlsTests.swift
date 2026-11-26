@@ -288,6 +288,36 @@ import Testing
         #expect(window.makeFirstResponder(nil) && !create.namesKey, "Create names ⏎ after its field gave up the keys")
     }
 
+    /// A row's Open changes width as its key's room comes and goes and as it turns primary, its
+    /// label bold: the row, which lays out by hand, is laid out again each time, its Open where a
+    /// fresh row of that state puts it. A row on its own, in no table and no window, so nothing
+    /// else lays it out.
+    @Test func aRowIsLaidOutAgainAsItsOpenChangesWidth() throws {
+        let mono = try Self.mono()
+        func row() -> RowCell {
+            let item = SailList.Item(id: "dock", name: "dock", voice: "dock", content: NSView(), actions: [SailList.Action("Start and Open") {}])
+            let cell = RowCell(item, rowStyle: .list, actionsColumn: nil, look: .light, mono: mono)
+            cell.frame = NSRect(x: 0, y: 0, width: 440, height: 53)
+            return cell
+        }
+        func open(_ cell: RowCell) throws -> SailButton {
+            try #require(cell.actions.views.first as? SailButton)
+        }
+        let shown = row()
+        var widths: [CGFloat] = []
+        for (state, chosen, keys) in [("hovered", false, false), ("chosen with the keys", true, true), ("chosen without them", true, false), ("hovered again", false, false)] {
+            shown.show(true, chosen: chosen, keys: keys)
+            shown.layoutSubtreeIfNeeded()
+            let fresh = row()
+            fresh.show(true, chosen: chosen, keys: keys)
+            fresh.layoutSubtreeIfNeeded()
+            let laid = try open(shown).frame, wanted = try open(fresh).frame
+            widths.append(wanted.width)
+            #expect(near(laid, wanted), "\(state): the Open is laid out at \(laid), a fresh row's at \(wanted)")
+        }
+        #expect(Set(widths).count == 3, "the Open's width does not change with each state: \(widths)")
+    }
+
     /// The label is drawn, centred in the box within a point.
     @Test func theLabelsInkIsCentredInTheBox() {
         let button = Self.sized(SailButton("Start and Open", kind: .secondary, look: .light, target: nil, action: nil))

@@ -297,7 +297,8 @@ import Testing
     /// A save the connection lost before it reached the workspace says so, and names ⌘S to save
     /// again only while the keys are in the pane (``KeyHolder``), the one place its Save reaches: not
     /// while another view holds them, nor in a window that is not key; said again each time they
-    /// come and go. The pane is driven frame by frame, its window key.
+    /// come and go, and laid out again only when the words change. The pane is driven frame by
+    /// frame, its window key.
     @Test func aLostSaveNamesCommandSOnlyWhileThePaneHoldsTheKeys() throws {
         let text = Array("one\n".utf8)
         var hash = SHA256()
@@ -338,6 +339,10 @@ import Testing
         #expect(pane.noteWords == lost, "in a window that is not key it says \(pane.noteWords ?? "nothing")")
         window.key = true
         #expect(pane.noteWords == again, "the window key again, it says \(pane.noteWords ?? "nothing")")
+        try #require(window.makeFirstResponder(other))
+        pane.layoutSubtreeIfNeeded()
+        let settled = !pane.needsLayout
+        #expect(window.makeFirstResponder(nil) && settled && !pane.needsLayout && pane.noteWords == lost, "a key change that left its words as they were laid the pane out again")
     }
 
     /// The newest word wins the line, whichever way: a save's refusal after the file's own note
