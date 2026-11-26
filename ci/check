@@ -12,10 +12,11 @@ Usage:
   ci/check                      format, then run the tests of classes changed against origin/main
   ci/check quick                format, then every module's unit tests, incrementally and without coverage
   ci/check full                 every module's tests and gates, as CI's unit jobs run them together
-  ci/check unit MODULE [--tests-only]
+  ci/check unit MODULE [--tests-only | BASE]
                                 one module's tests and gates, its upstream installed first; sail-infra's
-                                adds the architecture rules, the duplication report and ci/exclusions;
-                                --tests-only runs the tests alone, without coverage or quality gates
+                                adds the architecture rules, the duplication report and ci/exclusions
+                                from BASE (default: where it left origin/main); --tests-only runs the
+                                tests alone, without coverage or quality gates
   ci/check shard INDEX COUNT [EXCLUDED_IT...]
                                 print the IT classes of shard INDEX (1-based) of COUNT
   ci/check its INDEX COUNT [EXCLUDED_IT...] -- [MAVEN_ARG...]
@@ -37,6 +38,9 @@ Usage:
                                 nor edited, another added or one deleted, an edit of CHANGELOG.md,
                                 or one the release could not fold
                                 (ci/rules check, ci/changelog check)
+  ci/check base                 print base=<commit> for GITHUB_OUTPUT: where the pull request whose
+                                merge is checked out left main, which every check of what it
+                                changed measures from
 EOF
   exit 2
 }
@@ -60,17 +64,19 @@ require_module() {
 }
 
 unit() {
-  local module=${1:-} gates=true
+  local module=${1:-} gates=true base=""
   [[ -n $module ]] || usage
   require_module "$module"
   case ${2:-} in
     "") ;;
     --tests-only) gates=false ;;
-    *) usage ;;
+    -*) usage ;;
+    *) base=$2 ;;
   esac
   local upstream upstream_pmd=-Dpmd.skip=true
   upstream=$(upstream_of "$module")
   if $gates && [[ $module == sail-infra ]]; then
+    ci/exclusions ${base:+"$base"}
     upstream_pmd=-Dpmd.failOnViolation=false
   fi
   if [[ -n $upstream ]]; then
@@ -80,7 +86,6 @@ unit() {
   if ! $gates; then
     mvn -B verify -pl "$module" -Djacoco.skip=true -Dpmd.skip=true -Dcpd.skip=true
   elif [[ $module == sail-infra ]]; then
-    ci/exclusions
     mvn -B verify -pl sail-infra,architecture
     mvn -B pmd:aggregate-cpd@cpd pmd:aggregate-cpd-check@cpd-check
   else
@@ -321,6 +326,17 @@ rules() {
   ci/rules check "$@"
 }
 
+# A pull request's run checks out GitHub's merge of the branch into main as it stood then; its
+# first parent is that main. The event's base sha can be older, and what main gained since would
+# count as the branch's own (sail#551).
+base() {
+  if ! git rev-parse -q --verify 'HEAD^2' > /dev/null; then
+    echo "ci/check: HEAD is no merge, so it holds no pull request's base: run this on the merge a pull request's run checks out." >&2
+    exit 1
+  fi
+  echo "base=$(git rev-parse 'HEAD^1')"
+}
+
 changed() {
   rules
   mvn -B -q spotless:apply
@@ -346,5 +362,6 @@ case ${1:-} in
   min-macos) shift; min_macos "$@" ;;
   exclusions) shift; exclusions "$@" ;;
   rules) shift; rules "$@" ;;
+  base) base ;;
   *) usage ;;
 esac
