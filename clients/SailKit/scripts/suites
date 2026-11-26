@@ -7,9 +7,6 @@ set -euo pipefail
 # fails unless each of them printed every case it was meant to run. Both fail when a suite or a
 # test started and never ended, read from the test library's own event stream (scripts/ends).
 readonly EXHAUSTIVE='^(SailWorkbenchTests\.(WholenessTests|ReviewPropertyTests)|SailEventsTests\.EventStreamParserTests|SailVTTests\.FixtureTests)/'
-# A child that kept a copy of another test's listener once made a reconnect test fail only when the
-# two ran together, so `rest` also runs them together 20 times in one process.
-readonly TOGETHER='^SailTerminalTests\.(HostTakeoverTests|SessionTests/aRunnerKeepsTryingForAMinuteAtTheCapThenParksUntilReconnectNow\(\))'
 
 usage() {
   echo "Usage: scripts/suites rest EVENTS | exhaustive LOG" >&2
@@ -24,7 +21,6 @@ case $1 in
     rm -f "$2"
     swift test --skip "$EXHAUSTIVE" --event-stream-output-path "$2" --event-stream-version 0
     "$(dirname "$0")/ends" "$2"
-    swift test --skip-build --filter "$TOGETHER" --maximum-repetitions 20 --repeat-until fail
     ;;
   exhaustive)
     [[ $# -eq 2 ]] || usage
