@@ -328,13 +328,17 @@ rules() {
 
 # A pull request's run checks out GitHub's merge of the branch into main as it stood then; its
 # first parent is that main. The event's base sha can be older, and what main gained since would
-# count as the branch's own (sail#551).
+# count as the branch's own (sail#551). A shallow clone holds no parent of HEAD to ask.
 base() {
-  if ! git rev-parse -q --verify 'HEAD^2' > /dev/null; then
+  if git rev-parse -q --verify 'HEAD^2' > /dev/null; then
+    echo "base=$(git rev-parse 'HEAD^1')"
+  elif [[ $(git rev-parse --is-shallow-repository) == true ]]; then
+    echo "ci/check: this clone is shallow, so HEAD's parents are not here: check it out with fetch-depth: 0." >&2
+    exit 1
+  else
     echo "ci/check: HEAD is no merge, so it holds no pull request's base: run this on the merge a pull request's run checks out." >&2
     exit 1
   fi
-  echo "base=$(git rev-parse 'HEAD^1')"
 }
 
 changed() {

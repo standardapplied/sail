@@ -41,6 +41,14 @@ class CiRulesTest {
   private static final String JAVA = "sail-core/src/main/java/ai/singlr/sail/A.java";
   private static final String EXCLUSIONS = "config/quality/pmd-exclusions.properties";
   private static final String LOCAL = "ci/check rules \"$(git merge-base origin/main HEAD)\"";
+  private static final String DIFF_STEP =
+      """
+            - id: diff
+              env:
+                EVENT: ${{ github.event_name }}
+                BASE: ${{ steps.base.outputs.base || github.event.before }}
+              run: ci/changes "$EVENT" "$BASE" >> "$GITHUB_OUTPUT"
+      """;
   private static final String BASE_STEP =
       """
             - id: base
@@ -583,9 +591,8 @@ class CiRulesTest {
 
     for (var workflow : List.of(ci, clients)) {
       assertTrue(workflow.contains(BASE_STEP), workflow);
-      assertTrue(workflow.contains("BASE: ${{ steps.base.outputs.base || github.event.before }}"));
+      assertTrue(workflow.contains(DIFF_STEP), workflow);
     }
-    assertEquals("${{ steps.base.outputs.base }}", ciStep(".github/workflows/clients.yml").get(0));
     assertTrue(ci.contains("      base: ${{ steps.base.outputs.base }}\n"), ci);
     assertTrue(ci.contains("'--tests-only' || needs.changes.outputs.base }}"), ci);
   }
@@ -645,7 +652,29 @@ class CiRulesTest {
   }
 
   @Test
+  void aShallowCloneOfAMergeIsToldToFetchItsHistoryNotThatItIsNoMerge(@TempDir Path elsewhere)
+      throws Exception {
+    var stale = commit();
+    git("checkout", "-q", "-b", "agent/the-spec");
+    commit();
+    git("checkout", "-q", "-b", "merged", stale);
+    commit();
+    git("merge", "-q", "--no-ff", "-m", "merge", "agent/the-spec");
+    var shallow = elsewhere.resolve("shallow");
+    git("clone", "-q", "--depth", "1", "--branch", "merged", "file://" + repo, shallow.toString());
+
+    assertEquals(
+        new Ran(
+            1,
+            "",
+            "ci/check: this clone is shallow, so HEAD's parents are not here: check it out with"
+                + " fetch-depth: 0.\n"),
+        run(List.of("bash", "ci/check", "base"), shallow, Map.of()));
+  }
+
+  @Test
   void aCommitThatIsNoMergeHoldsNoPullRequestsBase() throws Exception {
+    commit();
     commit();
 
     assertEquals(
