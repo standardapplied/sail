@@ -18,10 +18,13 @@ Usage:
   ci/images fleet-image bake    build the native fleet's Podman image on this host
   ci/images fleet-image import|export DIR
                                 load the native fleet's image from DIR, or keep it there
+  sudo ci/images runner-packages sources
+                                point the runner's apt at Ubuntu's sources and Zabbly's only
   ci/images runner-packages fetch DIR
-                                download the .deb files of incus and of zfsutils-linux into DIR
-  ci/images runner-packages install DIR PACKAGE
-                                install PACKAGE from its files in DIR, with no network
+                                download into DIR the .deb files of incus, of zfsutils-linux and of
+                                every package they need, whatever this runner already holds
+  sudo ci/images runner-packages install DIR PACKAGE
+                                install PACKAGE and what this runner lacks of it from DIR alone
 EOF
   exit 2
 }
@@ -180,36 +183,60 @@ fleet_image() {
   esac
 }
 
-# The runner's own packages, kept as .deb files: fetched from Zabbly's stable repository and the
-# Ubuntu mirror once (the incus action keeps them per runner image and week), and installed from
-# those files by dpkg, which never reaches a mirror, the same way after a fetch as after a restore.
-# apt given the files and --no-download still wanted archives from the mirror ("Unable to fetch
-# some archives").
+# The runner's own packages, kept as .deb files in one directory: fetched once (the incus action
+# keeps them per runner image and week) and installed by apt from that directory alone, the same way
+# after a fetch as after a restore. Runners of one image differ in what they hold (on sail#547 AWS's
+# held librados2 and librbd1, Azure's did not), so the fetch resolves against an empty dpkg status
+# and keeps everything incus and the ZFS tools need, whatever the fetching runner holds. The install
+# makes the files apt's only source, a flat repository: apt takes from it only what this runner
+# lacks, keeps a version the runner holds unless the package needs a newer one (apt_preferences(5):
+# no downgrade below priority 1000), and stops before dpkg runs, naming any package the files lack.
 runner_packages() {
-  local verb=${1:-} dir=${2:-} package
-  [[ -n $dir ]] || usage
+  local verb=${1:-} dir=${2:-} package=${3:-}
   case $verb in
-    fetch)
-      sudo find /etc/apt/sources.list.d -type f ! -name ubuntu.sources -delete
-      bake_stage "fetch Zabbly's key" sudo curl -fsSL --create-dirs -o /etc/apt/keyrings/zabbly.asc https://pkgs.zabbly.com/key.asc
-      printf 'Enabled: yes\nTypes: deb\nURIs: https://pkgs.zabbly.com/incus/stable\nSuites: %s\nComponents: main\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/zabbly.asc\n' \
-        "$(sed -n 's/^VERSION_CODENAME=//p' /etc/os-release)" "$(dpkg --print-architecture)" \
-        | sudo tee /etc/apt/sources.list.d/zabbly-incus-stable.sources > /dev/null
-      bake_stage "apt-get update" sudo apt-get update
-      for package in $RUNNER_PACKAGES; do
-        sudo apt-get clean
-        bake_stage "download $package" sudo apt-get install -y --download-only "$package"
-        mkdir -p "$dir/$package"
-        cp /var/cache/apt/archives/*.deb "$dir/$package/"
-      done
-      ;;
-    install)
-      package=${3:-}
-      [[ -n $package && -d $dir/$package ]] || { echo "ci/images: no files of '$package' in $dir." >&2; exit 1; }
-      sudo env DEBIAN_FRONTEND=noninteractive dpkg -i "$dir/$package"/*.deb
-      ;;
+    sources) runner_sources ;;
+    fetch) [[ -n $dir ]] || usage; runner_fetch "$dir" ;;
+    install) [[ -n $dir && -n $package ]] || usage; runner_install "$dir" "$package" ;;
     *) usage ;;
   esac
+}
+
+runner_sources() {
+  find /etc/apt/sources.list.d -type f ! -name ubuntu.sources -delete
+  bake_stage "fetch Zabbly's key" curl -fsSL --create-dirs -o /etc/apt/keyrings/zabbly.asc https://pkgs.zabbly.com/key.asc
+  printf 'Enabled: yes\nTypes: deb\nURIs: https://pkgs.zabbly.com/incus/stable\nSuites: %s\nComponents: main\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/zabbly.asc\n' \
+    "$(sed -n 's/^VERSION_CODENAME=//p' /etc/os-release)" "$(dpkg --print-architecture)" \
+    > /etc/apt/sources.list.d/zabbly-incus-stable.sources
+  bake_stage "apt-get update" apt-get update
+}
+
+runner_fetch() {
+  local dir=$1 nothing
+  mkdir -p "$dir"
+  dir=$(cd "$dir" && pwd)
+  nothing=$(mktemp -d)
+  touch "$nothing/status"
+  # shellcheck disable=SC2086
+  bake_stage "download $RUNNER_PACKAGES" apt-get install -y -q --download-only \
+    -o Dir::State::status="$nothing/status" -o Dir::Cache::archives="$dir" $RUNNER_PACKAGES
+  rm -rf "$nothing"
+  echo "Fetched $(find "$dir" -maxdepth 1 -name '*.deb' | wc -l | tr -d ' ') packages into $dir."
+}
+
+runner_install() {
+  local dir=$1 package=$2 index
+  compgen -G "$dir/*.deb" > /dev/null || { echo "ci/images: no .deb files in $dir." >&2; exit 1; }
+  dir=$(cd "$dir" && pwd)
+  (cd "$dir" && dpkg-scanpackages . > Packages)
+  index=$(mktemp -d)
+  mkdir -p "$index/lists/partial"
+  printf 'deb [trusted=yes] file:%s ./\n' "$dir" > "$index/sources.list"
+  local apt=(apt-get -q -o Dir::Etc::SourceList="$index/sources.list" -o Dir::Etc::SourceParts="$index/parts"
+    -o Dir::State::Lists="$index/lists" -o Dir::Cache::pkgcache= -o Dir::Cache::srcpkgcache=
+    -o DPkg::Lock::Timeout="$APT_LOCK_SECONDS")
+  "${apt[@]}" update
+  DEBIAN_FRONTEND=noninteractive "${apt[@]}" install -y "$package"
+  rm -rf "$index"
 }
 
 case ${1:-} in
