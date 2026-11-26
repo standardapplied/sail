@@ -239,6 +239,58 @@ final class Reached: Sendable {
         #expect(welcome.version.stringValue == "Sail 0.76.0" && abs(version.midX - welcome.bounds.midX) <= half && version.maxY < column.minY, "the version \(version)")
     }
 
+    /// A link among words takes a word's space before its words and after them, the same either
+    /// side, and the chip's words stand as far in from either end, measured where AppKit draws each
+    /// piece's words, within half a backing pixel: on all three screens, either direction. A link
+    /// is as wide as its words.
+    @Test(arguments: [NSUserInterfaceLayoutDirection.leftToRight, .rightToLeft])
+    func aLinkTakesAWordsSpaceEitherSide(_ direction: NSUserInterfaceLayoutDirection) throws {
+        let (welcome, window) = try Self.shown(RecordedServer([]))
+        defer { window.orderOut(nil) }
+        let half = 0.5 / Double(window.backingScaleFactor)
+        let space = Double((" " as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: Look.Step.footnote.points)]).width)
+        let plane = try ControlPlane(address: "sail.example.com")
+        let screens = [Welcome(plane: nil, person: nil), Welcome(plane: plane, person: nil), Welcome(plane: plane, person: RememberedSignIn(handle: "mara", name: "Mara Quill"))]
+        for screen in screens {
+            welcome.show(screen)
+            for line in [welcome.quietLine, welcome.chip.row, welcome.chipUnder.row] {
+                line.userInterfaceLayoutDirection = direction
+            }
+            welcome.layoutSubtreeIfNeeded()
+            let spans = Self.spans(in: welcome.quietLine, direction)
+            let gaps = zip(spans, spans.dropFirst()).map { $1.lowerBound - $0.upperBound }
+            #expect(spans.count >= 2 && gaps.allSatisfy { abs($0 - space) <= half }, "\(screen.title): the gaps are \(gaps), a space is \(space)")
+            if let chip = welcome.shownChip {
+                chip.layoutSubtreeIfNeeded()
+                let drawn = Self.spans(in: chip.row, direction)
+                let first = try #require(drawn.first), last = try #require(drawn.last)
+                let leading = first.lowerBound, trailing = Double(chip.row.bounds.width) - last.upperBound
+                #expect(abs(leading - trailing) <= half && leading >= Look.Space.s - half, "\(screen.title): the chip's words stand \(leading) and \(trailing) in")
+            }
+        }
+        for link in [welcome.toTerminals, welcome.toSignIn, welcome.toEnroll, welcome.chip.change] {
+            #expect(Double(link.intrinsicContentSize.width) - Double(link.attributedTitle.size().width) < 0.5, "\(link.title) asks room past its words")
+        }
+    }
+
+    /// Where each shown piece of `line` draws, left to right: a label's words from its alignment
+    /// rect's leading edge (its trailing edge right to left, where its words stand right-aligned), a
+    /// link's from its frame's leading edge likewise, any other view whole.
+    static func spans(in line: NSView, _ direction: NSUserInterfaceLayoutDirection) -> [ClosedRange<Double>] {
+        let rightToLeft = direction == .rightToLeft
+        return line.subviews.filter { !$0.isHidden }.map { view -> ClosedRange<Double> in
+            let frame = view.frame
+            let (words, inner): (Double, NSRect) = if let label = view as? NSTextField {
+                (Double(label.attributedStringValue.size().width), label.alignmentRect(forFrame: frame))
+            } else if let link = view as? NSButton {
+                (Double(link.attributedTitle.size().width), frame)
+            } else {
+                (Double(frame.width), frame)
+            }
+            return rightToLeft ? (Double(inner.maxX) - words) ... Double(inner.maxX) : Double(inner.minX) ... (Double(inner.minX) + words)
+        }.sorted { $0.lowerBound < $1.lowerBound }
+    }
+
     /// Every state, at the least window's card: nothing out of reach.
     @Test func nothingIsOutOfReachAtTheLeastWindow() throws {
         let least = NSSize(width: Double(ShellApp.leastFrame.width) - Rail.width - 4, height: Double(ShellApp.leastFrame.height) - ShellApp.bandHeight - 2)

@@ -310,7 +310,8 @@ public final class WelcomeView: NSView {
     private let mono: LabelFont
     /// The centred column every screen stands in.
     let column = NSStackView()
-    private let other = NSStackView()
+    /// The quiet line under the primary: words, the screen's link, words after it.
+    let quietLine = WordLine(inset: nil)
     private let before = NSTextField(labelWithString: "")
     private let after = NSTextField(labelWithString: "")
     private lazy var chipRow = Self.holding(chip, centred: false)
@@ -516,6 +517,7 @@ public final class WelcomeView: NSView {
         before.stringValue = welcome.other.before
         after.stringValue = welcome.other.after ?? ""
         after.isHidden = welcome.other.after == nil
+        quietLine.wordsChanged()
         guard claim, let field, window?.isKeyWindow == true else { return }
         window?.makeFirstResponder(field.field)
     }
@@ -571,7 +573,6 @@ public final class WelcomeView: NSView {
             label.font = words
             label.textColor = NSColor(look.textTertiary)
         }
-        other.spacing = (" " as NSString).size(withAttributes: [.font: words]).width
         version.font = mono.font(Look.Step.micro.points, .regular) as NSFont
         version.textColor = NSColor(look.textTertiary)
         render()
@@ -616,18 +617,18 @@ public final class WelcomeView: NSView {
         for label in [heading, lede, said] {
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
-        other.orientation = .horizontal
-        other.setViews([before, toTerminals, toSignIn, toEnroll, after], in: .center)
+        let space = Double((" " as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: Look.Step.footnote.points)]).width)
+        quietLine.pieces = [WordLine.Piece(before)] + [toTerminals, toSignIn, toEnroll, after].map { WordLine.Piece($0, gap: space) }
         column.orientation = .vertical
         column.alignment = .leading
         column.spacing = Look.Space.xxl
-        column.setViews([mark, chipRow, heading, lede, addressField, ticketField, note, proceed, create, signIn, said, chipUnderRow, other], in: .top)
+        column.setViews([mark, chipRow, heading, lede, addressField, ticketField, note, proceed, create, signIn, said, chipUnderRow, quietLine], in: .top)
         column.setCustomSpacing(Look.Space.s, after: heading)
         column.translatesAutoresizingMaskIntoConstraints = false
         version.translatesAutoresizingMaskIntoConstraints = false
         addSubview(column)
         addSubview(version)
-        for view in [chipRow, heading, lede, addressField, ticketField, note, proceed, create, signIn, said, chipUnderRow, other] as [NSView] {
+        for view in [chipRow, heading, lede, addressField, ticketField, note, proceed, create, signIn, said, chipUnderRow, quietLine] as [NSView] {
             fill(view)
         }
         let wide = column.widthAnchor.constraint(equalToConstant: Self.columnWidth)
@@ -676,6 +677,8 @@ package final class PlaneChip: NSView {
     }
 
     package let change: LinkButton
+    /// The chip's pieces, its words `Look.Space.s` in from either end.
+    let row = WordLine(inset: Look.Space.s)
     private let cloud = NSImageView()
     private let host = NSTextField(labelWithString: "")
     private let square = NSView()
@@ -691,19 +694,17 @@ package final class PlaneChip: NSView {
         layer?.cornerRadius = Look.contentRadius
         layer?.borderWidth = Look.hairline
         square.wantsLayer = true
-        let row = NSStackView(views: [cloud, host, square, change])
-        row.orientation = .horizontal
-        row.spacing = Look.Space.s
-        row.setCustomSpacing(Look.Space.m, after: square)
-        row.edgeInsets = NSEdgeInsets(top: 0, left: Look.Space.s, bottom: 0, right: Look.Space.s)
+        row.pieces = [
+            WordLine.Piece(cloud, size: NSSize(width: FieldSize.mark, height: FieldSize.mark)), WordLine.Piece(host, gap: Look.Space.s, shrinks: true),
+            WordLine.Piece(square, gap: Look.Space.s, size: NSSize(width: ControlPlaneRow.square, height: ControlPlaneRow.square)),
+            WordLine.Piece(change, gap: Look.Space.m),
+        ]
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
         NSLayoutConstraint.activate([
             row.leadingAnchor.constraint(equalTo: leadingAnchor), row.trailingAnchor.constraint(equalTo: trailingAnchor),
             row.topAnchor.constraint(equalTo: topAnchor), row.bottomAnchor.constraint(equalTo: bottomAnchor),
             heightAnchor.constraint(equalToConstant: FieldSize.small.height),
-            cloud.widthAnchor.constraint(equalToConstant: FieldSize.mark), cloud.heightAnchor.constraint(equalToConstant: FieldSize.mark),
-            square.widthAnchor.constraint(equalToConstant: ControlPlaneRow.square), square.heightAnchor.constraint(equalToConstant: ControlPlaneRow.square),
         ])
         host.lineBreakMode = .byTruncatingMiddle
         host.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -723,6 +724,7 @@ package final class PlaneChip: NSView {
 
     func show(_ words: String, answers: Bool?) {
         host.stringValue = words
+        row.wordsChanged()
         self.answers = answers
         setAccessibilityLabel(words)
         paint()
@@ -750,6 +752,106 @@ package final class PlaneChip: NSView {
         host.font = mono.font(Look.Step.footnote.points, .medium) as NSFont
         host.textColor = NSColor(look.text)
         change.look = look
+        row.wordsChanged()
+    }
+}
+
+/// Views in one line laid out by what they draw, mirrored right to left: each piece's words (an
+/// image or a square, its whole frame) stand exactly its `gap` after the words before them, the
+/// line centred, at least `inset` in from both ends. AppKit's cells keep room around their words that they
+/// never draw into (a label 2 pt each side, a link's cell more after its words), so a stack of them
+/// spaced the words unevenly; this places the words themselves. A piece that `shrinks` gives up its
+/// room, cut, where the line has too little.
+@MainActor
+final class WordLine: NSView {
+    struct Piece {
+        let view: NSView
+        let gap: Double
+        let size: NSSize?
+        let shrinks: Bool
+
+        init(_ view: NSView, gap: Double = 0, size: NSSize? = nil, shrinks: Bool = false) {
+            self.view = view
+            self.gap = gap
+            self.size = size
+            self.shrinks = shrinks
+        }
+    }
+
+    private let inset: Double?
+    var pieces: [Piece] = [] {
+        didSet {
+            oldValue.forEach { $0.view.removeFromSuperview() }
+            pieces.forEach { addSubview($0.view) }
+            wordsChanged()
+        }
+    }
+
+    init(inset: Double?) {
+        self.inset = inset
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) {
+        nil
+    }
+
+    /// The words of a piece changed, or which are shown: called outside a layout pass.
+    func wordsChanged() {
+        invalidateIntrinsicContentSize()
+        needsLayout = true
+    }
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    /// What a piece draws, in its frame: how far in its words start, how wide they are, and how wide
+    /// and tall the frame is.
+    private static func drawn(_ piece: Piece) -> (lead: Double, words: Double, frame: NSSize) {
+        if let size = piece.size { return (0, Double(size.width), size) }
+        let insets = piece.view.alignmentRectInsets
+        let words: Double = if let button = piece.view as? NSButton {
+            Double(button.attributedTitle.size().width)
+        } else {
+            Double((piece.view as? NSTextField)?.attributedStringValue.size().width ?? 0)
+        }
+        let room = piece.view is NSButton ? Double(piece.view.intrinsicContentSize.width) : words + Double(insets.left + insets.right)
+        return (Double(insets.left), words, NSSize(width: room, height: piece.view.intrinsicContentSize.height))
+    }
+
+    private var shown: [Piece] {
+        pieces.filter { !$0.view.isHidden }
+    }
+
+    /// The words' width end to end, the gaps between them included.
+    private var span: Double {
+        shown.enumerated().reduce(0) { sum, item in sum + (item.offset == 0 ? 0 : item.element.gap) + Self.drawn(item.element).words }
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let height = shown.map { Double(Self.drawn($0).frame.height) }.max() ?? 0
+        guard let inset else { return NSSize(width: NSView.noIntrinsicMetric, height: height) }
+        return NSSize(width: span + 2 * inset, height: height)
+    }
+
+    override func layout() {
+        super.layout()
+        let width = Double(bounds.width), height = Double(bounds.height), rightToLeft = userInterfaceLayoutDirection == .rightToLeft
+        let short = max(0, span - (width - 2 * (inset ?? 0)))
+        var x = max(inset ?? 0, (width - span) / 2)
+        for (index, piece) in shown.enumerated() {
+            var (lead, words, size) = Self.drawn(piece)
+            if piece.shrinks, short > 0 {
+                words = max(0, words - short)
+                size.width = max(0, Double(size.width) - short)
+            }
+            x += index == 0 ? 0 : piece.gap
+            let left = x - lead, y = (height - Double(size.height)) / 2
+            piece.view.frame = NSRect(x: rightToLeft ? width - left - Double(size.width) : left, y: y, width: Double(size.width), height: Double(size.height))
+            x += words
+        }
     }
 }
 
