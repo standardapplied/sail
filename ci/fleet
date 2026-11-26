@@ -280,7 +280,9 @@ log_name() {
 check() { check_within "$CHECK_LIMIT" "$@"; }
 
 # A check runs in a process group of its own beside a timer, so that one still running at its limit
-# ends whole, ssh and all it started; its body ignores errexit, as it would in an if.
+# ends whole, ssh and all it started; its body ignores errexit, as it would in an if. It is given
+# its caller's input by name: in a subshell, as in a parallel group, bash hands a background job
+# /dev/null instead, and a body fed at the check's call would read nothing.
 check_within() {
   local limit=$1 run=$2 name=$3
   shift 3
@@ -292,7 +294,7 @@ check_within() {
     return 1
   fi
   set -m
-  { "$@" || exit; } > "$log" 2>&1 &
+  { "$@" || exit; } <&0 > "$log" 2>&1 &
   job=$!
   sleep "$limit" > /dev/null 2>&1 &
   timer=$!
@@ -2848,6 +2850,18 @@ loop_config() {
     on "$1" main "echo '{\"type\":\"${LOOP_AGENTS%% *}\",\"install\":[$(install_list)]}' | sudo sail project config set acme agent -"
 }
 
+# Spec $2 titled $3 on eng, from the body on this function's input. A body that never reached eng
+# is stored empty and its agent builds from the title alone, so the row that writes it fails here.
+eng_writes_spec() {
+  local run=$1 spec=$2 title=$3
+  on "$run" eng "cat > /tmp/$spec.md && sudo sail spec create -p acme --id $spec --title '$title' --body-file /tmp/$spec.md --assignee eng" || return 1
+  on "$run" eng "sudo sail spec show $spec --no-sync --json" | python3 -I -c '
+import json, sys
+body = json.load(sys.stdin)["body"]
+print("%s holds a body of %d characters" % (sys.argv[1], len(body)))
+sys.exit(0 if body.strip() else 1)' "$spec"
+}
+
 loop() {
   local run=${1:-} spec beside polls
   [[ -n $run ]] || usage
@@ -2871,11 +2885,11 @@ loop() {
   check "$run" "eng's logins list each agent's default by fingerprint, no value" each_agent_has_its_login "$run" eng
   check "$run" "no secret appears in the run's logs" no_secret_in_logs "$run"
   check "$run" "eng writes a spec for the loop" \
-    on "$run" eng "cat > /tmp/loop.md && sudo sail spec create -p acme --id $spec --title 'The build passes on JDK 21 and the README says how to run it' --body-file /tmp/loop.md --assignee eng" <<< "$LOOP_BODY"
+    eng_writes_spec "$run" "$spec" 'The build passes on JDK 21 and the README says how to run it' <<< "$LOOP_BODY"
   check "$run" "eng makes it ready" on "$run" eng "sudo sail spec update $spec --status pending"
   check "$run" "eng dispatches it in the background" on "$run" eng "sudo sail spec dispatch -p acme --spec $spec --background"
   check "$run" "eng writes a second spec of the same repo" \
-    on "$run" eng "cat > /tmp/beside.md && sudo sail spec create -p acme --id $beside --title 'A note beside the build' --body-file /tmp/beside.md --assignee eng" <<< "$BESIDE_BODY"
+    eng_writes_spec "$run" "$beside" 'A note beside the build' <<< "$BESIDE_BODY"
   check "$run" "eng makes it ready" on "$run" eng "sudo sail spec update $beside --status pending"
   check "$run" "eng dispatches it while the first builds, in the background" on "$run" eng "sudo sail spec dispatch -p acme --spec $beside --background"
   polls="$(log_dir "$run")/beside-workspace"

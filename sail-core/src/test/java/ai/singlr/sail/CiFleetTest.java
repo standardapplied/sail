@@ -112,6 +112,65 @@ class CiFleetTest {
   }
 
   @Test
+  void aCheckFedByAHereStringDeliversItWholeInAParallelGroupAndAlone() throws Exception {
+    var ended =
+        inAGroupAndAlone("check \"$1\" fed on \"$1\" eng \"cat > /tmp/fed-$1\" <<< 'the body'");
+
+    for (var run : List.of("grouped-access", "alone")) {
+      assertEquals(List.of("PASS fed"), report(run), ended.stdout() + ended.stderr());
+      assertEquals("the body\n", Files.readString(callEndingWith("fed-" + run).in()), run);
+    }
+  }
+
+  @Test
+  void aRemoteCommandGivenNoInputReadsNoneInAParallelGroupAndAlone() throws Exception {
+    var ended = inAGroupAndAlone("check \"$1\" unfed on \"$1\" client \"cat > /tmp/unfed-$1\"");
+
+    for (var run : List.of("grouped-access", "alone")) {
+      assertEquals(List.of("PASS unfed"), report(run), ended.stdout() + ended.stderr());
+      assertEquals("", Files.readString(callEndingWith("unfed-" + run).in()), run);
+    }
+  }
+
+  @Test
+  void aSpecWrittenFromItsBodyHoldsIt() throws Exception {
+    remote(storesTheSpecsBody());
+
+    var ended =
+        Child.run(
+            shell(
+                "source <(sed '/^case ${1:-} in$/,$d' \"$0\") && check sourced 'eng writes a spec"
+                    + " for the loop' eng_writes_spec sourced loop-1 'The build passes' <<<"
+                    + " \"$LOOP_BODY\" && echo \"$LOOP_BODY\" > \"$FLEET_TEST/sent\"",
+                SCRIPT.toString()));
+
+    assertEquals(0, ended.exit(), ended.stdout() + ended.stderr());
+    assertEquals(List.of("PASS eng writes a spec for the loop"), report("sourced"));
+    assertTrue(Files.readString(dir.resolve("sent")).startsWith("# The build passes on JDK 21"));
+    assertEquals(Files.readString(dir.resolve("sent")), Files.readString(dir.resolve("stored")));
+  }
+
+  @Test
+  void aSpecStoredWithAnEmptyBodyFailsTheRowThatWroteIt() throws Exception {
+    remote(storesTheSpecsBody());
+
+    var ended =
+        Child.run(
+            shell(
+                "source <(sed '/^case ${1:-} in$/,$d' \"$0\") && check sourced 'eng writes a spec"
+                    + " for the loop' eng_writes_spec sourced loop-1 'The build passes'",
+                SCRIPT.toString()));
+
+    assertEquals(1, ended.exit(), ended.stdout() + ended.stderr());
+    var log = runs.resolve("sourced").resolve(logOf("eng writes a spec for the loop"));
+    assertEquals(
+        List.of("FAIL eng writes a spec for the loop (see " + log + ")"), report("sourced"));
+    assertTrue(
+        Files.readString(log).contains("loop-1 holds a body of 0 characters"),
+        Files.readString(log));
+  }
+
+  @Test
   void aPersonsOwnSshPassesTheInputTheyGiveItOn() throws Exception {
     var ended =
         Child.run(
@@ -283,6 +342,45 @@ class CiFleetTest {
         esac
         """
         .formatted(TIMERS);
+  }
+
+  /**
+   * The script's functions sourced, its caller's input a line that ends, and {@code checks} run
+   * twice with the run as {@code $1}: once as a group's fleet under {@code in_parallel}, as {@code
+   * ci/fleet run} runs it, in run {@code grouped-access}, then once alone, as a serial run does, in
+   * run {@code alone}.
+   */
+  private Child.Ended inAGroupAndAlone(String checks) throws Exception {
+    return Child.run(
+        shell(
+            "source <(sed '/^case ${1:-} in$/,$d' \"$0\") && checks() { "
+                + checks
+                + "; } && fleet() { checks \"$1\"; } && mkdir -p \"$RUNS/grouped\""
+                + " && { in_parallel grouped 0.76.0 '' access || true; checks alone || true; }",
+            SCRIPT.toString()),
+        "the caller's input\n",
+        Child.PATIENCE);
+  }
+
+  /**
+   * A box's {@code sail spec} as far as the loop's spec rows go: a create keeps the body it reads
+   * from its input, and a show prints it back as {@code spec show --json} does.
+   */
+  private static String storesTheSpecsBody() {
+    return """
+        case $2 in
+          *"sail spec create"*) cat > "$FLEET_TEST/stored" ;;
+          *"sail spec show"*)
+            python3 -I -c 'import json,sys; print(json.dumps({"spec": {}, "body": open(sys.argv[1]).read()}))' "$FLEET_TEST/stored" ;;
+        esac
+        """;
+  }
+
+  private Call callEndingWith(String command) throws IOException {
+    return calls().stream()
+        .filter(call -> call.command().endsWith(command))
+        .findFirst()
+        .orElseThrow(() -> new AssertionError("no call ends with " + command));
   }
 
   /** One ssh the script made: the box, the remote command, and what that command read. */
