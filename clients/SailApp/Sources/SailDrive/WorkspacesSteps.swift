@@ -378,7 +378,7 @@ extension Driver {
             view.flashScrollers()
             let scroller = view.scroller, thumb = scroller.thumb, drags = scroller.drags, before = view.contentView.bounds.minY
             guard thumb.height > 1 else { return (false, "the \(which)'s thumb is \(thumb): nothing to drag") }
-            let from = scroller.convert(NSPoint(x: thumb.midX, y: thumb.midY), to: nil), to = NSPoint(x: Double(from.x), y: Double(from.y) - 30)
+            let from = clickPoint(NSPoint(x: thumb.midX, y: thumb.midY), in: scroller), to = NSPoint(x: Double(from.x), y: Double(from.y) - 30)
             func mouse(_ type: NSEvent.EventType, at point: NSPoint) -> NSEvent? {
                 NSEvent.mouseEvent(
                     with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
@@ -1072,7 +1072,7 @@ extension Driver {
         let room = Double(document.frame.height) - Double(view.contentSize.height)
         guard room > 0 else { return (false, "nothing to scroll: the rows are \(document.frame.height) pt in \(view.contentSize.height) pt") }
         let wanted = room * min(max(fraction, 0), 1)
-        let middle = window.convertPoint(toScreen: view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil))
+        let middle = window.convertPoint(toScreen: clickPoint(NSPoint(x: view.bounds.midX, y: view.bounds.midY), in: view))
         let top = Double(NSScreen.screens.first?.frame.maxY ?? 0)
         var routed = true
         while abs(Double(view.contentView.bounds.minY) - wanted) > 0.5 {
@@ -1110,12 +1110,18 @@ extension Driver {
 
     /// Clicks the row of `id` in `list` 24 pt in from its leading edge in the list's direction,
     /// clear of the actions at its end.
+    /// A click on row `id` of `list` once the row is where a person would click it: its point,
+    /// taken with the window laid out (``clickPoint(_:in:)``), reaches the list.
     func clickRow(_ id: String, in list: SailList) async -> Bool {
-        list.layoutSubtreeIfNeeded()
-        guard let row = Self.row(id, in: list) else { return false }
-        let rect = list.rect(ofRow: row)
-        let x = list.userInterfaceLayoutDirection == .rightToLeft ? rect.maxX - 24 : rect.minX + 24
-        return await click(list, at: NSPoint(x: x, y: rect.minY + min(rect.height, 52) / 2))
+        var point = NSPoint.zero
+        let reachable = await waitUntil(5) {
+            guard let row = Self.row(id, in: list) else { return false }
+            let rect = list.rect(ofRow: row)
+            point = NSPoint(x: list.userInterfaceLayoutDirection == .rightToLeft ? rect.maxX - 24 : rect.minX + 24, y: rect.minY + min(rect.height, 52) / 2)
+            return list.window?.contentView?.superview?.hitTest(clickPoint(point, in: list))?.isDescendant(of: list) == true
+        }
+        guard reachable else { return false }
+        return await click(list, at: point)
     }
 
     private static func row(_ id: String, in list: SailList) -> Int? {
@@ -1130,7 +1136,7 @@ extension Driver {
     /// tracking takes both.
     func click(_ view: NSView, at point: NSPoint, modifiers: NSEvent.ModifierFlags = []) async -> Bool {
         guard let window = view.window else { return false }
-        let location = view.convert(point, to: nil)
+        let location = clickPoint(point, in: view)
         func event(_ type: NSEvent.EventType) -> NSEvent? {
             NSEvent.mouseEvent(
                 with: type, location: location, modifierFlags: modifiers, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,

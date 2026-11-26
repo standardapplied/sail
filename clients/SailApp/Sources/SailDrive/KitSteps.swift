@@ -115,7 +115,7 @@ extension Driver {
         }
         let watch = MenuWatch(tooltip)
         menu.delegate = watch
-        let middle = more.convert(NSPoint(x: more.bounds.midX, y: more.bounds.midY), to: nil)
+        let middle = clickPoint(NSPoint(x: more.bounds.midX, y: more.bounds.midY), in: more)
         func click(_ type: NSEvent.EventType) -> NSEvent? {
             NSEvent.mouseEvent(
                 with: type, location: middle, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,

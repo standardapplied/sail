@@ -8,7 +8,7 @@ import Testing
 
 /// The list and the left panel scroll with the quiet scroller while their heads and feet stay put;
 /// the panel's foot and loading head as the frames draw them; and the words that must fit, fit.
-@MainActor @Suite struct WorkspacesScrollTests {
+@MainActor @Suite(.timeLimit(.minutes(1))) struct WorkspacesScrollTests {
     init() {
         ExitWatch.install()
     }
@@ -242,6 +242,43 @@ import Testing
         let chosen = panel.list.rect(ofRow: panel.list.selectedRow)
         #expect(panel.scroll.contentView.documentVisibleRect.insetBy(dx: -0.5, dy: -0.5).contains(chosen), "the chosen project is not scrolled into view")
     }
+
+    /// A project listed since the panel was last laid out is not yet where a click finds it: the
+    /// panel sizes its scroll view to its rows in its own layout, so until the window's next layout
+    /// pass it is as tall as the one project listed before, and lighthouse's place, taken from the
+    /// list, lies outside it, where a click chooses nothing (main's drive on af09e04fd, step
+    /// `w-l-lighthouse-chosen`). The window's next pass, which runs before anything is drawn, puts
+    /// the row under that point; a person, who clicks what is drawn, always finds it there.
+    @Test func aProjectListedSinceTheLastLayoutIsNotYetWhereAClickFindsIt() throws {
+        let panel = LeftPanel(look: .light, mono: try LabelFont(directory: LookTests.fonts))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: LeftPanel.width.standard, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.orderOut(nil) }
+        window.contentView = panel
+        window.orderFront(nil)
+        var model = WorkspacesModel(person: WorkspacesViewTests.ana)
+        func shown(_ names: [String]) throws -> WorkspacesModel.Panel {
+            let projects = names.map { ProjectSummary(name: $0, containerStatus: .known(.running), template: .known(.ready)) }
+            _ = model.projectsListed(.success(ProjectList(projects: projects, total: projects.count)))
+            guard case let .shown(shown, _) = model.screen else { throw Unshown() }
+            return shown
+        }
+        panel.render(try shown(["harbor"]))
+        window.layoutIfNeeded()
+        panel.render(try shown(["harbor", "demo", "lighthouse", "marina", "atlas", "keel", "quarry", "beacon", "tidewater"]))
+        let row = try #require(panel.list.entries.firstIndex { if case let .item(item) = $0 { item.id == "lighthouse" } else { false } })
+        func hit() -> NSView? {
+            let rect = panel.list.rect(ofRow: row)
+            let point = panel.list.convert(NSPoint(x: rect.minX + 24, y: rect.minY + min(rect.height, 52) / 2), to: nil)
+            return panel.superview?.hitTest(point)
+        }
+        let before = hit()
+        #expect(!(before?.isDescendant(of: panel.list) ?? false), "before the window's layout pass, lighthouse's place hit \(before.map { "\(type(of: $0))" } ?? "nothing") in the list; the scroll view is \(panel.scroll.frame.height) pt tall")
+        window.layoutIfNeeded()
+        let after = hit()
+        #expect(after?.isDescendant(of: panel.list) == true, "after the window's layout pass, lighthouse's place hit \(after.map { "\(type(of: $0))" } ?? "nothing"), not its row")
+    }
+
+    struct Unshown: Error {}
 
     /// N2: the card's edge is drawn over the panel's leading edge in dark, so there the chosen bar
     /// starts a hairline in, clear of it; in light, with no edge, at the panel's edge; a change of
