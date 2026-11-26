@@ -32,7 +32,7 @@ public final class ProjectCatalogRename {
                           new IllegalStateException(
                               "No project '" + from + "' in the catalog to rename."));
           if (projects.findByName(to).isPresent()) {
-            throw new IllegalStateException("A project named '" + to + "' already exists.");
+            throw new ProjectStore.NameTaken(to);
           }
           projects.rename(from, to, existing.definition().withName(to));
           new SpecStore(db).reproject(from, to);

@@ -42,7 +42,6 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -256,10 +255,40 @@ class PasskeyRoutesTest {
   }
 
   /**
+   * A session whose own passkey an admin removed at the host, which leaves its sessions alive, is
+   * no longer a session signed in with a passkey: it removes none of its person's others, refused
+   * as a token is, whatever the id.
+   */
+  @Test
+  void aSessionWhosePasskeyTheAdminRemovedRemovesNoOther() throws Exception {
+    var phone = enroll("mara", "iPhone");
+    var mac = enroll("mara", "MacBook");
+    enroll("mara", "iPad");
+    var stolen = signIn(phone);
+    new WebauthnCredentialStore(db).delete(phone.credentialId());
+
+    for (var id : List.of(encoded(mac), encoded(phone), "bm90LWEtcGFzc2tleQ")) {
+      var refused = ask(stolen, "DELETE", "/v1/passkeys/" + id);
+
+      assertEquals(403, refused.status(), id);
+      assertEquals(
+          refusal(
+              "forbidden",
+              "Passkeys are removed only from a session signed in with a passkey.",
+              "Sign in with one of your passkeys, then try again.",
+              List.of()),
+          refused.map(),
+          id);
+    }
+    assertEquals(2, credentials.listForFde(idOf("mara")).size());
+  }
+
+  /**
    * Two removals at once never leave their person without a passkey: Mara, signed in on her Mac
    * with one and on her phone with the other, removes each from the other device. Whichever decides
    * first, on its own connection as another process would, the other waits for its write lock and
-   * then decides on what it left: its own session ended with the passkey the first removed.
+   * then decides on what it left: its own session ended with the passkey the first removed, so it
+   * is answered as an ended session is.
    */
   @ParameterizedTest
   @ValueSource(strings = {"mac", "phone"})
@@ -287,7 +316,7 @@ class PasskeyRoutesTest {
                   decidingDb.transaction(
                       () -> {
                         locked.countDown();
-                        awaitWaitingOnTheWriteLock(waitingThread);
+                        awaitBeginningItsWriteTransaction(waitingThread);
                         return remove(decidingDb, deciding);
                       }));
       Thread.ofPlatform().start(decidingRemoval);
@@ -296,7 +325,7 @@ class PasskeyRoutesTest {
 
       assertEquals("removed", decidingRemoval.get(30, TimeUnit.SECONDS));
       assertEquals(
-          "forbidden: Passkeys are removed only from a session signed in with a passkey.",
+          "invalid_bearer_token: Session token is invalid or expired.",
           waitingRemoval.get(30, TimeUnit.SECONDS));
     }
     assertEquals(
@@ -500,17 +529,34 @@ class PasskeyRoutesTest {
         });
   }
 
-  /** Returns once {@code thread} is inside a write transaction, which another holds: waiting. */
-  private static void awaitWaitingOnTheWriteLock(Thread thread) {
+  /**
+   * Returns once {@code thread} is running the statement that begins its write transaction: a
+   * statement {@code Sqlite.transaction} runs itself. While this thread's connection holds the
+   * write lock, that {@code BEGIN IMMEDIATE} cannot return before this one commits. The wait itself
+   * is in SQLite's busy handler, native code a stack shows no differently from a statement running,
+   * so this is the furthest a thread can be seen to have gone without a sleep.
+   */
+  private static void awaitBeginningItsWriteTransaction(Thread thread) {
     var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-    while (Arrays.stream(thread.getStackTrace())
-        .noneMatch(
-            frame ->
-                frame.getClassName().equals(Sqlite.class.getName())
-                    && frame.getMethodName().equals("transaction"))) {
-      assertTrue(System.nanoTime() < deadline, "the other removal never waited on the write lock");
+    while (!beginning(thread.getStackTrace())) {
+      assertTrue(
+          System.nanoTime() < deadline, "the other removal never began its write transaction");
       Thread.onSpinWait();
     }
+  }
+
+  private static boolean beginning(StackTraceElement[] frames) {
+    for (var i = 1; i < frames.length; i++) {
+      if (inSqlite(frames[i], "transaction") && inSqlite(frames[i - 1], "execute")) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean inSqlite(StackTraceElement frame, String method) {
+    return frame.getClassName().equals(Sqlite.class.getName())
+        && frame.getMethodName().equals(method);
   }
 
   /**

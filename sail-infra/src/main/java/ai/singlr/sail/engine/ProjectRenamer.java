@@ -9,6 +9,7 @@ import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -86,7 +87,7 @@ public final class ProjectRenamer {
                     new IllegalStateException(
                         "No project '" + old + "' in the catalog to rename."));
     if (operations.catalog().project(renamed).isPresent()) {
-      throw new IllegalStateException("A project named '" + renamed + "' already exists.");
+      throw new ProjectStore.NameTaken(renamed);
     }
     operations.catalog().requireRenamable(old);
     if (!(containers.queryState(renamed) instanceof ContainerState.NotCreated)) {

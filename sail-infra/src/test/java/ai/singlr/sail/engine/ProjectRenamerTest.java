@@ -296,6 +296,10 @@ class ProjectRenamerTest {
   void rejectsATargetNameAlreadyInTheCatalog() throws Exception {
     new ProjectStore(db).upsert(TestDefinitions.named("taken"));
 
-    assertThrows(IllegalStateException.class, () -> renamer(runningShell()).rename("old", "taken"));
+    var taken =
+        assertThrows(
+            IllegalStateException.class, () -> renamer(runningShell()).rename("old", "taken"));
+
+    assertEquals("A project named taken already exists.", taken.getMessage());
   }
 }

@@ -157,6 +157,23 @@ class CatalogAuthorityAuditTest {
     assertEquals("acme2", new SpecStore(db).findById("theirs").orElseThrow().project());
   }
 
+  /** A rename onto a name the catalog holds is refused in the create's one sentence for it. */
+  @Test
+  void aRenameOntoATakenNameSaysTheCreatesSentence() {
+    Acting.system(
+        () -> {
+          new ProjectStore(db).upsert(TestDefinitions.named("acme"));
+          new ProjectStore(db).upsert(TestDefinitions.named("acme2"));
+        });
+
+    var taken =
+        assertThrows(
+            ProjectStore.NameTaken.class,
+            () -> Acting.as("root", () -> ProjectCatalogRename.rename(db, "acme", "acme2")));
+
+    assertEquals("A project named acme2 already exists.", taken.getMessage());
+  }
+
   private static SpecStore.SpecRow bobsSpec() {
     return new SpecStore.SpecRow(
         "theirs",

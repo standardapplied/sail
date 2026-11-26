@@ -19,7 +19,6 @@ import ai.singlr.sail.store.WebauthnCredentialStore;
 import ai.singlr.sail.store.WebauthnCredentialStore.Credential;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 
 /**
  * The doors to a person's own passkeys (Keep passkeys): list them, saying which one the calling
@@ -49,7 +48,7 @@ public final class PasskeyOperations {
   /** The caller's passkeys, oldest first, the one {@code credential} signed in with current. */
   PasskeysResponse list(String credential) {
     var held = heldBy(keeper());
-    var signedInWith = sessions.passkeyOf(credential);
+    var signedInWith = sessions.passkeyOf(credential).orElse(null);
     return new PasskeysResponse(
         held.stream()
             .map(passkey -> new PasskeyView(passkey, signedIn(passkey, signedInWith)))
@@ -59,17 +58,26 @@ public final class PasskeyOperations {
   /**
    * Removes the caller's passkey {@code id}, its credential id as {@link Passkeys#encodeId} writes
    * it, and ends every session it signed in, deciding and removing in one write transaction;
-   * refused when {@code credential}, the caller's own, is no session a passkey signed in, and then
-   * when the passkey is not theirs, their last, or the one that session signed in with, the last
-   * said first.
+   * refused as an ended session is when {@code credential}, the caller's own session, has ended by
+   * the time the transaction reads it (a removal that went first ended it); when it is no session
+   * signed in with one of the caller's passkeys that still exists (a token, a session no passkey
+   * signed in, one whose passkey an admin removed at the host); and then when the passkey is not
+   * theirs, their last, or the one that session signed in with, the last said first.
    */
   void remove(String id, String credential) {
     db.transaction(
         () -> {
           var keeper = keeper();
-          var signedInWith =
-              sessions.passkeyOf(credential).orElseThrow(PasskeyOperations::noPasskeySession);
+          if (credential.startsWith(SessionAwareAuth.SESSION_PREFIX)
+              && sessions.validate(credential).isEmpty()) {
+            throw SessionAwareAuth.invalid();
+          }
           var held = heldBy(keeper);
+          var signedInWith =
+              sessions
+                  .passkeyOf(credential)
+                  .filter(signed -> held.stream().anyMatch(each -> signedIn(each, signed)))
+                  .orElseThrow(PasskeyOperations::noPasskeySession);
           var passkey =
               held.stream()
                   .filter(each -> Passkeys.encodeId(each.credentialId()).equals(id))
@@ -126,7 +134,8 @@ public final class PasskeyOperations {
         Remedy.of("Sign in with one of your passkeys, then try again."));
   }
 
-  private static boolean signedIn(Credential passkey, Optional<String> signedInWith) {
-    return signedInWith.filter(Passkeys.encodeId(passkey.credentialId())::equals).isPresent();
+  /** Whether {@code passkey} is the one {@code signedInWith} names, none when null. */
+  private static boolean signedIn(Credential passkey, String signedInWith) {
+    return Passkeys.encodeId(passkey.credentialId()).equals(signedInWith);
   }
 }

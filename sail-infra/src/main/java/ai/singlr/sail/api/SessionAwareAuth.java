@@ -66,7 +66,8 @@ public final class SessionAwareAuth implements ApiAuth {
     }
   }
 
-  private static ApiException invalid() {
+  /** The refusal of a session token that is unknown, expired or ended. */
+  static ApiException invalid() {
     return new ApiException(ErrorCode.INVALID_BEARER_TOKEN, "Session token is invalid or expired.");
   }
 }

@@ -16,6 +16,7 @@ import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.LoginStore;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 
@@ -66,10 +67,15 @@ final class AgentStarts {
 
   /**
    * Why a harness a workspace offers does not start ({@code why}), and the few words a list row
-   * says of it ({@code unavailable}), declared beside the refusal it shortens: null for a refusal
-   * that has none, whose row says its sentence alone.
+   * says of it ({@code unavailable}), declared beside the refusal it shortens: every refusal an
+   * offer carries has both.
    */
-  record OfferRefusal(ApiException why, String unavailable) {}
+  record OfferRefusal(ApiException why, String unavailable) {
+    OfferRefusal {
+      Objects.requireNonNull(why, "why");
+      Objects.requireNonNull(unavailable, "unavailable");
+    }
+  }
 
   /**
    * Why {@code harness} does not start in a workspace of {@code config}'s project, "Not installed

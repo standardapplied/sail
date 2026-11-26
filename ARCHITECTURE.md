@@ -591,9 +591,10 @@ passkeys, `PasskeyOperations`): `GET /v1/passkeys` answers each one's `id` (base
 signed in with (`sessions.credential_id`, written by the sign-in that minted it, which looks the
 passkey up in the write transaction that inserts the session, so a passkey removed mid sign-in mints
 none; none for a gateway's session or a token); `DELETE /v1/passkeys/{id}` removes one and ends every
-session it signed in, `204`. Only a session signed in with a passkey removes one: a person's token at
-any role and a session that names no passkey are `403 forbidden`, the same for every id, before the
-id is looked up. Another person's id is `404` as an unknown one is, so ids are not probed; the last
+session it signed in, `204`. Only a session signed in with one of the caller's passkeys that still
+exists removes one: a person's token at any role, a session that names no passkey and one whose
+passkey an admin removed at the host are `403 forbidden`, the same for every id, before the id is
+looked up; a session a removal that went first ended is `401`, as an ended session always is. Another person's id is `404` as an unknown one is, so ids are not probed; the last
 passkey and the one the caller signed in with are `409`, the last said first. The whole decision,
 from reading the caller's session and passkeys to the delete and the revoke, is one write
 transaction, so two removals at once, in one process or two, never leave a person none
@@ -4367,7 +4368,7 @@ seconds, none when none is installed). `signed_in` is said only when it was read
 workspace is not started to read it, and a read that fails or does not answer says nothing. A
 harness the project does not install carries `harness_not_installed`, `unavailable` beside it ("Not
 installed in harbor", the few words a list row says, declared with the refusal it shortens in
-`AgentStarts.OfferRefusal`; a refusal with none says its sentence alone) and `inside` false.
+`AgentStarts.OfferRefusal`, which takes no refusal without them) and `inside` false.
 `GET /v1/agents` says each harness's `sign_in` (without `signed_in`) and `kinds` from the same mapping
 (`HarnessWaysIn`). Every
 harness has exactly two ways in, its own sign-in or one stored key (`HarnessContractTest`), so a

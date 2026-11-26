@@ -2197,7 +2197,7 @@ record AgentOffersResponse(
  * inside it ({@code inside}), its own sign-in ({@code sign_in}) and whether the workspace holds it
  * ({@code signed_in}), said only when that was read ({@code signedIn} null when not); and why it
  * does not start at all ({@code refusal}), with the few words a list row says of it ({@code
- * unavailable}) where the refusal declares them.
+ * unavailable}).
  */
 record AgentOffer(
     Harness harness,
@@ -2241,9 +2241,7 @@ record AgentOffer(
     }
     if (refusal != null) {
       m.put("refusal", refusal.why().error().toMap());
-      if (refusal.unavailable() != null) {
-        m.put("unavailable", refusal.unavailable());
-      }
+      m.put("unavailable", refusal.unavailable());
     }
     return m;
   }

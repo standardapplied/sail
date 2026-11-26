@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectRenamer;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.store.ProjectStore;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -81,7 +82,7 @@ public final class ProjectRenameCommand implements Runnable {
                 + "' to see projects.");
       }
       if (operations.catalog().project(newName).isPresent()) {
-        throw new IllegalStateException("A project named '" + newName + "' already exists.");
+        throw new ProjectStore.NameTaken(newName);
       }
 
       if (dryRun) {
