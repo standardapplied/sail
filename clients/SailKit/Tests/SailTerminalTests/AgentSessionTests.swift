@@ -17,7 +17,9 @@ import Testing
 
     static func agent(_ door: FakeRunnerDoor, _ name: String) throws -> TerminalSession {
         let create = place.sessionCreate(session: name, size: TerminalSize(columns: 80, rows: 24), agent: start)
-        return TerminalSession(open: create, door: .runner(FakeRunnerDoorTests.Tickets(door)), screen: try screen())
+        return TerminalSession(
+            open: create, door: .runner(FakeRunnerDoorTests.Tickets(door)), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep
+        )
     }
 
     @Test func anAgentsCreateNamesItsHarnessAndModeAndNoCommandAndIsListedByIt() async throws {

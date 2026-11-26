@@ -23,7 +23,7 @@ struct RealRunnerTests {
         let runner = try RealRunner()
         let (session, watch) = try await runner.ours()
         "echo hi-$((6*7))\r".forEach { session.send(.typing($0)) }
-        try await watch.until(within: 30, "echoed") { try session.screen.text().contains("\nhi-42") }
+        try await watch.until("echoed") { try session.screen.text().contains("\nhi-42") }
         session.close()
     }
 
@@ -39,9 +39,9 @@ struct RealRunnerTests {
         let session = TerminalSession(open: create, door: .runner(runner.counter), screen: try screen(columns: 100, rows: 30))
         let watch = Watch(session)
         session.start()
-        try await watch.attached(within: 120)
+        try await watch.attached()
         "echo app-$((6*7)) $PWD\r".forEach { session.send(.typing($0)) }
-        try await watch.until(within: 30, "echoed in the workspace") {
+        try await watch.until("echoed in the workspace") {
             try session.screen.text().contains("\napp-42 /home/dev/workspace")
         }
         session.close()
@@ -56,7 +56,7 @@ struct RealRunnerTests {
         try await present(ticket)
         await #expect(throws: TerminalError.self) { try await present(ticket) }
         "echo still-here\r".forEach { session.send(.typing($0)) }
-        try await watch.until(within: 30, "echoed") { try session.screen.text().contains("\nstill-here") }
+        try await watch.until("echoed") { try session.screen.text().contains("\nstill-here") }
         #expect(session.state.phase == .attached)
         session.close()
     }
@@ -79,13 +79,13 @@ struct RealRunnerTests {
         let runner = try RealRunner()
         let (session, watch) = try await runner.ours()
         "printf 'mark-%s\\033[?1004h\\n' $((6*7)); cat -v\r".forEach { session.send(.typing($0)) }
-        try await watch.until(within: 30, "started cat") { try session.screen.text().contains("\nmark-42") }
+        try await watch.until("started cat") { try session.screen.text().contains("\nmark-42") }
         let before = try session.screen.text()
         let asked = runner.counter.count
         session.setFocused(false)
         session.dropConnection()
-        try await watch.until(within: 30, "reattached") { runner.counter.count > asked && session.state.phase == .attached }
-        try await watch.until(within: 30, "showed the focus-lost report") { try session.screen.text().contains("^[[O") }
+        try await watch.until("reattached") { runner.counter.count > asked && session.state.phase == .attached }
+        try await watch.until("showed the focus-lost report") { try session.screen.text().contains("^[[O") }
         #expect(try session.screen.text().hasPrefix(before.split(separator: "\n").dropLast().joined(separator: "\n")))
         #expect(runner.counter.last == .attach(session: session.state.session))
         session.close()
@@ -100,7 +100,7 @@ struct RealRunnerTests {
         let watch = Watch(theirs)
         theirs.start()
         let words = "There is no session '\(name)' on this box that you may attach."
-        try await watch.until(within: 30, "the API's refusal of the ticket, in the host's sentence") {
+        try await watch.until("the API's refusal of the ticket, in the host's sentence") {
             if case let .ended(.ticketRefused(refusal)) = theirs.state.phase { refusal.message == words } else { false }
         }
         session.close()
@@ -179,7 +179,7 @@ struct RealRunner {
             let session = TerminalSession(open: create, door: .runner(counter), screen: try screen(columns: 100, rows: 30))
             let watch = Watch(session)
             session.start()
-            try await watch.attached(within: 60)
+            try await watch.attached()
             return (session, watch)
         }
         guard let socket = Self.environment["SAIL_BOX_SOCKET"] else { throw HostError("SAIL_PROJECT or SAIL_BOX_SOCKET names where a session opens") }
@@ -187,13 +187,13 @@ struct RealRunner {
         let opener = TerminalSession(open: create, door: .local(.unix(path: socket)), screen: try screen(columns: 100, rows: 30))
         let opened = Watch(opener)
         opener.start()
-        try await opened.attached(within: 30)
+        try await opened.attached()
         opener.detach()
         try await opened.phase(.detached)
         let session = TerminalSession(attach: name, write: true, door: .runner(counter), screen: try screen(columns: 100, rows: 30))
         let watch = Watch(session)
         session.start()
-        try await watch.attached(within: 30)
+        try await watch.attached()
         return (session, watch)
     }
 }

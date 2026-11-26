@@ -16,7 +16,10 @@ import Testing
         let create = SessionCreate(
             session: name, command: [], workingDirectory: "/tmp", project: "acme", room: "", size: TerminalSize(columns: 80, rows: 24), workspace: "try"
         )
-        return TerminalSession(open: create, door: .runner(FakeRunnerDoorTests.Tickets(door)), screen: try screen())
+        return TerminalSession(
+            open: create, door: .runner(FakeRunnerDoorTests.Tickets(door)), screen: try screen(), timeout: Patience.answer,
+            sleep: { try await Task.sleep(for: $0) }
+        )
     }
 
     @Test func anEndWhileTheCreateIsUnansweredWaitsForItAndEndsWhatWasMade() async throws {
@@ -28,7 +31,7 @@ import Testing
         session.start()
         try await watch.until("the runner is making it") { door.createsReceived == 1 }
         #expect(session.atHost == .coming, "a session coming counts")
-        let ending = Task { await session.end(within: .seconds(10)) }
+        let ending = Task { await session.end(within: .seconds(Patience.answer)) }
         door.releaseCreates()
         #expect(await ending.value == .ended)
         #expect(door.sessions.isEmpty, "the host's list: nothing left behind")
@@ -81,12 +84,12 @@ import Testing
             session: "app-lost", command: [], workingDirectory: "/tmp", project: "acme", room: "", size: TerminalSize(columns: 80, rows: 24), workspace: "try"
         )
         let session = TerminalSession(
-            open: create, door: .runner(FakeRunnerDoorTests.Tickets(door)), screen: try screen(), timeout: 5, sleep: timeline.sleep
+            open: create, door: .runner(FakeRunnerDoorTests.Tickets(door)), screen: try screen(), timeout: Patience.answer, sleep: timeline.sleep
         )
         let watch = Watch(session)
         session.start()
         try await watch.until("the runner made it, its answer lost") { door.sessions == ["app-lost"] && session.atHost == .maybe }
-        #expect(await session.end(within: .seconds(5)) == .ended)
+        #expect(await session.end(within: .seconds(Patience.answer)) == .ended)
         #expect(door.sessions.isEmpty, "the host's list: nothing left behind")
         timeline.passAll()
     }

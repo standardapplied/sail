@@ -1,4 +1,5 @@
 import Foundation
+import SailKitTestSupport
 @testable import SailTerminal
 import SailTerminalWire
 import SailVT
@@ -26,7 +27,7 @@ import Testing
     @Test func aSubscribedProgramHearsTheWritersLookAndNeverTheObservers() async throws {
         let (host, writer, peer, watch) = try await attachedLocally()
         let observer = TerminalSession(
-            attach: "work", write: false, door: .local(host.address), screen: try screen(), timeout: 5, sleep: Naps().sleep
+            attach: "work", write: false, door: .local(host.address), screen: try screen(), timeout: Patience.answer, sleep: Naps().sleep
         )
         let watched = Watch(observer)
         observer.start()
@@ -100,7 +101,7 @@ import Testing
         let create = SessionCreate(session: "work", command: [], workingDirectory: "/tmp", project: "", room: "", size: TerminalSize(columns: 80, rows: 24))
         let screen = try Screen(size: GridSize(columns: 80, rows: 24), scrollbackBytes: 1 << 20, palette: .light, now: { hands.now })
         let session = TerminalSession(
-            open: create, door: .local(host.address), screen: screen, timeout: 5, stableAfter: .zero, sleep: Naps().sleep, after: timers.after
+            open: create, door: .local(host.address), screen: screen, timeout: Patience.answer, stableAfter: .zero, sleep: Naps().sleep, after: timers.after
         )
         let watch = Watch(session)
         session.start()
