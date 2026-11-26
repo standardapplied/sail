@@ -40,10 +40,42 @@ import Testing
         defer { close(foreign) }
         try #require(foreign >= 0)
         let child = try await Child()
-        let held = try Self.descriptors(of: child.pid)
+        let held = Result { try Self.descriptors(of: child.pid) }
         try await child.end()
-        #expect(held == [0, 1, 2], "the child holds what it was not given: a listener, a connection, or a descriptor opened outside Descriptors")
+        #expect(try held.get() == [0, 1, 2], "the child holds what it was not given: a listener, a connection, or a descriptor opened outside Descriptors")
         withExtendedLifetime((connection, peer)) {}
+    }
+
+    /// A child starts with no signal blocked and every signal at its default action, whatever the
+    /// thread that starts it blocks and this process ignores: a host that inherited a blocked or
+    /// ignored SIGTERM would never end on `stop()`. Here SIGUSR1 is both, for the instant of the
+    /// start, on a thread of its own, and the child sends it to itself.
+    @Test func aChildStartsWithEverySignalAtItsDefaultActionAndNoneBlocked() async throws {
+        let status = try await onThread { () throws(SpawnRefused) -> Int32 in
+            var blocked = sigset_t(), before = sigset_t()
+            sigemptyset(&blocked)
+            sigaddset(&blocked, SIGUSR1)
+            pthread_sigmask(SIG_BLOCK, &blocked, &before)
+            let handled = signal(SIGUSR1, SIG_IGN)
+            defer {
+                signal(SIGUSR1, handled)
+                pthread_sigmask(SIG_SETMASK, &before, nil)
+            }
+            let pid = try TestSpawn.process("/bin/sh", ["-c", "kill -USR1 $$; exit 0"])
+            var status: Int32 = 0
+            while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+            return status
+        }
+        #expect(status & 0x7F == SIGUSR1, "the child did not end of the SIGUSR1 it sent itself: status \(status)")
+    }
+
+    /// A child's standard descriptor is never given one of this process's own standard three: an
+    /// earlier one may already have taken its place in the child when a later one is copied.
+    @Test func aStandardDescriptorIsNeverGivenAsAnother() {
+        for descriptor in Int32(0) ... 2 {
+            let refused = #expect(throws: SpawnRefused.self) { try TestSpawn.process("/bin/sh", ["-c", "exit 0"], errors: .descriptor(descriptor)) }
+            #expect(refused?.description == "descriptor \(descriptor) is one of the child's own standard three")
+        }
     }
 
     @Test func aListenerStoppedWhileAChildLivesRefusesTheNextConnection() async throws {
@@ -69,6 +101,7 @@ import Testing
     /// `listener` closed, then connected to, on a thread of its own.
     final class Closing: Sendable {
         private let answered = Mutex<Result<Socket, TerminalError>?>(nil)
+        private let ended = DispatchSemaphore(value: 0)
 
         init(_ listener: HeldListener) {
             Thread { [self] in
@@ -77,11 +110,15 @@ import Testing
                     try Socket.connect(to: .tcp(host: "127.0.0.1", port: listener.port), timeout: Patience.answer)
                 }
                 answered.withLock { $0 = answer }
+                ended.signal()
             }.start()
         }
 
+        /// The connect's answer, waited for at most a glance.
         var answer: Result<Socket, TerminalError>? {
-            answered.withLock { $0 }
+            if let answer = answered.withLock({ $0 }) { return answer }
+            _ = ended.wait(timeout: .now() + .milliseconds(Int(glance)))
+            return answered.withLock { $0 }
         }
     }
 
@@ -92,14 +129,16 @@ import Testing
     final class HeldStart: Sendable {
         private let folder: String
         private let through: Int32
-        private let started = DispatchSemaphore(value: 0)
+        private let ended = DispatchSemaphore(value: 0)
         private let spawned = Mutex<Result<pid_t, SpawnRefused>?>(nil)
         private let released = Mutex(false)
-        private let step = Mutex(Step.holding)
+        private let step = Mutex(Step.unstarted)
 
-        /// Until it has opened its standard output; then while `listener` is closed and connected
-        /// to, as long as the close has not ended or waited; then after `held` was opened.
+        /// Before the start; until it has opened its standard output; then while `listener` is
+        /// closed and connected to, as long as the close has not ended or waited; then after `held`
+        /// was opened.
         private enum Step {
+            case unstarted
             case holding
             case closing(Closing, waits: Int)
             case released(Closing)
@@ -109,35 +148,34 @@ import Testing
             var template = Array("/tmp/sailkit-XXXXXX".utf8CString)
             let folder = try #require(mkdtemp(&template).map { String(cString: $0) })
             self.folder = folder
-            try #require(mkfifo(folder + "/through", 0o600) == 0 && mkfifo(folder + "/held", 0o600) == 0, "no FIFO: \(errno)")
-            through = open(folder + "/through", O_RDONLY | O_NONBLOCK | O_CLOEXEC)
-            try #require(through >= 0, "the FIFO cannot be read: \(errno)")
-            Thread { [self] in
-                let result = Result { () throws(SpawnRefused) in
-                    try TestSpawn.process("/bin/sh", ["-c", "exit 0"], output: .file(folder + "/through"), errors: .file(folder + "/held"))
-                }
-                spawned.withLock { $0 = result }
-                started.signal()
-            }.start()
+            let made = mkfifo(folder + "/through", 0o600) == 0 && mkfifo(folder + "/held", 0o600) == 0
+            through = made ? open(folder + "/through", O_RDONLY | O_NONBLOCK | O_CLOEXEC) : -1
+            guard through >= 0 else {
+                let reason = errno
+                HeldStart.clear(folder)
+                throw HostError("no FIFO to hold the start with: \(reason)")
+            }
         }
 
         /// `listener` closed while the start holds this process's descriptors, then connected to:
         /// the connect's answer. `held` is opened once the close has ended or waits for the start.
-        /// Every step runs on one thread of its own, never on the shared pool: tests there that
-        /// close a listener or start a process wait for the start meanwhile, and a step that waited
-        /// for a pool thread could wait for them for ever.
+        /// Every step, the start first, runs on one thread of its own, never on the shared pool:
+        /// tests there that close a listener or start a process wait for the start meanwhile, and a
+        /// step that waited for a pool thread could wait for them for ever.
         func closing(_ listener: HeldListener) async throws -> Result<Socket, TerminalError> {
             try await untilCancelled("the start, its close or the connect after never ended") { [self] () -> Result<Socket, TerminalError>? in
-                defer { sched_yield() }
                 switch step.withLock({ $0 }) {
+                case .unstarted:
+                    step.withLock { $0 = .holding }
+                    start()
                 case .holding:
                     var byte: UInt8 = 0
                     if read(through, &byte, 1) < 0, errno == EAGAIN {
                         let waits = TestSpawn.waits
                         let closing = Closing(listener)
                         step.withLock { $0 = .closing(closing, waits: waits) }
-                    } else if let ended = spawned.withLock({ $0 }) {
-                        throw HostError("the start ended before it opened its output: \(ended)")
+                    } else if ended.wait(timeout: .now() + .milliseconds(Int(glance))) == .success {
+                        throw HostError("the start ended before it opened its output: \(String(describing: spawned.withLock { $0 }))")
                     }
                 case let .closing(closing, waits):
                     guard closing.answer != nil || TestSpawn.waits != waits else { return nil }
@@ -150,19 +188,44 @@ import Testing
             }
         }
 
-        /// Lets the start open `held`, waits for it to end and reaps what it started; once.
+        private func start() {
+            Thread { [self] in
+                let result = Result { () throws(SpawnRefused) in
+                    try TestSpawn.process("/bin/sh", ["-c", "exit 0"], output: .file(folder + "/through"), errors: .file(folder + "/held"))
+                }
+                spawned.withLock { $0 = result }
+                ended.signal()
+            }.start()
+        }
+
+        /// Lets the start open `held`, waits for it to end and reaps what it started; once. A start
+        /// that cannot be let go would hold every later start and close of this process for ever,
+        /// so that ends the process at once.
         func release() {
             guard released.withLock({ (done: inout Bool) -> Bool in
                 defer { done = true }
                 return !done
             }) else { return }
+            switch step.withLock({ $0 }) {
+            case .unstarted: break
+            default: letGo()
+            }
+            close(through)
+            HeldStart.clear(folder)
+        }
+
+        private func letGo() {
             let held = open(folder + "/held", O_RDONLY | O_NONBLOCK | O_CLOEXEC)
-            started.wait()
+            precondition(held >= 0, "the held FIFO cannot be opened, so the start it holds never ends: \(errno)")
+            if spawned.withLock({ $0 }) == nil { ended.wait() }
             if case let .success(pid)? = spawned.withLock({ $0 }) {
                 var status: Int32 = 0
                 while waitpid(pid, &status, 0) < 0, errno == EINTR {}
             }
-            [held, through].forEach { close($0) }
+            close(held)
+        }
+
+        private static func clear(_ folder: String) {
             ["/held", "/through", ""].forEach { _ = remove(folder + $0) }
         }
     }
@@ -189,12 +252,17 @@ import Testing
             self.pid = pid
             self.input = input.write
             self.output = output.read
-            let said = try await untilCancelled("the child never said it runs") { [output = output.read] () -> Int? in
-                guard readable(output) else { return nil }
-                var buffer = [UInt8](repeating: 0, count: 16)
-                return read(output, &buffer, buffer.count)
+            do {
+                let said = try await untilCancelled("the child never said it runs") { [output = output.read] () -> Int? in
+                    guard readable(output) else { return nil }
+                    var buffer = [UInt8](repeating: 0, count: 16)
+                    return read(output, &buffer, buffer.count)
+                }
+                try #require(said > 0, "the child ended before it said it runs")
+            } catch {
+                try await end()
+                throw error
             }
-            try #require(said > 0, "the child ended before it said it runs")
         }
 
         /// Kills the child and reaps it: a child that holds a copy of its own input's writing end

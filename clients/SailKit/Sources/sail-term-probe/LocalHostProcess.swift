@@ -39,7 +39,8 @@ final class LocalHostProcess: Sendable {
 
     /// Starts the host and returns once it says it serves; its standard error is read to its end
     /// meanwhile and after, so the host never waits on a full pipe. This process gives up its own
-    /// copy of the pipe's writing end at once, so a host that ends is seen ending then.
+    /// copy of the pipe's writing end at once, so a host that ends is seen ending then. A host that
+    /// did not say it serves is killed and reaped before the start throws, so none is left behind.
     func start() async throws {
         guard let ends = Descriptors.pipe() else { throw ProbeError("no pipe for the host's output: \(errno)") }
         let spawned = Result { () throws(SpawnRefused) in try spawn(binary, ["_pty-host", "--local"], .descriptor(ends.write)) }
@@ -52,19 +53,16 @@ final class LocalHostProcess: Sendable {
             throw ProbeError("\(binary) could not be run: \(error)")
         }
         child.withLock { $0 = pid }
-        switch await said(ends.read) {
-        case true?:
-            return
-        case false?:
-            crash()
-            throw ProbeError("\(binary) _pty-host --local ended before it said it serves")
-        case nil:
-            throw ProbeError("\(binary) _pty-host --local did not say it serves within \(Self.startDeadline) s")
-        }
+        let said = await said(ends.read)
+        guard said != true else { return }
+        crash()
+        guard said == nil else { throw ProbeError("\(binary) _pty-host --local ended before it said it serves") }
+        try Task.checkCancellation()
+        throw ProbeError("\(binary) _pty-host --local did not say it serves within \(Self.startDeadline) s")
     }
 
     /// Whether the host said it serves before its output ended; nil when the deadline passed first,
-    /// or the start was cancelled, and then the host is killed, which ends its output.
+    /// or the start was cancelled.
     private func said(_ reading: Int32) async -> Bool? {
         let first = Handoff<Bool?>()
         Thread { first.answer(.success(Self.readUntilServing(reading))) }.start()
@@ -74,7 +72,6 @@ final class LocalHostProcess: Sendable {
         }
         let said = await withTaskCancellationHandler { try? await first.value() } onCancel: { deadline.cancel() }
         deadline.cancel()
-        if said == nil { crash() }
         return said
     }
 

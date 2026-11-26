@@ -263,7 +263,7 @@ struct HostError: Error, CustomStringConvertible {
 
 /// How long a reader of a fake looks at once before it looks whether it is still wanted, in
 /// milliseconds: a cadence, never a limit on what it waits for.
-private let glance: Int32 = 100
+let glance: Int32 = 100
 
 /// Whether `descriptor` has something to read, or has ended, within a glance.
 func readable(_ descriptor: Int32) -> Bool {
