@@ -740,9 +740,11 @@ extension Driver {
     }
 
     /// The Workspaces card while the app asks who is signed in, as a launch onto the section shows
-    /// it: Sail's mark alone in the card, centred in it, drawing itself (still under Reduce Motion),
-    /// the same mark in each look and in that look. The window's content is drawn by AppKit at 2x,
-    /// whatever the screen's scale, in both looks as `<name>-<look>.png`.
+    /// it: Sail's mark alone in the card, centred in it within half a pixel (AppKit puts a view on
+    /// whole pixels), the same mark in each look and in that look. The window's content is drawn by
+    /// AppKit at 2x, whatever the screen's scale, in both looks as `<name>-<look>.png`. Then the
+    /// mark draws itself with motion on and holds still with it reduced, whatever the runner's
+    /// setting (GitHub's macOS images turn Reduce Motion on), which is put back after.
     private func askingWhoIsSignedIn(_ name: String) async -> (Bool, String) {
         let pane = shell.workspaces
         pane.waitForSignIn()
@@ -754,13 +756,20 @@ extension Driver {
             pane.layoutSubtreeIfNeeded()
             let card = pane.card.convert(pane.card.bounds, to: nil), drawn = mark.convert(mark.bounds, to: nil)
             let same = pane.card.subviews.count == 1 && pane.card.subviews.first === mark && mark.look == self.shell.look
-            let centred = abs(Double(drawn.midX - card.midX)) < 0.5, drawing = mark.isDrawing == !Motion.shared.reduced
-            held = held && same && centred && drawing
+            let centred = abs(Double(drawn.midX - card.midX)) <= 0.5 / Double(self.shell.window.backingScaleFactor)
+            held = held && same && centred
             let place = String(format: "the mark %.0f × %.0f pt, its centre %+.1f from the card's", drawn.width, drawn.height, Double(drawn.midX - card.midX))
             said.append("\(self.shell.look == .dark ? "dark" : "light"): \(place), \(mark.isDrawing ? "drawing" : "still")" + (same ? "" : ", not the same mark in this look"))
             Self.drawnAtTwice(self.shell.window.contentView, to: file)
         }
-        return (held && taken, said.joined(separator: "; ") + "; " + shots)
+        let motion = Motion.shared, was = motion.reduced
+        motion.reduced = false
+        let draws = mark.isDrawing
+        motion.reduced = true
+        let stands = !mark.isDrawing
+        motion.reduced = was
+        let moves = "Reduce Motion \(was ? "on" : "off") here; with motion on the mark \(draws ? "draws" : "does not draw"), reduced it \(stands ? "stands still" : "moves")"
+        return (held && taken && draws && stands, said.joined(separator: "; ") + "; " + moves + "; " + shots)
     }
 
     /// `view` as AppKit draws it (`cacheDisplay`), at twice its size, into `file` as a PNG.
