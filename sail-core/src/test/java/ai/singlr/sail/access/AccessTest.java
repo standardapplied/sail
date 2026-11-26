@@ -44,8 +44,7 @@ class AccessTest {
 
   private static final String READ_ONLY_FIX = "Ask an admin for a member or admin credential.";
   private static final String LANE_FIX = "Only an operator lane (CLI or API token) may do this.";
-  private static final String PASSKEYS_LANE_FIX =
-      "Only their person may, signed in with one of their passkeys.";
+  private static final String PASSKEYS_LANE_FIX = "Only their person may.";
   private static final String DRAFT_IT =
       "An agent acts only on the work sail launched it for; draft a follow-up spec for anything"
           + " else.";

@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -93,6 +94,21 @@ class ClosesWhatItOpensTest {
 
     assertFalse(jars.isEmpty(), "the fork holds jars of its class path");
     assertDoesNotThrow(() -> ClosesWhatItOpens.assertClosed("Quiet", before));
+  }
+
+  /**
+   * The JVM reads its cgroup's files from its own threads, a compiler thread inside whichever class
+   * runs; a read of one open across the check stands for that.
+   */
+  @Test
+  void aClassPassesWhileTheJvmReadsItsCgroup() throws Exception {
+    var memory = Path.of("/sys/fs/cgroup/memory.current");
+    assumeTrue(Files.isReadable(memory), "a host whose cgroup names its memory");
+    var before = OpenDescriptors.list();
+
+    try (var read = Files.newByteChannel(memory)) {
+      assertDoesNotThrow(() -> ClosesWhatItOpens.assertClosed("Quiet", before));
+    }
   }
 
   /** What a refusal of class {@code Leaky} names as left open, without the descriptors' numbers. */

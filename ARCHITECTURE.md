@@ -594,7 +594,8 @@ none; none for a gateway's session or a token); `DELETE /v1/passkeys/{id}` remov
 session it signed in, `204`. Only a session signed in with one of the caller's passkeys that still
 exists removes one: a person's token at any role, a session that names no passkey and one whose
 passkey an admin removed at the host are `403 forbidden`, the same for every id, before the id is
-looked up; a session a removal that went first ended is `401`, as an ended session always is. Another person's id is `404` as an unknown one is, so ids are not probed; the last
+looked up; a session a removal that went first ended is `403 invalid_bearer_token`, as an ended
+session always is. Another person's id is `404` as an unknown one is, so ids are not probed; the last
 passkey and the one the caller signed in with are `409`, the last said first. The whole decision,
 from reading the caller's session and passkeys to the delete and the revoke, is one write
 transaction, so two removals at once, in one process or two, never leave a person none

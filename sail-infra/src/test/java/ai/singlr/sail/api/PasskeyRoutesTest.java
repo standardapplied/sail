@@ -325,7 +325,7 @@ class PasskeyRoutesTest {
 
       assertEquals("removed", decidingRemoval.get(30, TimeUnit.SECONDS));
       assertEquals(
-          "invalid_bearer_token: Session token is invalid or expired.",
+          "403 invalid_bearer_token: Session token is invalid or expired.",
           waitingRemoval.get(30, TimeUnit.SECONDS));
     }
     assertEquals(
@@ -524,7 +524,7 @@ class PasskeyRoutesTest {
             new PasskeyOperations(connection).remove(removal.id(), removal.session());
             return "removed";
           } catch (ApiException refused) {
-            return refused.error().code() + ": " + refused.getMessage();
+            return refused.status() + " " + refused.error().code() + ": " + refused.getMessage();
           }
         });
   }

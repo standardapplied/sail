@@ -105,7 +105,7 @@ final class Wording {
         Refusal.Kind.LANE_FORBIDDEN,
         "Agent principals cannot " + action.act(kind) + ".",
         action == Action.KEEP_PASSKEYS
-            ? "Only their person may, signed in with one of their passkeys."
+            ? "Only their person may."
             : "Only an operator lane (CLI or API token) may do this.");
   }
 
