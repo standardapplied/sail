@@ -161,7 +161,7 @@ final class Socket: Sendable {
     }
 
     private static func open(family: Int32) throws(TerminalError) -> Socket {
-        let descriptor = socket(family, streamType, 0)
+        let descriptor = Descriptors.socket(family)
         guard descriptor >= 0 else { throw .unreachable("no socket: \(reason(errno))") }
         return Socket(descriptor: descriptor)
     }

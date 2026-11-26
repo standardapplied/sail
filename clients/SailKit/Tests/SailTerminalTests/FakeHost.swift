@@ -46,7 +46,7 @@ final class FakeHost: Sendable {
             let descriptor = listener.withLock { $0 }
             guard descriptor >= 0 else { throw HostError("the host stopped listening") }
             guard readable(descriptor) else { return nil }
-            let accepted = acceptClient(descriptor)
+            let accepted = Descriptors.accept(descriptor)
             guard accepted >= 0 else { throw HostError("accept failed: \(errno)") }
             return Peer(socket: Socket(descriptor: accepted), descriptor: accepted)
         }
@@ -251,7 +251,7 @@ final class FakeHost: Sendable {
     }
 
     private static func listen(unix path: String) throws -> Int32 {
-        let descriptor = socket(AF_UNIX, streamType, 0)
+        let descriptor = Descriptors.socket(AF_UNIX)
         guard descriptor >= 0 else { throw HostError("no socket: \(errno)") }
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
@@ -267,7 +267,7 @@ final class FakeHost: Sendable {
     }
 
     private static func listenTCP() throws -> (Int32, UInt16) {
-        let descriptor = socket(AF_INET, streamType, 0)
+        let descriptor = Descriptors.socket(AF_INET)
         guard descriptor >= 0 else { throw HostError("no socket: \(errno)") }
         var address = sockaddr_in()
         address.sin_family = sa_family_t(AF_INET)
@@ -282,16 +282,6 @@ final class FakeHost: Sendable {
         guard bound, startListening(descriptor) == 0 else { throw HostError("cannot listen on loopback: \(errno)") }
         return (descriptor, UInt16(bigEndian: address.sin_port))
     }
-
-    #if canImport(Glibc)
-    private static let streamType = Int32(SOCK_STREAM.rawValue)
-    #else
-    private static let streamType = SOCK_STREAM
-    #endif
-}
-
-private func acceptClient(_ descriptor: Int32) -> Int32 {
-    accept(descriptor, nil, nil)
 }
 
 private func startListening(_ descriptor: Int32) -> Int32 {
@@ -315,7 +305,7 @@ struct HostError: Error, CustomStringConvertible {
 private let glance: Int32 = 100
 
 /// Whether `descriptor` has something to read, or has ended, within a glance.
-private func readable(_ descriptor: Int32) -> Bool {
+func readable(_ descriptor: Int32) -> Bool {
     var ready = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
     return poll(&ready, 1, glance) == 1
 }

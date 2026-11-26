@@ -96,7 +96,7 @@ import Testing
     /// A host in this process at `path` that admits any client and lists no session, as another
     /// program's would; the closure returned stops it.
     static func answeringHost(at path: String) throws -> @Sendable () -> Void {
-        let listener = socket(AF_UNIX, SOCK_STREAM, 0)
+        let listener = Descriptors.socket(AF_UNIX)
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: path.utf8) }
@@ -111,7 +111,7 @@ import Testing
             while !stopped.raised.load(ordering: .relaxed) {
                 var ready = pollfd(fd: listener, events: Int16(POLLIN), revents: 0)
                 guard poll(&ready, 1, 50) == 1 else { continue }
-                let client = accept(listener, nil, nil)
+                let client = Descriptors.accept(listener)
                 guard client >= 0 else { continue }
                 answer(client)
                 close(client)
@@ -219,7 +219,7 @@ import Testing
         let address = try HostAddress.local(home: folder.path)
         guard case let .unix(path) = address else { throw CancellationError() }
         try FileManager.default.createDirectory(atPath: URL(filePath: path).deletingLastPathComponent().path, withIntermediateDirectories: true)
-        let listener = socket(AF_UNIX, SOCK_STREAM, 0)
+        let listener = Descriptors.socket(AF_UNIX)
         defer {
             shutdown(listener, SHUT_RDWR)
             close(listener)
@@ -231,7 +231,7 @@ import Testing
         try #require(bound == 0 && listen(listener, 8) == 0)
         Thread {
             while true {
-                let client = accept(listener, nil, nil)
+                let client = Descriptors.accept(listener)
                 guard client >= 0 else { return }
                 var one: Int32 = 1
                 setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
@@ -296,7 +296,7 @@ import Testing
     /// The process serving at a socket is found by its pid and its executable: here, this test's own.
     @Test func theProcessServingAtASocketIsFound() throws {
         let path = FileManager.default.temporaryDirectory.appending(path: "sail-peer-\(UUID().uuidString.prefix(8)).sock").path
-        let listener = socket(AF_UNIX, SOCK_STREAM, 0)
+        let listener = Descriptors.socket(AF_UNIX)
         defer {
             close(listener)
             unlink(path)

@@ -115,7 +115,7 @@ public final class FakeRunnerDoor: Sendable {
     public init(thisMac: Bool = false, person: String? = nil) throws {
         self.thisMac = thisMac
         self.person = person
-        let socket = Self.socket()
+        let socket = Descriptors.socket(AF_INET)
         guard socket >= 0 else { throw DoorError("no socket for the door") }
         var address = sockaddr_in()
         #if canImport(Darwin)
@@ -726,17 +726,9 @@ public final class FakeRunnerDoor: Sendable {
     /// the session's write token.
     public static let notTheWriter = "This connection does not hold the terminal's keyboard, so it was not ended; someone else may hold it."
 
-    private static func socket() -> Int32 {
-        #if canImport(Darwin)
-        Darwin.socket(AF_INET, SOCK_STREAM, 0)
-        #else
-        Glibc.socket(AF_INET, Int32(SOCK_STREAM.rawValue), 0)
-        #endif
-    }
-
     private func serve() {
         while true {
-            let connection = accept(listener, nil, nil)
+            let connection = Descriptors.accept(listener)
             guard connection >= 0 else { return }
             #if canImport(Darwin)
             var one: Int32 = 1

@@ -4,6 +4,7 @@ import Glibc
 import Darwin
 #endif
 import Foundation
+import SailTerminal
 import Synchronization
 
 /// `sail _pty-host --local`, run by the probe (or a test) as its child: started, found serving by
@@ -27,12 +28,17 @@ final class LocalHostProcess: Sendable {
     /// Starts the host and returns once it says it serves; its standard error is read to its end
     /// meanwhile and after, so the host never waits on a full pipe.
     func start() async throws {
-        var ends: [Int32] = [0, 0]
-        guard pipe(&ends) == 0 else { throw ProbeError("no pipe for the host's output: \(errno)") }
-        let pid = try spawn(errorsTo: ends[1])
-        close(ends[1])
+        guard let ends = Descriptors.pipe() else { throw ProbeError("no pipe for the host's output: \(errno)") }
+        defer { close(ends.write) }
+        let reading = ends.read
+        let pid: pid_t
+        do {
+            pid = try Spawn.process(binary, ["_pty-host", "--local"], errors: .descriptor(ends.write))
+        } catch {
+            close(reading)
+            throw ProbeError("\(binary) could not be run: \(error)")
+        }
         child.withLock { $0 = pid }
-        let reading = ends[0]
         let serving = await withCheckedContinuation { (said: CheckedContinuation<Bool, Never>) in
             Thread { said.resume(returning: Self.readUntilServing(reading)) }.start()
         }
@@ -59,27 +65,6 @@ final class LocalHostProcess: Sendable {
         kill(pid, signal)
         var status: Int32 = 0
         while waitpid(pid, &status, 0) < 0, errno == EINTR {}
-    }
-
-    private func spawn(errorsTo descriptor: Int32) throws -> pid_t {
-        #if canImport(Darwin)
-        var actions: posix_spawn_file_actions_t?
-        #else
-        var actions = posix_spawn_file_actions_t()
-        #endif
-        posix_spawn_file_actions_init(&actions)
-        defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_adddup2(&actions, descriptor, 2)
-        posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0)
-        let words: [String] = [binary, "_pty-host", "--local"]
-        let settings: [String] = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" }
-        let arguments: [UnsafeMutablePointer<CChar>?] = words.map { strdup($0) } + [nil]
-        let environment: [UnsafeMutablePointer<CChar>?] = settings.map { strdup($0) } + [nil]
-        defer { (arguments + environment).forEach { free($0) } }
-        var pid: pid_t = 0
-        let spawned = posix_spawn(&pid, binary, &actions, nil, arguments, environment)
-        guard spawned == 0 else { throw ProbeError("\(binary) could not be run: \(String(cString: strerror(spawned)))") }
-        return pid
     }
 
     /// Reads the host's standard error until it says it serves, the deadline passes or it closes:

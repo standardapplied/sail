@@ -4,7 +4,7 @@ import SailTerminalWire
 import Testing
 
 /// The design note's rule for another copy's host, and ending one (review 1, M1 and M2).
-@Suite struct HostTakeoverTests {
+@Suite(.timeLimit(.minutes(1))) struct HostTakeoverTests {
     static func session(attached: Int32) -> SessionInfo {
         SessionInfo(name: "s", instanceID: "i", live: true, attached: attached, writerFDE: "", room: "", command: [])
     }
@@ -70,34 +70,15 @@ import Testing
     }
 
     /// `/bin/sh -c script`, a child of this test, reaped the moment it exits by a thread that waits.
+    /// It is waited for until it runs `tail`, for as long as the suite's time limit allows.
     static func spawn(_ script: String) throws -> Int32 {
-        var pid: pid_t = 0
-        let arguments: [String] = ["/bin/sh", "-c", script]
-        let words: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) } + [nil]
-        defer { words.forEach { free($0) } }
-        #if canImport(Darwin)
-        var attributes: posix_spawnattr_t?
-        #else
-        var attributes = posix_spawnattr_t()
-        #endif
-        posix_spawnattr_init(&attributes)
-        defer { posix_spawnattr_destroy(&attributes) }
-        var none = sigset_t(), all = sigset_t()
-        sigemptyset(&none)
-        sigfillset(&all)
-        posix_spawnattr_setsigmask(&attributes, &none)
-        posix_spawnattr_setsigdefault(&attributes, &all)
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF))
-        let spawned = posix_spawn(&pid, "/bin/sh", nil, &attributes, words, environ)
-        try #require(spawned == 0 && pid > 1, "posix_spawn: \(spawned)")
-        let reaped = pid
+        let pid = try Spawn.process("/bin/sh", ["-c", script])
         Thread {
             var status: Int32 = 0
-            while waitpid(reaped, &status, 0) < 0, errno == EINTR {}
+            while waitpid(pid, &status, 0) < 0, errno == EINTR {}
         }.start()
-        let deadline = ContinuousClock.now + .seconds(10)
         while !(executable(of: pid)?.hasSuffix("/tail") ?? false) {
-            try #require(ContinuousClock.now < deadline, "the shell never became tail")
+            try #require(!Task.isCancelled, "the shell never became tail")
             sched_yield()
         }
         return pid
