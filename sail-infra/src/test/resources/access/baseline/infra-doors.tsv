@@ -16210,33 +16210,33 @@ remove a passkey as agent viewer ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 
 remove a passkey as agent viewer bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
 remove a passkey as agent viewer bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
 remove a passkey as agent viewer bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot keep passkeys. | Only an operator lane (CLI or API token) may do this.
-remove a passkey as api admin root all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as api member ada acme	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as api member ada all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as api member ada beta	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as api member bob acme	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as api member bob all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as api member bob beta	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as api member machine all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as api viewer ada acme	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as api viewer ada all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as api viewer ada beta	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as api viewer bob acme	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as api viewer bob all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as api viewer bob beta	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as cli admin root all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as cli member ada acme	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as cli member ada all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as cli member ada beta	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as cli member bob acme	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as cli member bob all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as cli member bob beta	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as cli viewer ada acme	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as cli viewer ada all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as cli viewer ada beta	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as cli viewer bob acme	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as cli viewer bob all	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
-remove a passkey as cli viewer bob beta	denied NOT_FOUND 404 No passkey of yours has that id. | List your passkeys again.
+remove a passkey as api admin root all	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as api member ada acme	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as api member ada all	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as api member ada beta	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as api member bob acme	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as api member bob all	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as api member bob beta	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as api member machine all	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as api viewer ada acme	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as api viewer ada all	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as api viewer ada beta	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as api viewer bob acme	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as api viewer bob all	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as api viewer bob beta	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as cli admin root all	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as cli member ada acme	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as cli member ada all	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as cli member ada beta	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as cli member bob acme	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as cli member bob all	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as cli member bob beta	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as cli viewer ada acme	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as cli viewer ada all	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as cli viewer ada beta	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as cli viewer bob acme	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as cli viewer bob all	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
+remove a passkey as cli viewer bob beta	denied FORBIDDEN 403 Passkeys are removed only from a session signed in with a passkey. | Sign in with one of your passkeys, then try again.
 remove a passkey as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
 remove a passkey as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.
 remove a passkey as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot keep passkeys. | Do it from outside the container: with sail on the host, or in Mast.

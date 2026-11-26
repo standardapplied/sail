@@ -1339,6 +1339,48 @@ class ApiRouterTest {
     };
   }
 
+  /**
+   * An offer refused for a reason that has no short form still answers 200, its refusal in its own
+   * long sentence and no few words beside it: a refusal of a new kind never breaks the route.
+   */
+  @Test
+  void anOfferRefusedWithNoShortFormAnswersWithItsSentence() throws Exception {
+    var refused =
+        new ApiException(
+            ErrorCode.NOT_YOUR_WORKSPACE,
+            "Codex starts in this workspace only as its person.",
+            Remedy.of("Start it in a workspace of your own."));
+    var operations =
+        new TestOperations() {
+          @Override
+          public Result<AgentOffersResponse> workspaceAgents(String project, String name) {
+            return Result.success(
+                new AgentOffersResponse(
+                    project,
+                    name,
+                    "uday",
+                    true,
+                    null,
+                    List.of(
+                        new AgentOffer(
+                            Harnesses.of("codex"),
+                            null,
+                            false,
+                            null,
+                            new AgentStarts.OfferRefusal(refused, null)))));
+          }
+        };
+    try (var server = serverWith(operations, true)) {
+      var answer = get(server, "/v1/projects/acme/workspaces/acme-dock/agents", "token");
+
+      assertEquals(200, answer.statusCode(), answer.body());
+      var codex =
+          (Map<?, ?>) ((List<?>) YamlUtil.parseMap(answer.body()).get("offered")).getFirst();
+      assertEquals(refused.error().toMap(), codex.get("refusal"));
+      assertFalse(codex.containsKey("unavailable"), "no few words for a refusal that has none");
+    }
+  }
+
   @Test
   void servePortsAndStopAnswerTheStacksPorts() throws Exception {
     try (var server = serverWith(withStack(), true)) {

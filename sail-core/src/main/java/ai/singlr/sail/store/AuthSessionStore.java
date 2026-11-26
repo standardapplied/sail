@@ -21,7 +21,6 @@ import java.util.Optional;
 public final class AuthSessionStore {
 
   private static final Base64.Encoder ID = Base64.getUrlEncoder().withoutPadding();
-  private static final Base64.Decoder ID_DECODER = Base64.getUrlDecoder();
 
   private final Sqlite db;
 
@@ -36,14 +35,28 @@ public final class AuthSessionStore {
 
   /** A session for {@code fdeId} that no passkey minted: a gateway's, or a test's. */
   public CreatedSession create(String fdeId, Duration ttl) {
-    return createSignedInWith(fdeId, null, ttl);
+    return insert(fdeId, null, ttl);
   }
 
   /**
-   * A session for {@code fdeId} signed in with the passkey {@code credentialId}, none when null:
-   * removing that passkey ends it ({@link #revokeMintedBy}).
+   * A session for {@code fdeId} signed in with the passkey {@code credentialId}, which removing
+   * that passkey ends ({@link #revokeMintedBy}); empty when the passkey is gone. The passkey is
+   * looked up in the write transaction that inserts, so a removal that lands after a sign-in read
+   * its passkey and before this mints none.
    */
-  public CreatedSession createSignedInWith(String fdeId, byte[] credentialId, Duration ttl) {
+  public Optional<CreatedSession> createSignedInWith(
+      String fdeId, byte[] credentialId, Duration ttl) {
+    var passkey = ID.encodeToString(credentialId);
+    return db.transaction(
+        () ->
+            db.queryOne(
+                    "SELECT 1 FROM webauthn_credentials WHERE credential_id = ?",
+                    row -> row.integer(0),
+                    passkey)
+                .map(held -> insert(fdeId, passkey, ttl)));
+  }
+
+  private CreatedSession insert(String fdeId, String passkey, Duration ttl) {
     var token = generateToken();
     var now = DateTimeUtils.now();
     var expiresAt = now.plus(ttl);
@@ -52,20 +65,22 @@ public final class AuthSessionStore {
             + " VALUES (?, ?, ?, ?, ?)",
         sha256(token),
         fdeId,
-        credentialId == null ? null : ID.encodeToString(credentialId),
+        passkey,
         now,
         expiresAt);
     return new CreatedSession(token, fdeId, expiresAt);
   }
 
-  /** The passkey the session of {@code token} was signed in with; empty for none or no session. */
-  public Optional<byte[]> passkeyOf(String token) {
+  /**
+   * The passkey the session of {@code token} was signed in with, its credential id as {@code
+   * Passkeys.encodeId} writes it; empty for none or no session.
+   */
+  public Optional<String> passkeyOf(String token) {
     return db.queryOne(
             "SELECT credential_id FROM sessions WHERE token_hash = ?",
             row -> Optional.ofNullable(row.text(0)),
             sha256(token))
-        .flatMap(found -> found)
-        .map(ID_DECODER::decode);
+        .flatMap(found -> found);
   }
 
   /** Ends every session the passkey {@code credentialId} was signed in with; how many it ended. */

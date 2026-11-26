@@ -588,11 +588,19 @@ Each box enrolls its own passkeys (`sail fde enroll`), and each box lists and re
 on its own (`sail fde passkey list|rm`). A person lists and removes their own over HTTP (Keep
 passkeys, `PasskeyOperations`): `GET /v1/passkeys` answers each one's `id` (base64url), `label`,
 `created_at`, `last_used_at` once used and `current`, true for the passkey the calling session was
-signed in with (`sessions.credential_id`, written by the sign-in that minted it; none for a gateway's
-session or a token); `DELETE /v1/passkeys/{id}` removes one and ends every session it signed in, in
-one transaction, `204`. Another person's id is `404` as an unknown one is, so ids are not probed;
-the last passkey and the one the caller signed in with are `409`, the last said first, so a person
-never locks or signs themselves out; the lost-device case stays the admin's `sail fde passkey rm`.
+signed in with (`sessions.credential_id`, written by the sign-in that minted it, which looks the
+passkey up in the write transaction that inserts the session, so a passkey removed mid sign-in mints
+none; none for a gateway's session or a token); `DELETE /v1/passkeys/{id}` removes one and ends every
+session it signed in, `204`. Only a session signed in with a passkey removes one: a person's token at
+any role and a session that names no passkey are `403 forbidden`, the same for every id, before the
+id is looked up. Another person's id is `404` as an unknown one is, so ids are not probed; the last
+passkey and the one the caller signed in with are `409`, the last said first. The whole decision,
+from reading the caller's session and passkeys to the delete and the revoke, is one write
+transaction, so two removals at once, in one process or two, never leave a person none
+(`PasskeyRoutesTest.twoRemovalsAtOnceLeaveTheirPersonAPasskey`): a person never locks or signs
+themselves out; the lost-device case stays the admin's `sail fde passkey rm`. A removal ends the
+sessions' next requests; a stream or terminal those sessions already opened is
+`sail-an-ended-session-ends-what-it-opened`'s.
 
 ### The engine
 
@@ -1326,7 +1334,8 @@ own, about three (2.9 to 4.3 s over 32 creates, median 3.2 s).
     record, one Incus read. It answers `state` (`ready` while a version is current, `building`,
     `failed` when none is current and the last build failed or was cut short, else `missing`),
     `version`, `stale`, `steps` (20), `step_names` (`TemplateBuild.STEP_NAMES`: step n is the n-th,
-    the `ProjectPhase`s lower-cased in their order, then `template_finished`) and `build`, the last
+    the `ProjectPhase`s lower-cased in their order, then `template_finished`; the provisioner numbers
+    each step by `ProjectPhase.step()`, the same order) and `build`, the last
     build's record, so a rebuild that failed
     while an older version serves is told beside that version. `GET /v1/projects` gives each
     project's `template` state, Incus listed once for all.
@@ -4357,7 +4366,8 @@ whether the workspace holds it: its `SignIn.file` (`~/.claude/.credentials.json`
 seconds, none when none is installed). `signed_in` is said only when it was read: a stopped
 workspace is not started to read it, and a read that fails or does not answer says nothing. A
 harness the project does not install carries `harness_not_installed`, `unavailable` beside it ("Not
-installed in harbor", the few words a list row says, `AgentStarts.unavailable`) and `inside` false.
+installed in harbor", the few words a list row says, declared with the refusal it shortens in
+`AgentStarts.OfferRefusal`; a refusal with none says its sentence alone) and `inside` false.
 `GET /v1/agents` says each harness's `sign_in` (without `signed_in`) and `kinds` from the same mapping
 (`HarnessWaysIn`). Every
 harness has exactly two ways in, its own sign-in or one stored key (`HarnessContractTest`), so a

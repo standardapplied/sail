@@ -568,7 +568,8 @@ let refusalsOfRoutesNotYetCalled: Set<String> = [
     "refusal-template-admin-only", "refusal-template-read-only", "refusal-template-node",
     "refusal-template-2d-login-not-stored", "refusal-template-2d-no-resources",
     "refusal-template-2d-runner-not-ready", "refusal-passkey-not-yours", "refusal-passkey-last",
-    "refusal-passkey-current", "refusal-project-name-taken",
+    "refusal-passkey-current", "refusal-passkey-no-passkey-session",
+    "refusal-project-name-taken",
 ]
 
 /// The answers of routes this client does not call yet, recorded for the apps that will.

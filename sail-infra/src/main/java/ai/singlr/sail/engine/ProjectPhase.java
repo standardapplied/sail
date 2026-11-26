@@ -51,5 +51,14 @@ public enum ProjectPhase {
    */
   SKILLS_INSTALLED,
   /** Project state written inside container. Provisioning complete. */
-  COMPLETE,
+  COMPLETE;
+
+  /**
+   * The number of the step this phase is in a provision's report, from 1 in this order: the one
+   * place it is made, so a template's build names each step ({@code TemplateBuild.STEP_NAMES}) by
+   * the same order.
+   */
+  public int step() {
+    return ordinal() + 1;
+  }
 }

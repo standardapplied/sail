@@ -371,7 +371,7 @@ class ClientGoldensTest {
       box.record(http, "board-specs", "GET", "/v1/specs?project=" + PROJECT, uday, null);
       box.record(http, "board-rooms", "GET", "/v1/rooms?project=" + PROJECT, uday, null);
       box.record(http, "refusal-resync-required", "GET", "/v1/changes?since=999999999", uday, null);
-      box.recordPasskeys(http);
+      box.recordPasskeys(http, uday);
       var resumed = box.resumed(uday, beginning, "id: " + changes.get("next"));
       var resync = box.resumed(uday, "999999999", "event: resync");
 
@@ -1070,9 +1070,10 @@ class ClientGoldensTest {
      * A passkey enrolled by ticket and signed in with, as a native client does it, each answer
      * recorded: the ticket refused once spent, a second registration offering the enrolled passkey
      * as excluded, a passkey the box never enrolled, an origin it does not accept, and the routes
-     * on a box with no relying party.
+     * on a box with no relying party; then the person's own passkeys, listed and removed, and
+     * {@code plainSession}, a session no passkey signed in, refused a removal.
      */
-    void recordPasskeys(Map<String, String> goldens) throws Exception {
+    void recordPasskeys(Map<String, String> goldens, String plainSession) throws Exception {
       var passkey = new TestAuthenticator(RP_ID);
       var ticket = enrollment().issue("uday").ticket();
       var started =
@@ -1127,6 +1128,13 @@ class ClientGoldensTest {
       var other = enroll(goldens, "Sail for iPhone");
       var first = B64URL.encodeToString(passkey.credentialId());
       record(goldens, "passkeys", "GET", OWN_PASSKEYS, session, null);
+      record(
+          goldens,
+          "refusal-passkey-no-passkey-session",
+          "DELETE",
+          ownPasskey(first),
+          plainSession,
+          null);
       record(goldens, "refusal-passkey-current", "DELETE", ownPasskey(first), session, null);
       record(goldens, "passkey-removed", "DELETE", ownPasskey(other), session, null);
       record(goldens, "refusal-passkey-last", "DELETE", ownPasskey(first), session, null);

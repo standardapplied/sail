@@ -156,7 +156,10 @@ public final class PasskeyService implements PasskeyCeremonies {
     var fde =
         ActivePerson.of(fdes.byId(credential.fdeId()).orElseThrow(PasskeyService::loginFailed));
     credentials.recordUse(credentialId, newSignCount);
-    var session = sessions.createSignedInWith(fde.id(), credentialId, sessionTtl);
+    var session =
+        sessions
+            .createSignedInWith(fde.id(), credentialId, sessionTtl)
+            .orElseThrow(PasskeyService::loginFailed);
     return new LoginResult(session.token(), fde.handle(), session.expiresAt());
   }
 

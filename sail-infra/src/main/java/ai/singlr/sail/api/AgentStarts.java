@@ -65,10 +65,17 @@ final class AgentStarts {
   }
 
   /**
-   * Why {@code harness} does not start in a workspace of {@code config}'s project: empty when the
-   * project's agent installation lists it.
+   * Why a harness a workspace offers does not start ({@code why}), and the few words a list row
+   * says of it ({@code unavailable}), declared beside the refusal it shortens: null for a refusal
+   * that has none, whose row says its sentence alone.
    */
-  static Optional<ApiException> notInstalled(ProjectDefinition config, Harness harness) {
+  record OfferRefusal(ApiException why, String unavailable) {}
+
+  /**
+   * Why {@code harness} does not start in a workspace of {@code config}'s project, "Not installed
+   * in" it in a row's few words: empty when the project's agent installation lists it.
+   */
+  static Optional<OfferRefusal> notInstalled(ProjectDefinition config, Harness harness) {
     var installs =
         Optional.ofNullable(config.agent())
             .map(ProjectDefinition.Agent::installs)
@@ -77,7 +84,7 @@ final class AgentStarts {
       return Optional.empty();
     }
     var project = config.name();
-    return Optional.of(
+    var why =
         new ApiException(
             ErrorCode.HARNESS_NOT_INSTALLED,
             harness.displayName()
@@ -95,21 +102,8 @@ final class AgentStarts {
                     + harness.yamlName()
                     + " to "
                     + project
-                    + "'s agent install list and builds its template again.")));
-  }
-
-  /**
-   * The few words a list row says of an offer {@code refusal} refuses in a workspace of {@code
-   * project}: each refusal {@link #notInstalled} makes, the one an offer carries, has one.
-   *
-   * @throws IllegalStateException for a refusal an offer never carries, which has none
-   */
-  static String unavailable(ApiError refusal, String project) {
-    if (ErrorCode.HARNESS_NOT_INSTALLED.code().equals(refusal.code())) {
-      return "Not installed in " + project;
-    }
-    throw new IllegalStateException(
-        "An offer refused with " + refusal.code() + " has no short form to show.");
+                    + "'s agent install list and builds its template again."));
+    return Optional.of(new OfferRefusal(why, "Not installed in " + project));
   }
 
   /**

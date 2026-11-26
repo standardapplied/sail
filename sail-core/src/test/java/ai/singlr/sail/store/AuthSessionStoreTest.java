@@ -5,13 +5,14 @@
 
 package ai.singlr.sail.store;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.webauthn.RegisteredCredential;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -80,18 +81,19 @@ class AuthSessionStoreTest {
   }
 
   /**
-   * A session signed in with a passkey names it, one minted by no passkey names none, and ending
-   * the sessions a passkey minted ends those alone.
+   * A session signed in with a passkey names it, as the stores write a credential id; one minted by
+   * no passkey names none; ending the sessions a passkey minted ends those alone; and a passkey
+   * already gone mints no session.
    */
   @Test
   void aSessionSignedInWithAPasskeyNamesItAndEndsWithIt() {
-    var passkey = new byte[] {1, 2, 3};
-    var other = new byte[] {4, 5, 6};
-    var signedIn = store.createSignedInWith(fdeId, passkey, Duration.ofMinutes(30));
-    var elsewhere = store.createSignedInWith(fdeId, other, Duration.ofMinutes(30));
+    var passkey = held(new byte[] {1, 2, 3});
+    var other = held(new byte[] {4, 5, 6});
+    var signedIn = store.createSignedInWith(fdeId, passkey, Duration.ofMinutes(30)).orElseThrow();
+    var elsewhere = store.createSignedInWith(fdeId, other, Duration.ofMinutes(30)).orElseThrow();
     var plain = store.create(fdeId, Duration.ofMinutes(30));
 
-    assertArrayEquals(passkey, store.passkeyOf(signedIn.token()).orElseThrow());
+    assertEquals(Optional.of("AQID"), store.passkeyOf(signedIn.token()));
     assertTrue(store.passkeyOf(plain.token()).isEmpty(), "a session no passkey minted");
     assertTrue(store.passkeyOf("sess_unknown").isEmpty(), "no session");
 
@@ -99,5 +101,25 @@ class AuthSessionStoreTest {
     assertTrue(store.validate(signedIn.token()).isEmpty());
     assertTrue(store.validate(elsewhere.token()).isPresent());
     assertTrue(store.validate(plain.token()).isPresent());
+
+    new WebauthnCredentialStore(db).delete(other);
+    assertEquals(Optional.empty(), store.createSignedInWith(fdeId, other, Duration.ofMinutes(30)));
+    assertEquals(
+        Optional.empty(),
+        store.createSignedInWith(fdeId, new byte[] {7}, Duration.ofMinutes(30)),
+        "a passkey never held");
+    assertEquals(
+        2L,
+        db.queryOne("SELECT COUNT(*) FROM sessions", row -> row.integer(0)).orElseThrow(),
+        "the refused sign-ins minted nothing");
+  }
+
+  private byte[] held(byte[] credentialId) {
+    new WebauthnCredentialStore(db)
+        .save(
+            new RegisteredCredential(credentialId, new byte[] {9}, -7, 0, null, false, false),
+            fdeId,
+            "test");
+    return credentialId;
   }
 }

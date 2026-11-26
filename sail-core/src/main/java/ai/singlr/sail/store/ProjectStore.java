@@ -74,7 +74,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   /** A create or rename refused because a project by that name is already catalogued. */
   public static final class NameTaken extends IllegalStateException {
     NameTaken(String name) {
-      super("A project named '" + name + "' already exists.");
+      super("A project named " + name + " already exists.");
     }
   }
 

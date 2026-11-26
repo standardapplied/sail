@@ -312,10 +312,10 @@ public final class WorkspaceDoors {
           project, name, person, running, refused.get().error(), List.of());
     }
     var fdeId = owners.apply(person).id();
-    var notInstalled = new HashMap<Harness, ApiError>();
+    var notInstalled = new HashMap<Harness, AgentStarts.OfferRefusal>();
     for (var harness : Harnesses.all()) {
       AgentStarts.notInstalled(config, harness)
-          .ifPresent(refusal -> notInstalled.put(harness, refusal.error()));
+          .ifPresent(refusal -> notInstalled.put(harness, refusal));
     }
     var signInFiles =
         Harnesses.all().stream()

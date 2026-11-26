@@ -6,8 +6,11 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.auth.PasskeyCeremonies;
+import ai.singlr.sail.auth.PasskeyException;
 import ai.singlr.sail.auth.PasskeyService;
 import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -15,6 +18,8 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.PendingChallengeStore;
@@ -34,15 +39,20 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Handler;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
@@ -50,7 +60,10 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * A person's own passkeys through the real web router over the production operations, stores and
@@ -80,6 +93,7 @@ class PasskeyRoutesTest {
   private WebauthnCredentialStore credentials;
   private String theoId;
   private String machine;
+  private Map<String, String> tokens;
 
   @BeforeEach
   void aBoxWithAMemberAnotherAndAViewer() throws Exception {
@@ -90,10 +104,20 @@ class PasskeyRoutesTest {
     Acting.system(
         () -> {
           var fdes = new FdeStore(db);
-          fdes.add("mara", "Mara", "mara@x", "member");
+          var maraId = fdes.add("mara", "Mara", "mara@x", "member").id();
           theoId = fdes.add("theo", "Theo", "theo@x", "member").id();
           fdes.add("vik", "Vik", "vik@x", "viewer");
-          machine = new TokenStore(db).create("ci", "member", null, null).token();
+          var adaId = fdes.add("ada", "Ada", "ada@x", "admin").id();
+          var minted = new TokenStore(db);
+          machine = minted.create("ci", "member", null, null).token();
+          tokens =
+              Map.of(
+                  "mara's member token",
+                  minted.create("mara-cli", "member", maraId, null).token(),
+                  "mara's viewer token",
+                  minted.create("mara-read", "viewer", maraId, null).token(),
+                  "ada's admin token",
+                  minted.create("ada-cli", "admin", adaId, null).token());
         });
     credentials = new WebauthnCredentialStore(db);
     ceremonies =
@@ -187,8 +211,139 @@ class PasskeyRoutesTest {
     assertEquals(
         Map.of("schema_version", 1, "passkeys", List.of(), "total", 0),
         ask(machine, "GET", "/v1/passkeys").map());
-    assertEquals(404, ask(machine, "DELETE", "/v1/passkeys/" + encoded(maras)).status());
+    assertEquals(403, ask(machine, "DELETE", "/v1/passkeys/" + encoded(maras)).status());
     assertEquals(2, credentials.listForFde(idOf("mara")).size());
+  }
+
+  /**
+   * Only a session signed in with a passkey removes one: a person's own token, at any role, and a
+   * session no passkey signed in are refused alike for every id, theirs, another's, none and not
+   * base64url, so the refusal says nothing of an id; they still list their own.
+   */
+  @Test
+  void onlyASessionSignedInWithAPasskeyRemovesOne() throws Exception {
+    var maras = enroll("mara", "MacBook");
+    enroll("mara", "iPhone");
+    var adas = enroll("ada", "Ada's Mac");
+    enroll("ada", "Ada's iPhone");
+    var theo = enroll("theo", "Theo's Mac");
+    var asking = new LinkedHashMap<>(tokens);
+    asking.put("mara's session no passkey signed in", sessionOf("mara"));
+    var ids =
+        List.of(
+            encoded(maras), encoded(adas), encoded(theo), "bm90LWEtcGFzc2tleQ", "not+base64url=");
+
+    for (var credential : asking.entrySet()) {
+      for (var id : ids) {
+        var refused = ask(credential.getValue(), "DELETE", "/v1/passkeys/" + id);
+
+        assertEquals(403, refused.status(), credential.getKey() + " " + id);
+        assertEquals(
+            refusal(
+                "forbidden",
+                "Passkeys are removed only from a session signed in with a passkey.",
+                "Sign in with one of your passkeys, then try again.",
+                List.of()),
+            refused.map(),
+            credential.getKey() + " " + id);
+      }
+      assertEquals(
+          200, ask(credential.getValue(), "GET", "/v1/passkeys").status(), credential.getKey());
+    }
+    assertEquals(2, credentials.listForFde(idOf("mara")).size());
+    assertEquals(2, credentials.listForFde(idOf("ada")).size());
+    assertEquals(1, credentials.listForFde(theoId).size());
+  }
+
+  /**
+   * Two removals at once never leave their person without a passkey: Mara, signed in on her Mac
+   * with one and on her phone with the other, removes each from the other device. Whichever decides
+   * first, on its own connection as another process would, the other waits for its write lock and
+   * then decides on what it left: its own session ended with the passkey the first removed.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"mac", "phone"})
+  @Timeout(60)
+  void twoRemovalsAtOnceLeaveTheirPersonAPasskey(String waits) throws Exception {
+    var mac = enroll("mara", "MacBook");
+    var phone = enroll("mara", "iPhone");
+    var removals =
+        Map.of(
+            "mac", new Removal(signIn(mac), encoded(phone)),
+            "phone", new Removal(signIn(phone), encoded(mac)));
+    var waiting = removals.get(waits);
+    var deciding = removals.get(waits.equals("mac") ? "phone" : "mac");
+    var file = tempDir.resolve("main.db");
+
+    try (var waitingDb = Sqlite.open(file);
+        var decidingDb = Sqlite.open(file)) {
+      waitingDb.execute("PRAGMA busy_timeout = 30000");
+      var waitingRemoval = new FutureTask<>(() -> remove(waitingDb, waiting));
+      var waitingThread = Thread.ofPlatform().unstarted(waitingRemoval);
+      var locked = new CountDownLatch(1);
+      var decidingRemoval =
+          new FutureTask<>(
+              () ->
+                  decidingDb.transaction(
+                      () -> {
+                        locked.countDown();
+                        awaitWaitingOnTheWriteLock(waitingThread);
+                        return remove(decidingDb, deciding);
+                      }));
+      Thread.ofPlatform().start(decidingRemoval);
+      assertTrue(locked.await(30, TimeUnit.SECONDS), "the first removal never took the lock");
+      waitingThread.start();
+
+      assertEquals("removed", decidingRemoval.get(30, TimeUnit.SECONDS));
+      assertEquals(
+          "forbidden: Passkeys are removed only from a session signed in with a passkey.",
+          waitingRemoval.get(30, TimeUnit.SECONDS));
+    }
+    assertEquals(
+        List.of(waiting.id()),
+        credentials.listForFde(idOf("mara")).stream()
+            .map(credential -> Passkeys.encodeId(credential.credentialId()))
+            .toList(),
+        "the passkey the first removal's session signed in with stays");
+    assertEquals(200, ask(deciding.session(), "GET", "/v1/whoami").status());
+  }
+
+  /**
+   * A sign-in that a removal of its passkey overtakes mints no session, whether the removal lands
+   * before the sign-in looks its passkey up or between that lookup and the session's insert, so no
+   * session outlives the passkey it names.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"consume", "recordUse"})
+  @Timeout(60)
+  void aSignInThatARemovalOvertakesMintsNoSession(String pausedIn) throws Exception {
+    var mac = enroll("mara", "MacBook");
+    var phone = enroll("mara", "iPhone");
+    var mara = signIn(mac);
+    var reached = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var signingIn = new FutureTask<>(() -> signIn(phone));
+    var signer = Thread.ofPlatform().unstarted(signingIn);
+    DateTimeUtils.clock = new PausingClock(DateTimeUtils.clock, signer, pausedIn, reached, release);
+    signer.start();
+    assertTrue(reached.await(30, TimeUnit.SECONDS), "the sign-in never reached " + pausedIn);
+
+    var removed = ask(mara, "DELETE", "/v1/passkeys/" + encoded(phone));
+    release.countDown();
+
+    assertEquals(204, removed.status());
+    var refused =
+        assertThrows(Exception.class, () -> signingIn.get(30, TimeUnit.SECONDS)).getCause();
+    assertEquals(PasskeyException.class, refused.getClass());
+    assertEquals("Passkey authentication failed.", refused.getMessage());
+    assertEquals(
+        0L,
+        db.queryOne(
+                "SELECT COUNT(*) FROM sessions WHERE credential_id = ?",
+                row -> row.integer(0),
+                encoded(phone))
+            .orElseThrow(),
+        "no session names the removed passkey");
   }
 
   /**
@@ -326,6 +481,85 @@ class PasskeyRoutesTest {
           refusal("not_found", "API endpoint was not found.", null, List.of()),
           answer.map(),
           request.toString());
+    }
+  }
+
+  private record Removal(String session, String id) {}
+
+  /** Mara's removal of {@code removal}'s id as her session asks it, on {@code connection}. */
+  private static String remove(Sqlite connection, Removal removal) {
+    return Actor.call(
+        new Actor("mara", Role.MEMBER, Actor.Lane.API),
+        () -> {
+          try {
+            new PasskeyOperations(connection).remove(removal.id(), removal.session());
+            return "removed";
+          } catch (ApiException refused) {
+            return refused.error().code() + ": " + refused.getMessage();
+          }
+        });
+  }
+
+  /** Returns once {@code thread} is inside a write transaction, which another holds: waiting. */
+  private static void awaitWaitingOnTheWriteLock(Thread thread) {
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+    while (Arrays.stream(thread.getStackTrace())
+        .noneMatch(
+            frame ->
+                frame.getClassName().equals(Sqlite.class.getName())
+                    && frame.getMethodName().equals("transaction"))) {
+      assertTrue(System.nanoTime() < deadline, "the other removal never waited on the write lock");
+      Thread.onSpinWait();
+    }
+  }
+
+  /**
+   * The clock {@code paused} reads: the first time it is read on {@code paused} from a method named
+   * {@code method}, it says so ({@code reached}) and holds that read until {@code release}.
+   */
+  private static final class PausingClock extends Clock {
+    private final Clock clock;
+    private final Thread paused;
+    private final String method;
+    private final CountDownLatch reached;
+    private final CountDownLatch release;
+
+    PausingClock(
+        Clock clock, Thread paused, String method, CountDownLatch reached, CountDownLatch release) {
+      this.clock = clock;
+      this.paused = paused;
+      this.method = method;
+      this.reached = reached;
+      this.release = release;
+    }
+
+    @Override
+    public Instant instant() {
+      if (Thread.currentThread() == paused && reached.getCount() > 0 && readIn()) {
+        reached.countDown();
+        try {
+          assertTrue(release.await(30, TimeUnit.SECONDS), "never released");
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          throw new IllegalStateException(e);
+        }
+      }
+      return clock.instant();
+    }
+
+    private boolean readIn() {
+      return StackWalker.getInstance()
+          .walk(frames -> frames.anyMatch(frame -> frame.getMethodName().equals(method)));
+    }
+
+    @Override
+    public ZoneId getZone() {
+      return clock.getZone();
+    }
+
+    @Override
+    public Clock withZone(ZoneId zone) {
+      return clock.withZone(zone);
     }
   }
 

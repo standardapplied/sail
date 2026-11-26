@@ -59,10 +59,12 @@ Usage:
                                 person at its node's CLI or at main's gateway; main refuses a sync session
                                 whose token is no session; eng reads sync health and bus stats on its own
                                 box but not on main, nor runs main's rounds; eng and obs list their own
-                                passkeys on main over HTTP, eng's removal of an id not hers is not found, and
+                                passkeys on main over HTTP, neither eng's token nor uday's admin token removes
+                                one, whatever the id (only a session signed in with a passkey does), and
                                 eng's in-container credential reaches no passkey door; a removal that ends
-                                its sessions, the last passkey and the one signed in with are proven by the
-                                unit tests (PasskeyRoutesTest), which enroll a passkey; row 4, a push into a project
+                                its sessions, the last passkey, the one signed in with, two removals at once
+                                and a sign-in a removal overtakes are proven by the unit tests
+                                (PasskeyRoutesTest), which enroll a passkey; row 4, a push into a project
                                 client is not granted, is proven by the unit tests (AccessScenarioTest row
                                 4), as client's box drops an ungranted project before it offers anything and
                                 only a forged sync client reaches main; row 26, a disabled person's passkey
@@ -1618,8 +1620,10 @@ access() {
     http_token_door "$run" main eng member 200 GET /v1/passkeys '' '"passkeys": ['
   check "$run" "obs, a viewer, lists their own passkeys on main [HTTP]" \
     http_token_door "$run" main obs viewer 200 GET /v1/passkeys '' '"passkeys": ['
-  check "$run" "eng removes a passkey id that is not hers on main: not found, as an id that names none [HTTP]" \
-    http_token_door "$run" main eng member 404 DELETE /v1/passkeys/bm90LWhlcnM '' "No passkey of yours has that id."
+  check "$run" "eng's token removes no passkey on main, an id not hers as any: only a session signed in with a passkey removes one [HTTP]" \
+    http_token_door "$run" main eng member 403 DELETE /v1/passkeys/bm90LWhlcnM '' "Passkeys are removed only from a session signed in with a passkey."
+  check "$run" "uday's admin token removes no passkey on main either [HTTP]" \
+    http_token_door "$run" main uday admin 403 DELETE /v1/passkeys/bm90LWhlcnM '' "Passkeys are removed only from a session signed in with a passkey."
   check "$run" "eng's in-container credential lists no passkeys: the socket serves no passkey door, and the lane is refused at every door that does (the unit tests' container column) [socket]" \
     container_refuses "$run" eng acme "HTTP 404" "$IN_CONTAINER_PASSKEYS"
   check "$run" "obs asks main's gateway to stop a run: agent stop would run as main's own person, refused [gateway]" \

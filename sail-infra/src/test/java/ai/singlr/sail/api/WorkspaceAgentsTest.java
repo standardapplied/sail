@@ -7,7 +7,6 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
@@ -356,21 +355,6 @@ class WorkspaceAgentsTest {
           List.of(agent.get("sign_in"), agent.get("kinds")),
           harness);
     }
-  }
-
-  /** A refusal an offer never carries has no short form, and saying one fails loudly. */
-  @Test
-  void aRefusalNoOfferCarriesHasNoShortForm() {
-    var refused =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                AgentStarts.unavailable(
-                    new ApiError("not_your_workspace", "Not yours.", (String) null), "acme"));
-
-    assertEquals(
-        "An offer refused with not_your_workspace has no short form to show.",
-        refused.getMessage());
   }
 
   /**

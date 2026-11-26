@@ -60,8 +60,7 @@ final class ProjectDefinitionOperations {
       return response(projects.create(definition));
     } catch (ProjectStore.NameTaken taken) {
       throw nameRefused(
-          "A project named " + name + " already exists.",
-          Remedy.of("Choose another name, or open " + name + "."));
+          taken.getMessage(), Remedy.of("Choose another name, or open " + name + "."));
     }
   }
 

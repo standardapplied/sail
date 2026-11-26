@@ -2184,7 +2184,7 @@ record AgentOffersResponse(
     if (refusal != null) {
       m.put("refusal", refusal.toMap());
     }
-    m.put("offered", offered.stream().map(offer -> offer.toMap(project)).toList());
+    m.put("offered", offered.stream().map(AgentOffer::toMap).toList());
     return m;
   }
 }
@@ -2197,13 +2197,17 @@ record AgentOffersResponse(
  * inside it ({@code inside}), its own sign-in ({@code sign_in}) and whether the workspace holds it
  * ({@code signed_in}), said only when that was read ({@code signedIn} null when not); and why it
  * does not start at all ({@code refusal}), with the few words a list row says of it ({@code
- * unavailable}).
+ * unavailable}) where the refusal declares them.
  */
 record AgentOffer(
-    Harness harness, LoginStore.Row login, boolean inside, Boolean signedIn, ApiError refusal) {
-
-  /** The offer as a workspace of {@code project} sends it. */
-  Map<String, Object> toMap(String project) {
+    Harness harness,
+    LoginStore.Row login,
+    boolean inside,
+    Boolean signedIn,
+    AgentStarts.OfferRefusal refusal)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
     m.put("harness", harness.yamlName());
     m.put("display", harness.displayName());
@@ -2236,8 +2240,10 @@ record AgentOffer(
       m.put("sign_in", said);
     }
     if (refusal != null) {
-      m.put("refusal", refusal.toMap());
-      m.put("unavailable", AgentStarts.unavailable(refusal, project));
+      m.put("refusal", refusal.why().error().toMap());
+      if (refusal.unavailable() != null) {
+        m.put("unavailable", refusal.unavailable());
+      }
     }
     return m;
   }

@@ -249,7 +249,7 @@ class ProjectCreateCommandTest {
         ProjectDefinitionJson.write(mutations.catalog().read("acme").orElseThrow()) + "\n",
         first.out());
     assertEquals("x/1", mutations.catalog().read("acme").orElseThrow().image());
-    assertEquals(new CommandRun(1, "", "  ✗ A project named 'acme' already exists.\n"), second);
+    assertEquals(new CommandRun(1, "", "  ✗ A project named acme already exists.\n"), second);
     assertEquals("x/1", mutations.catalog().read("acme").orElseThrow().image());
   }
 
