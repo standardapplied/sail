@@ -258,31 +258,12 @@ public final class LocalHost: Sendable {
     }
 
     func start(_ binary: String) throws(ShellError) {
-        var attributes: posix_spawnattr_t?
-        var actions: posix_spawn_file_actions_t?
-        posix_spawnattr_init(&attributes)
-        posix_spawn_file_actions_init(&actions)
-        defer {
-            posix_spawnattr_destroy(&attributes)
-            posix_spawn_file_actions_destroy(&actions)
+        let pid: pid_t
+        do {
+            pid = try Spawn.process(binary, ["_pty-host", "--local"], errors: .file(log), newSession: true)
+        } catch {
+            throw .host("\(binary) could not be started: \(error)")
         }
-        var none = sigset_t(), all = sigset_t()
-        sigemptyset(&none)
-        sigfillset(&all)
-        posix_spawnattr_setsigmask(&attributes, &none)
-        posix_spawnattr_setsigdefault(&attributes, &all)
-        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF))
-        posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
-        posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0)
-        posix_spawn_file_actions_addopen(&actions, 2, log, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0o600)
-        let words = [binary, "_pty-host", "--local"]
-        let settings = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" }
-        let arguments: [UnsafeMutablePointer<CChar>?] = words.map { strdup($0) } + [nil]
-        let environment: [UnsafeMutablePointer<CChar>?] = settings.map { strdup($0) } + [nil]
-        defer { (arguments + environment).forEach { free($0) } }
-        var pid: pid_t = 0
-        let spawned = posix_spawn(&pid, binary, &actions, &attributes, arguments, environment)
-        guard spawned == 0 else { throw .host("\(binary) could not be started: \(String(cString: strerror(spawned)))") }
         child.withLock { $0 = pid }
         watch(pid, binary: binary, since: ContinuousClock.now)
     }

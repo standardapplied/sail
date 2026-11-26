@@ -101,6 +101,11 @@ struct RealLocalHostTests {
 struct RealLocalHost {
     static let binary = ProcessInfo.processInfo.environment["SAIL_BINARY"]
 
+    /// A host started as every process a test starts (``TestSpawn``).
+    static let spawn: LocalHostProcess.Spawning = { executable, arguments, errors throws(SpawnRefused) in
+        try TestSpawn.process(executable, arguments, errors: errors)
+    }
+
     let process: LocalHostProcess
     let address: HostAddress
     let folder: String
@@ -108,7 +113,7 @@ struct RealLocalHost {
     static func with(_ body: (RealLocalHost) async throws -> Void) async throws {
         guard let binary else { throw HostError("SAIL_BINARY names no sail binary") }
         let environment = ProcessInfo.processInfo.environment
-        let process = LocalHostProcess(binary: binary)
+        let process = LocalHostProcess(binary: binary, spawn: spawn)
         try await process.start()
         defer { process.stop() }
         let folder = try environment["SAIL_LOCAL_FOLDER"] ?? physical(FileManager.default.temporaryDirectory.path)

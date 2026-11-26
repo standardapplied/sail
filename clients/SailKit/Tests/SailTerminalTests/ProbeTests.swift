@@ -4,6 +4,7 @@ import SailKitTestSupport
 import SailTerminal
 import SailTerminalWire
 @testable import sail_term_probe
+import Synchronization
 import Testing
 
 @Suite(.timeLimit(.minutes(1))) struct ProbeTests {
@@ -30,6 +31,38 @@ import Testing
         #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
         #expect(throws: ProbeError.self) { try Capture(path: path) }
         #expect(try String(contentsOfFile: path, encoding: .utf8) == "bytes")
+    }
+
+    /// A host that ends before it says it serves is reported as it ends, never at the start's
+    /// deadline, which is held and never let pass; it is reaped before the start throws.
+    @Test func aHostThatEndsBeforeItServesIsReportedAsItEnds() async throws {
+        let deadline = Timeline()
+        let started = Mutex<pid_t?>(nil)
+        let host = LocalHostProcess(binary: "/usr/bin/true", sleep: deadline.sleep) { executable, arguments, errors throws(SpawnRefused) in
+            let pid = try RealLocalHost.spawn(executable, arguments, errors)
+            started.withLock { $0 = pid }
+            return pid
+        }
+        await #expect { try await host.start() } throws: { error in
+            "\(error)" == "/usr/bin/true _pty-host --local ended before it said it serves"
+        }
+        let pid = try #require(started.withLock { $0 })
+        #expect(HostTakeoverTests.gone(pid), "the host was left behind")
+        withExtendedLifetime(host) {}
+    }
+
+    /// A start cancelled before its host says it serves is said to be cancelled, never to have
+    /// run out of its deadline, which is held and never let pass. The host takes no arguments and
+    /// lives until it is killed.
+    @Test func aCancelledStartIsSaidToBeCancelled() async throws {
+        let deadline = Timeline()
+        let binary = FileManager.default.temporaryDirectory.appending(path: "silent-host-\(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: binary) }
+        try #require(FileManager.default.createFile(atPath: binary, contents: Data("#!/bin/sh\nexec tail -f /dev/null\n".utf8), attributes: [.posixPermissions: 0o700]))
+        let host = LocalHostProcess(binary: binary, sleep: deadline.sleep, spawn: RealLocalHost.spawn)
+        let start = Task { try await host.start() }
+        start.cancel()
+        await #expect(throws: CancellationError.self) { try await start.value }
     }
 
     /// MINOR 11: a report names what a step did, never what it typed.

@@ -14,7 +14,7 @@ enum ExitMark {
         exitMark = strdup(file.path)
         atexit {
             guard let path = exitMark else { return }
-            _ = close(open(path, O_CREAT | O_WRONLY | O_TRUNC, 0o644))
+            _ = close(open(path, O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC, 0o644))
         }
     }
 }

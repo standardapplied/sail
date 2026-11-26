@@ -166,7 +166,7 @@ final class Capture: Sendable {
     private let file: FileHandle
 
     init(path: String) throws {
-        let descriptor = open(path, O_WRONLY | O_CREAT | O_EXCL, 0o600)
+        let descriptor = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else { throw ProbeError("cannot make \(path), which must not exist yet: \(String(cString: strerror(errno)))") }
         file = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
     }
