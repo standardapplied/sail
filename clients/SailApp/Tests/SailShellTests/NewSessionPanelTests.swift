@@ -866,15 +866,14 @@ import Testing
     }
 
     /// Everything that can show while the panel is open was measured as it opened, so its rows show
-    /// as many as they did: a harness's help chosen by its mode that wraps past every other, and a
-    /// key stored there, its line said over the foot, then every kind chosen under that line; at
-    /// the design's window and the least, the window at the top of the screen. Its top stays and the
-    /// box stays in the page.
+    /// as many as they did: a harness's help chosen by its mode that wraps past every other kind's,
+    /// and a key stored there, its line said over the foot, then every kind chosen under that line;
+    /// at the design's window and the least (where the page holds a help two lines shorter), the
+    /// window at the top of the screen. Its top stays and the box stays in the page.
     @Test func whatShowsWhileOpenShortensNoRows() async throws {
-        let wordy = String(repeating: "Runs everything, with a classifier reviewing each action first, and asks where it is unsure. ", count: 2)
-        let answer = try Exchange("workspace-agents-dock").altered(at: ["offered", 0, "modes", 4, "about"], to: wordy)
-        let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: answer.body))
-        for (width, height) in Self.windows {
+        for ((width, height), sentences) in zip(Self.windows, [3, 2]) {
+            let answer = try Self.wordy(sentences)
+            let agents = try Endpoint.agents(workspace: "dock", project: "harbor").decode(HTTPResponse(status: 200, headers: [:], body: answer.body))
             let (view, window) = try await Self.atTheTop(answer, width: width, height: height)
             defer { window.orderOut(nil) }
             let panel = try await Self.open("dock", in: view)
@@ -897,12 +896,21 @@ import Testing
         }
     }
 
+    /// dock's answer with Claude Code's Auto said in `sentences` sentences, its words then wrapping
+    /// past every other kind's.
+    static func wordy(_ sentences: Int) throws -> Exchange {
+        let words = String(repeating: "Runs everything, with a classifier reviewing each action first, and asks where it is unsure. ", count: sentences)
+        return try Exchange("workspace-agents-dock").altered(at: ["offered", 0, "modes", 4, "about"], to: words)
+    }
+
     /// With no room under the row, the panel hangs over it: its top placed by its tallest choice,
     /// whose foot stands at least 4 pt over the row, and at least a stored key's line over the page's
-    /// foot, and kept there for a shorter one; a key stored then moves nothing and cuts no row.
+    /// foot, and kept there for a shorter one; a key stored then moves nothing and cuts no row. Its
+    /// top is the same whichever of Claude Code's modes is remembered, Auto's words wrapping past
+    /// every other kind's: each mode was measured.
     @Test func withNoRoomUnderItsRowThePanelHangsOverIt() async throws {
         let rows = try WorkspacesReachTests.list((1 ... 30).map { ["name": String(format: "ws-%02d", $0), "instance": String(format: "harbor-ws-%02d", $0), "state": "running", "owner": "uday"] })
-        let agents = Exchange(method: "GET", path: "/v1/projects/harbor/workspaces/ws-30/agents", status: 200, body: try Exchange("workspace-agents-dock").body)
+        let agents = Exchange(method: "GET", path: "/v1/projects/harbor/workspaces/ws-30/agents", status: 200, body: try Self.wordy(3).body)
         let (view, window, _) = try await Self.listed([], rows: rows, also: [agents], saying: "ws-30")
         defer { window.orderOut(nil) }
         let panel = try await Self.open("ws-30", in: view)
@@ -918,6 +926,12 @@ import Testing
         #expect(codex.minY >= max(row.maxY + NewSessionPanel.gap, page.minY + NewSessionPanel.inset + line) - 0.5 && near(codex.maxY, claude.maxY), "the panel is \(codex) with Codex CLI chosen, \(claude) with Claude Code, the row \(row), a stored line \(line) pt")
         let faults = Self.misplaced(panel, in: view, top: claude.maxY, "a key stored")
         #expect(faults.isEmpty, "\(faults.joined(separator: "\n"))")
+        for mode in try #require(decoded.offered.first).modes.map(\.mode) {
+            panel.close()
+            view.memory = ModeMemory(modes: ["claude-code": mode])
+            let again = try await Self.open("ws-30", in: view)
+            #expect(near(again.popover.frame.maxY, claude.maxY), "remembering \(mode) placed its top at \(again.popover.frame.maxY), not \(claude.maxY)")
+        }
     }
 
     /// The panel follows its row or closes: the list scrolled, or drawn again with its row gone or
