@@ -100,6 +100,30 @@ import Testing
         _ = first
     }
 
+    /// A limited wait whose task is cancelled, as a test's time limit cancels it, says what it waited
+    /// for, never only that it was cancelled.
+    @Test func aCancelledWaitSaysWhatItWaitedFor() async throws {
+        let create = SessionCreate(
+            session: "work", command: [], workingDirectory: "/tmp", project: "", room: "", size: TerminalSize(columns: 20, rows: 3)
+        )
+        let session = TerminalSession(
+            open: create, door: .local(.unix(path: "/nonexistent/h.sock")), screen: try screen(columns: 20, rows: 3), timeout: Patience.answer,
+            sleep: Naps().sleep
+        )
+        defer { session.close() }
+        let limits = Timeline()
+        let follower = Follower(session, patience: Self.probesOwn, sleep: limits.sleep)
+        let waiting = Task { try await follower.until("held what it never holds") { false } }
+        try await limits.until(held: [.seconds(Self.probesOwn)])
+        waiting.cancel()
+        do {
+            try await waiting.value
+            Issue.record("a wait for what never holds returned")
+        } catch let error as ProbeError {
+            #expect(error.description.hasPrefix("the session never held what it never holds"), "\(error)")
+        }
+    }
+
     /// The probe's own patience: the limit a `same` whose replay never comes, or never ends, fails
     /// at, and the one limit these tests let pass.
     static let probesOwn = 5

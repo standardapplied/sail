@@ -48,8 +48,7 @@ final class Follower: Sendable {
         }
         try await withThrowingTaskGroup(of: Bool.self) { group in
             group.addTask { [sleep] in
-                try await sleep(.seconds(limit))
-                return true
+                (try? await sleep(.seconds(limit))) != nil
             }
             defer { group.cancelAll() }
             var expired = false

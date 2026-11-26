@@ -18,8 +18,8 @@ struct Runner {
     let progress: @Sendable (StepResult) -> Void
     private let clock = ContinuousClock()
 
-    /// A probe's run waits 5 s for what a step needs, 30 s for an attach and ``Door/endLimit`` for a
-    /// close, each limit timed by `sleep`.
+    /// A probe's run waits 5 s for what a step needs and 30 s for an attach, those limits timed by
+    /// `sleep`, and ``Door/endLimit`` for a close, which the session times itself.
     init(
         session: TerminalSession, host: LocalHostProcess?, echoBudget: Double, patience: Int? = 5, ending: Duration = Door.endLimit,
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
