@@ -703,11 +703,15 @@ public final class WorkspacesView: NSView {
         }
     }
 
-    /// The card as an empty state: who is signed in being asked, signed out, not known, or the
-    /// control plane out of reach with when it was last tried.
+    /// The card while who is signed in is asked: that wait, Sail's mark drawing itself over its words.
+    static let asking = "Asking who is signed in"
+
+    /// The card: who is signed in being asked, or an empty state saying the person is signed out,
+    /// not known, or the control plane out of reach with when it was last tried.
     private func showCard(_ screen: WorkspacesModel.Screen?) {
+        card.subviews.forEach { $0.removeFromSuperview() }
+        guard door != .asking else { return showAsking() }
         let (icon, title, body, button, line): (LineIcon, String, String, String?, String?) = switch (door, screen) {
-        case (.asking, _): (.box, "Asking the control plane who is signed in…", "", nil, nil)
         case (.signedOut, _): (.box, "Sign in to see your workspaces", "You are signed out of the control plane.", "Sign In", nil)
         case let (.unknown(lines), _): (.cloudOff, lines.first ?? "", lines.dropFirst().joined(separator: " "), "Try Again", nil)
         case let (_, .unreachable(empty)?): (.cloudOff, empty.title, empty.body, "Try Again", triedAt.map { "last tried " + Self.clock.string(from: $0) })
@@ -720,12 +724,21 @@ public final class WorkspacesView: NSView {
         var actions = button == nil ? [] : [first]
         if case .unreachable? = screen { actions.append(SailButton("Open Account", kind: .quiet, look: look, target: self, action: #selector(openAccount(_:)))) }
         let empty = EmptyState(icon: icon, title: title, body: body, actions: actions, line: line, look: look, titleFont: titleFont, mono: mono)
-        card.subviews.forEach { $0.removeFromSuperview() }
         empty.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(empty)
         NSLayoutConstraint.activate([
             empty.leadingAnchor.constraint(equalTo: card.leadingAnchor), empty.trailingAnchor.constraint(equalTo: card.trailingAnchor),
             empty.topAnchor.constraint(equalTo: card.topAnchor), empty.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+        ])
+    }
+
+    private func showAsking() {
+        cardSaid = [Self.asking]
+        let mark = BrandMark(.drawing(label: Self.asking), look: look, mono: mono)
+        mark.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(mark)
+        NSLayoutConstraint.activate([
+            mark.centerXAnchor.constraint(equalTo: card.centerXAnchor), mark.topAnchor.constraint(equalTo: card.topAnchor), mark.bottomAnchor.constraint(equalTo: card.bottomAnchor),
         ])
     }
 

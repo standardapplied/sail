@@ -47,7 +47,7 @@ public final class TabStrip: NSView {
     init(look: Look) {
         self.look = look
         add = RingedButton(symbol: "plus", tip: "New Tab", look: look)
-        super.init(frame: NSRect(x: 0, y: 0, width: 600, height: 28))
+        super.init(frame: NSRect(x: 0, y: 0, width: 600, height: Self.tabHeight))
         wantsLayer = true
         add.target = self
         add.action = #selector(addTab)
@@ -91,7 +91,7 @@ public final class TabStrip: NSView {
     }
 
     /// A tab's height, centred in the band.
-    static let tabHeight = 28.0
+    static let tabHeight = 26.0
 
     private var row: TabRow {
         TabRow(tabs: tabs.count, selected: selectedIndex, width: Double(bounds.width) - leading)

@@ -3,14 +3,14 @@ import SailLook
 import SailTerminalView
 
 /// The icon rail, 60 pt wide on the window's chrome under the band: "This Mac" on top, "Workspaces"
-/// under it while signed in, the account at the bottom, as Mast's `.rail` (10 pt in at the top, 12
-/// at the bottom, 42 pt items). The selected item takes the accent fill and a 2 pt bar at its
+/// under it while signed in, the account at the bottom, as Mast's `.rail` (8 pt in at the top under
+/// the compact band, 12 at the bottom, 42 pt items). The selected item takes the accent fill and a 2 pt bar at its
 /// leading edge.
 @MainActor
 public final class Rail: NSView {
     public static let width = 60.0
-    /// Mast's `.rail` measures: 10 pt in at the top, 12 at the bottom, 42 pt items, a 2 pt bar.
-    static let top = 10.0, bottom = 12.0, item = 42.0, bar = 2.0, barHeight = 24.0, gap = 4.0
+    /// Mast's `.rail` measures: 8 pt in at the top, 12 at the bottom, 42 pt items, a 2 pt bar.
+    static let top = 8.0, bottom = 12.0, item = 42.0, bar = 2.0, barHeight = 24.0, gap = 4.0
 
     public enum Item: String, CaseIterable, Sendable {
         case thisMac, workspaces, account

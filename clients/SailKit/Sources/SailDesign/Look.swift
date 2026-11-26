@@ -231,11 +231,15 @@ public struct Look: Equatable, Sendable {
     }
 
     /// Durations, in seconds: hover, press and caret turns; a spinner's turn; a pulse; how long a
-    /// skeleton waits before it shows, so a fast answer never flashes one.
+    /// skeleton waits before it shows, so a fast answer never flashes one; the brand mark's cycle,
+    /// drawn by `drawn` of it and held whole until `held` (Mast's `loading-draw`).
     public enum Timing {
         public static let hover = 0.12
         public static let turn = 0.7
         public static let pulse = 1.2
         public static let skeletonDelay = 0.15
+        public static let draw = 1.8
+        public static let drawn = 0.45
+        public static let held = 0.7
     }
 }

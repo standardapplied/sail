@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import SailAccount
 import SailAPI
 import SailShell
@@ -82,7 +83,7 @@ extension Driver {
             return accent()
         }
         if step.titleBar == true {
-            return titleBar()
+            return await titleBar(step.name ?? "title-bar")
         }
         if step.sweep == true {
             return sweep()
@@ -344,15 +345,32 @@ extension Driver {
         )
     }
 
-    /// A: the window's chrome is the look's, laid out as Mast's shell. The title bar is transparent
-    /// over a full-size content view with the platform's buttons centred in the band; the band is
-    /// the chrome under the buttons, in the middle and at the end, and the rail under it is too.
-    private func titleBar() -> (Bool, String) {
+    /// A: the window's chrome is the look's, laid out as Mast's shell, in light and then dark. The
+    /// title bar is transparent over a full-size content view in the compact unified style with the
+    /// platform's buttons shown; the band is the chrome under the buttons, in the middle and at the
+    /// end, and the rail under it is too; and the band's geometry holds (``bandGeometry()``). The top of
+    /// the window, the band and the card's first rows, is saved in each look as `<name>-<look>.png`
+    /// (`-rtl` right to left) beside the window's other shots.
+    private func titleBar(_ name: String) async -> (Bool, String) {
         let window = shell.window
-        guard window.styleMask.contains(.fullSizeContentView), window.titlebarAppearsTransparent,
-              [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].allSatisfy({ window.standardWindowButton($0)?.isHidden == false }),
-              let content = window.contentView, let context = Self.drawn(content), let bytes = context.data
-        else { return (false, "the window's title bar is the system's, or a window button is missing") }
+        guard window.styleMask.contains(.fullSizeContentView), window.titlebarAppearsTransparent, window.toolbarStyle == .unifiedCompact,
+              [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].allSatisfy({ window.standardWindowButton($0)?.isHidden == false })
+        else { return (false, "the window's title bar is the system's, not compact, or a window button is missing") }
+        var held = true, said: [String] = []
+        let (taken, shots) = await inBothLooks(name) { file in
+            let (chrome, chromeSaid) = self.bandIsChrome(), (geometry, geometrySaid) = self.bandGeometry()
+            held = held && chrome && geometry
+            said.append("\(self.shell.look == .dark ? "dark" : "light"): \(chromeSaid); \(geometrySaid)")
+            await self.capture(.window(window.windowNumber), to: file)
+            Self.keepTheTop(of: file, points: ShellApp.bandHeight + 48, window: window)
+        }
+        return (held && taken, said.joined(separator: " | ") + "; " + shots)
+    }
+
+    /// The band, the rail under it and the window's foot sampled in the chrome.
+    private func bandIsChrome() -> (Bool, String) {
+        let window = shell.window
+        guard let content = window.contentView, let context = Self.drawn(content), let bytes = context.data else { return (false, "the window drew nothing") }
         let pixels = bytes.bindMemory(to: UInt8.self, capacity: context.width * context.height * 4)
         let band = Double(content.bounds.height - window.contentLayoutRect.maxY)
         func at(_ x: Double, _ y: Double) -> UInt32 {
@@ -362,9 +380,65 @@ extension Driver {
         let samples = [("under the buttons", at(40, band / 2)), ("mid-band", at(Double(content.bounds.width) / 2, band / 2)),
                        ("the band's end", at(Double(content.bounds.width) - 6, band / 2)), ("the rail", at(Rail.width / 2, band + 4))]
         return (
-            band >= 44 && samples.allSatisfy { Self.near($0.1, chrome) },
-            "the band is \(band) pt; " + samples.map { "\($0.0) #" + String(format: "%06X", $0.1) }.joined(separator: ", ") + String(format: " (wanted #%06X)", chrome)
+            samples.allSatisfy { Self.near($0.1, chrome) },
+            samples.map { "\($0.0) #" + String(format: "%06X", $0.1) }.joined(separator: ", ") + String(format: " (wanted #%06X)", chrome)
         )
+    }
+
+    /// The band as AppKit and the shell laid it out, said in window points: its height (AppKit's,
+    /// or in full screen the one the window draws) against `bandHeight`; each window button's frame
+    /// and its centre against the band's, within 1 pt; the shown tabs' centres, within half a point;
+    /// the room from the buttons to the nearest of the strip's tabs and `+`, at least `buttonsGap`;
+    /// the card's top flush under the band; and no view of the shell over a button.
+    func bandGeometry() -> (Bool, String) {
+        let window = shell.window
+        guard let root = window.contentView, let card = shell.thisMac.superview else { return (false, "the window has no content") }
+        root.layoutSubtreeIfNeeded()
+        let full = window.styleMask.contains(.fullScreen), height = Double(root.bounds.height)
+        let band = full ? Double(shell.thisMac.strip.frame.height) : height - Double(window.contentLayoutRect.maxY)
+        let middle = height - band / 2, cardTop = height - Double(card.convert(card.bounds, to: nil).maxY)
+        let strip = shell.thisMac.strip
+        let controls = ((strip.tabs as [NSView]) + [strip.add]).filter { !$0.isHiddenOrHasHiddenAncestor }.map { $0.convert($0.bounds, to: nil) }
+        var misses: [String] = []
+        var said = [String(format: "the band %.1f pt", band), String(format: "the card's top at %.1f", cardTop)]
+        if abs(band - ShellApp.bandHeight) >= 0.5 { misses.append(String(format: "the band is %.1f pt, not %.0f", band, ShellApp.bandHeight)) }
+        if abs(cardTop - band) >= 0.5 { misses.append("the card is not flush under the band") }
+        for tab in strip.tabs where !tab.isHiddenOrHasHiddenAncestor {
+            let frame = tab.convert(tab.bounds, to: nil)
+            if abs(Double(frame.midY) - middle) >= 0.5 { misses.append(String(format: "a tab's centre is %.1f pt off the band's", Double(frame.midY) - middle)) }
+        }
+        if let tab = strip.tabs.first(where: { !$0.isHiddenOrHasHiddenAncestor }) {
+            let frame = tab.convert(tab.bounds, to: nil)
+            said.append(String(format: "the first tab x %.1f–%.1f, %.1f pt high, centred %+.1f", frame.minX, frame.maxX, frame.height, Double(frame.midY) - middle))
+        }
+        if !full, let buttons = ShellApp.buttons(of: window) {
+            for (kind, named) in [(NSWindow.ButtonType.closeButton, "close"), (.miniaturizeButton, "minimise"), (.zoomButton, "zoom")] {
+                guard let button = window.standardWindowButton(kind) else { continue }
+                let frame = button.convert(button.bounds, to: nil)
+                said.append(named + String(format: " x %.1f–%.1f y %.1f from the top, centred %+.1f", frame.minX, frame.maxX, height - frame.maxY, Double(frame.midY) - middle))
+                if abs(Double(frame.midY) - middle) >= 1 { misses.append("\(named) is not centred in the band") }
+                for view in [shell.rail, card, strip] as [NSView] where view.convert(view.bounds, to: nil).intersects(frame) {
+                    misses.append("\(type(of: view)) lies over \(named)")
+                }
+            }
+            let onTheRight = buttons.midX > root.bounds.midX
+            let gaps = controls.map { onTheRight ? Double(buttons.minX - $0.maxX) : Double($0.minX - buttons.maxX) }
+            if let gap = gaps.min() {
+                said.append(String(format: "%.1f pt from the buttons to the nearest tab", gap) + (onTheRight ? ", the buttons on the right" : ""))
+                if gap < ShellApp.buttonsGap - 0.5 { misses.append(String(format: "the nearest tab is %.1f pt from the buttons", gap)) }
+            }
+        }
+        return (misses.isEmpty, (misses.isEmpty ? "" : "MISSED " + misses.joined(separator: ", ") + "; ") + said.joined(separator: ", "))
+    }
+
+    /// The shot in `file` cut to the window's top `points`.
+    private static func keepTheTop(of file: URL, points: Double, window: NSWindow) {
+        guard let source = CGImageSourceCreateWithURL(file as CFURL, nil), let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return }
+        let scale = Double(image.width) / Double(window.frame.width)
+        guard let top = image.cropping(to: CGRect(x: 0, y: 0, width: Double(image.width), height: (points * scale).rounded())),
+              let png = NSBitmapImageRep(cgImage: top).representation(using: .png, properties: [:])
+        else { return }
+        try? png.write(to: file)
     }
 
     /// The sRGB colour at byte `offset` of an RGBA bitmap, as `0xRRGGBB`.
