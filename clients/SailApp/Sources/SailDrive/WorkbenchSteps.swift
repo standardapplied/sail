@@ -26,7 +26,7 @@ extension Driver {
         }
         if let index = step.clickPane {
             guard let view = paneView(at: index) else { return (false, "no pane \(index) in the selected tab") }
-            let middle = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
+            let middle = clickPoint(NSPoint(x: view.bounds.midX, y: view.bounds.midY), in: view)
             mouse(.leftMouseDown, at: middle, clicks: 1)
             mouse(.leftMouseUp, at: middle, clicks: 1)
             return (true, "")
@@ -289,7 +289,7 @@ extension Driver {
         let start = (x: Double(divider.line.midX), y: Double(divider.line.midY))
         let along = divider.axis == .sideBySide
         func windowPoint(_ offset: Double) -> NSPoint {
-            workbench.convert(NSPoint(x: start.x + (along ? offset : 0), y: start.y + (along ? 0 : offset)), to: nil)
+            clickPoint(NSPoint(x: start.x + (along ? offset : 0), y: start.y + (along ? 0 : offset)), in: workbench)
         }
         mouse(.leftMouseDown, at: windowPoint(0), clicks: 1)
         var followed = 0
@@ -326,7 +326,7 @@ extension Driver {
         shell.window.layoutIfNeeded()
         let tabs = workbench.strip.tabs
         guard tabs.indices.contains(index) else { return nil }
-        return tabs[index].convert(NSPoint(x: tabs[index].bounds.midX, y: tabs[index].bounds.midY), to: nil)
+        return clickPoint(NSPoint(x: tabs[index].bounds.midX, y: tabs[index].bounds.midY), in: tabs[index])
     }
 
     /// Scenario 28: the tab at `from` pressed, dragged to the middle of the tab at `to`, let go.
@@ -395,7 +395,7 @@ extension Driver {
         let hit = frame.hitTest(middle)
         let buttons = zoom.convert(zoom.bounds, to: nil)
         let places = [
-            ("the strip's empty end", strip.convert(NSPoint(x: strip.bounds.maxX - 4, y: strip.bounds.midY), to: nil)),
+            ("the strip's empty end", clickPoint(NSPoint(x: strip.bounds.maxX - 4, y: strip.bounds.midY), in: strip)),
             ("just after the window's buttons", NSPoint(x: buttons.maxX + 2, y: buttons.midY)),
         ]
         let said = places.map { name, point -> (Bool, String) in
@@ -685,7 +685,7 @@ extension Driver {
         default: target = nil
         }
         guard let target, let event = NSEvent.mouseEvent(
-            with: .rightMouseDown, location: target.convert(NSPoint(x: target.bounds.midX, y: target.bounds.midY), to: nil), modifierFlags: [],
+            with: .rightMouseDown, location: clickPoint(NSPoint(x: target.bounds.midX, y: target.bounds.midY), in: target), modifierFlags: [],
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: shell.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
         ) else { return (false, "no \(kind) \(index)") }
         guard let menu = target.menu(for: event) else { return (false, "the \(kind) offered no menu") }
@@ -1080,7 +1080,7 @@ extension Driver {
     private func captureWithTheMenuOpen(to file: URL) async {
         let view = terminal
         guard let event = NSEvent.mouseEvent(
-            with: .rightMouseDown, location: view.convert(NSPoint(x: 80, y: 60), to: nil), modifierFlags: [],
+            with: .rightMouseDown, location: clickPoint(NSPoint(x: 80, y: 60), in: view), modifierFlags: [],
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: shell.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
         ), let menu = view.menu(for: event) else { return print("the pane offered no menu") }
         guard let shot = Shot.begin(.menu, to: file) else { return }

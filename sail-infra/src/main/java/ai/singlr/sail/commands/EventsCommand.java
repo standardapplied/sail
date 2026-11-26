@@ -22,6 +22,9 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import picocli.CommandLine.Command;
@@ -59,14 +62,31 @@ public final class EventsCommand implements Runnable {
   @Option(names = "--json", description = "Print one JSON event per line (raw bus payload).")
   private boolean json;
 
+  private final Supplier<ExecutorService> executors;
+
+  public EventsCommand() {
+    this(Executors::newCachedThreadPool);
+  }
+
+  EventsCommand(Supplier<ExecutorService> executors) {
+    this.executors = executors;
+  }
+
   @Override
   public void run() {
     CliCommand.run(this::execute);
   }
 
+  /**
+   * Follows the stream on a client whose work runs on an executor closed after it: a client's close
+   * waits for its selector thread only, and when the API drops the stream, a task of the client's
+   * still closes the connection after that.
+   */
   private void execute() throws Exception {
     var token = ServerConnectionConfig.resolve().token();
-    try (var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()) {
+    try (var work = executors.get();
+        var client =
+            HttpClient.newBuilder().executor(work).connectTimeout(Duration.ofSeconds(5)).build()) {
       streamEvents(client, token, System.out);
     }
   }

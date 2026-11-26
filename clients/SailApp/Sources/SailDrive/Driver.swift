@@ -929,7 +929,7 @@ final class Driver {
             x: (Double(origin.x) + Double(metrics.width) / 2) / metrics.scale, y: (Double(origin.y) + Double(metrics.height) / 2) / metrics.scale
         )
         guard let event = NSEvent.mouseEvent(
-            with: type, location: terminal.convert(point, to: nil), modifierFlags: shift ? .shift : [],
+            with: type, location: clickPoint(point, in: terminal), modifierFlags: shift ? .shift : [],
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: shell.window.windowNumber, context: nil, eventNumber: 0,
             clickCount: clicks, pressure: 1
         ) else { return }
@@ -974,4 +974,15 @@ extension Turns {
         CFRunLoopAddObserver(CFRunLoopGetMain(), ends, .commonModes)
         return turns
     }
+}
+
+/// `point` in `view` as its window's point, the window laid out first, as it is before anything
+/// is drawn: a row a fresh answer has just added is then where a person would see and click it,
+/// not where the rows before it left room. Every point the drive sends the pointer to is taken so
+/// (main's drive on af09e04fd clicked lighthouse's place outside the projects panel, which had not
+/// yet grown to the nine projects just listed).
+@MainActor
+func clickPoint(_ point: NSPoint, in view: NSView) -> NSPoint {
+    view.window?.layoutIfNeeded()
+    return view.convert(point, to: nil)
 }
