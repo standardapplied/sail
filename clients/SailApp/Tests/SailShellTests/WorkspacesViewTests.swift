@@ -13,7 +13,7 @@ import Testing
 /// test shares, while the sweeps beside it hold that actor; on the owner's Mac on its efficiency
 /// cores the suite was red in 10 of 10 runs side by side (listings never shown within 5 s) and
 /// green in 3 of 3 one at a time.
-@MainActor @Suite(.serialized) struct WorkspacesViewTests {
+@MainActor @Suite(.serialized, .timeLimit(.minutes(1))) struct WorkspacesViewTests {
     init() {
         ExitWatch.install()
     }
@@ -82,6 +82,80 @@ import Testing
         #expect(view.text.contains("dock · running") && view.text.contains("pier · stopped"), "\(view.text)")
         #expect(view.panel.list.chosen == "harbor" && view.project.newWorkspace.isEnabled)
         #expect(!view.text.contains("/v1/") && !view.text.contains("sail "))
+    }
+
+    /// A project pressed stays chosen when an answer lands while the button is down: harbor's
+    /// workspaces, asked before the press, are drawn during it, and demo is what the press leaves
+    /// chosen and shown, not harbor put back under the pointer. The choice is told once, as the
+    /// button goes down, not again as it comes up.
+    @Test func aProjectPressedStaysChosenWhenAnAnswerLandsDuringThePress() async throws {
+        let transport = Held(RecordedServer(Self.twoProjects + [try Exchange("workspaces-three")]), holding: "harbor/workspaces")
+        let (view, _) = try Self.view(transport)
+        view.shown()
+        try #require(await RunnerTabTests.until { transport.routes.contains("GET /v1/projects/harbor/workspaces") }, "harbor's workspaces never asked")
+        let told = Self.toldChoices(of: view.panel.list)
+        view.panel.list.pressed("demo")
+        transport.release()
+        try #require(await RunnerTabTests.until { view.text.contains("dock") || view.text.hasPrefix("Workspaces\ndemo\n") }, "nothing drawn: \(view.text)")
+        view.panel.list.letGo()
+        #expect(view.panel.list.chosen == "demo" && view.text.hasPrefix("Workspaces\ndemo\n"), "the press left \(view.panel.list.chosen ?? "nothing") chosen: \(view.text)")
+        #expect(told.choices == ["demo"], "the press told \(told.choices)")
+    }
+
+    /// A press dragged from demo back to harbor ends on harbor, the row under the pointer as the
+    /// button comes up, each row told once as it is crossed; demo's listing, asked as the press
+    /// crossed it, is cancelled, so no request is left running for a project passed over.
+    @Test func aPressDraggedBackEndsOnTheRowItEndsOnAndLeavesNothingAsked() async throws {
+        let server = RecordedServer(Self.twoProjects + [try Exchange("workspaces-three")])
+        let transport = Held(server, holding: "demo/workspaces")
+        let (view, _) = try Self.view(transport)
+        view.shown()
+        try #require(await RunnerTabTests.until { view.text.contains("dock") }, "nothing listed: \(view.text)")
+        let told = Self.toldChoices(of: view.panel.list)
+        view.panel.list.pressed("demo")
+        try #require(await RunnerTabTests.until { transport.routes.contains("GET /v1/projects/demo/workspaces") }, "demo's workspaces never asked")
+        view.panel.list.dragged(to: "harbor")
+        view.panel.list.letGo()
+        #expect(view.panel.list.chosen == "harbor" && told.choices == ["demo", "harbor"], "the press left \(view.panel.list.chosen ?? "nothing") chosen, told \(told.choices)")
+        #expect(await Self.reached("GET /v1/projects/demo/workspaces", server), "demo's listing still waits for its answer")
+        #expect(await RunnerTabTests.until { !view.busy && view.text.hasPrefix("Workspaces\nharbor\n") && view.text.contains("dock") }, "\(view.text)")
+    }
+
+    /// `route` reached `server`, within ``RunnerTabTests/until(_:_:)``'s bound: a held request
+    /// reaches it only once let go.
+    static func reached(_ route: String, _ server: RecordedServer) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !(await server.requests.contains { $0.route == route }) {
+            guard ContinuousClock.now < deadline else { return false }
+            await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in DispatchQueue.main.async { done.resume() } }
+        }
+        return true
+    }
+
+    /// What `list` tells its owner, recorded and passed on.
+    static func toldChoices(of list: SailList) -> Told {
+        let told = Told(), owner = list.onChoose
+        list.onChoose = { choice in
+            told.choices.append(choice ?? "nothing")
+            owner(choice)
+        }
+        return told
+    }
+
+    @MainActor final class Told {
+        var choices: [String] = []
+    }
+
+    /// A workspace row pressed stays chosen through a redraw during the press: ⌘R's, which draws
+    /// the section at once, while the button is down on pier.
+    @Test func aWorkspacePressedStaysChosenThroughARedrawDuringThePress() async throws {
+        let (view, _, _) = try await Self.listed()
+        view.project.list.pressed("pier")
+        view.askAgain(nil)
+        view.project.list.letGo()
+        #expect(view.project.list.chosen == "pier", "the press left \(view.project.list.chosen ?? "nothing") chosen")
+        await view.projectsAsked?.value
+        #expect(await RunnerTabTests.until { !view.busy } && view.project.list.chosen == "pier", "listed again, \(view.project.list.chosen ?? "nothing") is chosen")
     }
 
     /// A listing under way (the section shown again) holds nothing: only a person's action does (#462).
@@ -875,5 +949,31 @@ final class KeyWindow: NSWindow {
     private func told(wasKey: Bool) {
         guard isKeyWindow != wasKey else { return }
         NotificationCenter.default.post(name: isKeyWindow ? NSWindow.didBecomeKeyNotification : NSWindow.didResignKeyNotification, object: self)
+    }
+}
+
+/// A press as AppKit makes one, its tracking played by hand, as no unit test runs AppKit's: the
+/// choice moves while the button is down and is told only as changing; ``letGo()`` lets it up,
+/// telling the change.
+extension SailList {
+    func pressed(_ id: String) {
+        guard let row = entries.firstIndex(where: { if case let .item(item) = $0 { item.id == id } else { false } }) else {
+            Issue.record("no row \(id) to press")
+            return
+        }
+        let told = delegate
+        delegate = nil
+        selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        delegate = told
+        tableViewSelectionIsChanging(Notification(name: NSTableView.selectionIsChangingNotification, object: self))
+    }
+
+    /// The pressed button dragged onto row `id`: the choice moves there, told only as changing.
+    func dragged(to id: String) {
+        pressed(id)
+    }
+
+    func letGo() {
+        tableViewSelectionDidChange(Notification(name: NSTableView.selectionDidChangeNotification, object: self))
     }
 }

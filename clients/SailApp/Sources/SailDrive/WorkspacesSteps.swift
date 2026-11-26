@@ -34,6 +34,11 @@ actor GoldenDesk: Transport {
         holding.insert(route)
     }
 
+    /// A request for `route` waits here for ``release(_:)``.
+    func isHolding(_ route: String) -> Bool {
+        heldAnswers[route]?.isEmpty == false
+    }
+
     /// Gives `route`'s held answers now, and its later ones at once.
     func release(_ route: String) {
         holding.remove(route)
@@ -526,6 +531,16 @@ extension Driver {
             guard await clickRow(wanted, in: pane.panel.list) else { return (false, "the panel's \(wanted) row could not be clicked") }
             let named = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.hasPrefix("Workspaces\n\(wanted)\n") }
             return (named, "chosen: \(pane.panel.list.chosen ?? "none"); the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
+        }
+        if let rows = step.pressProject, let first = rows.first, let last = rows.last {
+            let listed = await waitUntil(step.seconds ?? 10) { rows.allSatisfy { Self.row($0, in: pane.panel.list) != nil } }
+            guard listed else { return (false, "the panel never listed \(rows): chosen \(pane.panel.list.chosen ?? "none")") }
+            let before = await GoldenDesk.shared.asked.count
+            let pressed = await press(rows, in: pane.panel.list, releasing: step.releasing) { pane.text.hasPrefix("Workspaces\n\(first)\n") }
+            guard pressed.ok else { return (false, pressed.said) }
+            let named = await waitUntil(step.seconds ?? 10) { !pane.busy && pane.text.hasPrefix("Workspaces\n\(last)\n") }
+            let lists = await GoldenDesk.shared.asked.dropFirst(before).map(\.route).filter { $0.hasSuffix("/workspaces") }
+            return (named, "\(pressed.said); chosen: \(pane.panel.list.chosen ?? "none"); workspaces asked: \(lists); the pane says: " + pane.text.replacingOccurrences(of: "\n", with: " | "))
         }
         if let wanted = step.chooseRow {
             guard await clickRow(wanted, in: pane.project.list) else { return (false, "no row \(wanted) to click") }
@@ -1088,6 +1103,43 @@ extension Driver {
         return await click(list, at: NSPoint(x: x, y: rect.minY + min(rect.height, 52) / 2))
     }
 
+    /// A press over the rows of `ids` as a person makes one: the button down on the first; then,
+    /// from inside AppKit's tracking of the press, where a person's next events arrive, the request
+    /// held for `route` answered when given, and the section waited on for up to 5 s to name the
+    /// row pressed (long past that answer's own drawing, which would put another row back); a drag
+    /// over each row after the first; and the button let up on the last. Should that tracking never
+    /// run the app's work, the button is let up after 5 s and the press is said to have failed.
+    func press(_ ids: [String], in list: SailList, releasing route: String?, drawn: @escaping @MainActor () -> Bool) async -> (ok: Bool, said: String) {
+        list.layoutSubtreeIfNeeded()
+        guard let window = list.window else { return (false, "the panel is in no window") }
+        let points = ids.compactMap { id in Self.row(id, in: list).map { row -> NSPoint in
+            let rect = list.rect(ofRow: row)
+            let x = list.userInterfaceLayoutDirection == .rightToLeft ? rect.maxX - 24 : rect.minX + 24
+            return list.convert(NSPoint(x: x, y: rect.minY + min(rect.height, 52) / 2), to: nil)
+        } }
+        guard points.count == ids.count, let press = Press(points, in: window) else { return (false, "no rows \(ids) to press") }
+        if let route {
+            let held = await waitUntilAsync(10) { await GoldenDesk.shared.isHolding(route) }
+            guard held else { return (false, "no request for \(route) is held, so none can be answered during the press") }
+        }
+        press.rescueLater()
+        Task { @MainActor in
+            if let route {
+                let before = await GoldenDesk.shared.answered.filter { $0 == route }.count
+                await GoldenDesk.shared.release(route)
+                let answered = await waitUntilAsync(5) { await GoldenDesk.shared.answered.filter { $0 == route }.count > before }
+                let shown = await waitUntil(5, drawn)
+                press.said = "\(route) \(answered ? "answered" : "never answered") and \(shown ? "drawn" : "not drawn") during the press, \(list.chosen ?? "nothing") chosen then"
+            } else {
+                press.said = "pressed"
+            }
+            press.dragAndLetUp()
+        }
+        NSApp.sendEvent(press.down)
+        await Task.yield()
+        return (!press.rescued, press.rescued ? "the press's tracking never ran the app's work; let up after 5 s" : press.said)
+    }
+
     private static func row(_ id: String, in list: SailList) -> Int? {
         list.entries.firstIndex { entry in
             guard case let .item(item) = entry else { return false }
@@ -1121,5 +1173,47 @@ extension Driver {
             try? await Task.sleep(for: .milliseconds(50))
         }
         return true
+    }
+}
+
+/// The events of one press over rows, at window points: the button down on the first, a drag over
+/// each after it, up on the last; and, should the press's tracking never run the app's work, the
+/// button let up after 5 s from a timer the tracking's run loop mode still fires.
+@MainActor
+final class Press: NSObject {
+    let down: NSEvent
+    private let drags: [NSEvent]
+    private let up: NSEvent
+    private(set) var rescued = false
+    var said = "nothing ran during the press"
+
+    init?(_ points: [NSPoint], in window: NSWindow) {
+        func event(_ type: NSEvent.EventType, at point: NSPoint) -> NSEvent? {
+            NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1
+            )
+        }
+        guard let first = points.first, let last = points.last, let down = event(.leftMouseDown, at: first), let up = event(.leftMouseUp, at: last) else { return nil }
+        self.down = down
+        self.up = up
+        drags = points.dropFirst().compactMap { event(.leftMouseDragged, at: $0) }
+    }
+
+    func rescueLater() {
+        perform(#selector(rescue), with: nil, afterDelay: 5, inModes: [.common])
+    }
+
+    @objc private func rescue() {
+        rescued = true
+        NSApp.postEvent(up, atStart: false)
+    }
+
+    func dragAndLetUp() {
+        NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(rescue), object: nil)
+        for drag in drags {
+            NSApp.postEvent(drag, atStart: false)
+        }
+        NSApp.postEvent(up, atStart: false)
     }
 }

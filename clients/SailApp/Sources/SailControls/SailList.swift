@@ -245,7 +245,7 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
             reloadKeepingHover()
             select(kept)
             reloading = false
-            if chosen != kept { onChoose(chosen) }
+            if chosen != kept { tell() }
         }
     }
 
@@ -588,7 +588,25 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
     }
 
     public func tableViewSelectionDidChange(_: Notification) {
-        if !reloading { onChoose(chosen) }
+        if !reloading { tell() }
+    }
+
+    /// A press moves the choice while the button is still down, and AppKit says so only after it
+    /// comes up: told now, the owner draws what the list shows, so a redraw during the press keeps
+    /// the person's row rather than putting its own back. Each row a press drags across is told, as
+    /// each arrow key's is.
+    public func tableViewSelectionIsChanging(_: Notification) {
+        if !reloading { tell() }
+    }
+
+    /// Every id chosen when `onChoose` was last told: the change AppKit says as a press comes up is
+    /// the one told as it went down, and is not told again.
+    private var told: [String] = []
+
+    private func tell() {
+        guard chosenIDs != told else { return }
+        told = chosenIDs
+        onChoose(chosen)
     }
 
     // MARK: Moving rows by a drag

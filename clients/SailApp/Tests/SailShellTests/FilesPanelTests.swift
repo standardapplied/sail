@@ -15,7 +15,7 @@ import Testing
 /// says what it will do in front), a plain tree the workspace's files fill and follow over the
 /// runner's door, the one quiet line only when the tree is not the workspace's live truth, and
 /// nothing redrawn by a tick that changes nothing.
-@MainActor @Suite struct FilesPanelTests {
+@MainActor @Suite(.timeLimit(.minutes(1))) struct FilesPanelTests {
     static let root = FileTree.root.shown
 
     static func file(_ name: String) -> FileEntry {
@@ -380,6 +380,19 @@ import Testing
         panel.heard(.frame(.filesChanged(paths: [FileName(Self.root)])))
         panel.heard(.frame(.filesListing(FileListing(id: 4, version: "v2", entries: [Self.folder("src"), Self.file("b.txt")], more: false, truncated: false))))
         #expect(panel.list.chosen == Self.root + "/b.txt", "a.txt gone with no folder shown, the choice did not move to the row in its place: \(panel.list.chosen ?? "nothing")")
+    }
+
+    /// A file pressed stays chosen when a listing lands while the button is down: the tree made
+    /// again during the press keeps b.txt, which the press leaves chosen, not a.txt put back.
+    @Test func aFilePressedStaysChosenWhenAListingLandsDuringThePress() throws {
+        let panel = try Self.played([Self.file("a.txt"), Self.file("b.txt"), Self.file("c.txt")])
+        let a = Self.root + "/a.txt", b = Self.root + "/b.txt"
+        panel.list.choose(a)
+        panel.list.pressed(b)
+        panel.heard(.frame(.filesChanged(paths: [FileName(Self.root)])))
+        panel.heard(.frame(.filesListing(FileListing(id: 2, version: "v2", entries: [Self.file("a.txt"), Self.file("b.txt"), Self.file("c.txt"), Self.file("d.txt")], more: false, truncated: false))))
+        panel.list.letGo()
+        #expect(panel.list.chosen == b && panel.chosenPath == FileName(b), "the press left \(panel.list.chosen ?? "nothing") chosen, the panel \(panel.chosenPath.map { "\($0)" } ?? "nothing")")
     }
 
     /// Calm: a tick, or a beat with nothing changed, makes no row and draws no line.
