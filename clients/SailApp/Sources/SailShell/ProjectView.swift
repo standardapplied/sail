@@ -472,7 +472,7 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     private var footKeys: [WorkspacesModel.Key] {
         let keys = page?.keys(chosen: list.chosen) ?? []
         guard list.primaryElsewhere else { return keys }
-        return keys.filter { if case .primary = $0 { false } else { true } }
+        return keys.filter { $0 != .open }
     }
 
     /// The foot drawn again when the keys it names changed: the row chosen, its state, the page, or
@@ -485,15 +485,16 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
     /// A key as the foot names it.
     private static func said(_ key: WorkspacesModel.Key) -> (key: String, words: String) {
         switch key {
-        case .primary(.open): ("⏎", "Open")
-        case .primary(.startAndOpen): ("⏎", "Start and Open")
+        case .open: ("⏎", "Open")
         case .newSession: ("⌥⌘T", NewSessionWords.newSession)
         case .newWorkspace: ("⌘N", "New")
         }
     }
 
     /// The count (or when the list was last listed) at the left, the keys at the right
-    /// (``showKeys()``), as the approved list's foot says them (⌘R says itself on List Again).
+    /// (``showKeys()``), as the approved list's foot says them (⌘R says itself on List Again). It
+    /// is a keycap tall with or without keys, so keys coming and going never move the list: a row
+    /// that moved closes its New Session panel.
     private func buildFoot() {
         foot.subviews.forEach { $0.removeFromSuperview() }
         footShows = footKeys
@@ -511,13 +512,11 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
             view.translatesAutoresizingMaskIntoConstraints = false
             foot.addSubview(view)
         }
-        let hug = foot.heightAnchor.constraint(equalToConstant: 0)
-        hug.priority = .fittingSizeCompression
         NSLayoutConstraint.activate([
             count.leadingAnchor.constraint(equalTo: foot.leadingAnchor), count.centerYAnchor.constraint(equalTo: foot.centerYAnchor),
             count.trailingAnchor.constraint(lessThanOrEqualTo: keys.leadingAnchor, constant: -12),
             keys.trailingAnchor.constraint(equalTo: foot.trailingAnchor), keys.centerYAnchor.constraint(equalTo: foot.centerYAnchor),
-            foot.heightAnchor.constraint(greaterThanOrEqualTo: keys.heightAnchor), foot.heightAnchor.constraint(greaterThanOrEqualTo: count.heightAnchor), hug,
+            foot.heightAnchor.constraint(equalToConstant: Keycap.height),
         ])
     }
 

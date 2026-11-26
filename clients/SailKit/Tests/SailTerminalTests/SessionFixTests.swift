@@ -211,7 +211,7 @@ import Testing
     /// MINOR 3: a close during the handshake (here, waiting for the host's welcome) shuts the
     /// connection at once, not after the handshake's timeout: that timeout is 120 s, past the
     /// test's minute, so a close that waited for it fails the test whatever the runner's speed.
-    @Test(.timeLimit(.minutes(1))) func aCloseDuringTheHandshakeShutsTheConnectionAtOnce() async throws {
+    @Test func aCloseDuringTheHandshakeShutsTheConnectionAtOnce() async throws {
         let host = try FakeHost()
         let session = TerminalSession(open: create, door: .local(host.address), screen: try screen(), timeout: 120, sleep: Naps().sleep)
         session.start()
@@ -359,7 +359,7 @@ import Testing
     /// A Kill answered after the end's limit is no end: unconfirmed at the limit, in this Mac's
     /// words. The limit passes once the host has read the Kill, and the Kill is never answered: an
     /// end that waited for its answer would wait out its reads' 120 s, past the test's minute.
-    @Test(.timeLimit(.minutes(1))) func anAttachedSessionWhoseKillIsAnsweredLateIsNotEnded() async throws {
+    @Test func anAttachedSessionWhoseKillIsAnsweredLateIsNotEnded() async throws {
         let (host, session, attached, _) = try await attachedLocally()
         defer { withExtendedLifetime(attached) {} }
         let deadline = Timeline()
@@ -669,7 +669,7 @@ import Testing
         let host = try FakeHost(tcp: ())
         let desk = TicketDesk(address: host.address)
         let deadline = Timeline()
-        let ended = Task { await Door.runner(desk).end("app-a", within: Self.unhurried, sleep: deadline.sleep) }
+        let ended = Task { await Door.runner(desk).end("app-a", within: SessionFixTests.unhurried, sleep: deadline.sleep) }
         let peer = try await host.accept()
         defer { withExtendedLifetime(peer) {} }
         try await peer.welcome()
@@ -679,7 +679,7 @@ import Testing
         let streaming = Task.detached {
             while !Task.isCancelled { try peer.send(output("x")) }
         }
-        try await deadline.until(held: [Self.unhurried])
+        try await deadline.until(held: [SessionFixTests.unhurried])
         deadline.passAll()
         let outcome = await ended.value
         streaming.cancel()

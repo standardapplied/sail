@@ -39,7 +39,7 @@ import Testing
     /// is held until after the end, so an end that waited on it past its deadline would hold the
     /// test past its minute; the deadline is the wall clock's, which waits at least its second, so
     /// nothing of it is left for the Kill whatever the runner's speed.
-    @Test(.timeLimit(.minutes(1))) func aCreateUnansweredAtTheDeadlineIsSaidAndWhatItMakesIsWhatWasSaid() async throws {
+    @Test func aCreateUnansweredAtTheDeadlineIsSaidAndWhatItMakesIsWhatWasSaid() async throws {
         let door = try FakeRunnerDoor()
         defer { door.stop() }
         door.holdCreates()

@@ -91,12 +91,12 @@ public struct WorkspacesModel: Sendable {
         public let listedAt: Date?
 
         /// The keys its foot names with row `chosen` chosen, each only while it does what it says:
-        /// none with no workspace row chosen; Return where the row has an Open or Start and Open,
-        /// which Return presses; ⌥⌘T, which opens any row's New Session; ⌘N while a workspace can be
+        /// none with no workspace row chosen; Return where the row opens (its Open or Start and Open,
+        /// which Return presses); ⌥⌘T, which opens any row's New Session; ⌘N while a workspace can be
         /// made.
         public func keys(chosen: String?) -> [Key] {
             guard case let .list(table) = body, let line = (table.yours + table.others).first(where: { $0.name == chosen }) else { return [] }
-            var keys: [Key] = line.primary.map { [Key.primary($0)] } ?? []
+            var keys: [Key] = line.primary == nil ? [] : [.open]
             keys.append(.newSession)
             if canCreate { keys.append(.newWorkspace) }
             return keys
@@ -105,9 +105,7 @@ public struct WorkspacesModel: Sendable {
 
     /// A key a page's foot names.
     public enum Key: Equatable, Sendable {
-        /// Return, which presses the row's primary.
-        case primary(Primary)
-        case newSession, newWorkspace
+        case open, newSession, newWorkspace
     }
 
     public enum Body: Equatable, Sendable {

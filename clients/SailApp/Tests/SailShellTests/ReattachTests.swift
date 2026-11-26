@@ -190,6 +190,7 @@ import Testing
         bench.openWorkspace(project: "harbor", name: "dock")
         try #require(await RunnerTabTests.until(10) { Self.runnerSessions(bench).count == 2 })
         try #require(await Self.attached(bench))
+        let tabs = bench.model.tabs.count
 
         bench.startSession(nil, project: "harbor", name: "dock")
 
@@ -197,7 +198,7 @@ import Testing
         let started = try #require(Self.runnerSessions(bench).last)
         #expect(Self.runnerSessions(bench).count == 3 && !["app-old", "app-new"].contains(started))
         #expect(bench.model.focusedPane?.session == started, "the new shell's tab is not the one chosen")
-        #expect(bench.model.tabs.count == 3)
+        #expect(bench.model.tabs.count == tabs + 1, "a shell's tab beside This Mac's and the two")
         let create = try #require(runner.create(of: started))
         #expect(create.agent.harness.isEmpty && create.agent.mode.isEmpty && !create.agent.inside, "a shell started as \(create.agent)")
     }

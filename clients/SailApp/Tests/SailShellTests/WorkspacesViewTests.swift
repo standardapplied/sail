@@ -233,8 +233,8 @@ import Testing
     }
 
     /// The foot names a key only while it works: none with no row chosen; on a chosen row of the
-    /// person's own Return by what it presses, ⌥⌘T and ⌘N; on someone else's no Return, which
-    /// presses nothing there; ⌘N only while a workspace can be made; none again once no row is.
+    /// person's own Return (which opens it, starting it first when stopped), ⌥⌘T and ⌘N; on someone
+    /// else's no Return, which presses nothing there; ⌘N only while a workspace can be made; none again once no row is.
     @Test func theFootNamesAKeyOnlyWhileItWorks() throws {
         let rows = [
             WorkspaceRow(name: "dock", instance: "harbor-dock", state: .known(.running), owner: "uday"),
@@ -244,13 +244,15 @@ import Testing
         defer { window.orderOut(nil) }
         project.render(try #require(Self.page(rows)))
         #expect(project.list.chosen == nil && Self.footSays(project).isEmpty, "with no row chosen the foot says \(Self.footSays(project))")
+        let tall = project.foot.fittingSize.height
         project.list.choose("dock")
         #expect(Self.footSays(project) == ["Open", "New Session", "New"])
+        #expect(project.foot.fittingSize.height == tall, "the keys coming moved the list")
         project.list.choose("pier")
-        #expect(Self.footSays(project) == ["Start and Open", "New Session", "New"])
+        #expect(Self.footSays(project) == ["Open", "New Session", "New"], "Return starts and opens pier")
         project.list.deselectAll(nil)
         #expect(Self.footSays(project).isEmpty, "with the row let go the foot says \(Self.footSays(project))")
-        #expect(project.foot.fittingSize.height >= project.count.fittingSize.height, "the foot with no key is lower than its count")
+        #expect(project.foot.fittingSize.height == tall, "the keys going moved the list")
 
         let building = try #require(Self.page(rows, template: .building))
         project.render(building)
