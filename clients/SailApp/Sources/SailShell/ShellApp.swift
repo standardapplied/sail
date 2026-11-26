@@ -393,8 +393,9 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// The accessory reaches the window's far edge, so all the row beside the buttons is the title
     /// bar's (AppKit sets a `.left` accessory's height, its view's frame its width), its first tab
-    /// `buttonsGap` past the buttons; where AppKit puts the buttons at the window's right, the
-    /// strip ends that far before them.
+    /// `buttonsGap` past the buttons. Right to left AppKit puts the buttons at the window's right
+    /// and the accessory at its left: the strip, whose tabs then run from its right edge, ends
+    /// just short of the buttons, its first tab `buttonsGap` before them.
     private func fitTheStrip() {
         let strip = thisMac.strip
         guard !window.styleMask.contains(.fullScreen), strip.superview != nil else { return }
@@ -403,7 +404,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let start = strip.window == nil ? Double(buttons.maxX) : Double(strip.convert(NSPoint.zero, to: nil).x)
         let onTheRight = Double(buttons.midX) > width / 2
         strip.leading = onTheRight ? Look.Space.s : max(Look.Space.s, Double(buttons.maxX) + Self.buttonsGap - start)
-        let end = onTheRight ? Double(buttons.minX) - Self.buttonsGap : width
+        let end = onTheRight ? Double(buttons.minX) - Self.buttonsGap + Look.Space.s : width
         strip.setFrameSize(NSSize(width: max(0, end - start), height: strip.frame.height))
     }
 

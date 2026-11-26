@@ -2,6 +2,7 @@ import AppKit
 import ImageIO
 import SailAccount
 import SailAPI
+import SailLook
 import SailShell
 import SailTestPasskey
 import SailVT
@@ -367,7 +368,8 @@ extension Driver {
         return (held && taken, said.joined(separator: " | ") + "; " + shots)
     }
 
-    /// The band, the rail under it and the window's foot sampled in the chrome.
+    /// The band under the buttons, in its middle and at its end, and the rail under it, wherever
+    /// the direction put the buttons and the rail, sampled in the chrome.
     private func bandIsChrome() -> (Bool, String) {
         let window = shell.window
         guard let content = window.contentView, let context = Self.drawn(content), let bytes = context.data else { return (false, "the window drew nothing") }
@@ -377,8 +379,9 @@ extension Driver {
             Self.pixel(pixels, (Int(y * 2) * context.width + Int(x * 2)) * 4)
         }
         let chrome = Self.hex(shell.look.chrome)
-        let samples = [("under the buttons", at(40, band / 2)), ("mid-band", at(Double(content.bounds.width) / 2, band / 2)),
-                       ("the band's end", at(Double(content.bounds.width) - 6, band / 2)), ("the rail", at(Rail.width / 2, band + 4))]
+        let buttons = Double(ShellApp.buttons(of: window)?.midX ?? 40), rail = Double(shell.rail.convert(shell.rail.bounds, to: nil).midX)
+        let samples = [("under the buttons", at(buttons, band / 2)), ("mid-band", at(Double(content.bounds.width) / 2, band / 2)),
+                       ("the band's end", at(Double(content.bounds.width) - 6, band / 2)), ("the rail", at(rail, band + 4))]
         return (
             samples.allSatisfy { Self.near($0.1, chrome) },
             samples.map { "\($0.0) #" + String(format: "%06X", $0.1) }.joined(separator: ", ") + String(format: " (wanted #%06X)", chrome)
@@ -388,7 +391,7 @@ extension Driver {
     /// The band as AppKit and the shell laid it out, said in window points: its height (AppKit's,
     /// or in full screen the one the window draws) against `bandHeight`; each window button's frame
     /// and its centre against the band's, within 1 pt; the shown tabs' centres, within half a point;
-    /// the room from the buttons to the nearest of the strip's tabs and `+`, at least `buttonsGap`;
+    /// the room from the buttons to the nearest of the strip's tabs and `+`, `buttonsGap` (8 pt more at most);
     /// the card's top flush under the band; and no view of the shell over a button.
     func bandGeometry() -> (Bool, String) {
         let window = shell.window
@@ -425,7 +428,9 @@ extension Driver {
             let gaps = controls.map { onTheRight ? Double(buttons.minX - $0.maxX) : Double($0.minX - buttons.maxX) }
             if let gap = gaps.min() {
                 said.append(String(format: "%.1f pt from the buttons to the nearest tab", gap) + (onTheRight ? ", the buttons on the right" : ""))
-                if gap < ShellApp.buttonsGap - 0.5 { misses.append(String(format: "the nearest tab is %.1f pt from the buttons", gap)) }
+                if gap < ShellApp.buttonsGap - 0.5 || gap > ShellApp.buttonsGap + Look.Space.s + 0.5 {
+                    misses.append(String(format: "the nearest tab is %.1f pt from the buttons, not %.0f", gap, ShellApp.buttonsGap))
+                }
             }
         }
         return (misses.isEmpty, (misses.isEmpty ? "" : "MISSED " + misses.joined(separator: ", ") + "; ") + said.joined(separator: ", "))
