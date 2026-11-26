@@ -63,7 +63,11 @@ and names what still bills.
 
 It needs `gcloud` signed in to a project (`FLEET_PROJECT`, default `sail-mast-511621`). Every
 VM is labelled `purpose=sail-fleet` and deletes itself after six hours whatever happens to the
-run. Each check is a line in `~/.sail-fleet/<run>/report.txt`, beside the log of what it ran;
+run, and has Ubuntu's daily package timers turned off before Sail is installed, so no package
+changes on it but by a fleet step. The script reads no input of its caller's (only `ci/fleet ssh`
+passes it on), and a check still running at its limit (`FLEET_CHECK_LIMIT`, 1200 s by default; a
+check that waits longer by design names its own) is ended with all it started and FAILs, naming
+the limit. Each check is a line in `~/.sail-fleet/<run>/report.txt`, beside the log of what it ran;
 a parallel run's `~/.sail-fleet/<run>/report.txt` merges its fleets' reports, and each fleet's
 output is in `~/.sail-fleet/<run>/<group>.log`.
 
