@@ -674,8 +674,8 @@ import Testing
         }
     }
 
-    /// A failed refresh draws the panel's names in the secondary ink, as the stale frame does, and
-    /// leaves its tiles and its chosen row's bar as they are.
+    /// A failed refresh draws the control plane's names in the secondary ink, as the stale frame
+    /// does, and leaves This Mac's, its tiles and its chosen row's bar as they are.
     @Test func aStalePanelSaysItsNamesInTheSecondaryInk() throws {
         var model = WorkspacesModel(person: Self.uday)
         model.projectsListed(.success(ProjectList(projects: [ProjectSummary(name: "harbor", containerStatus: .known(.running), template: .known(.ready))], total: 1)))
@@ -688,11 +688,15 @@ import Testing
         window.contentView = panel
         panel.render(stale)
         panel.layoutSubtreeIfNeeded()
-        let row = try #require(panel.list.rowView(atRow: 1, makeIfNecessary: true))
-        row.layoutSubtreeIfNeeded()
-        let cell = try #require(Self.found(SidebarRowCell.self, in: row).first)
-        let name = try #require(Self.found(NSTextField.self, in: cell).first)
-        #expect(name.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor == NSColor(Look.light.textSecondary))
+        let ink = { (index: Int) throws -> NSColor? in
+            let row = try #require(panel.list.rowView(atRow: index, makeIfNecessary: true))
+            row.layoutSubtreeIfNeeded()
+            let cell = try #require(Self.found(SidebarRowCell.self, in: row).first)
+            let name = try #require(Self.found(NSTextField.self, in: cell).first)
+            return name.attributedStringValue.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+        }
+        #expect(try ink(3) == NSColor(Look.light.textSecondary), "harbor, the control plane's, is not in the secondary ink")
+        #expect(try ink(1) == NSColor(Look.light.text), "This Mac, listed on this Mac, is drawn stale")
         #expect(panel.list.alphaValue == 1, "the panel is dimmed whole, its tiles and bar too")
     }
 
