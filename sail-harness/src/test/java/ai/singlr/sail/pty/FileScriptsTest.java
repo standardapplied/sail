@@ -753,6 +753,30 @@ class FileScriptsTest {
     assertEquals(List.of(gone.toString()), watch.changed(), "held missing, then made");
   }
 
+  /**
+   * A new set's path is held without its version until two beats have come: the loop says a beat
+   * only from a check, and the second comes a second after the first, by when the loop has read the
+   * path, so a check runs between the path and its version.
+   */
+  @Test
+  void aCheckBetweenAPathAndItsVersionFilesTheVersionUnderThatPath() throws Exception {
+    var src = Files.createDirectory(home.resolve("src"));
+    var docs = Files.createDirectory(home.resolve("docs"));
+    var watch = new Watch();
+    watch.set(Map.of(src, version(src)));
+
+    watch.loop.input().write(FileScripts.nul(docs.toString()));
+    watch.loop.input().flush();
+    watch.onlyBeats(2);
+    watch.loop.input().write(FileScripts.nul(version(docs)));
+    watch.loop.input().write(0);
+    watch.loop.input().flush();
+
+    watch.onlyBeats(2);
+    Files.createFile(docs.resolve("New.java"));
+    assertEquals(List.of(docs.toString()), watch.changed(), "the new path, watched");
+  }
+
   @Test
   void theLoopEndsWhenItsInputClosesAndAPathCutAcrossWritesIsWhole() throws Exception {
     var src = Files.createDirectory(home.resolve("src"));
