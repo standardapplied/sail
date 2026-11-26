@@ -102,14 +102,19 @@ public final class AccountFlow {
             onChange()
         }
         _ = await run(byAPerson: false) { () async throws(AccountRefusal) in
-            let checked: (answer: Result<SignedIn?, AccountRefusal>, until: Date?)
+            let until: Date?
             do throws(AccountRefusal) {
-                let until = try self.account.heldUntil(at: plane)
-                checked = (.success(try await self.account.current(at: plane)), until)
+                until = try self.account.heldUntil(at: plane)
             } catch {
-                checked = (.failure(error), nil)
+                return self.whenNoOneActs { self.take(.failure(error), seen: seen, until: nil) }
             }
-            self.whenNoOneActs { self.take(checked.answer, seen: seen, until: checked.until) }
+            let answer: Result<SignedIn?, AccountRefusal>
+            do throws(AccountRefusal) {
+                answer = .success(try await self.account.current(at: plane))
+            } catch {
+                answer = .failure(error)
+            }
+            self.whenNoOneActs { self.take(answer, seen: seen, until: until) }
         }
     }
 
