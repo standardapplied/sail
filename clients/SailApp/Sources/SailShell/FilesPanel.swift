@@ -129,8 +129,9 @@ final class FilesPanel: NSView {
         list.returnKeyShown = false
         list.onKey = { [weak self] event in self?.key(event) ?? false }
         list.onKeys = { [weak self] in
-            guard let self, list.holdsKeys else { return }
-            filePane?.keysTakenElsewhere()
+            guard let self else { return }
+            sayLine(at: clock())
+            if list.holdsKeys { filePane?.keysTakenElsewhere() }
         }
         list.onChoose = { [weak self] key in
             guard let self, !rebuilding else { return }
@@ -330,16 +331,7 @@ final class FilesPanel: NSView {
     /// and goes ahead of the tree's standing line, behind only what the connection says while down.
     package func refresh() {
         let now = clock()
-        let standing = FilesLine(tree: tree, phase: phase, workspace: workspace, at: now) { [clock] at in Self.timeOfDay(at, now: clock()) }
-        let refusal = refused.map { FilesLine(words: $0, mark: .bad) }
-        let said = startRefusal.map { FilesLine(words: $0.joined(separator: " "), mark: .bad, action: .start) }
-            ?? (FilesLine.state(of: phase, workspace: workspace) == nil ? refusal ?? standing : standing ?? refusal)
-        if said != shownLine {
-            shownLine = said
-            line.show(said, starting: starting)
-            scroll.alphaValue = said?.dims == true ? Self.dimmed : 1
-            needsLayout = true
-        }
+        sayLine(at: now)
         schedule(after: now)
         let new = tree.newPaths(at: now), marked = new != shownNew || unsaved != shownUnsaved || naming != shownNaming
         guard tree.revision != shownRevision || marked else { return chooseMade() }
@@ -366,6 +358,20 @@ final class FilesPanel: NSView {
         named(focus: focus)
         keepChoice(in: rows, place: place)
         chooseMade()
+        needsLayout = true
+    }
+
+    /// The line as the tree, the connection and what holds the keys say at `now`, drawn again only
+    /// when it changed.
+    private func sayLine(at now: Double) {
+        let standing = FilesLine(tree: tree, phase: phase, workspace: workspace, at: now, treeHoldsKeys: list.holdsKeys) { [clock] at in Self.timeOfDay(at, now: clock()) }
+        let refusal = refused.map { FilesLine(words: $0, mark: .bad) }
+        let said = startRefusal.map { FilesLine(words: $0.joined(separator: " "), mark: .bad, action: .start) }
+            ?? (FilesLine.state(of: phase, workspace: workspace) == nil ? refusal ?? standing : standing ?? refusal)
+        guard said != shownLine else { return }
+        shownLine = said
+        line.show(said, starting: starting)
+        scroll.alphaValue = said?.dims == true ? Self.dimmed : 1
         needsLayout = true
     }
 

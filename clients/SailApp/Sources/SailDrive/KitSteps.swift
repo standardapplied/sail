@@ -45,7 +45,7 @@ extension Driver {
         for specimen in kit.specimens {
             guard await prepare(specimen, in: window) else { return (false, "\(specimen.name) could not be put in its state") }
         }
-        window.makeFirstResponder(nil)
+        window.makeFirstResponder(kit.ground)
         kit.fit()
         guard await waitUntil(2, { kit.specimens.allSatisfy { $0.settled } }) else { return (false, "a skeleton never showed") }
         var cut = 0
@@ -304,6 +304,9 @@ final class Kit {
     let mono: LabelFont
     let title: TitleFont
     let presses = KitPresses()
+    /// The sheet's ground, which holds the keys while the whole sheet is shot: the view Create's ⏎
+    /// is named through, as a name field is in the app.
+    let ground: KitSheet
     private(set) var specimens: [Specimen] = []
     private var rows: [NSView] = []
 
@@ -312,6 +315,7 @@ final class Kit {
         self.look = look
         self.mono = mono
         self.title = title
+        ground = KitSheet(look: look)
         switch sheet {
         case "button": buttons()
         case "field": fields()
@@ -350,7 +354,7 @@ final class Kit {
         open.shortcut("\r", mono: mono)
         check.shortcut("r", modifiers: .command, mono: mono)
         let create = button("Create", .primary, size: .small)
-        create.hint("\r", mono: mono)
+        create.hint("\r", through: ground, mono: mono)
         row("Sizes, symbols and hints", [
             held("button-small-create", button("Create", .primary, size: .small)), held("button-symbol-build-template", button("Build Template", .primary, icon: .hammer)),
             held("button-large-sign-in", button("Sign In with Passkey", .primary, size: .large)),
@@ -607,7 +611,7 @@ final class Kit {
         stack.alignment = .leading
         stack.spacing = 18
         stack.edgeInsets = NSEdgeInsets(top: 22, left: 22, bottom: 26, right: 22)
-        let sheet = KitSheet(look: look)
+        let sheet = ground
         stack.translatesAutoresizingMaskIntoConstraints = false
         sheet.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -632,7 +636,8 @@ final class KitWindow: NSWindow {
     }
 }
 
-/// The sheet's ground, the canvas, read from the top.
+/// The sheet's ground, the canvas, read from the top. It takes the keys only when given them, never
+/// by Tab.
 final class KitSheet: NSView {
     let look: Look
 
@@ -648,6 +653,14 @@ final class KitSheet: NSView {
 
     override var isFlipped: Bool {
         true
+    }
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
+
+    override var canBecomeKeyView: Bool {
+        false
     }
 
     override func draw(_: NSRect) {

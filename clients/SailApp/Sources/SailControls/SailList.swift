@@ -217,6 +217,12 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         KeyHolder.holds(self)
     }
 
+    /// It is its window's first responder, the window key or not: the chosen row's first action has
+    /// Return as its key then, and so keeps the key's room while a sheet or another window takes it.
+    var leadsKeys: Bool {
+        KeyHolder.isFirst(self)
+    }
+
     override public func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
         keysWatch.watch(newWindow)
@@ -762,7 +768,7 @@ final class SailRowView: NSTableRowView {
         let paint = self.paint
         if numberOfColumns > 0, let cell = view(atColumn: 0) as? RowCell {
             let list = superview as? SailList
-            cell.show(paint.actions, chosen: isSelected, keys: list?.holdsKeys == true, quiet: list?.primaryElsewhere == true)
+            cell.show(paint.actions, chosen: isSelected, keys: list?.leadsKeys == true, quiet: list?.primaryElsewhere == true)
             (cell.content as? MarkedRow)?.mark(chosen: isSelected, strong: paint.strong)
         }
         needsDisplay = true
@@ -1048,7 +1054,8 @@ final class RowCell: NSView {
 
     /// The actions shown (over 120 ms, at once while motion is reduced) or gone; the primary loud
     /// while the row is chosen and the one primary is not elsewhere (`quiet`), and Return its key
-    /// (shown as ⏎) only while the list holds the keys.
+    /// only while the list is its window's first responder (`keys`), named (⏎) only while that
+    /// window is key too.
     func show(_ shown: Bool, chosen: Bool, keys: Bool, quiet: Bool = false) {
         if let first {
             let kind: ButtonKind = chosen && !quiet ? .primary : .secondary, key = chosen && keys && returnKey ? "\r" : ""

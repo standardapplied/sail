@@ -397,8 +397,9 @@ package final class NewSessionView: NSView {
     package private(set) var signIn: SailButton?
     /// Under its sheet's veil, its primary elsewhere: the sheet's.
     package private(set) var veiled = false
-    /// Sign in holds the keys: drawn with the ring a control holding them has.
-    private var focused = false
+    /// What of the panel holds the keys (``KeyHolder``), as last shown: Sign in is drawn with the
+    /// ring a control holding them has; Start with Return's while the rows hold them.
+    private var holder = NewSessionWords.Holder.none
     /// The veil drawn over it while its sheet asks.
     private var veil: NSView?
     /// The hairlines across it, the chosen row's bar, the stopped line's square and the stored
@@ -446,11 +447,12 @@ package final class NewSessionView: NSView {
     /// Builds it for `content` in workspace `workspace`, `width` wide, saying `line` over the foot;
     /// `veiled` while its sheet asks: its Start outlined, as a row's Open is
     /// under the panel, the sheet's Store the one primary on screen, and the sheet's veil over it.
-    /// The foot names the keys of `holder`, and Start its ⏎ while `keys`, whose Return presses it,
-    /// holds the keys.
+    /// The foot names the keys of `holder`, Start wears Return's ring once a key is stored only while
+    /// `holder` is the rows (nothing under a sheet), and names its ⏎ while `keys`, whose Return
+    /// presses it, holds the keys.
     func show(_ content: Content, workspace: String, line: Line?, veiled: Bool, holder: NewSessionWords.Holder, keys: NSView, width: Double) {
         self.veiled = veiled
-        focused = holder == .signIn
+        self.holder = holder
         subviews.forEach { $0.removeFromSuperview() }
         rows = []
         primary = nil
@@ -485,7 +487,7 @@ package final class NewSessionView: NSView {
             let start = SailButton(title, kind: veiled ? .secondary : .primary, size: .small, look: look, target: self, action: #selector(pressedStart(_:)))
             start.hint("\r", through: keys, mono: mono)
             start.isEnabled = enabled
-            start.holdsKeys = line.map { if case .stored = $0 { true } else { false } } == true && enabled && !focused
+            start.holdsKeys = line.map { if case .stored = $0 { true } else { false } } == true && enabled && holder == .rows
             start.why = enabled ? nil : Self.refusal(panel.readiness)?.message
             primary = start
             let hint = Self.label(Self.text(NewSessionWords.hint(holder, modes: modes != nil), mono.font(Look.Step.micro.points, .regular) as NSFont, look.textTertiary, direction: direction).cut(.byTruncatingTail))
@@ -635,7 +637,7 @@ package final class NewSessionView: NSView {
         menu.addItem(store)
         let after = x + column + 10
         let button = popUp(way == .key ? key ?? account : account, menu: menu, name: NewSessionWords.signIn, x: after, y: y, room: x + width - after)
-        button.holdsKeys = focused
+        button.holdsKeys = holder == .signIn
         signIn = button
         return y + ButtonSize.small.height
     }

@@ -221,8 +221,11 @@ import Testing
     /// A button names its key, after its label and in its tooltip, only while the key does what it
     /// says (``KeyHolder``): enabled, not in flight, and, for a key equivalent, its window key; for a
     /// key reached through another view (Create's ⏎, through its name field), that view holding the
-    /// keys. In no window it names none. The key's room is kept whichever, so the button never
-    /// changes width and its neighbours never move.
+    /// keys. In no window it names none. While it has a key its room is kept, named or not (disabled,
+    /// the window not key), so the button keeps its width and its neighbours their place; with its
+    /// key equivalent taken away (a row's Open on a row not chosen) it keeps no room and its label is
+    /// centred. One watch tells it what holds its keys: each key change is told once, a hinted
+    /// button's too.
     @Test func aButtonNamesItsKeyOnlyWhileItWorksAndKeepsItsWidth() throws {
         let mono = try Self.mono()
         let open = SailButton("Open", kind: .secondary, size: .small, look: .light, target: nil, action: nil)
@@ -252,11 +255,13 @@ import Testing
         }
         #expect(open.namesKey && drawsItsKey(open) && icon.tooltip?.chip.showsHint == true, "Open in a key window does not name ⏎, or New Workspace's tooltip ⌘N")
         #expect(window.makeFirstResponder(nil) && !create.namesKey && !drawsItsKey(create), "Create names ⏎ while its field does not hold the keys")
-        let told = create.holderChanges
-        #expect(window.makeFirstResponder(field) && create.holderChanges > told, "Create is not drawn again as its field takes the keys")
+        let told = create.keyChanges
+        #expect(window.makeFirstResponder(field) && create.keyChanges > told, "Create is not drawn again as its field takes the keys")
         #expect(create.namesKey && drawsItsKey(create), "Create does not name ⏎ while its field holds the keys")
+        let before = [open.keyChanges, create.keyChanges]
         window.key = false
         NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+        #expect([open.keyChanges, create.keyChanges] == before.map { $0 + 1 }, "a key change was told other than once: Open \(open.keyChanges - before[0]), Create \(create.keyChanges - before[1])")
         #expect(!open.namesKey && !create.namesKey && !drawsItsKey(open) && icon.tooltip?.chip.showsHint == false, "a key is named in a window that is not key")
         #expect(keptWidth(), "a button changed width as its key stopped being named")
         window.key = true
@@ -275,8 +280,11 @@ import Testing
         #expect(!open.namesKey, "a button in flight names its key")
         open.fly(nil)
         open.keyEquivalent = ""
-        #expect(!open.namesKey && keptWidth(), "Open with its key equivalent taken away names it, or gives up its room")
+        let (_, label, hint) = open.arrangement()
+        #expect(!open.namesKey && hint == nil && open.intrinsicContentSize.width < widths[0], "Open with no key equivalent names one or keeps its room")
+        #expect(abs(Double(label.midX - open.box.midX)) <= 1, "Open with no key equivalent is not centred: its label \(label) in \(open.box)")
         open.keyEquivalent = "\r"
+        #expect(keptWidth(), "Open given its key again has not its room again")
         #expect(window.makeFirstResponder(nil) && !create.namesKey, "Create names ⏎ after its field gave up the keys")
     }
 

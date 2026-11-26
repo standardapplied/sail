@@ -2050,12 +2050,12 @@ template_holds_nothing() {
 # configuration file, as the workspace's person. claude auth status reads ~/.claude.json at start-up
 # as a session does and needs no sign-in or network; claude --version and --help leave before that
 # read, so they could never fail. Its answer ("loggedIn") proves Claude ran; its exit is not read,
-# and a Claude that has not answered in 60 s fails it. The workspace is deleted whatever happened,
-# a create that failed part way included.
+# and a call that has not answered in 90 s, incus exec into the workspace included, fails it. The
+# workspace is deleted whatever happened, a create that failed part way included.
 claude_starts_clean() {
   local run=$1 box=$2 said status=0
   if on "$run" "$box" "sudo sail project workspace create acme fleet-first > /dev/null"; then
-    said=$(on "$run" "$box" "sudo incus exec acme-fleet-first --user 1000 --group 1000 --cwd /home/dev --env HOME=/home/dev -- bash -lc 'timeout 60 ~/.local/bin/claude auth status' < /dev/null 2>&1 || true")
+    said=$(on "$run" "$box" "sudo timeout 90 incus exec acme-fleet-first --user 1000 --group 1000 --cwd /home/dev --env HOME=/home/dev -- bash -lc '~/.local/bin/claude auth status' < /dev/null 2>&1 || true")
     echo "$said"
     [[ $said == *'"loggedIn"'* && $said != *"configuration file not found"* ]] || status=1
   else
