@@ -129,8 +129,12 @@ jobs:
       - name: Xcode
         run: sudo xcode-select --switch /Applications/Xcode_26.3.app
 
+      # The image beside the toolchain: a lane that changes behaviour with the runner's image says
+      # which one in its own output.
       - name: Swift
-        run: swift --version
+        run: |
+          echo "Runner image: $ImageOS $ImageVersion, $(sysctl -n hw.ncpu) cores, $(sysctl -n hw.memsize) bytes"
+          swift --version
 
       - name: Keep SwiftPM's downloads
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -152,8 +156,15 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
+      # The suites' event stream and, when no test reports for 10 s, what the machine and the test
+      # process were doing (scripts/stalls), both kept in the reports artifact: on runner image
+      # 20261123.0558.1 nothing ended for 20 s mid-run and the socket suites' 5 s waits ran out
+      # (job 139714853398), and the console, which the test process buffers, could not say why.
       - name: Test
-        run: scripts/suites rest "$RUNNER_TEMP/rest-events.jsonl"
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          scripts/stalls "$RUNNER_TEMP/reports/rest-events.jsonl" "$RUNNER_TEMP/reports/stalls" \
+            scripts/suites rest "$RUNNER_TEMP/reports/rest-events.jsonl"
 
       - name: Exhaustive and seeded suites
         run: scripts/suites exhaustive "$RUNNER_TEMP/exhaustive-suites.log"
@@ -169,11 +180,11 @@ jobs:
           "$(swift build -c release --show-bin-path)/sail-term-probe" --local --host-binary "$SAIL_BINARY" --folder /tmp \
             --script Tests/Probe/measure.json --report "$RUNNER_TEMP/reports/macos-measure.json"
 
-      - name: Leave the probe's reports
+      - name: Leave the reports
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: sailkit-macos-probe-reports
+          name: sailkit-macos-reports
           if-no-files-found: ignore
           path: ${{ runner.temp }}/reports
 

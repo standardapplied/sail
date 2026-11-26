@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Runs COMMAND and watches the test event stream it writes to EVENTS, so a stall names itself.
+# Every second it appends to DIR/ticks the time, the stream's size and the machine's load: a gap
+# between two ticks is the whole machine stopped, not only the tests. When the stream has not grown
+# for 10 s while COMMAND runs, it keeps in DIR/stall-N what the machine and the tests were doing:
+# the load and the processes using the CPU, and a sample of every process under COMMAND; the first
+# time, a spindump of every process on the machine too, through sudo, which a CI runner grants. At
+# most 4 captures, each after another 10 s of silence; a capture that fails says so in its files and
+# never fails the run. Exits with COMMAND's status. bash 3.2 and BSD tools, as macOS ships them.
+set -uo pipefail
+
+[[ $# -ge 3 ]] || { echo "usage: scripts/stalls EVENTS DIR COMMAND..." >&2; exit 2; }
+events=$1
+dir=$2
+shift 2
+readonly quiet=10 limit=4
+mkdir -p "$dir"
+: > "$dir/ticks"
+
+size() {
+  if [[ -f $events ]]; then wc -c < "$events" | tr -d ' '; else echo 0; fi
+}
+
+load() {
+  uptime | sed 's/.*load average[s]*: //'
+}
+
+under() {
+  ps -A -o pid= -o ppid= | awk -v root="$1" '
+    { parent[$1] = $2 }
+    END {
+      for (pid in parent) {
+        up = parent[pid]
+        while (up in parent && up != root && up > 1) up = parent[up]
+        if (up == root) print pid
+      }
+    }'
+}
+
+capture() {
+  local into=$dir/stall-$1 pid
+  mkdir -p "$into"
+  {
+    date -u +%Y-%m-%dT%H:%M:%SZ
+    echo "no test reported for $2 s; the event stream holds $(size) bytes"
+    uptime
+    top -l 2 -s 1 -n 20 -o cpu -stats pid,command,cpu,state,time,threads
+    vm_stat
+  } > "$into/machine.txt" 2>&1
+  for pid in $(under "$watched"); do
+    ps -o pid= -o pcpu= -o state= -o time= -o command= -p "$pid" >> "$into/processes.txt" 2>&1
+    sample "$pid" 2 -mayDie -file "$into/sample-$pid.txt" > /dev/null 2>&1 \
+      || sudo -n sample "$pid" 2 -mayDie -file "$into/sample-$pid.txt" > /dev/null 2>&1 \
+      || echo "no sample of $pid" >> "$into/processes.txt"
+  done
+  if [[ $1 -eq 1 ]]; then
+    { sudo -n spindump -notarget 2 10 -o "$into/spindump.txt" -noProcessingWhileSampling -timelimit 60 || echo "no spindump: $?"; } \
+      > "$into/spindump.log" 2>&1
+  fi
+}
+
+"$@" &
+watched=$!
+captures=0
+last=$(size)
+changed=$(date +%s)
+silence_captures=0
+while kill -0 "$watched" 2> /dev/null; do
+  now=$(date +%s)
+  bytes=$(size)
+  echo "$now $bytes $(load)" >> "$dir/ticks"
+  if [[ $bytes != "$last" ]]; then
+    last=$bytes
+    changed=$now
+    silence_captures=0
+  elif ((captures < limit && now - changed >= quiet * (silence_captures + 1))); then
+    captures=$((captures + 1))
+    silence_captures=$((silence_captures + 1))
+    capture "$captures" "$((now - changed))" &
+  fi
+  sleep 1
+done
+wait "$watched"
+status=$?
+wait
+gap=$(awk 'NR > 1 && $1 - previous > widest { widest = $1 - previous } { previous = $1 } END { print widest + 0 }' "$dir/ticks")
+echo "scripts/stalls: $captures captures of a silent event stream in $dir; the widest gap between this watch's one-second ticks was $gap s"
+exit "$status"
