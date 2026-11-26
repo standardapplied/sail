@@ -36,8 +36,8 @@ final class Follower: Sendable {
         log.withLock { $0 }
     }
 
-    /// Waits until `holds`, failing once `seconds`, or the follower's patience, have been slept,
-    /// naming `what`.
+    /// Waits until `holds`, failing, named `what`, when it still does not once `seconds`, or the
+    /// follower's patience, have been slept.
     func until(within seconds: Int? = nil, _ what: String, _ holds: () throws -> Bool) async throws {
         guard let limit = seconds ?? patience else {
             while try !holds() {
@@ -52,15 +52,15 @@ final class Follower: Sendable {
                 return true
             }
             defer { group.cancelAll() }
+            var expired = false
             while try !holds() {
                 guard !Task.isCancelled else { throw ProbeError("the session never \(what): \(session.state.phase)") }
+                guard !expired else { throw ProbeError("the session never \(what) within \(limit) s: \(session.state.phase)") }
                 group.addTask { [tick] in
                     await tick.wait(nil)
                     return false
                 }
-                if try await group.next() == true {
-                    throw ProbeError("the session never \(what) within \(limit) s: \(session.state.phase)")
-                }
+                expired = try await group.next() == true
             }
         }
     }
