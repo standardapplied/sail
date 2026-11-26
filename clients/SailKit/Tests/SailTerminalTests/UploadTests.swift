@@ -1,5 +1,6 @@
 import Foundation
 import SailAPI
+import SailKitTestSupport
 @testable import SailTerminal
 import SailTerminalWire
 @testable import sail_term_probe
@@ -291,9 +292,9 @@ func digest(_ bytes: [UInt8]) -> [UInt8] {
         let bytes = [UInt8](repeating: 3, count: UploadPacing.chunk * 3)
         try Data(bytes).write(to: file)
         defer { try? FileManager.default.removeItem(at: file) }
-        let script = try JSONDecoder().decode(Script.self, from: Data(#"{"steps": [{"upload": "\#(file.path)", "within": 30}]}"#.utf8))
-        let runner = Runner(session: session, host: nil, echoBudget: 10) { _ in }
-        let report = Task { await runner.run(script) }
+        let script = try JSONDecoder().decode(Script.self, from: Data(#"{"steps": [{"upload": "\#(file.path)", "within": \#(Patience.answer)}]}"#.utf8))
+        let runner = Runner(session: session, host: nil, echoBudget: 10, patience: nil) { _ in }
+        async let report = runner.run(script)
         var held = 0
         var id: Int32 = 0
         var typed = 0
@@ -329,7 +330,7 @@ func digest(_ bytes: [UInt8]) -> [UInt8] {
             }
         }
         #expect(String(decoding: pasted, as: UTF8.self) == "/var/lib/sail-paste/inst-1/1-shot.png ")
-        let done = await report.value
+        let done = await report
         let failed = done.steps.filter { !$0.ok }.map(\.step)
         #expect(failed == [])
         let upload = try #require(done.uploads.first)
@@ -345,7 +346,7 @@ func digest(_ bytes: [UInt8]) -> [UInt8] {
 func attachedOnRunner(write: Bool = true) async throws -> (FakeHost, TerminalSession, FakeHost.Peer) {
     let host = try FakeHost(tcp: ())
     let door = Door.runner(TicketDesk(address: host.address))
-    let session = TerminalSession(attach: "work", write: write, door: door, screen: try screen(), timeout: 5, stableAfter: .zero, sleep: Naps().sleep)
+    let session = TerminalSession(attach: "work", write: write, door: door, screen: try screen(), timeout: Patience.answer, stableAfter: .zero, sleep: Naps().sleep)
     let watch = Watch(session)
     session.start()
     let peer = try await host.accept()

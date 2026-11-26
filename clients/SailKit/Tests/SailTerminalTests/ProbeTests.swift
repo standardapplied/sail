@@ -1,11 +1,12 @@
 import Foundation
 import SailAPI
+import SailKitTestSupport
 import SailTerminal
 import SailTerminalWire
 @testable import sail_term_probe
 import Testing
 
-@Suite struct ProbeTests {
+@Suite(.timeLimit(.minutes(1))) struct ProbeTests {
     /// `--workspace` names the workspace a runner session opens in; without it, the project's own
     /// container, as before.
     @Test func aRunnerRunNamesItsWorkspace() throws {
@@ -38,23 +39,23 @@ import Testing
 
     /// A `same` after a reconnect is proved by the replay, not by the screen before the replay
     /// arrives: the e2e lane once passed a drop's check on the old screen while the replay that
-    /// followed changed it.
+    /// followed changed it. No replay comes, and the `same` fails once its limit is let pass.
     @Test func aSameAfterAReconnectWaitsForTheReplay() async throws {
-        let steps = try await reconnected { peer in try peer.send(.accepted) }
+        let steps = try await reconnected(sameRunsOut: true) { peer in try peer.send(.accepted) }
         #expect(steps.map(\.ok) == [true, true, true, true, true, false])
     }
 
     /// Fix 3: a replay is compared once it has ended, never partway through, where a screen can
     /// match the kept one for a moment.
     @Test func aSameWaitsForTheReplayToEnd() async throws {
-        let steps = try await reconnected { peer in
+        let steps = try await reconnected(sameRunsOut: true) { peer in
             try peer.send([.accepted, .resized(TerminalSize(columns: 20, rows: 3)), .replayBegin(safe: true), output("kept")])
         }
         #expect(steps.map(\.ok) == [true, true, true, true, true, false])
     }
 
     @Test func aSameAfterAReconnectPassesOnAReplayOfTheKeptScreen() async throws {
-        let steps = try await reconnected { peer in
+        let steps = try await reconnected(sameRunsOut: false) { peer in
             try peer.send([
                 .accepted, .resized(TerminalSize(columns: 20, rows: 3)), .replayBegin(safe: true), output("kept"), .replayEnd,
                 .writerChanged(fde: "ada", yours: true),
@@ -78,14 +79,14 @@ import Testing
             workspace: "try"
         )
         let session = TerminalSession(
-            open: create, door: .runner(desk), screen: try screen(columns: 20, rows: 3), timeout: FakeHost.deadline, sleep: Naps().sleep
+            open: create, door: .runner(desk), screen: try screen(columns: 20, rows: 3), timeout: Patience.answer, sleep: Naps().sleep
         )
-        let runner = Runner(session: session, host: nil, echoBudget: 10) { _ in }
+        let runner = Runner(session: session, host: nil, echoBudget: 10, patience: nil, ending: .seconds(Patience.answer)) { _ in }
         session.start()
         let first = try await host.accept()
         try await first.welcome()
         _ = try await first.acceptAttach(columns: 20, rows: 3)
-        let report = Task { await runner.run(script) }
+        async let report = runner.run(script)
         #expect(try await first.read() == .resize(TerminalSize(columns: 20, rows: 3)), "reconnect now")
         let ending = try await host.accept()
         #expect(try await ending.welcome() == "ticket-2")
@@ -93,40 +94,76 @@ import Testing
         try ending.send(.accepted)
         #expect(try await ending.read() == .kill(session: "work"))
         try ending.send(.accepted)
-        #expect(await report.value.steps.map(\.ok) == [true, true, true])
+        let steps = await report.steps
+        #expect(steps.map(\.ok) == [true, true, true])
         #expect(desk.requests == [.open(project: "acme", workspace: "try"), .attach(session: "work")])
         _ = first
     }
 
-    /// Runs snapshot, drop, attached, same against a fake host whose reattach `answer` gives. The
-    /// session's answer timeout and the script's waits are the fake host's own bound: the host's
-    /// side is a task on the cooperative pool, which the suite's CPU-heavy tests can hold past 5 s
-    /// on a 3-core runner, and a session that waits 5 s for the welcome closes the connection.
-    private func reconnected(answer: (FakeHost.Peer) async throws -> Void) async throws -> [StepResult] {
+    /// A limited wait whose task is cancelled, as a test's time limit cancels it, says what it waited
+    /// for, never only that it was cancelled.
+    @Test func aCancelledWaitSaysWhatItWaitedFor() async throws {
+        let create = SessionCreate(
+            session: "work", command: [], workingDirectory: "/tmp", project: "", room: "", size: TerminalSize(columns: 20, rows: 3)
+        )
+        let session = TerminalSession(
+            open: create, door: .local(.unix(path: "/nonexistent/h.sock")), screen: try screen(columns: 20, rows: 3), timeout: Patience.answer,
+            sleep: Naps().sleep
+        )
+        defer { session.close() }
+        let limits = Timeline()
+        let follower = Follower(session, patience: Self.probesOwn, sleep: limits.sleep)
+        let waiting = Task { try await follower.until("held what it never holds") { false } }
+        try await limits.until(held: [.seconds(Self.probesOwn)])
+        waiting.cancel()
+        do {
+            try await waiting.value
+            Issue.record("a wait for what never holds returned")
+        } catch let error as ProbeError {
+            #expect(error.description.hasPrefix("the session never held what it never holds"), "\(error)")
+        }
+    }
+
+    /// The probe's own patience: the limit a `same` whose replay never comes, or never ends, fails
+    /// at, and the one limit these tests let pass.
+    static let probesOwn = 5
+
+    /// Runs snapshot, drop, attached, same against a fake host whose reattach `answer` gives. Every
+    /// limit of the run's is held until the test lets it pass: the steps that name one wait
+    /// `Patience.answer`, the others the probe's own 5 s. Once the drop is seen (the attached step
+    /// holds the only limit) the host answers, and when `sameRunsOut` the `same`'s limit, then the
+    /// only one held, passes; no limit runs out by the runner's speed.
+    private func reconnected(sameRunsOut: Bool, answer: (FakeHost.Peer) async throws -> Void) async throws -> [StepResult] {
         let host = try FakeHost()
         let create = SessionCreate(
             session: "work", command: [], workingDirectory: "/tmp", project: "", room: "", size: TerminalSize(columns: 20, rows: 3)
         )
         let session = TerminalSession(
-            open: create, door: .local(host.address), screen: try screen(columns: 20, rows: 3), timeout: FakeHost.deadline, stableAfter: .zero,
+            open: create, door: .local(host.address), screen: try screen(columns: 20, rows: 3), timeout: Patience.answer, stableAfter: .zero,
             sleep: Naps().sleep
         )
-        let runner = Runner(session: session, host: nil, echoBudget: 10) { _ in }
+        let limits = Timeline()
+        let runner = Runner(session: session, host: nil, echoBudget: 10, patience: Self.probesOwn, sleep: limits.sleep) { _ in }
         let script = try JSONDecoder().decode(Script.self, from: Data("""
-            {"size": [20, 3], "steps": [{"wait": "kept", "within": \(FakeHost.deadline)}, {"snapshot": "before"}, {"drop": true},
-              {"phase": "attached", "within": \(FakeHost.deadline)}, {"same": "before"}]}
+            {"size": [20, 3], "steps": [{"wait": "kept", "within": \(Patience.answer)}, {"snapshot": "before"}, {"drop": true},
+              {"phase": "attached", "within": \(Patience.answer)}, {"same": "before"}]}
             """.utf8))
         session.start()
         let first = try await host.accept()
         try await first.welcome()
         _ = try await first.acceptAttach(columns: 20, rows: 3)
         try first.send(output("kept"))
-        let report = Task { await runner.run(script) }
+        async let report = runner.run(script)
         let again = try await host.accept()
         try await again.welcome()
         guard case .attach = try await again.read() else { throw HostError("the reconnect did not attach") }
+        try await limits.until(held: [.seconds(Patience.answer)])
         try await answer(again)
-        let steps = await report.value.steps
+        if sameRunsOut {
+            try await limits.until(held: [.seconds(Self.probesOwn)])
+            limits.passAll()
+        }
+        let steps = await report.steps
         session.close()
         _ = first
         return steps
