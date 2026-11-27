@@ -560,7 +560,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
       handle.stdin().write(prompt);
       assertEquals(
           new LiveStream.Step.Result(
-              false, null, "heard", false, false, null, new ChatItem.TurnEnded(0, 0, 0, 0)),
+              false, null, "heard", false, false, null, new ChatItem.TurnEnded(null, 0, 0, 0)),
           nextStep(handle));
 
       assertEquals(
