@@ -60,7 +60,8 @@ public final class Tile: NSView {
 /// design's stale frame draws it), a workspace's in regular ink, cut in its middle with its tooltip
 /// whole, each semibold while chosen or under the pointer; quiet words in 12 pt tertiary ink; and at
 /// the trailing edge, 7 pt apart, the template's small pill when not ready, a `tag`'s plain small pill
-/// (This Mac's "Local"), or its + while it is chosen or under the pointer.
+/// (This Mac's "Local"), or its +: one at a time, the row's under the pointer, else the chosen row's,
+/// and drawn pressed, shown whatever the pointer does, while what it opened is open (``held``).
 @MainActor
 public final class SidebarRowCell: NSView {
     /// What stands between the disclosure's slot and the name.
@@ -85,8 +86,18 @@ public final class SidebarRowCell: NSView {
     package let disclosure: Disclosure?
     package let label = NSTextField(labelWithString: "")
     let pill: Pill?
-    /// The row's +, shown while it is chosen or under the pointer.
+    /// The row's +, shown while it is under the pointer, or chosen while no other row is.
     package let plus: SailButton?
+    /// The + opened what is open now: drawn pressed, and shown.
+    package var held = false {
+        didSet {
+            plus?.held = held
+            showPlus()
+        }
+    }
+
+    /// The row offers its +: under the pointer, or chosen while no other row is.
+    private var offers = false
     private let name: String
     private let lead: Lead
     package let nameTip: Tooltip?
@@ -178,6 +189,10 @@ public final class SidebarRowCell: NSView {
         onPlus()
     }
 
+    private func showPlus() {
+        plus?.isHidden = !offers && !held
+    }
+
     private func repaint() {
         let words: NSAttributedString
         switch lead {
@@ -205,9 +220,10 @@ extension SidebarRowCell.Lead {
 }
 
 extension SidebarRowCell: MarkedRow {
-    package func mark(chosen: Bool, strong: Bool) {
+    package func mark(chosen: Bool, strong: Bool, offers: Bool) {
         tile?.chosen = chosen
-        plus?.isHidden = !strong
+        self.offers = offers
+        showPlus()
         guard strong != self.strong else { return }
         self.strong = strong
         repaint()
@@ -250,13 +266,7 @@ package final class Disclosure: NSView {
 
     override package func draw(_: NSRect) {
         let rect = NSRect(x: (Double(bounds.width) - Self.chevron) / 2, y: (Double(bounds.height) - Self.chevron) / 2, width: Self.chevron, height: Self.chevron)
-        guard !open, userInterfaceLayoutDirection == .rightToLeft else { return Draw.icon(open ? .down : .right, in: rect, ink: look.textTertiary) }
-        let context = NSGraphicsContext.current?.cgContext
-        context?.saveGState()
-        context?.translateBy(x: rect.midX * 2, y: 0)
-        context?.scaleBy(x: -1, y: 1)
-        Draw.icon(.right, in: rect, ink: look.textTertiary)
-        context?.restoreGState()
+        Draw.disclosure(open: open, in: rect, ink: look.textTertiary, rightToLeft: userInterfaceLayoutDirection == .rightToLeft)
     }
 
     override package func mouseDown(with event: NSEvent) {

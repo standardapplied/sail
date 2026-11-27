@@ -6,9 +6,9 @@ import SailWorkbench
 
 /// A workspace row's New Session popover (`first-impressions-mockup.html`, 3A): what its agents
 /// route answered, in a 388 pt box 4 pt under the row, its trailing edge on the row's ⋯ (from a row of
-/// the left panel, 4 pt past the row's trailing edge, its top on the row's, over the content), always
-/// within what shows of the page less 8 pt each side (spanning that where the page is drawn narrow,
-/// as at the least window), and over the row when the window has no room under it, else covering the
+/// the left panel, 4 pt past the row's trailing edge, its top on the row's where it fits, over the
+/// content), always within what shows of the page less 8 pt each side (spanning that where the page
+/// is drawn narrow, as at the least window), and over the row when the window has no room under it, else covering the
 /// row whole. It is placed once, by the tallest of its kinds in each of their modes, and its top
 /// stays there while it is open; its rows scroll in what that leaves. Every kind is an equal row, the route's harnesses
 /// in its order then the Shell: a tile, the name, and how it signs in as its Sign in is set, or

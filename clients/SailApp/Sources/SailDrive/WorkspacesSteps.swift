@@ -620,7 +620,8 @@ extension Driver {
             let open = pair[1] == "open"
             guard let disclosure = cell(name)?.disclosure else { return (false, "\(name) shows no disclosure; the panel's rows: \(rows())") }
             if disclosure.open != open {
-                guard await click(disclosure, at: NSPoint(x: disclosure.bounds.midX, y: disclosure.bounds.midY)) else { return (false, "\(name)'s disclosure could not be clicked") }
+                let clicked = await clickWhenReached { cell(name)?.disclosure.map { ($0, NSPoint(x: $0.bounds.midX, y: $0.bounds.midY)) } }
+                guard clicked else { return (false, "\(name)'s disclosure could not be clicked") }
             }
             let made = await waitUntil(step.seconds ?? 10) { cell(name)?.disclosure?.open == open }
             return (made, "\(name) \(cell(name)?.disclosure?.open == true ? "open" : "shut"); the panel's rows: \(rows())")
@@ -643,8 +644,9 @@ extension Driver {
         }
         if let id = step.panelPlus {
             let parts = id.split(separator: "/").map(String.init)
-            guard parts.count == 2, let plus = panel.plus(parts[0], parts[1]) else { return (false, "\(id) shows no +; the panel's rows: \(rows())") }
-            guard await click(plus, at: NSPoint(x: plus.bounds.midX, y: plus.bounds.midY)) else { return (false, "\(id)'s + could not be clicked") }
+            guard parts.count == 2, panel.plus(parts[0], parts[1]) != nil else { return (false, "\(id) shows no +; the panel's rows: \(rows())") }
+            let clicked = await clickWhenReached { panel.plus(parts[0], parts[1]).map { ($0, NSPoint(x: $0.bounds.midX, y: $0.bounds.midY)) } }
+            guard clicked else { return (false, "\(id)'s + could not be clicked") }
             let opened = await waitUntil(step.seconds ?? 5) { !pane.busy && pane.newSession.isOpen }
             return (opened, "New Session \(opened ? "open for \(pane.newSession.workspace)" : "closed"); \(workspacesLayout)")
         }
@@ -1241,15 +1243,24 @@ extension Driver {
     /// A click on row `id` of `list` once the row is where a person would click it: its point,
     /// taken with the window laid out (``clickPoint(_:in:)``), reaches the list.
     func clickRow(_ id: String, in list: SailList) async -> Bool {
-        var point = NSPoint.zero
-        let reachable = await waitUntil(5) {
-            guard let row = Self.row(id, in: list) else { return false }
+        await clickWhenReached {
+            guard let row = Self.row(id, in: list) else { return nil }
             let rect = list.rect(ofRow: row)
-            point = NSPoint(x: list.userInterfaceLayoutDirection == .rightToLeft ? rect.maxX - 24 : rect.minX + 24, y: rect.minY + min(rect.height, 52) / 2)
-            return list.window?.contentView?.superview?.hitTest(clickPoint(point, in: list))?.isDescendant(of: list) == true
+            return (list, NSPoint(x: list.userInterfaceLayoutDirection == .rightToLeft ? rect.maxX - 24 : rect.minX + 24, y: rect.minY + min(rect.height, 52) / 2))
         }
-        guard reachable else { return false }
-        return await click(list, at: point)
+    }
+
+    /// Clicks the view and the point in it that `target` names, as laid out now, once a click there
+    /// reaches that view: a row just made again may not be laid out or hit yet.
+    func clickWhenReached(_ target: @MainActor () -> (view: NSView, point: NSPoint)?) async -> Bool {
+        var reached: (view: NSView, point: NSPoint)?
+        let reachable = await waitUntil(5) {
+            reached = target()
+            guard let reached else { return false }
+            return reached.view.window?.contentView?.superview?.hitTest(clickPoint(reached.point, in: reached.view))?.isDescendant(of: reached.view) == true
+        }
+        guard reachable, let reached else { return false }
+        return await click(reached.view, at: reached.point)
     }
 
     private static func row(_ id: String, in list: SailList) -> Int? {

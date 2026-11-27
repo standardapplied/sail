@@ -221,8 +221,13 @@ public final class SailButton: NSButton {
         didSet { needsDisplay = true }
     }
 
+    /// Drawn pressed while what it opened stays open: a row's + while its popover shows.
+    package var held = false {
+        didSet { if held != oldValue { needsDisplay = true } }
+    }
+
     var drawnState: ButtonState {
-        ButtonState(enabled: isEnabled, hovered: hovered, pressed: isHighlighted, focused: holdsKeys || (focused || (isDefault && kind != .primary)) && window?.isKeyWindow == true, busy: busyWord != nil)
+        ButtonState(enabled: isEnabled, hovered: hovered, pressed: isHighlighted || held, focused: holdsKeys || (focused || (isDefault && kind != .primary)) && window?.isKeyWindow == true, busy: busyWord != nil)
     }
 
     var paint: ButtonPaint {

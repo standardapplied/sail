@@ -6,7 +6,7 @@ import Testing
 /// The left panel's tree: an open project lists the person's own workspaces from the one listing its
 /// page shows, other people's counted in one row; which projects are open is the person's
 /// arrangement, asked again on a refresh; a listing that fails says so under its own project.
-@Suite struct WorkspacesPanelTests {
+@Suite(.timeLimit(.minutes(1))) struct WorkspacesPanelTests {
     static let uday = WorkspacesModelTests.uday
     static let at = WorkspacesModelTests.at
     static let two = ProjectList(projects: ["harbor", "lighthouse"].map { ProjectSummary(name: $0, containerStatus: .known(.running), template: .known(.ready)) }, total: 2)
@@ -48,6 +48,16 @@ import Testing
         let page = try #require(WorkspacesModelTests.page(model))
         let lines = try #require(WorkspacesModelTests.table(model)).yours
         #expect(page.name == "harbor" && lines.map(\.name) == holds.yours.map(\.name) && lines.map(\.state) == holds.yours.map(\.state), "the panel and the page disagree")
+    }
+
+    /// 1: a row's + is offered exactly where its page's row offers New Session: on the person's own
+    /// running or stopped workspace (a start there starts it, as Start and Open does), never while a
+    /// stop or delete is under way on it.
+    @Test func thePlusIsOfferedWhereThePageOffersNewSession() throws {
+        var model = try Self.model()
+        #expect(model.ask(.stop, "dock", terminals: 0) != nil)
+        let yours = try #require(Self.project("harbor", in: model)?.holds?.yours), lines = try #require(WorkspacesModelTests.table(model)).yours
+        #expect(yours.map(\.newSession) == lines.map { $0.menu.contains(.newSession) } && yours.map(\.newSession) == [false, true], "the panel's + and the page's New Session disagree")
     }
 
     /// 3: the person's own workspace chosen is the panel's row chosen; someone else's, or This Mac,
@@ -143,6 +153,101 @@ import Testing
         let none = try #require(opened)
         never.listed(.failure(.unreachable("lost")), request: none, at: Self.at)
         #expect(Self.project("lighthouse", in: never)?.holds == WorkspacesModel.Nest(yours: [], others: 0, failed: "Couldn’t list its workspaces"))
+    }
+
+    static func dock(_ model: WorkspacesModel) -> WorkspacesModel.Workspace? {
+        project("harbor", in: model)?.holds?.yours.first { $0.name == "dock" }
+    }
+
+    /// The Ruling: a stop answered after the person left its project settles its row under that
+    /// project at once and asks the project again, so a listing already on its way cannot bring the
+    /// row back running; its refusal still waits for the person's return.
+    @Test func aStopAnsweredAfterThePersonLeftSettlesItsRowAndAsksAgain() throws {
+        var model = try Self.model(open: ["lighthouse"])
+        #expect(model.ask(.stop, "dock", terminals: 0) != nil)
+        #expect(Self.dock(model)?.busy == .stop)
+        _ = model.choose("lighthouse")
+        let refreshed = model.askExpanded()
+        let older = try #require(refreshed.first)
+        #expect(model.project(of: older) == "harbor")
+        model.collapse("harbor")
+        let request = model.changed(.stop, "dock", project: "harbor", WorkspacesModelTests.stopped)
+        #expect(request.flatMap(model.project(of:)) == "harbor" && model.project(of: older) == nil, "harbor is not asked again")
+        model.listed(Self.harbor(), request: older, at: Self.at)
+        #expect(model.expand("harbor") == nil)
+        #expect(Self.dock(model)?.state == .known(.stopped) && Self.dock(model)?.busy == nil, "harbor's row says \(String(describing: Self.dock(model))) after its stop answered")
+    }
+
+    /// The Ruling: a delete answered after the person left takes its row out of the panel at once.
+    @Test func aDeleteAnsweredAfterThePersonLeftTakesItsRowOut() throws {
+        var model = try Self.model(open: ["lighthouse"])
+        let question = try WorkspacesModelTests.asks(&model, .delete(force: false), "dock", terminals: nil)
+        _ = try WorkspacesModelTests.confirms(&model, question)
+        _ = model.choose("lighthouse")
+        let request = model.changed(.delete(force: false), "dock", project: "harbor", WorkspacesModelTests.deleted("dock"))
+        #expect(request.flatMap(model.project(of:)) == "harbor")
+        #expect(Self.dock(model) == nil, "deleted dock still under harbor in the panel")
+    }
+
+    /// The Ruling: a create answered after the person left asks its project again, its new row
+    /// under it in the panel once listed, and chosen when the person comes back.
+    @Test func aCreateAnsweredAfterThePersonLeftListsItsProjectAgain() throws {
+        var model = try Self.model(open: ["lighthouse"])
+        WorkspacesModelTests.send("new", &model)
+        _ = model.choose("lighthouse")
+        let made = model.created(WorkspacesModelTests.answer(try Endpoint.createWorkspace("new", project: "harbor"), "workspace-create"), project: "harbor")
+        let request = try #require(made, "harbor is not asked again")
+        #expect(model.project(of: request) == "harbor")
+        model.listed(WorkspacesModelTests.answer(.workspaces(project: "harbor"), "workspaces-made"), request: request, at: Self.at)
+        #expect(Self.project("harbor", in: model)?.holds?.yours.contains { $0.name == "new" } == true, "the created row is not under harbor")
+        let back = model.choose("harbor")
+        model.listed(WorkspacesModelTests.answer(.workspaces(project: "harbor"), "workspaces-made"), request: back, at: Self.at)
+        #expect(model.panel.chosenRow == "new")
+    }
+
+    /// 5: a refresh whose projects could not be listed asks no open project, which would say the one
+    /// failure again under each; the next that lists them does.
+    @Test func aFailedProjectsRefreshAsksNoOpenProject() throws {
+        var model = try Self.model(open: ["lighthouse"])
+        let failing = model.askingProjects()
+        model.projectsListed(.failure(.unreachable("lost")), request: failing)
+        #expect(model.askExpanded().isEmpty, "an open project was asked while the projects could not be listed")
+        let listing = model.askingProjects()
+        model.projectsListed(.success(Self.two), request: listing)
+        #expect(model.askExpanded().compactMap(model.project(of:)) == ["lighthouse"])
+    }
+
+    /// The Ruling: a shut project's rows are not the panel's, so an answer for it changes nothing
+    /// the panel shows.
+    @Test func aShutProjectsAnswerChangesNothingThePanelShows() throws {
+        var model = try Self.model()
+        let before = model.panel
+        let expanded = model.expand("lighthouse")
+        let opened = try #require(expanded)
+        model.collapse("lighthouse")
+        model.listed(Self.lighthouse(), request: opened, at: Self.at)
+        #expect(model.panel == before, "a shut project's answer changed the panel")
+        #expect(model.expand("lighthouse") == nil && Self.project("lighthouse", in: model)?.holds?.yours.map(\.name) == ["beacon"])
+    }
+
+    /// n1: choosing a project whose listing failed keeps saying so until an answer comes.
+    @Test func choosingAProjectKeepsItsFailureLineUntilAnAnswer() throws {
+        var model = try Self.model(open: ["lighthouse"])
+        let refreshed = model.askExpanded()
+        let asked = try #require(refreshed.first)
+        model.listed(.failure(.unreachable("lost")), request: asked, at: Self.at)
+        let chose = model.choose("lighthouse")
+        #expect(Self.project("lighthouse", in: model)?.holds?.failed == WorkspacesModel.unlisted, "the failure line went on choose, before any answer")
+        model.listed(Self.lighthouse(), request: chose, at: Self.at)
+        #expect(Self.project("lighthouse", in: model)?.holds?.failed == nil)
+    }
+
+    /// 4: a project no longer listed is no longer open, so the arrangement kept holds only projects
+    /// that are.
+    @Test func aProjectNoLongerListedIsNoLongerOpen() throws {
+        var model = WorkspacesModel(person: Self.uday, chosen: "harbor", expanded: ["gone", "lighthouse"])
+        model.projectsListed(.success(Self.two))
+        #expect(model.expanded == ["harbor", "lighthouse"])
     }
 
     static let keeperShown = WorkspacesModel.Workspace(name: "keeper", state: .known(.stopped), busy: nil, primary: .startAndOpen, newSession: true)

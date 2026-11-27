@@ -179,6 +179,7 @@ public final class WorkspacesView: NSView {
         newSession.onStoreKey = { [weak self] offer in self?.storeKey(offer) }
         newSession.onClose = { [weak self] in
             self?.panelRow = nil
+            self?.panel.opened = nil
             self?.project.list.primaryElsewhere = false
         }
         for clip in [project.listScroll?.contentView, panel.scroll.contentView].compactMap({ $0 }) {
@@ -314,7 +315,9 @@ public final class WorkspacesView: NSView {
             let answer = await Self.result { () async throws(SailError) in try await client.send(.projects) }
             guard era == self.era else { return }
             if case .failure = answer { triedAt = Date() }
+            let open = model.expanded
             if let request = model.projectsListed(answer, request: asked) { list(request) }
+            if model.expanded != open { keepExpanded(model.expanded.sorted(), person) }
             model.askExpanded().forEach(list)
             render()
         }
@@ -509,6 +512,7 @@ public final class WorkspacesView: NSView {
             newSession.open(said(answer), workspace: name, memory: memory, under: row, page: inPanel ? self : project, narrow: !inPanel && project.narrow, beside: inPanel, anchor: anchor)
             guard newSession.isOpen else { return }
             panelRow = (row, line, inPanel)
+            panel.opened = inPanel ? LeftPanel.id(projectName, name) : nil
             project.list.primaryElsewhere = true
         }
     }

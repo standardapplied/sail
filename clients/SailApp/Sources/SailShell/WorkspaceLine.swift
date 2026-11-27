@@ -201,7 +201,7 @@ extension WorkspaceLine: MarkedRow {
         ]).cut(.byTruncatingTail)
     }
 
-    package func mark(chosen _: Bool, strong: Bool) {
+    package func mark(chosen _: Bool, strong: Bool, offers _: Bool) {
         let weight: NSFont.Weight = strong ? .semibold : .medium
         guard let font = title.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont,
               font != NSFont.systemFont(ofSize: Look.Step.body.points, weight: weight),

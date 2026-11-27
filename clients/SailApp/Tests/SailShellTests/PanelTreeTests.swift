@@ -1,6 +1,6 @@
 import AppKit
 import SailAPI
-import SailControls
+@testable import SailControls
 import SailKitTestSupport
 import SailLook
 @testable import SailShell
@@ -133,6 +133,8 @@ import Testing
         #expect(await RunnerTabTests.until { !view.busy } && view.panel.list.chosen == "lighthouse/beacon")
         view.project.list.choose(nil)
         #expect(view.panel.list.chosen == "lighthouse", "the page's choice left the panel's")
+        view.panel.list.choose("harbor\u{0}others")
+        #expect(view.text.hasPrefix("Workspaces\nharbor\n") && view.panel.list.chosen == "harbor", "Other people's showed \(view.text.split(separator: "\n").dropFirst().first ?? "nothing")")
     }
 
     /// 4, 5: opening a project asks its workspaces once, kept as the person's arrangement; a
@@ -159,10 +161,15 @@ import Testing
         #expect(kept.expanded == [["harbor", "lighthouse"], ["harbor"], ["harbor", "lighthouse"]])
     }
 
-    /// 6: → goes into an open project, ← back to it and shuts it, Return opens a workspace as its
-    /// page's row's Open or Start and Open does.
+    /// 6: → goes into an open project and opens a shut one, ← back to it and shuts it, Return opens
+    /// a workspace as its page's row's Open or Start and Open does, and does nothing on one its page
+    /// cannot open, which offers no + either.
     @Test func theKeysMoveThroughTheTreeAndReturnOpens() async throws {
-        let (view, window, _, kept) = try await Self.shown()
+        let rows = try WorkspacesReachTests.list([
+            ["name": "dock", "instance": "harbor-dock", "state": "running", "owner": "uday"], ["name": "pier", "instance": "harbor-pier", "state": "stopped", "owner": "uday"],
+            ["name": "quay", "instance": "harbor-quay", "state": "running", "owner": "ana"], ["name": "wreck", "instance": "harbor-wreck", "state": "error", "owner": "uday"],
+        ])
+        let (view, window, _, kept) = try await Self.shown(harbor: rows)
         defer { window.orderOut(nil) }
         let list = view.panel.list
         window.makeFirstResponder(list)
@@ -170,11 +177,77 @@ import Testing
         #expect(list.onKey?(try Self.arrow(124)) == true && list.chosen == "harbor/dock", "→ on open harbor chose \(list.chosen ?? "none")")
         #expect(view.project.list.chosen == "dock")
         #expect(list.onKey?(try NewSessionPanelTests.returnKey()) == true && kept.opened == ["harbor/dock"])
+        list.choose("harbor/wreck")
+        #expect(list.onKey?(try NewSessionPanelTests.returnKey()) == true && kept.opened == ["harbor/dock"], "Return opened a workspace its page cannot open")
+        #expect(try Self.cell("harbor/wreck", in: view.panel).cell.plus == nil, "a + on a workspace no session can start in")
         list.choose("harbor/pier")
         #expect(list.onKey?(try NewSessionPanelTests.returnKey()) == true && kept.opened == ["harbor/dock", "harbor/pier"])
         #expect(list.onKey?(try Self.arrow(123)) == true && list.chosen == "harbor" && view.project.list.chosen == nil, "← on pier chose \(list.chosen ?? "none")")
         #expect(list.onKey?(try Self.arrow(123)) == true && !Self.ids(view.panel).contains("harbor/dock") && list.chosen == "harbor", "← shut nothing")
         #expect(list.onKey?(try Self.arrow(123)) == false, "← on a shut project was taken")
+        #expect(list.onKey?(try Self.arrow(124)) == true && Self.ids(view.panel).contains("harbor/dock") && list.chosen == "harbor", "→ on shut harbor did not open it")
+    }
+
+    /// 1 and the Ruling: one + at a time, the row's under the pointer, else the chosen row's; the +
+    /// whose popover is open is drawn pressed and stays while the pointer moves on.
+    @Test func onePlusShowsAtATime() async throws {
+        let (view, window, _, _) = try await Self.shown(also: [try Exchange("workspace-agents-dock")], height: 800)
+        defer { window.orderOut(nil) }
+        view.panel.list.choose("harbor/dock")
+        let dock = try Self.cell("harbor/dock", in: view.panel), pier = try Self.cell("harbor/pier", in: view.panel)
+        let pointed = try #require(pier.row as? SailRowView)
+        #expect(dock.cell.plus?.isHidden == false && pier.cell.plus?.isHidden == true)
+        pointed.hovered = true
+        #expect(pier.cell.plus?.isHidden == false && dock.cell.plus?.isHidden == true, "two +s, or none under the pointer")
+        pointed.hovered = false
+        #expect(dock.cell.plus?.isHidden == false && pier.cell.plus?.isHidden == true, "the chosen row's + did not come back")
+        try NewSessionPanelTests.press(dock.cell.plus)
+        try #require(await RunnerTabTests.until { view.newSession.isOpen }, "the + opened nothing")
+        let held = try #require(view.panel.plus("harbor", "dock") as? SailButton, "the open popover's + is not shown")
+        #expect(held.drawnState.pressed, "the open popover's + is not drawn pressed")
+        pointed.hovered = true
+        #expect(view.panel.plus("harbor", "dock") != nil && pier.cell.plus?.isHidden == false, "the open popover's + went while the pointer moved on")
+        pointed.hovered = false
+        view.newSession.close()
+        let released = try #require(view.panel.plus("harbor", "dock") as? SailButton)
+        #expect(!released.drawnState.pressed, "the + stayed pressed after its popover closed")
+    }
+
+    /// The Ruling and m2: the panel makes again only the rows whose drawing changed: a stop on one
+    /// workspace remakes its row alone, the same panel or a shut project's answer none.
+    @Test func aStopRemakesItsRowAlone() throws {
+        let row = { (name: String, project: String, state: WorkspaceState, owner: String) in WorkspaceRow(name: name, instance: "\(project)-\(name)", state: .known(state), owner: owner) }
+        let at = Date(timeIntervalSince1970: 1_800_000_000)
+        var model = WorkspacesModel(person: WorkspacesViewTests.uday, chosen: "harbor")
+        let ready = ["harbor", "lighthouse"].map { ProjectSummary(name: $0, containerStatus: .known(.running), template: .known(.ready)) }
+        let listed = model.projectsListed(.success(ProjectList(projects: ready, total: 2)))
+        let harbor = [row("dock", "harbor", .running, "uday"), row("pier", "harbor", .stopped, "uday"), row("quay", "harbor", .running, "ana")]
+        model.listed(.success(WorkspaceList(project: "harbor", workspaces: harbor)), request: try #require(listed), at: at)
+        let panel = LeftPanel(look: .light, mono: try LabelFont(directory: LookTests.fonts))
+        let window = KeyWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+        defer { window.orderOut(nil) }
+        window.contentView = panel
+        panel.render(model.panel)
+        panel.layoutSubtreeIfNeeded()
+        let fills = panel.list.fills, made = panel.list.appliedRows
+        panel.render(model.panel)
+        #expect(panel.list.fills == fills && panel.list.appliedRows == made, "the same panel drawn again remade rows")
+        #expect(model.ask(.stop, "dock", terminals: 0) != nil)
+        panel.render(model.panel)
+        #expect(panel.list.fills == fills && panel.list.appliedRows == made + 1, "a stop on dock made \(panel.list.appliedRows - made) rows and \(panel.list.fills - fills) fills")
+        let expanded = model.expand("lighthouse")
+        let opened = try #require(expanded)
+        model.collapse("lighthouse")
+        model.listed(.success(WorkspaceList(project: "lighthouse", workspaces: [row("beacon", "lighthouse", .running, "uday")])), request: opened, at: at)
+        panel.render(model.panel)
+        #expect(panel.list.fills == fills && panel.list.appliedRows == made + 1, "a shut project's answer remade rows")
+    }
+
+    /// 4: a project no longer listed is no longer kept open.
+    @Test func aProjectNoLongerListedIsNoLongerKeptOpen() async throws {
+        let (_, window, _, kept) = try await Self.shown(open: ["gone", "lighthouse"])
+        defer { window.orderOut(nil) }
+        #expect(kept.expanded.first == ["harbor", "lighthouse"], "kept open: \(kept.expanded)")
     }
 
     /// 1: the + shows on the row chosen or under the pointer, on the person's own rows alone; it

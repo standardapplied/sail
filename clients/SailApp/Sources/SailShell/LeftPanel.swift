@@ -8,11 +8,11 @@ import SailWorkbench
 /// projects: a 46 pt header with the section's title over a hairline, then two groups to its
 /// bottom edge: THIS MAC, holding the one local project, and the control plane's projects under its
 /// host with their count, as the panel's project rows (disclosure, tile, name, readiness pill). An open
-/// project lists the person's own workspaces under it, 14 pt in, each with its state square and, while
-/// chosen or under the pointer, its + for New Session; then one quiet row counting other people's,
-/// and a quiet line where its workspaces could not be listed. → opens a project or goes to its first
-/// row, ← shuts it or goes to the project a row is under, Return opens a workspace. Who is signed in
-/// and where is the user menu's to say. With no project it says so under the control plane's head;
+/// project lists the person's own workspaces under it, 14 pt in, each with its state square and its +
+/// for New Session (the row's under the pointer, else the chosen row's); then one quiet row counting
+/// other people's, and a quiet line where its workspaces could not be listed. → opens a project or
+/// goes to its first row, ← shuts it or goes to the project a row is under, Return opens a workspace.
+/// Who is signed in and where is the user menu's to say. With no project it says so under the control plane's head;
 /// before any is listed it shows skeleton rows there, and, when none could be, why, with Try Again.
 /// It is 236 pt by default; its trailing edge drags it between 200 and 360 pt, remembered on this Mac.
 @MainActor
@@ -61,16 +61,26 @@ package final class LeftPanel: NSView {
     private var stale = false
     /// What it last showed, drawn again in a new look.
     private var shown: WorkspacesModel.Panel?
-    /// What each row of the control plane's group is, by its id.
+    /// What each row of the control plane's group is, by its id, as it is drawn: a row whose kind
+    /// changed is made again, and only it.
     private var kinds: [String: Kind] = [:]
     /// Its rows are being drawn from the model: a choice made so is the model's, told no one.
     private var drawing = false
+    /// The row whose + opened New Session, its + drawn pressed while that is open.
+    var opened: String? {
+        didSet {
+            guard opened != oldValue else { return }
+            for id in [oldValue, opened].compactMap({ $0 }) { cell(id)?.held = id == opened }
+        }
+    }
 
-    private enum Kind {
-        case project(WorkspacesModel.Project)
+    private enum Kind: Equatable {
+        /// A project's row: its name, its template's mark, its disclosure (nil for none), and whether it is open.
+        case project(String, mark: WorkspacesModel.Mark?, disclosure: Bool?, expanded: Bool)
         case workspace(String, WorkspacesModel.Workspace)
-        case others(String)
-        case note(String)
+        /// A quiet row under a project, in its words: other people's, which chooses the project; or a note.
+        case others(String, String)
+        case note(String, String)
     }
 
     init(look: Look, mono: LabelFont) {
@@ -161,13 +171,20 @@ package final class LeftPanel: NSView {
         let count = panel.listed ? panel.projects.count : nil
         drawing = true
         defer { drawing = false }
-        if panel.projects != projects || panel.stale != stale || panel.controlPlane != headed || count != counted {
+        let head = panel.stale != stale || panel.controlPlane != headed || count != counted
+        if head || panel.projects != projects {
             projects = panel.projects
             stale = panel.stale
             headed = panel.controlPlane
             counted = count
+            let before = kinds
             kinds = [:]
-            list.entries = thisMac + [.head(panel.controlPlane, count: count, icon: .cloud)] + panel.projects.flatMap(entries)
+            let entries = thisMac + [.head(panel.controlPlane, count: count, icon: .cloud)] + panel.projects.flatMap(entries)
+            if head {
+                list.entries = entries
+            } else {
+                list.apply(entries, changed: Set(kinds.filter { id, kind in before[id].map { $0 != kind } ?? false }.keys))
+            }
         }
         let chosen = chosenID(panel)
         if list.chosen != chosen { list.choose(chosen) }
@@ -190,7 +207,7 @@ package final class LeftPanel: NSView {
         guard !drawing else { return }
         switch kinds[id] {
         case let .workspace(project, workspace)?: onChooseRow(project, workspace.name)
-        case let .others(project)?: onChoose(project)
+        case let .others(project, _)?: onChoose(project)
         case .note?: break
         case .project?, nil: onChoose(id)
         }
@@ -219,22 +236,22 @@ package final class LeftPanel: NSView {
 
     /// A project's rows: its own, then, while it is open, what it holds.
     private func entries(_ project: WorkspacesModel.Project) -> [SailList.Entry] {
-        kinds[project.name] = .project(project)
-        var rows = [row(project)]
+        let open: Bool? = project.holds?.empty == true ? nil : project.expanded
+        kinds[project.name] = .project(project.name, mark: project.mark, disclosure: open, expanded: project.expanded)
+        var rows = [row(project, open: open)]
         if project.expanded, let holds = project.holds {
             rows += holds.yours.map { row($0, in: project.name) }
-            if let others = holds.othersSaid { rows.append(quiet(others, id: project.name + "\u{0}others", kind: .others(project.name))) }
-            if let failed = holds.failed { rows.append(quiet(failed, id: project.name + "\u{0}failed", kind: .note(project.name))) }
+            if let others = holds.othersSaid { rows.append(quiet(others, id: project.name + "\u{0}others", kind: .others(project.name, others))) }
+            if let failed = holds.failed { rows.append(quiet(failed, id: project.name + "\u{0}failed", kind: .note(project.name, failed))) }
         }
         return rows.map { .item($0) }
     }
 
-    /// A project's row: its disclosure (none where it holds nothing), its tile, its name and its
-    /// template's pill; VoiceOver reads its name and pill.
-    private func row(_ project: WorkspacesModel.Project) -> SailList.Item {
+    /// A project's row: its disclosure (`open`, nil for none, where it holds nothing), its tile, its
+    /// name and its template's pill; VoiceOver reads its name and pill.
+    private func row(_ project: WorkspacesModel.Project, open: Bool?) -> SailList.Item {
         let pill = Self.pill(project.mark), look = look, mono = mono, stale = stale, name = project.name
         let voice = pill.map { "\(project.name), \($0.label.lowercased())" } ?? project.name
-        let open: Bool? = project.holds?.empty == true ? nil : project.expanded
         return SailList.Item(id: name, name: name, voice: voice, content: {
             let cell = SidebarRowCell(name, disclosure: open, template: pill, look: look, mono: mono, onDisclose: { [weak self] in self?.onToggle(name) })
             cell.stale = stale
@@ -246,14 +263,12 @@ package final class LeftPanel: NSView {
     private func row(_ workspace: WorkspacesModel.Workspace, in project: String) -> SailList.Item {
         let id = Self.id(project, workspace.name), look = look, mono = mono, state = WorkspaceLine.pill(state: workspace.state, busy: workspace.busy)
         kinds[id] = .workspace(project, workspace)
-        return SailList.Item(
-            id: id, name: workspace.name, voice: "\(workspace.name), \(state.label.lowercased())",
-            content: SidebarRowCell(
-                workspace.name, lead: .state(state), indent: Self.nested.indent, plus: workspace.newSession ? NewSessionWords.newSession : nil, look: look, mono: mono,
-                onPlus: { [weak self] in self?.onNewSession(project, workspace.name) }
-            ),
-            height: Self.nested.height
+        let cell = SidebarRowCell(
+            workspace.name, lead: .state(state), indent: Self.nested.indent, plus: workspace.newSession ? NewSessionWords.newSession : nil, look: look, mono: mono,
+            onPlus: { [weak self] in self?.onNewSession(project, workspace.name) }
         )
+        cell.held = id == opened
+        return SailList.Item(id: id, name: workspace.name, voice: "\(workspace.name), \(state.label.lowercased())", content: cell, height: Self.nested.height)
     }
 
     /// A quiet row under a project: other people's workspaces counted, shut, which chooses the
@@ -274,13 +289,13 @@ package final class LeftPanel: NSView {
         let rightToLeft = userInterfaceLayoutDirection == .rightToLeft
         let inward: UInt16 = rightToLeft ? 123 : 124, outward: UInt16 = rightToLeft ? 124 : 123
         switch (event.keyCode, kind) {
-        case (inward, .project(let project)):
-            if !project.expanded { onToggle(project.name) } else if let first = next(after: id), kinds[first].map(Self.isUnder) == true { list.choose(first) }
+        case (inward, .project(let name, _, _, let expanded)):
+            if !expanded { onToggle(name) } else if let first = next(after: id), kinds[first].map(Self.isUnder) == true { list.choose(first) }
             return true
-        case (outward, .project(let project)) where project.expanded:
-            onToggle(project.name)
+        case (outward, .project(let name, _, _, true)):
+            onToggle(name)
             return true
-        case (outward, .workspace(let project, _)), (outward, .others(let project)):
+        case (outward, .workspace(let project, _)), (outward, .others(let project, _)):
             list.choose(project)
             return true
         case (36, .workspace(let project, let workspace)), (76, .workspace(let project, let workspace)):
@@ -314,11 +329,15 @@ package final class LeftPanel: NSView {
 
     /// Row `workspace`'s + of `project` while it shows: what opened its panel, which a click on toggles.
     package func plus(_ project: String, _ workspace: String) -> NSView? {
-        let id = Self.id(project, workspace)
+        cell(Self.id(project, workspace))?.plus.flatMap { $0.isHiddenOrHasHiddenAncestor ? nil : $0 }
+    }
+
+    /// Row `id`'s content while its row is made.
+    private func cell(_ id: String) -> SidebarRowCell? {
         guard let row = list.entries.firstIndex(where: { if case let .item(item) = $0 { item.id == id } else { false } }),
               let cell = list.rowView(atRow: row, makeIfNecessary: false)?.view(atColumn: 0) as? NSView
         else { return nil }
-        return Self.cells(in: cell).first?.plus.flatMap { $0.isHiddenOrHasHiddenAncestor ? nil : $0 }
+        return Self.cells(in: cell).first
     }
 
     private static func cells(in view: NSView) -> [SidebarRowCell] {

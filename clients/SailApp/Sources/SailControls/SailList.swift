@@ -177,6 +177,20 @@ public final class SailList: NSTableView, NSTableViewDataSource, NSTableViewDele
         return convert(NSPoint(x: box.midX, y: box.midY), to: nil)
     }
 
+    /// Whether a row other than `row` is under the pointer, whose hover action alone then shows.
+    func hovered(besides row: NSTableRowView) -> Bool {
+        var found = false
+        enumerateAvailableRowViews { view, _ in found = found || view !== row && (view as? SailRowView)?.hovered == true }
+        return found
+    }
+
+    /// The pointer came onto a row or left one: the chosen rows mark again whether they offer theirs.
+    func hoverMoved() {
+        for row in selectedRowIndexes {
+            (rowView(atRow: row, makeIfNecessary: false) as? SailRowView)?.mark()
+        }
+    }
+
     private func rowIndex(of id: String) -> Int? {
         entries.indices.first { item(at: $0)?.id == id }
     }
@@ -676,7 +690,11 @@ final class SailRowView: NSTableRowView {
     }
 
     var hovered = false {
-        didSet { if hovered != oldValue { refresh() } }
+        didSet {
+            guard hovered != oldValue else { return }
+            refresh()
+            (superview as? SailList)?.hoverMoved()
+        }
     }
 
     init(rowStyle: RowStyle, look: Look, item: SailList.Item?, first: Bool) {
@@ -776,9 +794,16 @@ final class SailRowView: NSTableRowView {
         if numberOfColumns > 0, let cell = view(atColumn: 0) as? RowCell {
             let list = superview as? SailList
             cell.show(paint.actions, chosen: isSelected, keys: list?.leadsKeys == true, quiet: list?.primaryElsewhere == true)
-            (cell.content as? MarkedRow)?.mark(chosen: isSelected, strong: paint.strong)
         }
+        mark()
         needsDisplay = true
+    }
+
+    /// Its content marked as the row is now: chosen, strong, and whether it offers its hover action.
+    func mark() {
+        guard numberOfColumns > 0, let cell = view(atColumn: 0) as? RowCell, let content = cell.content as? MarkedRow else { return }
+        let offers = hovered || isSelected && (superview as? SailList)?.hovered(besides: self) != true
+        content.mark(chosen: isSelected, strong: paint.strong, offers: offers)
     }
 
     override func didAddSubview(_ subview: NSView) {
@@ -1389,7 +1414,8 @@ extension SailRowView: Marked {
 }
 
 /// A row's content that marks it chosen without a fill, as paper and ink does: its name at full
-/// weight while `strong` (chosen or under the pointer), and its own chosen mark.
+/// weight while `strong` (chosen or under the pointer), its own chosen mark, and its hover action
+/// while it `offers` one: under the pointer, or chosen while no other row is.
 @MainActor package protocol MarkedRow: AnyObject {
-    func mark(chosen: Bool, strong: Bool)
+    func mark(chosen: Bool, strong: Bool, offers: Bool)
 }

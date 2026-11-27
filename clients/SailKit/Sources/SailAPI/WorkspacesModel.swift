@@ -85,7 +85,8 @@ public struct WorkspacesModel: Sendable {
         public let mark: Mark?
         /// It is open in the panel: what it holds is listed under it.
         public let expanded: Bool
-        /// What it holds as last listed, open or shut; nil before its workspaces were asked and answered.
+        /// What it holds as last listed while it is open; nil while shut, or before its workspaces were
+        /// asked and answered.
         public let holds: Nest?
     }
 
@@ -392,9 +393,10 @@ public struct WorkspacesModel: Sendable {
 
     // MARK: Projects and lists
 
-    /// Takes the projects listed; the first is chosen when none still is. Returns the list request
-    /// the chosen project needs: a project chosen again is listed again too, as what was shown
-    /// before may have changed, keeping what is under way on it.
+    /// Takes the projects listed; the first is chosen when none still is, and a project no longer
+    /// listed is no longer open. Returns the list request the chosen project needs: a project chosen
+    /// again is listed again too, as what was shown before may have changed, keeping what is under
+    /// way on it.
     @discardableResult
     public mutating func projectsListed(_ result: Result<ProjectList, SailError>, request: Int? = nil) -> Int? {
         if let request, request != projectsAsked { return nil }
@@ -402,6 +404,7 @@ public struct WorkspacesModel: Sendable {
         case let .success(list):
             projects = list.projects
             projectsFailure = nil
+            expanded.formIntersection(list.projects.map(\.name))
             guard let name = list.projects.first(where: { $0.name == chosen })?.name ?? list.projects.first?.name else {
                 chosen = nil
                 listing.clear()
@@ -439,7 +442,6 @@ public struct WorkspacesModel: Sendable {
         chosen = name
         chosenRow = nil
         sessions = [:]
-        listFailures[name] = nil
         let request = listing.ask(name)
         if refused[name] != nil, refused[name]?.since == nil { refused[name]?.since = request }
         askNextWaiting()
@@ -488,9 +490,10 @@ public struct WorkspacesModel: Sendable {
     }
 
     /// A refresh of every open project but the one chosen, which the projects' own answer lists:
-    /// the requests, in the panel's order.
+    /// the requests, in the panel's order; none while the projects' last answer failed.
     public mutating func askExpanded() -> [Int] {
-        (projects ?? []).map(\.name).filter { expanded.contains($0) && $0 != chosen }.map { listing.ask($0) }
+        guard projectsFailure == nil else { return [] }
+        return (projects ?? []).map(\.name).filter { expanded.contains($0) && $0 != chosen }.map { listing.ask($0) }
     }
 
     /// The number of a new request for `workspace`'s sessions in the project shown.
@@ -534,15 +537,16 @@ public struct WorkspacesModel: Sendable {
     }
 
     /// Takes the answer to the create sent in `project`, wherever the person is now: a created
-    /// workspace is chosen once listed (the request to list it, when that project is shown); a
-    /// refusal is said under the name in that project's row, kept to be fixed.
+    /// workspace is chosen once listed (the request to list that project again, shown or not, as its
+    /// rows are the panel's too); a refusal is said under the name in that project's row, kept to be
+    /// fixed.
     public mutating func created(_ result: Result<WorkspaceCreated, SailError>, project: String) -> Int? {
         guard let sent = creates[project], sent.underWay else { return nil }
         switch result {
         case let .success(created):
             creates[project] = nil
             choosingAfterList[project] = created.workspace
-            return project == chosen ? listAgain() : nil
+            return listing.ask(project)
         case let .failure(error):
             creates[project] = CreateLine(name: sent.name, underWay: false, refusal: lines(error), existing: nil)
             return nil
@@ -672,17 +676,17 @@ public struct WorkspacesModel: Sendable {
         return true
     }
 
-    /// Takes the answer to `action` on `name` in `project`, wherever the person is now, and the
-    /// request to list that project again when it is shown. A plain delete refused for the work it
-    /// holds asks Delete Anyway in the server's sentence (after the question open, if one is); in a
-    /// project left, and any other refusal, it is said over that project's page.
+    /// Takes the answer to `action` on `name` in `project`, wherever the person is now, its row
+    /// settled at once, and the request to list that project again, shown or not: its rows are the
+    /// panel's too. A plain delete refused for the work it holds asks Delete Anyway in the server's
+    /// sentence (after the question open, if one is); in a project left, and any other refusal, it is
+    /// said over that project's page, from the person's return there when they left it.
     public mutating func changed(_ action: Action, _ name: String, project: String, _ result: Result<WorkspaceChanged, SailError>) -> Int? {
         guard busy[project]?[name] == action else { return nil }
         busy[project]?[name] = nil
-        let request = project == chosen ? listAgain() : nil
+        let request = listing.ask(project), since = project == chosen ? request : nil
         switch result {
         case let .success(answer):
-            guard request != nil else { break }
             switch answer.change {
             case .known(.deleted): listing.settle(name, in: project, as: nil)
             case .known(.stopped), .known(.alreadyStopped): listing.settle(name, in: project, as: .stopped)
@@ -697,10 +701,10 @@ public struct WorkspacesModel: Sendable {
             )
             if asking == nil { asking = anyway } else { waiting.append(anyway) }
         case let .failure(.refused(refusal)) where refusal.code == .known(.workspaceHoldsWork):
-            refused[project] = (Notice(tone: .error, title: Self.holdsWork(refusal.message, name).said, line: "", tryAgain: false), request)
+            refused[project] = (Notice(tone: .error, title: Self.holdsWork(refusal.message, name).said, line: "", tryAgain: false), since)
         case let .failure(error):
             let said = lines(error)
-            refused[project] = (Notice(tone: .error, title: said.first ?? "", line: said.dropFirst().joined(separator: " "), tryAgain: false), request)
+            refused[project] = (Notice(tone: .error, title: said.first ?? "", line: said.dropFirst().joined(separator: " "), tryAgain: false), since)
         }
         return request
     }
@@ -723,7 +727,7 @@ public struct WorkspacesModel: Sendable {
     public var panel: Panel {
         let shownFailed = chosen.map { listing.rows[$0] != nil && listFailures[$0] != nil } ?? false
         return Panel(
-            projects: (projects ?? []).map { Project(name: $0.name, mark: Self.mark($0.template), expanded: expanded.contains($0.name), holds: nest($0.name)) },
+            projects: (projects ?? []).map { Project(name: $0.name, mark: Self.mark($0.template), expanded: expanded.contains($0.name), holds: expanded.contains($0.name) ? nest($0.name) : nil) },
             chosen: thisMacChosen ? Self.thisMac : chosen, chosenRow: panelRow, controlPlane: person.named, who: who, listed: projects != nil, emptyLine: emptyLine,
             stale: projects != nil && (projectsFailure != nil || shownFailed)
         )
