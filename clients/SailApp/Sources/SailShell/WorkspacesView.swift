@@ -313,10 +313,13 @@ public final class WorkspacesView: NSView {
         render()
     }
 
-    /// The section is shown: its projects asked again, then the chosen one's workspaces.
+    /// The section is shown: its projects asked again, then the chosen one's workspaces; a template
+    /// whose reads stopped (its build stopped, a refusal, an ended session the check found holding)
+    /// is read once more.
     func shown() {
         guard client != nil else { return }
         door = .signedIn
+        if reading.ended { reading.project = nil }
         askProjects()
     }
 
@@ -558,14 +561,15 @@ public final class WorkspacesView: NSView {
 
     /// Project `name`'s template's build asked once while it is unanswered, which the server joins
     /// when one is under way: its answer draws the build card, which then reads the template; a
-    /// refusal, or no answer, is said on the card.
+    /// refusal, or no answer, is said on the card; an ended session is handed to the check that says it.
     private func build(_ name: String, era: Int) async {
         guard let client, model.asksBuild(name) else { return }
         render()
         let built = await Self.result { () async throws(SailError) in try await client.send(.buildTemplate(project: name)) }
         guard era == self.era else { return }
-        model.built(name, built)
+        let after = model.built(name, built)
         render()
+        if after == .sessionEnded { onSessionEnded() }
     }
 
     /// Reads the template of the project whose page shows its build: once each time that page is

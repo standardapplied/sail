@@ -574,7 +574,7 @@ public final class ShellApp: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
         workspaces.onSignIn = { [weak self] in self?.select(.account) }
-        workspaces.onSessionEnded = { [weak self] in self?.account.sessionEnded() }
+        workspaces.onSessionEnded = { [weak self] in self?.askWhoIsSignedIn() }
         thisMac.onRunnerTabs = { [weak self] project, name in self?.workspaces.recount(project: project, name: name) }
         thisMac.onSessions = { [weak self] in
             guard let self else { return }

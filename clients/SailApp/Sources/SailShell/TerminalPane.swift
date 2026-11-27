@@ -365,7 +365,7 @@ public final class TerminalPane: NSView {
             banner.show(NewSessionWords.refused(refusal), tone: .warning, button: "Close", handler: { [weak self] in MainActor.assumeIsolated { self.map { $0.onClose($0) } } })
         case .signIn:
             banner.show(end.said.joined(separator: " "), tone: .warning, button: "Sign In", handler: signIn)
-        case let .ticketRefused(refusal) where [.known(.missingBearerToken), .known(.invalidBearerToken)].contains(refusal.code):
+        case let .ticketRefused(refusal) where AccountRefusal.ends(.refused(refusal)):
             banner.show(end.said.joined(separator: " "), tone: .warning, button: "Sign In", handler: signIn)
         default:
             banner.show(end.said.joined(separator: " "), tone: .warning)

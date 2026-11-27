@@ -196,9 +196,11 @@ package final class ProjectView: NSView, NSTextFieldDelegate {
         case .unlisted: break
         case let .empty(empty): views.append(Self.framed(emptyState(empty), look: look))
         case let .build(build):
-            buildCard.show(build)
-            buildFrame.invalidateIntrinsicContentSize()
-            buildFrame.needsLayout = true
+            if buildCard.build != build {
+                buildCard.show(build)
+                buildFrame.invalidateIntrinsicContentSize()
+                buildFrame.needsLayout = true
+            }
             views.append(buildFrame)
         case let .list(table):
             if let scroll = frameView.scroll, filled == page.name {

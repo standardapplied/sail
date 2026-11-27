@@ -121,8 +121,8 @@ import Testing
     }
 
     /// While the window is off screen (closed, in the Dock, the app hidden) the reads stop and the
-    /// time does not tick; back on screen, the template is read again and the time ticks, through a
-    /// scroll's tracking too.
+    /// time does not tick, nor while the section is hidden; back on screen, the template is read
+    /// again and the time ticks, through a scroll's tracking too.
     @Test func offScreenNothingIsReadAndNothingTicks() async throws {
         let pauses = Pauses()
         let (view, window, desk) = try await Self.section("building", "template-2e-building", pauses)
@@ -137,10 +137,14 @@ import Testing
         #expect(await RunnerTabTests.until { pauses.count == 2 }, "not read again back on screen")
         let reads = await Self.reads(desk)
         #expect(card.ticks != nil && reads == 2)
+        view.isHidden = true
+        #expect(card.ticks == nil, "the time ticked in a hidden section")
+        view.isHidden = false
+        #expect(card.ticks != nil, "the time stopped in the section shown again")
     }
 
     /// The shell tells Workspaces when the window goes off screen and comes back, wherever it tells
-    /// the files; and an ended session Workspaces finds goes to the check that every section's does.
+    /// the files; and an ended session Workspaces finds goes to the shell's own check.
     @Test func theShellTellsWorkspacesTheWindowAndTheSession() async throws {
         let desk = try Desk(["whoami"])
         let shell = try WelcomeViewTests.shell(desk, defaults: WelcomeViewTests.reached(), vault: OneSession(fde: "uday", lasts: AccountPaneTests.month))
@@ -160,7 +164,7 @@ import Testing
         await shell.checking?.value
         let checks = await desk.asked.filter { $0 == "GET /v1/whoami" }.count
         shell.workspaces.onSessionEnded()
-        await shell.account.acting?.value
+        await shell.checking?.value
         #expect(await desk.asked.filter { $0 == "GET /v1/whoami" }.count == checks + 1, "the ended session was not checked")
     }
 
@@ -183,6 +187,7 @@ import Testing
         switch golden {
         case "refusal-forbidden":
             #expect(await RunnerTabTests.until { view.text.contains("Enrollment ticket is invalid or expired.") }, "\(view.text)")
+            #expect(view.project.buildCard.ticks == nil, "the time ticked on a card no longer read")
         case "refusal-project-not-in-catalog-sessions":
             #expect(await RunnerTabTests.until { Self.row(view) == nil && !view.text.contains("Creating lighthouse") }, "the page kept a project gone: \(view.text)")
             #expect(await desk.asked.filter { $0 == "GET /v1/projects" }.count == lists + 1)
@@ -192,6 +197,23 @@ import Testing
         }
         let reads = await Self.reads(desk)
         #expect(!view.text.contains("No answer just now") && pauses.count == 1 && reads == 2, "read again after a refusal: \(view.text)")
+    }
+
+    /// A first read that finds the session ended says nothing and hands it over; the check finding it
+    /// holding shows the section again, which reads the template once more, so the page does not wait
+    /// on the loading frame for ever.
+    @Test func aFirstReadWithAnEndedSessionIsReadOnceTheSectionIsShownAgain() async throws {
+        let pauses = Pauses()
+        let (view, window, desk) = try await Self.section("building", "refusal-missing-bearer-token", pauses)
+        defer { window.orderOut(nil) }
+        var ended = 0
+        view.onSessionEnded = { ended += 1 }
+        #expect(await RunnerTabTests.until { ended == 1 }, "the ended session was not handed over: \(view.text)")
+        #expect(!view.text.lowercased().contains("bearer") && !view.text.contains("Creating lighthouse") && pauses.count == 0, "\(view.text)")
+        await desk.answer(try Self.template("template-2e-building"))
+        view.shown()
+        #expect(await RunnerTabTests.until { view.text.contains("Creating lighthouse") && pauses.count == 1 }, "not read again once shown: \(view.text)")
+        #expect(await Self.reads(desk) == 2 && ended == 1)
     }
 
     /// At the least window a stopped build's Build Again stands inside the card's frame, in view with
@@ -209,6 +231,10 @@ import Testing
         #expect(Double(frame.frame.height) == card.height(width: Double(frame.frame.width) - 2) + 2, "the frame \(frame.frame) kept the card's height at the width before")
         let button = card.convert(card.again.alignmentRect(forFrame: card.again.frame), to: frame)
         #expect(!card.again.isHidden && frame.bounds.insetBy(dx: 1, dy: 1).contains(button), "Build Again at \(button) in a frame \(frame.bounds)")
+        let narrow = view.project.narrow
+        try #require(!card.needsLayout)
+        view.project.setFrameSize(NSSize(width: narrow ? ProjectView.wide + 100 : ProjectView.wide - 100, height: view.project.frame.height))
+        #expect(view.project.narrow != narrow && !card.needsLayout, "the page drawn again for its own width laid the same card out again")
     }
 
     /// Build Again only for those who may build; while it is asked it says so.
@@ -290,6 +316,23 @@ import Testing
         view.signedOut()
         #expect(await RunnerTabTests.until { pauses.cancelled == 3 }, "a pause outlived its page")
         #expect(await Self.reads(desk) == 3, "read after signing out")
+    }
+
+    /// Build Again with a session that has ended says nothing on the card: the ended session is
+    /// handed to the check that says it.
+    @Test func buildAgainWithAnEndedSessionHandsItOver() async throws {
+        let pauses = Pauses()
+        let (view, window, desk) = try await Self.section("failed", "template-2h-failed", pauses)
+        defer { window.orderOut(nil) }
+        var ended = 0
+        view.onSessionEnded = { ended += 1 }
+        #expect(await RunnerTabTests.until { view.text.contains("lighthouse’s template did not finish") }, "\(view.text)")
+        let joined = try Exchange("template-2f-joined"), refusal = try Exchange("refusal-missing-bearer-token")
+        await desk.answer(Exchange(method: joined.method, path: joined.path, status: refusal.status, body: refusal.body))
+        let again = view.project.buildCard.again
+        _ = again.sendAction(again.action, to: again.target)
+        #expect(await RunnerTabTests.until { ended == 1 }, "the ended session was not handed over: \(view.text)")
+        #expect(!view.text.lowercased().contains("bearer") && view.text.contains("lighthouse’s template did not finish"), "\(view.text)")
     }
 
     /// Build Again on a failed build asks the build once however often it is pressed while asked;

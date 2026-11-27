@@ -43,8 +43,9 @@ final class BuildCard: NSView {
     let again: SailButton
     private let titleFont: TitleFont
     private let mono: LabelFont
-    /// Redraws the time since the build started, each second while it runs and is on screen, a
-    /// scroll's tracking included.
+    /// Redraws the time since the build started, each second while it runs, is read and is on
+    /// screen, a scroll's tracking included: not while its section is hidden, nor once a read was
+    /// refused.
     private(set) var ticks: Timer? {
         didSet { oldValue?.invalidate() }
     }
@@ -91,8 +92,18 @@ final class BuildCard: NSView {
         keepTicking()
     }
 
+    override func viewDidHide() {
+        super.viewDidHide()
+        keepTicking()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        keepTicking()
+    }
+
     private func keepTicking() {
-        let ticking = window != nil && !away && build?.stage == .building
+        let ticking = window != nil && !away && !isHiddenOrHasHiddenAncestor && build?.stage == .building && build?.refusal.isEmpty == true
         guard ticking != (ticks != nil) else { return }
         guard ticking else {
             ticks = nil

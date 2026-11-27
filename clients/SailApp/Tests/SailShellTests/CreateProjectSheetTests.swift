@@ -383,8 +383,10 @@ import Testing
 
     /// A project created is listed and chosen before its build is asked, once; a build that got no
     /// answer reads the template, and as none started says so on its card with Build Again, which
-    /// asks it again, and then the card shows it building.
-    @Test func aCreatedProjectIsChosenThenBuilt() async throws {
+    /// asks it again, and then the card shows it building. A build that finds the session ended says
+    /// nothing and hands it to the check.
+    @Test(arguments: [false, true])
+    func aCreatedProjectIsChosenThenBuilt(_ ended: Bool) async throws {
         let build = "POST /v1/projects/lighthouse/template%3Abuild"
         let desk = try Desk(["projects-none", "agents"])
         let (view, window) = try WorkspacesViewTests.view(desk)
@@ -395,6 +397,8 @@ import Testing
         let pauses = Pauses()
         view.pause = { try await pauses.pause($0) }
         view.person = BuildCardViewTests.dana
+        var handed = 0
+        view.onSessionEnded = { handed += 1 }
         view.shown()
         #expect(await RunnerTabTests.until { Driverless.button("Create Project", in: view.project) != nil }, "\(view.text)")
         await desk.answer(try Exchange("project-created").altered(at: ["name"], to: "lighthouse"))
@@ -412,6 +416,15 @@ import Testing
         #expect(asked.filter { $0 == build }.count == 1 && asked.last == build, "\(asked)")
         #expect(asked.firstIndex(of: "POST /v1/projects").map { asked[$0...].contains("GET /v1/projects") } == true, "not listed before the build: \(asked)")
         #expect(view.panel.list.chosen == "lighthouse" && view.text.hasPrefix("Workspaces\nlighthouse\n"), "not chosen before the build: \(view.text)")
+        if ended {
+            let joined = try Exchange("template-2f-joined"), refusal = try Exchange("refusal-missing-bearer-token")
+            await desk.answer(Exchange(method: joined.method, path: joined.path, status: refusal.status, body: refusal.body))
+            await desk.release()
+            #expect(await RunnerTabTests.until { handed == 1 }, "the ended session was not handed over: \(view.text)")
+            let reads = await BuildCardViewTests.reads(desk)
+            #expect(!view.text.lowercased().contains("bearer") && !view.text.contains("did not start") && reads == 0, "\(view.text)")
+            return
+        }
         await desk.answer(try BuildCardViewTests.template("template-2c-missing"))
         await desk.release()
         #expect(await RunnerTabTests.until { view.text.contains("lighthouse’s template did not start\nSail cannot reach the control plane at 127.0.0.1.") }, "\(view.text)")

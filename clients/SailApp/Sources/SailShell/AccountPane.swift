@@ -269,18 +269,13 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         onDrawn()
     }
 
-    /// Whether `error` finds the session ended (``sessionEnded()``). Then nothing of it is said
-    /// where it happened.
+    /// Whether `error` finds the session ended. Then nothing of it is said where it happened: the
+    /// check is asked at once, in a task of its own that neither a hide nor a new load stops, and
+    /// says so where every check does.
     private func ends(_ error: SailError) -> Bool {
         guard flow.standing != nil, AccountRefusal.ends(error) else { return false }
-        sessionEnded()
-        return true
-    }
-
-    /// The session was found ended, here or in another section: the check is asked at once, in a
-    /// task of its own that neither a hide nor a new load stops, and says so where every check does.
-    func sessionEnded() {
         acting = Task { [flow] in await flow.refresh() }
+        return true
     }
 
     private static func result<Value>(_ work: () async throws(SailError) -> Value) async -> Result<Value, SailError> {
