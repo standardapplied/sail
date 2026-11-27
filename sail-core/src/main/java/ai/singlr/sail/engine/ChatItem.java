@@ -24,7 +24,10 @@ import java.util.List;
  * <p>What the agent wrote is never markup, and is clipped where the item is made, to its bound:
  * {@link LiveStream#NAME_CODE_POINTS} for a name, {@link LiveStream#SUMMARY_CODE_POINTS} for a
  * short line, {@link LiveStream#CONTENT_CODE_POINTS} for anything long. A piece holding text that
- * was cut says so in its one {@code clipped} flag, so a client marks it as shown in part.
+ * was cut says so in its one {@code clipped} flag, so a client marks it as shown in part. Only what
+ * is shown after the fact is ever cut: every part of a {@link Request}, and of its detail, is held
+ * to the content bound, and a request any part of which is longer is never asked ({@link
+ * Unreadable}), since a person can never allow what they were not shown whole.
  */
 public sealed interface ChatItem {
 
@@ -46,8 +49,14 @@ public sealed interface ChatItem {
    */
   sealed interface Detail {
 
-    /** A command {@code line} run in the workspace's shell. */
-    record Command(String line, boolean clipped) implements Detail {
+    /** Whether any of its text was cut. */
+    boolean clipped();
+
+    /**
+     * A command {@code line} run in the workspace's shell, in the {@code background} when it keeps
+     * running after the turn that ran it.
+     */
+    record Command(String line, boolean background, boolean clipped) implements Detail {
       public Command {
         clipped |= cut(line, CONTENT_CODE_POINTS);
         line = clip(line, CONTENT_CODE_POINTS);
@@ -55,7 +64,16 @@ public sealed interface ChatItem {
     }
 
     /** Changes to files, one or several, in the order the harness gave them. */
-    record Edit(List<Change> changes) implements Detail {}
+    record Edit(List<Change> changes) implements Detail {
+      public Edit {
+        changes = List.copyOf(changes);
+      }
+
+      @Override
+      public boolean clipped() {
+        return changes.stream().anyMatch(Change::clipped);
+      }
+    }
 
     /** A read of the file at {@code path}. */
     record Read(String path, boolean clipped) implements Detail {
@@ -85,8 +103,8 @@ public sealed interface ChatItem {
     /** Any other call: the tool's {@code name} and its {@code input} as text, shown as text. */
     record Other(String name, String input, boolean clipped) implements Detail {
       public Other {
-        clipped |= cut(name, NAME_CODE_POINTS) || cut(input, CONTENT_CODE_POINTS);
-        name = clip(name, NAME_CODE_POINTS);
+        clipped |= cut(name, CONTENT_CODE_POINTS) || cut(input, CONTENT_CODE_POINTS);
+        name = clip(name, CONTENT_CODE_POINTS);
         input = clip(input, CONTENT_CODE_POINTS);
       }
     }
@@ -227,9 +245,10 @@ public sealed interface ChatItem {
       boolean clipped)
       implements Request {
     public Permission {
-      clipped |= cut(words, SUMMARY_CODE_POINTS) || cut(reason, SUMMARY_CODE_POINTS);
-      words = clip(words, SUMMARY_CODE_POINTS);
-      reason = clip(reason, SUMMARY_CODE_POINTS);
+      clipped |= cut(words, CONTENT_CODE_POINTS) || cut(reason, CONTENT_CODE_POINTS);
+      words = clip(words, CONTENT_CODE_POINTS);
+      reason = clip(reason, CONTENT_CODE_POINTS);
+      always = List.copyOf(always);
     }
   }
 
@@ -237,26 +256,35 @@ public sealed interface ChatItem {
    * One way to allow a call always: everything choosing it changes, one plain sentence each ({@code
    * words}), each saying what is allowed or changed and where, said whole and never clipped.
    */
-  record Always(List<String> words) {}
+  record Always(List<String> words) {
+    public Always {
+      words = List.copyOf(words);
+    }
+  }
 
   /** The agent asks a person to choose, one answer to each of {@code questions}. */
-  record Question(String id, String call, List<Asked> questions) implements Request {}
+  record Question(String id, String call, List<Asked> questions) implements Request {
+    public Question {
+      questions = List.copyOf(questions);
+    }
+  }
 
   /** One question: its text, its short {@code header}, and its choices, one or several. */
   record Asked(
       String question, String header, List<Choice> choices, boolean multiSelect, boolean clipped) {
     public Asked {
-      clipped |= cut(question, CONTENT_CODE_POINTS) || cut(header, SUMMARY_CODE_POINTS);
+      clipped |= cut(question, CONTENT_CODE_POINTS) || cut(header, CONTENT_CODE_POINTS);
       question = clip(question, CONTENT_CODE_POINTS);
-      header = clip(header, SUMMARY_CODE_POINTS);
+      header = clip(header, CONTENT_CODE_POINTS);
+      choices = List.copyOf(choices);
     }
   }
 
   /** One choice of a question, and what it means. */
   record Choice(String label, String about, boolean clipped) {
     public Choice {
-      clipped |= cut(label, SUMMARY_CODE_POINTS) || cut(about, CONTENT_CODE_POINTS);
-      label = clip(label, SUMMARY_CODE_POINTS);
+      clipped |= cut(label, CONTENT_CODE_POINTS) || cut(about, CONTENT_CODE_POINTS);
+      label = clip(label, CONTENT_CODE_POINTS);
       about = clip(about, CONTENT_CODE_POINTS);
     }
   }
@@ -311,10 +339,11 @@ public sealed interface ChatItem {
   }
 
   /**
-   * The agent asked something that could not be read whole, so no person was asked: the host
-   * refused it at once, or, when it named no request to answer, stopped the turn.
+   * The agent asked something that could not be read whole, or that was {@code tooLarge} to show a
+   * person whole, so no person was asked: the host refused it at once, telling the agent to split a
+   * request too large into smaller steps, or, when it named no request to answer, stopped the turn.
    */
-  record Unreadable() implements Notice {}
+  record Unreadable(boolean tooLarge) implements Notice {}
 
   /** The turn that ends next was begun by the agent itself, not by a person's message. */
   record SelfStarted() implements ChatItem {}

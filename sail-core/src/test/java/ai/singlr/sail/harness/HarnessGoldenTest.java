@@ -608,9 +608,16 @@ class HarnessGoldenTest {
         new Detail.Fetch("https://example.com", false),
         CLAUDE_CODE_CHAT.detail("WebFetch", Map.of("url", "https://example.com", "prompt", "p")));
     assertEquals(
-        new Detail.Command(null, false),
+        new Detail.Command(null, false, false),
         CLAUDE_CODE_CHAT.detail("Bash", Map.of("command", 7)),
         "a field that is not text is not said");
+    assertEquals(
+        new Detail.Command("sleep 30", true, false),
+        CLAUDE_CODE_CHAT.detail("Bash", Map.of("command", "sleep 30", "run_in_background", true)),
+        "a command that keeps running after the turn says so (04b:40)");
+    assertEquals(
+        new Detail.Command("sleep 25", false, false),
+        CLAUDE_CODE_CHAT.detail("Bash", Map.of("command", "sleep 25", "run_in_background", false)));
     assertEquals(
         new Detail.Other("mcp__github__create_issue", "{\"title\": \"t\"}", false),
         CLAUDE_CODE_CHAT.detail("mcp__github__create_issue", Map.of("title", "t")));
@@ -653,8 +660,7 @@ class HarnessGoldenTest {
   }
 
   private static Map<String, Object> folder(String path) {
-    return Map.of(
-        "type", "addDirectories", "directories", List.of(path), "destination", "session");
+    return Map.of("type", "addDirectories", "directories", List.of(path), "destination", "session");
   }
 
   private static final Map<String, Object> FOLDER = folder("/w");
@@ -686,8 +692,7 @@ class HarnessGoldenTest {
             + " also as another command runs it, as Claude Code strips such wrappers first");
     assertEquals(
         List.of(
-            new ChatItem.Always(
-                List.of("Let it work in the folder `/w`, for this session only."))),
+            new ChatItem.Always(List.of("Let it work in the folder `/w`, for this session only."))),
         always(FOLDER),
         "a folder is quoted, so nothing in it reads as the sentence's own words");
     assertEquals(

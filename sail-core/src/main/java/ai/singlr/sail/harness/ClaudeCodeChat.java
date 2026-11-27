@@ -105,17 +105,20 @@ final class ClaudeCodeChat implements HarnessChat {
   }
 
   /**
-   * A call's detail from its input as Claude Code names it: {@code command} (Bash, recorded),
-   * {@code file_path} with {@code old_string}, {@code new_string} and {@code replace_all} (Edit) or
-   * {@code content} (Write, recorded), {@code file_path} (Read), {@code pattern} and {@code path}
-   * (Grep, Glob), {@code query} (WebSearch) and {@code url} (WebFetch), each as its tool's schema
-   * names it in a recorded transcript; any other is its input as JSON. An edit is one change:
-   * 2.1.332 has no tool that changes several files in one call (its {@code init} lists its tools).
+   * A call's detail from its input as Claude Code names it: {@code command} and {@code
+   * run_in_background} (Bash, recorded), {@code file_path} with {@code old_string}, {@code
+   * new_string} and {@code replace_all} (Edit) or {@code content} (Write, recorded), {@code
+   * file_path} (Read), {@code pattern} and {@code path} (Grep, Glob), {@code query} (WebSearch) and
+   * {@code url} (WebFetch), each as its tool's schema names it in a recorded transcript; any other
+   * is its input as JSON. An edit is one change: 2.1.332 has no tool that changes several files in
+   * one call (its {@code init} lists its tools).
    */
   @Override
   public Detail detail(String tool, Map<String, Object> input) {
     return switch (tool) {
-      case "Bash" -> new Detail.Command(field(input, "command"), false);
+      case "Bash" ->
+          new Detail.Command(
+              field(input, "command"), Boolean.TRUE.equals(input.get("run_in_background")), false);
       case "Edit" ->
           edit(
               field(input, "file_path"),

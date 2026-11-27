@@ -437,6 +437,72 @@ class LiveStreamChatTest {
   }
 
   @Test
+  void aQuestionsLabelsAreHeldWholeToBeAnsweredExactly() {
+    var label = "l".repeat(LiveStream.SUMMARY_CODE_POINTS + 10);
+    var header = "h".repeat(LiveStream.SUMMARY_CODE_POINTS + 10);
+
+    var question =
+        (Step.Question)
+            LiveStream.read(
+                "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":"
+                    + "\"can_use_tool\",\"tool_name\":\"AskUserQuestion\",\"tool_use_id\":\"t1\","
+                    + "\"input\":{\"questions\":[{\"question\":\"Which?\",\"header\":\""
+                    + header
+                    + "\",\"options\":[{\"label\":\""
+                    + label
+                    + "\"}]}]}}}");
+
+    assertEquals(
+        List.of(new Asked("Which?", header, List.of(new Choice(label, null, false)), false, false)),
+        question.questions(),
+        "an answer hands back the label chosen, so the step keeps it whole");
+  }
+
+  /**
+   * A line past the frame ceiling is not parsed, but its start is read: a request the agent made
+   * that long is too large to show a person, so it is refused, by its id when the start names it,
+   * else the turn is stopped; any other such line says nothing, as before.
+   */
+  @Test
+  void aRequestPastTheFrameCeilingIsRefusedNeverLostUnseen() {
+    var padding = "a".repeat(LiveStream.MAX_LINE_CHARS);
+    var asked =
+        "{\"type\":\"control_request\",\"request_id\":\"%s\",\"request\":{\"subtype\":"
+            + "\"%s\",\"tool_name\":\"Bash\",\"input\":{\"command\":\""
+            + padding
+            + "\"},\"tool_use_id\":\"t1\"}}";
+
+    assertEquals(
+        new Step.Unreadable("r1", true),
+        LiveStream.read(asked.formatted("r1", "can_use_tool")),
+        "its id is in the start read, so the host refuses it at once");
+    assertEquals(
+        new Step.Unreadable(null, true),
+        LiveStream.read(asked.formatted("-p", "can_use_tool")),
+        "an id that is not safe is never handed back: the turn is stopped");
+    assertEquals(
+        new Step.Unreadable(null, true),
+        LiveStream.read(asked.formatted("r1", "elicitation")),
+        "a request no deny answers: the turn is stopped");
+    assertEquals(
+        new Step.Unreadable(null, true),
+        LiveStream.read(
+            "{\"type\":\"control_request\",\"request\":{\"subtype\":\"can_use_tool\","
+                + "\"input\":{\"command\":\""
+                + padding
+                + "\"},\"request_id\":\"r1\"}}"),
+        "an id past the start read: the turn is stopped");
+    assertEquals(
+        new Step.Other(""),
+        LiveStream.read("{\"type\":\"user\",\"message\":\"" + padding + "\"}"),
+        "any other line says nothing, and its row is closed at the turn's end");
+    assertEquals(
+        new Step.Other(""),
+        LiveStream.read("{\"x\":\"{\\\"type\\\":\\\"control_request\\\"," + padding + "\"}"),
+        "only a line that starts as a request is one");
+  }
+
+  @Test
   void whatTheAgentWroteIsReadWholeForItsItemToClip() {
     var longer = "y".repeat(LiveStream.CONTENT_CODE_POINTS + 5);
 
@@ -448,7 +514,7 @@ class LiveStreamChatTest {
                 + longer
                 + "\"}]}}"));
     assertEquals(
-        new Step.Plan("r1", "t1", Map.of("plan", longer), longer),
+        new Step.Unreadable("r1", true),
         LiveStream.read(
             "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":"
                 + "\"can_use_tool\",\"tool_name\":\"ExitPlanMode\",\"tool_use_id\":\"t1\","
@@ -478,7 +544,7 @@ class LiveStreamChatTest {
     var unsafe = List.of("x".repeat(129), "-p", "a b", "../x", "");
     for (var id : unsafe) {
       assertEquals(
-          new Step.Unreadable(null),
+          new Step.Unreadable(null, false),
           LiveStream.read(
               "{\"type\":\"control_request\",\"request_id\":\""
                   + id
@@ -486,7 +552,7 @@ class LiveStreamChatTest {
                   + "\"input\":{},\"tool_use_id\":\"t1\"}}"),
           id);
       assertEquals(
-          new Step.Unreadable("r1"),
+          new Step.Unreadable("r1", false),
           LiveStream.read(
               "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":{\"subtype\":"
                   + "\"can_use_tool\",\"tool_name\":\"Bash\",\"input\":{},\"tool_use_id\":\""
@@ -543,31 +609,31 @@ class LiveStreamChatTest {
   @Test
   void aRequestThatCannotBeReadWholeIsOneToRefuseAtOnce() {
     assertEquals(
-        new Step.Unreadable(null),
+        new Step.Unreadable(null, false),
         LiveStream.read(
             "{\"type\":\"control_request\",\"request\":{\"subtype\":\"can_use_tool\","
                 + "\"tool_name\":\"Bash\",\"input\":{},\"tool_use_id\":\"t1\"}}"),
         "no request id: the turn is stopped, since nothing can answer it");
     assertEquals(
-        new Step.Unreadable("r1"),
+        new Step.Unreadable("r1", false),
         LiveStream.read(
             "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":"
                 + "{\"subtype\":\"can_use_tool\",\"tool_name\":\"Bash\",\"input\":{}}}"),
         "no call");
     assertEquals(
-        new Step.Unreadable("r1"),
+        new Step.Unreadable("r1", false),
         LiveStream.read(
             "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":"
                 + "{\"subtype\":\"can_use_tool\",\"tool_name\":\"Bash\",\"tool_use_id\":\"t1\"}}"),
         "no input to run or hand back");
     assertEquals(
-        new Step.Unreadable("r1"),
+        new Step.Unreadable("r1", false),
         LiveStream.read(
             "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":"
                 + "{\"subtype\":\"can_use_tool\",\"input\":{},\"tool_use_id\":\"t1\"}}"),
         "no tool");
     assertEquals(
-        new Step.Unreadable("r1"),
+        new Step.Unreadable("r1", false),
         LiveStream.read(
             "{\"type\":\"control_request\",\"request_id\":\"r1\",\"request\":"
                 + "{\"subtype\":\"can_use_tool\",\"tool_name\":\"Bash\",\"input\":[],"
