@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 class LegacyHostConversionTest {
@@ -201,6 +202,7 @@ class LegacyHostConversionTest {
   }
 
   @Test
+  @Timeout(10)
   void aRunHasEndedOnlyWhenItsUnitIsInactiveOrFailedOrItsContainerIsStoppedOrGone() {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(1, "", "Failed to connect to bus"))
@@ -211,11 +213,15 @@ class LegacyHostConversionTest {
             .on(
                 "sail-agent-orphan.service",
                 new ShellExec.Result(1, "", "Error: Instance not found"))
-            .on("info -- deleted", new ShellExec.Result(1, "", "Error: Instance not found"))
-            .onOk("info -- parked", "Name: parked\nStatus: STOPPED\nType: container\n")
+            .onOk("incus list ^deleted$ --format json", "[]")
+            .onOk(
+                "incus list ^parked$ --format json",
+                "[{\"name\": \"parked\", \"status\": \"Stopped\", \"type\": \"container\"}]")
             .on("parked", new ShellExec.Result(1, "", "Error: Instance is not running"))
-            .onOk("info -- sail", "Name: sail\nStatus: RUNNING\n")
-            .on("info -- unreachable", new ShellExec.Result(1, "", "Error: connection refused"))
+            .onOk(
+                "incus list ^sail$ --format json",
+                "[{\"name\": \"sail\", \"status\": \"Running\", \"type\": \"container\"}]")
+            .onFail("incus list ^unreachable$ --format json", "Error: connection refused")
             .onThrow("sail-agent-hung.service", new IOException("incus timed out"));
     var host = new LegacyHostConversion.BoxHost(db, proc, shell);
 
@@ -241,7 +247,8 @@ class LegacyHostConversionTest {
                 "sail-agent-gone.service")),
         shell.arguments().get(2));
     assertTrue(
-        shell.invocations().contains("incus info -- deleted"), shell.invocations().toString());
+        shell.arguments().contains(List.of("incus", "list", "^deleted$", "--format", "json")),
+        shell.invocations().toString());
   }
 
   @Test
