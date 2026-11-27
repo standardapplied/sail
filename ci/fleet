@@ -923,6 +923,153 @@ chat_walks() {
   grep -q '^CHAT WALKED$' <<< "$out"
 }
 
+# A chat's person answering what Claude Code asks, on the API as a client calls it, each effect
+# checked in the workspace itself: a command denied with a token comes back as the call's result,
+# exactly, and never ran; asked again and allowed, it ran; one allowed always keeps the rule Claude
+# Code suggested, and the same command then asks nothing; a second answer, an invented id and
+# another member are refused, an idle chat has no turn to stop, Never asks is refused and Edits
+# freely is set between turns, said back by Claude Code. The chat is ended, the login removed, the
+# key file and both tokens gone, whatever failed.
+readonly CHAT_ANSWERS='set -u
+handle=$1 project=$2 workspace=$3 other=$4
+api=http://127.0.0.1:7070
+container=$project-$workspace
+session="" after=0
+token=$(sudo sail server token create "answers-$handle" member --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " ")
+stranger=$(sudo sail server token create "answers-$other" member --fde "$other" 2>/dev/null | sed -n 2p | tr -d " ")
+call() { curl -s -o /tmp/chat.json -w "%{http_code}" -X "$2" -H "Authorization: Bearer $1" -H "Content-Type: application/json" -d "${4:-}" "$api$3"; }
+in_workspace() { sudo incus exec "$container" --user 1000 --cwd /home/dev/workspace -- "$@"; }
+cleanup() {
+  if [ -n "$session" ]; then call "$token" POST "/v1/sessions/$session:end" > /dev/null; fi
+  call "$token" DELETE /v1/logins/claude-code/fleet-answers > /dev/null
+  in_workspace rm -f asked.txt always.txt .claude/settings.local.json > /dev/null 2>&1
+  sudo rm -f /root/.fleet/anthropic /tmp/chat.json /tmp/chat-items.json /tmp/chat-step.py
+  sudo sail server token revoke "answers-$handle" > /dev/null 2>&1
+  sudo sail server token revoke "answers-$other" > /dev/null 2>&1
+}
+trap cleanup EXIT
+fail() { echo "FAIL: $1"; head -c 400 /tmp/chat.json; echo; exit 1; }
+[ -n "$token" ] && [ -n "$stranger" ] || fail "no token"
+cat > /tmp/chat-step.py <<"PY"
+import json, sys
+mode, mark, arg = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+items = json.load(open("/tmp/chat-items.json"))
+if mode == "read":
+    new = json.load(open("/tmp/chat.json"))["items"]
+    seqs = [i["seq"] for i in new]
+    last = items[-1]["seq"] if items else 0
+    if seqs != list(range(last + 1, last + 1 + len(seqs))):
+        print("gap"); sys.exit()
+    json.dump(items + new, open("/tmp/chat-items.json", "w"))
+    print(seqs[-1] if seqs else last); sys.exit()
+since = [i for i in items if i["seq"] > mark]
+asked = [i for i in since if i["type"] == "permission"]
+if mode == "asked":
+    found = [i for i in asked if arg in (i.get("detail") or {}).get("line", "")]
+    print("%s %s %s" % (found[0]["id"], found[0]["call"], "always" if found[0]["always"] else "once") if found else "-")
+elif mode == "ended":
+    print("yes" if any(i["type"] == "turn_ended" for i in since) else "-")
+elif mode == "done":
+    done = [i for i in since if i["type"] == "tool_done" and i["id"] == arg]
+    print(json.dumps([done[0]["failed"], done[0]["output"]]) if done else "-")
+elif mode == "unasked":
+    print("asked" if asked else "unasked")
+elif mode == "mode":
+    print("yes" if any(i["type"] == "mode_changed" and i["mode"] == arg for i in since) else "-")
+PY
+echo "[]" > /tmp/chat-items.json
+await() {
+  local want=$1 arg=$2
+  found="-"
+  for attempt in $(seq 1 16); do
+    status=$(curl -s -o /tmp/chat.json -w "%{http_code}" -H "Authorization: Bearer $token" "$api/v1/sessions/$session/chat?after=$after")
+    [ "$status" = 200 ] || fail "a read was refused: HTTP $status"
+    after=$(python3 -I /tmp/chat-step.py read 0 -)
+    [ "$after" = gap ] && fail "a read gave an item twice, or skipped one"
+    found=$(python3 -I /tmp/chat-step.py "$want" "$mark" "$arg")
+    [ "$found" != "-" ] && break
+  done
+}
+say() {
+  mark=$after
+  status=$(call "$token" POST "/v1/sessions/$session/chat/messages" "{\"text\":\"Use the Bash tool to run exactly this command, verbatim, as one Bash call and nothing else: $1 ${2:-}If it is refused, do not retry and do not try another way; reply with just: done\"}")
+  [ "$status" = 200 ] || fail "the message was not taken: HTTP $status"
+}
+answer() { call "$token" POST "/v1/sessions/$session/chat/requests/$1" "$2"; }
+status=$(sudo python3 -I -c "import json; print(json.dumps({\"kind\": \"api-key\", \"value\": open(\"/root/.fleet/anthropic\").read().strip()}))" |
+  curl -s -o /tmp/chat.json -w "%{http_code}" -X PUT -H "Authorization: Bearer $token" -H "Content-Type: application/json" --data-binary @- "$api/v1/logins/claude-code/fleet-answers")
+[ "$status" = 200 ] || fail "the key was not stored: HTTP $status"
+status=$(call "$token" POST /v1/logins/claude-code/fleet-answers:use)
+[ "$status" = 200 ] || fail "the key was not made the default: HTTP $status"
+in_workspace rm -f asked.txt always.txt .claude/settings.local.json
+status=$(call "$token" POST "/v1/projects/$project/workspaces/$workspace/chats" "{\"harness\":\"claude-code\",\"mode\":\"default\"}")
+[ "$status" = 201 ] || fail "the chat did not open: HTTP $status"
+session=$(python3 -I -c "import json; print(json.load(open(\"/tmp/chat.json\"))[\"session\"])")
+say "printf fleet-%s 7341 > asked.txt"
+await asked 7341
+read -r denied call_id offer <<< "$found"
+[ "$denied" != "-" ] || fail "no permission item for the command holding 7341 arrived"
+status=$(answer "$denied" "{\"decision\":\"deny\",\"message\":\"DENIED-tamarind-4417\"}")
+[ "$status" = 200 ] || fail "the denial was refused: HTTP $status"
+await done "$call_id"
+[ "$found" = "[true, \"DENIED-tamarind-4417\"]" ] || fail "the denied call did not come back failed with exactly the words"
+await ended -
+[ "$found" = yes ] || fail "the denied turn did not end"
+in_workspace test ! -e asked.txt || fail "the denied command ran: asked.txt exists"
+echo "denied: the call came back failed with exactly the words, and asked.txt does not exist"
+say "printf fleet-%s 7341 > asked.txt" "This time it will be allowed. "
+await asked 7341
+read -r allowed _ _ <<< "$found"
+[ "$allowed" != "-" ] || fail "no permission item arrived when asked again"
+status=$(answer "$allowed" "{\"decision\":\"allow\"}")
+[ "$status" = 200 ] || fail "the allow was refused: HTTP $status"
+await ended -
+[ "$found" = yes ] || fail "the allowed turn did not end"
+[ "$(in_workspace cat asked.txt)" = fleet-7341 ] || fail "the allowed command did not write fleet-7341"
+echo "allowed: asked.txt holds fleet-7341"
+say "printf fleet-%s 7341 > always.txt"
+await asked always.txt
+read -r always _ offer <<< "$found"
+[ "$always" != "-" ] || fail "no permission item arrived for always.txt"
+[ "$offer" = always ] || fail "the card offered no always"
+status=$(answer "$always" "{\"decision\":\"allow_always\"}")
+[ "$status" = 200 ] || fail "allow always was refused: HTTP $status"
+await ended -
+[ "$found" = yes ] || fail "the turn allowed always did not end"
+in_workspace cat .claude/settings.local.json | python3 -I -c "import json, sys; sys.exit(0 if \"Bash(printf fleet-%s 7341 > always.txt)\" in json.load(sys.stdin)[\"permissions\"][\"allow\"] else 1)" ||
+  fail "settings.local.json does not hold the rule Claude Code suggested"
+in_workspace rm -f always.txt
+say "printf fleet-%s 7341 > always.txt"
+await ended -
+[ "$found" = yes ] || fail "the repeated turn did not end"
+[ "$(python3 -I /tmp/chat-step.py unasked "$mark" -)" = unasked ] || fail "the command allowed always asked again"
+[ "$(in_workspace cat always.txt)" = fleet-7341 ] || fail "the command allowed always did not run again"
+echo "always: the suggested rule is kept, and the same command ran again without asking"
+status=$(answer "$denied" "{\"decision\":\"allow\"}")
+[ "$status" = 409 ] && grep -qF "\"request_answered\"" /tmp/chat.json || fail "a second answer was not refused: HTTP $status"
+status=$(answer 7f35b673-a8fa-4967-a1d0-a52e2b28cf73 "{\"decision\":\"allow\"}")
+[ "$status" = 404 ] || fail "an invented request was not refused: HTTP $status"
+status=$(call "$stranger" POST "/v1/sessions/$session/chat/requests/$denied" "{\"decision\":\"allow\"}")
+[ "$status" = 404 ] && grep -qF "There is no chat $session of yours here." /tmp/chat.json || fail "$other was not refused: HTTP $status"
+status=$(call "$token" POST "/v1/sessions/$session/chat:interrupt")
+[ "$status" = 200 ] && grep -qF "\"stopping\": false" /tmp/chat.json || fail "an idle chat did not say it had nothing to stop: HTTP $status"
+status=$(call "$token" PUT "/v1/sessions/$session/chat/mode" "{\"mode\":\"bypassPermissions\"}")
+[ "$status" = 422 ] || fail "Never asks was not refused: HTTP $status"
+mark=$after
+status=$(call "$token" PUT "/v1/sessions/$session/chat/mode" "{\"mode\":\"acceptEdits\"}")
+[ "$status" = 200 ] || fail "Edits freely was refused between turns: HTTP $status"
+await mode acceptEdits
+[ "$found" = yes ] || fail "Claude Code did not say it is in acceptEdits"
+echo "refused: a second answer, an invented id, $other, Never asks; an idle stop is none; acceptEdits set and said"
+echo "ANSWERS GIVEN"'
+
+chat_answers() {
+  local run=$1 box=$2 handle=$3 project=$4 workspace=$5 other=$6 out
+  out=$(on "$run" "$box" "cat > /tmp/sail-chat-answers && bash /tmp/sail-chat-answers $handle $project $workspace $other" <<< "$CHAT_ANSWERS")
+  echo "$out"
+  grep -q '^ANSWERS GIVEN$' <<< "$out"
+}
+
 modes_match_claude() {
   local run=$1 box=$2 handle=$3 project=$4 workspace=$5 out
   out=$(on "$run" "$box" "cat > /tmp/sail-modes && bash /tmp/sail-modes $handle $project $workspace" <<< "$MODES_MATCH")
@@ -2497,6 +2644,10 @@ storage() {
     place_secret "$run" main fleet-anthropic-key anthropic
   check "$run" "eng chats with Claude Code in eng-own on main through main's API with the fleet's key: one message, its items read to the turn's end each once, a reconnect from 0 and from the last seq losing and repeating nothing, client told there is no such chat of hers, then the chat ended and taking no message; the key, the login and the tokens removed after" \
     chat_walks "$run" main eng acme eng-own client
+  check "$run" "main holds the fleet's Claude Code key where only root reads it, for eng's answers" \
+    place_secret "$run" main fleet-anthropic-key anthropic
+  check "$run" "eng answers what Claude Code asks in a chat in eng-own: a command denied with a token comes back as the call's result exactly and never ran, asked again and allowed it ran, allowed always its suggested rule is kept and it then asks nothing; a second answer, an invented id and client are refused, an idle chat has nothing to stop, Never asks is refused and Edits freely set between turns is said back; the key, the login and the tokens removed after" \
+    chat_answers "$run" main eng acme eng-own client
   check "$run" "eng's workspace commits as eng" commits_as "$run" main acme-eng-own eng@fleet.example
   check "$run" "eng's workspace holds none of main's person's forge token" holds_no_forge_token "$run" main acme-eng-own
   check "$run" "client, a member, is refused eng's workspace on main, naming her" \
