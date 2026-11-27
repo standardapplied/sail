@@ -16,6 +16,7 @@ import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.ChatStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
@@ -53,6 +54,7 @@ final class ChatBench implements AutoCloseable {
   final FdeStore fdes;
   final ChatStore store;
   final ScriptedShellExecutor incus;
+  final RoleRule roles;
   final HostLanes.Pty door;
 
   /** The workspaces' insides, where a chat's process is found by its pid file and signalled. */
@@ -120,10 +122,11 @@ final class ChatBench implements AutoCloseable {
             .onOk(
                 "incus list --format json",
                 "[" + workspace("try", "sam", samId) + ", " + workspace("tom", "tom", tomId) + "]");
+    roles = TestAuth.roles(db, new SyncConfig("main", null, "ada", "box"));
     door =
         new HostLanes.Pty(
             db,
-            TestAuth.roles(db, new SyncConfig("main", null, "ada", "box")),
+            roles,
             null,
             new BoxInstances(incus),
             TestWorkspaces.over(incus),
@@ -145,7 +148,7 @@ final class ChatBench implements AutoCloseable {
     return new ChatHost(
         store,
         new ChatLaunch(
-            door, fdes, ProjectReader.ofCatalog(new ProjectStore(db)), processes, container),
+            door, fdes, ProjectReader.ofCatalog(new ProjectStore(db)), processes, container, roles),
         timing(grace));
   }
 

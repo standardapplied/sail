@@ -21,7 +21,7 @@ import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.HarnessChat;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyMessage;
@@ -66,23 +66,26 @@ final class ChatLaunch {
   private final ProjectReader definitions;
   private final AgentProcess processes;
   private final ShellExec shell;
+  private final RoleRule roles;
 
   /**
    * Admits through {@code doors}, as the FDEs {@code fdes} holds, chats of the projects {@code
    * definitions} reads, started as {@code processes}; a process left over is asked after through
-   * {@code shell}.
+   * {@code shell}, and an opener acted as whom {@code roles} says they are.
    */
   ChatLaunch(
       HostPty doors,
       FdeStore fdes,
       ProjectReader definitions,
       AgentProcess processes,
-      ShellExec shell) {
+      ShellExec shell,
+      RoleRule roles) {
     this.doors = Objects.requireNonNull(doors, "doors");
     this.fdes = Objects.requireNonNull(fdes, "fdes");
     this.definitions = Objects.requireNonNull(definitions, "definitions");
     this.processes = Objects.requireNonNull(processes, "processes");
     this.shell = Objects.requireNonNull(shell, "shell");
+    this.roles = Objects.requireNonNull(roles, "roles");
   }
 
   /**
@@ -117,14 +120,24 @@ final class ChatLaunch {
   }
 
   /**
-   * {@code work} done as {@code chat}'s opener, as a route of theirs is: no one is there to ask.
+   * {@code work} done as {@code chat}'s opener, as their own credential acts ({@link
+   * RoleRule#principal}): no one is there to ask.
+   *
+   * @throws ApiException when the opener may no longer act on this box
    */
   <T> T asOpener(ChatStore.Chat chat, Supplier<T> work) {
-    var opener =
+    var handle =
         fdes.byId(chat.opener())
+            .map(FdeStore.Fde::handle)
             .orElseThrow(() -> new IllegalStateException("Chat " + chat.id() + " has no opener."));
-    return Actor.call(
-        new Actor(opener.handle(), Role.fromAttribute(opener.role()), Actor.Lane.API), work::get);
+    var opener =
+        roles
+            .principal(RoleRule.Credential.person(handle, Actor.Lane.API))
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.FORBIDDEN, handle + " may no longer act on this box."));
+    return Actor.call(opener, work::get);
   }
 
   /**
