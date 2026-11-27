@@ -121,6 +121,16 @@ class ChatItemTest {
         new Asked("q", over(CONTENT), List.of(), false, false));
     assertEquals(new Choice(CONTENT, "a", true), new Choice(over(CONTENT), "a", false));
     assertEquals(new Choice("l", CONTENT, true), new Choice("l", over(CONTENT), false));
+    var whole = permission(CONTENT, CONTENT, false);
+    assertEquals(
+        List.of(CONTENT, CONTENT, CONTENT, CONTENT, CONTENT),
+        List.of(
+            whole.words(),
+            whole.reason(),
+            new Asked("q", CONTENT, List.of(), false, false).header(),
+            new Choice(CONTENT, null, false).label(),
+            new Detail.Other(CONTENT, "{}", false).name()),
+        "a request's every part is whole up to the content bound");
   }
 
   private static ChatItem.Permission permission(String words, String reason, boolean cut) {
