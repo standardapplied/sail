@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -128,35 +129,7 @@ public record ProjectDefinition(
     for (var i = 0; i < raw.size(); i++) {
       repos.add(Repo.fromMap(Fields.element(raw, i, "repos")));
     }
-    requireOwnPaths(repos);
     return List.copyOf(repos);
-  }
-
-  /**
-   * Refuses two repositories cloned to one path under the workspace, naming each of their rows: the
-   * second clone would find the first's checkout there and stop the build.
-   */
-  private static void requireOwnPaths(List<Repo> repos) {
-    var rows = new LinkedHashMap<String, List<Integer>>();
-    for (var i = 0; i < repos.size(); i++) {
-      rows.computeIfAbsent(
-              Path.of(repos.get(i).path()).normalize().toString(), path -> new ArrayList<>())
-          .add(i);
-    }
-    var fields = new LinkedHashMap<String, String>();
-    var sentences = new ArrayList<String>();
-    rows.forEach(
-        (path, held) -> {
-          if (held.size() > 1) {
-            var sentence =
-                "More than one repository is cloned to " + path + ": give each its own path.";
-            sentences.add(sentence);
-            held.forEach(row -> fields.put("repos[" + row + "].path", sentence));
-          }
-        });
-    if (!fields.isEmpty()) {
-      throw new FieldsRefused(String.join(" ", sentences), fields);
-    }
   }
 
   private static Map<String, Service> services(Map<String, Object> raw) {
@@ -175,6 +148,57 @@ public record ProjectDefinition(
             processes.put(
                 process, Process.fromMap(process, Fields.asMap(declared, "processes." + process))));
     return processes;
+  }
+
+  /**
+   * This definition, refused unless it holds the rules a definition is written under and not read
+   * under ({@link #requirePortsClaimedOnce}, {@link #requireOwnPaths}): one a release before a rule
+   * stored, or a box on one syncs, stays readable, repairable and deletable.
+   */
+  public ProjectDefinition requireWritable() {
+    return requireOwnPaths().requirePortsClaimedOnce();
+  }
+
+  /**
+   * Refuses repositories cloned to one path, or one inside another's, naming each of their rows:
+   * the clone of the second would find the first's checkout there and stop the build.
+   */
+  public ProjectDefinition requireOwnPaths() {
+    var paths =
+        repos == null
+            ? List.<Path>of()
+            : repos.stream().map(repo -> Path.of(repo.path()).normalize()).toList();
+    var fields = new LinkedHashMap<String, String>();
+    var sentences = new LinkedHashSet<String>();
+    for (var i = 0; i < paths.size(); i++) {
+      for (var j = i + 1; j < paths.size(); j++) {
+        var clash = clash(paths.get(i), paths.get(j));
+        if (clash != null) {
+          sentences.add(clash);
+          fields.putIfAbsent("repos[" + i + "].path", clash);
+          fields.putIfAbsent("repos[" + j + "].path", clash);
+        }
+      }
+    }
+    if (!fields.isEmpty()) {
+      throw new FieldsRefused(String.join(" ", sentences), fields);
+    }
+    return this;
+  }
+
+  private static String clash(Path one, Path other) {
+    if (one.equals(other)) {
+      return "More than one repository is cloned to " + one + ": give each its own path.";
+    }
+    if (one.startsWith(other) || other.startsWith(one)) {
+      var inner = one.startsWith(other) ? one : other;
+      var outer = inner == one ? other : one;
+      return inner
+          + " is inside "
+          + outer
+          + ", another repository's path: clone each outside the other.";
+    }
+    return null;
   }
 
   /**

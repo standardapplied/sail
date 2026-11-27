@@ -75,7 +75,8 @@ Usage:
                                 one, whatever the id (only a session signed in with a passkey does), and
                                 eng's in-container credential reaches no passkey door; whoami shows uday
                                 build and eng none; main refuses a project named 'Bad Name' under name, and
-                                two repositories cloned to app under each row, created or written to acme;
+                                two repositories cloned to app under each row, created or written to acme,
+                                each undone if main ever takes it;
                                 a removal that ends
                                 its sessions, the last passkey, the one signed in with, two removals at once
                                 and a sign-in a removal overtakes are proven by the unit tests
@@ -836,6 +837,13 @@ modes_match_claude() {
   grep -q '^SAME$' <<< "$out"
 }
 
+refused_write_door() {
+  local run=$1 box=$2 handle=$3 role=$4 method=$5 path=$6 body=$7 says=$8 out
+  out=$(on "$run" "$box" "cat > /tmp/sail-refused-door && bash /tmp/sail-refused-door $handle $role $method '$path' '$body'" <<< "$REFUSED_WRITE_DOOR")
+  echo "$out"
+  grep -q "^HTTP 422$" <<< "$out" && grep -qF "$says" <<< "$out"
+}
+
 http_token_door() {
   local run=$1 box=$2 handle=$3 role=$4 expected=$5 method=$6 path=$7 body=${8:-} says=${9:-} out
   out=$(on "$run" "$box" "cat > /tmp/sail-token-door && bash /tmp/sail-token-door $handle $role $method '$path' '$body'" <<< "$HTTP_TOKEN_DOOR")
@@ -845,6 +853,29 @@ http_token_door() {
 
 readonly TWO_REPOS='[{"url":"https://github.com/standardapplied/nocaptcha.git","path":"app"},{"url":"https://github.com/standardapplied/nocaptcha.git","path":"app/"}]'
 readonly TWO_REPOS_AT_APP='{"name":"dock-two","repos":'"$TWO_REPOS"'}'
+
+# A write main must refuse, sent as a client sends it, which undoes itself when main takes it: the
+# project a create made is purged, a section a PUT wrote is put back as it was read, so a
+# regression fails its row and nothing after it.
+readonly REFUSED_WRITE_DOOR='set -u
+handle=$1 role=$2 method=$3 path=$4 body=$5
+token=$(sudo sail server token create "refused-$handle" "$role" --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " ")
+[ -n "$token" ] || { echo "no token"; exit 1; }
+send() { curl -s -o "$1" -w "%{http_code}" -X "$2" -H "Authorization: Bearer $token" -H "Content-Type: application/json" -d "$4" "http://127.0.0.1:7070$3"; }
+if [ "$method" = PUT ]; then
+  curl -s -H "Authorization: Bearer $token" "http://127.0.0.1:7070${path%/*/*}/definition" > /tmp/refused-held.json
+  held=$(python3 -c "import json, sys; print(json.dumps({\"value\": json.load(open(\"/tmp/refused-held.json\"))[\"definition\"].get(sys.argv[1])}))" "${path##*/}")
+fi
+status=$(send /tmp/refused.json "$method" "$path" "$body")
+if [ "$status" != 422 ]; then
+  if [ "$method" = PUT ]; then
+    send /dev/null PUT "$path" "$held" > /dev/null
+  else
+    sudo sail project destroy "$(python3 -c "import json, sys; print(json.loads(sys.argv[1])[\"name\"])" "$body")" --purge --yes > /dev/null 2>&1
+  fi
+fi
+sudo sail server token revoke "refused-$handle" > /dev/null 2>&1
+echo "HTTP $status"; head -c 400 /tmp/refused.json; echo'
 
 readonly FEED_DOOR='set -u
 mode=$1 handle=$2 arg=$3 text=${4:-}
@@ -1718,9 +1749,9 @@ access() {
   check "$run" "uday's create of a project named 'Bad Name' on main is refused under name [HTTP]" \
     http_token_door "$run" main uday admin 422 POST /v1/projects '{"name":"Bad Name"}' '"field_errors": [{"field": "name"'
   check "$run" "uday's create of a project cloning two repositories to app on main is refused under each row [HTTP]" \
-    http_token_door "$run" main uday admin 422 POST /v1/projects "$TWO_REPOS_AT_APP" '{"field": "repos[1].path"'
+    refused_write_door "$run" main uday admin POST /v1/projects "$TWO_REPOS_AT_APP" '{"field": "repos[1].path"'
   check "$run" "uday's write of acme's repos cloning two to app on main is refused under each row [HTTP]" \
-    http_token_door "$run" main uday admin 422 PUT /v1/projects/acme/definition/repos "{\"value\":$TWO_REPOS}" '{"field": "repos[1].path"'
+    refused_write_door "$run" main uday admin PUT /v1/projects/acme/definition/repos "{\"value\":$TWO_REPOS}" '{"field": "repos[1].path"'
   check "$run" "obs asks main's gateway to stop a run: agent stop would run as main's own person, refused [gateway]" \
     naming "$FOLLOW_WITH_SPEC" gateway_door "$run" observer "$AGENT_VERB_RUNS_AS_THE_BOX" agent stop acme --dry-run
   check "$run" "eng lists acme's agent sessions at main's gateway: an agent verb that asks the API runs [gateway]" \

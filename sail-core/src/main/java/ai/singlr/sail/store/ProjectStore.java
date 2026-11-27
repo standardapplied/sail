@@ -150,12 +150,14 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   /**
    * Writes each section {@code values} names, as {@link #writeSection} writes one, all in one
    * revision or none: a section whose tag {@code expected} names and the project no longer holds
-   * refuses the whole write, and one that leaves every section as it was records nothing.
+   * refuses the whole write, and one that leaves every section as it was records nothing. Who may
+   * write is decided first, so one who may not learns nothing of what the values would make.
    */
   public ProjectRow writeSections(
       String name, Map<Section, String> values, Map<Section, String> expected) {
     return db.transaction(
         () -> {
+          journal.admit(name, Map.of());
           var held =
               findByName(name)
                   .orElseThrow(

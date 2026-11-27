@@ -234,6 +234,26 @@ class ProjectDefinitionOperationsTest {
     assertTrue(projects.findByName("gamma").isEmpty());
   }
 
+  /**
+   * Who may write a section is decided before its value is read, so a person who may not write is
+   * told only that, never what the definition holds or why the value would not fit it.
+   */
+  @Test
+  void aSectionWriteIsDecidedBeforeItsValueIsChecked() {
+    var viewer = new Actor("vic", Role.VIEWER, Actor.Lane.API);
+    var repos =
+        List.of(
+            Map.of("url", "https://github.com/acme/app.git", "path", "app"),
+            Map.of("url", "https://github.com/acme/web.git", "path", "app"));
+
+    var refused =
+        assertThrows(
+            WriteRefused.class,
+            () -> Acting.by(viewer, () -> operations.writeSection("acme", "repos", repos, null)));
+
+    assertEquals(Refusal.Kind.READ_ONLY, refused.refusal().kind());
+  }
+
   @Test
   void aReadOnlyCredentialIsNeverHandedADefinition() {
     var viewer = new Actor("vic", Role.VIEWER, Actor.Lane.API);

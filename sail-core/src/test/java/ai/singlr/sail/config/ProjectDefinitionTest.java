@@ -789,16 +789,27 @@ class ProjectDefinitionTest {
   }
 
   @Test
-  void twoRepositoriesClonedToOnePathAreRefusedNamingEachRow() {
+  void twoRepositoriesClonedToOnePathAreReadButRefusedWhereTheyAreWrittenNamingEachRow() {
     var yaml =
         "name: acme\nrepos:\n"
             + "  - url: https://github.com/acme/app.git\n    path: app\n"
             + "  - url: https://github.com/acme/docs.git\n    path: docs\n"
             + "  - url: https://github.com/acme/web.git\n    path: app/\n"
             + "  - url: https://github.com/acme/notes.git\n    path: docs\n";
+    var read = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
-    var refused =
-        assertThrows(FieldsRefused.class, () -> ProjectDefinition.fromMap(YamlUtil.parseMap(yaml)));
+    var refused = assertThrows(FieldsRefused.class, () -> ProjectDefinitionJson.validated(read));
+    var section =
+        assertThrows(
+            FieldsRefused.class,
+            () ->
+                ProjectDefinitionJson.withSection(
+                    TestDefinitions.yaml("name: acme\n"),
+                    ProjectDefinition.Section.REPOS,
+                    ProjectDefinitionJson.section(read, ProjectDefinition.Section.REPOS)));
+
+    assertEquals(4, read.repos().size());
+    assertEquals(refused.fields(), section.fields());
 
     var app = "More than one repository is cloned to app: give each its own path.";
     var docs = "More than one repository is cloned to docs: give each its own path.";
@@ -810,6 +821,27 @@ class ProjectDefinitionTest {
             Map.entry("repos[1].path", docs),
             Map.entry("repos[3].path", docs)),
         List.copyOf(refused.fields().entrySet()));
+  }
+
+  @Test
+  void aRepositoryClonedInsideAnothersPathIsRefusedInEitherOrderNamingBothRows() {
+    var inner = "  - url: https://github.com/acme/web.git\n    path: app/web\n";
+    var outer = "  - url: https://github.com/acme/app.git\n    path: app\n";
+    var apart = "  - url: https://github.com/acme/application.git\n    path: application\n";
+    var sentence =
+        "app/web is inside app, another repository's path: clone each outside the other.";
+
+    for (var repos : List.of(inner + outer, outer + inner)) {
+      var refused =
+          assertThrows(
+              FieldsRefused.class,
+              () ->
+                  ProjectDefinitionJson.validated(
+                      TestDefinitions.yaml("name: acme\nrepos:\n" + apart + repos)));
+
+      assertEquals(sentence, refused.getMessage());
+      assertEquals(Map.of("repos[1].path", sentence, "repos[2].path", sentence), refused.fields());
+    }
   }
 
   @Test

@@ -8,6 +8,7 @@ package ai.singlr.sail.common;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Supplier;
 
 /**
@@ -30,7 +31,8 @@ public final class FieldsRefused extends IllegalArgumentException {
     try {
       return read.get();
     } catch (IllegalArgumentException refused) {
-      throw new FieldsRefused(refused.getMessage(), Map.of(field, refused.getMessage()));
+      var sentence = Objects.requireNonNullElse(refused.getMessage(), field + " is refused.");
+      throw new FieldsRefused(sentence, Map.of(field, sentence));
     }
   }
 
