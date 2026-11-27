@@ -19,9 +19,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 class SqliteTest {
@@ -389,6 +393,115 @@ class SqliteTest {
     db.close();
     assertThrows(IllegalStateException.class, () -> db.execute("SELECT 1"));
     db = null;
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void aCloseWaitsForTheScopeInFlightOnAnotherThreadAndEveryLaterCallIsRefused() throws Exception {
+    var shared = Sqlite.open(tempDir.resolve("shared.db"));
+    var holding = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var read = new AtomicReference<Object>();
+    var reader =
+        Thread.ofPlatform()
+            .start(
+                () -> {
+                  try {
+                    read.set(
+                        shared.read(
+                            () -> {
+                              holding.countDown();
+                              await(release);
+                              return shared
+                                  .queryOne("SELECT 41 + 1", row -> row.integer(0))
+                                  .orElseThrow();
+                            }));
+                  } catch (RuntimeException e) {
+                    read.set(e);
+                  }
+                });
+    holding.await();
+
+    var closer = Thread.ofPlatform().start(shared::close);
+    awaitLeavingRunnable(closer);
+    var waited = closer.isAlive();
+    release.countDown();
+    reader.join();
+    closer.join();
+
+    assertTrue(waited, "the close went ahead under a scope in flight");
+    assertEquals(42L, read.get(), "the scope's work finished whole");
+    assertEquals(
+        "Database is closed",
+        assertThrows(IllegalStateException.class, () -> shared.query("SELECT 1", row -> 1))
+            .getMessage());
+    assertEquals(
+        "Database is closed",
+        assertThrows(IllegalStateException.class, () -> shared.read(() -> 1)).getMessage());
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void aCallWaitingForTheConnectionAsItClosesIsRefusedNeverRunOnTheFreedHandle() throws Exception {
+    var shared = Sqlite.open(tempDir.resolve("shared.db"));
+    var holding = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var ownScope = new AtomicReference<Throwable>();
+    var holder =
+        Thread.ofPlatform()
+            .start(
+                () -> {
+                  try {
+                    shared.read(
+                        () -> {
+                          holding.countDown();
+                          await(release);
+                          shared.close();
+                          return null;
+                        });
+                  } catch (RuntimeException e) {
+                    ownScope.set(e);
+                  }
+                });
+    holding.await();
+    var refused = new AtomicReference<Throwable>();
+    var straggler =
+        Thread.ofPlatform()
+            .start(
+                () -> {
+                  try {
+                    shared.query("SELECT 1", row -> row.integer(0));
+                  } catch (RuntimeException e) {
+                    refused.set(e);
+                  }
+                });
+
+    awaitLeavingRunnable(straggler);
+    release.countDown();
+    holder.join();
+    straggler.join();
+
+    assertInstanceOf(IllegalStateException.class, refused.get());
+    assertEquals("Database is closed", refused.get().getMessage());
+    assertEquals(
+        "Database is closed",
+        ownScope.get().getMessage(),
+        "the scope that closed its own connection cannot commit on it");
+  }
+
+  private static void await(CountDownLatch latch) {
+    try {
+      latch.await();
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(e);
+    }
+  }
+
+  private static void awaitLeavingRunnable(Thread thread) {
+    while (thread.getState() == Thread.State.RUNNABLE) {
+      Thread.onSpinWait();
+    }
   }
 
   @Test

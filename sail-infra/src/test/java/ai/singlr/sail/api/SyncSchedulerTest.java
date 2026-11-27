@@ -7,23 +7,29 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
+import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -440,8 +446,8 @@ class SyncSchedulerTest {
   }
 
   @Test
-  void anOwnedHealthSourceClosesWithTheSchedulerAndItsFailureIsLoud() {
-    var closed = new java.util.concurrent.atomic.AtomicBoolean();
+  void anOwnedHealthSourceClosesWithTheSchedulerAndAFailedCloseIsAWarningThatNamesItsCause() {
+    var closed = new AtomicBoolean();
     var scheduler = scheduler(new QueueExecutor(), rounds::incrementAndGet);
     scheduler.useHealth(() -> SyncStatus.unattempted("node", "main"), () -> closed.set(true));
     scheduler.close();
@@ -451,58 +457,128 @@ class SyncSchedulerTest {
     broken.useHealth(
         () -> SyncStatus.unattempted("node", "main"),
         () -> {
-          throw new java.io.IOException("store already gone");
+          throw new IOException("store already gone");
         });
-    var failure = assertThrows(IllegalStateException.class, broken::close);
-    assertEquals("store already gone", failure.getCause().getMessage());
+
+    assertEquals(
+        List.of("WARNING Closing the sync health source failed: store already gone"),
+        warnings(broken::close));
   }
 
   @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
   void closeWaitsForTheTimersHealthReadBeforeItClosesTheSource() throws Exception {
     var reading = new CountDownLatch(1);
     var release = new CountDownLatch(1);
     var reads = new AtomicInteger();
     var inRead = new AtomicBoolean();
     var closedUnderARead = new AtomicBoolean();
-    var closeFailure = new AtomicReference<Throwable>();
     var scheduler = new SyncScheduler(rounds::incrementAndGet, DEBOUNCE, TTL);
     scheduler.useHealth(
-        () -> {
-          if (reads.getAndIncrement() == 0) {
-            inRead.set(true);
-            reading.countDown();
-            awaitIgnoringInterrupts(release);
-            inRead.set(false);
-          }
-          return SyncStatus.unattempted("node", "main");
-        },
-        () -> {
-          if (inRead.get()) {
-            closedUnderARead.set(true);
-            release.countDown();
-            throw new IllegalStateException("Session is acquired by 1 clients");
-          }
-        });
+        heldFirstRead(reads, inRead, reading, release),
+        closingFailsUnder(inRead, closedUnderARead, release));
 
     reading.await();
-    var closer =
-        Thread.ofPlatform()
-            .start(
-                () -> {
-                  try {
-                    scheduler.close();
-                  } catch (RuntimeException e) {
-                    closeFailure.set(e);
-                  }
-                });
-    while (closer.isAlive() && closer.getState() == Thread.State.RUNNABLE) {
+    closeWhileHeld(scheduler, release);
+
+    assertFalse(closedUnderARead.get(), "the source closed under the timer's read");
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void closeWaitsForAWritesRoundBeforeItClosesTheSourceTheRoundReads() throws Exception {
+    var reading = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var reads = new AtomicInteger();
+    var inRead = new AtomicBoolean();
+    var closedUnderARead = new AtomicBoolean();
+    var scheduler =
+        new SyncScheduler(
+            rounds::incrementAndGet,
+            DEBOUNCE,
+            TTL,
+            Executors.newVirtualThreadPerTaskExecutor(),
+            nanos::get,
+            this::advanceBy);
+    scheduler.useHealth(
+        heldFirstRead(reads, inRead, reading, release),
+        closingFailsUnder(inRead, closedUnderARead, release));
+
+    scheduler.afterWrite();
+    reading.await();
+    closeWhileHeld(scheduler, release);
+
+    assertFalse(closedUnderARead.get(), "the source closed under the round's read");
+    assertEquals(1, rounds.get(), "the round the write asked for ran whole");
+  }
+
+  /**
+   * A health read whose first call holds until {@code release}, ignoring interrupts as a thread
+   * inside a native call does.
+   */
+  private static Supplier<SyncStatus> heldFirstRead(
+      AtomicInteger reads, AtomicBoolean inRead, CountDownLatch reading, CountDownLatch release) {
+    return () -> {
+      if (reads.getAndIncrement() == 0) {
+        inRead.set(true);
+        reading.countDown();
+        awaitIgnoringInterrupts(release);
+        inRead.set(false);
+      }
+      return SyncStatus.unattempted("node", "main");
+    };
+  }
+
+  /** A source whose close fails as the arena's does while a read is in flight, freeing it. */
+  private static AutoCloseable closingFailsUnder(
+      AtomicBoolean inRead, AtomicBoolean closedUnderARead, CountDownLatch release) {
+    return () -> {
+      if (inRead.get()) {
+        closedUnderARead.set(true);
+        release.countDown();
+        throw new IllegalStateException("Session is acquired by 1 clients");
+      }
+    };
+  }
+
+  /**
+   * Closes {@code scheduler} on a thread of its own and lets the held read go only once that thread
+   * waits (or has ended), so a close that does not wait closes the source under the read.
+   */
+  private static void closeWhileHeld(SyncScheduler scheduler, CountDownLatch release)
+      throws InterruptedException {
+    var closer = Thread.ofPlatform().start(scheduler::close);
+    while (closer.getState() == Thread.State.RUNNABLE) {
       Thread.onSpinWait();
     }
     release.countDown();
     closer.join();
+  }
 
-    assertFalse(closedUnderARead.get(), "the source closed under the timer's read");
-    assertNull(closeFailure.get(), "close failed after the work was done");
+  /** The warnings the scheduler logs while {@code work} runs, each as its level and message. */
+  private static List<String> warnings(Runnable work) {
+    var log = Logger.getLogger(SyncScheduler.class.getName());
+    var said = new ArrayList<String>();
+    var listening =
+        new Handler() {
+          @Override
+          public void publish(LogRecord record) {
+            said.add(record.getLevel() + " " + record.getMessage());
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    log.addHandler(listening);
+    try {
+      work.run();
+    } finally {
+      log.removeHandler(listening);
+    }
+    return said;
   }
 
   private static void awaitIgnoringInterrupts(CountDownLatch latch) {

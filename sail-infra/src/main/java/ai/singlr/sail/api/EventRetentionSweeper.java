@@ -20,17 +20,20 @@ public final class EventRetentionSweeper implements AutoCloseable {
 
   private final EventStore events;
   private final Duration retention;
-  private final ScheduledExecutorService scheduler =
-      Executors.newSingleThreadScheduledExecutor(
-          Thread.ofPlatform().name("sail-event-retention").daemon(true).factory());
+  private final ScheduledExecutorService scheduler;
 
   public EventRetentionSweeper(EventStore events) {
-    this(events, DEFAULT_RETENTION);
+    this(
+        events,
+        DEFAULT_RETENTION,
+        Executors.newSingleThreadScheduledExecutor(
+            Thread.ofPlatform().name("sail-event-retention").daemon(true).factory()));
   }
 
-  EventRetentionSweeper(EventStore events, Duration retention) {
+  EventRetentionSweeper(EventStore events, Duration retention, ScheduledExecutorService scheduler) {
     this.events = events;
     this.retention = retention;
+    this.scheduler = scheduler;
   }
 
   public void start() {

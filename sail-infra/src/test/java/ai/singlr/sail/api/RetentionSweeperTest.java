@@ -29,12 +29,16 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -182,6 +186,46 @@ class RetentionSweeperTest {
 
     assertTrue(err.contains("deciding whether this box sweeps failed"), err);
     assertTrue(err.contains("sync is not a mapping"), err);
+  }
+
+  @Test
+  @Timeout(value = 1, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+  void closingWaitsForTheSweepInFlightSoTheDatabaseNeverClosesUnderIt() throws Exception {
+    var sweeping = new CountDownLatch(1);
+    var held = new ReentrantLock();
+    var swept = new AtomicBoolean();
+    var sweptWhenClosed = new AtomicBoolean();
+    var holding =
+        new RetentionSweeper(
+            new SpecPruner(db, null, main::get, clock::get),
+            policy::get,
+            new BlobStore(db),
+            () -> {
+              sweeping.countDown();
+              held.lock();
+              held.unlock();
+              swept.set(true);
+              return false;
+            },
+            scheduler);
+    held.lock();
+    scheduler.execute(holding::sweepQuietly);
+    sweeping.await();
+
+    var closer =
+        Thread.ofPlatform()
+            .start(
+                () -> {
+                  holding.close();
+                  sweptWhenClosed.set(swept.get());
+                });
+    while (closer.getState() == Thread.State.RUNNABLE) {
+      Thread.onSpinWait();
+    }
+    held.unlock();
+    closer.join();
+
+    assertTrue(sweptWhenClosed.get(), "the close returned under a sweep still in flight");
   }
 
   @Test
