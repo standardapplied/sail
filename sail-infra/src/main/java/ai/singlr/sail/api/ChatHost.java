@@ -210,7 +210,7 @@ public final class ChatHost implements AutoCloseable {
       }
       var process = live.get(session);
       if (process == null || process.end().over()) {
-        process = startProcess(store.find(session).orElseThrow(() -> unknown(session)));
+        process = startProcess(store.find(session).orElseThrow());
       }
       if (ended(session)) {
         var started = process;
@@ -219,7 +219,7 @@ public final class ChatHost implements AutoCloseable {
             .start(() -> started.end().endChat(timing.grace().afterInt()));
         throw ended(chat);
       }
-      return process.send(text, () -> ended(chat));
+      return process.send(text, ended(chat));
     }
   }
 
@@ -393,9 +393,7 @@ public final class ChatHost implements AutoCloseable {
     Thread.ofVirtual().name("sail-chat-withdraw").start(withdraw);
     var session = ended.session();
     synchronized (lock(session)) {
-      if (!live.remove(session, ended)) {
-        return;
-      }
+      live.remove(session, ended);
       if (ended.end().known()) {
         released(session);
       }

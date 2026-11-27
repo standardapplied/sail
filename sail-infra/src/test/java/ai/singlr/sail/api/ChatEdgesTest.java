@@ -229,4 +229,40 @@ class ChatEdgesTest {
 
     assertEquals(0, bench.processes.starts.size());
   }
+
+  /** A chat's folder its workspace cannot remove stays, said so; an interrupt is kept. */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aChatsFolderItsWorkspaceCannotRemoveStaysAndAnInterruptIsKept() {
+    var chat = bench.store.find(bench.samsChat()).orElseThrow();
+
+    bench.launchOver(failing(new IOException("incus is down"))).forget(chat);
+    bench.launchOver(failing(new InterruptedException("stopping"))).forget(chat);
+
+    assertTrue(Thread.interrupted(), "the interrupt is kept");
+  }
+
+  /** A shell whose every command fails with {@code failure}. */
+  private static ShellExec failing(Exception failure) {
+    return new ShellExec() {
+      @Override
+      public Result exec(List<String> command) throws IOException, InterruptedException {
+        if (failure instanceof InterruptedException interrupted) {
+          throw interrupted;
+        }
+        throw (IOException) failure;
+      }
+
+      @Override
+      public Result exec(List<String> command, Path workDir, Duration timeout)
+          throws IOException, InterruptedException {
+        return exec(command);
+      }
+
+      @Override
+      public boolean isDryRun() {
+        return false;
+      }
+    };
+  }
 }

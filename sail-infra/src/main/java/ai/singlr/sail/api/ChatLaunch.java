@@ -126,10 +126,7 @@ final class ChatLaunch {
    * @throws ApiException when the opener may no longer act on this box
    */
   <T> T asOpener(ChatStore.Chat chat, Supplier<T> work) {
-    var handle =
-        fdes.byId(chat.opener())
-            .map(FdeStore.Fde::handle)
-            .orElseThrow(() -> new IllegalStateException("Chat " + chat.id() + " has no opener."));
+    var handle = fdes.byId(chat.opener()).map(FdeStore.Fde::handle).orElseThrow();
     var opener =
         roles
             .principal(RoleRule.Credential.person(handle, Actor.Lane.API))

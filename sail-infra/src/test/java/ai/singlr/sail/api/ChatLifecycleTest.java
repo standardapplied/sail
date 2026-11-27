@@ -310,6 +310,50 @@ class ChatLifecycleTest {
   }
 
   /**
+   * I5: a process that ended before it took the message it was started for is not started again for
+   * it, which would start one after another; the person is told, and it waits.
+   */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aProcessThatTookNoMessageIsNotStartedAgainForIt() {
+    var session = bench.samsChat();
+    bench.processes.onStart(
+        fake -> {
+          fake.onClose(fake::exitsIfRunning);
+          fake.breaksStdin();
+        });
+
+    var sent = bench.send(session, "hi");
+    over(bench.processes.latest());
+
+    assertFalse(sent.queued());
+    assertEquals(1, bench.processes.starts.size());
+    assertEquals(List.of("message", "told"), bench.kinds(session));
+    assertEquals(
+        "Claude Code's process ended before it took your message; it waits for your next one.",
+        bench.items(session).getLast().get("words"));
+  }
+
+  /** I5, I10: a waiting message whose opener may no longer act here is said so, and kept. */
+  @Test
+  @Timeout(value = 60, unit = TimeUnit.SECONDS)
+  void aWaitingMessageWhoseOpenerMayNoLongerActIsSaidAndKept() {
+    var session = bench.samsChat();
+    bench.send(session, "hi");
+    bench.says(INIT);
+    bench.send(session, "second");
+    bench.db.execute("UPDATE fdes SET status = 'disabled' WHERE id = ?", bench.samId);
+
+    bench.restarted().reclaim();
+
+    assertEquals(1, bench.processes.starts.size());
+    assertEquals(
+        "sam may no longer act on this box. Your waiting message was not sent; it goes with your"
+            + " next one.",
+        ChatLog.fields(bench.store.after(session, 0, 100).getLast()).get("words"));
+  }
+
+  /**
    * I9: a request unanswered at its bound has its turn stopped, said in plain words; the process
    * stays, and the harness withdraws the request as it stops.
    */
@@ -430,8 +474,7 @@ class ChatLifecycleTest {
         assertThrows(
             ApiException.class,
             () ->
-                process.send(
-                    "late", () -> new ApiException(ErrorCode.CONFLICT, "This chat has ended.")));
+                process.send("late", new ApiException(ErrorCode.CONFLICT, "This chat has ended.")));
 
     assertEquals("This chat has ended.", refused.reason());
     assertEquals(List.of(), bench.kinds(session), "nothing of it is logged");

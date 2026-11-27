@@ -17,7 +17,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
-import java.util.function.Supplier;
 
 /**
  * The one process that holds a chat's conversation: what it writes is read a line at a time on a
@@ -187,11 +186,11 @@ final class ChatProcess {
    * Logs what the person said, and hands it to the process at once unless a turn is open, the
    * process is ending or an earlier message still waits, as each turn's end hands the next.
    *
-   * @throws ApiException {@code ended}'s, when the person ended the chat
+   * @throws ApiException {@code ended}, when the person ended the chat
    */
-  synchronized ChatHost.Sent send(String text, Supplier<ApiException> ended) {
+  synchronized ChatHost.Sent send(String text, ApiException ended) {
     if (end.chatEnded()) {
-      throw ended.get();
+      throw ended;
     }
     var queued = turnOpen || end.ending() || !log.unhanded().isEmpty();
     var seq = log.log(new ChatWire.Message(text, queued));
@@ -295,8 +294,9 @@ final class ChatProcess {
 
   /**
    * Holds the open turn's requests to {@code bound} at {@code now}: once one has waited it out, the
-   * person is told and the turn stopped, the process kept. Returns whether the process must be
-   * ended: its turn not stopped a bound after it was asked to, or no input left to ask it on.
+   * person is told and the turn stopped, the process kept (one whose stdin is closed is ended, as a
+   * write it no longer takes ends it). Returns whether the process must be ended: its turn not
+   * stopped a bound after it was asked to.
    */
   synchronized boolean overBound(Instant now, Duration bound) {
     if (!turnOpen) {
@@ -315,9 +315,6 @@ final class ChatProcess {
                 + bound.toMinutes()
                 + " minutes Sail stopped its turn and withdrew the request."));
     stopAsked = now;
-    if (end.ending()) {
-      return true;
-    }
     stopTurn();
     return false;
   }
@@ -329,24 +326,24 @@ final class ChatProcess {
    */
   private void finished() {
     var exit = end.seenOut();
-    synchronized (this) {
-      try {
-        log.flush();
-        if (turnOpen) {
-          log.cut(end.why(exit));
-        }
-      } catch (RuntimeException unlogged) {
-        System.err.println(
-            "  [chat] the end of chat " + session + " was not logged: " + unlogged.getMessage());
-      } finally {
-        turnOpen = false;
-        end.exited(exit);
-      }
-    }
     try {
-      host.gone(this);
+      synchronized (this) {
+        try {
+          log.flush();
+          if (turnOpen) {
+            log.cut(end.why(exit));
+          }
+        } finally {
+          turnOpen = false;
+          end.exited(exit);
+        }
+      }
     } finally {
-      end.done();
+      try {
+        host.gone(this);
+      } finally {
+        end.done();
+      }
     }
   }
 }
