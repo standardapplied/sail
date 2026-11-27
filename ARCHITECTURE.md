@@ -2290,7 +2290,8 @@ harness in `Harnesses.all()`.
 
 The file also carries `includeCoAuthoredBy: false` and the `permissions.deny` read rules
 (`ClaudeCode.readDenyRules`, the one list): the box credential, `~/.ssh`, `~/.git-credentials`,
-`~/.config/gh` and a run's `launch.env`, each an absolute path written `Read(//…)`. A live member
+`~/.config/gh`, a run's `launch.env` and a session's login file under `~/.sail/sessions`, each
+an absolute path written `Read(//…)`. A live member
 runs under a second file, `~/.sail/claude-live.json`, with those two entries and no `hooks` key:
 sail reads a live process, so nothing in it reports back. Recorded on Claude Code 2.1.332
 (`chat-probe2`, `chat-probe3`), a `//` rule refuses the Read tool and a `cat` of its path in every

@@ -162,7 +162,8 @@ class HarnessHooksTest {
                     "Read(//home/dev/.ssh/**)",
                     "Read(//home/dev/.git-credentials)",
                     "Read(//home/dev/.config/gh/**)",
-                    "Read(//home/dev/.sail/runs/**/launch.env)"),
+                    "Read(//home/dev/.sail/runs/**/launch.env)",
+                    "Read(//home/dev/.sail/sessions/**)"),
                 ((Map<String, Object>) YamlUtil.parseMap(json).get("permissions")).get("deny"),
                 file
                     + ": each rule an absolute path written //, which Claude Code reads from the"

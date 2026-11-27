@@ -1,0 +1,1 @@
+{"type":"system","subtype":"compact_boundary","session_id":"5fc823b3-1a05-4c07-bdec-a7b3e33ee28f","uuid":"6a6031dc-ffd6-44f8-999d-2692734bb673","compact_metadata":{"trigger":"manual","pre_tokens":18074,"post_tokens":3069,"cumulative_dropped_tokens":15005,"duration_ms":3394},"logical_parent_uuid":"32db2b55-d84f-4435-80ff-2ba150db11e8"}

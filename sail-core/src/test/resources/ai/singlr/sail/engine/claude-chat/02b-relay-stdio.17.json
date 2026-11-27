@@ -1,0 +1,1 @@
+{"type":"control_response","response":{"subtype":"success","request_id":"a871f652-0656-42bf-8cc8-860ad0a34b79","response":{"behavior":"allow","updatedInput":{"command":"date > stamp.txt","description":"Write current date into stamp.txt"}}}}

@@ -196,6 +196,26 @@ class LiveMemberTest {
   }
 
   @Test
+  void aToolsNameIsToldClippedToAName() {
+    var process = room.prompted(SPEC, "full", "first");
+    var run = room.memberRun();
+
+    room.says(
+        process,
+        Lines.init("sess-1"),
+        Lines.toolUse("toolu_1", "T".repeat(80), "{}"),
+        Lines.toolResult("toolu_1"),
+        Lines.result("done"));
+
+    assertEquals(
+        List.of(
+            LiveRoom.live(
+                run, SPEC, 1, Map.of("tool", "T".repeat(64), "summary", "", "status", "started")),
+            LiveRoom.live(run, SPEC, 1, Map.of("tool", "T".repeat(64), "status", "finished"))),
+        room.data(Event.WellKnownTypes.AGENT_TOOL_CALL));
+  }
+
+  @Test
   void aMessageDuringATurnIsWrittenAtOnceAndStartsTheNextTurn() {
     var process = room.prompted(SPEC, "full", "first");
     room.says(process, Lines.init("sess-1"), Lines.delta("One"));

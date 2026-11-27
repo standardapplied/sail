@@ -1179,7 +1179,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         case LiveStream.Step.ToolResults returned -> {
           open();
           flush();
-          returned.callIds().forEach(this::returned);
+          returned.results().forEach(result -> returned(result.callId()));
         }
         case LiveStream.Step.Working working -> open();
         case LiveStream.Step.Result result -> {
@@ -1187,7 +1187,15 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
           spent(line);
           answered(result);
         }
-        case LiveStream.Step.Other other -> {}
+        case LiveStream.Step.Said _,
+            LiveStream.Step.Subagent _,
+            LiveStream.Step.Permission _,
+            LiveStream.Step.Question _,
+            LiveStream.Step.Plan _,
+            LiveStream.Step.Shown _,
+            LiveStream.Step.Status _,
+            LiveStream.Step.Unreadable _,
+            LiveStream.Step.Other _ -> {}
       }
     }
 
@@ -1307,9 +1315,10 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     }
 
     private void called(LiveStream.ToolCall call) {
-      calls.put(call.id(), call.tool());
+      var tool = Strings.clip(call.tool(), LiveStream.NAME_CODE_POINTS);
+      calls.put(call.id(), tool);
       var data = new LinkedHashMap<String, Object>();
-      data.put("tool", call.tool());
+      data.put("tool", tool);
       data.put("summary", call.summary());
       data.put("status", "started");
       tell(Event.WellKnownTypes.AGENT_TOOL_CALL, data);

@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.BoxCredentialFile;
 import ai.singlr.sail.engine.ContainerExec;
+import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.SailPaths;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -17,7 +18,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.SequencedMap;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /** Claude Code: {@code claude}, launched headless with sail's own settings file of hooks. */
@@ -44,11 +44,21 @@ final class ClaudeCode implements Harness {
    */
   private static final String HOST_MANAGED = "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST";
 
-  /** A result that says the login's account is out of quota, and when it resets, if it says. */
-  private static final Pattern LIMIT =
-      Pattern.compile("You['\u2019]ve hit your .*?limit(?:\\s*\u00b7\\s*resets\\s+(.+))?");
-
   private static final List<String> EFFORTS = List.of("low", "medium", "high", "xhigh");
+
+  /**
+   * How sail runs Claude Code as one process it talks to: JSON lines both ways, text as written.
+   */
+  static final List<String> STREAMING =
+      List.of(
+          BINARY,
+          "--print",
+          "--input-format",
+          "stream-json",
+          "--output-format",
+          "stream-json",
+          "--verbose",
+          "--include-partial-messages");
 
   /** Where, under the dev user's home, Claude Code keeps its own sign-in. */
   private static final String CREDENTIALS = ".claude/.credentials.json";
@@ -65,8 +75,7 @@ final class ClaudeCode implements Harness {
    * The settings file of a live member, passed via {@code --settings} to the one process sail reads
    * instead of hooking: the read-deny rules and nothing that runs a script.
    */
-  private static final String LIVE_SETTINGS_PATH =
-      ContainerExec.DEV_HOME + "/.sail/claude-live.json";
+  static final String LIVE_SETTINGS_PATH = ContainerExec.DEV_HOME + "/.sail/claude-live.json";
 
   /**
    * What makes a session read-only, as argv: ambient settings and MCP configs excluded, the tool
@@ -210,21 +219,8 @@ final class ClaudeCode implements Harness {
    */
   @Override
   public Optional<List<String>> live(LiveLaunch launch) {
-    var command =
-        new ArrayList<>(
-            List.of(
-                BINARY,
-                "--print",
-                "--input-format",
-                "stream-json",
-                "--output-format",
-                "stream-json",
-                "--verbose",
-                "--include-partial-messages",
-                "--permission-prompts",
-                "none",
-                "--settings",
-                LIVE_SETTINGS_PATH));
+    var command = new ArrayList<>(STREAMING);
+    command.addAll(List.of("--permission-prompts", "none", "--settings", LIVE_SETTINGS_PATH));
     command.addAll(
         launch.fullPermissions() ? List.of("--dangerously-skip-permissions") : READ_ONLY_ARGS);
     if (launch.model() != null) {
@@ -237,6 +233,11 @@ final class ClaudeCode implements Harness {
   @Override
   public Optional<LiveSettings> liveSettings() {
     return Optional.of(new LiveSettings(LIVE_SETTINGS_PATH, settings()));
+  }
+
+  @Override
+  public Optional<HarnessChat> chat() {
+    return Optional.of(new ClaudeCodeChat());
   }
 
   @Override
@@ -347,7 +348,7 @@ final class ClaudeCode implements Harness {
             true));
   }
 
-  private static Mode permissionMode(String name, String label, String about, boolean risky) {
+  static Mode permissionMode(String name, String label, String about, boolean risky) {
     return new Mode(name, label, about, " --permission-mode " + name, risky);
   }
 
@@ -394,13 +395,12 @@ final class ClaudeCode implements Harness {
   }
 
   /**
-   * The last {@code result}, when it is an error: a 401 is a refusal of the login; "Not logged in"
-   * is no login delivered at all (only a harness given no credential, or an empty one, prints it:
-   * 2.1.322, recorded); "You've hit your … limit" is a limit, with the time it resets. No other
-   * credential is ever used in the login's place: under {@link #HOST_MANAGED} no settings file's
-   * {@code apiKeyHelper} or key, a user's, a project's or a managed one, no key kept by {@code
-   * /login} and no signed-in subscription outranks the key's own variable, and its {@code init}
-   * line names that variable (2.1.327, measured).
+   * The last {@code result}, when it is an error, read as {@link LiveStream#loginOutcome} reads a
+   * failed turn of a chat: a 401, "Not logged in" or a limit. No other credential is ever used in
+   * the login's place: under {@link #HOST_MANAGED} no settings file's {@code apiKeyHelper} or key,
+   * a user's, a project's or a managed one, no key kept by {@code /login} and no signed-in
+   * subscription outranks the key's own variable, and its {@code init} line names that variable
+   * (2.1.327, measured).
    */
   @Override
   public Optional<LoginOutcome> loginOutcome(String report) {
@@ -408,18 +408,9 @@ final class ClaudeCode implements Harness {
     if (result == null || !Boolean.TRUE.equals(result.get("is_error"))) {
       return Optional.empty();
     }
-    var said = result.get("result") instanceof String text ? text.strip() : "";
-    var limit = LIMIT.matcher(said);
-    if (Long.valueOf(401).equals(RunUsage.count(result, "api_error_status"))) {
-      return Optional.of(new LoginOutcome.Refused());
-    }
-    if (said.startsWith("Not logged in")) {
-      return Optional.of(new LoginOutcome.Undelivered());
-    }
-    if (limit.matches()) {
-      return Optional.of(new LoginOutcome.Limited(LoginOutcome.resetTime(limit.group(1))));
-    }
-    return Optional.empty();
+    return LiveStream.loginOutcome(
+        result.get("result") instanceof String text ? text : "",
+        RunUsage.count(result, "api_error_status"));
   }
 
   private static boolean reports(Map<String, Object> line) {
@@ -580,19 +571,21 @@ final class ClaudeCode implements Harness {
    * The Read-deny rules every settings file Sail hands Claude Code carries, whichever lane reads
    * it: the box FDE {@code box.credential}, the box SSH identity ({@code ~/.ssh}, the Sail CLI
    * identity), the {@code ~/.git-credentials} token, the {@code gh} token under {@code
-   * ~/.config/gh} and a run's {@code launch.env}, which holds its credential and its person's login
-   * until its wrapper reads it. Each is an absolute path, written from the root ({@link
-   * #readDeny}). Probe 3 recorded them on Claude Code 2.1.332: each refused the Read tool and a
-   * {@code cat} of its path in both lanes, {@code --dangerously-skip-permissions} included, since a
-   * deny rule outranks bypass (03a, 03b). So they bind the full lane, and in the read-only lane
-   * they hold on top of the refusal of every read outside the workspace ({@link #readOnly}). Deny
-   * outranks every allow rule, and the read-only invocation pins {@code --setting-sources ""} so no
-   * ambient settings file can shadow these. Written with one leading slash, as Sail wrote them
-   * before, they matched nothing in either lane: a full agent read all four home paths unasked
-   * (03d). Spec-CLI auth is untouched: the helper reads the credential at the OS level, not through
-   * a tool. Residual (a secret committed inside the workspace, a read by a command Claude Code does
-   * not map to the path it reads, a kernel escape, a harness-enforcement bug) is owned by the
-   * room-lane hardening follow-up, a read-only-disk sidecar, not this denylist.
+   * ~/.config/gh}, a run's {@code launch.env}, which holds its credential and its person's login
+   * until its wrapper reads it, and a session's login file under {@code ~/.sail/sessions}, which
+   * holds its person's login until its shell reads it. Each is an absolute path, written from the
+   * root ({@link #readDeny}). Probe 3 recorded the four home rules on Claude Code 2.1.332 (the
+   * session one came later): each refused the Read tool and a {@code cat} of its path in both
+   * lanes, {@code --dangerously-skip-permissions} included, since a deny rule outranks bypass (03a,
+   * 03b). So they bind the full lane, and in the read-only lane they hold on top of the refusal of
+   * every read outside the workspace ({@link #readOnly}). Deny outranks every allow rule, and the
+   * read-only invocation pins {@code --setting-sources ""} so no ambient settings file can shadow
+   * these. Written with one leading slash, as Sail wrote them before, they matched nothing in
+   * either lane: a full agent read all four home paths unasked (03d). Spec-CLI auth is untouched:
+   * the helper reads the credential at the OS level, not through a tool. Residual (a secret
+   * committed inside the workspace, a read by a command Claude Code does not map to the path it
+   * reads, a kernel escape, a harness-enforcement bug) is owned by the room-lane hardening
+   * follow-up, a read-only-disk sidecar, not this denylist.
    */
   private static List<String> readDenyRules() {
     return List.of(
@@ -600,7 +593,8 @@ final class ClaudeCode implements Harness {
         readDeny(ContainerExec.DEV_HOME + "/.ssh/**"),
         readDeny(ContainerExec.DEV_HOME + "/.git-credentials"),
         readDeny(ContainerExec.DEV_HOME + "/.config/gh/**"),
-        readDeny(ContainerExec.DEV_HOME + "/.sail/runs/**/launch.env"));
+        readDeny(ContainerExec.DEV_HOME + "/.sail/runs/**/launch.env"),
+        readDeny(ContainerExec.DEV_HOME + "/.sail/sessions/**"));
   }
 
   /**
