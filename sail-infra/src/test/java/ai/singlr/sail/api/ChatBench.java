@@ -156,34 +156,28 @@ final class ChatBench implements AutoCloseable {
 
   /** A host over this box's chats whose ends wait {@code grace} each step. */
   ChatHost restarted(ProcessEnd.Grace grace) {
-    return new ChatHost(store, launch, timing(grace));
-  }
-
-  /** The listing of this box's chats, on the clock the test moves. */
-  ChatListing listing() {
-    return new ChatListing(store, fdes, timing(new ProcessEnd.Grace(GRACE, GRACE, GRACE, GRACE)));
-  }
-
-  private ChatTiming timing(ProcessEnd.Grace grace) {
-    return new ChatTiming(
-        clock::instant,
-        window -> {
-          if (!windowsWait) {
-            throw new InterruptedException("the window is the next line's to close");
-          }
-          windows.acquire();
-        },
-        (arrivals, within) -> {
-          if (readsWait) {
-            held.release();
-            arrivals.wait();
-          } else {
-            clock.advance(within);
-          }
-        },
-        Duration.ofSeconds(25),
-        Duration.ofMinutes(5),
-        grace);
+    return new ChatHost(
+        store,
+        launch,
+        new ChatTiming(
+            clock::instant,
+            window -> {
+              if (!windowsWait) {
+                throw new InterruptedException("the window is the next line's to close");
+              }
+              windows.acquire();
+            },
+            (arrivals, within) -> {
+              if (readsWait) {
+                held.release();
+                arrivals.wait();
+              } else {
+                clock.advance(within);
+              }
+            },
+            Duration.ofSeconds(25),
+            Duration.ofMinutes(5),
+            grace));
   }
 
   /** How many chats this box holds. */

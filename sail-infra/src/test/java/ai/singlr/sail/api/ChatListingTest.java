@@ -54,7 +54,17 @@ class ChatListingTest {
   @BeforeEach
   void setUp() {
     bench = new ChatBench(dir);
-    listing = bench.listing();
+    listing =
+        new ChatListing(
+            bench.store,
+            bench.fdes,
+            new ChatTiming(
+                bench.clock::instant,
+                window -> {},
+                (arrivals, within) -> {},
+                Duration.ZERO,
+                Duration.ZERO,
+                ProcessEnd.Grace.DEFAULT));
   }
 
   @AfterEach
