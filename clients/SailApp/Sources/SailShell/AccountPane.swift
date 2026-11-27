@@ -76,6 +76,8 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     private var keysAfter: Int?
     /// What the control plane's banner says now: it is made again only when that changes.
     private var bannerLines: [String]?
+    /// The lists' width their rows were made for.
+    private var listedAt = 0.0
 
     private let titleFont: TitleFont
     private let mono: TerminalFonts
@@ -126,7 +128,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         keyFrame = ListFrame(scrolling: keyList, look: look)
         passkeyMark = BrandMark(.drawing(label: nil), side: 28, look: look, mono: labels)
         keyMark = BrandMark(.drawing(label: nil), side: 28, look: look, mono: labels)
-        planeRow = AccountRowView(.icon(.cloud), title: "", mono: true, look: look, labels: labels)
+        planeRow = AccountRowView(.icon(.cloud), title: "", mono: true, direction: .leftToRight, look: look, labels: labels)
         super.init(frame: .zero)
         compose()
         show()
@@ -140,6 +142,13 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     override public func viewDidUnhide() {
         super.viewDidUnhide()
         painter.shown()
+    }
+
+    /// A new width makes the lists' rows again at the height their words wrap to there.
+    override public func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        scroll.frame = bounds
+        if listWidth != listedAt { relist() }
     }
 
     /// Gone from view, the load under way is stopped and the refusals said are done with: shown
@@ -199,19 +208,23 @@ public final class AccountPane: NSView, NSMenuItemValidation {
 
     /// Shown (the rail's Account, the menu's Account or Keys): the groups asked again.
     func shown() {
-        load(keepingRefusals: true)
+        load(keepingSaid: true)
     }
 
     /// Asks the server for the groups' answers while someone is signed in and the view is shown,
     /// all at once: their own passkeys, the harnesses it knows and their keys, each group drawn as
     /// its own answer lands. The load before is stopped, and only the latest one's answers are
     /// taken, for this sign-in; a group keeps its last answer until a call answers again. A refusal
-    /// under a row is said until the next load but the one the view's showing asks.
-    func load(keepingRefusals: Bool = false) {
+    /// under a row, and what storing a key said, are said until the next load but the one the
+    /// view's showing asks: what they speak of may have changed since (a key removed, another sign-in).
+    func load(keepingSaid: Bool = false) {
         guard !isHiddenOrHasHiddenAncestor, let client = flow.client() else { return }
         loading?.cancel()
         loads += 1
-        if !keepingRefusals { refusals = [:] }
+        if !keepingSaid {
+            refusals = [:]
+            storedLine = nil
+        }
         let load = (number: loads, era: era)
         loading = Task { [weak self] in
             await withTaskGroup(of: Void.self) { group in
@@ -360,7 +373,8 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         window.beginSheet(sheet)
     }
 
-    /// A key the sheet stored, by `client`.
+    /// A key the sheet stored, by `client`: said under the keys until the groups are asked again
+    /// after the ask it starts.
     package func stored(_ stored: StoreLogin, by client: SailClient) {
         if case .stored(_, clearsClipboard: true) = stored.stage { pasteboard.clearContents() }
         storedLine = stored.stored
@@ -368,9 +382,9 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         acting = Task { [weak self] in
             let inUse = await self?.useStored?(stored, client)
             guard let self, era == self.era else { return }
-            if inUse == false { storedLine = stored.notUsed }
-            show()
             load()
+            storedLine = inUse == false ? stored.notUsed : stored.stored
+            show()
         }
     }
 
@@ -416,6 +430,7 @@ public final class AccountPane: NSView, NSMenuItemValidation {
             if who != nil { load() }
         }
         let content = flow.menuContent
+        eyebrows.forEach { $0.alignment = userInterfaceLayoutDirection == .rightToLeft ? .right : .left }
         heading.attributedStringValue = words(content.name, titleFont.font(.title1) as NSFont, look.text, cut: true)
         disc.name = content.name
         handle.attributedStringValue = words(content.handle ?? "", labels.font(Look.Step.footnote.points) as NSFont, look.textSecondary, cut: true)
@@ -423,8 +438,9 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         role.isHidden = content.role == nil
         email.attributedStringValue = words((try? standing?.whoami.get())?.email ?? "", .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary, cut: true)
         showPlane(content.plane)
-        showPasskeys()
-        showKeys()
+        relist()
+        showGroup(passkeys, frame: passkeyFrame, list: passkeyList, mark: passkeyMark, said: passkeySaid, note: passkeyNote, extra: nil)
+        showGroup(keys, frame: keyFrame, list: keyList, mark: keyMark, said: keySaid, note: keyNote, extra: storedLine)
         outWords.attributedStringValue = words(standing.map { AccountPage.signedInHere((try? $0.whoami.get())?.fde ?? $0.fde) } ?? "", .systemFont(ofSize: Look.Step.footnote.points), look.textSecondary)
         outNote.attributedStringValue = words(AccountPage.signOutNote, .systemFont(ofSize: Look.Step.footnote.points), look.textTertiary)
         outSaid.attributedStringValue = refusalWords(signOutLines, look: look, scale: scale)
@@ -443,8 +459,8 @@ public final class AccountPane: NSView, NSMenuItemValidation {
     private func showPlane(_ plane: UserMenuContent.Plane?) {
         let ending = self.ending, lines = planeLines
         planeRow.removeFromSuperview()
-        planeRow = AccountRowView(.icon(.cloud), title: place, mono: true, detail: ending?.said ?? "", warns: ending?.soon == true, look: look, labels: labels)
-        planeFrame.addSubview(planeRow)
+        planeRow = AccountRowView(.icon(.cloud), title: place, mono: true, detail: ending?.said ?? "", warns: ending?.soon == true, direction: userInterfaceLayoutDirection, look: look, labels: labels)
+        planeFrame.addSubview(planeRow, positioned: .below, relativeTo: nil)
         if lines != bannerLines {
             bannerLines = lines
             banner?.removeFromSuperview()
@@ -466,6 +482,12 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         state.words = words
         signInAgain.isHidden = ending?.soon != true
         signInAgain.isEnabled = !flow.isActing
+        planeRow.controls = planeControls.map(\.intrinsicContentSize)
+    }
+
+    /// The control plane row's controls, in order from its words: Sign In Again when shown, the pill.
+    private var planeControls: [NSView] {
+        (signInAgain.isHidden ? [] : [signInAgain]) + [state]
     }
 
     /// Remove in a row's ⋯ and on ⌘⌫: off while that row's removal is under way.
@@ -473,25 +495,28 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         SailList.Action("Remove", key: "\u{8}", modifiers: .command, onRow: false, destructive: true, enabled: { [weak self] in self?.removing.contains(id) == false }, run: ask)
     }
 
-    private func showPasskeys() {
-        let rows = passkeyRows
-        passkeyList.entries = rows.flatMap { row -> [SailList.Entry] in
+    /// The lists' rows made again for the column's width, which their words wrap to.
+    private func relist() {
+        listedAt = listWidth
+        passkeyList.entries = passkeyEntries
+        keyList.entries = keyEntries
+    }
+
+    private var passkeyEntries: [SailList.Entry] {
+        passkeyRows.flatMap { row -> [SailList.Entry] in
             let remove = removal(of: row.id) { [weak self] in
                 self?.ask(row.removing, row: row.id) { (client) async throws(SailError) in _ = try await client.send(.removePasskey(row.id)) }
             }
-            let detail = rowDetail(row.id, row.detail)
+            let detail = rowDetail(row.id, row.detail), width = rowWidth(in: listWidth, actions: passkeyList.actionsColumn ?? 0)
             let voice = [row.label, row.thisMac ? AccountPage.thisMac : nil, detail].compactMap { $0 }.joined(separator: ", ")
-            let item = SailList.Item(
-                id: row.id, name: row.label, voice: voice, content: self.rowView(.icon(.fingerprint), title: row.label, tag: row.thisMac ? AccountPage.thisMac : nil, detail: detail),
-                actions: [remove], height: Self.row
-            )
+            let made = { self.rowView(.icon(.fingerprint), title: row.label, tag: row.thisMac ? AccountPage.thisMac : nil, detail: detail, width: width) }
+            let item = SailList.Item(id: row.id, name: row.label, voice: voice, content: made(), actions: [remove], height: made().height)
             return [.item(item)] + refused(row.id)
         }
-        showGroup(passkeys, frame: passkeyFrame, list: passkeyList, mark: passkeyMark, said: passkeySaid, note: passkeyNote, extra: nil)
     }
 
-    private func showKeys() {
-        keyList.entries = keyRows.flatMap { row -> [SailList.Entry] in
+    private var keyEntries: [SailList.Entry] {
+        keyRows.flatMap { row -> [SailList.Entry] in
             let store = row.stores ? SailList.Action(row.login == nil ? "Add Key" : "Replace", run: { [weak self] in self?.storeKey(row) }) : nil
             var actions = [store].compactMap(\.self)
             if let asked = row.removing, let login = row.login {
@@ -500,37 +525,62 @@ public final class AccountPane: NSView, NSMenuItemValidation {
                 })
             }
             let offered = row.login == nil ? store : nil, detail = rowDetail(row.id, row.detail)
+            let width = rowWidth(in: listWidth, actions: offered == nil ? keyList.actionsColumn ?? 0 : 0)
+            let made = { self.rowView(.letters(row.monogram), title: row.display, detail: detail, offer: offered, width: width) }
             let item = SailList.Item(
-                id: row.id, name: row.display, voice: "\(row.display), \(detail)",
-                content: self.rowView(.letters(row.monogram), title: row.display, detail: detail, offer: offered),
-                actions: actions, height: Self.row, full: offered != nil
+                id: row.id, name: row.display, voice: "\(row.display), \(detail)", content: made(), actions: actions, height: made().height, full: offered != nil
             )
             return [.item(item)] + refused(row.id)
         }
-        showGroup(keys, frame: keyFrame, list: keyList, mark: keyMark, said: keySaid, note: keyNote, extra: storedLine)
     }
 
-    /// A row of a list, made each time its list asks: an always-shown button of its own runs `offer`.
-    private func rowView(_ mark: AccountRowView.Mark, title: String, tag: String? = nil, detail: String, offer: SailList.Action? = nil) -> AccountRowView {
-        let row = AccountRowView(mark, title: title, tag: tag, detail: detail, look: look, labels: labels)
+    /// A row of a list, made each time its list asks, `width` wide and as tall as that makes it: an
+    /// always-shown button of its own runs `offer`.
+    private func rowView(_ mark: AccountRowView.Mark, title: String, tag: String? = nil, detail: String, offer: SailList.Action? = nil, width: Double) -> AccountRowView {
+        let row = AccountRowView(mark, title: title, tag: tag, detail: detail, direction: userInterfaceLayoutDirection, look: look, labels: labels)
         if let offer {
             let run = Run(offer)
             let button = SailButton(offer.title, kind: .secondary, size: .small, icon: .plus, look: look, target: run, action: #selector(Run.go(_:)))
             button.setAccessibilityLabel("\(offer.title), \(title)")
             row.offer(button, keeping: run)
         }
+        row.height = Self.height(of: row.fit(width: width))
         return row
     }
 
-    /// The refusal of row `id`'s removal, as words under it, wrapped to the row, that the keys pass.
+    /// The room a list keeps for its rows' own buttons, so its rows' words wrap at one width: the
+    /// widest row's (`titles`, then ⋯) as the list packs them, 6 pt apart, and the 8 pt before them.
+    private func actionsColumn(_ titles: [String]) -> Double {
+        let more = SailButton(icon: .more, label: "More", size: .small, look: look, target: nil, action: nil)
+        let buttons = titles.map { SailButton($0, kind: .secondary, size: .small, look: look, target: nil, action: nil) } + [more]
+        return buttons.reduce(0.0) { $0 + Double($1.intrinsicContentSize.width) } + Double(buttons.count - 1) * 6 + 8
+    }
+
+    /// The refusal of row `id`'s removal, as words under its words, wrapped to the row, that the
+    /// keys pass.
     private func refused(_ id: String) -> [SailList.Entry] {
         guard let lines = refusals[id] else { return [] }
-        let width = max(listWidth - RowStyle.list.leading - RowStyle.list.trailing, 1), said = refusalWords(lines, look: look, scale: scale)
+        let width = rowWidth(in: listWidth, actions: 0), said = underTheWords(refusalWords(lines, look: look, scale: scale))
         let height = Double(ceil(said.boundingRect(with: NSSize(width: width - 4, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin]).height))
         let item = SailList.Item(
-            id: id + "\u{1F}refused", name: "", voice: lines.joined(separator: " "), content: Self.wrapped(said, width: width), height: height + 2 * Self.refusalPadding, inert: true
+            id: id + "\u{1F}refused", name: "", voice: lines.joined(separator: " "), content: Self.wrapped(said, width: width), height: height + 2 * Self.refusalPadding, full: true, inert: true
         )
         return [.item(item)]
+    }
+
+    /// `said` from where the rows' words start, as the control plane's banner stands, in the view's
+    /// direction: a label's own 2 pt inside its frame less.
+    private func underTheWords(_ said: NSAttributedString) -> NSAttributedString {
+        let under = NSMutableAttributedString(attributedString: said), start = AccountRowView.tile + AccountRowView.gap - 2, style = NSMutableParagraphStyle()
+        if userInterfaceLayoutDirection == .rightToLeft {
+            style.alignment = .right
+            style.tailIndent = -start
+        } else {
+            style.firstLineHeadIndent = start
+            style.headIndent = start
+        }
+        under.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: under.length))
+        return under
     }
 
     private static func wrapped(_ said: NSAttributedString, width: Double) -> NSTextField {
@@ -572,6 +622,8 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         for mark in [passkeyMark, keyMark] { mark.look = look }
         eyebrows.forEach { $0.textColor = NSColor(look.textSecondary) }
         page.look = look
+        question?.look = look
+        loginSheet?.look = look
         bannerLines = nil
         show()
     }
@@ -590,6 +642,8 @@ public final class AccountPane: NSView, NSMenuItemValidation {
             list.primaryElsewhere = true
             list.returnKeyShown = false
         }
+        passkeyList.actionsColumn = actionsColumn([])
+        keyList.actionsColumn = actionsColumn(["Replace"])
         for label in [heading, handle, email] {
             label.maximumNumberOfLines = 1
             label.lineBreakMode = .byTruncatingTail
@@ -696,28 +750,36 @@ public final class AccountPane: NSView, NSMenuItemValidation {
         return y
     }
 
-    /// The control plane's row inside its frame, `width` wide, and the banner under it; its height.
+    /// The control plane's row inside its frame, `width` wide, its controls where the row's
+    /// ``AccountRowView/fit(width:)`` puts them, and the banner under it; its height.
     private func layPlane(width: Double) -> Double {
         func at(_ rect: NSRect) -> NSRect {
             mirrored(rect, inWidth: width + 2)
         }
-        var trailing = 1 + width - RowStyle.list.trailing
-        let pill = state.intrinsicContentSize
-        state.frame = at(NSRect(x: trailing - Double(pill.width), y: 1 + (Self.row - Double(pill.height)) / 2, width: Double(pill.width), height: Double(pill.height)))
-        trailing -= Double(pill.width) + Look.Space.s
-        if !signInAgain.isHidden {
-            let size = signInAgain.intrinsicContentSize
-            signInAgain.frame = at(signInAgain.frame(forAlignmentRect: NSRect(x: trailing - Double(size.width), y: 1 + (Self.row - Double(size.height)) / 2, width: Double(size.width), height: Double(size.height))))
-            trailing -= Double(size.width) + Look.Space.s
+        let lead = 1 + RowStyle.list.leading, rowWidth = rowWidth(in: width, actions: 0), fit = planeRow.fit(width: rowWidth)
+        let height = Self.height(of: fit), top = 1 + (height - fit.height) / 2
+        planeRow.frame = at(NSRect(x: lead, y: top, width: rowWidth, height: fit.height))
+        for (control, box) in zip(planeControls, fit.controls) {
+            control.frame = at(control.frame(forAlignmentRect: box.offsetBy(dx: lead, dy: top)))
         }
-        let rowHeight = Double(planeRow.intrinsicContentSize.height), lead = 1 + RowStyle.list.leading
-        planeRow.frame = at(NSRect(x: lead, y: 1 + (Self.row - rowHeight) / 2, width: max(trailing - lead, 1), height: rowHeight))
-        guard let banner else { return Self.row }
+        guard let banner else { return height }
         let start = RowStyle.list.leading + AccountRowView.tile + AccountRowView.gap, bannerWidth = max(width - start - RowStyle.list.trailing, 1)
         banner.frame = NSRect(x: 0, y: 0, width: bannerWidth, height: 10)
-        let height = Double(banner.intrinsicContentSize.height)
-        banner.frame = at(NSRect(x: 1 + start, y: 1 + Self.row, width: bannerWidth, height: height))
-        return Self.row + height + Self.bannerFoot
+        let bannerHeight = Double(banner.intrinsicContentSize.height)
+        banner.frame = at(NSRect(x: 1 + start, y: 1 + height, width: bannerWidth, height: bannerHeight))
+        return height + bannerHeight + Self.bannerFoot
+    }
+
+    /// A row's height in its list: its words and controls between the page's 9 pt padding, at least
+    /// the page's 56 pt.
+    private static func height(of fit: AccountRowView.Fit) -> Double {
+        max(Self.row, fit.height + 2 * AccountRowView.padding)
+    }
+
+    /// The width a row's words and controls are given in a list `width` wide, past `actions` kept
+    /// for the list's own.
+    private func rowWidth(in width: Double, actions: Double) -> Double {
+        max(width - 2 * RowStyle.list.margin - RowStyle.list.leading - RowStyle.list.trailing - actions, 1)
     }
 
     /// A list's rows in its frame, which holds them at their height, or the drawing mark while its
@@ -754,41 +816,66 @@ final class AccountColumn: NSView {
 
 /// A row of the Account view, as the page's `.li` draws it: a 28 pt tile in 6 pt corners holding an
 /// icon or a harness's monogram, the title (mono for an address) with a tag after it, the detail
-/// under it in the tertiary ink (the warning's when it warns), and a button of its own at its
-/// trailing edge where it offers one whatever the pointer does (Add Key). Mirrored right to left.
+/// under it in the tertiary ink (the warning's when it warns), and controls at its trailing edge
+/// whatever the pointer does: a button of its own (Add Key), or those its view lays out by
+/// ``fit(width:)`` (the control plane's pill and Sign In Again). Its words are read whole: the
+/// controls stand beside them while the title fits beside them, else on a line under them, and the
+/// detail wraps to the words' width. Mirrored right to left.
 @MainActor
 final class AccountRowView: NSView {
     enum Mark: Equatable {
         case icon(LineIcon), letters(String)
     }
 
-    static let tile = 28.0, gap = 12.0, lineGap = 3.0
+    /// Where a row's words and controls stand in it, left to right: the words' width and top, each
+    /// control's box, and the row's height less its padding.
+    struct Fit: Equatable {
+        let words: Double
+        let top: Double
+        let controls: [NSRect]
+        let height: Double
+    }
+
+    static let tile = 28.0, gap = 12.0, lineGap = 3.0, padding = 9.0
 
     let mark: Mark
     let title = NSTextField(labelWithString: "")
-    let detail = NSTextField(labelWithString: "")
+    let detail = NSTextField(wrappingLabelWithString: "")
     let tagged: String?
+    /// Its controls by size, at its trailing edge or under its words: its own button's, or those its
+    /// view lays out.
+    var controls: [NSSize] = [] {
+        didSet { needsLayout = true }
+    }
+
+    /// The height its list's row gives it, all of which it takes.
+    var height = 0.0
     private(set) var offered: SailButton?
     private var keep: AnyObject?
     private let look: Look
     private let labels: LabelFont
     private let mono: Bool
 
-    init(_ mark: Mark, title words: String, mono: Bool = false, tag: String? = nil, detail said: String = "", warns: Bool = false, look: Look, labels: LabelFont) {
+    init(
+        _ mark: Mark, title words: String, mono: Bool = false, tag: String? = nil, detail said: String = "", warns: Bool = false, direction: NSUserInterfaceLayoutDirection,
+        look: Look, labels: LabelFont
+    ) {
         self.mark = mark
         self.tagged = tag
         self.look = look
         self.labels = labels
         self.mono = mono
         super.init(frame: .zero)
+        userInterfaceLayoutDirection = direction
         let titleFont = mono ? labels.font(Look.Step.callout.points) as NSFont : NSFont.systemFont(ofSize: 13.5, weight: .medium)
         title.attributedStringValue = Draw.text(words, titleFont, look.text).cut(.byTruncatingTail)
-        detail.attributedStringValue = Draw.text(said, .systemFont(ofSize: Look.Step.footnote.points), warns ? Tint(look.warning) : look.textTertiary).cut(.byTruncatingTail)
-        for label in [title, detail] {
-            label.maximumNumberOfLines = 1
-            label.lineBreakMode = .byTruncatingTail
-            addSubview(label)
-        }
+        title.maximumNumberOfLines = 1
+        title.lineBreakMode = .byTruncatingTail
+        let style = NSMutableParagraphStyle()
+        style.alignment = direction == .rightToLeft ? .right : .left
+        let ink = warns ? Tint(look.warning) : look.textTertiary
+        detail.attributedStringValue = NSAttributedString(string: said, attributes: [.font: NSFont.systemFont(ofSize: Look.Step.footnote.points), .foregroundColor: NSColor(ink), .paragraphStyle: style])
+        [title, detail].forEach(addSubview)
         setAccessibilityElement(false)
     }
 
@@ -801,19 +888,48 @@ final class AccountRowView: NSView {
         true
     }
 
-    /// `button` at its trailing edge, `keeping` what it runs.
+    /// `button` its one control, `keeping` what it runs.
     func offer(_ button: SailButton, keeping run: AnyObject) {
         offered = button
         keep = run
         addSubview(button)
-    }
-
-    private var lines: (title: Double, detail: Double) {
-        (Double(ceil(title.attributedStringValue.size().height)), Double(ceil(detail.attributedStringValue.size().height)))
+        controls = [button.intrinsicContentSize]
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: NSView.noIntrinsicMetric, height: max(Self.tile, lines.title + Self.lineGap + lines.detail))
+        NSSize(width: NSView.noIntrinsicMetric, height: height)
+    }
+
+    private var titleLine: Double {
+        Double(ceil(title.attributedStringValue.size().height))
+    }
+
+    /// The title's width with its tag after it.
+    private var titleWidth: Double {
+        Double(ceil(title.attributedStringValue.size().width)) + (tagWords.map { Double(ceil($0.size().width)) + 18 } ?? 0)
+    }
+
+    private func detailHeight(_ width: Double) -> Double {
+        Double(ceil(detail.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width + 4, height: 10000)).height ?? 0))
+    }
+
+    /// Its words and ``controls`` `width` wide: the controls `Look.Space.s` apart at the trailing
+    /// edge while the title fits whole beside them, else from the words' start on a line under them.
+    func fit(width: Double) -> Fit {
+        let start = Self.tile + Self.gap, sizes = controls
+        let row = sizes.reduce(0.0) { $0 + Double($1.width) } + Double(max(sizes.count - 1, 0)) * Look.Space.s
+        let beside = sizes.isEmpty || titleWidth + Self.gap + row <= width - start
+        let words = max(width - start - (sizes.isEmpty || !beside ? 0 : row + Self.gap), 1)
+        let block = titleLine + Self.lineGap + detailHeight(words), tallest = sizes.map { Double($0.height) }.max() ?? 0
+        let whole = beside ? block : block + Look.Space.s + tallest, height = max(Self.tile, whole, tallest)
+        let top = (height - whole) / 2
+        var x = beside ? width - row : start
+        let boxes = sizes.map { size -> NSRect in
+            let y = beside ? (height - Double(size.height)) / 2 : top + block + Look.Space.s
+            defer { x += Double(size.width) + Look.Space.s }
+            return NSRect(x: x, y: y, width: Double(size.width), height: Double(size.height))
+        }
+        return Fit(words: words, top: beside ? (height - block) / 2 : top, controls: boxes, height: height)
     }
 
     private var tagWords: NSAttributedString? {
@@ -832,19 +948,17 @@ final class AccountRowView: NSView {
         mirrored(rect, inWidth: Double(bounds.width))
     }
 
+    /// Its words and controls as ``fit(width:)`` places them, the whole centred in its height.
     override func layout() {
         super.layout()
-        let width = Double(bounds.width), height = Double(bounds.height), (titleLine, detailLine) = lines
-        var end = width
-        if let offered {
-            let size = offered.intrinsicContentSize
-            offered.frame = offered.frame(forAlignmentRect: mirrored(NSRect(x: width - Double(size.width), y: (height - Double(size.height)) / 2, width: Double(size.width), height: Double(size.height))))
-            end -= Double(size.width) + Self.gap
+        let fit = fit(width: Double(bounds.width)), start = Self.tile + Self.gap
+        let below = (Double(bounds.height) - fit.height) / 2, top = below + fit.top
+        if let offered, let box = fit.controls.first {
+            offered.frame = offered.frame(forAlignmentRect: mirrored(box.offsetBy(dx: 0, dy: below)))
         }
-        let start = Self.tile + Self.gap, top = (height - titleLine - Self.lineGap - detailLine) / 2
-        let room = max(end - start - (tagWords.map { Double(ceil($0.size().width)) + 18 } ?? 0), 1)
-        title.frame = mirrored(NSRect(x: start - 2, y: top, width: min(room, Double(ceil(title.attributedStringValue.size().width)) + 4), height: titleLine))
-        detail.frame = mirrored(NSRect(x: start - 2, y: top + titleLine + Self.lineGap, width: max(end - start, 1) + 4, height: detailLine))
+        let room = max(fit.words - (tagWords.map { Double(ceil($0.size().width)) + 18 } ?? 0), 1)
+        title.frame = mirrored(NSRect(x: start - 2, y: top, width: min(room, Double(ceil(title.attributedStringValue.size().width))) + 4, height: titleLine))
+        detail.frame = mirrored(NSRect(x: start - 2, y: top + titleLine + Self.lineGap, width: fit.words + 4, height: detailHeight(fit.words)))
         needsDisplay = true
     }
 

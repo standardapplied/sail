@@ -1,7 +1,7 @@
 import AppKit
 import Foundation
 import SailAPI
-import SailControls
+@testable import SailControls
 import SailKitTestSupport
 import SailLook
 import SailWorkbench
@@ -166,12 +166,13 @@ func signInExchanges() throws -> [Exchange] {
 
     static let plane = try! ControlPlane(address: "http://127.0.0.1:7979")
 
-    /// A flow at the drive's control plane, reached on this Mac, holding a session as `fde`.
+    /// A flow at the drive's control plane, or `at` another, reached on this Mac, holding a session
+    /// as `fde`.
     static func flow(
         remembering fde: String, _ transport: any Transport, sheet: Gate? = nil, asked: Gate? = nil, defaults: UserDefaults = ReattachTests.defaults(),
-        lasts: TimeInterval = 3600, now: @escaping @MainActor () -> Date = { Date() }
+        lasts: TimeInterval = 3600, now: @escaping @MainActor () -> Date = { Date() }, at reached: ControlPlane = plane
     ) -> AccountFlow {
-        SignInMemory(defaults).reached(plane)
+        SignInMemory(defaults).reached(reached)
         let account = Account(authenticator: Signs(sheet: sheet, asked: asked), vault: OneSession(fde: fde, lasts: lasts)) { _ in transport }
         return AccountFlow(account: account, memory: SignInMemory(defaults), now: now)
     }
@@ -448,10 +449,10 @@ actor Desk: Transport {
     static let goldens = ["whoami", "passkeys", "agents", "logins-no-default"]
     static let month: TimeInterval = 30 * 86_400
 
-    /// The pane over a flow at the drive's control plane holding a session as `fde` for `lasts`,
-    /// drawn as the shell draws it at each change.
-    static func pane(remembering fde: String, _ transport: any Transport, lasts: TimeInterval = 3600) throws -> AccountPane {
-        let flow = AccountFlowTests.flow(remembering: fde, transport, lasts: lasts)
+    /// The pane over a flow at the drive's control plane, or `at` another, holding a session as `fde`
+    /// for `lasts`, drawn as the shell draws it at each change.
+    static func pane(remembering fde: String, _ transport: any Transport, lasts: TimeInterval = 3600, at plane: ControlPlane = AccountFlowTests.plane) throws -> AccountPane {
+        let flow = AccountFlowTests.flow(remembering: fde, transport, lasts: lasts, at: plane)
         let pane = AccountPane(
             flow: flow, look: .light, title: try TitleFont(directory: LookTests.fonts), mono: try TerminalFonts(directory: LookTests.fonts),
             labels: try LabelFont(directory: LookTests.fonts)
@@ -473,9 +474,11 @@ actor Desk: Transport {
     }
 
     /// Signed in as uday at `desk` for a month, the groups' first answers taken.
-    static func signedIn(_ desk: any Transport, width: Double = 900, look: Look = .light, lasts: TimeInterval = month) async throws -> (AccountPane, NSWindow) {
-        let pane = try pane(remembering: "uday", desk, lasts: lasts)
-        let window = shown(pane, width: width, look: look)
+    static func signedIn(
+        _ desk: any Transport, width: Double = 900, height: Double = 900, look: Look = .light, lasts: TimeInterval = month, at plane: ControlPlane = AccountFlowTests.plane
+    ) async throws -> (AccountPane, NSWindow) {
+        let pane = try pane(remembering: "uday", desk, lasts: lasts, at: plane)
+        let window = shown(pane, width: width, height: height, look: look)
         await pane.flow.refresh()
         await pane.loading?.value
         pane.layoutSubtreeIfNeeded()
@@ -860,26 +863,55 @@ actor Desk: Transport {
         #expect(pane.banner == nil && pane.state.said == "Connected")
     }
 
-    /// Every group's tile, and the words after it, stand on one line: the control plane's row and
-    /// its banner start where the list rows of the Passkeys and the Keys do.
-    @Test func theGroupsTilesAndWordsStandInOneColumn() async throws {
-        let desk = try Desk(Self.goldens)
+    /// `root` and every view in it laid out right to left, as the drive lays them out.
+    static func direct(_ root: NSView) {
+        root.userInterfaceLayoutDirection = .rightToLeft
+        root.subviews.forEach(direct)
+    }
+
+    /// Every row of the view: the control plane's, then each list row's, made and laid out.
+    static func rows(_ pane: AccountPane) throws -> [AccountRowView] {
+        pane.layoutSubtreeIfNeeded()
+        let listed = try [pane.passkeyList, pane.keyList].flatMap { list in
+            try list.entries.indices.compactMap { index -> AccountRowView? in
+                let row = try #require(list.rowView(atRow: index, makeIfNecessary: true))
+                row.layoutSubtreeIfNeeded()
+                return WorkspacesViewTests.found(AccountRowView.self, in: row).first
+            }
+        }
+        return [pane.planeRow] + listed
+    }
+
+    /// Every group's tile, and the words after it, stand on one line at the frame's leading inset,
+    /// left to right and right to left: the control plane's row, its banner and a refusal under a
+    /// passkey's row start where the words of the list rows of the Passkeys and the Keys do, and the
+    /// eyebrows stand at the same edge.
+    @Test(arguments: [false, true])
+    func theGroupsTilesAndWordsStandInOneColumn(_ rightToLeft: Bool) async throws {
+        let desk = try Desk(Self.goldens + ["refusal-conflict-passkey-current"])
         let (pane, window) = try await Self.signedIn(desk)
         defer { window.orderOut(nil) }
+        _ = try await Self.removed("Sail for Mac", in: pane)
         await desk.forget("GET /v1/whoami")
         await pane.flow.refresh()
-        pane.layoutSubtreeIfNeeded()
-        let listed = try [pane.passkeyList, pane.keyList].map { list -> AccountRowView in
-            try #require(list.numberOfRows > 0, "\(pane.text)")
-            let cell = try #require(list.rowView(atRow: 0, makeIfNecessary: true))
-            cell.layoutSubtreeIfNeeded()
-            return try #require(WorkspacesViewTests.found(AccountRowView.self, in: cell).first)
-        }
-        let tiles = ([pane.planeRow] + listed).map { Double($0.convert($0.tileBox, to: pane).minX) }
-        #expect(Set(tiles).count == 1, "the tiles stand at \(tiles)")
-        let banner = try #require(pane.banner)
-        let words = Double(banner.convert(banner.bounds, to: pane).minX), after = (tiles.first ?? 0) + AccountRowView.tile + AccountRowView.gap
-        #expect(abs(words - after) < 0.5, "the banner starts at \(words), the rows' words at \(after)")
+        if rightToLeft { Self.direct(pane) }
+        pane.show()
+        let rows = try Self.rows(pane)
+        try #require(rows.count == 6, "\(pane.text)")
+        let frame = pane.planeFrame.convert(pane.planeFrame.bounds, to: pane), inset = 1 + RowStyle.list.leading
+        let edge = rightToLeft ? Double(frame.maxX) - inset : Double(frame.minX) + inset
+        let tiles = rows.map { row in row.convert(row.tileBox, to: pane) }.map { Double(rightToLeft ? $0.maxX : $0.minX) }
+        #expect(tiles.allSatisfy { abs($0 - edge) < 0.5 }, "the tiles stand at \(tiles), the frame's inset at \(edge)")
+        let words = rightToLeft ? edge - AccountRowView.tile - AccountRowView.gap : edge + AccountRowView.tile + AccountRowView.gap
+        let banner = try #require(pane.banner), box = banner.convert(banner.bounds, to: pane)
+        let bannerStart = Double(rightToLeft ? box.maxX : box.minX)
+        #expect(abs(bannerStart - words) < 0.5, "the banner starts at \(bannerStart), the rows' words at \(words)")
+        let refusal = try #require(WorkspacesViewTests.found(NSTextField.self, in: pane.passkeyList).first { $0.stringValue.contains("You are signed in with this passkey.") })
+        let field = refusal.convert(refusal.bounds, to: pane)
+        let style = try #require(refusal.attributedStringValue.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+        let said = rightToLeft ? Double(field.maxX) - 2 + Double(style.tailIndent) : Double(field.minX) + 2 + Double(style.firstLineHeadIndent)
+        #expect(abs(said - words) < 0.5 && (rightToLeft ? style.alignment == .right : style.headIndent == style.firstLineHeadIndent), "the refusal starts at \(said), the rows' words at \(words)")
+        #expect(pane.eyebrows.allSatisfy { $0.alignment == (rightToLeft ? .right : .left) }, "the eyebrows stand at the other edge")
     }
 
     /// Under three days left the end is drawn in the warning ink and Sign In Again shows; it runs
@@ -1015,5 +1047,133 @@ actor Desk: Transport {
             longWindow.orderOut(nil)
         }
         #expect(faults.isEmpty, "\(faults.count) faults: \(faults.prefix(20).joined(separator: "\n"))")
+    }
+
+    /// The row of a harness with no key shows its one Add Key, hovered or not: the list draws none
+    /// of its own actions over the row's, as it draws Replace on a hovered row with a key.
+    @Test func aRowWithNoKeyShowsOneAddKeyWhenHovered() async throws {
+        let (pane, window) = try await Self.signedIn(try Desk(Self.goldens))
+        defer { window.orderOut(nil) }
+        func shown(_ name: String) throws -> [String] {
+            let item = try Self.item(name, in: pane.keyList)
+            let index = try #require(pane.keyList.entries.firstIndex { entry in if case let .item(listed) = entry { listed.id == item.id } else { false } })
+            let row = try #require(pane.keyList.rowView(atRow: index, makeIfNecessary: true) as? SailRowView)
+            row.hovered = true
+            row.layoutSubtreeIfNeeded()
+            return WorkspacesViewTests.found(SailButton.self, in: row).filter { !$0.isHiddenOrHasHiddenAncestor && !$0.title.isEmpty }.map(\.title)
+        }
+        try #require(try shown("Codex CLI").contains("Replace"), "a hovered row with a key does not show Replace")
+        let offered = try shown("Claude Code")
+        #expect(offered == ["Add Key"], "hovered, the row with no key shows \(offered)")
+    }
+
+    /// What storing a key said goes once it may no longer be true: when a key is removed, and when
+    /// the groups are asked again after Sign In Again.
+    @Test func whatStoringAKeySaidGoesWhenTheGroupsAreAskedAgain() async throws {
+        let desk = try Desk(Self.goldens + ["login-removed", "passkey-login-start", "passkey-login-finish"])
+        let (pane, window) = try await Self.signedIn(desk)
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("account-pane-tests-\(UUID().uuidString)"))
+        defer {
+            window.orderOut(nil)
+            pasteboard.releaseGlobally()
+        }
+        pane.pasteboard = pasteboard
+        let client = try #require(pane.flow.client())
+        var model = try LoginSheetTests.model()
+        model.typed(holdsSomething: true)
+        _ = model.store(LoginSheetTests.pasted, clipboard: StoreLogin.Clipboard(count: 1, text: nil))
+        model.answered(try LoginSheetTests.answer("login-stored"), clipboard: 1)
+        let said = try #require(model.stored)
+        func store() async throws {
+            pane.stored(model, by: client)
+            await pane.acting?.value
+            await pane.loading?.value
+            try #require(pane.text.contains(said), "storing said nothing: \(pane.text)")
+        }
+        try await desk.answer("logins-with-a-default")
+        try await store()
+        try #require(try Self.item("Claude Code", in: pane.keyList).actions.first { $0.title == "Remove" }).run()
+        let sheet = try #require(pane.question)
+        _ = sheet.confirm.sendAction(sheet.confirm.action, to: sheet.confirm.target)
+        await pane.acting?.value
+        await pane.loading?.value
+        #expect(!pane.text.contains(said), "the key was removed, the view still says it was stored: \(pane.text)")
+        try await store()
+        pane.signInAgainNow(nil)
+        await pane.acting?.value
+        await pane.loading?.value
+        #expect(!pane.text.contains(said), "after Sign In Again the view still says the key was stored: \(pane.text)")
+    }
+
+    /// Where a row's words are cut short: its title wider than its frame, or its detail taller.
+    static func cut(_ row: AccountRowView) -> [String] {
+        [(row.title, false), (row.detail, true)].compactMap { pair -> String? in
+            let (label, wraps) = pair
+            guard !label.stringValue.isEmpty else { return nil }
+            let font = label.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont ?? .systemFont(ofSize: Look.Step.footnote.points)
+            let plain = NSAttributedString(string: label.stringValue, attributes: [.font: font]), room = Double(label.frame.width) - 4
+            let needs = wraps ? Double(ceil(plain.boundingRect(with: NSSize(width: room, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin]).height)) : Double(ceil(plain.size().width))
+            let has = wraps ? Double(label.frame.height) : room
+            return needs > has + 0.5 ? "\"\(label.stringValue)\" needs \(needs) pt, has \(has)" : nil
+        }
+    }
+
+    /// Brought down to the least window, nothing a row says is cut short, the address and the
+    /// sign-in line read whole for the longest host, signed in for long, ending soon or ended, left
+    /// to right and right to left: a row's own controls stand under its words where beside them its
+    /// title would be cut, its second line wraps, and the row grows to hold it. Each row's words
+    /// stand on the far side of its tile, and nothing overlaps, a row hovered or not.
+    @Test(arguments: ["connected", "ends soon", "ended"], [false, true])
+    func atTheLeastWindowEveryRowIsReadWhole(_ state: String, _ rightToLeft: Bool) async throws {
+        let host = try ControlPlane(address: "https://sail.standardapplied.com")
+        let width = Double(ShellApp.leastFrame.width) - Rail.width - 4, lasts = state == "ends soon" ? 2 * 86_400 + 600 : Self.month
+        let (pane, window) = try await Self.signedIn(try Desk(Self.goldens), lasts: lasts, at: host)
+        defer { window.orderOut(nil) }
+        if state == "ended" {
+            let later = Date().addingTimeInterval(2 * Self.month)
+            pane.now = { later }
+        }
+        if rightToLeft { Self.direct(pane) }
+        pane.show()
+        window.setContentSize(NSSize(width: width, height: Double(ShellApp.leastFrame.height)))
+        let rows = try Self.rows(pane)
+        try #require(rows.count == 6 && pane.ending?.soon == (state != "connected") && !pane.signInAgain.isHidden == (state != "connected"), "\(pane.text)")
+        #expect(pane.planeRow.title.stringValue == "sail.standardapplied.com" && pane.planeRow.detail.stringValue == pane.ending?.said)
+        let cut = rows.flatMap(Self.cut)
+        #expect(cut.isEmpty, "cut short: \(cut)")
+        for row in rows {
+            let tile = row.tileBox, title = row.title.frame, detail = row.detail.frame
+            let far = rightToLeft ? title.maxX <= tile.minX && detail.maxX <= tile.minX && abs(tile.maxX - row.bounds.width) < 0.5 : title.minX >= tile.maxX && detail.minX >= tile.maxX && tile.minX == 0
+            #expect(far, "\(row.title.stringValue)'s words at \(title) and \(detail), its tile at \(tile) in \(row.bounds)")
+        }
+        var faults = WorkspacesReachTests.outOfReach(in: pane)
+        window.setContentSize(NSSize(width: width, height: 1600))
+        pane.layoutSubtreeIfNeeded()
+        for list in [pane.passkeyList, pane.keyList] {
+            for index in list.entries.indices {
+                let row = try #require(list.rowView(atRow: index, makeIfNecessary: true) as? SailRowView)
+                row.hovered = true
+                faults += WorkspacesReachTests.outOfReach(in: pane).map { "row \(index) hovered: \($0)" }
+                row.hovered = false
+            }
+        }
+        #expect(faults.isEmpty, "\(faults.count) faults: \(faults.prefix(10).joined(separator: "\n"))")
+    }
+
+    /// A question or the Store a Key sheet up takes the view's new look.
+    @Test func aSheetUpTakesTheViewsNewLook() async throws {
+        let (pane, window) = try await Self.signedIn(try Desk(Self.goldens))
+        defer { window.orderOut(nil) }
+        try #require(try Self.item("Sail for iPhone", in: pane.passkeyList).actions.first { $0.title == "Remove" }).run()
+        let question = try #require(pane.question)
+        pane.look = .dark
+        #expect(question.look == .dark, "the question kept the light look")
+        question.withdraw()
+        await pane.acting?.value
+        try #require(try Self.item("Claude Code", in: pane.keyList).actions.first { $0.title == "Add Key" }).run()
+        let sheet = try #require(pane.loginSheet)
+        pane.look = .light
+        #expect(sheet.look == .light, "the Store a Key sheet kept the dark look")
+        sheet.withdraw()
     }
 }
